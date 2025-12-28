@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/docs/">
+    <File Path="docs/EXAMPLES.md" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path=".github/workflows/ci.yml" />
+    <File Path="CONTRIBUTING.md" />
+    <File Path="Directory.Build.props" />
+    <File Path="IDEA.md" />
+    <File Path="LICENSE.txt" />
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nivara.Tests/Nivara.Tests.csproj" />
+  </Folder>
+  <Project Path="src/Nivara.Extensions/Nivara.Extensions.csproj" />
+  <Project Path="src/Nivara/Nivara.csproj" />
+</Solution>
