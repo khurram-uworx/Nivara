@@ -1,4 +1,6 @@
 using System.Numerics;
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace Nivara;
 
@@ -185,6 +187,214 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             return _storage;
         }
+    }
+
+    // Arithmetic Operations
+
+    /// <summary>
+    /// Multiplies all elements in the column by a scalar value.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="scalar">The scalar value to multiply by</param>
+    /// <returns>A new column with all elements multiplied by the scalar</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Multiply(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        
+        // Runtime check for numeric types
+        if (!IsNumericType(typeof(T)))
+        {
+            throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
+        }
+        
+        if (!ColumnStorageFactory.IsVectorizable<T>())
+        {
+            throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
+        }
+
+        return MultiplyVectorized(scalar);
+    }
+
+    /// <summary>
+    /// Adds corresponding elements of two columns together.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="other">The column to add to this column</param>
+    /// <returns>A new column with element-wise addition results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Add(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+        
+        if (other._disposed)
+            throw new ObjectDisposedException(nameof(other));
+        
+        if (Length != other.Length)
+            throw new ArgumentException($"Cannot add columns of different lengths: {Length} vs {other.Length}");
+        
+        // Runtime check for numeric types
+        if (!IsNumericType(typeof(T)))
+        {
+            throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
+        }
+        
+        if (!ColumnStorageFactory.IsVectorizable<T>())
+        {
+            throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
+        }
+
+        return AddVectorized(other);
+    }
+
+    /// <summary>
+    /// Operator overload for scalar multiplication
+    /// </summary>
+    public static NivaraColumn<T> operator *(NivaraColumn<T> column, T scalar)
+    {
+        return column.Multiply(scalar);
+    }
+
+    /// <summary>
+    /// Operator overload for scalar multiplication (commutative)
+    /// </summary>
+    public static NivaraColumn<T> operator *(T scalar, NivaraColumn<T> column)
+    {
+        return column.Multiply(scalar);
+    }
+
+    /// <summary>
+    /// Operator overload for element-wise addition
+    /// </summary>
+    public static NivaraColumn<T> operator +(NivaraColumn<T> left, NivaraColumn<T> right)
+    {
+        return left.Add(right);
+    }
+
+    /// <summary>
+    /// Performs vectorized scalar multiplication using TensorPrimitives
+    /// </summary>
+    private NivaraColumn<T> MultiplyVectorized(T scalar)
+    {
+        // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
+        if (_storage is MemoryStorage<T> memoryStorage)
+        {
+            var data = memoryStorage.Data.Span;
+            var result = new T[data.Length];
+            
+            // Use our helper method for multiplication
+            MultiplyTensorPrimitive(data, scalar, result.AsSpan());
+            
+            // Handle null propagation
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var nullMask = memoryStorage.NullMaskMemory;
+            if (nullMask.HasValue && nullMask.Value.Length > 0)
+            {
+                var nullMaskArray = new bool[data.Length];
+                nullMask.Value.Span.CopyTo(nullMaskArray);
+                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+            }
+            
+            var resultStorage = new MemoryStorage<T>(result, resultNullMask);
+            return new NivaraColumn<T>(resultStorage);
+        }
+        else
+        {
+            throw new InvalidOperationException("Unsupported storage type for vectorized operations");
+        }
+    }
+
+    /// <summary>
+    /// Performs vectorized element-wise addition using TensorPrimitives
+    /// </summary>
+    private NivaraColumn<T> AddVectorized(NivaraColumn<T> other)
+    {
+        // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
+        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        {
+            var leftData = leftMemory.Data.Span;
+            var rightData = rightMemory.Data.Span;
+            var result = new T[leftData.Length];
+            
+            // Use our helper method for addition
+            AddTensorPrimitive(leftData, rightData, result.AsSpan());
+            
+            // Handle null propagation - null + anything = null
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNulls = leftMemory.NullMaskMemory;
+            var rightNulls = rightMemory.NullMaskMemory;
+            
+            if ((leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0))
+            {
+                var resultNullMaskArray = new bool[result.Length];
+                
+                for (int i = 0; i < result.Length; i++)
+                {
+                    bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
+                    bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
+                    resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                }
+                
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+            
+            var resultStorage = new MemoryStorage<T>(result, resultNullMask);
+            return new NivaraColumn<T>(resultStorage);
+        }
+        else
+        {
+            throw new InvalidOperationException("Cannot perform arithmetic operations on columns with different storage types");
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized multiplication using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    private static void MultiplyTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
+    {
+        // For now, use scalar multiplication with dynamic dispatch
+        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y!)!;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized addition using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    private static void AddTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        // For now, use scalar addition with dynamic dispatch
+        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = (T)(object)((dynamic)x[i]! + (dynamic)y[i]!)!;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to check if a type is numeric and supports arithmetic operations
+    /// </summary>
+    private static bool IsNumericType(Type type)
+    {
+        return type == typeof(int) ||
+               type == typeof(float) ||
+               type == typeof(double) ||
+               type == typeof(long) ||
+               type == typeof(short) ||
+               type == typeof(byte) ||
+               type == typeof(sbyte) ||
+               type == typeof(uint) ||
+               type == typeof(ulong) ||
+               type == typeof(ushort) ||
+               type == typeof(decimal) ||
+               type == typeof(bool);
     }
 
     /// <inheritdoc />

@@ -51,6 +51,7 @@ internal static class ColumnStorageFactory
                type == typeof(uint) ||
                type == typeof(ulong) ||
                type == typeof(ushort) ||
-               type == typeof(sbyte);
+               type == typeof(sbyte) ||
+               type == typeof(bool);
     }
 }

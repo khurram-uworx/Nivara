@@ -337,6 +337,11 @@ public class NivaraColumnTests
 - **Avoid premature optimization**: Get the basic functionality working first, then optimize storage selection
 - **Generic constraints are tricky**: Static methods in generic classes cannot have additional constraints
 - **Reflection has limits**: Span<T> and complex generics don't work well with reflection-based approaches
+- **Arithmetic operations**: Use ColumnStorageFactory.IsVectorizable<T>() to check type vectorizability, not storage.IsVectorizable
+- **Dynamic dispatch works**: For arithmetic operations, dynamic dispatch with runtime type checking is simpler than complex generic constraints
+- **Bool is vectorizable**: Remember to include bool in vectorizable type lists for both storage factory and arithmetic operations
+- **Operator overloads**: Can't use operators directly in Assert.Throws, wrap in lambda expressions
+- **Test organization**: Group related tests in regions for better organization and readability
 
 ---
 
