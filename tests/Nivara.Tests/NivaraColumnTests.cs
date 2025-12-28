@@ -1025,4 +1025,606 @@ public class NivaraColumnTests
     }
 
     #endregion
+
+    #region Property 15: Immutability of operations
+    
+    /// <summary>
+    /// Property 15: Immutability of operations
+    /// For any NivaraColumn operation, the original column should remain unchanged and a new column instance should be returned.
+    /// **Validates: Requirements 5.1**
+    /// </summary>
+    [Test]
+    public void ColumnOperations_ShouldPreserveOriginalAndReturnNewInstance()
+    {
+        // Test arithmetic operations immutability
+        var originalValues = new[] { 10, 20, 30, 40, 50 };
+        var originalColumn = NivaraColumn<int>.Create(originalValues);
+        
+        // Test scalar multiplication
+        var multiplied = originalColumn.Multiply(2);
+        
+        Assert.That(ReferenceEquals(multiplied, originalColumn), Is.False, "Multiply should return a new instance");
+        Assert.That(originalColumn.Length, Is.EqualTo(5), "Original column length should be unchanged");
+        Assert.That(originalColumn[0], Is.EqualTo(10), "Original column values should be unchanged");
+        Assert.That(originalColumn[1], Is.EqualTo(20), "Original column values should be unchanged");
+        Assert.That(originalColumn[4], Is.EqualTo(50), "Original column values should be unchanged");
+        
+        Assert.That(multiplied.Length, Is.EqualTo(5), "New column should have correct length");
+        Assert.That(multiplied[0], Is.EqualTo(20), "New column should have multiplied values");
+        Assert.That(multiplied[1], Is.EqualTo(40), "New column should have multiplied values");
+        Assert.That(multiplied[4], Is.EqualTo(100), "New column should have multiplied values");
+        
+        // Test element-wise addition
+        var otherColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
+        var added = originalColumn.Add(otherColumn);
+        
+        Assert.That(ReferenceEquals(added, originalColumn), Is.False, "Add should return a new instance");
+        Assert.That(ReferenceEquals(added, otherColumn), Is.False, "Add should not modify the other column");
+        
+        // Verify original columns are unchanged
+        Assert.That(originalColumn[0], Is.EqualTo(10), "Original left column should be unchanged");
+        Assert.That(otherColumn[0], Is.EqualTo(1), "Original right column should be unchanged");
+        
+        // Verify new column has correct values
+        Assert.That(added[0], Is.EqualTo(11), "Added column should have correct values");
+        Assert.That(added[4], Is.EqualTo(55), "Added column should have correct values");
+        
+        // Test element-wise multiplication
+        var elementMultiplied = originalColumn.Multiply(otherColumn);
+        
+        Assert.That(ReferenceEquals(elementMultiplied, originalColumn), Is.False, "Element-wise multiply should return new instance");
+        Assert.That(ReferenceEquals(elementMultiplied, otherColumn), Is.False, "Element-wise multiply should not modify other column");
+        
+        // Verify originals unchanged
+        Assert.That(originalColumn[0], Is.EqualTo(10), "Original left column should be unchanged after element-wise multiply");
+        Assert.That(otherColumn[0], Is.EqualTo(1), "Original right column should be unchanged after element-wise multiply");
+        
+        // Verify new column has correct values
+        Assert.That(elementMultiplied[0], Is.EqualTo(10), "Element-wise multiplied column should have correct values");
+        Assert.That(elementMultiplied[4], Is.EqualTo(250), "Element-wise multiplied column should have correct values");
+    }
+
+    [Test]
+    public void ComparisonOperations_ShouldPreserveOriginalAndReturnNewInstance()
+    {
+        var originalValues = new[] { 10, 20, 30, 40, 50 };
+        var originalColumn = NivaraColumn<int>.Create(originalValues);
+        
+        // Test scalar comparison
+        var equalsResult = originalColumn.Equals(30);
+        
+        Assert.That(equalsResult, Is.Not.Null, "Equals should return a new instance");
+        Assert.That(ReferenceEquals(equalsResult, originalColumn), Is.False, "Equals should return a different instance");
+        Assert.That(originalColumn[0], Is.EqualTo(10), "Original column should be unchanged after equals");
+        Assert.That(originalColumn[2], Is.EqualTo(30), "Original column should be unchanged after equals");
+        
+        // Test greater than comparison
+        var greaterResult = originalColumn.GreaterThan(25);
+        
+        Assert.That(greaterResult, Is.Not.Null, "GreaterThan should return a new instance");
+        Assert.That(ReferenceEquals(greaterResult, originalColumn), Is.False, "GreaterThan should return a different instance");
+        Assert.That(originalColumn[0], Is.EqualTo(10), "Original column should be unchanged after GreaterThan");
+        
+        // Test less than comparison
+        var lessResult = originalColumn.LessThan(35);
+        
+        Assert.That(lessResult, Is.Not.Null, "LessThan should return a new instance");
+        Assert.That(ReferenceEquals(lessResult, originalColumn), Is.False, "LessThan should return a different instance");
+        Assert.That(originalColumn[4], Is.EqualTo(50), "Original column should be unchanged after LessThan");
+        
+        // Test element-wise comparison
+        var otherColumn = NivaraColumn<int>.Create(new[] { 15, 25, 30, 35, 45 });
+        var elementEqualsResult = originalColumn.Equals(otherColumn);
+        
+        Assert.That(elementEqualsResult, Is.Not.Null, "Element-wise equals should return new instance");
+        Assert.That(ReferenceEquals(elementEqualsResult, originalColumn), Is.False, "Element-wise equals should return different instance");
+        Assert.That(ReferenceEquals(elementEqualsResult, otherColumn), Is.False, "Element-wise equals should not modify other column");
+        
+        // Verify originals unchanged
+        Assert.That(originalColumn[0], Is.EqualTo(10), "Original left column should be unchanged");
+        Assert.That(otherColumn[0], Is.EqualTo(15), "Original right column should be unchanged");
+    }
+
+    [Test]
+    public void SlicingOperations_ShouldPreserveOriginalAndReturnNewInstance()
+    {
+        var originalValues = new[] { 10, 20, 30, 40, 50 };
+        var originalColumn = NivaraColumn<int>.Create(originalValues);
+        
+        // Test slicing
+        var sliced = originalColumn.Slice(1, 3);
+        
+        Assert.That(sliced, Is.Not.SameAs(originalColumn), "Slice should return a new instance");
+        Assert.That(originalColumn.Length, Is.EqualTo(5), "Original column length should be unchanged");
+        Assert.That(originalColumn[0], Is.EqualTo(10), "Original column values should be unchanged");
+        Assert.That(originalColumn[4], Is.EqualTo(50), "Original column values should be unchanged");
+        
+        Assert.That(sliced.Length, Is.EqualTo(3), "Sliced column should have correct length");
+        Assert.That(sliced[0], Is.EqualTo(20), "Sliced column should have correct values");
+        Assert.That(sliced[1], Is.EqualTo(30), "Sliced column should have correct values");
+        Assert.That(sliced[2], Is.EqualTo(40), "Sliced column should have correct values");
+        
+        // Modify sliced column (if it were mutable) shouldn't affect original
+        // Since columns are immutable, we can't directly test this, but we verify
+        // that operations on the slice don't affect the original
+        var slicedMultiplied = sliced.Multiply(10);
+        
+        Assert.That(originalColumn[1], Is.EqualTo(20), "Original should be unchanged after operations on slice");
+        Assert.That(originalColumn[2], Is.EqualTo(30), "Original should be unchanged after operations on slice");
+        Assert.That(slicedMultiplied[0], Is.EqualTo(200), "Operations on slice should work correctly");
+    }
+
+    /// <summary>
+    /// Property 15: Immutability of operations - Enhanced property-based tests
+    /// For any NivaraColumn operation, the original column should remain unchanged and a new column instance should be returned.
+    /// **Validates: Requirements 5.1**
+    /// </summary>
+    [TestCase(new int[] { 1, 2, 3 })]
+    [TestCase(new int[] { -5, 0, 5, 10, 15 })]
+    [TestCase(new int[] { int.MaxValue, int.MinValue, 0 })]
+    [TestCase(new int[] { 42 })]
+    public void ImmutabilityProperty_ArithmeticOperations_ShouldPreserveOriginals(int[] values)
+    {
+        if (values.Length == 0) return; // Skip empty arrays for arithmetic operations
+        
+        var originalColumn = NivaraColumn<int>.Create(values);
+        var originalValuesCopy = values.ToArray(); // Keep a copy for verification
+        
+        // Test scalar multiplication immutability
+        var multiplied = originalColumn.Multiply(3);
+        
+        Assert.That(ReferenceEquals(multiplied, originalColumn), Is.False, 
+            "Scalar multiplication should return a new instance");
+        
+        // Verify original column is unchanged
+        Assert.That(originalColumn.Length, Is.EqualTo(values.Length), 
+            "Original column length should be unchanged after scalar multiplication");
+        
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]), 
+                $"Original column value at index {i} should be unchanged after scalar multiplication");
+        }
+        
+        // Test element-wise operations if we have enough elements
+        if (values.Length > 1)
+        {
+            var otherValues = values.Select(x => x + 1).ToArray();
+            var otherColumn = NivaraColumn<int>.Create(otherValues);
+            
+            var added = originalColumn.Add(otherColumn);
+            var elementMultiplied = originalColumn.Multiply(otherColumn);
+            
+            Assert.That(ReferenceEquals(added, originalColumn), Is.False, 
+                "Element-wise addition should return a new instance");
+            Assert.That(ReferenceEquals(elementMultiplied, originalColumn), Is.False, 
+                "Element-wise multiplication should return a new instance");
+            
+            // Verify originals are still unchanged
+            for (int i = 0; i < values.Length; i++)
+            {
+                Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]), 
+                    $"Original column value at index {i} should be unchanged after element-wise operations");
+                Assert.That(otherColumn[i], Is.EqualTo(otherValues[i]), 
+                    $"Other column value at index {i} should be unchanged after element-wise operations");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Property 15: Immutability of operations - Comparison operations property test
+    /// **Validates: Requirements 5.1**
+    /// </summary>
+    [TestCase(new int[] { 1, 5, 10, 15, 20 })]
+    [TestCase(new int[] { -10, -5, 0, 5, 10 })]
+    [TestCase(new int[] { 100, 200, 300 })]
+    [TestCase(new int[] { 42 })]
+    public void ImmutabilityProperty_ComparisonOperations_ShouldPreserveOriginals(int[] values)
+    {
+        var originalColumn = NivaraColumn<int>.Create(values);
+        var originalValuesCopy = values.ToArray();
+        var targetValue = values.Length > 0 ? values[values.Length / 2] : 0;
+        
+        // Test all comparison operations
+        var equalsResult = originalColumn.Equals(targetValue);
+        var greaterResult = originalColumn.GreaterThan(targetValue);
+        var lessResult = originalColumn.LessThan(targetValue);
+        
+        // Verify all return new instances
+        Assert.That(ReferenceEquals(equalsResult, originalColumn), Is.False, 
+            "Equals should return a new instance");
+        Assert.That(ReferenceEquals(greaterResult, originalColumn), Is.False, 
+            "GreaterThan should return a new instance");
+        Assert.That(ReferenceEquals(lessResult, originalColumn), Is.False, 
+            "LessThan should return a new instance");
+        
+        // Verify original column is unchanged
+        Assert.That(originalColumn.Length, Is.EqualTo(values.Length), 
+            "Original column length should be unchanged after comparisons");
+        
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]), 
+                $"Original column value at index {i} should be unchanged after comparisons");
+        }
+        
+        // Test element-wise comparison if we have multiple elements
+        if (values.Length > 1)
+        {
+            var otherValues = values.Select(x => x % 2 == 0 ? x : x + 1).ToArray();
+            var otherColumn = NivaraColumn<int>.Create(otherValues);
+            
+            var elementEquals = originalColumn.Equals(otherColumn);
+            
+            Assert.That(ReferenceEquals(elementEquals, originalColumn), Is.False, 
+                "Element-wise equals should return a new instance");
+            Assert.That(ReferenceEquals(elementEquals, otherColumn), Is.False, 
+                "Element-wise equals should not modify other column");
+            
+            // Verify both originals are unchanged
+            for (int i = 0; i < values.Length; i++)
+            {
+                Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]), 
+                    $"Original column value at index {i} should be unchanged after element-wise comparison");
+                Assert.That(otherColumn[i], Is.EqualTo(otherValues[i]), 
+                    $"Other column value at index {i} should be unchanged after element-wise comparison");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Property 15: Immutability of operations - String operations property test
+    /// **Validates: Requirements 5.1**
+    /// </summary>
+    [Test]
+    public void ImmutabilityProperty_StringOperations_ShouldPreserveOriginals()
+    {
+        var testCases = new[]
+        {
+            new string[] { "apple", "banana", "cherry" },
+            new string[] { "hello", "world" },
+            new string[] { "single" },
+            new string[] { "", "non-empty", "" }
+        };
+
+        foreach (var values in testCases)
+        {
+            var originalColumn = NivaraColumn<string>.Create(values);
+            var originalValuesCopy = values.ToArray();
+            var targetValue = values.Length > 0 ? values[0] : "test";
+            
+            // Test comparison operations on strings
+            var equalsResult = originalColumn.Equals(targetValue);
+            var greaterResult = originalColumn.GreaterThan(targetValue);
+            var lessResult = originalColumn.LessThan(targetValue);
+            
+            // Verify all return new instances
+            Assert.That(ReferenceEquals(equalsResult, originalColumn), Is.False, 
+                "String equals should return a new instance");
+            Assert.That(ReferenceEquals(greaterResult, originalColumn), Is.False, 
+                "String GreaterThan should return a new instance");
+            Assert.That(ReferenceEquals(lessResult, originalColumn), Is.False, 
+                "String LessThan should return a new instance");
+            
+            // Verify original column is unchanged
+            Assert.That(originalColumn.Length, Is.EqualTo(values.Length), 
+                "Original string column length should be unchanged");
+            
+            for (int i = 0; i < values.Length; i++)
+            {
+                Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]), 
+                    $"Original string column value at index {i} should be unchanged");
+            }
+        }
+    }
+
+    #endregion
+
+    #region Property 16: Efficient slicing
+    
+    /// <summary>
+    /// Property 16: Efficient slicing
+    /// For any NivaraColumn and any valid slice range, slicing should return a new column that correctly represents the specified range of the original data.
+    /// **Validates: Requirements 5.4**
+    /// </summary>
+    [Test]
+    public void ColumnSlicing_ShouldReturnCorrectSubsetForAllValidRanges()
+    {
+        var originalValues = new[] { 100, 200, 300, 400, 500, 600, 700 };
+        var originalColumn = NivaraColumn<int>.Create(originalValues);
+        
+        // Test various slice ranges
+        var testCases = new[]
+        {
+            new { Start = 0, Length = 3, Expected = new[] { 100, 200, 300 }, Description = "slice from beginning" },
+            new { Start = 2, Length = 3, Expected = new[] { 300, 400, 500 }, Description = "slice from middle" },
+            new { Start = 4, Length = 3, Expected = new[] { 500, 600, 700 }, Description = "slice to end" },
+            new { Start = 0, Length = 7, Expected = new[] { 100, 200, 300, 400, 500, 600, 700 }, Description = "full slice" },
+            new { Start = 3, Length = 1, Expected = new[] { 400 }, Description = "single element slice" },
+            new { Start = 6, Length = 1, Expected = new[] { 700 }, Description = "last element slice" },
+            new { Start = 0, Length = 1, Expected = new[] { 100 }, Description = "first element slice" }
+        };
+        
+        foreach (var testCase in testCases)
+        {
+            var sliced = originalColumn.Slice(testCase.Start, testCase.Length);
+            
+            Assert.That(sliced.Length, Is.EqualTo(testCase.Expected.Length), 
+                $"Sliced column length should be correct for {testCase.Description}");
+            
+            for (int i = 0; i < testCase.Expected.Length; i++)
+            {
+                Assert.That(sliced[i], Is.EqualTo(testCase.Expected[i]), 
+                    $"Sliced value at index {i} should be correct for {testCase.Description}");
+            }
+        }
+    }
+
+    [Test]
+    public void ColumnSlicing_ShouldHandleEdgeCases()
+    {
+        // Test empty slice
+        var values = new[] { 1, 2, 3, 4, 5 };
+        var column = NivaraColumn<int>.Create(values);
+        
+        var emptySlice = column.Slice(2, 0);
+        Assert.That(emptySlice.Length, Is.EqualTo(0), "Empty slice should have length 0");
+        
+        // Test single element column
+        var singleColumn = NivaraColumn<int>.Create(new[] { 42 });
+        var singleSlice = singleColumn.Slice(0, 1);
+        
+        Assert.That(singleSlice.Length, Is.EqualTo(1), "Single element slice should have length 1");
+        Assert.That(singleSlice[0], Is.EqualTo(42), "Single element slice should have correct value");
+        
+        // Test slicing with different data types
+        var stringValues = new[] { "apple", "banana", "cherry", "date", "elderberry" };
+        var stringColumn = NivaraColumn<string>.Create(stringValues);
+        var stringSlice = stringColumn.Slice(1, 3);
+        
+        Assert.That(stringSlice.Length, Is.EqualTo(3), "String slice should have correct length");
+        Assert.That(stringSlice[0], Is.EqualTo("banana"), "String slice should have correct values");
+        Assert.That(stringSlice[1], Is.EqualTo("cherry"), "String slice should have correct values");
+        Assert.That(stringSlice[2], Is.EqualTo("date"), "String slice should have correct values");
+    }
+
+    [Test]
+    public void ColumnSlicing_ShouldThrowForInvalidRanges()
+    {
+        var values = new[] { 1, 2, 3, 4, 5 };
+        var column = NivaraColumn<int>.Create(values);
+        
+        // Test invalid start positions
+        Assert.Throws<ArgumentOutOfRangeException>(() => column.Slice(-1, 2), 
+            "Negative start should throw ArgumentOutOfRangeException");
+        Assert.Throws<ArgumentOutOfRangeException>(() => column.Slice(6, 1), 
+            "Start beyond length should throw ArgumentOutOfRangeException");
+        
+        // Test invalid lengths
+        Assert.Throws<ArgumentOutOfRangeException>(() => column.Slice(0, -1), 
+            "Negative length should throw ArgumentOutOfRangeException");
+        Assert.Throws<ArgumentOutOfRangeException>(() => column.Slice(3, 3), 
+            "Length extending beyond end should throw ArgumentOutOfRangeException");
+        Assert.Throws<ArgumentOutOfRangeException>(() => column.Slice(2, 4), 
+            "Start + length > column length should throw ArgumentOutOfRangeException");
+    }
+
+    [Test]
+    public void ColumnSlicing_WithNullValues_ShouldPreserveNullSemantics()
+    {
+        // Test slicing with reference type nulls
+        var stringValues = new[] { "apple", null!, "cherry", null!, "elderberry" };
+        var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringValues);
+        
+        var sliced = stringColumn.Slice(1, 3); // Should get [null, "cherry", null]
+        
+        Assert.That(sliced.Length, Is.EqualTo(3), "Sliced column should have correct length");
+        Assert.That(sliced[0], Is.Null, "First sliced element should be null");
+        Assert.That(sliced[1], Is.EqualTo("cherry"), "Second sliced element should be correct");
+        Assert.That(sliced[2], Is.Null, "Third sliced element should be null");
+        
+        // Test null detection methods on sliced column
+        Assert.That(sliced.IsNull(0), Is.True, "First element should be detected as null");
+        Assert.That(sliced.IsNull(1), Is.False, "Second element should not be detected as null");
+        Assert.That(sliced.IsNull(2), Is.True, "Third element should be detected as null");
+        Assert.That(sliced.HasNulls, Is.True, "Sliced column should report having nulls");
+    }
+
+    /// <summary>
+    /// Property 16: Efficient slicing - Enhanced property-based tests
+    /// For any NivaraColumn and any valid slice range, slicing should return a new column that correctly represents the specified range of the original data.
+    /// **Validates: Requirements 5.4**
+    /// </summary>
+    [TestCase(new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, 0, 5)]
+    [TestCase(new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, 3, 4)]
+    [TestCase(new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, 7, 3)]
+    [TestCase(new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }, 0, 10)]
+    [TestCase(new int[] { 100, 200, 300 }, 1, 2)]
+    [TestCase(new int[] { 42 }, 0, 1)]
+    [TestCase(new int[] { -5, -3, -1, 1, 3, 5 }, 2, 3)]
+    public void SlicingProperty_ValidRanges_ShouldReturnCorrectSubset(int[] values, int start, int length)
+    {
+        var originalColumn = NivaraColumn<int>.Create(values);
+        var originalValuesCopy = values.ToArray();
+        
+        var sliced = originalColumn.Slice(start, length);
+        
+        // Verify slice returns new instance
+        Assert.That(ReferenceEquals(sliced, originalColumn), Is.False, 
+            "Slice should return a new instance");
+        
+        // Verify slice has correct length
+        Assert.That(sliced.Length, Is.EqualTo(length), 
+            $"Sliced column should have length {length}");
+        
+        // Verify slice contains correct values
+        for (int i = 0; i < length; i++)
+        {
+            Assert.That(sliced[i], Is.EqualTo(values[start + i]), 
+                $"Sliced value at index {i} should match original value at index {start + i}");
+        }
+        
+        // Verify original column is unchanged
+        Assert.That(originalColumn.Length, Is.EqualTo(values.Length), 
+            "Original column length should be unchanged after slicing");
+        
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]), 
+                $"Original column value at index {i} should be unchanged after slicing");
+        }
+    }
+
+    /// <summary>
+    /// Property 16: Efficient slicing - Different data types property test
+    /// **Validates: Requirements 5.4**
+    /// </summary>
+    [TestCase(new string[] { "a", "b", "c", "d", "e", "f" }, 1, 3)]
+    [TestCase(new string[] { "hello", "world", "test", "slice" }, 0, 2)]
+    [TestCase(new string[] { "apple", "banana", "cherry", "date", "elderberry" }, 2, 2)]
+    [TestCase(new string[] { "single" }, 0, 1)]
+    public void SlicingProperty_StringColumns_ShouldReturnCorrectSubset(string[] values, int start, int length)
+    {
+        var originalColumn = NivaraColumn<string>.Create(values);
+        var originalValuesCopy = values.ToArray();
+        
+        var sliced = originalColumn.Slice(start, length);
+        
+        // Verify slice properties
+        Assert.That(ReferenceEquals(sliced, originalColumn), Is.False, 
+            "String slice should return a new instance");
+        Assert.That(sliced.Length, Is.EqualTo(length), 
+            $"String sliced column should have length {length}");
+        
+        // Verify slice contains correct values
+        for (int i = 0; i < length; i++)
+        {
+            Assert.That(sliced[i], Is.EqualTo(values[start + i]), 
+                $"String sliced value at index {i} should match original value at index {start + i}");
+        }
+        
+        // Verify original is unchanged
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]), 
+                $"Original string column value at index {i} should be unchanged after slicing");
+        }
+    }
+
+    /// <summary>
+    /// Property 16: Efficient slicing - Edge cases property test
+    /// **Validates: Requirements 5.4**
+    /// </summary>
+    [TestCase(new double[] { 1.1, 2.2, 3.3, 4.4, 5.5 }, 2, 0)] // Empty slice
+    [TestCase(new double[] { 1.1, 2.2, 3.3, 4.4, 5.5 }, 0, 1)] // First element only
+    [TestCase(new double[] { 1.1, 2.2, 3.3, 4.4, 5.5 }, 4, 1)] // Last element only
+    [TestCase(new double[] { 1.1, 2.2, 3.3, 4.4, 5.5 }, 0, 5)] // Full slice
+    [TestCase(new double[] { 3.14 }, 0, 1)] // Single element column
+    [TestCase(new double[] { 3.14 }, 1, 0)] // Empty slice from single element
+    public void SlicingProperty_EdgeCases_ShouldHandleCorrectly(double[] values, int start, int length)
+    {
+        var originalColumn = NivaraColumn<double>.Create(values);
+        var originalValuesCopy = values.ToArray();
+        
+        var sliced = originalColumn.Slice(start, length);
+        
+        // Verify slice properties
+        Assert.That(ReferenceEquals(sliced, originalColumn), Is.False, 
+            "Edge case slice should return a new instance");
+        Assert.That(sliced.Length, Is.EqualTo(length), 
+            $"Edge case sliced column should have length {length}");
+        
+        // Verify slice contains correct values (if any)
+        for (int i = 0; i < length; i++)
+        {
+            Assert.That(sliced[i], Is.EqualTo(values[start + i]).Within(0.000001), 
+                $"Edge case sliced value at index {i} should match original value at index {start + i}");
+        }
+        
+        // Verify original is unchanged
+        Assert.That(originalColumn.Length, Is.EqualTo(values.Length), 
+            "Original column length should be unchanged after edge case slicing");
+        
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(originalColumn[i], Is.EqualTo(originalValuesCopy[i]).Within(0.000001), 
+                $"Original column value at index {i} should be unchanged after edge case slicing");
+        }
+    }
+
+    /// <summary>
+    /// Property 16: Efficient slicing - Invalid ranges should throw exceptions
+    /// **Validates: Requirements 5.4**
+    /// </summary>
+    [TestCase(new int[] { 1, 2, 3, 4, 5 }, -1, 2)] // Negative start
+    [TestCase(new int[] { 1, 2, 3, 4, 5 }, 6, 1)]  // Start beyond length
+    [TestCase(new int[] { 1, 2, 3, 4, 5 }, 0, -1)] // Negative length
+    [TestCase(new int[] { 1, 2, 3, 4, 5 }, 3, 3)]  // Length extending beyond end
+    [TestCase(new int[] { 1, 2, 3, 4, 5 }, 2, 4)]  // Start + length > column length
+    public void SlicingProperty_InvalidRanges_ShouldThrowArgumentOutOfRangeException(int[] values, int start, int length)
+    {
+        var column = NivaraColumn<int>.Create(values);
+        
+        Assert.Throws<ArgumentOutOfRangeException>(() => column.Slice(start, length), 
+            $"Slice with start={start}, length={length} should throw ArgumentOutOfRangeException");
+    }
+
+    /// <summary>
+    /// Property 16: Efficient slicing - Null preservation property test
+    /// **Validates: Requirements 5.4**
+    /// </summary>
+    [Test]
+    public void SlicingProperty_WithNulls_ShouldPreserveNullSemantics()
+    {
+        var testCases = new[]
+        {
+            new { Values = new string[] { "a", null!, "c", null!, "e" }, Start = 1, Length = 3, Description = "Slice with nulls" },
+            new { Values = new string[] { null!, "b", "c" }, Start = 0, Length = 2, Description = "Slice starting with null" },
+            new { Values = new string[] { "a", "b", null! }, Start = 1, Length = 2, Description = "Slice ending with null" },
+            new { Values = new string[] { null!, null!, null! }, Start = 0, Length = 3, Description = "All nulls slice" }
+        };
+
+        foreach (var testCase in testCases)
+        {
+            var originalColumn = NivaraColumn<string>.CreateForReferenceType(testCase.Values);
+            
+            var sliced = originalColumn.Slice(testCase.Start, testCase.Length);
+            
+            // Verify slice properties
+            Assert.That(ReferenceEquals(sliced, originalColumn), Is.False, 
+                $"Null slice should return a new instance for {testCase.Description}");
+            Assert.That(sliced.Length, Is.EqualTo(testCase.Length), 
+                $"Null sliced column should have length {testCase.Length} for {testCase.Description}");
+            
+            // Verify slice contains correct values and null semantics
+            bool expectedHasNulls = false;
+            for (int i = 0; i < testCase.Length; i++)
+            {
+                var expectedValue = testCase.Values[testCase.Start + i];
+                var actualValue = sliced[i];
+                
+                if (expectedValue == null)
+                {
+                    expectedHasNulls = true;
+                    Assert.That(actualValue, Is.Null, 
+                        $"Sliced value at index {i} should be null for {testCase.Description}");
+                    Assert.That(sliced.IsNull(i), Is.True, 
+                        $"Sliced IsNull at index {i} should be true for {testCase.Description}");
+                }
+                else
+                {
+                    Assert.That(actualValue, Is.EqualTo(expectedValue), 
+                        $"Sliced value at index {i} should match expected non-null value for {testCase.Description}");
+                    Assert.That(sliced.IsNull(i), Is.False, 
+                        $"Sliced IsNull at index {i} should be false for {testCase.Description}");
+                }
+            }
+            
+            // Verify HasNulls property
+            Assert.That(sliced.HasNulls, Is.EqualTo(expectedHasNulls), 
+                $"Sliced column HasNulls should be {expectedHasNulls} for {testCase.Description}");
+        }
+    }
+
+    #endregion
 }

@@ -8,6 +8,7 @@
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara</PackageId>
     <PackageVersion>1.0.0</PackageVersion>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <Authors>Khurram</Authors>
     <Description>High-performance columnar DataFrame library for .NET</Description>
     <PackageTags>dataframe;analytics;columnar;performance;simd</PackageTags>
@@ -25,6 +26,10 @@
 
   <ItemGroup>
     <PackageReference Include="System.Numerics.Tensors" Version="10.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>

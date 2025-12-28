@@ -1,5 +1,7 @@
 # Nivara Development Guidelines
 
+- Please go through the [CONTRIBUTING.md](CONTRIBUTING.md) first
+
 This document captures lessons learned, architectural decisions, and non-obvious gotchas discovered during Nivara development. It serves as living knowledge for LLMs and maintainers to avoid repeating mistakes and understand the rationale behind design decisions.
 
 ## Architecture Decisions & Rationale
@@ -121,6 +123,33 @@ if (typeof(T) == typeof(int))
 public void TestMethod()
 {
     var testCases = new[] { new string[] { "a", null!, "c" } };
+}
+```
+
+### TestCase Attribute Array Creation Limitations
+**Problem**: TestCase attributes require constant expressions, cannot use `new string[] { ... }` syntax
+**Error**: CS0182 - An attribute argument must be a constant expression, typeof expression or array creation expression
+**Solution**: Convert parameterized tests to regular Test methods with inline test data
+```csharp
+// WRONG - compiler error CS0182
+[TestCase(new string[] { "apple", "banana", "cherry" })]
+[TestCase(new string[] { "hello", "world" })]
+public void TestMethod(string[] values) { }
+
+// CORRECT - use regular test with inline test cases
+[Test]
+public void TestMethod()
+{
+    var testCases = new[]
+    {
+        new string[] { "apple", "banana", "cherry" },
+        new string[] { "hello", "world" }
+    };
+    
+    foreach (var values in testCases)
+    {
+        // Test logic here
+    }
 }
 ```
 
