@@ -54,6 +54,48 @@ var stringWithNulls = NivaraColumn<string>.CreateForReferenceType(
     
 Console.WriteLine(stringWithNulls.HasNulls);    // True
 Console.WriteLine(stringWithNulls.IsNull(1));   // True
+
+// Working with nullable value types
+var nullableInts = new int?[] { 1, null, 3, null, 5 };
+var intColumnWithNulls = NivaraColumn<int>.CreateFromNullable(nullableInts);
+
+Console.WriteLine(intColumnWithNulls.NullCount);     // 2
+var nullIndices = intColumnWithNulls.GetNullIndices(); // [1, 3]
+
+// Null handling operations
+var filled = intColumnWithNulls.FillNull(0);           // Replace nulls with 0
+var forwardFilled = intColumnWithNulls.FillNullForward(); // Forward fill
+var backwardFilled = intColumnWithNulls.FillNullBackward(); // Backward fill
+var dropped = intColumnWithNulls.DropNulls();          // Remove null values
+```
+
+### Advanced Null Handling
+
+Nivara provides comprehensive null handling capabilities:
+
+```csharp
+// Create from nullable arrays
+var nullableData = new double?[] { 1.5, null, 3.14, null, 2.71 };
+var column = NivaraColumn<double>.CreateFromNullable(nullableData);
+
+// Null inspection
+Console.WriteLine(column.HasNulls);        // True
+Console.WriteLine(column.NullCount);       // 2
+Console.WriteLine(column.Length);          // 5
+
+// Get null positions
+int[] nullIndices = column.GetNullIndices(); // [1, 3]
+
+// Fill strategies
+var constantFilled = column.FillNull(0.0);           // [1.5, 0.0, 3.14, 0.0, 2.71]
+var forwardFilled = column.FillNullForward();        // [1.5, 1.5, 3.14, 3.14, 2.71]
+var backwardFilled = column.FillNullBackward();      // [1.5, 3.14, 3.14, 2.71, 2.71]
+
+// Remove nulls entirely
+var cleaned = column.DropNulls();                    // [1.5, 3.14, 2.71] (length: 3)
+
+// Convert to array (preserves nulls as default values)
+double[] array = column.ToArray();                  // [1.5, 0.0, 3.14, 0.0, 2.71]
 ```
 
 ### Supported Operations
@@ -72,7 +114,10 @@ Console.WriteLine(stringWithNulls.IsNull(1));   // True
 #### Column Operations
 - Indexer access: `column[index]`
 - Length property: `column.Length`
-- Null checking: `column.IsNull(index)`, `column.HasNulls`
+- Null checking: `column.IsNull(index)`, `column.HasNulls`, `column.NullCount`
+- Null inspection: `column.GetNullIndices()`
+- Null handling: `column.FillNull(value)`, `column.FillNullForward()`, `column.FillNullBackward()`, `column.DropNulls()`
+- Array conversion: `column.ToArray()`
 - Slicing: `column.Slice(start, length)`
 
 #### Series Operations

@@ -47,6 +47,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         get
         {
             ObjectDisposedException.ThrowIf(disposed, this);
+            
+            if (index < 0 || index >= Length)
+                throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}. Valid range is 0 to {Length - 1}");
+
             return storage[index];
         }
     }
@@ -135,6 +139,64 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
+    /// Creates a new column from the specified array of nullable value type values.
+    /// Automatically detects and tracks null values using null masks.
+    /// </summary>
+    /// <param name="values">The nullable value type values to store in the column</param>
+    /// <returns>A new NivaraColumn instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when values array is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T is not a value type</exception>
+    public static NivaraColumn<T> CreateFromNullable(Array values)
+    {
+        if (values == null)
+            throw new ArgumentNullException(nameof(values));
+
+        // Ensure this method is only used with value types
+        if (!typeof(T).IsValueType)
+            throw new InvalidOperationException($"CreateFromNullable can only be used with value types. Use CreateForReferenceType for reference types.");
+
+        // Validate the array type - it should be T?[] where T is a value type
+        var actualElementType = values.GetType().GetElementType();
+        var expectedNullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
+        
+        if (actualElementType != expectedNullableType)
+            throw new ArgumentException($"Array element type must be {expectedNullableType.Name}, but was {actualElementType?.Name}");
+
+        // Handle empty array
+        if (values.Length == 0)
+        {
+            return new NivaraColumn<T>(new MemoryStorage<T>(ReadOnlySpan<T>.Empty));
+        }
+
+        // Process nullable values manually
+        var dataArray = new T[values.Length];
+        var nullMaskArray = new bool[values.Length];
+        bool hasNulls = false;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            var value = values.GetValue(i);
+            if (value == null)
+            {
+                dataArray[i] = default(T)!;
+                nullMaskArray[i] = true;
+                hasNulls = true;
+            }
+            else
+            {
+                dataArray[i] = (T)value;
+                nullMaskArray[i] = false;
+            }
+        }
+
+        var data = new ReadOnlyMemory<T>(dataArray);
+        var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : null;
+
+        var storage = new MemoryStorage<T>(data, nullMask);
+        return new NivaraColumn<T>(storage);
+    }
+
+    /// <summary>
     /// Creates appropriate storage for the given values based on type characteristics
     /// </summary>
     /// <param name="values">The values to store</param>
@@ -171,6 +233,19 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
+        // Enhanced validation with clear error messages
+        if (start < 0)
+            throw new ArgumentOutOfRangeException(nameof(start), start, $"Start index cannot be negative. Provided: {start}");
+        
+        if (length < 0)
+            throw new ArgumentOutOfRangeException(nameof(length), length, $"Length cannot be negative. Provided: {length}");
+        
+        if (start > Length)
+            throw new ArgumentOutOfRangeException(nameof(start), start, $"Start index {start} is out of range for column of length {Length}. Valid range is 0 to {Length}");
+        
+        if (start + length > Length)
+            throw new ArgumentOutOfRangeException(nameof(length), length, $"Slice range [{start}, {start + length}) exceeds column bounds [0, {Length}). Maximum length from start {start} is {Length - start}");
+
         var slicedStorage = storage.Slice(start, length);
         return new NivaraColumn<T>(slicedStorage);
     }
@@ -200,16 +275,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        // Runtime check for numeric types
-        if (!IsNumericType(typeof(T)))
-        {
-            throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
-        }
-
-        if (!ColumnStorageFactory.IsVectorizable<T>())
-        {
-            throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
-        }
+        // Use centralized validation
+        ValidateTypeSupportsOperation("arithmetic");
 
         return MultiplyVectorized(scalar);
     }
@@ -233,19 +300,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
 
-        if (Length != other.Length)
-            throw new ArgumentException($"Cannot add columns of different lengths: {Length} vs {other.Length}");
-
-        // Runtime check for numeric types
-        if (!IsNumericType(typeof(T)))
-        {
-            throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
-        }
-
-        if (!ColumnStorageFactory.IsVectorizable<T>())
-        {
-            throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
-        }
+        // Use centralized validation
+        ValidateCompatibleLength(other, "addition");
+        ValidateTypeSupportsOperation("arithmetic");
 
         return AddVectorized(other);
     }
@@ -269,19 +326,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
 
-        if (Length != other.Length)
-            throw new ArgumentException($"Cannot multiply columns of different lengths: {Length} vs {other.Length}");
-
-        // Runtime check for numeric types
-        if (!IsNumericType(typeof(T)))
-        {
-            throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
-        }
-
-        if (!ColumnStorageFactory.IsVectorizable<T>())
-        {
-            throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
-        }
+        // Use centralized validation
+        ValidateCompatibleLength(other, "multiplication");
+        ValidateTypeSupportsOperation("arithmetic");
 
         return MultiplyVectorized(other);
     }
@@ -516,8 +563,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
 
-        if (Length != other.Length)
-            throw new ArgumentException($"Cannot compare columns of different lengths: {Length} vs {other.Length}");
+        // Use centralized validation
+        ValidateCompatibleLength(other, "equality comparison");
 
         if (storage.IsVectorizable && other.storage.IsVectorizable)
         {
@@ -540,10 +587,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        if (!IsComparableType(typeof(T)))
-        {
-            throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
-        }
+        // Use centralized validation
+        ValidateTypeSupportsOperation("comparison");
 
         if (storage.IsVectorizable)
         {
@@ -574,13 +619,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
 
-        if (Length != other.Length)
-            throw new ArgumentException($"Cannot compare columns of different lengths: {Length} vs {other.Length}");
-
-        if (!IsComparableType(typeof(T)))
-        {
-            throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
-        }
+        // Use centralized validation
+        ValidateCompatibleLength(other, "greater than comparison");
+        ValidateTypeSupportsOperation("comparison");
 
         if (storage.IsVectorizable && other.storage.IsVectorizable)
         {
@@ -603,10 +644,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        if (!IsComparableType(typeof(T)))
-        {
-            throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
-        }
+        // Use centralized validation
+        ValidateTypeSupportsOperation("comparison");
 
         if (storage.IsVectorizable)
         {
@@ -637,13 +676,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
 
-        if (Length != other.Length)
-            throw new ArgumentException($"Cannot compare columns of different lengths: {Length} vs {other.Length}");
-
-        if (!IsComparableType(typeof(T)))
-        {
-            throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
-        }
+        // Use centralized validation
+        ValidateCompatibleLength(other, "less than comparison");
+        ValidateTypeSupportsOperation("comparison");
 
         if (storage.IsVectorizable && other.storage.IsVectorizable)
         {
@@ -1356,6 +1391,283 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Check if type implements IComparable<T> or IComparable
         return typeof(IComparable<>).MakeGenericType(type).IsAssignableFrom(type) ||
                typeof(IComparable).IsAssignableFrom(type);
+    }
+
+    // Null Handling Methods
+
+    /// <summary>
+    /// Gets the number of null values in the column
+    /// </summary>
+    /// <returns>The count of null values</returns>
+    public int NullCount
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+
+            if (!HasNulls)
+                return 0;
+
+            var nullMask = storage.NullMask;
+            int count = 0;
+            for (int i = 0; i < nullMask.Length; i++)
+            {
+                if (nullMask[i])
+                    count++;
+            }
+            return count;
+        }
+    }
+
+    /// <summary>
+    /// Gets the indices of all null values in the column
+    /// </summary>
+    /// <returns>An array of indices where null values are located</returns>
+    public int[] GetNullIndices()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (!HasNulls)
+            return Array.Empty<int>();
+
+        var nullMask = storage.NullMask;
+        var indices = new List<int>();
+        
+        for (int i = 0; i < nullMask.Length; i++)
+        {
+            if (nullMask[i])
+                indices.Add(i);
+        }
+
+        return indices.ToArray();
+    }
+
+    /// <summary>
+    /// Creates a new column with all null values replaced by the specified value
+    /// </summary>
+    /// <param name="fillValue">The value to use for replacing nulls</param>
+    /// <returns>A new column with nulls filled</returns>
+    /// <exception cref="ArgumentNullException">Thrown when fillValue is null for reference types</exception>
+    public NivaraColumn<T> FillNull(T fillValue)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Enhanced validation with clear error messages for reference types
+        if (!typeof(T).IsValueType && fillValue == null)
+            throw new ArgumentNullException(nameof(fillValue), $"Fill value cannot be null for reference type {typeof(T).Name}. Provide a non-null value to replace null entries.");
+
+        // If no nulls, return a copy of the current column
+        if (!HasNulls)
+        {
+            return Slice(0, Length);
+        }
+
+        // Create new data array with nulls filled
+        var nullMask = storage.NullMask;
+        var newData = new T[Length];
+
+        for (int i = 0; i < Length; i++)
+        {
+            if (nullMask[i])
+            {
+                newData[i] = fillValue;
+            }
+            else
+            {
+                newData[i] = storage[i];
+            }
+        }
+
+        // Create storage without null mask since all nulls are filled
+        var newStorage = CreateStorage(newData.AsSpan());
+        return new NivaraColumn<T>(newStorage);
+    }
+
+    /// <summary>
+    /// Validates that the column is not empty for operations that require data
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the column is empty</exception>
+    private void ValidateNotEmpty()
+    {
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot perform operation on empty column. Column must contain at least one element.");
+    }
+
+    /// <summary>
+    /// Validates that two columns have compatible lengths for binary operations
+    /// </summary>
+    /// <param name="other">The other column to validate against</param>
+    /// <param name="operationName">The name of the operation being performed</param>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    private void ValidateCompatibleLength(NivaraColumn<T> other, string operationName)
+    {
+        if (Length != other.Length)
+            throw new ArgumentException($"Cannot perform {operationName} on columns of different lengths: {Length} vs {other.Length}. Both columns must have the same number of elements.");
+    }
+
+    /// <summary>
+    /// Validates that the type supports the specified operation
+    /// </summary>
+    /// <param name="operationType">The type of operation being validated</param>
+    /// <exception cref="InvalidOperationException">Thrown when the type doesn't support the operation</exception>
+    private static void ValidateTypeSupportsOperation(string operationType)
+    {
+        switch (operationType.ToLowerInvariant())
+        {
+            case "arithmetic":
+                if (!IsNumericType(typeof(T)))
+                    throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
+                if (!ColumnStorageFactory.IsVectorizable<T>())
+                    throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
+                break;
+            case "comparison":
+                if (!IsComparableType(typeof(T)))
+                    throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
+                break;
+            default:
+                throw new ArgumentException($"Unknown operation type: {operationType}", nameof(operationType));
+        }
+    }
+
+    /// <summary>
+    /// Creates a new column with null values filled using forward fill strategy.
+    /// Each null value is replaced with the last non-null value that appeared before it.
+    /// </summary>
+    /// <returns>A new column with nulls forward-filled</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the first element is null (no value to forward fill)</exception>
+    public NivaraColumn<T> FillNullForward()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Validate that the column is not empty
+        ValidateNotEmpty();
+
+        // If no nulls, return a copy of the current column
+        if (!HasNulls)
+        {
+            return Slice(0, Length);
+        }
+
+        var nullMask = storage.NullMask;
+        var newData = new T[Length];
+        T? lastValidValue = default;
+        bool hasValidValue = false;
+
+        for (int i = 0; i < Length; i++)
+        {
+            if (nullMask[i])
+            {
+                if (!hasValidValue)
+                    throw new InvalidOperationException($"Cannot forward fill: null value at index {i} has no preceding non-null value. Consider using FillNull() with a default value instead.");
+                
+                newData[i] = lastValidValue!;
+            }
+            else
+            {
+                var currentValue = storage[i];
+                newData[i] = currentValue;
+                lastValidValue = currentValue;
+                hasValidValue = true;
+            }
+        }
+
+        // Create storage without null mask since all nulls are filled
+        var newStorage = CreateStorage(newData.AsSpan());
+        return new NivaraColumn<T>(newStorage);
+    }
+
+    /// <summary>
+    /// Creates a new column with null values filled using backward fill strategy.
+    /// Each null value is replaced with the next non-null value that appears after it.
+    /// </summary>
+    /// <returns>A new column with nulls backward-filled</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the last element is null (no value to backward fill)</exception>
+    public NivaraColumn<T> FillNullBackward()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Validate that the column is not empty
+        ValidateNotEmpty();
+
+        // If no nulls, return a copy of the current column
+        if (!HasNulls)
+        {
+            return Slice(0, Length);
+        }
+
+        var nullMask = storage.NullMask;
+        var newData = new T[Length];
+        T? nextValidValue = default;
+        bool hasValidValue = false;
+
+        // Process backwards to find next valid values
+        for (int i = Length - 1; i >= 0; i--)
+        {
+            if (nullMask[i])
+            {
+                if (!hasValidValue)
+                    throw new InvalidOperationException($"Cannot backward fill: null value at index {i} has no following non-null value. Consider using FillNull() with a default value instead.");
+                
+                newData[i] = nextValidValue!;
+            }
+            else
+            {
+                var currentValue = storage[i];
+                newData[i] = currentValue;
+                nextValidValue = currentValue;
+                hasValidValue = true;
+            }
+        }
+
+        // Create storage without null mask since all nulls are filled
+        var newStorage = CreateStorage(newData.AsSpan());
+        return new NivaraColumn<T>(newStorage);
+    }
+
+    /// <summary>
+    /// Creates a new column containing only the non-null values from this column
+    /// </summary>
+    /// <returns>A new column with all null values removed</returns>
+    public NivaraColumn<T> DropNulls()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // If no nulls, return a copy of the current column
+        if (!HasNulls)
+        {
+            return Slice(0, Length);
+        }
+
+        var nullMask = storage.NullMask;
+        var nonNullValues = new List<T>();
+
+        for (int i = 0; i < Length; i++)
+        {
+            if (!nullMask[i])
+            {
+                nonNullValues.Add(storage[i]);
+            }
+        }
+
+        // Create storage without null mask since all nulls are removed
+        var newStorage = CreateStorage(nonNullValues.ToArray().AsSpan());
+        return new NivaraColumn<T>(newStorage);
+    }
+
+    /// <summary>
+    /// Converts the column to an array
+    /// </summary>
+    /// <returns>An array containing all values from the column</returns>
+    public T[] ToArray()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var result = new T[Length];
+        for (int i = 0; i < Length; i++)
+        {
+            result[i] = storage[i];
+        }
+        return result;
     }
 
     /// <inheritdoc />

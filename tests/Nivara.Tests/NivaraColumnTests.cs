@@ -1627,4 +1627,133 @@ public class NivaraColumnTests
     }
 
     #endregion
+
+    #region CreateFromNullable Tests
+
+    /// <summary>
+    /// Test the new CreateFromNullable method for nullable value types
+    /// **Validates: Requirements 7.2, 7.3, 7.4, 7.5**
+    /// </summary>
+    [Test]
+    public void CreateFromNullable_ShouldHandleNullableValueTypes()
+    {
+        // Test with nullable integers
+        var nullableInts = new int?[] { 1, null, 3, null, 5 };
+        var column = NivaraColumn<int>.CreateFromNullable(nullableInts);
+
+        Assert.That(column, Is.Not.Null, "Column should be created from nullable array");
+        Assert.That(column.Length, Is.EqualTo(5), "Column should have correct length");
+        Assert.That(column.HasNulls, Is.True, "Column should detect nulls");
+        Assert.That(column.NullCount, Is.EqualTo(2), "Column should count nulls correctly");
+
+        // Verify values and null positions
+        Assert.That(column[0], Is.EqualTo(1), "First value should be 1");
+        Assert.That(column.IsNull(1), Is.True, "Second position should be null");
+        Assert.That(column[2], Is.EqualTo(3), "Third value should be 3");
+        Assert.That(column.IsNull(3), Is.True, "Fourth position should be null");
+        Assert.That(column[4], Is.EqualTo(5), "Fifth value should be 5");
+
+        // Test null indices
+        var nullIndices = column.GetNullIndices();
+        Assert.That(nullIndices, Is.EqualTo(new[] { 1, 3 }), "Null indices should be correct");
+    }
+
+    /// <summary>
+    /// Test CreateFromNullable with different value types
+    /// </summary>
+    [Test]
+    public void CreateFromNullable_ShouldWorkWithDifferentValueTypes()
+    {
+        // Test with nullable doubles
+        var nullableDoubles = new double?[] { 1.5, null, 3.14 };
+        var doubleColumn = NivaraColumn<double>.CreateFromNullable(nullableDoubles);
+        
+        Assert.That(doubleColumn.Length, Is.EqualTo(3));
+        Assert.That(doubleColumn.HasNulls, Is.True);
+        Assert.That(doubleColumn[0], Is.EqualTo(1.5));
+        Assert.That(doubleColumn.IsNull(1), Is.True);
+        Assert.That(doubleColumn[2], Is.EqualTo(3.14));
+
+        // Test with nullable booleans
+        var nullableBools = new bool?[] { true, null, false, null };
+        var boolColumn = NivaraColumn<bool>.CreateFromNullable(nullableBools);
+        
+        Assert.That(boolColumn.Length, Is.EqualTo(4));
+        Assert.That(boolColumn.HasNulls, Is.True);
+        Assert.That(boolColumn.NullCount, Is.EqualTo(2));
+        Assert.That(boolColumn[0], Is.True);
+        Assert.That(boolColumn.IsNull(1), Is.True);
+        Assert.That(boolColumn[2], Is.False);
+        Assert.That(boolColumn.IsNull(3), Is.True);
+    }
+
+    /// <summary>
+    /// Test CreateFromNullable error handling
+    /// </summary>
+    [Test]
+    public void CreateFromNullable_ShouldThrowForInvalidInputs()
+    {
+        // Test null array
+        Assert.Throws<ArgumentNullException>(() => 
+            NivaraColumn<int>.CreateFromNullable(null!));
+
+        // Test with reference type (should fail)
+        var stringArray = new string[] { "a", "b" };
+        Assert.Throws<InvalidOperationException>(() => 
+            NivaraColumn<string>.CreateFromNullable(stringArray));
+    }
+
+    /// <summary>
+    /// Test advanced null handling methods
+    /// **Validates: Requirements 7.4, 7.5**
+    /// </summary>
+    [Test]
+    public void AdvancedNullHandling_ShouldWorkCorrectly()
+    {
+        var nullableInts = new int?[] { 1, null, 3, null, 5 };
+        var column = NivaraColumn<int>.CreateFromNullable(nullableInts);
+
+        // Test FillNull
+        var filled = column.FillNull(0);
+        Assert.That(filled.HasNulls, Is.False, "Filled column should have no nulls");
+        Assert.That(filled.ToArray(), Is.EqualTo(new[] { 1, 0, 3, 0, 5 }), "Nulls should be filled with 0");
+
+        // Test FillNullForward
+        var forwardFilled = column.FillNullForward();
+        Assert.That(forwardFilled.HasNulls, Is.False, "Forward filled column should have no nulls");
+        Assert.That(forwardFilled.ToArray(), Is.EqualTo(new[] { 1, 1, 3, 3, 5 }), "Nulls should be forward filled");
+
+        // Test FillNullBackward
+        var backwardFilled = column.FillNullBackward();
+        Assert.That(backwardFilled.HasNulls, Is.False, "Backward filled column should have no nulls");
+        Assert.That(backwardFilled.ToArray(), Is.EqualTo(new[] { 1, 3, 3, 5, 5 }), "Nulls should be backward filled");
+
+        // Test DropNulls
+        var dropped = column.DropNulls();
+        Assert.That(dropped.HasNulls, Is.False, "Dropped column should have no nulls");
+        Assert.That(dropped.Length, Is.EqualTo(3), "Dropped column should have 3 elements");
+        Assert.That(dropped.ToArray(), Is.EqualTo(new[] { 1, 3, 5 }), "Only non-null values should remain");
+    }
+
+    /// <summary>
+    /// Test error handling for fill operations
+    /// </summary>
+    [Test]
+    public void NullFillOperations_ShouldHandleEdgeCases()
+    {
+        // Test forward fill with leading null (should throw)
+        var leadingNullColumn = NivaraColumn<int>.CreateFromNullable(new int?[] { null, 2, 3 });
+        Assert.Throws<InvalidOperationException>(() => leadingNullColumn.FillNullForward());
+
+        // Test backward fill with trailing null (should throw)
+        var trailingNullColumn = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, 2, null });
+        Assert.Throws<InvalidOperationException>(() => trailingNullColumn.FillNullBackward());
+
+        // Test operations on empty column
+        var emptyColumn = NivaraColumn<int>.Create(Array.Empty<int>());
+        Assert.Throws<InvalidOperationException>(() => emptyColumn.FillNullForward());
+        Assert.Throws<InvalidOperationException>(() => emptyColumn.FillNullBackward());
+    }
+
+    #endregion
 }

@@ -190,6 +190,40 @@ public static void Method(ReadOnlySpan<T>? values) { }
 public static void Method(T[]? values) { }
 ```
 
+### Nullable Generic Method Constraints
+**Problem**: Cannot add constraints to static methods in generic classes (CS0080)
+**Error**: CS0080 - Constraints are not allowed on non-generic declarations
+**Solution**: Use runtime type checking with Array parameter and manual processing
+```csharp
+// WRONG - compiler error CS0080
+public static NivaraColumn<T> CreateFromNullable(T?[] values) where T : struct
+
+// CORRECT - use Array parameter with runtime type checking
+public static NivaraColumn<T> CreateFromNullable(Array values)
+{
+    if (!typeof(T).IsValueType)
+        throw new InvalidOperationException("Method only supports value types");
+    
+    // Validate array element type
+    var expectedNullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
+    var actualElementType = values.GetType().GetElementType();
+    if (actualElementType != expectedNullableType)
+        throw new ArgumentException($"Array element type must be {expectedNullableType.Name}");
+    
+    // Process manually using GetValue()
+    for (int i = 0; i < values.Length; i++)
+    {
+        var value = values.GetValue(i);
+        // Handle null and non-null values...
+    }
+}
+```
+
+### Over-Engineering Generic Solutions
+**Problem**: Attempting complex pattern matching or reflection when simple solutions exist
+**Lesson**: Always check existing patterns in codebase first. Manual processing with GetValue() is often simpler than complex generic solutions.
+**Solution**: Use the simplest approach that works - manual array processing with runtime type checking
+
 ## Type System Discoveries
 
 ### Vectorizable Types
