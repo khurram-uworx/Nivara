@@ -81,6 +81,9 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     public bool HasNulls => _nullMask.HasValue && _nullMask.Value.Length > 0;
 
     /// <inheritdoc />
+    public StorageType StorageType => StorageType.Memory;
+
+    /// <inheritdoc />
     public ReadOnlySpan<bool> NullMask
     {
         get

@@ -93,6 +93,38 @@ var value = series[(object)42]; // boxed int goes to label indexer
 var value = series.GetByLabel(42); // explicit method call
 ```
 
+### Diagnostic Information Architecture
+**Decision**: Separate diagnostic classes for column metadata and operation tracking
+**Rationale**: Column diagnostics provide static information about storage and performance characteristics, while operation diagnostics track runtime kernel selection and performance metrics.
+
+**Pattern**: Use `ColumnDiagnostics` for storage analysis and `DiagnosticsTracker` for operation monitoring
+```csharp
+// Column-level diagnostics
+var diagnostics = column.Diagnostics;
+var storageType = diagnostics.StorageType;
+var recommendedKernel = diagnostics.RecommendedKernel;
+
+// Operation-level diagnostics
+DiagnosticsTracker.IsEnabled = true;
+var result = column1.Add(column2); // Automatically tracked
+var operations = DiagnosticsTracker.GetRecordedOperations();
+```
+
+### Kernel Selection Logic
+**Decision**: Centralized kernel selection in `DetermineKernelType()` method
+**Rationale**: Consistent logic across all operations. Considers vectorizability, hardware acceleration, and data size thresholds.
+
+**Implementation**: Check vectorizability → hardware acceleration → size threshold
+```csharp
+private KernelType DetermineKernelType()
+{
+    if (!storage.IsVectorizable) return KernelType.Scalar;
+    if (!Vector.IsHardwareAccelerated) return KernelType.Scalar;
+    if (Length < vectorSize * 4) return KernelType.Scalar; // Overhead threshold
+    return KernelType.Vectorized;
+}
+```
+
 ### MemoryMarshal with Unconstrained Generics
 **Problem**: MemoryMarshal.Cast requires unmanaged constraint but generic T doesn't have it
 **Solution**: Use runtime type checking and safe conversion

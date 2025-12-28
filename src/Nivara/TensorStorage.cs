@@ -50,6 +50,9 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     public bool HasNulls => _nullMask != null;
 
     /// <inheritdoc />
+    public StorageType StorageType => StorageType.Tensor;
+
+    /// <inheritdoc />
     public ReadOnlySpan<bool> NullMask
     {
         get

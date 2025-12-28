@@ -80,6 +80,28 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
+    /// Gets diagnostic information about this column's storage and performance characteristics.
+    /// Provides insights for performance analysis and optimization decisions.
+    /// </summary>
+    public ColumnDiagnostics Diagnostics
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            
+            // Use the StorageType property from the storage interface
+            var storageType = storage.StorageType;
+
+            return new ColumnDiagnostics(
+                storageType,
+                storage.IsVectorizable,
+                typeof(T),
+                storage.Length,
+                storage.HasNulls);
+        }
+    }
+
+    /// <summary>
     /// Creates a new column from the specified array of values.
     /// Automatically selects appropriate storage based on type characteristics.
     /// </summary>
@@ -370,6 +392,18 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<T> MultiplyVectorized(T scalar)
     {
+        // Determine which kernel will actually be used
+        var kernelType = DetermineKernelType();
+        
+        // Record diagnostic information
+        var diagnostic = new OperationDiagnostics(
+            "ScalarMultiplication",
+            kernelType,
+            Length,
+            typeof(T),
+            HasNulls);
+        DiagnosticsTracker.RecordOperation(diagnostic);
+
         // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
         if (storage is MemoryStorage<T> memoryStorage)
         {
@@ -403,6 +437,18 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<T> AddVectorized(NivaraColumn<T> other)
     {
+        // Determine which kernel will actually be used
+        var kernelType = DetermineKernelType();
+        
+        // Record diagnostic information
+        var diagnostic = new OperationDiagnostics(
+            "ElementwiseAddition",
+            kernelType,
+            Length,
+            typeof(T),
+            HasNulls || other.HasNulls);
+        DiagnosticsTracker.RecordOperation(diagnostic);
+
         // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
         if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
@@ -695,6 +741,18 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> EqualsVectorized(T scalar)
     {
+        // Determine which kernel will actually be used
+        var kernelType = DetermineKernelType();
+        
+        // Record diagnostic information
+        var diagnostic = new OperationDiagnostics(
+            "ScalarEquals",
+            kernelType,
+            Length,
+            typeof(T),
+            HasNulls);
+        DiagnosticsTracker.RecordOperation(diagnostic);
+
         if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
@@ -1481,6 +1539,27 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Create storage without null mask since all nulls are filled
         var newStorage = CreateStorage(newData.AsSpan());
         return new NivaraColumn<T>(newStorage);
+    }
+
+    /// <summary>
+    /// Determines which kernel type should be used for operations on this column
+    /// </summary>
+    /// <returns>The recommended kernel type</returns>
+    private KernelType DetermineKernelType()
+    {
+        // Use the same logic as ColumnDiagnostics.RecommendedKernel
+        if (!storage.IsVectorizable)
+            return KernelType.Scalar;
+
+        if (!System.Numerics.Vector.IsHardwareAccelerated)
+            return KernelType.Scalar;
+
+        // For small arrays, scalar operations might be faster due to overhead
+        var vectorSize = System.Numerics.Vector<byte>.Count;
+        if (Length < vectorSize * 4)
+            return KernelType.Scalar;
+
+        return KernelType.Vectorized;
     }
 
     /// <summary>

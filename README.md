@@ -14,6 +14,7 @@ Nivara provides strongly-typed, immutable columns backed by optimized storage im
 - **Type Safety**: Strongly-typed columns with compile-time type checking
 - **Immutability**: All operations return new instances without modifying originals
 - **Memory Efficiency**: Views and slicing operations minimize copying
+- **Performance Diagnostics**: Comprehensive diagnostic APIs for performance analysis and kernel selection optimization
 
 ## Quick Start
 
@@ -315,6 +316,61 @@ Console.WriteLine(slice.Length); // 4
 Console.WriteLine(slice[0]);     // 3
 ```
 
+### Performance Analysis and Diagnostics
+
+Nivara provides comprehensive diagnostic information for performance analysis and optimization:
+
+```csharp
+// Get column diagnostic information
+var column = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
+var diagnostics = column.Diagnostics;
+
+Console.WriteLine($"Storage Type: {diagnostics.StorageType}");           // Memory or Tensor
+Console.WriteLine($"Is Vectorizable: {diagnostics.IsVectorizable}");     // True for numeric types
+Console.WriteLine($"Element Type: {diagnostics.ElementType.Name}");      // Int32
+Console.WriteLine($"Length: {diagnostics.Length}");                      // 5
+Console.WriteLine($"Has Nulls: {diagnostics.HasNulls}");                 // False
+Console.WriteLine($"Hardware Accelerated: {diagnostics.IsHardwareAccelerated}"); // SIMD support
+Console.WriteLine($"Recommended Kernel: {diagnostics.RecommendedKernel}"); // Vectorized or Scalar
+Console.WriteLine($"Estimated Memory: {diagnostics.EstimatedMemoryUsage} bytes");
+
+// Performance characteristics
+var performance = diagnostics.Performance;
+Console.WriteLine($"Throughput Multiplier: {performance.ThroughputMultiplier}x");
+Console.WriteLine($"Memory Efficiency: {performance.MemoryEfficiency:P1}");
+Console.WriteLine($"Supports Vectorization: {performance.SupportsVectorization}");
+
+// Track operations for performance analysis
+DiagnosticsTracker.IsEnabled = true;
+
+// Perform operations - they will be automatically tracked
+var result1 = column.Add(column);
+var result2 = column.Multiply(2);
+var result3 = column.Equals(3);
+
+// Get operation statistics
+var operations = DiagnosticsTracker.GetRecordedOperations();
+foreach (var op in operations)
+{
+    Console.WriteLine($"Operation: {op.OperationType}");
+    Console.WriteLine($"Kernel Used: {op.KernelUsed}");
+    Console.WriteLine($"Input Length: {op.InputLength}");
+    Console.WriteLine($"Had Nulls: {op.HadNulls}");
+    Console.WriteLine($"Selection Reason: {op.KernelSelectionReason}");
+}
+
+// Get summary statistics
+var summary = DiagnosticsTracker.GetSummary();
+Console.WriteLine($"Total Operations: {summary.TotalOperations}");
+Console.WriteLine($"Vectorized: {summary.VectorizedOperations}");
+Console.WriteLine($"Scalar: {summary.ScalarOperations}");
+Console.WriteLine($"Vectorization Rate: {summary.VectorizationRate:F1}%");
+
+// Clear tracking data
+DiagnosticsTracker.ClearRecordedOperations();
+DiagnosticsTracker.IsEnabled = false;
+```
+
 ## Error Handling
 
 Nivara provides clear error messages for common mistakes:
@@ -400,6 +456,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Comparison operations (equals, greater than, less than)
 - ✅ Null handling for reference types
 - ✅ Series with indexing (`NivaraSeries<T>`)
+- ✅ Performance diagnostics and kernel selection analysis
 - ✅ Comprehensive test suite
 
 ### Upcoming Features

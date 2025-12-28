@@ -44,4 +44,10 @@ internal interface IColumnStorage<T> : IDisposable
     /// <returns>A new storage instance representing the slice</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
     IColumnStorage<T> Slice(int start, int length);
+
+    /// <summary>
+    /// Gets diagnostic information about this storage implementation.
+    /// Used for performance analysis and kernel selection.
+    /// </summary>
+    StorageType StorageType { get; }
 }
