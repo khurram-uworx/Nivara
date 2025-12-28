@@ -18,7 +18,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <param name="storage">The storage implementation to use</param>
     internal NivaraColumn(IColumnStorage<T> storage)
     {
-        storage = storage ?? throw new ArgumentNullException(nameof(storage));
+        this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
     }
 
     /// <inheritdoc />
@@ -251,6 +251,42 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
+    /// Multiplies corresponding elements of two columns together.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="other">The column to multiply with this column</param>
+    /// <returns>A new column with element-wise multiplication results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Multiply(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (other.disposed)
+            throw new ObjectDisposedException(nameof(other));
+
+        if (Length != other.Length)
+            throw new ArgumentException($"Cannot multiply columns of different lengths: {Length} vs {other.Length}");
+
+        // Runtime check for numeric types
+        if (!IsNumericType(typeof(T)))
+        {
+            throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
+        }
+
+        if (!ColumnStorageFactory.IsVectorizable<T>())
+        {
+            throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
+        }
+
+        return MultiplyVectorized(other);
+    }
+
+    /// <summary>
     /// Operator overload for scalar multiplication
     /// </summary>
     public static NivaraColumn<T> operator *(NivaraColumn<T> column, T scalar)
@@ -264,6 +300,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     public static NivaraColumn<T> operator *(T scalar, NivaraColumn<T> column)
     {
         return column.Multiply(scalar);
+    }
+
+    /// <summary>
+    /// Operator overload for element-wise multiplication
+    /// </summary>
+    public static NivaraColumn<T> operator *(NivaraColumn<T> left, NivaraColumn<T> right)
+    {
+        return left.Multiply(right);
     }
 
     /// <summary>
@@ -351,6 +395,49 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
+    /// Performs vectorized element-wise multiplication using TensorPrimitives
+    /// </summary>
+    private NivaraColumn<T> MultiplyVectorized(NivaraColumn<T> other)
+    {
+        // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        {
+            var leftData = leftMemory.Data.Span;
+            var rightData = rightMemory.Data.Span;
+            var result = new T[leftData.Length];
+
+            // Use our helper method for multiplication
+            MultiplyTensorPrimitive(leftData, rightData, result.AsSpan());
+
+            // Handle null propagation - null * anything = null
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNulls = leftMemory.NullMaskMemory;
+            var rightNulls = rightMemory.NullMaskMemory;
+
+            if ((leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0))
+            {
+                var resultNullMaskArray = new bool[result.Length];
+
+                for (int i = 0; i < result.Length; i++)
+                {
+                    bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
+                    bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
+                    resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                }
+
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            var resultStorage = new MemoryStorage<T>(result, resultNullMask);
+            return new NivaraColumn<T>(resultStorage);
+        }
+        else
+        {
+            throw new InvalidOperationException("Cannot perform arithmetic operations on columns with different storage types");
+        }
+    }
+
+    /// <summary>
     /// Helper method to perform vectorized multiplication using TensorPrimitives with runtime type dispatch
     /// </summary>
     private static void MultiplyTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
@@ -360,6 +447,19 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         for (int i = 0; i < x.Length; i++)
         {
             destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y!)!;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized element-wise multiplication using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    private static void MultiplyTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        // For now, use scalar multiplication with dynamic dispatch
+        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y[i]!)!;
         }
     }
 
@@ -599,7 +699,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> EqualsVectorized(NivaraColumn<T> other)
     {
-        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -647,7 +747,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> EqualsScalar(T scalar)
     {
-        if (_storage is MemoryStorage<T> memoryStorage)
+        if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -693,7 +793,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> EqualsScalar(NivaraColumn<T> other)
     {
-        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -752,7 +852,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> GreaterThanVectorized(T scalar)
     {
-        if (_storage is MemoryStorage<T> memoryStorage)
+        if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -791,7 +891,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> GreaterThanVectorized(NivaraColumn<T> other)
     {
-        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -838,7 +938,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> GreaterThanScalar(T scalar)
     {
-        if (_storage is MemoryStorage<T> memoryStorage)
+        if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -884,7 +984,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> GreaterThanScalar(NivaraColumn<T> other)
     {
-        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -943,7 +1043,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> LessThanVectorized(T scalar)
     {
-        if (_storage is MemoryStorage<T> memoryStorage)
+        if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -982,7 +1082,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> LessThanVectorized(NivaraColumn<T> other)
     {
-        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -1029,7 +1129,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> LessThanScalar(T scalar)
     {
-        if (_storage is MemoryStorage<T> memoryStorage)
+        if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -1075,7 +1175,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> LessThanScalar(NivaraColumn<T> other)
     {
-        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -1261,10 +1361,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!_disposed)
+        if (!disposed)
         {
-            _storage?.Dispose();
-            _disposed = true;
+            storage?.Dispose();
+            disposed = true;
         }
     }
 }

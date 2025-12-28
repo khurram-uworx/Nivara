@@ -218,7 +218,176 @@ public class NivaraSeriesTests
 
     #endregion
 
-    #region Additional Series Functionality Tests
+    #region Property 13: Series alignment
+    
+    /// <summary>
+    /// Property 13: Series alignment
+    /// For any two NivaraSeries with different indices, alignment operations should correctly 
+    /// match values based on index labels and handle missing indices appropriately.
+    /// **Validates: Requirements 4.4**
+    /// </summary>
+    [Test]
+    public void SeriesAlignment_WithDifferentIndices_ShouldMatchCorrectly()
+    {
+        // Test basic alignment with some matching indices
+        var values1 = new[] { 10, 20, 30, 40 };
+        var index1 = new[] { "a", "b", "c", "d" };
+        var series1 = NivaraSeries<int>.Create(values1, index1);
+
+        var values2 = new[] { 100, 200, 300 };
+        var index2 = new[] { "b", "d", "e" }; // "b" and "d" match, "e" doesn't
+        var series2 = NivaraSeries<int>.Create(values2, index2);
+
+        // Test Align method (returns aligned version of first series)
+        var aligned = series1.Align(series2);
+        
+        Assert.That(aligned.Length, Is.EqualTo(2), "Aligned series should contain only matching indices");
+        Assert.That(aligned["b"], Is.EqualTo(20), "Value for 'b' should come from first series");
+        Assert.That(aligned["d"], Is.EqualTo(40), "Value for 'd' should come from first series");
+        Assert.That(aligned.ContainsLabel("a"), Is.False, "Non-matching index 'a' should not be in aligned series");
+        Assert.That(aligned.ContainsLabel("c"), Is.False, "Non-matching index 'c' should not be in aligned series");
+        Assert.That(aligned.ContainsLabel("e"), Is.False, "Non-matching index 'e' should not be in aligned series");
+
+        // Test AlignBoth method (returns aligned versions of both series)
+        var (alignedLeft, alignedRight) = series1.AlignBoth(series2);
+        
+        Assert.That(alignedLeft.Length, Is.EqualTo(2), "Left aligned series should contain only matching indices");
+        Assert.That(alignedRight.Length, Is.EqualTo(2), "Right aligned series should contain only matching indices");
+        
+        // Both should have same index labels in same order
+        Assert.That(alignedLeft.GetLabel(0), Is.EqualTo(alignedRight.GetLabel(0)), "Both series should have same index labels");
+        Assert.That(alignedLeft.GetLabel(1), Is.EqualTo(alignedRight.GetLabel(1)), "Both series should have same index labels");
+        
+        // Values should come from respective original series
+        Assert.That(alignedLeft["b"], Is.EqualTo(20), "Left aligned value for 'b' should come from first series");
+        Assert.That(alignedRight["b"], Is.EqualTo(100), "Right aligned value for 'b' should come from second series");
+        Assert.That(alignedLeft["d"], Is.EqualTo(40), "Left aligned value for 'd' should come from first series");
+        Assert.That(alignedRight["d"], Is.EqualTo(200), "Right aligned value for 'd' should come from second series");
+    }
+
+    [Test]
+    public void SeriesAlignment_WithNoMatchingIndices_ShouldReturnEmptySeries()
+    {
+        var values1 = new[] { 10, 20, 30 };
+        var index1 = new[] { "a", "b", "c" };
+        var series1 = NivaraSeries<int>.Create(values1, index1);
+
+        var values2 = new[] { 100, 200 };
+        var index2 = new[] { "x", "y" }; // No matching indices
+        var series2 = NivaraSeries<int>.Create(values2, index2);
+
+        var aligned = series1.Align(series2);
+        Assert.That(aligned.Length, Is.EqualTo(0), "Alignment with no matching indices should return empty series");
+
+        var (alignedLeft, alignedRight) = series1.AlignBoth(series2);
+        Assert.That(alignedLeft.Length, Is.EqualTo(0), "Left aligned series should be empty when no indices match");
+        Assert.That(alignedRight.Length, Is.EqualTo(0), "Right aligned series should be empty when no indices match");
+    }
+
+    [Test]
+    public void SeriesAlignment_WithIdenticalIndices_ShouldPreserveAllElements()
+    {
+        var values1 = new[] { 10, 20, 30 };
+        var index1 = new[] { "a", "b", "c" };
+        var series1 = NivaraSeries<int>.Create(values1, index1);
+
+        var values2 = new[] { 100, 200, 300 };
+        var index2 = new[] { "a", "b", "c" }; // Identical indices
+        var series2 = NivaraSeries<int>.Create(values2, index2);
+
+        var aligned = series1.Align(series2);
+        Assert.That(aligned.Length, Is.EqualTo(3), "Alignment with identical indices should preserve all elements");
+        Assert.That(aligned["a"], Is.EqualTo(10), "All values should be preserved");
+        Assert.That(aligned["b"], Is.EqualTo(20), "All values should be preserved");
+        Assert.That(aligned["c"], Is.EqualTo(30), "All values should be preserved");
+    }
+
+    [Test]
+    public void SeriesAlignment_WithDifferentIndexTypes_ShouldWork()
+    {
+        var values1 = new[] { 10, 20, 30 };
+        var index1 = new object[] { 1, "b", DateTime.Today };
+        var series1 = NivaraSeries<int>.Create(values1, index1);
+
+        var values2 = new[] { 100, 200 };
+        var index2 = new object[] { "b", DateTime.Today }; // Mixed types, some matching
+        var series2 = NivaraSeries<int>.Create(values2, index2);
+
+        var aligned = series1.Align(series2);
+        Assert.That(aligned.Length, Is.EqualTo(2), "Should align based on object equality regardless of type");
+        Assert.That(aligned["b"], Is.EqualTo(20), "String index should match");
+        Assert.That(aligned[DateTime.Today], Is.EqualTo(30), "DateTime index should match");
+    }
+
+    #endregion
+
+    #region Property 14: Index-value relationship preservation
+    
+    /// <summary>
+    /// Property 14: Index-value relationship preservation
+    /// For any NivaraSeries operation, the relationship between index labels and their 
+    /// corresponding values should be maintained in the result.
+    /// **Validates: Requirements 4.5**
+    /// </summary>
+    [Test]
+    public void SeriesOperations_ShouldPreserveIndexValueRelationships()
+    {
+        // Test scalar multiplication preserves relationships
+        var values = new[] { 10, 20, 30 };
+        var index = new[] { "first", "second", "third" };
+        var series = NivaraSeries<int>.Create(values, index);
+
+        var multiplied = series.Multiply(2);
+        
+        Assert.That(multiplied.Length, Is.EqualTo(3), "Scalar operation should preserve length");
+        Assert.That(multiplied["first"], Is.EqualTo(20), "Index-value relationship should be preserved");
+        Assert.That(multiplied["second"], Is.EqualTo(40), "Index-value relationship should be preserved");
+        Assert.That(multiplied["third"], Is.EqualTo(60), "Index-value relationship should be preserved");
+        
+        // Verify original series is unchanged (immutability)
+        Assert.That(series["first"], Is.EqualTo(10), "Original series should be unchanged");
+        Assert.That(series["second"], Is.EqualTo(20), "Original series should be unchanged");
+        Assert.That(series["third"], Is.EqualTo(30), "Original series should be unchanged");
+
+        // Test element-wise operations preserve relationships
+        var values2 = new[] { 1, 2, 3 };
+        var index2 = new[] { "first", "second", "third" }; // Same indices
+        var series2 = NivaraSeries<int>.Create(values2, index2);
+
+        var added = series.Add(series2);
+        
+        Assert.That(added.Length, Is.EqualTo(3), "Element-wise operation should preserve matching indices");
+        Assert.That(added["first"], Is.EqualTo(11), "Addition should preserve index-value relationships");
+        Assert.That(added["second"], Is.EqualTo(22), "Addition should preserve index-value relationships");
+        Assert.That(added["third"], Is.EqualTo(33), "Addition should preserve index-value relationships");
+
+        var multipliedSeries = series.Multiply(series2);
+        
+        Assert.That(multipliedSeries.Length, Is.EqualTo(3), "Element-wise operation should preserve matching indices");
+        Assert.That(multipliedSeries["first"], Is.EqualTo(10), "Multiplication should preserve index-value relationships");
+        Assert.That(multipliedSeries["second"], Is.EqualTo(40), "Multiplication should preserve index-value relationships");
+        Assert.That(multipliedSeries["third"], Is.EqualTo(90), "Multiplication should preserve index-value relationships");
+    }
+
+    [Test]
+    public void SeriesOperations_WithPartialAlignment_ShouldPreserveOnlyMatchingRelationships()
+    {
+        var values1 = new[] { 10, 20, 30, 40 };
+        var index1 = new[] { "a", "b", "c", "d" };
+        var series1 = NivaraSeries<int>.Create(values1, index1);
+
+        var values2 = new[] { 1, 2 };
+        var index2 = new[] { "b", "d" }; // Only partial overlap
+        var series2 = NivaraSeries<int>.Create(values2, index2);
+
+        var added = series1.Add(series2);
+        
+        Assert.That(added.Length, Is.EqualTo(2), "Result should contain only matching indices");
+        Assert.That(added["b"], Is.EqualTo(21), "Index-value relationship should be preserved for 'b'");
+        Assert.That(added["d"], Is.EqualTo(42), "Index-value relationship should be preserved for 'd'");
+        Assert.That(added.ContainsLabel("a"), Is.False, "Non-matching indices should not be in result");
+        Assert.That(added.ContainsLabel("c"), Is.False, "Non-matching indices should not be in result");
+    }
 
     [Test]
     public void SeriesSlicing_ShouldPreserveIndexValueRelationships()
@@ -226,25 +395,43 @@ public class NivaraSeriesTests
         var values = new[] { 10, 20, 30, 40, 50 };
         var index = new[] { "a", "b", "c", "d", "e" };
         var series = NivaraSeries<int>.Create(values, index);
-        
-        // Test slicing
-        var sliced = series.Slice(1, 3); // Should get elements at positions 1, 2, 3
+
+        var sliced = series.Slice(1, 3); // Get elements at positions 1, 2, 3
         
         Assert.That(sliced.Length, Is.EqualTo(3), "Sliced series should have correct length");
-        Assert.That(sliced[0], Is.EqualTo(20), "First element of slice should be correct");
-        Assert.That(sliced[1], Is.EqualTo(30), "Second element of slice should be correct");
-        Assert.That(sliced[2], Is.EqualTo(40), "Third element of slice should be correct");
+        Assert.That(sliced[0], Is.EqualTo(20), "Position-based access should work on sliced series");
+        Assert.That(sliced[1], Is.EqualTo(30), "Position-based access should work on sliced series");
+        Assert.That(sliced[2], Is.EqualTo(40), "Position-based access should work on sliced series");
         
-        // Verify index relationships are preserved
-        Assert.That(sliced.GetLabel(0), Is.EqualTo("b"), "First label of slice should be correct");
-        Assert.That(sliced.GetLabel(1), Is.EqualTo("c"), "Second label of slice should be correct");
-        Assert.That(sliced.GetLabel(2), Is.EqualTo("d"), "Third label of slice should be correct");
+        // Verify index-value relationships are preserved
+        Assert.That(sliced["b"], Is.EqualTo(20), "Index-value relationship should be preserved in slice");
+        Assert.That(sliced["c"], Is.EqualTo(30), "Index-value relationship should be preserved in slice");
+        Assert.That(sliced["d"], Is.EqualTo(40), "Index-value relationship should be preserved in slice");
         
-        // Test label-based access on sliced series
-        Assert.That(sliced["b"], Is.EqualTo(20), "Should access sliced element by original label");
-        Assert.That(sliced["c"], Is.EqualTo(30), "Should access sliced element by original label");
-        Assert.That(sliced["d"], Is.EqualTo(40), "Should access sliced element by original label");
+        // Verify original indices not in slice are not accessible
+        Assert.That(sliced.ContainsLabel("a"), Is.False, "Indices not in slice should not be accessible");
+        Assert.That(sliced.ContainsLabel("e"), Is.False, "Indices not in slice should not be accessible");
     }
+
+    [Test]
+    public void SeriesOperations_WithNullValues_ShouldPreserveRelationships()
+    {
+        // Test with nullable reference type
+        var values = new[] { "apple", null!, "cherry" };
+        var index = new[] { "a", "b", "c" };
+        var series = NivaraSeries<string>.Create(values, index);
+
+        var sliced = series.Slice(0, 3);
+        
+        Assert.That(sliced["a"], Is.EqualTo("apple"), "Non-null value relationship should be preserved");
+        Assert.That(sliced["b"], Is.Null, "Null value relationship should be preserved");
+        Assert.That(sliced["c"], Is.EqualTo("cherry"), "Non-null value relationship should be preserved");
+        Assert.That(sliced.IsNull(1), Is.True, "Null status should be preserved");
+    }
+
+    #endregion
+
+    #region Additional Series Functionality Tests
 
     [Test]
     public void SeriesNullHandling_ShouldWorkCorrectly()

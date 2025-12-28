@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara;
 
 /// <summary>
@@ -7,9 +9,9 @@ namespace Nivara;
 /// <typeparam name="T">The type of values in the series</typeparam>
 public sealed class NivaraSeries<T> : IDisposable
 {
-    private readonly NivaraColumn<T> _values;
-    private readonly NivaraColumn<object> _index;
-    private bool _disposed;
+    private readonly NivaraColumn<T> values;
+    private readonly NivaraColumn<object> index;
+    private bool disposed;
 
     /// <summary>
     /// Initializes a new instance of NivaraSeries with the specified values and optional index
@@ -20,18 +22,18 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
     public NivaraSeries(NivaraColumn<T> values, NivaraColumn<object>? index = null)
     {
-        _values = values ?? throw new ArgumentNullException(nameof(values));
+        this.values = values ?? throw new ArgumentNullException(nameof(values));
 
         if (index != null)
         {
             if (index.Length != values.Length)
                 throw new ArgumentException($"Index length ({index.Length}) must match values length ({values.Length})", nameof(index));
 
-            _index = index;
+            this.index = index;
         }
         else
         {
-            _index = CreateDefaultIndex(values.Length);
+            this.index = NivaraSeries<T>.CreateDefaultIndex(values.Length);
         }
     }
 
@@ -42,8 +44,8 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _values.Length;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return values.Length;
         }
     }
 
@@ -54,8 +56,8 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _values.HasNulls;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return values.HasNulls;
         }
     }
 
@@ -66,8 +68,8 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _values;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return values;
         }
     }
 
@@ -78,8 +80,8 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _index;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return index;
         }
     }
 
@@ -93,8 +95,8 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _values[position];
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return values[position];
         }
     }
 
@@ -108,7 +110,7 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            ObjectDisposedException.ThrowIf(disposed, this);
             return GetByLabel(label);
         }
     }
@@ -121,8 +123,8 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <exception cref="IndexOutOfRangeException">Thrown when position is out of bounds</exception>
     public bool IsNull(int position)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return _values.IsNull(position);
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return values.IsNull(position);
     }
 
     /// <summary>
@@ -133,7 +135,7 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <exception cref="KeyNotFoundException">Thrown when the label is not found</exception>
     public T GetByLabel(object label)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(disposed, this);
 
         var position = FindLabelPosition(label);
         if (position == -1)
@@ -141,7 +143,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new KeyNotFoundException($"Label '{label}' not found in series index");
         }
 
-        return _values[position];
+        return values[position];
     }
 
     /// <summary>
@@ -152,12 +154,12 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <returns>true if the label was found; otherwise, false</returns>
     public bool TryGetByLabel(object label, out T value)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(disposed, this);
 
         var position = FindLabelPosition(label);
         if (position != -1)
         {
-            value = _values[position];
+            value = values[position];
             return true;
         }
 
@@ -172,7 +174,7 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <returns>true if the series contains the label; otherwise, false</returns>
     public bool ContainsLabel(object label)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(disposed, this);
         return FindLabelPosition(label) != -1;
     }
 
@@ -184,8 +186,8 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <exception cref="IndexOutOfRangeException">Thrown when position is out of bounds</exception>
     public object GetLabel(int position)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        return _index[position];
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return index[position];
     }
 
     /// <summary>
@@ -197,12 +199,155 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
     public NivaraSeries<T> Slice(int start, int length)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(disposed, this);
 
-        var slicedValues = _values.Slice(start, length);
-        var slicedIndex = _index.Slice(start, length);
+        var slicedValues = values.Slice(start, length);
+        var slicedIndex = index.Slice(start, length);
 
         return new NivaraSeries<T>(slicedValues, slicedIndex);
+    }
+
+    /// <summary>
+    /// Aligns this series with another series based on their index labels.
+    /// Returns a new series containing only the values where both series have matching index labels.
+    /// The resulting series maintains the index-value relationships from this series.
+    /// </summary>
+    /// <param name="other">The series to align with</param>
+    /// <returns>A new aligned series containing values where indices match</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    public NivaraSeries<T> Align(NivaraSeries<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var alignedPairs = GetAlignedPairs(other);
+        
+        if (alignedPairs.Count == 0)
+        {
+            // No matching indices, return empty series
+            return NivaraSeries<T>.Create(Array.Empty<T>(), Array.Empty<object>());
+        }
+
+        var alignedValues = new T[alignedPairs.Count];
+        var alignedIndex = new object[alignedPairs.Count];
+
+        for (int i = 0; i < alignedPairs.Count; i++)
+        {
+            var (thisPos, _) = alignedPairs[i];
+            alignedValues[i] = values[thisPos];
+            alignedIndex[i] = index[thisPos];
+        }
+
+        return NivaraSeries<T>.Create(alignedValues, alignedIndex);
+    }
+
+    /// <summary>
+    /// Aligns this series with another series and returns both aligned series.
+    /// Both series will have the same index labels in the same order, containing only
+    /// values where both original series had matching index labels.
+    /// </summary>
+    /// <param name="other">The series to align with</param>
+    /// <returns>A tuple containing the aligned versions of both series</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    public (NivaraSeries<T> Left, NivaraSeries<T> Right) AlignBoth(NivaraSeries<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var alignedPairs = GetAlignedPairs(other);
+        
+        if (alignedPairs.Count == 0)
+        {
+            // No matching indices, return empty series
+            var empty = Array.Empty<T>();
+            var emptyIndex = Array.Empty<object>();
+            return (NivaraSeries<T>.Create(empty, emptyIndex), 
+                    NivaraSeries<T>.Create(empty, emptyIndex));
+        }
+
+        var leftValues = new T[alignedPairs.Count];
+        var rightValues = new T[alignedPairs.Count];
+        var alignedIndex = new object[alignedPairs.Count];
+
+        for (int i = 0; i < alignedPairs.Count; i++)
+        {
+            var (thisPos, otherPos) = alignedPairs[i];
+            leftValues[i] = values[thisPos];
+            rightValues[i] = other.values[otherPos];
+            alignedIndex[i] = index[thisPos];
+        }
+
+        return (NivaraSeries<T>.Create(leftValues, alignedIndex),
+                NivaraSeries<T>.Create(rightValues, alignedIndex));
+    }
+
+    /// <summary>
+    /// Performs element-wise addition with another series after aligning their indices.
+    /// Only values with matching index labels are included in the result.
+    /// </summary>
+    /// <param name="other">The series to add</param>
+    /// <returns>A new series containing the element-wise sum of aligned values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support addition</exception>
+    public NivaraSeries<T> Add(NivaraSeries<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var (alignedLeft, alignedRight) = AlignBoth(other);
+        
+        if (alignedLeft.Length == 0)
+        {
+            // No matching indices, return empty series
+            return NivaraSeries<T>.Create(Array.Empty<T>(), Array.Empty<object>());
+        }
+
+        var resultValues = alignedLeft.values + alignedRight.values;
+        return new NivaraSeries<T>(resultValues, alignedLeft.index);
+    }
+
+    /// <summary>
+    /// Performs element-wise multiplication with another series after aligning their indices.
+    /// Only values with matching index labels are included in the result.
+    /// </summary>
+    /// <param name="other">The series to multiply</param>
+    /// <returns>A new series containing the element-wise product of aligned values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support multiplication</exception>
+    public NivaraSeries<T> Multiply(NivaraSeries<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        var (alignedLeft, alignedRight) = AlignBoth(other);
+        
+        if (alignedLeft.Length == 0)
+        {
+            // No matching indices, return empty series
+            return NivaraSeries<T>.Create(Array.Empty<T>(), Array.Empty<object>());
+        }
+
+        var resultValues = alignedLeft.values * alignedRight.values;
+        return new NivaraSeries<T>(resultValues, alignedLeft.index);
+    }
+
+    /// <summary>
+    /// Performs scalar multiplication on this series.
+    /// The index-value relationships are preserved in the result.
+    /// </summary>
+    /// <param name="scalar">The scalar value to multiply by</param>
+    /// <returns>A new series with all values multiplied by the scalar</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support multiplication</exception>
+    public NivaraSeries<T> Multiply(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var resultValues = values * scalar;
+        return new NivaraSeries<T>(resultValues, index);
     }
 
     /// <summary>
@@ -273,15 +418,52 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         var comparer = EqualityComparer<object>.Default;
 
-        for (int i = 0; i < _index.Length; i++)
+        for (int i = 0; i < index.Length; i++)
         {
-            if (!_index.IsNull(i) && comparer.Equals(_index[i], label))
+            if (!index.IsNull(i) && comparer.Equals(index[i], label))
             {
                 return i;
             }
         }
 
         return -1;
+    }
+
+    /// <summary>
+    /// Gets pairs of positions where both series have matching index labels
+    /// </summary>
+    /// <param name="other">The other series to align with</param>
+    /// <returns>A list of tuples containing (thisPosition, otherPosition) for matching indices</returns>
+    private List<(int ThisPos, int OtherPos)> GetAlignedPairs(NivaraSeries<T> other)
+    {
+        var alignedPairs = new List<(int, int)>();
+        var comparer = EqualityComparer<object>.Default;
+
+        // For each index in this series, find matching index in other series
+        for (int thisPos = 0; thisPos < index.Length; thisPos++)
+        {
+            if (index.IsNull(thisPos))
+                continue;
+
+            var thisLabel = index[thisPos];
+
+            // Find matching label in other series
+            for (int otherPos = 0; otherPos < other.index.Length; otherPos++)
+            {
+                if (other.index.IsNull(otherPos))
+                    continue;
+
+                var otherLabel = other.index[otherPos];
+
+                if (comparer.Equals(thisLabel, otherLabel))
+                {
+                    alignedPairs.Add((thisPos, otherPos));
+                    break; // Found match, move to next index in this series
+                }
+            }
+        }
+
+        return alignedPairs;
     }
 
     /// <summary>
@@ -303,11 +485,11 @@ public sealed class NivaraSeries<T> : IDisposable
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!_disposed)
+        if (!disposed)
         {
-            _values?.Dispose();
-            _index?.Dispose();
-            _disposed = true;
+            values?.Dispose();
+            index?.Dispose();
+            disposed = true;
         }
     }
 }
