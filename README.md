@@ -149,6 +149,148 @@ Nivara includes a foundational query engine infrastructure for building DataFram
 
 - **Schema System**: ✅ **Complete** - Immutable schema management with column metadata, type information, and transformation methods (WithColumn, WithoutColumn, SelectColumns)
 - **NivaraFrame**: ✅ **Complete** - Multi-column DataFrame-like structure with schema management, column validation, and immutable transformations
+- **QueryFrame**: ✅ **Complete** - Lazy query construction with fluent API for building complex data processing pipelines
+- **Column Expressions**: ✅ **Complete** - Composable expression system for building queries with operator overloading
+- **Query Operations**: ✅ **Complete** - Filter, Select, and GroupBy operations with schema transformation and execution
+- **Query Planning**: ✅ **Complete** - Infrastructure for building and optimizing query execution plans
+- **Type-Safe Interfaces**: Both generic and non-generic column interfaces for compile-time and runtime type handling
+- **Error Handling**: Comprehensive exception hierarchy with context-specific error messages
+
+#### QueryFrame Usage
+
+The QueryFrame provides a LINQ-like fluent API for building complex data processing pipelines:
+
+```csharp
+using Nivara;
+using Nivara.Expressions;
+
+// Create a frame with sample data
+var employees = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "David", "Eve" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28, 32 })),
+    ("Department", NivaraColumn<string>.Create(new[] { "Engineering", "Sales", "Engineering", "Marketing", "Sales" })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 75000, 65000, 85000, 55000, 70000 }))
+);
+
+// Build complex queries using fluent API
+var result = employees.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Age") > 30)                    // Filter employees over 30
+    .Filter(ColumnExpressions.Col("Salary") >= 65000)            // And earning at least 65k
+    .Select("Name", "Department", "Salary")                       // Select specific columns
+    .GroupBy("Department")                                        // Group by department (distinct values)
+    .Collect();                                                   // Execute the query
+
+// Query building is lazy - no execution until Collect()
+var lazyQuery = employees.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Department") == "Engineering")
+    .Select(ColumnExpressions.Col("Name"), ColumnExpressions.Col("Salary") * 1.1); // 10% raise
+
+// Inspect the query plan before execution
+Console.WriteLine(lazyQuery.ExplainPlan());
+var optimizations = lazyQuery.AnalyzeOptimizations();
+
+// Execute when ready
+var engineersWithRaise = lazyQuery.Collect();
+
+// Complex expressions with arithmetic and comparisons
+var complexQuery = employees.AsQueryFrame()
+    .Filter((ColumnExpressions.Col("Age") + 5) > 35)             // Complex arithmetic
+    .Filter(ColumnExpressions.Col("Salary") / 1000 > 60)        // Salary in thousands
+    .Select("Name", "Age", "Salary")
+    .Collect();
+
+// Method chaining supports multiple operations
+var pipeline = employees.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Age") >= 25)
+    .Filter(ColumnExpressions.Col("Age") <= 35)
+    .Select("Name", "Department")
+    .GroupBy("Department")
+    .Collect();
+
+Console.WriteLine($"Result has {pipeline.RowCount} rows and {pipeline.ColumnCount} columns");
+```
+
+#### Query Operations
+
+The query engine supports several core operations:
+
+**Filter Operations**: Apply conditions to filter rows
+```csharp
+// Simple comparisons
+.Filter(ColumnExpressions.Col("Age") > 30)
+.Filter(ColumnExpressions.Col("Name") == "Alice")
+
+// Complex expressions
+.Filter((ColumnExpressions.Col("Age") * 2) > ColumnExpressions.Col("Salary") / 1000)
+.Filter(ColumnExpressions.Col("Department") != "Sales")
+```
+
+**Select Operations**: Choose specific columns or expressions
+```csharp
+// Select by column names
+.Select("Name", "Age", "Salary")
+
+// Select with expressions
+.Select(
+    ColumnExpressions.Col("Name"),
+    ColumnExpressions.Col("Salary") * 1.1,  // 10% salary increase
+    ColumnExpressions.Col("Age") + 1        // Age next year
+)
+```
+
+**GroupBy Operations**: Group by columns (returns distinct values)
+```csharp
+// Group by single column
+.GroupBy("Department")
+
+// Group by multiple columns
+.GroupBy("Department", "Age")
+
+// Group by expressions
+.GroupBy(ColumnExpressions.Col("Department"), ColumnExpressions.Col("Age") / 10)
+```
+
+#### Query Diagnostics and Optimization
+
+The query engine provides comprehensive diagnostic information:
+
+```csharp
+var query = employees.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Age") > 25)
+    .Filter(ColumnExpressions.Col("Salary") > 60000)
+    .Select("Name", "Department");
+
+// Explain the query execution plan
+string explanation = query.ExplainPlan();
+Console.WriteLine(explanation);
+/* Output:
+Query Execution Plan:
+├─ Source: MemoryQuerySource
+│  └─ Schema: Name: String, Age: Int32, Department: String, Salary: Double
+│  └─ Lazy: False
+├─ Operations:
+│  ├─ 1. Filter
+│  ├─ 2. Filter
+│  └─ 3. Select
+│     └─ Schema: Name: String, Department: String
+└─ Result Schema: Name: String, Department: String
+*/
+
+// Analyze optimization opportunities
+var optimizations = query.AnalyzeOptimizations();
+foreach (var suggestion in optimizations)
+{
+    Console.WriteLine($"Optimization: {suggestion}");
+}
+/* Possible output:
+Optimization: Found 2 filter operations - consider combining them for better performance
+*/
+
+// Schema information is available before execution
+var resultSchema = query.Schema;
+Console.WriteLine($"Result will have columns: {string.Join(", ", resultSchema.ColumnNames)}");
+Console.WriteLine($"Result will have {resultSchema.ColumnNames.Count} columns");
+```
 
 #### NivaraFrame Usage
 
@@ -186,6 +328,10 @@ var selectedFrame = frame.SelectColumns("Name", "Score");
 
 // Case-insensitive column access
 var column = frame.GetColumn<string>("name"); // Works with different case
+
+// Convert to QueryFrame for complex operations
+var queryFrame = frame.AsQueryFrame();
+var filtered = queryFrame.Filter(ColumnExpressions.Col("Score") > 90).Collect();
 ```
 - **Column Expressions**: Composable expression system for building queries with operator overloading
 - **Query Planning**: Infrastructure for building and optimizing query execution plans
@@ -672,16 +818,18 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Schema system with column metadata and transformation methods
 - ✅ Column expression system with operator overloading and composition
 - ✅ NivaraFrame (DataFrame-like structure) with column management and validation
-- ✅ Comprehensive test suite with 296 passing tests
+- ✅ QueryFrame with fluent API for lazy query construction and execution
+- ✅ Query operations (Filter, Select, GroupBy) with schema transformation
+- ✅ Query planning and execution infrastructure with optimization analysis
+- ✅ Comprehensive test suite with 309 passing tests
 
 ### Upcoming Features
-- 🔄 Lazy query execution with optimization
-- 🔄 Data source scanning (CSV, JSON)
-- 🔄 Advanced null handling
-- 🔄 Performance optimizations
+- 🔄 Data source scanning (CSV, JSON) with lazy evaluation
+- 🔄 Query optimization passes (predicate pushdown, operation fusion)
+- 🔄 Advanced aggregation functions (Sum, Count, Average, etc.)
 - 📋 I/O operations (CSV, JSON, Parquet)
-- 📋 Aggregation functions
-- 📋 Grouping and joining operations
+- 📋 Grouping with aggregation functions
+- 📋 Joining operations between frames
 
 ## License
 

@@ -891,3 +891,145 @@ var condition = product > 50000;                     // ComparisonExpression
 public abstract class ColumnExpression { ... }  // Not NivaraColumnExpression
 public sealed class Schema { ... }              // Not NivaraSchema
 ```
+
+## Query Engine Implementation
+
+### QueryFrame and Query Operations Design
+**Decision**: Created QueryFrame class with fluent API for lazy query construction and separate operation classes (FilterOperation, SelectOperation, GroupByOperation)
+**Rationale**: Provides natural LINQ-like syntax while maintaining clear separation between query building and execution. Each operation is responsible for schema transformation and execution logic.
+
+**Pattern**: Immutable query building with method chaining
+```csharp
+var result = frame.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Age") > 30)
+    .Select("Name", "Salary")
+    .GroupBy("Department")
+    .Collect(); // Execution barrier
+```
+
+### Dynamic Dispatch for Column Creation
+**Decision**: Use type switching with dynamic dispatch instead of reflection for creating columns from unknown types
+**Rationale**: Avoids reflection overhead and complexity while maintaining type safety. Follows the same pattern as arithmetic operations in NivaraColumn.
+
+**Pattern**: Type switching for column creation
+```csharp
+// WRONG - using reflection
+var columnType = typeof(NivaraColumn<>).MakeGenericType(elementType);
+var createMethod = columnType.GetMethod("Create", new[] { elementType.MakeArrayType() });
+var result = createMethod.Invoke(null, new object[] { array });
+
+// CORRECT - using dynamic dispatch
+return elementType switch
+{
+    Type t when t == typeof(int) => CreateColumnTyped<int>(values),
+    Type t when t == typeof(string) => CreateColumnTyped<string>(values),
+    _ => CreateColumnGeneric(values)
+};
+
+private static IColumn CreateColumnTyped<T>(List<object> values)
+{
+    var array = values.Cast<T>().ToArray();
+    return NivaraColumn<T>.Create(array);
+}
+```
+
+### Expression Evaluation Architecture
+**Decision**: Created ExpressionEvaluator class that handles all column expression types with dynamic dispatch for arithmetic and comparison operations
+**Rationale**: Centralizes expression evaluation logic and provides consistent error handling. Uses the same dynamic dispatch pattern as NivaraColumn arithmetic operations.
+
+**Pattern**: Expression evaluation with dynamic dispatch
+```csharp
+// Arithmetic operations use dynamic dispatch like NivaraColumn
+private static object? AddValues(object? left, object? right)
+{
+    if (left == null || right == null) return null;
+    
+    return (left, right) switch
+    {
+        (int l, int r) => l + r,
+        (double l, double r) => l + r,
+        _ => Convert.ToDouble(left) + Convert.ToDouble(right)
+    };
+}
+```
+
+### Query Plan and Execution Design
+**Decision**: Separate QueryPlan, QueryExecutor, and QueryOptimizer classes with clear responsibilities
+**Rationale**: Enables future optimization passes and provides clear separation between query representation, execution, and optimization logic.
+
+**Pattern**: Query execution pipeline
+```csharp
+// Query building (lazy)
+var queryFrame = source.Filter(condition).Select(columns);
+
+// Query execution (eager)
+var plan = new QueryPlan(source, operations);
+var executor = new QueryExecutor();
+var result = executor.Execute(plan);
+```
+
+### Memory vs Lazy Query Sources
+**Decision**: MemoryQuerySource for in-memory data (IsLazy = false) and separate lazy sources for file-based data
+**Rationale**: Clear distinction between materialized data (frames) and unmaterialized data (files). Memory sources have no IO cost, while lazy sources defer IO until execution.
+
+**Pattern**: Query source abstraction
+```csharp
+// Memory source (already materialized)
+public bool IsLazy => false;
+public IReadOnlyDictionary<string, IColumn> Execute() => columns;
+
+// File source (lazy evaluation)
+public bool IsLazy => true;
+public IReadOnlyDictionary<string, IColumn> Execute() => ReadFromFile();
+```
+
+### Query Operation Interface Design
+**Decision**: IQueryOperation interface with TransformSchema and Execute methods
+**Rationale**: Enables schema validation during query building and consistent execution interface. Schema transformation allows early error detection.
+
+**Pattern**: Operation interface implementation
+```csharp
+public Schema TransformSchema(Schema inputSchema)
+{
+    // Validate operation can be applied to input schema
+    // Return transformed schema (may be same for Filter, different for Select)
+}
+
+public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+{
+    // Apply operation to input columns and return result columns
+}
+```
+
+### Testing Strategy for Query Engine
+**Decision**: Comprehensive unit tests covering query building, execution, and error conditions
+**Rationale**: Query engine is complex with many interaction points. Tests verify both lazy query building and eager execution work correctly.
+
+**Coverage**: 13 test cases covering:
+- Query plan building (Filter, Select, GroupBy)
+- Method chaining and fluent API
+- Query execution with Collect()
+- Schema transformation validation
+- Error handling (null conditions, empty operations)
+- Diagnostic and optimization analysis
+
+### Query Engine Gotchas
+**Problem**: Method overload ambiguity between `Select(params ColumnExpression[])` and `Select(params string[])`
+**Solution**: Provide both overloads but be explicit in tests to avoid compiler ambiguity
+```csharp
+// AMBIGUOUS in tests
+queryFrame.Select(); // Compiler can't choose overload
+
+// CLEAR in tests
+queryFrame.Select(new string[0]); // Explicit array type
+```
+
+**Problem**: Reflection for column creation is slow and complex
+**Solution**: Use type switching with dynamic dispatch following existing NivaraColumn patterns
+```csharp
+// Follow the same pattern as AddTensorPrimitive in NivaraColumn
+destination[i] = (T)(object)((dynamic)x[i]! + (dynamic)y[i]!)!;
+```
+
+**Problem**: Expression evaluation needs to handle all column types dynamically
+**Solution**: Use switch expressions on Type with fallback to generic object columns for unknown types

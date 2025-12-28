@@ -100,6 +100,18 @@ public sealed class NivaraFrame : IFrame
         return new NivaraFrame(namedColumns);
     }
 
+    /// <summary>
+    /// Creates a QueryFrame from an existing NivaraFrame for lazy query operations
+    /// </summary>
+    /// <returns>A QueryFrame that can be used to build query chains</returns>
+    public QueryFrame AsQueryFrame()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var memorySource = new MemoryQuerySource(columns, schema);
+        return new QueryFrame(memorySource);
+    }
+
     /// <inheritdoc />
     public int RowCount
     {
