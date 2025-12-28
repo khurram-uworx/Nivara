@@ -756,22 +756,138 @@ var columns = new[] { ("Test", col1), ("test", col2) };
 var columns = new[] { ("Test", (IColumn)col1), ("test", (IColumn)col2) };
 ```
 
-### Frame Disposal Pattern
-**Decision**: Dispose all contained columns when frame is disposed
-**Rationale**: Ensures proper resource cleanup for all column storage. Prevents memory leaks in complex frame hierarchies.
+## Column Expression System Implementation
 
-**Pattern**: Dispose all columns in disposal method
+### Expression Hierarchy Design Decisions
+**Decision**: Created comprehensive ColumnExpression hierarchy with operator overloading for both expression-to-expression and expression-to-scalar operations
+**Rationale**: Provides natural syntax for query building while maintaining type safety. Supports both `Col("A") + Col("B")` and `Col("A") + 5` patterns through different expression types.
+
+**Pattern**: Separate expression types for different operation categories
 ```csharp
-public void Dispose()
+// Base abstract class with operator overloads
+public abstract class ColumnExpression { /* operators */ }
+
+// Specific expression types
+public sealed class ColumnReference : ColumnExpression { /* column references */ }
+public sealed class BinaryExpression : ColumnExpression { /* column-to-column operations */ }
+public sealed class ScalarExpression : ColumnExpression { /* column-to-scalar operations */ }
+public sealed class ComparisonExpression : ColumnExpression { /* comparison operations */ }
+public sealed class LiteralExpression : ColumnExpression { /* literal values */ }
+```
+
+### Operator Overloading Implementation
+**Decision**: Comprehensive operator overloading for arithmetic (+, -, *, /) and comparison (>, <, >=, <=, ==, !=) operations
+**Rationale**: Enables natural mathematical syntax in query expressions. Separate overloads for expression-to-expression and expression-to-scalar operations provide flexibility.
+
+**Gotcha**: Required `Equals` and `GetHashCode` overrides when implementing equality operators
+**Solution**: Override both methods to avoid compiler warnings and maintain consistency
+```csharp
+public override bool Equals(object? obj) => ReferenceEquals(this, obj);
+public override int GetHashCode() => base.GetHashCode();
+```
+
+### Static Factory Class Pattern
+**Decision**: Use `ColumnExpressions` static class instead of global functions for creating column expressions
+**Rationale**: More OOP-compliant than global functions. Provides clear namespace organization and follows .NET conventions.
+
+**Pattern**: Static factory methods in dedicated class
+```csharp
+public static class ColumnExpressions
 {
-    if (!disposed)
-    {
-        // Dispose all columns
-        foreach (var column in columns.Values)
-        {
-            column?.Dispose();
-        }
-        disposed = true;
-    }
+    public static ColumnExpression Col(string name) => new ColumnReference(name);
+    public static ColumnExpression Col<T>(string name) => new ColumnReference(name, typeof(T));
+    public static ColumnExpression Lit(object? value) => new LiteralExpression(value);
 }
+```
+
+**Anti-Pattern**: Global functions in root namespace
+```csharp
+// WRONG - not OOP compliant
+public static ColumnExpression Col(string name) { ... } // in global namespace
+
+// CORRECT - use static factory class
+ColumnExpressions.Col("Name") // clear, organized, OOP-compliant
+```
+
+### Expression Validation Strategy
+**Decision**: Schema validation with detailed error messages including available alternatives
+**Rationale**: Helps users quickly identify and fix column reference errors. Provides context about what columns are actually available.
+
+**Pattern**: Enhanced error messages with suggestions
+```csharp
+if (!schema.HasColumn(ColumnName))
+{
+    var availableColumns = string.Join(", ", schema.ColumnNames);
+    throw new SchemaValidationException($"Column '{ColumnName}' not found in schema. Available columns: {availableColumns}");
+}
+```
+
+### Type System Integration
+**Decision**: Automatic type promotion for binary operations with fallback to `object` type
+**Rationale**: Provides reasonable type inference for numeric operations while handling edge cases gracefully.
+
+**Pattern**: Numeric type promotion hierarchy
+```csharp
+private static Type DetermineResultType(Type leftType, Type rightType)
+{
+    if (leftType == rightType) return leftType;
+    
+    // Numeric type promotion (double > float > long > int > short > byte)
+    var numericTypes = new[] { typeof(double), typeof(float), typeof(long), typeof(int), typeof(short), typeof(byte) };
+    var leftIndex = Array.IndexOf(numericTypes, leftType);
+    var rightIndex = Array.IndexOf(numericTypes, rightType);
+    
+    if (leftIndex >= 0 && rightIndex >= 0)
+        return numericTypes[Math.Min(leftIndex, rightIndex)]; // Higher precision wins
+    
+    return typeof(object); // Fallback for non-numeric types
+}
+```
+
+### Expression Composition Support
+**Decision**: Full support for complex expression composition through operator chaining
+**Rationale**: Enables building sophisticated query conditions like `(Col("Age") + 5) * Col("Salary") > 50000`. Each operation returns a new expression that can be further composed.
+
+**Pattern**: Immutable expression trees
+```csharp
+// Each operation creates new expression node
+var ageExpr = ColumnExpressions.Col("Age");           // ColumnReference
+var agePlus5 = ageExpr + 5;                          // ScalarExpression
+var salaryExpr = ColumnExpressions.Col("Salary");    // ColumnReference  
+var product = agePlus5 * salaryExpr;                 // BinaryExpression
+var condition = product > 50000;                     // ComparisonExpression
+```
+
+### Testing Strategy for Expression System
+**Decision**: Comprehensive unit tests covering all operator combinations, type scenarios, and validation cases
+**Rationale**: Expression system is foundational to query correctness. Thorough testing prevents runtime errors in complex query scenarios.
+
+**Coverage**: 20 test cases covering:
+- Expression creation and basic properties
+- All arithmetic operators (binary and scalar)
+- All comparison operators (binary and scalar)
+- Expression composition and complex expressions
+- Schema validation (valid and invalid cases)
+- Type promotion and inference
+- Error handling and edge cases
+
+### Expression System Gotchas
+**Problem**: Complex expression composition can create deeply nested expression trees
+**Solution**: Each expression type implements proper `ToString()` methods for debugging and provides clear `Name` properties for display
+
+**Problem**: Type inference for complex expressions can be ambiguous
+**Solution**: Conservative type promotion with fallback to `object` type ensures operations don't fail unexpectedly
+
+**Problem**: Schema validation needs to be performed at query execution time, not expression creation time
+**Solution**: Expressions store validation logic but defer execution until `Validate(Schema)` is called during query planning
+
+### Design Document Consistency
+**Lesson**: Keep design documents synchronized with actual implementation class names and patterns
+**Solution**: Regular review and update of design documents to match implemented code. Use actual class names (`ColumnExpression`, `Schema`) rather than conceptual names (`NivaraColumnExpression`, `NivaraSchema`)
+
+**Pattern**: Design document should reflect actual implementation
+```csharp
+// Design document should show actual class names
+public abstract class ColumnExpression { ... }  // Not NivaraColumnExpression
+public sealed class Schema { ... }              // Not NivaraSchema
 ```

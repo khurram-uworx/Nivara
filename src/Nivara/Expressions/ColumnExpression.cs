@@ -158,6 +158,28 @@ public abstract class ColumnExpression
     }
 
     /// <summary>
+    /// Scalar subtraction operator
+    /// </summary>
+    /// <param name="left">The column expression</param>
+    /// <param name="scalar">The scalar value</param>
+    /// <returns>A scalar expression representing subtraction</returns>
+    public static ColumnExpression operator -(ColumnExpression left, object scalar)
+    {
+        return new ScalarExpression(BinaryOperator.Subtract, left, scalar);
+    }
+
+    /// <summary>
+    /// Scalar division operator
+    /// </summary>
+    /// <param name="left">The column expression</param>
+    /// <param name="scalar">The scalar value</param>
+    /// <returns>A scalar expression representing division</returns>
+    public static ColumnExpression operator /(ColumnExpression left, object scalar)
+    {
+        return new ScalarExpression(BinaryOperator.Divide, left, scalar);
+    }
+
+    /// <summary>
     /// Scalar comparison operator (greater than)
     /// </summary>
     /// <param name="left">The column expression</param>
@@ -199,6 +221,28 @@ public abstract class ColumnExpression
     public static ColumnExpression operator !=(ColumnExpression left, object value)
     {
         return new ComparisonExpression(ComparisonOperator.NotEqual, left, new LiteralExpression(value));
+    }
+
+    /// <summary>
+    /// Scalar comparison operator (greater than or equal)
+    /// </summary>
+    /// <param name="left">The column expression</param>
+    /// <param name="value">The value to compare against</param>
+    /// <returns>A comparison expression</returns>
+    public static ColumnExpression operator >=(ColumnExpression left, object value)
+    {
+        return new ComparisonExpression(ComparisonOperator.GreaterThanOrEqual, left, new LiteralExpression(value));
+    }
+
+    /// <summary>
+    /// Scalar comparison operator (less than or equal)
+    /// </summary>
+    /// <param name="left">The column expression</param>
+    /// <param name="value">The value to compare against</param>
+    /// <returns>A comparison expression</returns>
+    public static ColumnExpression operator <=(ColumnExpression left, object value)
+    {
+        return new ComparisonExpression(ComparisonOperator.LessThanOrEqual, left, new LiteralExpression(value));
     }
 
     /// <summary>
@@ -264,11 +308,16 @@ public sealed class ColumnReference : ColumnExpression
     public override void Validate(Schema schema)
     {
         if (!schema.HasColumn(ColumnName))
-            throw new SchemaValidationException($"Column '{ColumnName}' not found in schema");
+        {
+            var availableColumns = string.Join(", ", schema.ColumnNames);
+            throw new SchemaValidationException($"Column '{ColumnName}' not found in schema. Available columns: {availableColumns}");
+        }
 
         var actualType = schema.GetColumnType(ColumnName);
         if (ResultType != typeof(object) && ResultType != actualType)
+        {
             throw new SchemaValidationException($"Column '{ColumnName}' has type {actualType.Name} but expected {ResultType.Name}");
+        }
     }
 
     /// <inheritdoc />

@@ -228,7 +228,76 @@ var metadata = new ColumnMetadata(
 var schemaWithMetadata = schema.WithColumn("Age", typeof(int), metadata);
 ```
 
-The query engine foundation supports the upcoming NivaraFrame implementation, which will provide lazy query execution, data source scanning, and advanced DataFrame operations.
+#### Column Expression System Features
+
+The Column Expression system provides a composable way to build query conditions and transformations:
+
+```csharp
+using Nivara.Expressions;
+
+// Create column references
+var ageExpr = ColumnExpressions.Col("Age");
+var salaryExpr = ColumnExpressions.Col<double>("Salary");
+var nameExpr = ColumnExpressions.Col("Name");
+
+// Create literal values
+var threshold = ColumnExpressions.Lit(30);
+var multiplier = ColumnExpressions.Lit(1.1);
+
+// Build arithmetic expressions
+var salaryIncrease = salaryExpr * multiplier;           // Scalar multiplication
+var totalCompensation = salaryExpr + ageExpr;          // Column addition
+var complexCalc = (ageExpr + 5) * salaryExpr;          // Complex composition
+
+// Build comparison expressions
+var seniorEmployees = ageExpr > 30;                     // Age greater than 30
+var highEarners = salaryExpr >= 75000;                  // Salary threshold
+var nameMatch = nameExpr == "John";                     // String equality
+
+// Combine expressions for complex conditions
+var eligibleForBonus = (ageExpr > 25) & (salaryExpr < 100000);
+var promotionCandidate = (ageExpr >= 30) | (salaryExpr > 80000);
+
+// Expression validation against schema
+var schema = new Schema(new[]
+{
+    ("Name", typeof(string)),
+    ("Age", typeof(int)),
+    ("Salary", typeof(double))
+});
+
+// Validate expressions
+ageExpr.Validate(schema);        // Passes - Age column exists
+salaryExpr.Validate(schema);     // Passes - Salary column exists and type matches
+
+try
+{
+    var invalidExpr = ColumnExpressions.Col("Department");
+    invalidExpr.Validate(schema);  // Throws SchemaValidationException
+}
+catch (SchemaValidationException ex)
+{
+    Console.WriteLine(ex.Message); // "Column 'Department' not found in schema. Available columns: Name, Age, Salary"
+}
+
+// Expression composition and type inference
+var expr = ageExpr + 5;          // ScalarExpression: Age + 5
+var comparison = expr > 30;      // ComparisonExpression: (Age + 5) > 30
+var complex = (ageExpr * 2) + (salaryExpr / 1000); // BinaryExpression with type promotion
+
+// Expression properties
+Console.WriteLine(ageExpr.Name);         // "Age"
+Console.WriteLine(ageExpr.ResultType);   // System.Int32
+Console.WriteLine(comparison.ToString()); // "(Age + 5) > 30"
+```
+
+The expression system supports:
+- **Arithmetic Operations**: `+`, `-`, `*`, `/` for both column-to-column and column-to-scalar operations
+- **Comparison Operations**: `>`, `<`, `>=`, `<=`, `==`, `!=` with automatic type promotion
+- **Expression Composition**: Build complex nested expressions through operator chaining
+- **Type Safety**: Compile-time and runtime type checking with clear error messages
+- **Schema Validation**: Validate column references against frame schemas
+- **Immutable Design**: All operations create new expression instances
 
 ### Type Support
 
@@ -601,9 +670,9 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Performance diagnostics and kernel selection analysis
 - ✅ Query engine foundation and interfaces
 - ✅ Schema system with column metadata and transformation methods
-- ✅ Column expression system for query building
+- ✅ Column expression system with operator overloading and composition
 - ✅ NivaraFrame (DataFrame-like structure) with column management and validation
-- ✅ Comprehensive test suite with 276 passing tests
+- ✅ Comprehensive test suite with 296 passing tests
 
 ### Upcoming Features
 - 🔄 Lazy query execution with optimization
