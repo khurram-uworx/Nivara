@@ -148,6 +148,45 @@ Nivara automatically selects the appropriate storage implementation:
 Nivara includes a foundational query engine infrastructure for building DataFrame-like operations:
 
 - **Schema System**: ✅ **Complete** - Immutable schema management with column metadata, type information, and transformation methods (WithColumn, WithoutColumn, SelectColumns)
+- **NivaraFrame**: ✅ **Complete** - Multi-column DataFrame-like structure with schema management, column validation, and immutable transformations
+
+#### NivaraFrame Usage
+
+```csharp
+using Nivara;
+
+// Create frame from named columns
+var numbers = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 });
+var names = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "David" });
+var scores = NivaraColumn<double>.Create(new[] { 95.5, 87.2, 92.1, 88.9 });
+
+var frame = NivaraFrame.Create(
+    ("ID", numbers),
+    ("Name", names), 
+    ("Score", scores)
+);
+
+// Frame properties
+Console.WriteLine(frame.RowCount);      // 4
+Console.WriteLine(frame.ColumnCount);   // 3
+Console.WriteLine(string.Join(", ", frame.ColumnNames)); // ID, Name, Score
+
+// Type-safe column access
+var idColumn = frame.GetColumn<int>("ID");
+var nameColumn = frame.GetColumn<string>("Name");
+
+// Schema information
+var schema = frame.Schema;
+Console.WriteLine(schema.GetColumnType("Score")); // System.Double
+
+// Immutable transformations
+var frameWithAge = frame.WithColumn("Age", NivaraColumn<int>.Create(new[] { 25, 30, 28, 35 }));
+var frameWithoutScore = frame.WithoutColumn("Score");
+var selectedFrame = frame.SelectColumns("Name", "Score");
+
+// Case-insensitive column access
+var column = frame.GetColumn<string>("name"); // Works with different case
+```
 - **Column Expressions**: Composable expression system for building queries with operator overloading
 - **Query Planning**: Infrastructure for building and optimizing query execution plans
 - **Type-Safe Interfaces**: Both generic and non-generic column interfaces for compile-time and runtime type handling
@@ -563,10 +602,10 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Query engine foundation and interfaces
 - ✅ Schema system with column metadata and transformation methods
 - ✅ Column expression system for query building
-- ✅ Comprehensive test suite with 241 passing tests
+- ✅ NivaraFrame (DataFrame-like structure) with column management and validation
+- ✅ Comprehensive test suite with 276 passing tests
 
 ### Upcoming Features
-- 🔄 NivaraFrame (DataFrame-like structure)
 - 🔄 Lazy query execution with optimization
 - 🔄 Data source scanning (CSV, JSON)
 - 🔄 Advanced null handling

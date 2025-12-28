@@ -676,3 +676,102 @@ When working with Nivara code:
 - **Namespace Clarity**: Clear separation of concerns
 - **IDE Support**: Better IntelliSense and navigation
 - **Documentation**: Easier to document and understand architecture
+
+## NivaraFrame Implementation
+
+### Frame Design Decisions
+**Decision**: Immutable NivaraFrame with transformation methods (WithColumn, WithoutColumn, SelectColumns)
+**Rationale**: Consistent with Schema immutability pattern. Prevents accidental frame corruption during transformations. Enables functional-style frame evolution.
+
+**Pattern**: Case-insensitive column name handling throughout frame operations
+```csharp
+// Use StringComparer.OrdinalIgnoreCase for all column name dictionaries
+var columnDict = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+```
+
+### Column Length Validation Strategy
+**Decision**: Validate all columns have the same length during frame creation
+**Rationale**: Prevents runtime errors and ensures data integrity. All columns in a frame must represent the same number of rows.
+
+**Pattern**: Comprehensive validation with detailed error messages
+```csharp
+if (column.Length != expectedLength.Value)
+{
+    var existingColumns = string.Join(", ", names.Where(n => !string.Equals(n, name, StringComparison.OrdinalIgnoreCase)));
+    throw new ArgumentException(
+        $"Column length mismatch: Column '{name}' has length {column.Length}, but expected {expectedLength.Value} " +
+        $"to match existing columns [{existingColumns}]. All columns in a frame must have the same length.",
+        nameof(namedColumns));
+}
+```
+
+### Type Safety in Frame Operations
+**Decision**: Use both generic `GetColumn<T>()` and non-generic `GetColumn()` methods
+**Rationale**: Generic method provides compile-time type safety for user code. Non-generic method enables runtime type handling for query engine operations.
+
+**Pattern**: Clear error messages for type mismatches
+```csharp
+if (column is not NivaraColumn<T> typedColumn)
+{
+    var actualType = column.ElementType;
+    var expectedType = typeof(T);
+    throw new ColumnTypeMismatchException(name, expectedType, actualType);
+}
+```
+
+### Frame Transformation Immutability
+**Decision**: All frame transformation methods return new instances
+**Rationale**: Prevents accidental mutation of existing frames. Enables safe sharing of frame instances across different parts of the application.
+
+**Pattern**: Functional-style transformations
+```csharp
+// WithColumn creates new frame with additional column
+public NivaraFrame WithColumn(string name, IColumn column)
+{
+    // Validation...
+    var newColumns = columns.Concat(new[] { new KeyValuePair<string, IColumn>(name, column) });
+    var namedColumns = newColumns.Select(kvp => (kvp.Key, kvp.Value));
+    return new NivaraFrame(namedColumns);
+}
+```
+
+### Frame Testing Gotchas
+**Problem**: Compiler cannot infer tuple types when one element is null
+**Solution**: Use explicit tuple type declarations
+```csharp
+// WRONG - compiler error CS0826
+var columns = new[] { (null!, (IColumn)col) };
+
+// CORRECT - explicit tuple type
+var columns = new (string, IColumn)[] { (null!, col) };
+```
+
+**Problem**: NivaraColumn<T> doesn't implicitly convert to IColumn in array literals
+**Solution**: Cast to IColumn when needed or use explicit tuple types
+```csharp
+// WRONG - type inference issues
+var columns = new[] { ("Test", col1), ("test", col2) };
+
+// CORRECT - explicit casting or tuple types
+var columns = new[] { ("Test", (IColumn)col1), ("test", (IColumn)col2) };
+```
+
+### Frame Disposal Pattern
+**Decision**: Dispose all contained columns when frame is disposed
+**Rationale**: Ensures proper resource cleanup for all column storage. Prevents memory leaks in complex frame hierarchies.
+
+**Pattern**: Dispose all columns in disposal method
+```csharp
+public void Dispose()
+{
+    if (!disposed)
+    {
+        // Dispose all columns
+        foreach (var column in columns.Values)
+        {
+            column?.Dispose();
+        }
+        disposed = true;
+    }
+}
+```
