@@ -257,7 +257,8 @@ public class ColumnStorageFactoryTests
 
         foreach (var values in testCases)
         {
-            var storage = ColumnStorageFactory.CreateForReferenceType<string>(values);
+            // Use the regular Create method which handles reference types automatically
+            var storage = ColumnStorageFactory.Create<string>(values);
             
             Assert.That(storage, Is.Not.Null, "Storage should be created successfully");
             Assert.That(storage.Length, Is.EqualTo(values.Length), "Storage should preserve input length");

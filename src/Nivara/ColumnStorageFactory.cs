@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara;
 
 /// <summary>
@@ -13,7 +15,9 @@ internal static class ColumnStorageFactory
     /// <returns>An appropriate storage implementation</returns>
     public static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values)
     {
-        // For now, always use memory storage - we'll optimize this later
+        // For now, use memory storage for all types
+        // Tensor storage optimization will be implemented in a future iteration
+        // when we can properly handle the generic constraints
         return new MemoryStorage<T>(values, detectNulls: !typeof(T).IsValueType);
     }
     
@@ -29,17 +33,6 @@ internal static class ColumnStorageFactory
     }
     
     /// <summary>
-    /// Creates storage for reference type values that may contain nulls
-    /// </summary>
-    /// <typeparam name="T">The reference type of elements to store</typeparam>
-    /// <param name="values">The values to store (may contain nulls)</param>
-    /// <returns>A memory storage implementation</returns>
-    public static IColumnStorage<T> CreateForReferenceType<T>(ReadOnlySpan<T> values) where T : class
-    {
-        return new MemoryStorage<T>(values, detectNulls: true);
-    }
-    
-    /// <summary>
     /// Determines if a type supports vectorized operations
     /// </summary>
     /// <typeparam name="T">The type to check</typeparam>
@@ -48,21 +41,16 @@ internal static class ColumnStorageFactory
     {
         var type = typeof(T);
         
-        // Check if it's an unmanaged type that supports SIMD operations
-        if (!type.IsValueType || type.IsEnum)
-            return false;
-            
-        // Check for specific vectorizable types
-        return type == typeof(byte) ||
-               type == typeof(sbyte) ||
-               type == typeof(short) ||
-               type == typeof(ushort) ||
-               type == typeof(int) ||
-               type == typeof(uint) ||
-               type == typeof(long) ||
-               type == typeof(ulong) ||
+        // Check for specific vectorizable numeric types
+        return type == typeof(int) ||
                type == typeof(float) ||
                type == typeof(double) ||
-               type == typeof(bool);
+               type == typeof(long) ||
+               type == typeof(short) ||
+               type == typeof(byte) ||
+               type == typeof(uint) ||
+               type == typeof(ulong) ||
+               type == typeof(ushort) ||
+               type == typeof(sbyte);
     }
 }

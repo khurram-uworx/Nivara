@@ -121,6 +121,80 @@ public void TestMethod()
 }
 ```
 
+### Issue: Generic Constraints on Static Methods in Generic Classes
+**Problem**: Cannot add constraints to static methods in generic classes
+**Solution**: Use runtime type checking instead of compile-time constraints
+```csharp
+// WRONG - compiler error CS0080
+public static NivaraColumn<T> CreateFromNullable(T?[] values) where T : struct
+
+// CORRECT - use runtime checking
+public static NivaraColumn<T> CreateFromNullable(T?[] values)
+{
+    if (!typeof(T).IsValueType)
+        throw new InvalidOperationException("Method only supports value types");
+    // ... implementation
+}
+```
+
+### Issue: Nullable Type Parameters Without Constraints
+**Problem**: Cannot use `T?` without `where T : struct` constraint
+**Solution**: Avoid nullable generic parameters or use reflection/runtime type handling
+```csharp
+// WRONG - compiler error without struct constraint
+public static void Method<T>(T? value) { }
+
+// CORRECT - either add constraint or avoid nullable generics
+public static void Method<T>(T? value) where T : struct { }
+// OR use object/Array parameters with runtime type checking
+public static void Method(Array nullableValues) { /* runtime type checking */ }
+```
+
+### Issue: Complex Anonymous Type Arrays in Tests
+**Problem**: Compiler cannot infer type for complex anonymous type arrays
+**Solution**: Use explicit typing or simplify test structure
+```csharp
+// WRONG - compiler error CS0826
+var testCases = new[] {
+    new { Type = typeof(int), Values = new int[] { 1, 2, 3 } },
+    new { Type = typeof(float), Values = new float[] { 1.0f, 2.0f } }
+};
+
+// CORRECT - use explicit object array or separate tests
+var testCases = new object[] {
+    new { Type = typeof(int), Values = (object)new int[] { 1, 2, 3 } }
+};
+// OR better - write separate focused tests for each type
+```
+
+### Issue: MemoryMarshal.Cast Generic Constraints
+**Problem**: MemoryMarshal.Cast requires unmanaged constraint but generic T doesn't have it
+**Solution**: Use runtime type checking and avoid unsafe casting in generic contexts
+```csharp
+// WRONG - compiler error CS0453
+var converted = MemoryMarshal.Cast<T, int>(values);
+
+// CORRECT - use runtime type checking and safe conversion
+if (typeof(T) == typeof(int))
+{
+    var intValues = values.ToArray();
+    var intStorage = new TensorStorage<int>((ReadOnlySpan<int>)(object)intValues.AsSpan());
+    return (IColumnStorage<T>)(object)intStorage;
+}
+```
+
+### Issue: Reflection with Span Parameters
+**Problem**: Cannot pass Span<T> as object parameter to reflection calls
+**Solution**: Convert to array first or use alternative approaches
+```csharp
+// WRONG - compiler error CS0030
+var result = method.Invoke(null, new object[] { spanValue });
+
+// CORRECT - convert to array first
+var arrayValue = spanValue.ToArray();
+var result = method.Invoke(null, new object[] { arrayValue });
+```
+
 ## Testing Patterns
 
 ## Testing Patterns
@@ -226,18 +300,43 @@ public class NivaraColumnTests
 10. **TestCase with nulls**: Use regular Test methods for null array scenarios
 11. **Testing internal classes**: Add InternalsVisibleTo for test access
 12. **Debugging without cleanup**: Remove debug tests after resolving issues
+13. **Generic constraints on static methods**: Use runtime checks instead of compile-time constraints
+14. **Nullable generics without constraints**: Avoid `T?` without `where T : struct` or use runtime handling
+15. **Complex anonymous arrays in tests**: Use explicit typing or separate focused tests
+16. **MemoryMarshal with unconstrained generics**: Use runtime type checking and safe conversions
+17. **Reflection with Span parameters**: Convert to arrays before reflection calls
+18. **Assuming INumber<T> works everywhere**: Use explicit type checking for vectorizable types
 
 ## Future Considerations
 
-### Extensibility
-- Design interfaces to support future storage backends
-- Consider plugin architecture for custom operations
-- Plan for distributed/parallel processing scenarios
+### Generic Programming Challenges
+- **Static method constraints**: Cannot add `where T : struct` to static methods in generic classes
+- **Nullable type parameters**: `T?` requires struct constraint, use runtime checks as alternative
+- **Complex type inference**: Compiler struggles with complex anonymous types, use explicit typing
+- **Reflection with generics**: Span<T> cannot be passed as object to reflection, convert to arrays
+- **MemoryMarshal constraints**: Requires unmanaged types, use runtime type checking for generic contexts
+- **INumber<T> limitations**: Not all numeric types implement it consistently, use explicit type lists
+
+### Testing Complex Generics
+- **Anonymous type arrays**: Use explicit object[] typing or separate focused tests per type
+- **Nullable arrays in TestCase**: Not supported, use regular Test methods with inline data
+- **Reflection-based testing**: Useful for testing multiple types but adds complexity
+- **Property-like testing**: Use multiple TestCase attributes or parameterized tests for comprehensive coverage
 
 ### Compatibility
 - Maintain backward compatibility in public APIs
 - Consider serialization and versioning requirements
 - Plan for cross-platform deployment scenarios
+
+### Lessons from NivaraColumn Implementation
+- **Start simple**: Begin with memory storage for all types, optimize later with tensor storage
+- **Runtime over compile-time**: When generic constraints fail, use runtime type checking
+- **Focused tests**: Separate tests per type are often clearer than complex parameterized tests
+- **Incremental complexity**: Add tensor storage optimization in future iterations when constraints are resolved
+- **Error messages matter**: Provide clear guidance when methods are used incorrectly
+- **Avoid premature optimization**: Get the basic functionality working first, then optimize storage selection
+- **Generic constraints are tricky**: Static methods in generic classes cannot have additional constraints
+- **Reflection has limits**: Span<T> and complex generics don't work well with reflection-based approaches
 
 ---
 
