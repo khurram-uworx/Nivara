@@ -63,6 +63,66 @@ internal class TensorStorage<T> : IColumnStorage<T>
 **Problem**: Vectorized operations not available on all platforms
 **Solution**: Implement fallback scalar operations and runtime detection
 
+### Issue: ReadOnlyMemory<T>? Null Detection
+**Problem**: Empty ReadOnlyMemory<T> still has HasValue = true, causing incorrect null detection
+**Solution**: Check both HasValue AND Length > 0 for proper null detection
+```csharp
+// WRONG - empty ReadOnlyMemory still has HasValue = true
+public bool HasNulls => _nullMask.HasValue;
+
+// CORRECT - check both HasValue and Length
+public bool HasNulls => _nullMask.HasValue && _nullMask.Value.Length > 0;
+```
+
+### Issue: Slicing Empty Null Masks
+**Problem**: Attempting to slice an empty ReadOnlyMemory throws ArgumentOutOfRangeException
+**Solution**: Check length before slicing null masks
+```csharp
+// WRONG - will fail if null mask is empty
+if (_nullMask.HasValue)
+{
+    slicedNullMask = _nullMask.Value.Slice(start, length);
+}
+
+// CORRECT - check length before slicing
+if (_nullMask.HasValue && _nullMask.Value.Length > 0)
+{
+    slicedNullMask = _nullMask.Value.Slice(start, length);
+}
+```
+
+### Issue: Internal Class Testing
+**Problem**: Cannot test internal classes from test projects
+**Solution**: Add InternalsVisibleTo attribute to main project
+```xml
+<ItemGroup>
+  <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+    <_Parameter1>Nivara.Tests</_Parameter1>
+  </AssemblyAttribute>
+</ItemGroup>
+```
+
+### Issue: TestCase Attributes with Null Arrays
+**Problem**: Cannot use null values in TestCase attribute arrays
+**Solution**: Convert to regular Test methods with inline test data
+```csharp
+// WRONG - compiler error with null in array
+[TestCase(new string[] { "a", null, "c" })]
+
+// CORRECT - use regular test with inline data
+[Test]
+public void TestMethod()
+{
+    var testCases = new[]
+    {
+        new string[] { "a", null!, "c" }
+    };
+    // ... test logic
+}
+```
+
+## Testing Patterns
+
 ## Testing Patterns
 
 ### Unit Testing
@@ -73,6 +133,27 @@ internal class TensorStorage<T> : IColumnStorage<T>
 - Focus on specific edge cases and integration points
 - Test error conditions and boundary values
 - Validate diagnostic information and performance characteristics
+
+### Property-Based Testing with NUnit
+- Use parameterized tests with TestCase attributes for simple scenarios
+- Use regular Test methods with inline test data for complex scenarios (especially with nulls)
+- Test universal behaviors across multiple input scenarios
+- Focus on core functional logic and important edge cases
+- Avoid over-testing - property-like coverage through multiple test cases
+
+### Debugging Complex Issues
+- Use reflection to inspect internal state when debugging test failures
+- Create targeted debug tests to isolate specific issues
+- Check both public API behavior and internal field values
+- Use Console.WriteLine for debugging test execution flow
+- Remove debug tests after issues are resolved
+
+### Test Data Generation
+- Use intelligent test case selection covering realistic data patterns
+- Handle null patterns carefully - avoid TestCase attributes with null arrays
+- Create varied null distributions for null handling tests
+- Test with different data types (vectorizable vs non-vectorizable)
+- Include edge cases: empty arrays, single elements, boundary values
 
 ### Test Organization
 ```csharp
@@ -140,6 +221,11 @@ public class NivaraColumnTests
 5. **Inconsistent error handling**: Use appropriate exception types
 6. **Missing bounds checking**: Validate indices and ranges
 7. **Forgetting generic constraints**: Use appropriate type constraints
+8. **ReadOnlyMemory null detection**: Check both HasValue AND Length > 0
+9. **Slicing empty collections**: Always check length before slicing
+10. **TestCase with nulls**: Use regular Test methods for null array scenarios
+11. **Testing internal classes**: Add InternalsVisibleTo for test access
+12. **Debugging without cleanup**: Remove debug tests after resolving issues
 
 ## Future Considerations
 

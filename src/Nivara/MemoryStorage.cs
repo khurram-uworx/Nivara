@@ -78,7 +78,7 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     public bool IsVectorizable => false;
     
     /// <inheritdoc />
-    public bool HasNulls => _nullMask.HasValue;
+    public bool HasNulls => _nullMask.HasValue && _nullMask.Value.Length > 0;
     
     /// <inheritdoc />
     public ReadOnlySpan<bool> NullMask
@@ -126,7 +126,7 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
         
         // Create sliced null mask if it exists
         ReadOnlyMemory<bool>? slicedNullMask = null;
-        if (_nullMask.HasValue)
+        if (_nullMask.HasValue && _nullMask.Value.Length > 0)
         {
             slicedNullMask = _nullMask.Value.Slice(start, length);
         }
