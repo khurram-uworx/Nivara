@@ -20,6 +20,10 @@ This document captures lessons learned, architectural decisions, and non-obvious
 **Decision**: All comparisons return `NivaraColumn<bool>` with null propagation
 **Rationale**: Null compared to anything yields null. Consistent with SQL semantics and prevents unexpected boolean results.
 
+### Series Indexing Strategy
+**Decision**: NivaraSeries<T> has separate indexers for `this[int position]` and `this[object label]`
+**Rationale**: Provides both position-based and label-based access. Integer literals get routed to position indexer, while boxed integers and other objects go to label indexer.
+
 ## Critical Implementation Gotchas
 
 ### ReadOnlyMemory<T>? Null Detection
@@ -70,6 +74,21 @@ public static void Method<T>(T? value) { }
 
 // CORRECT - use runtime type checking
 public static void Method(Array nullableValues) { /* runtime type checking */ }
+```
+
+### Series Indexer Ambiguity
+**Problem**: Integer literals can be ambiguous between position and label access in series
+**Solution**: Use explicit casting or GetByLabel method for clarity
+```csharp
+// AMBIGUOUS - could be position 42 or label 42
+var value = series[42];
+
+// CLEAR - explicitly position-based access
+var value = series[42]; // int literal goes to position indexer
+
+// CLEAR - explicitly label-based access  
+var value = series[(object)42]; // boxed int goes to label indexer
+var value = series.GetByLabel(42); // explicit method call
 ```
 
 ### MemoryMarshal with Unconstrained Generics
@@ -129,6 +148,17 @@ var result = method.Invoke(null, new object[] { spanValue });
 
 // CORRECT - convert to array first
 var result = method.Invoke(null, new object[] { spanValue.ToArray() });
+```
+
+### ReadOnlySpan<T>? Nullable Issues
+**Problem**: Cannot make ReadOnlySpan<T> nullable (CS9244)
+**Solution**: Use array parameters instead of nullable spans
+```csharp
+// WRONG - compiler error CS9244
+public static void Method(ReadOnlySpan<T>? values) { }
+
+// CORRECT - use nullable array parameter
+public static void Method(T[]? values) { }
 ```
 
 ## Type System Discoveries

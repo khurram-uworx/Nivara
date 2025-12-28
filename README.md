@@ -33,9 +33,15 @@ var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
 var floatColumn = NivaraColumn<float>.Create(new[] { 1.5f, 2.5f, 3.5f });
 var stringColumn = NivaraColumn<string>.Create(new[] { "hello", "world", "test" });
 
+// Create series with labels
+var labeledSeries = NivaraSeries<int>.Create(
+    new[] { 100, 200, 300 },
+    new[] { "first", "second", "third" });
+
 // Access elements
-Console.WriteLine(intColumn[0]);     // 1
-Console.WriteLine(intColumn.Length); // 5
+Console.WriteLine(intColumn[0]);         // 1
+Console.WriteLine(intColumn.Length);     // 5
+Console.WriteLine(labeledSeries["first"]); // 100
 
 // Arithmetic operations (vectorizable types only)
 var doubled = intColumn * 2;                    // Scalar multiplication
@@ -68,6 +74,14 @@ Console.WriteLine(stringWithNulls.IsNull(1));   // True
 - Length property: `column.Length`
 - Null checking: `column.IsNull(index)`, `column.HasNulls`
 - Slicing: `column.Slice(start, length)`
+
+#### Series Operations
+- Position-based access: `series[position]`
+- Label-based access: `series[label]` or `series.GetByLabel(label)`
+- Safe label access: `series.TryGetByLabel(label, out value)`
+- Label checking: `series.ContainsLabel(label)`
+- Index inspection: `series.GetLabel(position)`
+- Slicing with index preservation: `series.Slice(start, length)`
 
 ## Architecture
 
@@ -191,6 +205,59 @@ var matches = names.Equals(searchName);  // [false, true, null, false]
 Console.WriteLine(matches.IsNull(2));    // True - null comparison yields null
 ```
 
+### Working with Series (Labeled Data)
+
+```csharp
+// Create series with default integer index
+var prices = NivaraSeries<double>.Create(new[] { 10.50, 25.75, 15.25 });
+
+// Access by position
+Console.WriteLine(prices[0]);    // 10.50
+Console.WriteLine(prices[1]);    // 25.75
+
+// Access by default integer labels
+Console.WriteLine(prices[(object)0]);  // 10.50 (explicit label access)
+
+// Create series with custom string labels
+var namedPrices = NivaraSeries<double>.Create(
+    new[] { 10.50, 25.75, 15.25 },
+    new[] { "apple", "banana", "cherry" });
+
+// Access by label
+Console.WriteLine(namedPrices["apple"]);   // 10.50
+Console.WriteLine(namedPrices["banana"]);  // 25.75
+
+// Check if label exists
+if (namedPrices.ContainsLabel("apple"))
+{
+    Console.WriteLine($"Apple price: {namedPrices["apple"]}");
+}
+
+// Try to get value by label
+if (namedPrices.TryGetByLabel("orange", out var orangePrice))
+{
+    Console.WriteLine($"Orange price: {orangePrice}");
+}
+else
+{
+    Console.WriteLine("Orange not found");
+}
+
+// Create series with mixed object labels
+var mixedSeries = NivaraSeries<string>.Create(
+    new[] { "value1", "value2", "value3" },
+    new object[] { 1, "key", DateTime.Today });
+
+Console.WriteLine(mixedSeries.GetByLabel(1));           // "value1"
+Console.WriteLine(mixedSeries.GetByLabel("key"));       // "value2"
+Console.WriteLine(mixedSeries.GetByLabel(DateTime.Today)); // "value3"
+
+// Slice series (preserves index-value relationships)
+var sliced = namedPrices.Slice(1, 2);  // Gets "banana" and "cherry"
+Console.WriteLine(sliced["banana"]);   // 25.75
+Console.WriteLine(sliced["cherry"]);   // 15.25
+```
+
 ### Slicing and Views
 
 ```csharp
@@ -287,10 +354,10 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Basic arithmetic operations
 - ✅ Comparison operations (equals, greater than, less than)
 - ✅ Null handling for reference types
+- ✅ Series with indexing (`NivaraSeries<T>`)
 - ✅ Comprehensive test suite
 
 ### Upcoming Features
-- 🔄 Series with indexing (`NivaraSeries<T>`)
 - 🔄 Advanced null handling
 - 🔄 Performance optimizations
 - 📋 DataFrame operations
