@@ -57,6 +57,12 @@ Console.WriteLine(stringWithNulls.IsNull(1));   // True
 - Element-wise addition: `left + right` or `left.Add(right)`
 - Proper null propagation in all operations
 
+#### Comparison Operations
+- Scalar comparisons: `column.Equals(value)`, `column.GreaterThan(value)`, `column.LessThan(value)`
+- Element-wise comparisons: `column.Equals(other)`, `column.GreaterThan(other)`, `column.LessThan(other)`
+- Returns boolean columns with proper null handling
+- Supports all comparable types (numeric, string, DateTime, etc.)
+
 #### Column Operations
 - Indexer access: `column[index]`
 - Length property: `column.Length`
@@ -123,6 +129,37 @@ var discountedPrices = prices * 0.9;
 var combined = prices + discountedPrices;
 ```
 
+### Working with Comparisons
+
+```csharp
+// Create numeric data
+var scores = NivaraColumn<int>.Create(new[] { 85, 92, 78, 95, 88 });
+var threshold = 90;
+
+// Scalar comparisons
+var highScores = scores.GreaterThan(threshold);     // [false, true, false, true, false]
+var exactMatches = scores.Equals(92);               // [false, true, false, false, false]
+var belowThreshold = scores.LessThan(threshold);    // [true, false, true, false, true]
+
+// Element-wise comparisons
+var otherScores = NivaraColumn<int>.Create(new[] { 80, 95, 75, 90, 85 });
+var comparisons = scores.GreaterThan(otherScores);  // [true, false, true, true, true]
+
+// String comparisons
+var names = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie" });
+var startsWithB = names.GreaterThan("B");           // Lexicographic comparison
+var exactName = names.Equals("Bob");                // [false, true, false]
+
+// Working with comparison results
+for (int i = 0; i < highScores.Length; i++)
+{
+    if (highScores[i])
+    {
+        Console.WriteLine($"Score {scores[i]} is above threshold");
+    }
+}
+```
+
 ### Working with String Data
 
 ```csharp
@@ -145,6 +182,13 @@ if (names.HasNulls)
         }
     }
 }
+
+// String comparisons with null handling
+var searchName = "Bob";
+var matches = names.Equals(searchName);  // [false, true, null, false]
+
+// Null comparisons return null (represented as false with null mask)
+Console.WriteLine(matches.IsNull(2));    // True - null comparison yields null
 ```
 
 ### Slicing and Views
@@ -177,6 +221,15 @@ catch (InvalidOperationException ex)
     // "Arithmetic operations are not supported for type String. 
     //  Only numeric types support arithmetic operations."
 }
+
+// Comparison operations work on all types
+var stringComparison = stringColumn.Equals("2");        // Works fine
+var stringOrdering = stringColumn.GreaterThan("2");     // Works fine (lexicographic)
+
+// But some types don't support ordering comparisons
+var guidColumn = NivaraColumn<Guid>.Create(new[] { Guid.NewGuid() });
+var guidEquals = guidColumn.Equals(Guid.Empty);         // Works fine
+var guidOrdering = guidColumn.GreaterThan(Guid.Empty);  // Works (Guid implements IComparable)
 ```
 
 ## Building from Source
@@ -232,12 +285,12 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Core column types (`NivaraColumn<T>`)
 - ✅ Automatic storage selection
 - ✅ Basic arithmetic operations
+- ✅ Comparison operations (equals, greater than, less than)
 - ✅ Null handling for reference types
 - ✅ Comprehensive test suite
 
 ### Upcoming Features
 - 🔄 Series with indexing (`NivaraSeries<T>`)
-- 🔄 Comparison operations
 - 🔄 Advanced null handling
 - 🔄 Performance optimizations
 - 📋 DataFrame operations

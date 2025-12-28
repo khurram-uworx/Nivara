@@ -567,6 +567,324 @@ public class NivaraColumnTests
 
     #endregion
 
+    #region Property 9: Comprehensive comparison operations
+
+    /// <summary>
+    /// Property 9: Comprehensive comparison operations
+    /// For any NivaraColumn and any comparable value, all comparison operations (equals, greater than, less than, etc.) 
+    /// should return boolean columns with correct comparison results, with null comparisons yielding null.
+    /// **Validates: Requirements 3.1, 3.2, 3.3, 3.4**
+    /// </summary>
+    [Test]
+    public void ComparisonOperations_ShouldReturnCorrectBooleanResults()
+    {
+        // Test scalar equality comparison with int column
+        var intValues = new[] { 1, 2, 3, 4, 5 };
+        var intColumn = NivaraColumn<int>.Create(intValues);
+        var targetValue = 3;
+        
+        var equalsResult = intColumn.Equals(targetValue);
+        
+        Assert.That(equalsResult, Is.Not.Null, "Equals result should not be null");
+        Assert.That(equalsResult.Length, Is.EqualTo(intValues.Length), "Equals result should preserve length");
+        
+        for (int i = 0; i < intValues.Length; i++)
+        {
+            bool expected = intValues[i] == targetValue;
+            Assert.That(equalsResult[i], Is.EqualTo(expected), 
+                $"Equals comparison at index {i}: {intValues[i]} == {targetValue} should be {expected}");
+        }
+
+        // Test element-wise equality comparison
+        var otherIntValues = new[] { 1, 0, 3, 0, 5 };
+        var otherIntColumn = NivaraColumn<int>.Create(otherIntValues);
+        
+        var elementWiseEquals = intColumn.Equals(otherIntColumn);
+        
+        Assert.That(elementWiseEquals, Is.Not.Null, "Element-wise equals result should not be null");
+        Assert.That(elementWiseEquals.Length, Is.EqualTo(intValues.Length), "Element-wise equals result should preserve length");
+        
+        for (int i = 0; i < intValues.Length; i++)
+        {
+            bool expected = intValues[i] == otherIntValues[i];
+            Assert.That(elementWiseEquals[i], Is.EqualTo(expected), 
+                $"Element-wise equals at index {i}: {intValues[i]} == {otherIntValues[i]} should be {expected}");
+        }
+
+        // Test greater than comparison
+        var greaterThanResult = intColumn.GreaterThan(targetValue);
+        
+        Assert.That(greaterThanResult, Is.Not.Null, "GreaterThan result should not be null");
+        Assert.That(greaterThanResult.Length, Is.EqualTo(intValues.Length), "GreaterThan result should preserve length");
+        
+        for (int i = 0; i < intValues.Length; i++)
+        {
+            bool expected = intValues[i] > targetValue;
+            Assert.That(greaterThanResult[i], Is.EqualTo(expected), 
+                $"GreaterThan comparison at index {i}: {intValues[i]} > {targetValue} should be {expected}");
+        }
+
+        // Test element-wise greater than comparison
+        var elementWiseGreaterThan = intColumn.GreaterThan(otherIntColumn);
+        
+        Assert.That(elementWiseGreaterThan, Is.Not.Null, "Element-wise GreaterThan result should not be null");
+        Assert.That(elementWiseGreaterThan.Length, Is.EqualTo(intValues.Length), "Element-wise GreaterThan result should preserve length");
+        
+        for (int i = 0; i < intValues.Length; i++)
+        {
+            bool expected = intValues[i] > otherIntValues[i];
+            Assert.That(elementWiseGreaterThan[i], Is.EqualTo(expected), 
+                $"Element-wise GreaterThan at index {i}: {intValues[i]} > {otherIntValues[i]} should be {expected}");
+        }
+
+        // Test less than comparison
+        var lessThanResult = intColumn.LessThan(targetValue);
+        
+        Assert.That(lessThanResult, Is.Not.Null, "LessThan result should not be null");
+        Assert.That(lessThanResult.Length, Is.EqualTo(intValues.Length), "LessThan result should preserve length");
+        
+        for (int i = 0; i < intValues.Length; i++)
+        {
+            bool expected = intValues[i] < targetValue;
+            Assert.That(lessThanResult[i], Is.EqualTo(expected), 
+                $"LessThan comparison at index {i}: {intValues[i]} < {targetValue} should be {expected}");
+        }
+
+        // Test element-wise less than comparison
+        var elementWiseLessThan = intColumn.LessThan(otherIntColumn);
+        
+        Assert.That(elementWiseLessThan, Is.Not.Null, "Element-wise LessThan result should not be null");
+        Assert.That(elementWiseLessThan.Length, Is.EqualTo(intValues.Length), "Element-wise LessThan result should preserve length");
+        
+        for (int i = 0; i < intValues.Length; i++)
+        {
+            bool expected = intValues[i] < otherIntValues[i];
+            Assert.That(elementWiseLessThan[i], Is.EqualTo(expected), 
+                $"Element-wise LessThan at index {i}: {intValues[i]} < {otherIntValues[i]} should be {expected}");
+        }
+
+        // Test with float values
+        var floatValues = new[] { 1.5f, 2.5f, 3.5f, 4.5f };
+        var floatColumn = NivaraColumn<float>.Create(floatValues);
+        var floatTarget = 3.0f;
+        
+        var floatEquals = floatColumn.Equals(floatTarget);
+        var floatGreater = floatColumn.GreaterThan(floatTarget);
+        var floatLess = floatColumn.LessThan(floatTarget);
+        
+        for (int i = 0; i < floatValues.Length; i++)
+        {
+            Assert.That(floatEquals[i], Is.EqualTo(floatValues[i] == floatTarget), 
+                $"Float equals at index {i}");
+            Assert.That(floatGreater[i], Is.EqualTo(floatValues[i] > floatTarget), 
+                $"Float greater than at index {i}");
+            Assert.That(floatLess[i], Is.EqualTo(floatValues[i] < floatTarget), 
+                $"Float less than at index {i}");
+        }
+
+        // Test with string values (comparable type)
+        var stringValues = new[] { "apple", "banana", "cherry", "date" };
+        var stringColumn = NivaraColumn<string>.Create(stringValues);
+        var stringTarget = "cherry";
+        
+        var stringEquals = stringColumn.Equals(stringTarget);
+        var stringGreater = stringColumn.GreaterThan(stringTarget);
+        var stringLess = stringColumn.LessThan(stringTarget);
+        
+        for (int i = 0; i < stringValues.Length; i++)
+        {
+            Assert.That(stringEquals[i], Is.EqualTo(stringValues[i] == stringTarget), 
+                $"String equals at index {i}");
+            Assert.That(stringGreater[i], Is.EqualTo(string.Compare(stringValues[i], stringTarget) > 0), 
+                $"String greater than at index {i}");
+            Assert.That(stringLess[i], Is.EqualTo(string.Compare(stringValues[i], stringTarget) < 0), 
+                $"String less than at index {i}");
+        }
+
+        // Test with DateTime values (comparable type)
+        var dateValues = new[] { 
+            new DateTime(2023, 1, 1), 
+            new DateTime(2023, 6, 15), 
+            new DateTime(2023, 12, 31) 
+        };
+        var dateColumn = NivaraColumn<DateTime>.Create(dateValues);
+        var dateTarget = new DateTime(2023, 6, 15);
+        
+        var dateEquals = dateColumn.Equals(dateTarget);
+        var dateGreater = dateColumn.GreaterThan(dateTarget);
+        var dateLess = dateColumn.LessThan(dateTarget);
+        
+        for (int i = 0; i < dateValues.Length; i++)
+        {
+            Assert.That(dateEquals[i], Is.EqualTo(dateValues[i] == dateTarget), 
+                $"DateTime equals at index {i}");
+            Assert.That(dateGreater[i], Is.EqualTo(dateValues[i] > dateTarget), 
+                $"DateTime greater than at index {i}");
+            Assert.That(dateLess[i], Is.EqualTo(dateValues[i] < dateTarget), 
+                $"DateTime less than at index {i}");
+        }
+    }
+
+    /// <summary>
+    /// Test comparison operations with null values to ensure proper null propagation
+    /// **Validates: Requirements 3.3**
+    /// </summary>
+    [Test]
+    public void ComparisonOperations_WithNulls_ShouldPropagateNullsCorrectly()
+    {
+        // Test with string column containing nulls
+        var stringValuesWithNulls = new string?[] { "hello", null, "world", null, "test" };
+        var stringArrayWithNulls = new string[stringValuesWithNulls.Length];
+        for (int i = 0; i < stringValuesWithNulls.Length; i++)
+        {
+            stringArrayWithNulls[i] = stringValuesWithNulls[i]!; // Suppress null warning for test
+        }
+        
+        var stringColumnWithNulls = NivaraColumn<string>.CreateForReferenceType(stringArrayWithNulls);
+        var targetValue = "world";
+        
+        // Test scalar equality with nulls
+        var equalsResult = stringColumnWithNulls.Equals(targetValue);
+        
+        Assert.That(equalsResult, Is.Not.Null, "Equals result with nulls should not be null");
+        Assert.That(equalsResult.Length, Is.EqualTo(stringValuesWithNulls.Length), "Result should preserve length");
+        
+        // Check that null positions return false (null compared to anything is false)
+        Assert.That(equalsResult[0], Is.EqualTo(stringValuesWithNulls[0] == targetValue), "Non-null comparison should work");
+        Assert.That(equalsResult[1], Is.False, "Null comparison should return false");
+        Assert.That(equalsResult[2], Is.EqualTo(stringValuesWithNulls[2] == targetValue), "Non-null comparison should work");
+        Assert.That(equalsResult[3], Is.False, "Null comparison should return false");
+        Assert.That(equalsResult[4], Is.EqualTo(stringValuesWithNulls[4] == targetValue), "Non-null comparison should work");
+        
+        // Test that the result has null mask in the same positions
+        Assert.That(equalsResult.HasNulls, Is.True, "Result should have nulls where original had nulls");
+        Assert.That(equalsResult.IsNull(0), Is.False, "Non-null position should not be null in result");
+        Assert.That(equalsResult.IsNull(1), Is.True, "Null position should be null in result");
+        Assert.That(equalsResult.IsNull(2), Is.False, "Non-null position should not be null in result");
+        Assert.That(equalsResult.IsNull(3), Is.True, "Null position should be null in result");
+        Assert.That(equalsResult.IsNull(4), Is.False, "Non-null position should not be null in result");
+
+        // Test greater than with nulls
+        var greaterThanResult = stringColumnWithNulls.GreaterThan(targetValue);
+        
+        Assert.That(greaterThanResult.HasNulls, Is.True, "GreaterThan result should have nulls");
+        Assert.That(greaterThanResult.IsNull(1), Is.True, "Null position should remain null in GreaterThan result");
+        Assert.That(greaterThanResult.IsNull(3), Is.True, "Null position should remain null in GreaterThan result");
+
+        // Test less than with nulls
+        var lessThanResult = stringColumnWithNulls.LessThan(targetValue);
+        
+        Assert.That(lessThanResult.HasNulls, Is.True, "LessThan result should have nulls");
+        Assert.That(lessThanResult.IsNull(1), Is.True, "Null position should remain null in LessThan result");
+        Assert.That(lessThanResult.IsNull(3), Is.True, "Null position should remain null in LessThan result");
+
+        // Test element-wise comparison with nulls
+        var otherStringValues = new string?[] { "hello", "test", null, "world", null };
+        var otherStringArray = new string[otherStringValues.Length];
+        for (int i = 0; i < otherStringValues.Length; i++)
+        {
+            otherStringArray[i] = otherStringValues[i]!; // Suppress null warning for test
+        }
+        
+        var otherStringColumn = NivaraColumn<string>.CreateForReferenceType(otherStringArray);
+        
+        var elementWiseEquals = stringColumnWithNulls.Equals(otherStringColumn);
+        
+        Assert.That(elementWiseEquals.HasNulls, Is.True, "Element-wise equals should have nulls");
+        
+        // Check null propagation: if either side is null, result should be null
+        Assert.That(elementWiseEquals.IsNull(0), Is.False, "Both non-null should not be null in result");
+        Assert.That(elementWiseEquals.IsNull(1), Is.True, "Left null should propagate to result");
+        Assert.That(elementWiseEquals.IsNull(2), Is.True, "Right null should propagate to result");
+        Assert.That(elementWiseEquals.IsNull(3), Is.True, "Left null should propagate to result");
+        Assert.That(elementWiseEquals.IsNull(4), Is.True, "Both null should propagate to result");
+        
+        // Check actual comparison values for non-null positions
+        Assert.That(elementWiseEquals[0], Is.EqualTo(stringValuesWithNulls[0] == otherStringValues[0]), 
+            "Non-null comparison should work correctly");
+    }
+
+    /// <summary>
+    /// Test comparison operations error handling
+    /// </summary>
+    [Test]
+    public void ComparisonOperations_ErrorHandling_ShouldThrowAppropriateExceptions()
+    {
+        var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var shortColumn = NivaraColumn<int>.Create(new[] { 1, 2 });
+        
+        // Test mismatched lengths
+        Assert.Throws<ArgumentException>(() => intColumn.Equals(shortColumn), 
+            "Equals with mismatched lengths should throw ArgumentException");
+        Assert.Throws<ArgumentException>(() => intColumn.GreaterThan(shortColumn), 
+            "GreaterThan with mismatched lengths should throw ArgumentException");
+        Assert.Throws<ArgumentException>(() => intColumn.LessThan(shortColumn), 
+            "LessThan with mismatched lengths should throw ArgumentException");
+        
+        // Test null arguments
+        Assert.Throws<ArgumentNullException>(() => intColumn.Equals((NivaraColumn<int>)null!), 
+            "Equals with null column should throw ArgumentNullException");
+        Assert.Throws<ArgumentNullException>(() => intColumn.GreaterThan((NivaraColumn<int>)null!), 
+            "GreaterThan with null column should throw ArgumentNullException");
+        Assert.Throws<ArgumentNullException>(() => intColumn.LessThan((NivaraColumn<int>)null!), 
+            "LessThan with null column should throw ArgumentNullException");
+        
+        // Test disposed columns
+        var disposedColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        disposedColumn.Dispose();
+        
+        Assert.Throws<ObjectDisposedException>(() => disposedColumn.Equals(5), 
+            "Equals on disposed column should throw ObjectDisposedException");
+        Assert.Throws<ObjectDisposedException>(() => disposedColumn.GreaterThan(5), 
+            "GreaterThan on disposed column should throw ObjectDisposedException");
+        Assert.Throws<ObjectDisposedException>(() => disposedColumn.LessThan(5), 
+            "LessThan on disposed column should throw ObjectDisposedException");
+        
+        // Test with disposed other column
+        var anotherColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var otherDisposedColumn = NivaraColumn<int>.Create(new[] { 4, 5, 6 });
+        otherDisposedColumn.Dispose();
+        
+        Assert.Throws<ObjectDisposedException>(() => anotherColumn.Equals(otherDisposedColumn), 
+            "Equals with disposed other column should throw ObjectDisposedException");
+        Assert.Throws<ObjectDisposedException>(() => anotherColumn.GreaterThan(otherDisposedColumn), 
+            "GreaterThan with disposed other column should throw ObjectDisposedException");
+        Assert.Throws<ObjectDisposedException>(() => anotherColumn.LessThan(otherDisposedColumn), 
+            "LessThan with disposed other column should throw ObjectDisposedException");
+    }
+
+    /// <summary>
+    /// Test comparison operations on non-comparable types
+    /// </summary>
+    [Test]
+    public void ComparisonOperations_OnNonComparableTypes_ShouldThrowForOrderComparisons()
+    {
+        // Create a column of a type that supports equality but not ordering (like Guid)
+        var guidColumn = NivaraColumn<Guid>.Create(new[] { Guid.NewGuid(), Guid.NewGuid() });
+        var targetGuid = Guid.NewGuid();
+        
+        // Equals should work for all types
+        Assert.DoesNotThrow(() => guidColumn.Equals(targetGuid), 
+            "Equals should work for all types including Guid");
+        
+        // But ordering comparisons should work for Guid since it implements IComparable
+        Assert.DoesNotThrow(() => guidColumn.GreaterThan(targetGuid), 
+            "GreaterThan should work for Guid since it implements IComparable");
+        Assert.DoesNotThrow(() => guidColumn.LessThan(targetGuid), 
+            "LessThan should work for Guid since it implements IComparable");
+        
+        // Test that the results are boolean columns
+        var equalsResult = guidColumn.Equals(targetGuid);
+        var greaterResult = guidColumn.GreaterThan(targetGuid);
+        var lessResult = guidColumn.LessThan(targetGuid);
+        
+        Assert.That(equalsResult.Length, Is.EqualTo(guidColumn.Length), "Equals result should preserve length");
+        Assert.That(greaterResult.Length, Is.EqualTo(guidColumn.Length), "GreaterThan result should preserve length");
+        Assert.That(lessResult.Length, Is.EqualTo(guidColumn.Length), "LessThan result should preserve length");
+    }
+
+    #endregion
+
     #region Additional Core Functionality Tests
 
     /// <summary>
