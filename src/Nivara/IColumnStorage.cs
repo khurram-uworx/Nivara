@@ -11,23 +11,23 @@ internal interface IColumnStorage<T> : IDisposable
     /// Gets the number of elements in the storage
     /// </summary>
     int Length { get; }
-    
+
     /// <summary>
     /// Gets a value indicating whether this storage supports vectorized operations
     /// </summary>
     bool IsVectorizable { get; }
-    
+
     /// <summary>
     /// Gets a value indicating whether this storage contains any null values
     /// </summary>
     bool HasNulls { get; }
-    
+
     /// <summary>
     /// Gets the null mask indicating which positions contain null values.
     /// True indicates null, false indicates non-null.
     /// </summary>
     ReadOnlySpan<bool> NullMask { get; }
-    
+
     /// <summary>
     /// Gets the element at the specified index
     /// </summary>
@@ -35,7 +35,7 @@ internal interface IColumnStorage<T> : IDisposable
     /// <returns>The element at the specified index</returns>
     /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
     T this[int index] { get; }
-    
+
     /// <summary>
     /// Creates a slice of this storage containing elements from the specified range
     /// </summary>

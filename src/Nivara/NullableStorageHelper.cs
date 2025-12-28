@@ -17,11 +17,11 @@ internal static class NullableStorageHelper
         {
             return new TensorStorage<T>(Array.Empty<T>());
         }
-        
+
         var dataArray = new T[values.Length];
         var nullMaskArray = new bool[values.Length];
         bool hasNulls = false;
-        
+
         for (int i = 0; i < values.Length; i++)
         {
             var value = values[i];
@@ -37,12 +37,12 @@ internal static class NullableStorageHelper
                 hasNulls = true;
             }
         }
-        
+
         var nullMask = hasNulls ? nullMaskArray : null;
-        
+
         return new TensorStorage<T>(dataArray, nullMask);
     }
-    
+
     /// <summary>
     /// Creates memory storage for nullable value types
     /// </summary>
@@ -55,11 +55,11 @@ internal static class NullableStorageHelper
         {
             return new MemoryStorage<T>(ReadOnlySpan<T>.Empty);
         }
-        
+
         var dataArray = new T[values.Length];
         var nullMaskArray = new bool[values.Length];
         bool hasNulls = false;
-        
+
         for (int i = 0; i < values.Length; i++)
         {
             var value = values[i];
@@ -75,10 +75,10 @@ internal static class NullableStorageHelper
                 hasNulls = true;
             }
         }
-        
+
         var data = new ReadOnlyMemory<T>(dataArray);
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : null;
-        
+
         return new MemoryStorage<T>(data, nullMask);
     }
 }

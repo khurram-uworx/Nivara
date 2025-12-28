@@ -10,7 +10,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     private readonly T[] _data;
     private readonly bool[]? _nullMask;
     private bool _disposed;
-    
+
     /// <summary>
     /// Initializes a new instance of TensorStorage with the specified values
     /// </summary>
@@ -28,7 +28,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             _nullMask = null;
         }
     }
-    
+
     /// <summary>
     /// Initializes a new instance of TensorStorage with existing data and null mask
     /// </summary>
@@ -39,16 +39,16 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
         _data = data ?? throw new ArgumentNullException(nameof(data));
         _nullMask = nullMask;
     }
-    
+
     /// <inheritdoc />
     public int Length => _data.Length;
-    
+
     /// <inheritdoc />
     public bool IsVectorizable => true;
-    
+
     /// <inheritdoc />
     public bool HasNulls => _nullMask != null;
-    
+
     /// <inheritdoc />
     public ReadOnlySpan<bool> NullMask
     {
@@ -58,42 +58,42 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             return _nullMask != null ? _nullMask.AsSpan() : ReadOnlySpan<bool>.Empty;
         }
     }
-    
+
     /// <inheritdoc />
     public T this[int index]
     {
         get
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            
+
             if (index < 0 || index >= Length)
                 throw new IndexOutOfRangeException($"Index {index} is out of range for storage of length {Length}");
-            
+
             return _data[index];
         }
     }
-    
+
     /// <inheritdoc />
     public IColumnStorage<T> Slice(int start, int length)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        
+
         if (start < 0)
             throw new ArgumentOutOfRangeException(nameof(start), "Start index cannot be negative");
         if (length < 0)
             throw new ArgumentOutOfRangeException(nameof(length), "Length cannot be negative");
         if (start + length > Length)
             throw new ArgumentOutOfRangeException(nameof(length), "Start + length exceeds storage bounds");
-        
+
         if (length == 0)
         {
             return new TensorStorage<T>(Array.Empty<T>());
         }
-        
+
         // Create sliced data array
         var slicedData = new T[length];
         Array.Copy(_data, start, slicedData, 0, length);
-        
+
         // Create sliced null mask if it exists
         bool[]? slicedNullMask = null;
         if (_nullMask != null)
@@ -101,10 +101,10 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             slicedNullMask = new bool[length];
             Array.Copy(_nullMask, start, slicedNullMask, 0, length);
         }
-        
+
         return new TensorStorage<T>(slicedData, slicedNullMask);
     }
-    
+
     /// <summary>
     /// Gets the underlying data array for vectorized operations
     /// </summary>
@@ -116,7 +116,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             return _data;
         }
     }
-    
+
     /// <summary>
     /// Gets the underlying null mask array for vectorized null operations
     /// </summary>
@@ -128,7 +128,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             return _nullMask;
         }
     }
-    
+
     /// <inheritdoc />
     public void Dispose()
     {

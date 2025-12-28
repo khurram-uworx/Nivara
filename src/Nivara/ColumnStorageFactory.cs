@@ -1,5 +1,3 @@
-using System.Numerics;
-
 namespace Nivara;
 
 /// <summary>
@@ -20,7 +18,7 @@ internal static class ColumnStorageFactory
         // when we can properly handle the generic constraints
         return new MemoryStorage<T>(values, detectNulls: !typeof(T).IsValueType);
     }
-    
+
     /// <summary>
     /// Creates storage for nullable values, automatically selecting between tensor and memory storage
     /// </summary>
@@ -31,7 +29,7 @@ internal static class ColumnStorageFactory
     {
         return NullableStorageHelper.CreateMemoryStorage(values);
     }
-    
+
     /// <summary>
     /// Determines if a type supports vectorized operations
     /// </summary>
@@ -40,7 +38,7 @@ internal static class ColumnStorageFactory
     public static bool IsVectorizable<T>()
     {
         var type = typeof(T);
-        
+
         // Check for specific vectorizable numeric types
         return type == typeof(int) ||
                type == typeof(float) ||

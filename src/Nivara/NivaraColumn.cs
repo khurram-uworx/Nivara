@@ -1,6 +1,4 @@
-using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace Nivara;
 
@@ -11,8 +9,8 @@ namespace Nivara;
 /// <typeparam name="T">The type of elements in the column</typeparam>
 public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
 {
-    private readonly IColumnStorage<T> _storage;
-    private bool _disposed;
+    private readonly IColumnStorage<T> storage;
+    private bool disposed;
 
     /// <summary>
     /// Initializes a new instance of NivaraColumn with the specified storage
@@ -20,7 +18,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <param name="storage">The storage implementation to use</param>
     internal NivaraColumn(IColumnStorage<T> storage)
     {
-        _storage = storage ?? throw new ArgumentNullException(nameof(storage));
+        storage = storage ?? throw new ArgumentNullException(nameof(storage));
     }
 
     /// <inheritdoc />
@@ -28,8 +26,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _storage.Length;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return storage.Length;
         }
     }
 
@@ -38,8 +36,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _storage.HasNulls;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return storage.HasNulls;
         }
     }
 
@@ -48,20 +46,20 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _storage[index];
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return storage[index];
         }
     }
 
     /// <inheritdoc />
     public bool IsNull(int index)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         if (index < 0 || index >= Length)
             throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}");
 
-        var nullMask = _storage.NullMask;
+        var nullMask = storage.NullMask;
         return !nullMask.IsEmpty && nullMask[index];
     }
 
@@ -72,8 +70,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _storage.IsVectorizable;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return storage.IsVectorizable;
         }
     }
 
@@ -171,9 +169,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
     public NivaraColumn<T> Slice(int start, int length)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
-        var slicedStorage = _storage.Slice(start, length);
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var slicedStorage = storage.Slice(start, length);
         return new NivaraColumn<T>(slicedStorage);
     }
 
@@ -184,8 +182,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _storage;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return storage;
         }
     }
 
@@ -200,14 +198,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
     public NivaraColumn<T> Multiply(T scalar)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         // Runtime check for numeric types
         if (!IsNumericType(typeof(T)))
         {
             throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
         }
-        
+
         if (!ColumnStorageFactory.IsVectorizable<T>())
         {
             throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
@@ -227,23 +225,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
     public NivaraColumn<T> Add(NivaraColumn<T> other)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         if (other == null)
             throw new ArgumentNullException(nameof(other));
-        
-        if (other._disposed)
+
+        if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
-        
+
         if (Length != other.Length)
             throw new ArgumentException($"Cannot add columns of different lengths: {Length} vs {other.Length}");
-        
+
         // Runtime check for numeric types
         if (!IsNumericType(typeof(T)))
         {
             throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
         }
-        
+
         if (!ColumnStorageFactory.IsVectorizable<T>())
         {
             throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
@@ -282,14 +280,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     private NivaraColumn<T> MultiplyVectorized(T scalar)
     {
         // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
-        if (_storage is MemoryStorage<T> memoryStorage)
+        if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new T[data.Length];
-            
+
             // Use our helper method for multiplication
             MultiplyTensorPrimitive(data, scalar, result.AsSpan());
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var nullMask = memoryStorage.NullMaskMemory;
@@ -299,7 +297,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 nullMask.Value.Span.CopyTo(nullMaskArray);
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<T>(result, resultNullMask);
             return new NivaraColumn<T>(resultStorage);
         }
@@ -315,34 +313,34 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     private NivaraColumn<T> AddVectorized(NivaraColumn<T> other)
     {
         // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
-        if (_storage is MemoryStorage<T> leftMemory && other._storage is MemoryStorage<T> rightMemory)
+        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
             var result = new T[leftData.Length];
-            
+
             // Use our helper method for addition
             AddTensorPrimitive(leftData, rightData, result.AsSpan());
-            
+
             // Handle null propagation - null + anything = null
             ReadOnlyMemory<bool>? resultNullMask = null;
             var leftNulls = leftMemory.NullMaskMemory;
             var rightNulls = rightMemory.NullMaskMemory;
-            
+
             if ((leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0))
             {
                 var resultNullMaskArray = new bool[result.Length];
-                
+
                 for (int i = 0; i < result.Length; i++)
                 {
                     bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
                     bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
                     resultNullMaskArray[i] = leftIsNull || rightIsNull;
                 }
-                
+
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<T>(result, resultNullMask);
             return new NivaraColumn<T>(resultStorage);
         }
@@ -388,9 +386,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <returns>A new boolean column with comparison results</returns>
     public NivaraColumn<bool> Equals(T value)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
-        if (_storage.IsVectorizable)
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (storage.IsVectorizable)
         {
             return EqualsVectorized(value);
         }
@@ -410,18 +408,18 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
     public NivaraColumn<bool> Equals(NivaraColumn<T> other)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         if (other == null)
             throw new ArgumentNullException(nameof(other));
-        
-        if (other._disposed)
+
+        if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
-        
+
         if (Length != other.Length)
             throw new ArgumentException($"Cannot compare columns of different lengths: {Length} vs {other.Length}");
-        
-        if (_storage.IsVectorizable && other._storage.IsVectorizable)
+
+        if (storage.IsVectorizable && other.storage.IsVectorizable)
         {
             return EqualsVectorized(other);
         }
@@ -440,14 +438,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
     public NivaraColumn<bool> GreaterThan(T value)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         if (!IsComparableType(typeof(T)))
         {
             throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
         }
-        
-        if (_storage.IsVectorizable)
+
+        if (storage.IsVectorizable)
         {
             return GreaterThanVectorized(value);
         }
@@ -468,23 +466,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
     public NivaraColumn<bool> GreaterThan(NivaraColumn<T> other)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         if (other == null)
             throw new ArgumentNullException(nameof(other));
-        
-        if (other._disposed)
+
+        if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
-        
+
         if (Length != other.Length)
             throw new ArgumentException($"Cannot compare columns of different lengths: {Length} vs {other.Length}");
-        
+
         if (!IsComparableType(typeof(T)))
         {
             throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
         }
-        
-        if (_storage.IsVectorizable && other._storage.IsVectorizable)
+
+        if (storage.IsVectorizable && other.storage.IsVectorizable)
         {
             return GreaterThanVectorized(other);
         }
@@ -503,14 +501,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
     public NivaraColumn<bool> LessThan(T value)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         if (!IsComparableType(typeof(T)))
         {
             throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
         }
-        
-        if (_storage.IsVectorizable)
+
+        if (storage.IsVectorizable)
         {
             return LessThanVectorized(value);
         }
@@ -531,23 +529,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
     public NivaraColumn<bool> LessThan(NivaraColumn<T> other)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
-        
+        ObjectDisposedException.ThrowIf(disposed, this);
+
         if (other == null)
             throw new ArgumentNullException(nameof(other));
-        
-        if (other._disposed)
+
+        if (other.disposed)
             throw new ObjectDisposedException(nameof(other));
-        
+
         if (Length != other.Length)
             throw new ArgumentException($"Cannot compare columns of different lengths: {Length} vs {other.Length}");
-        
+
         if (!IsComparableType(typeof(T)))
         {
             throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
         }
-        
-        if (_storage.IsVectorizable && other._storage.IsVectorizable)
+
+        if (storage.IsVectorizable && other.storage.IsVectorizable)
         {
             return LessThanVectorized(other);
         }
@@ -562,14 +560,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> EqualsVectorized(T scalar)
     {
-        if (_storage is MemoryStorage<T> memoryStorage)
+        if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
-            
+
             // Use our helper method for equality comparison
             EqualsTensorPrimitive(data, scalar, result.AsSpan());
-            
+
             // Handle null propagation - null compared to anything is null (false in boolean result)
             ReadOnlyMemory<bool>? resultNullMask = null;
             var nullMask = memoryStorage.NullMaskMemory;
@@ -578,7 +576,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var nullMaskArray = new bool[data.Length];
                 nullMask.Value.Span.CopyTo(nullMaskArray);
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-                
+
                 // Set result to false where nulls exist (null comparisons yield null/false)
                 for (int i = 0; i < result.Length; i++)
                 {
@@ -586,7 +584,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                         result[i] = false;
                 }
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -606,35 +604,35 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
             var result = new bool[leftData.Length];
-            
+
             // Use our helper method for element-wise equality
             EqualsTensorPrimitive(leftData, rightData, result.AsSpan());
-            
+
             // Handle null propagation - null compared to anything is null (false in boolean result)
             ReadOnlyMemory<bool>? resultNullMask = null;
             var leftNulls = leftMemory.NullMaskMemory;
             var rightNulls = rightMemory.NullMaskMemory;
-            
+
             if ((leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0))
             {
                 var resultNullMaskArray = new bool[result.Length];
-                
+
                 for (int i = 0; i < result.Length; i++)
                 {
                     bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
                     bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
                     bool hasNull = leftIsNull || rightIsNull;
-                    
+
                     resultNullMaskArray[i] = hasNull;
-                    
+
                     // Set result to false where nulls exist (null comparisons yield null/false)
                     if (hasNull)
                         result[i] = false;
                 }
-                
+
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -654,15 +652,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
             var comparer = EqualityComparer<T>.Default;
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var nullMask = memoryStorage.NullMaskMemory;
-            
+
             for (int i = 0; i < data.Length; i++)
             {
                 bool isNull = nullMask.HasValue && nullMask.Value.Length > 0 && nullMask.Value.Span[i];
-                
+
                 if (isNull)
                 {
                     result[i] = false; // null compared to anything is false
@@ -672,7 +670,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                     result[i] = comparer.Equals(data[i], scalar);
                 }
             }
-            
+
             // Copy null mask if it exists
             if (nullMask.HasValue && nullMask.Value.Length > 0)
             {
@@ -680,7 +678,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 nullMask.Value.Span.CopyTo(nullMaskArray);
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -701,26 +699,26 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var rightData = rightMemory.Data.Span;
             var result = new bool[leftData.Length];
             var comparer = EqualityComparer<T>.Default;
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var leftNulls = leftMemory.NullMaskMemory;
             var rightNulls = rightMemory.NullMaskMemory;
-            
+
             bool hasAnyNulls = (leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0);
             bool[]? resultNullMaskArray = null;
-            
+
             if (hasAnyNulls)
             {
                 resultNullMaskArray = new bool[result.Length];
             }
-            
+
             for (int i = 0; i < result.Length; i++)
             {
                 bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
                 bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
                 bool hasNull = leftIsNull || rightIsNull;
-                
+
                 if (hasNull)
                 {
                     result[i] = false; // null compared to anything is false
@@ -734,12 +732,12 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                         resultNullMaskArray[i] = false;
                 }
             }
-            
+
             if (resultNullMaskArray != null)
             {
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -758,10 +756,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
-            
+
             // Use our helper method for greater than comparison
             GreaterThanTensorPrimitive(data, scalar, result.AsSpan());
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var nullMask = memoryStorage.NullMaskMemory;
@@ -770,7 +768,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var nullMaskArray = new bool[data.Length];
                 nullMask.Value.Span.CopyTo(nullMaskArray);
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-                
+
                 // Set result to false where nulls exist
                 for (int i = 0; i < result.Length; i++)
                 {
@@ -778,7 +776,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                         result[i] = false;
                 }
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -798,34 +796,34 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
             var result = new bool[leftData.Length];
-            
+
             // Use our helper method for element-wise greater than
             GreaterThanTensorPrimitive(leftData, rightData, result.AsSpan());
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var leftNulls = leftMemory.NullMaskMemory;
             var rightNulls = rightMemory.NullMaskMemory;
-            
+
             if ((leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0))
             {
                 var resultNullMaskArray = new bool[result.Length];
-                
+
                 for (int i = 0; i < result.Length; i++)
                 {
                     bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
                     bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
                     bool hasNull = leftIsNull || rightIsNull;
-                    
+
                     resultNullMaskArray[i] = hasNull;
-                    
+
                     if (hasNull)
                         result[i] = false;
                 }
-                
+
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -845,15 +843,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
             var comparer = Comparer<T>.Default;
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var nullMask = memoryStorage.NullMaskMemory;
-            
+
             for (int i = 0; i < data.Length; i++)
             {
                 bool isNull = nullMask.HasValue && nullMask.Value.Length > 0 && nullMask.Value.Span[i];
-                
+
                 if (isNull)
                 {
                     result[i] = false; // null compared to anything is false
@@ -863,7 +861,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                     result[i] = comparer.Compare(data[i], scalar) > 0;
                 }
             }
-            
+
             // Copy null mask if it exists
             if (nullMask.HasValue && nullMask.Value.Length > 0)
             {
@@ -871,7 +869,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 nullMask.Value.Span.CopyTo(nullMaskArray);
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -892,26 +890,26 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var rightData = rightMemory.Data.Span;
             var result = new bool[leftData.Length];
             var comparer = Comparer<T>.Default;
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var leftNulls = leftMemory.NullMaskMemory;
             var rightNulls = rightMemory.NullMaskMemory;
-            
+
             bool hasAnyNulls = (leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0);
             bool[]? resultNullMaskArray = null;
-            
+
             if (hasAnyNulls)
             {
                 resultNullMaskArray = new bool[result.Length];
             }
-            
+
             for (int i = 0; i < result.Length; i++)
             {
                 bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
                 bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
                 bool hasNull = leftIsNull || rightIsNull;
-                
+
                 if (hasNull)
                 {
                     result[i] = false; // null compared to anything is false
@@ -925,12 +923,12 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                         resultNullMaskArray[i] = false;
                 }
             }
-            
+
             if (resultNullMaskArray != null)
             {
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -949,10 +947,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
-            
+
             // Use our helper method for less than comparison
             LessThanTensorPrimitive(data, scalar, result.AsSpan());
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var nullMask = memoryStorage.NullMaskMemory;
@@ -961,7 +959,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var nullMaskArray = new bool[data.Length];
                 nullMask.Value.Span.CopyTo(nullMaskArray);
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-                
+
                 // Set result to false where nulls exist
                 for (int i = 0; i < result.Length; i++)
                 {
@@ -969,7 +967,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                         result[i] = false;
                 }
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -989,34 +987,34 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
             var result = new bool[leftData.Length];
-            
+
             // Use our helper method for element-wise less than
             LessThanTensorPrimitive(leftData, rightData, result.AsSpan());
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var leftNulls = leftMemory.NullMaskMemory;
             var rightNulls = rightMemory.NullMaskMemory;
-            
+
             if ((leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0))
             {
                 var resultNullMaskArray = new bool[result.Length];
-                
+
                 for (int i = 0; i < result.Length; i++)
                 {
                     bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
                     bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
                     bool hasNull = leftIsNull || rightIsNull;
-                    
+
                     resultNullMaskArray[i] = hasNull;
-                    
+
                     if (hasNull)
                         result[i] = false;
                 }
-                
+
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -1036,15 +1034,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
             var comparer = Comparer<T>.Default;
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var nullMask = memoryStorage.NullMaskMemory;
-            
+
             for (int i = 0; i < data.Length; i++)
             {
                 bool isNull = nullMask.HasValue && nullMask.Value.Length > 0 && nullMask.Value.Span[i];
-                
+
                 if (isNull)
                 {
                     result[i] = false; // null compared to anything is false
@@ -1054,7 +1052,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                     result[i] = comparer.Compare(data[i], scalar) < 0;
                 }
             }
-            
+
             // Copy null mask if it exists
             if (nullMask.HasValue && nullMask.Value.Length > 0)
             {
@@ -1062,7 +1060,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 nullMask.Value.Span.CopyTo(nullMaskArray);
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -1083,26 +1081,26 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             var rightData = rightMemory.Data.Span;
             var result = new bool[leftData.Length];
             var comparer = Comparer<T>.Default;
-            
+
             // Handle null propagation
             ReadOnlyMemory<bool>? resultNullMask = null;
             var leftNulls = leftMemory.NullMaskMemory;
             var rightNulls = rightMemory.NullMaskMemory;
-            
+
             bool hasAnyNulls = (leftNulls.HasValue && leftNulls.Value.Length > 0) || (rightNulls.HasValue && rightNulls.Value.Length > 0);
             bool[]? resultNullMaskArray = null;
-            
+
             if (hasAnyNulls)
             {
                 resultNullMaskArray = new bool[result.Length];
             }
-            
+
             for (int i = 0; i < result.Length; i++)
             {
                 bool leftIsNull = leftNulls.HasValue && leftNulls.Value.Length > 0 && leftNulls.Value.Span[i];
                 bool rightIsNull = rightNulls.HasValue && rightNulls.Value.Length > 0 && rightNulls.Value.Span[i];
                 bool hasNull = leftIsNull || rightIsNull;
-                
+
                 if (hasNull)
                 {
                     result[i] = false; // null compared to anything is false
@@ -1116,12 +1114,12 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                         resultNullMaskArray[i] = false;
                 }
             }
-            
+
             if (resultNullMaskArray != null)
             {
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
-            
+
             var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
@@ -1242,19 +1240,19 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // All numeric types support comparison
         if (IsNumericType(type))
             return true;
-        
+
         // String supports comparison
         if (type == typeof(string))
             return true;
-        
+
         // DateTime and other common comparable types
         if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan))
             return true;
-        
+
         // Guid supports comparison
         if (type == typeof(Guid))
             return true;
-        
+
         // Check if type implements IComparable<T> or IComparable
         return typeof(IComparable<>).MakeGenericType(type).IsAssignableFrom(type) ||
                typeof(IComparable).IsAssignableFrom(type);

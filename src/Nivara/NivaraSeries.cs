@@ -1,5 +1,3 @@
-using System.Collections;
-
 namespace Nivara;
 
 /// <summary>
@@ -23,12 +21,12 @@ public sealed class NivaraSeries<T> : IDisposable
     public NivaraSeries(NivaraColumn<T> values, NivaraColumn<object>? index = null)
     {
         _values = values ?? throw new ArgumentNullException(nameof(values));
-        
+
         if (index != null)
         {
             if (index.Length != values.Length)
                 throw new ArgumentException($"Index length ({index.Length}) must match values length ({values.Length})", nameof(index));
-            
+
             _index = index;
         }
         else
@@ -136,13 +134,13 @@ public sealed class NivaraSeries<T> : IDisposable
     public T GetByLabel(object label)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        
+
         var position = FindLabelPosition(label);
         if (position == -1)
         {
             throw new KeyNotFoundException($"Label '{label}' not found in series index");
         }
-        
+
         return _values[position];
     }
 
@@ -155,14 +153,14 @@ public sealed class NivaraSeries<T> : IDisposable
     public bool TryGetByLabel(object label, out T value)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        
+
         var position = FindLabelPosition(label);
         if (position != -1)
         {
             value = _values[position];
             return true;
         }
-        
+
         value = default(T)!;
         return false;
     }
@@ -200,10 +198,10 @@ public sealed class NivaraSeries<T> : IDisposable
     public NivaraSeries<T> Slice(int start, int length)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        
+
         var slicedValues = _values.Slice(start, length);
         var slicedIndex = _index.Slice(start, length);
-        
+
         return new NivaraSeries<T>(slicedValues, slicedIndex);
     }
 
@@ -233,16 +231,16 @@ public sealed class NivaraSeries<T> : IDisposable
     public static NivaraSeries<T> Create(ReadOnlySpan<T> values, object[]? index = null)
     {
         var valuesColumn = NivaraColumn<T>.Create(values);
-        
+
         NivaraColumn<object>? indexColumn = null;
         if (index != null)
         {
             if (index.Length != values.Length)
                 throw new ArgumentException($"Index length ({index.Length}) must match values length ({values.Length})", nameof(index));
-            
+
             indexColumn = NivaraColumn<object>.CreateForReferenceType(index);
         }
-        
+
         return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
 
@@ -274,7 +272,7 @@ public sealed class NivaraSeries<T> : IDisposable
     private int FindLabelPosition(object label)
     {
         var comparer = EqualityComparer<object>.Default;
-        
+
         for (int i = 0; i < _index.Length; i++)
         {
             if (!_index.IsNull(i) && comparer.Equals(_index[i], label))
@@ -282,7 +280,7 @@ public sealed class NivaraSeries<T> : IDisposable
                 return i;
             }
         }
-        
+
         return -1;
     }
 
@@ -298,7 +296,7 @@ public sealed class NivaraSeries<T> : IDisposable
         {
             indexValues[i] = i;
         }
-        
+
         return NivaraColumn<object>.CreateForReferenceType(indexValues);
     }
 

@@ -11,12 +11,12 @@ public interface IColumn<T>
     /// Gets the number of elements in the column
     /// </summary>
     int Length { get; }
-    
+
     /// <summary>
     /// Gets a value indicating whether this column contains any null values
     /// </summary>
     bool HasNulls { get; }
-    
+
     /// <summary>
     /// Gets the element at the specified index
     /// </summary>
@@ -24,7 +24,7 @@ public interface IColumn<T>
     /// <returns>The element at the specified index</returns>
     /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
     T this[int index] { get; }
-    
+
     /// <summary>
     /// Determines whether the element at the specified index is null
     /// </summary>
