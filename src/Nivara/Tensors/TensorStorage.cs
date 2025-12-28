@@ -1,4 +1,7 @@
-namespace Nivara;
+using Nivara;
+using Nivara.Diagnostics;
+
+namespace Nivara.Tensors;
 
 /// <summary>
 /// Tensor-backed storage implementation for vectorizable types.

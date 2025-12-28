@@ -147,11 +147,47 @@ Nivara automatically selects the appropriate storage implementation:
 
 Nivara includes a foundational query engine infrastructure for building DataFrame-like operations:
 
-- **Schema System**: Immutable schema management with column metadata and type information
+- **Schema System**: ✅ **Complete** - Immutable schema management with column metadata, type information, and transformation methods (WithColumn, WithoutColumn, SelectColumns)
 - **Column Expressions**: Composable expression system for building queries with operator overloading
 - **Query Planning**: Infrastructure for building and optimizing query execution plans
 - **Type-Safe Interfaces**: Both generic and non-generic column interfaces for compile-time and runtime type handling
 - **Error Handling**: Comprehensive exception hierarchy with context-specific error messages
+
+#### Schema System Features
+
+The Schema system provides comprehensive metadata management for columnar data:
+
+```csharp
+// Create schema from column definitions
+var schema = new Schema(new[]
+{
+    ("Name", typeof(string)),
+    ("Age", typeof(int)),
+    ("Salary", typeof(double))
+});
+
+// Access schema information
+Console.WriteLine($"Columns: {schema.ColumnNames.Count}");
+Console.WriteLine($"Has Age column: {schema.HasColumn("Age")}");
+Console.WriteLine($"Age type: {schema.GetColumnType("Age")}");
+
+// Transform schemas immutably
+var withBonus = schema.WithColumn("Bonus", typeof(double));
+var withoutAge = schema.WithoutColumn("Age");
+var projected = schema.SelectColumns(new[] { "Name", "Salary" });
+
+// Schema compatibility validation
+var otherSchema = new Schema(new[] { ("Name", typeof(string)), ("Age", typeof(int)) });
+bool compatible = schema.IsCompatibleWith(otherSchema);
+bool flexibleMatch = schema.IsCompatibleWith(otherSchema, requireExactMatch: false);
+
+// Column metadata support
+var metadata = new ColumnMetadata(
+    isNullable: false,
+    defaultValue: 0,
+    description: "Employee age in years");
+var schemaWithMetadata = schema.WithColumn("Age", typeof(int), metadata);
+```
 
 The query engine foundation supports the upcoming NivaraFrame implementation, which will provide lazy query execution, data source scanning, and advanced DataFrame operations.
 
@@ -441,13 +477,23 @@ dotnet pack
 ```
 src/
 ├── Nivara/                 # Core library (dependency-free)
-│   └── IO/                 # Built-in IO functionality (JSON, etc.)
+│   ├── Diagnostics/        # Performance analysis and diagnostic tools
+│   ├── Exceptions/         # Custom exception hierarchy
+│   ├── Expressions/        # Query expression system
+│   ├── IO/                 # Built-in IO functionality (JSON, etc.)
+│   ├── Memory/             # Memory-based storage implementations
+│   ├── Tensors/            # Tensor-based storage implementations
+│   └── [Root]              # Core interfaces and main classes
 ├── Nivara.Extensions/      # Extension methods and third-party integrations
 │   └── IO/                 # Third-party IO functionality (CSV, Parquet, etc.)
 samples/
 ├── Nivara.SampleApp/       # Sample applications
 tests/
 ├── Nivara.Tests/           # Unit and property tests
+│   ├── Diagnostics/        # Tests for diagnostic functionality
+│   ├── Memory/             # Tests for memory storage
+│   ├── Tensors/            # Tests for tensor storage
+│   └── [Root]              # Tests for core functionality
 ```
 
 ### Extensions Package
@@ -515,9 +561,9 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Series with indexing (`NivaraSeries<T>`)
 - ✅ Performance diagnostics and kernel selection analysis
 - ✅ Query engine foundation and interfaces
-- ✅ Schema system with column metadata
+- ✅ Schema system with column metadata and transformation methods
 - ✅ Column expression system for query building
-- ✅ Comprehensive test suite
+- ✅ Comprehensive test suite with 241 passing tests
 
 ### Upcoming Features
 - 🔄 NivaraFrame (DataFrame-like structure)

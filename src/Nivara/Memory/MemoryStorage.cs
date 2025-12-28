@@ -1,4 +1,7 @@
-namespace Nivara;
+using Nivara;
+using Nivara.Diagnostics;
+
+namespace Nivara.Memory;
 
 /// <summary>
 /// Memory-backed storage implementation for non-vectorizable types.

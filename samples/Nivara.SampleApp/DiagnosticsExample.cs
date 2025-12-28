@@ -1,4 +1,5 @@
 using System;
+using Nivara.Diagnostics;
 
 namespace Nivara.SampleApp;
 

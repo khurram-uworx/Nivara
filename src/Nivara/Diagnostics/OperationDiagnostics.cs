@@ -1,4 +1,6 @@
-namespace Nivara;
+using Nivara;
+
+namespace Nivara.Diagnostics;
 
 /// <summary>
 /// Provides diagnostic information about column operations, including kernel selection and performance metrics.

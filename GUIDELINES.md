@@ -457,3 +457,222 @@ namespace Nivara.IO;
 - `src/Nivara.Extensions/IO/` - IO functionality requiring third-party libraries (CSV, Parquet, etc.)
 - Consistent `Nivara.IO` namespace across both projects
 - Static factory classes: `Csv.Scan()`, `Json.Scan()`, etc.
+
+## Schema System Implementation
+
+### Schema Class Design Decisions
+**Decision**: Immutable Schema class with transformation methods (WithColumn, WithoutColumn, SelectColumns)
+**Rationale**: Immutable design prevents accidental schema corruption during query transformations. Transformation methods enable functional-style schema evolution without side effects.
+
+**Pattern**: Case-insensitive column name handling throughout schema system
+```csharp
+// Use StringComparer.OrdinalIgnoreCase for all column name dictionaries
+var typeDict = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+var metadataDict = new Dictionary<string, ColumnMetadata>(StringComparer.OrdinalIgnoreCase);
+```
+
+### Exception Hierarchy for Schema Operations
+**Decision**: Specific exception types for different failure modes (ColumnNotFoundException, ColumnTypeMismatchException, SchemaValidationException)
+**Rationale**: Enables precise error handling and provides context-specific error messages. Helps users understand exactly what went wrong.
+
+**Pattern**: Include available options in error messages when possible
+```csharp
+throw new ColumnNotFoundException(columnName, availableColumns);
+// Results in: "Column 'foo' not found. Available columns: bar, baz, qux"
+```
+
+### Schema Compatibility Validation
+**Decision**: Separate exact match and compatible type checking in IsCompatibleWith method
+**Rationale**: Query engine needs both strict validation (for type safety) and flexible validation (for numeric type coercion). Single method with parameter provides both capabilities.
+
+**Pattern**: Numeric type compatibility matrix for operations
+```csharp
+private static bool AreTypesCompatible(Type type1, Type type2)
+{
+    if (type1 == type2) return true;
+    
+    // Numeric type compatibility
+    var numericTypes = new[]
+    {
+        typeof(byte), typeof(sbyte), typeof(short), typeof(ushort),
+        typeof(int), typeof(uint), typeof(long), typeof(ulong),
+        typeof(float), typeof(double), typeof(decimal)
+    };
+    
+    return numericTypes.Contains(type1) && numericTypes.Contains(type2);
+}
+```
+
+### ColumnMetadata Design
+**Decision**: Immutable ColumnMetadata with With() method for updates
+**Rationale**: Consistent with Schema immutability pattern. Provides type-safe way to update specific properties without affecting others.
+
+**Pattern**: Builder-style With() method for partial updates
+```csharp
+var updated = original.With(isNullable: false, defaultValue: "New Default");
+// Only specified properties are updated, others remain unchanged
+```
+
+### Schema Testing Strategy
+**Decision**: Comprehensive unit tests covering all transformation methods and edge cases
+**Rationale**: Schema is foundational to query engine correctness. Thorough testing prevents runtime errors in complex query scenarios.
+
+**Coverage**: 30 test cases covering:
+- Constructor validation (null checks, duplicate names, invalid types)
+- Column access methods (case-insensitive, error handling)
+- Transformation methods (WithColumn, WithoutColumn, SelectColumns)
+- Compatibility validation (exact and flexible matching)
+- Metadata operations and immutability
+- Edge cases (empty schemas, single columns, case sensitivity)
+
+### Schema Validation Gotchas
+**Problem**: Case sensitivity can cause subtle bugs in column lookups
+**Solution**: Always use StringComparer.OrdinalIgnoreCase for column name dictionaries and comparisons
+```csharp
+// WRONG - case sensitive comparison
+if (columnName == storedName) { ... }
+
+// CORRECT - case insensitive comparison
+if (string.Equals(columnName, storedName, StringComparison.OrdinalIgnoreCase)) { ... }
+```
+
+**Problem**: Schema transformation methods can accidentally mutate original schema
+**Solution**: Always create new instances, never modify existing dictionaries
+```csharp
+// WRONG - modifies original dictionary
+columnTypes[newName] = newType;
+
+// CORRECT - creates new dictionary
+var newTypeDict = new Dictionary<string, Type>(columnTypes, StringComparer.OrdinalIgnoreCase);
+newTypeDict[newName] = newType;
+```
+## Project Organization and Namespace Structure
+
+### Folder and Namespace Organization
+**Decision**: Organize code by functional area using dedicated folders and namespaces
+**Rationale**: Improves discoverability, maintainability, and follows .NET best practices. Makes it easier for LLMs and developers to quickly locate related functionality.
+
+### Core Project Structure (`src/Nivara/`)
+
+```
+src/Nivara/
+├── Diagnostics/           # Performance analysis and diagnostic tools
+│   ├── ColumnDiagnostics.cs      # Column-level performance diagnostics
+│   └── OperationDiagnostics.cs   # Operation tracking and kernel selection
+├── Exceptions/            # Custom exception hierarchy
+│   └── QueryEngineExceptions.cs  # All query engine exceptions
+├── Expressions/           # Query expression system
+│   └── ColumnExpression.cs       # Column expressions and operators
+├── IO/                    # Built-in data source functionality
+│   ├── JsonDataSource.cs         # JSON reading (no third-party deps)
+│   └── JsonExtensions.cs         # JSON factory methods
+├── Memory/                # Memory-based storage implementations
+│   ├── MemoryStorage.cs           # Non-vectorizable type storage
+│   └── NullableStorageHelper.cs  # Nullable value type utilities
+├── Tensors/               # Tensor-based storage implementations
+│   └── TensorStorage.cs           # Vectorizable type storage
+└── [Root Files]           # Core interfaces and main classes
+    ├── IColumn.cs                 # Column interfaces
+    ├── IColumnStorage.cs          # Storage abstraction
+    ├── IFrame.cs                  # Frame interface
+    ├── NivaraColumn.cs           # Main column implementation
+    ├── NivaraSeries.cs           # Series implementation
+    ├── Schema.cs                  # Schema management
+    └── [Query Engine Files]       # Query planning and execution
+```
+
+### Namespace Mapping
+
+| Folder | Namespace | Purpose |
+|--------|-----------|---------|
+| `Diagnostics/` | `Nivara.Diagnostics` | Performance analysis, kernel selection, operation tracking |
+| `Exceptions/` | `Nivara.Exceptions` | Custom exception types with context-specific error messages |
+| `Expressions/` | `Nivara.Expressions` | Column expressions, operators, query building |
+| `IO/` | `Nivara.IO` | Data source abstractions and built-in implementations |
+| `Memory/` | `Nivara.Memory` | Memory-based storage for non-vectorizable types |
+| `Tensors/` | `Nivara.Tensors` | Tensor-based storage for vectorizable types |
+| `[Root]` | `Nivara` | Core interfaces, main classes, schema management |
+
+### Test Project Structure (`tests/Nivara.Tests/`)
+
+Tests follow the same organizational structure as the source code:
+
+```
+tests/Nivara.Tests/
+├── Diagnostics/
+│   └── DiagnosticsTests.cs       # Tests for diagnostic functionality
+├── Memory/
+│   └── MemoryStorageTests.cs     # Tests for memory storage
+├── Tensors/
+│   └── TensorStorageTests.cs     # Tests for tensor storage
+└── [Root Files]                  # Tests for core functionality
+    ├── SchemaTests.cs             # Schema system tests
+    ├── NivaraColumnTests.cs      # Column implementation tests
+    ├── NivaraSeriesTests.cs      # Series implementation tests
+    └── ColumnStorageFactoryTests.cs
+```
+
+### Using Statement Patterns
+
+**Pattern**: Always include necessary using statements for cross-namespace references
+```csharp
+// In core files that use moved classes
+using Nivara.Diagnostics;    // For ColumnDiagnostics, StorageType, etc.
+using Nivara.Exceptions;     // For custom exceptions
+using Nivara.Memory;         // For MemoryStorage
+using Nivara.Tensors;        // For TensorStorage
+
+// In moved files that reference core classes
+using Nivara;                // For core interfaces and classes
+```
+
+### Extensions Project Organization
+
+The Extensions project follows the same pattern but focuses on third-party integrations:
+
+```
+src/Nivara.Extensions/
+└── IO/                    # Third-party data source functionality
+    ├── CsvDataSource.cs           # CSV reading (uses CsvHelper)
+    └── CsvExtensions.cs           # CSV factory methods
+```
+
+### Quick Reference for LLMs
+
+When working with Nivara code:
+
+1. **Diagnostics**: Look in `Nivara.Diagnostics` namespace
+   - `ColumnDiagnostics` - Column performance info
+   - `DiagnosticsTracker` - Operation tracking
+   - `StorageType`, `KernelType` enums
+
+2. **Exceptions**: Look in `Nivara.Exceptions` namespace
+   - `ColumnNotFoundException` - Missing column errors
+   - `ColumnTypeMismatchException` - Type mismatch errors
+   - `SchemaValidationException` - Schema validation errors
+   - `DataSourceException` - Data source errors
+   - `QueryExecutionException` - Query execution errors
+
+3. **Expressions**: Look in `Nivara.Expressions` namespace
+   - `ColumnExpression` - Base expression class
+   - `ColumnReference` - Column references
+   - `BinaryExpression`, `ComparisonExpression` - Operators
+
+4. **Storage**: Look in appropriate namespace
+   - `Nivara.Memory.MemoryStorage<T>` - Non-vectorizable types
+   - `Nivara.Tensors.TensorStorage<T>` - Vectorizable types
+   - `Nivara.Memory.NullableStorageHelper` - Nullable utilities
+
+5. **Core**: Look in `Nivara` namespace
+   - `NivaraColumn<T>`, `NivaraSeries<T>` - Main classes
+   - `Schema`, `ColumnMetadata` - Schema management
+   - `IColumn<T>`, `IFrame` - Core interfaces
+
+### Benefits of This Organization
+
+- **Discoverability**: Related functionality is grouped together
+- **Maintainability**: Changes to specific areas are isolated
+- **Testing**: Test structure mirrors source structure
+- **Namespace Clarity**: Clear separation of concerns
+- **IDE Support**: Better IntelliSense and navigation
+- **Documentation**: Easier to document and understand architecture

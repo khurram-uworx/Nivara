@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using Nivara;
+using Nivara.Tensors;
 
 namespace Nivara.Tests;
 

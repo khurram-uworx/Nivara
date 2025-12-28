@@ -1,6 +1,7 @@
 using System.Numerics;
+using Nivara;
 
-namespace Nivara;
+namespace Nivara.Diagnostics;
 
 /// <summary>
 /// Provides diagnostic information about column operations and performance characteristics.

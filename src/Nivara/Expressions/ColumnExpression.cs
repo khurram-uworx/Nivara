@@ -1,4 +1,6 @@
-namespace Nivara;
+using Nivara.Exceptions;
+
+namespace Nivara.Expressions;
 
 /// <summary>
 /// Base class for column expressions used in query operations.

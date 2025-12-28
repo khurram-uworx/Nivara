@@ -1,4 +1,4 @@
-namespace Nivara;
+namespace Nivara.Exceptions;
 
 /// <summary>
 /// Exception thrown when a column is not found in a frame

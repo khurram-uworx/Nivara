@@ -1,4 +1,8 @@
 using System.Numerics.Tensors;
+using Nivara.Diagnostics;
+using Nivara.Exceptions;
+using Nivara.Memory;
+using Nivara.Tensors;
 
 namespace Nivara;
 

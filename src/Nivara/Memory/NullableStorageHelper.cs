@@ -1,4 +1,7 @@
-namespace Nivara;
+using Nivara;
+using Nivara.Tensors;
+
+namespace Nivara.Memory;
 
 /// <summary>
 /// Helper class for creating storage with nullable value types

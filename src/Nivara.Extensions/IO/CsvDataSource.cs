@@ -1,6 +1,7 @@
 using CsvHelper;
 using CsvHelper.Configuration;
 using System.Globalization;
+using Nivara.Exceptions;
 
 namespace Nivara.IO;
 
@@ -163,7 +164,7 @@ internal sealed class CsvLazySource : IQuerySource
             foreach (var header in headers)
             {
                 var inferredType = InferColumnType(sampleRecords, header);
-                columnDefinitions.Add((header, inferredType));
+                columnDefinitions.Add((Name: header, Type: inferredType));
             }
 
             return new Schema(columnDefinitions);

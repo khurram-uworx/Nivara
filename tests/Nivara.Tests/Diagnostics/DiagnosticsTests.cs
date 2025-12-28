@@ -1,4 +1,6 @@
 using NUnit.Framework;
+using Nivara;
+using Nivara.Diagnostics;
 
 namespace Nivara.Tests;
 

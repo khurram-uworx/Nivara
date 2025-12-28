@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Nivara.Exceptions;
 
 namespace Nivara.IO;
 
