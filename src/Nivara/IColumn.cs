@@ -1,11 +1,10 @@
 namespace Nivara;
 
 /// <summary>
-/// Public interface for strongly-typed columns in Nivara.
-/// Provides read-only access to column data with null handling.
+/// Non-generic base interface for columns, used by the query engine.
+/// Provides type-erased access to column operations.
 /// </summary>
-/// <typeparam name="T">The type of elements in the column</typeparam>
-public interface IColumn<T>
+public interface IColumn : IDisposable
 {
     /// <summary>
     /// Gets the number of elements in the column
@@ -18,12 +17,17 @@ public interface IColumn<T>
     bool HasNulls { get; }
 
     /// <summary>
-    /// Gets the element at the specified index
+    /// Gets the element type of the column
+    /// </summary>
+    Type ElementType { get; }
+
+    /// <summary>
+    /// Gets the element at the specified index as an object
     /// </summary>
     /// <param name="index">The zero-based index of the element to get</param>
     /// <returns>The element at the specified index</returns>
     /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
-    T this[int index] { get; }
+    object? GetValue(int index);
 
     /// <summary>
     /// Determines whether the element at the specified index is null
@@ -32,4 +36,20 @@ public interface IColumn<T>
     /// <returns>true if the element at the specified index is null; otherwise, false</returns>
     /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
     bool IsNull(int index);
+}
+
+/// <summary>
+/// Public interface for strongly-typed columns in Nivara.
+/// Provides read-only access to column data with null handling.
+/// </summary>
+/// <typeparam name="T">The type of elements in the column</typeparam>
+public interface IColumn<T> : IColumn
+{
+    /// <summary>
+    /// Gets the element at the specified index
+    /// </summary>
+    /// <param name="index">The zero-based index of the element to get</param>
+    /// <returns>The element at the specified index</returns>
+    /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
+    T this[int index] { get; }
 }

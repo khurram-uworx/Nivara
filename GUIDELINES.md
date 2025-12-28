@@ -324,3 +324,136 @@ Assert.Throws<ArgumentException>(() => { var result = column1 + column2; });
 ---
 
 **Note**: This document captures living knowledge and should be updated as new insights are discovered. Focus on "why" decisions were made and "what" didn't work, not "how" to implement (that belongs in CONTRIBUTING.md).
+
+## Query Engine Foundation Implementation
+
+### Interface Design Decisions
+**Decision**: Created both generic `IColumn<T>` and non-generic `IColumn` interfaces
+**Rationale**: Query engine needs to work with columns of unknown types at runtime. Non-generic interface provides type-erased access while maintaining type safety through generic interface for user code.
+
+**Pattern**: Non-generic interface includes `Type ElementType` and `object? GetValue(int index)` for runtime type handling
+```csharp
+// Non-generic for query engine
+public interface IColumn : IDisposable
+{
+    Type ElementType { get; }
+    object? GetValue(int index);
+}
+
+// Generic for user code
+public interface IColumn<T> : IColumn
+{
+    T this[int index] { get; }
+}
+```
+
+### Schema System Architecture
+**Decision**: Immutable schema with transformation methods (WithColumn, WithoutColumn, SelectColumns)
+**Rationale**: Immutable design prevents accidental schema corruption during query transformations. Transformation methods enable functional-style schema evolution.
+
+**Pattern**: Case-insensitive column name handling throughout schema system
+```csharp
+// Use StringComparer.OrdinalIgnoreCase for all column name dictionaries
+var typeDict = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+```
+
+### Exception Hierarchy Design
+**Decision**: Specific exception types for different failure modes (ColumnNotFoundException, ColumnTypeMismatchException, etc.)
+**Rationale**: Enables precise error handling and provides context-specific error messages. Helps users understand exactly what went wrong.
+
+**Pattern**: Include available options in error messages when possible
+```csharp
+throw new ColumnNotFoundException(columnName, availableColumns);
+// Results in: "Column 'foo' not found. Available columns: bar, baz, qux"
+```
+
+### Column Expression System
+**Decision**: Operator overloading with both expression-to-expression and expression-to-scalar operations
+**Rationale**: Provides natural syntax for query building while maintaining type safety. Supports both `Col("A") + Col("B")` and `Col("A") + 5` patterns.
+
+**Gotcha**: Required `Equals` and `GetHashCode` overrides when implementing equality operators
+**Solution**: Override both methods to avoid compiler warnings and maintain consistency
+```csharp
+public override bool Equals(object? obj) => ReferenceEquals(this, obj);
+public override int GetHashCode() => base.GetHashCode();
+```
+
+### Package Dependencies Strategy
+**Decision**: Added CsvHelper for CSV processing capabilities in Nivara.Extensions
+**Rationale**: Mature, well-tested library with good performance characteristics. Avoids reinventing CSV parsing which has many edge cases. Kept in Extensions project to maintain core library independence from third-party dependencies.
+
+**Pattern**: Third-party dependencies go in Nivara.Extensions, core interfaces made public when needed
+```csharp
+// Core library defines public interfaces
+public interface IQuerySource { ... }
+
+// Extensions library implements with third-party dependencies
+internal sealed class CsvLazySource : IQuerySource { ... }
+```
+
+**Version**: CsvHelper 33.0.1 - latest stable version compatible with .NET 10.0
+
+### Query Plan Infrastructure
+**Decision**: Immutable QueryPlan with schema transformation validation
+**Rationale**: Immutable design prevents plan corruption. Schema validation catches errors early in query building phase rather than at execution time.
+
+**Pattern**: Compute result schema during plan construction
+```csharp
+private Schema ComputeResultSchema()
+{
+    var schema = Source.Schema;
+    foreach (var operation in Operations)
+        schema = operation.TransformSchema(schema);
+    return schema;
+}
+```
+
+### Extensions Architecture Pattern
+**Decision**: Third-party dependencies and implementations go in Nivara.Extensions project
+**Rationale**: Keeps core library lightweight and free of external dependencies. Allows users to opt-in to specific functionality without bloating the core package.
+
+**Pattern**: Core defines public interfaces, Extensions implements with third-party libraries
+```csharp
+// Core: src/Nivara/IQuerySource.cs
+public interface IQuerySource { ... }
+
+// Extensions: src/Nivara.Extensions/IO/CsvDataSource.cs  
+internal sealed class CsvLazySource : IQuerySource
+{
+    // Uses CsvHelper internally
+}
+
+// Extensions: src/Nivara.Extensions/IO/CsvExtensions.cs
+public static class CsvExtensions
+{
+    public static IQuerySource ScanCsv(string filePath) { ... }
+}
+```
+
+**Benefits**: 
+- Core library stays dependency-free
+- Extensions can use specialized libraries (CsvHelper, Parquet.Net, etc.)
+- Users only pay for what they use
+- Easier to maintain and test core functionality
+
+### Namespace and Folder Organization
+**Decision**: Use consistent `Nivara` namespace across all projects, organize IO functionality in dedicated folders
+**Rationale**: C# namespace flexibility allows clean organization without Java-style rigid package structure. Dedicated IO folders improve maintainability and discoverability.
+
+**Pattern**: Organize by functionality, not by project boundaries
+```csharp
+// Core JSON support (no third-party dependencies)
+namespace Nivara.IO;
+// File: src/Nivara/IO/JsonDataSource.cs
+
+// Extensions CSV support (uses CsvHelper)
+namespace Nivara.IO; 
+// File: src/Nivara.Extensions/IO/CsvDataSource.cs
+// File: src/Nivara.Extensions/IO/CsvExtensions.cs
+```
+
+**Structure**:
+- `src/Nivara/IO/` - Core IO functionality using only .NET built-ins (JSON, etc.)
+- `src/Nivara.Extensions/IO/` - IO functionality requiring third-party libraries (CSV, Parquet, etc.)
+- Consistent `Nivara.IO` namespace across both projects
+- Static factory classes: `Csv.Scan()`, `Json.Scan()`, etc.

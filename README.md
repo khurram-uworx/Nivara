@@ -143,6 +143,18 @@ Nivara automatically selects the appropriate storage implementation:
   - Uses Memory<T> for efficient memory management
   - Supports null detection for reference types
 
+### Query Engine Foundation
+
+Nivara includes a foundational query engine infrastructure for building DataFrame-like operations:
+
+- **Schema System**: Immutable schema management with column metadata and type information
+- **Column Expressions**: Composable expression system for building queries with operator overloading
+- **Query Planning**: Infrastructure for building and optimizing query execution plans
+- **Type-Safe Interfaces**: Both generic and non-generic column interfaces for compile-time and runtime type handling
+- **Error Handling**: Comprehensive exception hierarchy with context-specific error messages
+
+The query engine foundation supports the upcoming NivaraFrame implementation, which will provide lazy query execution, data source scanning, and advanced DataFrame operations.
+
 ### Type Support
 
 **Vectorizable Types** (support arithmetic operations):
@@ -428,12 +440,57 @@ dotnet pack
 
 ```
 src/
-├── Nivara/                 # Core library
-├── Nivara.Extensions/      # Extension methods and utilities
+├── Nivara/                 # Core library (dependency-free)
+│   └── IO/                 # Built-in IO functionality (JSON, etc.)
+├── Nivara.Extensions/      # Extension methods and third-party integrations
+│   └── IO/                 # Third-party IO functionality (CSV, Parquet, etc.)
 samples/
 ├── Nivara.SampleApp/       # Sample applications
 tests/
 ├── Nivara.Tests/           # Unit and property tests
+```
+
+### Extensions Package
+
+The `Nivara.Extensions` package provides additional functionality that requires third-party dependencies:
+
+- **CSV Support**: Reading and writing CSV files using CsvHelper
+- **Parquet Support**: Integration with Parquet.Net for columnar file format
+- **Arrow Support**: Apache Arrow integration for interoperability
+- **ML.NET Integration**: Machine learning pipeline integration
+
+To use CSV functionality:
+
+```bash
+dotnet add package Nivara.Extensions
+```
+
+```csharp
+using Nivara.IO;
+
+// CSV functionality (requires Nivara.Extensions package)
+var csvSource = Csv.Scan("data.csv");
+var csvColumns = Csv.Read("data.csv");
+
+// JSON functionality (built into core Nivara package)
+var jsonSource = Json.Scan("data.json");
+var jsonColumns = Json.Read("data.json");
+
+// With custom options
+var csvOptions = new CsvOptions 
+{ 
+    HasHeaderRecord = true,
+    Delimiter = ";",
+    SchemaInferenceRows = 50
+};
+var csvData = Csv.Read("data.csv", csvOptions);
+
+var jsonOptions = new JsonOptions
+{
+    IsArray = true,
+    SchemaInferenceRecords = 100
+};
+var jsonData = Json.Read("data.json", jsonOptions);
 ```
 
 ## Contributing
@@ -457,12 +514,17 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Null handling for reference types
 - ✅ Series with indexing (`NivaraSeries<T>`)
 - ✅ Performance diagnostics and kernel selection analysis
+- ✅ Query engine foundation and interfaces
+- ✅ Schema system with column metadata
+- ✅ Column expression system for query building
 - ✅ Comprehensive test suite
 
 ### Upcoming Features
+- 🔄 NivaraFrame (DataFrame-like structure)
+- 🔄 Lazy query execution with optimization
+- 🔄 Data source scanning (CSV, JSON)
 - 🔄 Advanced null handling
 - 🔄 Performance optimizations
-- 📋 DataFrame operations
 - 📋 I/O operations (CSV, JSON, Parquet)
 - 📋 Aggregation functions
 - 📋 Grouping and joining operations

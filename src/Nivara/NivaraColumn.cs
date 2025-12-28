@@ -42,6 +42,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <inheritdoc />
+    public Type ElementType => typeof(T);
+
+    /// <inheritdoc />
+    public object? GetValue(int index)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        
+        if (index < 0 || index >= Length)
+            throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}. Valid range is 0 to {Length - 1}");
+
+        if (IsNull(index))
+            return null;
+
+        return storage[index];
+    }
+
+    /// <inheritdoc />
     public T this[int index]
     {
         get
