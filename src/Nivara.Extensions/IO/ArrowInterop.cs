@@ -30,6 +30,12 @@ public static class ArrowInterop
 
         options ??= new ArrowConversionOptions();
 
+        // Validate types if requested
+        if (options.ValidateTypes)
+        {
+            ValidateFrameTypesForArrowConversion(frame);
+        }
+
         // Handle empty frames
         if (frame.ColumnCount == 0)
         {
@@ -45,6 +51,12 @@ public static class ArrowInterop
         {
             var column = frame.GetColumn(columnName);
             var arrowType = TypeMapper.MapClrToArrow(column.ElementType);
+            
+            // For DateTime columns, use the timezone from options
+            if (column.ElementType == typeof(DateTime) && arrowType is TimestampType)
+            {
+                arrowType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
+            }
             
             // Create field with proper nullability
             var field = new Field(columnName, arrowType, nullable: true);
@@ -75,6 +87,12 @@ public static class ArrowInterop
             throw new ArgumentNullException(nameof(arrowTable));
 
         options ??= new ArrowConversionOptions();
+
+        // Validate types if requested
+        if (options.ValidateTypes)
+        {
+            ValidateArrowTableTypesForNivaraConversion(arrowTable);
+        }
 
         // Handle empty tables
         if (arrowTable.ColumnCount == 0)
@@ -116,6 +134,12 @@ public static class ArrowInterop
 
         options ??= new ArrowConversionOptions();
 
+        // Validate types if requested
+        if (options.ValidateTypes)
+        {
+            ValidateSeriesTypeForArrowConversion<T>();
+        }
+
         // Handle empty series
         if (series.Length == 0)
         {
@@ -148,6 +172,12 @@ public static class ArrowInterop
             throw new ArgumentNullException(nameof(arrowArray));
 
         options ??= new ArrowConversionOptions();
+
+        // Validate types if requested
+        if (options.ValidateTypes)
+        {
+            ValidateArrowArrayTypeForNivaraConversion<T>(arrowArray);
+        }
 
         // Handle empty arrays
         if (arrowArray.Length == 0)
@@ -255,6 +285,15 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateBooleanArray(NivaraColumn<bool> column, ArrowConversionOptions options)
     {
+        // Try zero-copy optimization first if enabled
+        if (options.UseZeroCopy)
+        {
+            var zeroCopyArray = TryCreateZeroCopyBooleanArray(column);
+            if (zeroCopyArray != null)
+                return zeroCopyArray;
+        }
+
+        // Fallback to copying approach
         var builder = new BooleanArray.Builder();
         
         for (int i = 0; i < column.Length; i++)
@@ -273,6 +312,15 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateInt32Array(NivaraColumn<int> column, ArrowConversionOptions options)
     {
+        // Try zero-copy optimization first if enabled
+        if (options.UseZeroCopy)
+        {
+            var zeroCopyArray = TryCreateZeroCopyInt32Array(column);
+            if (zeroCopyArray != null)
+                return zeroCopyArray;
+        }
+
+        // Fallback to copying approach
         var builder = new Int32Array.Builder();
         
         for (int i = 0; i < column.Length; i++)
@@ -327,6 +375,15 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateDoubleArray(NivaraColumn<double> column, ArrowConversionOptions options)
     {
+        // Try zero-copy optimization first if enabled
+        if (options.UseZeroCopy)
+        {
+            var zeroCopyArray = TryCreateZeroCopyDoubleArray(column);
+            if (zeroCopyArray != null)
+                return zeroCopyArray;
+        }
+
+        // Fallback to copying approach
         var builder = new DoubleArray.Builder();
         
         for (int i = 0; i < column.Length; i++)
@@ -652,5 +709,201 @@ public static class ArrowInterop
         }
         
         return dateTime;
+    }
+
+    /// <summary>
+    /// Validates that all column types in a NivaraFrame are supported for Arrow conversion
+    /// </summary>
+    /// <param name="frame">The frame to validate</param>
+    /// <exception cref="UnsupportedTypeException">Thrown when unsupported types are found</exception>
+    private static void ValidateFrameTypesForArrowConversion(NivaraFrame frame)
+    {
+        var unsupportedColumns = new List<string>();
+
+        foreach (var columnName in frame.ColumnNames)
+        {
+            var column = frame.GetColumn(columnName);
+            if (!TypeMapper.IsArrowSupported(column.ElementType))
+            {
+                unsupportedColumns.Add($"{columnName} ({column.ElementType.Name})");
+            }
+        }
+
+        if (unsupportedColumns.Count > 0)
+        {
+            var supportedTypes = string.Join(", ", TypeMapper.GetSupportedTypes().Select(t => t.Name));
+            throw new UnsupportedTypeException(
+                typeof(object), // Generic type since multiple types are involved
+                new[] { $"Unsupported column types found: {string.Join(", ", unsupportedColumns)}. Supported types: {supportedTypes}" }
+            );
+        }
+    }
+
+    /// <summary>
+    /// Validates that all Arrow types in a Table are supported for Nivara conversion
+    /// </summary>
+    /// <param name="arrowTable">The Arrow table to validate</param>
+    /// <exception cref="UnsupportedTypeException">Thrown when unsupported types are found</exception>
+    private static void ValidateArrowTableTypesForNivaraConversion(Table arrowTable)
+    {
+        var unsupportedFields = new List<string>();
+
+        for (int i = 0; i < arrowTable.Schema.FieldsList.Count; i++)
+        {
+            var field = arrowTable.Schema.FieldsList[i];
+            try
+            {
+                TypeMapper.MapArrowToClr(field.DataType);
+            }
+            catch (UnsupportedTypeException)
+            {
+                unsupportedFields.Add($"{field.Name} ({field.DataType.Name})");
+            }
+        }
+
+        if (unsupportedFields.Count > 0)
+        {
+            var supportedTypes = string.Join(", ", TypeMapper.GetSupportedTypes().Select(t => t.Name));
+            throw new UnsupportedTypeException(
+                typeof(object), // Generic type since multiple types are involved
+                new[] { $"Unsupported Arrow field types found: {string.Join(", ", unsupportedFields)}. Supported types: {supportedTypes}" }
+            );
+        }
+    }
+
+    /// <summary>
+    /// Validates that a series type is supported for Arrow conversion
+    /// </summary>
+    /// <typeparam name="T">The series type to validate</typeparam>
+    /// <exception cref="UnsupportedTypeException">Thrown when the type is not supported</exception>
+    private static void ValidateSeriesTypeForArrowConversion<T>()
+    {
+        if (!TypeMapper.IsArrowSupported(typeof(T)))
+        {
+            throw new UnsupportedTypeException(typeof(T), TypeMapper.GetTypeSuggestions(typeof(T)));
+        }
+    }
+
+    /// <summary>
+    /// Validates that an Arrow array type is compatible with the target Nivara type
+    /// </summary>
+    /// <typeparam name="T">The target Nivara type</typeparam>
+    /// <param name="arrowArray">The Arrow array to validate</param>
+    /// <exception cref="UnsupportedTypeException">Thrown when types are incompatible</exception>
+    private static void ValidateArrowArrayTypeForNivaraConversion<T>(IArrowArray arrowArray)
+    {
+        // Check if the target type is supported
+        if (!TypeMapper.IsArrowSupported(typeof(T)))
+        {
+            throw new UnsupportedTypeException(typeof(T), TypeMapper.GetTypeSuggestions(typeof(T)));
+        }
+
+        // Check if the Arrow array type is compatible with the target type
+        var expectedArrowType = TypeMapper.MapClrToArrow(typeof(T));
+        var actualArrowType = arrowArray.Data.DataType;
+
+        // Simple type compatibility check - in practice, this could be more sophisticated
+        if (expectedArrowType.TypeId != actualArrowType.TypeId)
+        {
+            throw new UnsupportedTypeException(
+                typeof(T),
+                new[] { $"Arrow array type {actualArrowType.Name} is not compatible with target type {typeof(T).Name}. Expected Arrow type: {expectedArrowType.Name}" }
+            );
+        }
+    }
+
+    /// <summary>
+    /// Attempts to create a zero-copy Boolean Arrow array from a NivaraColumn
+    /// </summary>
+    /// <param name="column">The NivaraColumn to convert</param>
+    /// <returns>A zero-copy Arrow array if possible, null if zero-copy is not feasible</returns>
+    private static IArrowArray? TryCreateZeroCopyBooleanArray(NivaraColumn<bool> column)
+    {
+        // Zero-copy is only possible if:
+        // 1. The column has no nulls (or we can handle the null mask efficiently)
+        // 2. The underlying storage is compatible with Arrow's memory layout
+        // 3. The data is contiguous in memory
+        
+        // For now, zero-copy is not implemented for boolean arrays due to bit-packing complexity
+        // This is a fallback that returns null to use the copying approach
+        return null;
+    }
+
+    /// <summary>
+    /// Attempts to create a zero-copy Int32 Arrow array from a NivaraColumn
+    /// </summary>
+    /// <param name="column">The NivaraColumn to convert</param>
+    /// <returns>A zero-copy Arrow array if possible, null if zero-copy is not feasible</returns>
+    private static IArrowArray? TryCreateZeroCopyInt32Array(NivaraColumn<int> column)
+    {
+        // Zero-copy is only possible if:
+        // 1. The column has no nulls (or we can handle the null mask efficiently)
+        // 2. The underlying storage is compatible with Arrow's memory layout
+        // 3. The data is contiguous in memory
+        
+        // Check if column has nulls - zero-copy is more complex with nulls
+        if (column.HasNulls)
+        {
+            return null; // Fallback to copying for now
+        }
+
+        // For tensor-backed columns, we might be able to share memory
+        // This is a simplified implementation - in practice, we'd need to check
+        // memory layout compatibility and create Arrow arrays from existing buffers
+        try
+        {
+            // This is a placeholder for actual zero-copy implementation
+            // In a real implementation, we would:
+            // 1. Get the underlying memory buffer from the column
+            // 2. Create an Arrow array that shares this buffer
+            // 3. Handle memory ownership and lifecycle properly
+            
+            // For now, return null to use copying approach
+            return null;
+        }
+        catch
+        {
+            // If zero-copy fails for any reason, return null to fallback to copying
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to create a zero-copy Double Arrow array from a NivaraColumn
+    /// </summary>
+    /// <param name="column">The NivaraColumn to convert</param>
+    /// <returns>A zero-copy Arrow array if possible, null if zero-copy is not feasible</returns>
+    private static IArrowArray? TryCreateZeroCopyDoubleArray(NivaraColumn<double> column)
+    {
+        // Zero-copy is only possible if:
+        // 1. The column has no nulls (or we can handle the null mask efficiently)
+        // 2. The underlying storage is compatible with Arrow's memory layout
+        // 3. The data is contiguous in memory
+        
+        // Check if column has nulls - zero-copy is more complex with nulls
+        if (column.HasNulls)
+        {
+            return null; // Fallback to copying for now
+        }
+
+        // For tensor-backed columns, we might be able to share memory
+        // This is a simplified implementation - in practice, we'd need to check
+        // memory layout compatibility and create Arrow arrays from existing buffers
+        try
+        {
+            // This is a placeholder for actual zero-copy implementation
+            // In a real implementation, we would:
+            // 1. Get the underlying memory buffer from the column
+            // 2. Create an Arrow array that shares this buffer
+            // 3. Handle memory ownership and lifecycle properly
+            
+            // For now, return null to use copying approach
+            return null;
+        }
+        catch
+        {
+            // If zero-copy fails for any reason, return null to fallback to copying
+            return null;
+        }
     }
 }

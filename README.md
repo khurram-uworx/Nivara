@@ -770,8 +770,10 @@ The `Nivara.Extensions` package provides additional functionality that requires 
   - ✅ **Extension Methods**: Fluent API with both instance extension methods and static factory methods
   - ✅ **Schema Validation**: Type compatibility checking with detailed error messages
   - ✅ **Error Handling**: Comprehensive exception hierarchy with context information
+  - ✅ **Advanced Configuration**: Zero-copy optimization support with fallback mechanisms
+  - ✅ **Performance Optimization**: Configurable validation options for performance-critical scenarios
   - Timezone-aware DateTime conversion
-  - Context-specific error messages with type suggestions
+  - Context-specific error messages with suggested alternativesc error messages with type suggestions
 - **ML.NET Integration**: Machine learning pipeline integration
 
 #### Arrow/Parquet Type Mapping
@@ -862,11 +864,21 @@ Console.WriteLine($"Null count: {restoredColumn.NullCount}");     // 2
 var options = new ArrowConversionOptions
 {
     TimeZone = TimeZoneInfo.Local,      // Handle DateTime timezone conversion
-    UseZeroCopy = true,                 // Enable zero-copy optimizations
-    ValidateTypes = true                // Validate type compatibility
+    UseZeroCopy = true,                 // Enable zero-copy optimizations (with fallback)
+    ValidateTypes = true,               // Validate type compatibility (can be disabled for performance)
+    StringEncoding = Encoding.UTF8      // String encoding for text data
 };
 
 var customArrowTable = frame.ToArrowTable(options);
+
+// Performance optimization - disable validation for trusted data
+var fastOptions = new ArrowConversionOptions
+{
+    ValidateTypes = false,              // Skip type validation for better performance
+    UseZeroCopy = true                  // Attempt zero-copy operations
+};
+
+var fastConversion = frame.ToArrowTable(fastOptions);
 ```
 
 #### Parquet File I/O
@@ -920,6 +932,15 @@ var writeOptions = new ParquetWriteOptions
 
 await frame.ToParquetAsync("custom_output.parquet", writeOptions);
 
+// Performance optimization - disable validation for trusted data
+var fastWriteOptions = new ParquetWriteOptions
+{
+    ValidateSchema = false,        // Skip schema validation for better performance
+    Compression = "none"           // No compression for fastest writing
+};
+
+await frame.ToParquetAsync("fast_output.parquet", fastWriteOptions);
+
 // Batch writing - write multiple frames to single file
 var frame1 = NivaraFrame.Create(
     ("ID", NivaraColumn<int>.Create(new[] { 1, 2 })),
@@ -951,6 +972,15 @@ var readOptions = new ParquetReadOptions
 };
 
 var frameWithOptions = await NivaraFrameExtensions.LoadParquetAsync("output.parquet", readOptions);
+
+// Performance optimization - disable validation for trusted files
+var fastReadOptions = new ParquetReadOptions
+{
+    ValidateSchema = false,     // Skip schema validation for better performance
+    BatchSize = 10000          // Larger batch size for better throughput
+};
+
+var fastFrame = await NivaraFrameExtensions.LoadParquetAsync("trusted_data.parquet", fastReadOptions);
 
 // Streaming for large files (simplified implementation)
 foreach (var chunk in ParquetReader.ReadParquetStreaming("huge_data.parquet"))

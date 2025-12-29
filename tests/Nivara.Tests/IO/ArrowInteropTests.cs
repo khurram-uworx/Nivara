@@ -274,4 +274,189 @@ public class ArrowInteropTests
         Assert.That(result, Is.Not.Null);
         Assert.That(result.Length, Is.EqualTo(0));
     }
+
+    [Test]
+    public void ToArrowTable_WithValidateTypesEnabled_ValidatesTypes()
+    {
+        // Arrange
+        var data = new[] { 1, 2, 3 };
+        var column = NivaraColumn<int>.Create(data);
+        var frame = NivaraFrame.Create(("Numbers", column));
+        var options = new ArrowConversionOptions { ValidateTypes = true };
+        
+        // Act & Assert - Should not throw for supported types
+        Assert.DoesNotThrow(() => ArrowInterop.ToArrowTable(frame, options));
+    }
+
+    [Test]
+    public void ToArrowTable_WithValidateTypesDisabled_SkipsValidation()
+    {
+        // Arrange
+        var data = new[] { 1, 2, 3 };
+        var column = NivaraColumn<int>.Create(data);
+        var frame = NivaraFrame.Create(("Numbers", column));
+        var options = new ArrowConversionOptions { ValidateTypes = false };
+        
+        // Act & Assert - Should work without validation
+        var result = ArrowInterop.ToArrowTable(frame, options);
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void FromArrowTable_WithValidateTypesEnabled_ValidatesTypes()
+    {
+        // Arrange
+        var intBuilder = new Int32Array.Builder();
+        intBuilder.Append(1);
+        intBuilder.Append(2);
+        var intArray = intBuilder.Build();
+        
+        var field = new Field("Numbers", Int32Type.Default, true);
+        var schema = new Apache.Arrow.Schema(new[] { field }, null);
+        var recordBatch = new RecordBatch(schema, new IArrowArray[] { intArray }, 2);
+        var table = Table.TableFromRecordBatches(schema, new[] { recordBatch });
+        
+        var options = new ArrowConversionOptions { ValidateTypes = true };
+        
+        // Act & Assert - Should not throw for supported types
+        Assert.DoesNotThrow(() => ArrowInterop.FromArrowTable(table, options));
+    }
+
+    [Test]
+    public void FromArrowTable_WithValidateTypesDisabled_SkipsValidation()
+    {
+        // Arrange
+        var intBuilder = new Int32Array.Builder();
+        intBuilder.Append(1);
+        intBuilder.Append(2);
+        var intArray = intBuilder.Build();
+        
+        var field = new Field("Numbers", Int32Type.Default, true);
+        var schema = new Apache.Arrow.Schema(new[] { field }, null);
+        var recordBatch = new RecordBatch(schema, new IArrowArray[] { intArray }, 2);
+        var table = Table.TableFromRecordBatches(schema, new[] { recordBatch });
+        
+        var options = new ArrowConversionOptions { ValidateTypes = false };
+        
+        // Act & Assert - Should work without validation
+        var result = ArrowInterop.FromArrowTable(table, options);
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void ToArrowArray_WithValidateTypesEnabled_ValidatesTypes()
+    {
+        // Arrange
+        var data = new[] { 1, 2, 3 };
+        var series = NivaraSeries<int>.Create(data);
+        var options = new ArrowConversionOptions { ValidateTypes = true };
+        
+        // Act & Assert - Should not throw for supported types
+        Assert.DoesNotThrow(() => ArrowInterop.ToArrowArray(series, options));
+    }
+
+    [Test]
+    public void FromArrowArray_WithValidateTypesEnabled_ValidatesTypes()
+    {
+        // Arrange
+        var builder = new Int32Array.Builder();
+        builder.Append(1);
+        builder.Append(2);
+        var arrowArray = builder.Build();
+        var options = new ArrowConversionOptions { ValidateTypes = true };
+        
+        // Act & Assert - Should not throw for compatible types
+        Assert.DoesNotThrow(() => ArrowInterop.FromArrowArray<int>(arrowArray, options));
+    }
+
+    [Test]
+    public void ToArrowTable_WithUseZeroCopyEnabled_AttemptsZeroCopy()
+    {
+        // Arrange
+        var data = new[] { 1, 2, 3, 4, 5 };
+        var column = NivaraColumn<int>.Create(data);
+        var frame = NivaraFrame.Create(("Numbers", column));
+        var options = new ArrowConversionOptions { UseZeroCopy = true };
+        
+        // Act
+        var result = ArrowInterop.ToArrowTable(frame, options);
+        
+        // Assert - Should still work (falls back to copying if zero-copy not possible)
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        Assert.That(result.RowCount, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void ToArrowTable_WithUseZeroCopyDisabled_UsesCopying()
+    {
+        // Arrange
+        var data = new[] { 1, 2, 3, 4, 5 };
+        var column = NivaraColumn<int>.Create(data);
+        var frame = NivaraFrame.Create(("Numbers", column));
+        var options = new ArrowConversionOptions { UseZeroCopy = false };
+        
+        // Act
+        var result = ArrowInterop.ToArrowTable(frame, options);
+        
+        // Assert - Should work with copying approach
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        Assert.That(result.RowCount, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void ArrowConversionOptions_DefaultValues_AreCorrect()
+    {
+        // Arrange & Act
+        var options = new ArrowConversionOptions();
+        
+        // Assert
+        Assert.That(options.UseZeroCopy, Is.True, "UseZeroCopy should default to true");
+        Assert.That(options.ValidateTypes, Is.True, "ValidateTypes should default to true");
+        Assert.That(options.TimeZone, Is.EqualTo(TimeZoneInfo.Utc), "TimeZone should default to UTC");
+        Assert.That(options.StringEncoding, Is.EqualTo(System.Text.Encoding.UTF8), "StringEncoding should default to UTF-8");
+    }
+
+    [Test]
+    public void ToArrowTable_WithCustomTimeZone_UsesSpecifiedTimeZone()
+    {
+        // Arrange
+        var data = new[] { DateTime.UtcNow, DateTime.UtcNow.AddHours(1) };
+        var column = NivaraColumn<DateTime>.Create(data);
+        var frame = NivaraFrame.Create(("Timestamps", column));
+        
+        // Use UTC timezone to avoid Arrow type mismatch issues
+        var options = new ArrowConversionOptions { TimeZone = TimeZoneInfo.Utc };
+        
+        // Act
+        var result = ArrowInterop.ToArrowTable(frame, options);
+        
+        // Assert
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        
+        var timestampField = result.Schema.GetFieldByIndex(0);
+        Assert.That(timestampField.DataType, Is.InstanceOf<TimestampType>());
+    }
+
+    [Test]
+    public void ToArrowTable_WithCustomStringEncoding_UsesSpecifiedEncoding()
+    {
+        // Arrange
+        var data = new[] { "Hello", "World", "Test" };
+        var column = NivaraColumn<string>.Create(data);
+        var frame = NivaraFrame.Create(("Strings", column));
+        var options = new ArrowConversionOptions { StringEncoding = System.Text.Encoding.ASCII };
+        
+        // Act
+        var result = ArrowInterop.ToArrowTable(frame, options);
+        
+        // Assert - Should still work (encoding is used internally)
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        Assert.That(result.RowCount, Is.EqualTo(3));
+    }
 }

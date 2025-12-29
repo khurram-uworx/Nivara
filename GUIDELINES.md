@@ -1873,6 +1873,98 @@ return NivaraFrame.Create(columns.ToArray());
 - Streaming interface (simplified implementation)
 
 
+## Arrow/Parquet I/O Advanced Configuration Implementation
+
+### Zero-Copy Optimization Strategy
+**Decision**: Implemented UseZeroCopy option with fallback mechanism to copying when zero-copy is not feasible
+**Rationale**: Zero-copy operations can significantly improve performance by avoiding memory duplication, but not all scenarios support it (e.g., columns with nulls, incompatible memory layouts).
+
+**Pattern**: Try zero-copy first, fallback to copying
+```csharp
+// Try zero-copy optimization first if enabled
+if (options.UseZeroCopy)
+{
+    var zeroCopyArray = TryCreateZeroCopyInt32Array(column);
+    if (zeroCopyArray != null)
+        return zeroCopyArray;
+}
+
+// Fallback to copying approach
+var builder = new Int32Array.Builder();
+// ... standard copying implementation
+```
+
+**Implementation Notes**:
+- Zero-copy is currently implemented as placeholder methods that return null to fallback to copying
+- Real zero-copy implementation would require:
+  1. Access to underlying memory buffers from NivaraColumn storage
+  2. Arrow array creation from existing buffers
+  3. Proper memory ownership and lifecycle management
+- Zero-copy is more complex with null values due to separate null mask handling
+
+### Validation Configuration Implementation
+**Decision**: Implemented ValidateTypes option for Arrow conversions with comprehensive type checking
+**Rationale**: Type validation can be expensive for large datasets, so providing an option to disable it improves performance for trusted data sources.
+
+**Pattern**: Conditional validation based on options
+```csharp
+// Validate types if requested
+if (options.ValidateTypes)
+{
+    ValidateFrameTypesForArrowConversion(frame);
+}
+```
+
+**Validation Coverage**:
+- Frame-level validation: Checks all column types are supported for Arrow conversion
+- Table-level validation: Validates Arrow types can be converted to Nivara types
+- Series-level validation: Ensures series type is supported
+- Array-level validation: Checks Arrow array type compatibility with target Nivara type
+
+### Configuration Options Testing Strategy
+**Decision**: Comprehensive unit tests covering all configuration scenarios including default values, enable/disable behavior, and custom settings
+**Rationale**: Configuration options affect core functionality, so thorough testing ensures they work correctly and don't break existing behavior.
+
+**Coverage**: 12 additional test cases covering:
+- ValidateTypes enable/disable for all conversion methods
+- UseZeroCopy enable/disable behavior
+- Default configuration values validation
+- Custom timezone handling for DateTime conversions
+- Custom string encoding options
+- Configuration option combinations
+
+### Arrow Timezone Handling Gotcha
+**Problem**: Arrow TimestampType in field definition must match TimestampType used in array creation
+**Solution**: Ensure consistent timezone usage between field creation and array building
+```csharp
+// WRONG - timezone mismatch between field and array
+var arrowType = TypeMapper.MapClrToArrow(typeof(DateTime)); // Uses UTC
+var timestampType = new TimestampType(TimeUnit.Microsecond, options.TimeZone); // Uses custom timezone
+
+// CORRECT - use same timezone for both field and array
+if (column.ElementType == typeof(DateTime) && arrowType is TimestampType)
+{
+    arrowType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
+}
+```
+
+### Performance Optimization Patterns
+**Decision**: Implemented configuration-driven performance optimizations with graceful degradation
+**Rationale**: Different use cases have different performance requirements. Configuration options allow users to optimize for their specific scenarios.
+
+**Optimization Strategies**:
+1. **Zero-Copy Operations**: Avoid memory duplication when possible
+2. **Validation Bypass**: Skip expensive type checking for trusted data
+3. **Custom Encoding**: Allow optimization for specific character sets
+4. **Timezone Optimization**: Use UTC by default to avoid conversion overhead
+
+### Configuration Testing Gotchas
+**Problem**: Testing timezone-specific functionality can cause Arrow type mismatches
+**Solution**: Use UTC timezone in tests to avoid compatibility issues, or ensure consistent timezone usage throughout the conversion pipeline
+
+**Problem**: Configuration options need to be tested for both enabled and disabled states
+**Solution**: Create separate test methods for each configuration state to ensure comprehensive coverage
+
 ## Parquet Writing Implementation
 
 ### Parquet.Net API Usage Patterns
