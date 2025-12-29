@@ -1790,3 +1790,145 @@ return NivaraFrame.Create(columns.ToArray());
 - Error handling with proper exception types
 - Streaming interface (simplified implementation)
 
+
+## Parquet Writing Implementation
+
+### Parquet.Net API Usage Patterns
+**Decision**: Use non-nullable arrays for Parquet.Net DataColumn constructor, even for nullable fields
+**Rationale**: Parquet.Net expects array types to match the DataField generic type exactly. For `DataField<int>` marked as nullable, pass `int[]` not `int?[]`. Nullability is handled internally by Parquet.Net.
+
+**Pattern**: Extract data as non-nullable arrays, let Parquet.Net handle null semantics
+```csharp
+// WRONG - passing nullable array to DataColumn
+var nullableArray = new T?[column.Length];
+for (int i = 0; i < column.Length; i++)
+    nullableArray[i] = column.IsNull(i) ? null : column[i];
+var dataColumn = new DataColumn(field, nullableArray); // ArgumentException
+
+// CORRECT - pass non-nullable array, Parquet.Net handles nulls
+var values = new T[column.Length];
+for (int i = 0; i < column.Length; i++)
+    values[i] = column.IsNull(i) ? default(T) : column[i];
+var dataColumn = new DataColumn(field, values); // Works correctly
+```
+
+### Schema Access in NivaraFrame
+**Decision**: Use `frame.Schema.GetColumnType(columnName)` instead of non-existent `frame.ColumnTypes[i]`
+**Rationale**: NivaraFrame doesn't expose a direct ColumnTypes indexer. Schema provides the correct API for accessing column type information.
+
+**Pattern**: Access column types through Schema
+```csharp
+// WRONG - ColumnTypes property doesn't exist
+var columnType = frame.ColumnTypes[i]; // Compiler error
+
+// CORRECT - use Schema to get column type
+var columnName = frame.ColumnNames[i];
+var columnType = frame.Schema.GetColumnType(columnName);
+```
+
+### Parquet Empty Frame Handling
+**Decision**: Create dummy "_empty" column for empty frames since Parquet requires at least one field
+**Rationale**: Parquet format specification requires at least one field. NivaraFrame also requires at least one column, so this approach maintains consistency.
+
+**Pattern**: Handle empty frames with dummy column
+```csharp
+if (frame.ColumnCount == 0)
+{
+    var dummyField = new DataField<int>("_empty");
+    var emptySchema = new ParquetSchema(dummyField);
+    using var emptyWriter = await Parquet.ParquetWriter.CreateAsync(emptySchema, stream);
+    using var emptyRowGroup = emptyWriter.CreateRowGroup();
+    var emptyColumn = new DataColumn(dummyField, Array.Empty<int>());
+    await emptyRowGroup.WriteColumnAsync(emptyColumn);
+    return;
+}
+```
+
+### String Null Handling in Parquet
+**Decision**: Pass `null` values directly for string columns, not empty strings
+**Rationale**: Parquet.Net can handle null string values correctly. Converting nulls to empty strings loses semantic meaning.
+
+**Pattern**: Preserve null semantics for reference types
+```csharp
+// WRONG - converts nulls to empty strings
+stringArray[i] = column.IsNull(i) ? string.Empty : column[i];
+
+// CORRECT - preserve null values
+stringArray[i] = column.IsNull(i) ? null! : column[i];
+```
+
+### Parquet Batch Writing Strategy
+**Decision**: Concatenate multiple frames into single frame before writing
+**Rationale**: Parquet.Net doesn't support multiple datasets in one file. Concatenation approach is simpler than managing multiple row groups.
+
+**Pattern**: Schema validation before concatenation
+```csharp
+// Validate schema compatibility first
+if (options.ValidateSchema)
+{
+    ValidateFrameSchemaCompatibility(frameList);
+}
+
+// Concatenate frames and write as single frame
+var concatenatedFrame = ConcatenateFrames(frameList);
+try
+{
+    await WriteParquetAsync(concatenatedFrame, stream, options);
+}
+finally
+{
+    concatenatedFrame.Dispose(); // Important: dispose concatenated frame
+}
+```
+
+### Error Context in I/O Operations
+**Decision**: Wrap low-level exceptions with context-rich NivaraIOException types
+**Rationale**: Provides better debugging experience with file paths, operation context, and affected data ranges.
+
+**Pattern**: Context-rich exception wrapping
+```csharp
+try
+{
+    var columnData = ExtractColumnDataArray(frame, columnName, columnType);
+    var dataColumn = new DataColumn(field, columnData);
+    await rowGroupWriter.WriteColumnAsync(dataColumn);
+}
+catch (Exception ex)
+{
+    throw new DataCorruptionException($"Failed to write column '{columnName}': {ex.Message}", ex)
+    {
+        AffectedColumns = new[] { columnName },
+        AffectedRowRange = new Range(0, frame.RowCount)
+    };
+}
+```
+
+### Parquet Writer Testing Strategy
+**Decision**: Test with various data types, null values, empty frames, and error conditions
+**Rationale**: Parquet writing involves complex type mapping and null handling. Comprehensive tests catch edge cases early.
+
+**Coverage**: 10 test cases covering:
+- Basic data type writing (int, string, double, bool, long, DateTime)
+- Null value handling for both value types and reference types
+- Empty frame handling
+- Stream vs file writing
+- Batch writing with multiple frames
+- Schema validation errors
+- Argument validation (null parameters)
+
+### Parquet Writer Gotchas
+**Problem**: Method overload ambiguity with null parameters
+**Solution**: Use explicit type casting for null parameters in tests
+```csharp
+// WRONG - ambiguous between string and Stream overloads
+Assert.Throws<ArgumentNullException>(() => ParquetWriter.WriteParquet(frame, null!));
+
+// CORRECT - explicit type casting
+Assert.Throws<ArgumentNullException>(() => ParquetWriter.WriteParquet(frame, (string)null!));
+```
+
+**Problem**: Parquet.Net DataColumn constructor expects exact type match
+**Solution**: Always pass arrays with types matching the DataField generic parameter, not nullable versions
+
+**Problem**: Frame concatenation requires proper resource disposal
+**Solution**: Always dispose concatenated frames in finally blocks to prevent memory leaks

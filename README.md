@@ -761,10 +761,11 @@ tests/
 The `Nivara.Extensions` package provides additional functionality that requires third-party dependencies:
 
 - **CSV Support**: Reading and writing CSV files using CsvHelper
-- **Arrow/Parquet I/O**: ✅ **Parquet Reading Complete** - Comprehensive Parquet reading capabilities with schema validation
+- **Arrow/Parquet I/O**: ✅ **Parquet I/O Complete** - Comprehensive Parquet reading and writing capabilities with schema validation
   - CLR ↔ Arrow type conversion with support for all primitive types
   - CLR ↔ Parquet type conversion with nullable type handling
   - ✅ **Parquet Reader**: File and stream reading with async support
+  - ✅ **Parquet Writer**: File and stream writing with configurable compression and batch operations
   - ✅ **Schema Validation**: Type compatibility checking with detailed error messages
   - ✅ **Error Handling**: Comprehensive exception hierarchy with context information
   - Timezone-aware DateTime conversion
@@ -864,31 +865,82 @@ var customArrowTable = ArrowInterop.ToArrowTable(frame, options);
 
 #### Parquet File I/O
 
-Read Parquet files with comprehensive schema validation and error handling:
+Read and write Parquet files with comprehensive schema validation and error handling:
 
 ```csharp
 using Nivara.IO;
 
+// Write Parquet file (async)
+var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
+var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d", "e" });
+var frame = NivaraFrame.Create(
+    ("Numbers", intColumn),
+    ("Letters", stringColumn)
+);
+
+await ParquetWriter.WriteParquetAsync(frame, "output.parquet");
+Console.WriteLine("Parquet file written successfully");
+
+// Write Parquet file (sync)
+ParquetWriter.WriteParquet(frame, "output_sync.parquet");
+
+// Write to stream
+using var memoryStream = new MemoryStream();
+await ParquetWriter.WriteParquetAsync(frame, memoryStream);
+
+// Custom writing options
+var writeOptions = new ParquetWriteOptions
+{
+    RowGroupSize = 5000,           // Rows per row group (default: 10000)
+    Compression = "snappy",        // Compression algorithm (default: "snappy")
+    ValidateSchema = true,         // Validate schema before writing (default: true)
+    WriteMetadata = true           // Include metadata (default: true)
+};
+
+await ParquetWriter.WriteParquetAsync(frame, "custom_output.parquet", writeOptions);
+
+// Batch writing - write multiple frames to single file
+var frame1 = NivaraFrame.Create(
+    ("ID", NivaraColumn<int>.Create(new[] { 1, 2 })),
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" }))
+);
+
+var frame2 = NivaraFrame.Create(
+    ("ID", NivaraColumn<int>.Create(new[] { 3, 4 })),
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie", "David" }))
+);
+
+var frames = new[] { frame1, frame2 };
+await ParquetWriter.WriteParquetBatchAsync(frames, "batch_output.parquet");
+
+// Handle nullable data
+var nullableData = new int?[] { 1, null, 3, null, 5 };
+var nullableColumn = NivaraColumn<int>.CreateFromNullable(nullableData);
+var frameWithNulls = NivaraFrame.Create(("NullableNumbers", nullableColumn));
+
+// Parquet writing preserves null information
+await ParquetWriter.WriteParquetAsync(frameWithNulls, "with_nulls.parquet");
+
 // Read Parquet file (async)
-var frame = await ParquetReader.ReadParquetAsync("data.parquet");
-Console.WriteLine($"Loaded {frame.RowCount} rows, {frame.ColumnCount} columns");
+var readFrame = await ParquetReader.ReadParquetAsync("output.parquet");
+Console.WriteLine($"Loaded {readFrame.RowCount} rows, {readFrame.ColumnCount} columns");
 
 // Read Parquet file (sync)
-var frameSync = ParquetReader.ReadParquet("data.parquet");
+var frameSync = ParquetReader.ReadParquet("output.parquet");
 
 // Read from stream
-using var fileStream = File.OpenRead("data.parquet");
+using var fileStream = File.OpenRead("output.parquet");
 var frameFromStream = await ParquetReader.ReadParquetAsync(fileStream);
 
 // Custom reading options
-var options = new ParquetReadOptions
+var readOptions = new ParquetReadOptions
 {
     ValidateSchema = true,      // Validate schema compatibility (default: true)
     BatchSize = 1000,          // Batch size for processing (default: 1000)
     StreamRowGroups = false    // Stream row groups for large files (default: false)
 };
 
-var frameWithOptions = await ParquetReader.ReadParquetAsync("large_data.parquet", options);
+var frameWithOptions = await ParquetReader.ReadParquetAsync("output.parquet", readOptions);
 
 // Streaming for large files (simplified implementation)
 foreach (var chunk in ParquetReader.ReadParquetStreaming("huge_data.parquet"))
@@ -900,7 +952,11 @@ foreach (var chunk in ParquetReader.ReadParquetStreaming("huge_data.parquet"))
 // Error handling with detailed context
 try
 {
-    var problematicFrame = await ParquetReader.ReadParquetAsync("corrupted.parquet");
+    // Schema validation during writing
+    var unsupportedFrame = NivaraFrame.Create(
+        ("GuidColumn", NivaraColumn<Guid>.Create(new[] { Guid.NewGuid() }))
+    );
+    await ParquetWriter.WriteParquetAsync(unsupportedFrame, "invalid.parquet");
 }
 catch (SchemaValidationException ex)
 {
@@ -986,13 +1042,13 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ DataFrame operations infrastructure with execution strategies and query node hierarchy
 - ✅ Arrow/Parquet type mapping system with comprehensive CLR ↔ Arrow ↔ Parquet conversion
 - ✅ Arrow interoperability with bidirectional conversion (ToArrowTable, FromArrowTable, ToArrowArray, FromArrowArray)
-- ✅ Comprehensive test suite with 365 passing tests (including 28 new infrastructure tests)
+- ✅ Parquet I/O operations with reading and writing support (file/stream, async/sync, batch operations)
 
 ### Upcoming Features
 - 🔄 Data source scanning (CSV, JSON) with lazy evaluation
 - 🔄 Query optimization passes (predicate pushdown, operation fusion)
 - 🔄 Advanced aggregation functions (Sum, Count, Average, etc.)
-- 🔄 Parquet I/O operations (reading and writing with streaming support)
+- 🔄 Parquet streaming and batch operations (advanced features)
 - 📋 Grouping with aggregation functions
 - 📋 Joining operations between frames
 
