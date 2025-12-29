@@ -44,6 +44,35 @@ public static class JsonExtensions
         var source = new JsonEagerSource(filePath, options ?? JsonOptions.Default);
         return source.Execute();
     }
+
+    /// <summary>
+    /// Creates a lazy query frame that scans a JSON file without immediately reading it
+    /// </summary>
+    /// <param name="filePath">The path to the JSON file</param>
+    /// <param name="options">Optional JSON reading options</param>
+    /// <returns>A QueryFrame that will read the JSON when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
+    public static QueryFrame ScanJsonAsQueryFrame(string filePath, JsonOptions? options = null)
+    {
+        var source = ScanJson(filePath, options);
+        return new QueryFrame(source);
+    }
+
+    /// <summary>
+    /// Reads a JSON file immediately and returns a frame with the data
+    /// </summary>
+    /// <param name="filePath">The path to the JSON file</param>
+    /// <param name="options">Optional JSON reading options</param>
+    /// <returns>A NivaraFrame containing the JSON data</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
+    /// <exception cref="DataSourceException">Thrown when the JSON file cannot be read</exception>
+    public static NivaraFrame ReadJsonAsFrame(string filePath, JsonOptions? options = null)
+    {
+        var columns = ReadJson(filePath, options);
+        return NivaraFrame.Create(columns);
+    }
 }
 
 /// <summary>
@@ -76,5 +105,32 @@ public static class Json
     public static IReadOnlyDictionary<string, IColumn> Read(string filePath, JsonOptions? options = null)
     {
         return JsonExtensions.ReadJson(filePath, options);
+    }
+
+    /// <summary>
+    /// Creates a lazy query frame that scans a JSON file without immediately reading it
+    /// </summary>
+    /// <param name="filePath">The path to the JSON file</param>
+    /// <param name="options">Optional JSON reading options</param>
+    /// <returns>A QueryFrame that will read the JSON when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
+    public static QueryFrame ScanAsQueryFrame(string filePath, JsonOptions? options = null)
+    {
+        return JsonExtensions.ScanJsonAsQueryFrame(filePath, options);
+    }
+
+    /// <summary>
+    /// Reads a JSON file immediately and returns a frame with the data
+    /// </summary>
+    /// <param name="filePath">The path to the JSON file</param>
+    /// <param name="options">Optional JSON reading options</param>
+    /// <returns>A NivaraFrame containing the JSON data</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
+    /// <exception cref="DataSourceException">Thrown when the JSON file cannot be read</exception>
+    public static NivaraFrame ReadAsFrame(string filePath, JsonOptions? options = null)
+    {
+        return JsonExtensions.ReadJsonAsFrame(filePath, options);
     }
 }

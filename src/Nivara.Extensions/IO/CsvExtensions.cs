@@ -44,6 +44,35 @@ public static class CsvExtensions
         var source = new CsvEagerSource(filePath, options ?? CsvOptions.Default);
         return source.Execute();
     }
+
+    /// <summary>
+    /// Creates a lazy query frame that scans a CSV file without immediately reading it
+    /// </summary>
+    /// <param name="filePath">The path to the CSV file</param>
+    /// <param name="options">Optional CSV reading options</param>
+    /// <returns>A QueryFrame that will read the CSV when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
+    public static QueryFrame ScanCsvAsQueryFrame(string filePath, CsvOptions? options = null)
+    {
+        var source = ScanCsv(filePath, options);
+        return new QueryFrame(source);
+    }
+
+    /// <summary>
+    /// Reads a CSV file immediately and returns a frame with the data
+    /// </summary>
+    /// <param name="filePath">The path to the CSV file</param>
+    /// <param name="options">Optional CSV reading options</param>
+    /// <returns>A NivaraFrame containing the CSV data</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
+    /// <exception cref="DataSourceException">Thrown when the CSV file cannot be read</exception>
+    public static NivaraFrame ReadCsvAsFrame(string filePath, CsvOptions? options = null)
+    {
+        var columns = ReadCsv(filePath, options);
+        return NivaraFrame.Create(columns);
+    }
 }
 
 /// <summary>
@@ -76,5 +105,32 @@ public static class Csv
     public static IReadOnlyDictionary<string, IColumn> Read(string filePath, CsvOptions? options = null)
     {
         return CsvExtensions.ReadCsv(filePath, options);
+    }
+
+    /// <summary>
+    /// Creates a lazy query frame that scans a CSV file without immediately reading it
+    /// </summary>
+    /// <param name="filePath">The path to the CSV file</param>
+    /// <param name="options">Optional CSV reading options</param>
+    /// <returns>A QueryFrame that will read the CSV when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
+    public static QueryFrame ScanAsQueryFrame(string filePath, CsvOptions? options = null)
+    {
+        return CsvExtensions.ScanCsvAsQueryFrame(filePath, options);
+    }
+
+    /// <summary>
+    /// Reads a CSV file immediately and returns a frame with the data
+    /// </summary>
+    /// <param name="filePath">The path to the CSV file</param>
+    /// <param name="options">Optional CSV reading options</param>
+    /// <returns>A NivaraFrame containing the CSV data</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
+    /// <exception cref="DataSourceException">Thrown when the CSV file cannot be read</exception>
+    public static NivaraFrame ReadAsFrame(string filePath, CsvOptions? options = null)
+    {
+        return CsvExtensions.ReadCsvAsFrame(filePath, options);
     }
 }

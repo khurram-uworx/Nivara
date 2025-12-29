@@ -216,6 +216,117 @@ var pipeline = employees.AsQueryFrame()
 Console.WriteLine($"Result has {pipeline.RowCount} rows and {pipeline.ColumnCount} columns");
 ```
 
+#### Lazy Data Sources
+
+Nivara provides comprehensive lazy data source capabilities for CSV and JSON files with automatic schema inference:
+
+```csharp
+using Nivara.IO;
+using Nivara.Expressions;
+
+// Lazy CSV scanning with schema inference
+var csvQuery = CsvExtensions.ScanCsvAsQueryFrame("employees.csv");
+Console.WriteLine($"CSV Schema: {string.Join(", ", csvQuery.Schema.ColumnNames)}");
+// Schema inferred automatically: Name (string), Age (int), Salary (int)
+
+// Lazy JSON scanning with schema inference  
+var jsonQuery = JsonExtensions.ScanJsonAsQueryFrame("employees.json");
+Console.WriteLine($"JSON Schema: {string.Join(", ", jsonQuery.Schema.ColumnNames)}");
+// Schema inferred automatically: Name (string), Age (double), Salary (double)
+
+// Build complex queries on lazy sources
+var filteredEmployees = csvQuery
+    .Filter(ColumnExpressions.Col("Age") > 30)                    // Only employees over 30
+    .Filter(ColumnExpressions.Col("Salary") > 70000)             // Earning more than 70k
+    .Select("Name", "Department", "Salary")                       // Select specific columns
+    .Collect();                                                   // Execute query and materialize results
+
+Console.WriteLine($"Found {filteredEmployees.RowCount} senior high-earners");
+
+// Lazy evaluation - no file I/O until Collect()
+var lazyPipeline = jsonQuery
+    .Filter(ColumnExpressions.Col("Department") == "Engineering")
+    .Select(ColumnExpressions.Col("Name"), ColumnExpressions.Col("Salary") * 1.1); // 10% raise
+
+// File is not read until this point
+var engineersWithRaise = lazyPipeline.Collect();
+
+// Static factory classes for convenience
+var csvData = Csv.ScanAsQueryFrame("data.csv");
+var jsonData = Json.ScanAsQueryFrame("data.json");
+
+// Eager reading for immediate materialization
+var csvFrame = CsvExtensions.ReadCsvAsFrame("data.csv");        // Immediate file reading
+var jsonFrame = JsonExtensions.ReadJsonAsFrame("data.json");    // Immediate file reading
+
+// Compare lazy vs eager - same results, different execution timing
+var lazyResult = Csv.ScanAsQueryFrame("large_file.csv")
+    .Filter(ColumnExpressions.Col("Status") == "Active")
+    .Collect();                                                  // File read only when needed
+
+var eagerFrame = Csv.ReadAsFrame("large_file.csv");            // File read immediately
+var eagerResult = eagerFrame.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Status") == "Active")
+    .Collect();
+
+// Results are identical, but timing and memory usage differ
+Console.WriteLine($"Lazy and eager results match: {lazyResult.RowCount == eagerResult.RowCount}");
+```
+
+**Schema Inference Characteristics**:
+- **CSV Files**: Conservative inference (string, int types)
+  - Numeric columns that parse as integers become `int` type
+  - All other columns become `string` type
+  - Analyzes up to 100 sample rows for type detection
+
+- **JSON Files**: JSON-native inference (string, double types)  
+  - JSON numbers become `double` type (JSON standard)
+  - String values become `string` type
+  - Analyzes up to 100 sample objects for type detection
+
+**Lazy vs Eager Evaluation**:
+- **Lazy Sources** (`ScanCsv`, `ScanJson`): File I/O deferred until `Collect()`
+  - Minimal upfront cost (schema inference only)
+  - Memory efficient for large files
+  - Best for filtered queries or conditional processing
+
+- **Eager Sources** (`ReadCsvAsFrame`, `ReadJsonAsFrame`): Immediate file I/O
+  - Full file processing upfront
+  - Better for small files or guaranteed data usage
+  - Simpler memory model (data already materialized)
+
+**Error Handling**:
+```csharp
+try
+{
+    var source = CsvExtensions.ScanCsv("nonexistent.csv");
+}
+catch (FileNotFoundException ex)
+{
+    Console.WriteLine($"File not found: {ex.Message}");
+}
+
+try
+{
+    var source = JsonExtensions.ScanJson("empty.json");  // Empty JSON array
+}
+catch (DataSourceException ex)
+{
+    Console.WriteLine($"Cannot infer schema: {ex.Message}");
+    // Empty JSON arrays cannot have schema inferred
+}
+
+// Null parameter validation
+try
+{
+    var source = CsvExtensions.ScanCsv(null!);
+}
+catch (ArgumentNullException ex)
+{
+    Console.WriteLine($"Invalid parameter: {ex.Message}");
+}
+```
+
 #### Query Operations
 
 The query engine supports several core operations:
@@ -1264,9 +1375,11 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Arrow interoperability with bidirectional conversion (ToArrowTable, FromArrowTable, ToArrowArray, FromArrowArray)
 - ✅ Parquet I/O operations with reading and writing support (file/stream, async/sync, batch operations)
 - ✅ Extension methods and fluent API for Arrow and Parquet operations with method chaining support
+- ✅ Lazy data sources (CSV, JSON) with automatic schema inference and lazy evaluation
+- ✅ Eager data sources (CSV, JSON) with immediate loading and data consistency validation
 
 ### Upcoming Features
-- 🔄 Data source scanning (CSV, JSON) with lazy evaluation
+- ✅ Data source scanning (CSV, JSON) with lazy evaluation - **Complete**
 - 🔄 Query optimization passes (predicate pushdown, operation fusion)
 - 🔄 Advanced aggregation functions (Sum, Count, Average, etc.)
 - 🔄 Parquet streaming and batch operations (advanced features)

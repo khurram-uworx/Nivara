@@ -299,11 +299,17 @@ internal sealed class JsonLazySource : IQuerySource
     /// <returns>An empty column</returns>
     private static IColumn CreateEmptyColumn(Type columnType)
     {
-        var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
-            .GetMethod("Create", new[] { typeof(Array) });
-        
+        // Create empty typed array
         var emptyArray = Array.CreateInstance(columnType, 0);
-        return (IColumn)createMethod!.Invoke(null, new object[] { emptyArray })!;
+        
+        // Use reflection to call the appropriate Create method
+        var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
+            .GetMethod("Create", new[] { columnType.MakeArrayType() });
+        
+        if (createMethod == null)
+            throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
+        
+        return (IColumn)createMethod.Invoke(null, new object[] { emptyArray })!;
     }
 
     /// <summary>
@@ -314,10 +320,14 @@ internal sealed class JsonLazySource : IQuerySource
     /// <returns>A column containing the data</returns>
     private static IColumn CreateColumn(Array data, Type columnType)
     {
+        // Use reflection to call the appropriate Create method
         var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
-            .GetMethod("Create", new[] { typeof(Array) });
+            .GetMethod("Create", new[] { columnType.MakeArrayType() });
         
-        return (IColumn)createMethod!.Invoke(null, new object[] { data })!;
+        if (createMethod == null)
+            throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
+        
+        return (IColumn)createMethod.Invoke(null, new object[] { data })!;
     }
 }
 

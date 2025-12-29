@@ -2363,3 +2363,452 @@ catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTy
     // Wrap only unexpected exceptions
 }
 ```
+
+## Lazy Data Sources Implementation
+
+### Data Source Architecture Decisions
+**Decision**: Created separate lazy and eager data sources with IQuerySource abstraction and factory methods in extension classes
+**Rationale**: Provides clear separation between lazy evaluation (scanning) and eager evaluation (reading). IQuerySource abstraction enables consistent query engine integration regardless of data source type.
+
+**Pattern**: Dual data source approach with factory methods
+```csharp
+// Lazy data sources (scanning)
+public static IQuerySource ScanCsv(string filePath) => new CsvLazySource(filePath);
+public static QueryFrame ScanCsvAsQueryFrame(string filePath) => new QueryFrame(ScanCsv(filePath));
+
+// Eager data sources (reading)  
+public static NivaraFrame ReadCsvAsFrame(string filePath) => new CsvEagerSource(filePath).Execute().ToNivaraFrame();
+
+// Static factory classes for convenience
+public static class Csv
+{
+    public static QueryFrame ScanAsQueryFrame(string filePath) => CsvExtensions.ScanCsvAsQueryFrame(filePath);
+    public static NivaraFrame ReadAsFrame(string filePath) => CsvExtensions.ReadCsvAsFrame(filePath);
+}
+```
+
+### Schema Inference Strategy
+**Decision**: Implement schema inference by reading sample rows and analyzing data types with fallback to string type
+**Rationale**: Provides automatic type detection while maintaining predictable behavior. Different formats have different type inference characteristics (CSV: string/int, JSON: string/double).
+
+**Pattern**: Sample-based schema inference with type-specific defaults
+```csharp
+// CSV schema inference (conservative, prefers integers)
+private Schema InferSchemaFromSample()
+{
+    var sampleRows = ReadSampleRows(Math.Min(100, totalRows));
+    var columnTypes = new Dictionary<string, Type>();
+    
+    foreach (var header in headers)
+    {
+        var columnValues = sampleRows.Select(row => row[header]).Where(v => !string.IsNullOrEmpty(v));
+        
+        // Try int first, then string
+        if (columnValues.All(v => int.TryParse(v, out _)))
+            columnTypes[header] = typeof(int);
+        else
+            columnTypes[header] = typeof(string);
+    }
+    
+    return new Schema(columnTypes.Select(kvp => (kvp.Key, kvp.Value)));
+}
+
+// JSON schema inference (uses double for numbers)
+private Schema InferSchemaFromSample()
+{
+    var sampleObjects = ReadSampleObjects(Math.Min(100, totalObjects));
+    var columnTypes = new Dictionary<string, Type>();
+    
+    foreach (var property in GetAllProperties(sampleObjects))
+    {
+        var values = sampleObjects.Select(obj => obj[property]).Where(v => v != null);
+        
+        // JSON numbers default to double
+        if (values.All(v => v is JsonElement elem && elem.ValueKind == JsonValueKind.Number))
+            columnTypes[property] = typeof(double);
+        else
+            columnTypes[property] = typeof(string);
+    }
+    
+    return new Schema(columnTypes.Select(kvp => (kvp.Key, kvp.Value)));
+}
+```
+
+### Column Creation Bug Fixes
+**Problem**: `CreateColumn` and `CreateEmptyColumn` methods in data sources were causing null reference exceptions
+**Root Cause**: Methods were not properly handling the dynamic dispatch pattern for creating columns from unknown types at runtime
+**Solution**: Implemented proper type switching with fallback to generic object columns
+
+**Pattern**: Fixed dynamic column creation
+```csharp
+// WRONG - causes null reference exceptions
+private static IColumn CreateColumn(Type elementType, List<object> values)
+{
+    // Missing proper type handling
+    return null; // This was causing the exceptions
+}
+
+// CORRECT - proper type switching with dynamic dispatch
+private static IColumn CreateColumn(Type elementType, List<object> values)
+{
+    return elementType switch
+    {
+        Type t when t == typeof(int) => CreateColumnTyped<int>(values),
+        Type t when t == typeof(double) => CreateColumnTyped<double>(values),
+        Type t when t == typeof(string) => CreateColumnTyped<string>(values),
+        Type t when t == typeof(bool) => CreateColumnTyped<bool>(values),
+        _ => CreateColumnGeneric(elementType, values)
+    };
+}
+
+private static IColumn CreateColumnTyped<T>(List<object> values)
+{
+    var array = values.Cast<T>().ToArray();
+    return NivaraColumn<T>.Create(array);
+}
+
+private static IColumn CreateColumnGeneric(Type elementType, List<object> values)
+{
+    var array = Array.CreateInstance(elementType, values.Count);
+    for (int i = 0; i < values.Count; i++)
+        array.SetValue(values[i], i);
+    
+    // Use reflection for unknown types
+    var createMethod = typeof(NivaraColumn<>).MakeGenericType(elementType)
+        .GetMethod("Create", new[] { elementType.MakeArrayType() });
+    return (IColumn)createMethod!.Invoke(null, new object[] { array })!;
+}
+```
+
+### Cross-Project Access Pattern
+**Problem**: Extensions project needed access to internal QueryFrame constructor
+**Solution**: Added `InternalsVisibleTo` attribute to core project to allow Extensions project access to internal APIs
+
+**Pattern**: Controlled internal access for extensions
+```csharp
+// In src/Nivara/Nivara.csproj
+<ItemGroup>
+    <InternalsVisibleTo Include="Nivara.Extensions" />
+</ItemGroup>
+
+// Enables Extensions project to use internal constructors
+internal QueryFrame(IQuerySource source) { ... } // Can be used from Extensions
+```
+
+### Factory Method Integration
+**Decision**: Added factory methods to extension classes that create QueryFrames directly from data sources
+**Rationale**: Provides convenient API for users who want to start with lazy queries immediately without manually creating QueryFrame instances.
+
+**Pattern**: Extension class factory methods
+```csharp
+// Extension class provides both source and QueryFrame factory methods
+public static class CsvExtensions
+{
+    // Low-level source creation
+    public static IQuerySource ScanCsv(string filePath) => new CsvLazySource(filePath);
+    
+    // High-level QueryFrame creation (most common use case)
+    public static QueryFrame ScanCsvAsQueryFrame(string filePath) => new QueryFrame(ScanCsv(filePath));
+    
+    // Eager reading for immediate materialization
+    public static NivaraFrame ReadCsvAsFrame(string filePath) => /* implementation */;
+}
+```
+
+### Error Handling for Data Sources
+**Decision**: Use specific exception types (DataSourceException, FileNotFoundException) with detailed error messages
+**Rationale**: Provides clear error context for data source issues. Helps users distinguish between file system errors and data format errors.
+
+**Pattern**: Context-specific error handling
+```csharp
+// File system errors
+if (!File.Exists(filePath))
+    throw new FileNotFoundException($"CSV file not found: {filePath}");
+
+// Data format errors
+if (headers.Length == 0)
+    throw new DataSourceException($"CSV file has no headers: {filePath}");
+
+// Schema inference errors (JSON specific)
+if (sampleObjects.Count == 0)
+    throw new DataSourceException($"Cannot infer schema from empty JSON array: {filePath}");
+```
+
+### Testing Strategy for Lazy Data Sources
+**Decision**: Comprehensive test suite covering lazy evaluation, schema inference, error conditions, and property-based testing
+**Rationale**: Lazy data sources are foundational to query engine correctness. Tests verify both lazy behavior and data correctness.
+
+**Coverage**: 27 test cases covering:
+- Lazy source creation and schema inference (CSV and JSON)
+- QueryFrame factory methods and lazy evaluation verification
+- Schema inference correctness (CSV: string/int types, JSON: string/double types)
+- Lazy evaluation behavior (no execution until Collect())
+- Query execution with filtering and result validation
+- Empty file handling (CSV: empty columns, JSON: schema inference error)
+- Error conditions (null parameters, non-existent files)
+- Eager vs lazy comparison (same results, different execution timing)
+- Static factory class methods (Csv.ScanAsQueryFrame, Json.ReadAsFrame, etc.)
+- Property-based testing for lazy evaluation and schema inference
+
+### Lazy Data Sources Gotchas
+**Problem**: Empty JSON arrays cannot have schema inferred because there are no sample objects
+**Solution**: Throw DataSourceException for empty JSON arrays since schema inference is impossible
+```csharp
+// JSON empty file handling
+if (jsonArray.GetArrayLength() == 0)
+    throw new DataSourceException($"Cannot infer schema from empty JSON array: {filePath}");
+```
+
+**Problem**: CSV empty files still have headers, so they can have valid schemas with zero-length columns
+**Solution**: Handle empty CSV files gracefully by creating columns with zero length
+```csharp
+// CSV empty file handling - create valid empty columns
+var columns = new Dictionary<string, IColumn>();
+foreach (var header in headers)
+{
+    var columnType = schema.GetColumnType(header);
+    columns[header] = CreateEmptyColumn(columnType);
+}
+```
+
+**Problem**: QueryFrame constructor is internal but needed by Extensions project
+**Solution**: Use InternalsVisibleTo attribute to allow controlled access from Extensions project
+
+**Problem**: Dynamic column creation requires careful type handling to avoid null reference exceptions
+**Solution**: Use comprehensive type switching with proper fallback to reflection for unknown types
+
+### Performance Characteristics
+**Lazy Sources**: 
+- Schema inference requires reading sample data (minimal I/O)
+- Query building has no I/O cost
+- Execution cost deferred until Collect()
+
+**Eager Sources**:
+- Immediate I/O cost during creation
+- No additional cost during query operations
+- Better for small datasets or when data will definitely be used
+
+**Schema Inference**:
+- CSV: Reads up to 100 sample rows for type detection
+- JSON: Reads up to 100 sample objects for type detection
+- Fallback to string type for ambiguous data
+- Conservative approach prioritizes correctness over performance
+
+### Integration with Query Engine
+**Decision**: Lazy data sources integrate seamlessly with QueryFrame operations through IQuerySource interface
+**Rationale**: Provides consistent API regardless of data source type. Query operations work the same whether source is lazy file-based or eager memory-based.
+
+**Pattern**: Transparent query engine integration
+```csharp
+// Same query operations work for both lazy and eager sources
+var csvQuery = CsvExtensions.ScanCsvAsQueryFrame("data.csv")
+    .Filter(ColumnExpressions.Col("Age") > 30)
+    .Select("Name", "Salary");
+
+var memoryQuery = frame.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Age") > 30)
+    .Select("Name", "Salary");
+
+// Both execute the same way
+var csvResult = csvQuery.Collect();
+var memoryResult = memoryQuery.Collect();
+```
+## Eager Data Sources Implementation
+
+### Eager vs Lazy Architecture Decisions
+**Decision**: Implemented eager data sources as wrappers around lazy sources using `Lazy<T>` for immediate execution
+**Rationale**: Avoids code duplication by reusing lazy source logic while providing different execution semantics. Eager sources execute immediately upon first access but still benefit from lazy initialization patterns.
+
+**Pattern**: Wrapper pattern with immediate execution semantics
+```csharp
+// Eager source wraps lazy source with immediate execution
+internal sealed class CsvEagerSource : IQuerySource
+{
+    private readonly CsvLazySource lazySource;
+    private readonly Lazy<IReadOnlyDictionary<string, IColumn>> lazyColumns;
+
+    public CsvEagerSource(string filePath, CsvOptions options)
+    {
+        lazySource = new CsvLazySource(filePath, options);
+        lazyColumns = new Lazy<IReadOnlyDictionary<string, IColumn>>(lazySource.Execute);
+    }
+
+    public bool IsLazy => false; // Key difference from lazy sources
+    public IReadOnlyDictionary<string, IColumn> Execute() => lazyColumns.Value;
+}
+```
+
+### Data Consistency Validation Strategy
+**Decision**: Implement graceful degradation for data inconsistencies with fallback to string types
+**Rationale**: Real-world data often has inconsistencies. Rather than failing completely, the system falls back to more general types (string) when mixed types are detected during schema inference.
+
+**Pattern**: Type inference with graceful fallback
+```csharp
+// CSV type inference with fallback
+private static Type InferColumnType(List<dynamic> sampleRecords, string columnName)
+{
+    var values = ExtractNonNullValues(sampleRecords, columnName);
+    
+    if (values.Count == 0)
+        return typeof(string); // Default fallback
+    
+    // Try specific types in order of preference
+    if (values.All(v => int.TryParse(v, out _)))
+        return typeof(int);
+    
+    if (values.All(v => double.TryParse(v, out _)))
+        return typeof(double);
+    
+    return typeof(string); // Fallback for mixed or unparseable types
+}
+```
+
+### Error Handling for Severe Data Corruption
+**Decision**: Use specific exception types (DataSourceException) with detailed context for severe errors
+**Rationale**: Distinguishes between recoverable inconsistencies (handled gracefully) and severe corruption (requires user intervention). Provides clear error messages with file paths and operation context.
+
+**Pattern**: Context-rich error reporting for severe issues
+```csharp
+try
+{
+    var records = csv.GetRecords<dynamic>().ToList();
+    return ProcessRecords(records);
+}
+catch (Exception ex)
+{
+    throw new DataSourceException($"Failed to read CSV file '{filePath}': {ex.Message}", ex);
+}
+```
+
+### Immediate Execution Validation
+**Decision**: Eager sources provide immediate data availability without additional I/O during data access
+**Rationale**: Eager sources should front-load all I/O costs and make data immediately available. This provides predictable performance characteristics and simpler memory models.
+
+**Pattern**: Immediate execution with no lazy behavior
+```csharp
+// Eager source executes immediately and caches results
+public IReadOnlyDictionary<string, IColumn> Execute()
+{
+    return lazyColumns.Value; // Executes once, then cached
+}
+
+// Subsequent data access requires no additional I/O
+var frame = CsvExtensions.ReadCsvAsFrame("data.csv"); // I/O happens here
+var value1 = frame.GetColumn<string>("Name")[0];      // No I/O, data already loaded
+var value2 = frame.GetColumn<string>("Name")[1];      // No I/O, data already loaded
+```
+
+### Property-Based Testing for Eager Sources
+**Decision**: Comprehensive property tests covering immediate execution behavior and data consistency validation
+**Rationale**: Eager sources have different performance characteristics than lazy sources. Tests verify immediate execution semantics and robust error handling.
+
+**Coverage**: 4 new property tests covering:
+- **Property 6: Eager loading behavior** - Immediate execution and data availability
+- **Property 17: Data consistency validation** - Graceful handling of inconsistent data
+- **Error reporting** - Clear error messages for severe corruption
+- **Empty file handling** - Appropriate behavior for edge cases
+
+### Testing Strategy for Data Consistency
+**Decision**: Test both graceful degradation (mixed types) and error reporting (severe corruption)
+**Rationale**: Real-world data sources have varying levels of issues. System should handle minor inconsistencies gracefully while reporting severe problems clearly.
+
+**Pattern**: Multi-level error handling validation
+```csharp
+// Test graceful degradation for mixed types
+var inconsistentData = "Name,Age\nAlice,30\nBob,not_a_number";
+var frame = CsvExtensions.ReadCsvAsFrame(inconsistentData);
+Assert.That(frame.Schema.GetColumnType("Age"), Is.EqualTo(typeof(string))); // Falls back to string
+
+// Test error reporting for severe corruption
+var corruptData = ""; // Empty file with no headers
+Assert.Throws<DataSourceException>(() => CsvExtensions.ReadCsvAsFrame(corruptData));
+```
+
+### Performance Characteristics Documentation
+**Eager Sources**:
+- **Upfront Cost**: All I/O and parsing happens during source creation/first access
+- **Memory Usage**: Full dataset loaded into memory immediately
+- **Access Pattern**: O(1) data access after initial load
+- **Best For**: Small datasets, guaranteed data usage, simple memory models
+
+**Lazy Sources**:
+- **Deferred Cost**: I/O and parsing deferred until Collect()
+- **Memory Usage**: Minimal until execution, then full dataset
+- **Access Pattern**: No cost until Collect(), then full processing
+- **Best For**: Large datasets, conditional processing, filtered queries
+
+### Integration with Query Engine
+**Decision**: Eager sources integrate seamlessly with QueryFrame operations but lose lazy evaluation benefits
+**Rationale**: Provides consistent API regardless of source type. Users can choose execution strategy (eager vs lazy) based on their specific needs.
+
+**Pattern**: Transparent integration with different execution semantics
+```csharp
+// Eager source - data loaded immediately
+var eagerFrame = CsvExtensions.ReadCsvAsFrame("data.csv");  // I/O happens here
+var eagerQuery = eagerFrame.AsQueryFrame()                  // No additional I/O
+    .Filter(ColumnExpressions.Col("Age") > 30)              // No I/O, data in memory
+    .Collect();                                             // No I/O, just processing
+
+// Lazy source - data loaded on demand
+var lazyQuery = CsvExtensions.ScanCsvAsQueryFrame("data.csv") // Minimal I/O (schema only)
+    .Filter(ColumnExpressions.Col("Age") > 30)                // No I/O, building query
+    .Collect();                                               // I/O happens here
+```
+
+### Factory Method Consistency
+**Decision**: Provide both extension methods and static factory classes for eager operations
+**Rationale**: Maintains API consistency with lazy sources. Users can choose their preferred calling style while getting the same functionality.
+
+**Pattern**: Dual API approach for eager operations
+```csharp
+// Extension methods on static classes
+var frame1 = CsvExtensions.ReadCsvAsFrame("data.csv");
+var frame2 = JsonExtensions.ReadJsonAsFrame("data.json");
+
+// Static factory classes
+var frame3 = Csv.ReadAsFrame("data.csv");
+var frame4 = Json.ReadAsFrame("data.json");
+
+// Both approaches provide identical functionality
+Assert.That(frame1.RowCount, Is.EqualTo(frame3.RowCount));
+Assert.That(frame2.RowCount, Is.EqualTo(frame4.RowCount));
+```
+
+### Eager Data Sources Gotchas
+**Problem**: Eager sources still use lazy initialization internally, which can be confusing
+**Solution**: Document that "eager" refers to execution semantics (immediate vs deferred), not implementation details
+
+**Problem**: Data consistency validation needs to balance robustness with usability
+**Solution**: Use graceful degradation for common issues (mixed types) but clear errors for severe problems (corruption, missing files)
+
+**Problem**: Empty files need different handling between CSV (headers available) and JSON (no schema inference possible)
+**Solution**: CSV empty files return valid frames with zero-length columns, JSON empty arrays throw DataSourceException
+
+**Problem**: File access time testing can be unreliable due to OS caching and file system behavior
+**Solution**: Focus on testing data availability and execution semantics rather than precise I/O timing
+
+### Memory Management Considerations
+**Decision**: Eager sources hold full dataset in memory until disposal
+**Rationale**: Provides predictable memory usage patterns. Users choosing eager sources accept the memory trade-off for simpler access patterns.
+
+**Pattern**: Full dataset retention with proper disposal
+```csharp
+// Eager source keeps all data in memory
+using var frame = CsvExtensions.ReadCsvAsFrame("large_file.csv"); // Full file loaded
+// Data remains accessible throughout frame lifetime
+var column = frame.GetColumn<string>("Name"); // No additional I/O
+// Memory released when frame is disposed
+```
+
+### Error Context Enhancement
+**Decision**: Include file paths and operation context in all error messages
+**Rationale**: Helps users quickly identify problematic data sources and understand what operation failed.
+
+**Pattern**: Enhanced error context for debugging
+```csharp
+catch (Exception ex)
+{
+    throw new DataSourceException($"Failed to read CSV file '{filePath}': {ex.Message}", ex);
+    // Includes: operation type, file path, underlying error details
+}
+```
