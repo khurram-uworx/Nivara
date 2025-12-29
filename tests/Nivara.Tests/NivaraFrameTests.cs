@@ -1,5 +1,5 @@
-using NUnit.Framework;
 using Nivara.Exceptions;
+using NUnit.Framework;
 
 namespace Nivara.Tests;
 
@@ -280,7 +280,7 @@ public class NivaraFrameTests
         Assert.That(newFrame.ColumnCount, Is.EqualTo(2));
         Assert.That(newFrame.HasColumn("Numbers"), Is.True);
         Assert.That(newFrame.HasColumn("Letters"), Is.True);
-        
+
         // Original frame should be unchanged
         Assert.That(frame.ColumnCount, Is.EqualTo(1));
     }
@@ -326,7 +326,7 @@ public class NivaraFrameTests
         Assert.That(newFrame.ColumnCount, Is.EqualTo(1));
         Assert.That(newFrame.HasColumn("Numbers"), Is.True);
         Assert.That(newFrame.HasColumn("Letters"), Is.False);
-        
+
         // Original frame should be unchanged
         Assert.That(frame.ColumnCount, Is.EqualTo(2));
     }
@@ -507,7 +507,7 @@ public class NivaraFrameTests
         var size = 10000;
         var numbers = Enumerable.Range(1, size).ToArray();
         var strings = Enumerable.Range(1, size).Select(i => $"item_{i}").ToArray();
-        
+
         var col1 = NivaraColumn<int>.Create(numbers);
         var col2 = NivaraColumn<string>.Create(strings);
 

@@ -1,9 +1,5 @@
-using NUnit.Framework;
 using Nivara.IO;
-using System;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
+using NUnit.Framework;
 
 namespace Nivara.Tests.IO;
 

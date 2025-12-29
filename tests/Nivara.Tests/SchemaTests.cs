@@ -1,6 +1,5 @@
-using NUnit.Framework;
-using Nivara;
 using Nivara.Exceptions;
+using NUnit.Framework;
 
 namespace Nivara.Tests;
 
@@ -169,7 +168,7 @@ public class SchemaTests
         Assert.That(newSchema.HasColumn("Name"), Is.True);
         Assert.That(newSchema.HasColumn("Age"), Is.True);
         Assert.That(newSchema.GetColumnType("Age"), Is.EqualTo(typeof(int)));
-        
+
         // Original schema should be unchanged
         Assert.That(originalSchema.ColumnNames.Count, Is.EqualTo(1));
         Assert.That(originalSchema.HasColumn("Age"), Is.False);
@@ -215,7 +214,7 @@ public class SchemaTests
         Assert.That(newSchema.ColumnNames.Count, Is.EqualTo(1));
         Assert.That(newSchema.HasColumn("Name"), Is.True);
         Assert.That(newSchema.HasColumn("Age"), Is.False);
-        
+
         // Original schema should be unchanged
         Assert.That(originalSchema.ColumnNames.Count, Is.EqualTo(2));
         Assert.That(originalSchema.HasColumn("Age"), Is.True);
@@ -236,11 +235,11 @@ public class SchemaTests
     public void SelectColumns_WithValidColumns_ReturnsNewSchemaWithSelectedColumns()
     {
         // Arrange
-        var originalSchema = new Schema(new[] 
-        { 
-            ("Name", typeof(string)), 
-            ("Age", typeof(int)), 
-            ("Salary", typeof(double)) 
+        var originalSchema = new Schema(new[]
+        {
+            ("Name", typeof(string)),
+            ("Age", typeof(int)),
+            ("Salary", typeof(double))
         });
 
         // Act
@@ -251,7 +250,7 @@ public class SchemaTests
         Assert.That(newSchema.HasColumn("Name"), Is.True);
         Assert.That(newSchema.HasColumn("Salary"), Is.True);
         Assert.That(newSchema.HasColumn("Age"), Is.False);
-        
+
         // Check order is preserved
         Assert.That(newSchema.ColumnNames[0], Is.EqualTo("Name"));
         Assert.That(newSchema.ColumnNames[1], Is.EqualTo("Salary"));
@@ -406,7 +405,7 @@ public class SchemaTests
         Assert.That(schema.HasColumn("NAME"), Is.True);
         Assert.That(schema.HasColumn("age"), Is.True);
         Assert.That(schema.HasColumn("Age"), Is.True);
-        
+
         Assert.That(schema.GetColumnType("name"), Is.EqualTo(typeof(string)));
         Assert.That(schema.GetColumnType("AGE"), Is.EqualTo(typeof(int)));
         Assert.That(schema.GetColumnType("age"), Is.EqualTo(typeof(int)));
@@ -463,7 +462,7 @@ public class ColumnMetadataTests
         Assert.That(updated.IsNullable, Is.False);
         Assert.That(updated.DefaultValue, Is.EqualTo("New Default"));
         Assert.That(updated.Description, Is.EqualTo("Original")); // Unchanged
-        
+
         // Original should be unchanged
         Assert.That(original.IsNullable, Is.True);
         Assert.That(original.DefaultValue, Is.Null);

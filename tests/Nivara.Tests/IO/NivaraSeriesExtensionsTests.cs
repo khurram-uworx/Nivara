@@ -1,5 +1,5 @@
-using NUnit.Framework;
 using Nivara.IO;
+using NUnit.Framework;
 
 namespace Nivara.Tests.IO;
 
@@ -58,7 +58,7 @@ public class NivaraSeriesExtensionsTests
         // Assert
         Assert.That(roundTripSeries, Is.Not.Null);
         Assert.That(roundTripSeries.Length, Is.EqualTo(originalSeries.Length));
-        
+
         for (int i = 0; i < originalSeries.Length; i++)
         {
             Assert.That(roundTripSeries[i], Is.EqualTo(originalSeries[i]));
@@ -73,7 +73,7 @@ public class NivaraSeriesExtensionsTests
 
         // Act & Assert - methods should work without options parameter
         Assert.DoesNotThrow(() => series.ToArrowArray());
-        
+
         // And with options parameter
         var options = new ArrowConversionOptions();
         Assert.DoesNotThrow(() => series.ToArrowArray(options));
@@ -87,7 +87,7 @@ public class NivaraSeriesExtensionsTests
 
         // Act & Assert - should handle empty series gracefully
         Assert.DoesNotThrow(() => emptySeries.ToArrowArray());
-        
+
         var arrowArray = emptySeries.ToArrowArray();
         Assert.That(arrowArray.Length, Is.EqualTo(0));
     }

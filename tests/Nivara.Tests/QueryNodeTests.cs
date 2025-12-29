@@ -84,7 +84,7 @@ public class QueryNodeTests
         var inputSchema = new Schema(new[] { ("Id", typeof(int)), ("Name", typeof(string)), ("Age", typeof(int)) });
         var outputSchema = new Schema(new[] { ("Id", typeof(int)), ("Name", typeof(string)) });
         var projections = new[] { "Id", "Name" };
-        
+
         var inputNode = new SourceNode(new TestQuerySource(inputSchema));
         var projectionNode = new ProjectionNode(outputSchema, projections);
         projectionNode.Children.Add(inputNode);

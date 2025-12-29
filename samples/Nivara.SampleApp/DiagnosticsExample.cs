@@ -1,4 +1,3 @@
-using System;
 using Nivara.Diagnostics;
 
 namespace Nivara.SampleApp;
@@ -20,7 +19,7 @@ public static class DiagnosticsExample
         // Demonstrate column diagnostics
         Console.WriteLine("Column Diagnostics:");
         Console.WriteLine("==================");
-        
+
         ShowColumnDiagnostics("Integer Column", intColumn.Diagnostics);
         ShowColumnDiagnostics("String Column", stringColumn.Diagnostics);
         ShowColumnDiagnostics("Double Column", doubleColumn.Diagnostics);
@@ -107,7 +106,7 @@ public static class DiagnosticsExample
         Console.WriteLine($"  Vector Size: {diagnostics.VectorSize} bytes");
         Console.WriteLine($"  Recommended Kernel: {diagnostics.RecommendedKernel}");
         Console.WriteLine($"  Estimated Memory: {diagnostics.EstimatedMemoryUsage:N0} bytes");
-        
+
         var performance = diagnostics.Performance;
         Console.WriteLine($"  Performance:");
         Console.WriteLine($"    Throughput Multiplier: {performance.ThroughputMultiplier:F1}x");

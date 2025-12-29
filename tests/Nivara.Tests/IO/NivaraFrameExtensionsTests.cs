@@ -1,6 +1,6 @@
-using NUnit.Framework;
-using Nivara.IO;
 using Apache.Arrow;
+using Nivara.IO;
+using NUnit.Framework;
 
 namespace Nivara.Tests.IO;
 
@@ -18,7 +18,7 @@ public class NivaraFrameExtensionsTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrow(() => frame.ToParquet(tempFile));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
         }
@@ -40,7 +40,7 @@ public class NivaraFrameExtensionsTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrowAsync(async () => await frame.ToParquetAsync(tempFile));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
         }
@@ -60,7 +60,7 @@ public class NivaraFrameExtensionsTests
 
         // Act & Assert - should not throw
         Assert.DoesNotThrow(() => frame.ToParquetStream(stream));
-        
+
         // Verify data was written
         Assert.That(stream.Length, Is.GreaterThan(0));
     }
@@ -74,7 +74,7 @@ public class NivaraFrameExtensionsTests
 
         // Act & Assert - should not throw
         Assert.DoesNotThrowAsync(async () => await frame.ToParquetStreamAsync(stream));
-        
+
         // Verify data was written
         Assert.That(stream.Length, Is.GreaterThan(0));
     }
@@ -148,7 +148,7 @@ public class NivaraFrameExtensionsTests
         {
             var arrowTable = frame.ToArrowTable();
             var roundTripFrame = arrowTable.FromArrowTable();
-            
+
             // Verify we can chain operations
             Assert.That(roundTripFrame, Is.Not.Null);
             Assert.That(roundTripFrame.ColumnCount, Is.EqualTo(frame.ColumnCount));
@@ -167,7 +167,7 @@ public class NivaraFrameExtensionsTests
             // Act & Assert - both sync and async variants should be available
             Assert.DoesNotThrow(() => frame.ToParquet(tempFile));
             Assert.DoesNotThrowAsync(async () => await frame.ToParquetAsync(tempFile));
-            
+
             Assert.DoesNotThrow(() => NivaraFrameExtensions.LoadParquet(tempFile));
             Assert.DoesNotThrowAsync(async () => await NivaraFrameExtensions.LoadParquetAsync(tempFile));
         }
@@ -190,11 +190,11 @@ public class NivaraFrameExtensionsTests
             // Act & Assert - methods should work without options parameter
             Assert.DoesNotThrow(() => frame.ToParquet(tempFile));
             Assert.DoesNotThrow(() => frame.ToArrowTable());
-            
+
             // And with options parameter
             var parquetOptions = new ParquetWriteOptions();
             var arrowOptions = new ArrowConversionOptions();
-            
+
             Assert.DoesNotThrow(() => frame.ToParquet(tempFile, parquetOptions));
             Assert.DoesNotThrow(() => frame.ToArrowTable(arrowOptions));
         }
@@ -209,7 +209,7 @@ public class NivaraFrameExtensionsTests
     {
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
         var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
-        
+
         return NivaraFrame.Create(
             ("IntColumn", intColumn),
             ("StringColumn", stringColumn)

@@ -1,8 +1,7 @@
-using NUnit.Framework;
-using Nivara;
-using Nivara.IO;
-using Nivara.Expressions;
 using Nivara.Exceptions;
+using Nivara.Expressions;
+using Nivara.IO;
+using NUnit.Framework;
 
 namespace Nivara.Tests.IO;
 
@@ -117,11 +116,11 @@ public class LazyDataSourceTests
         // Assert
         Assert.That(columns, Is.Not.Null);
         Assert.That(columns, Has.Count.EqualTo(3));
-        
+
         var nameColumn = columns["Name"];
         var ageColumn = columns["Age"];
         var salaryColumn = columns["Salary"];
-        
+
         Assert.That(nameColumn.Length, Is.EqualTo(3));
         Assert.That(ageColumn.Length, Is.EqualTo(3));
         Assert.That(salaryColumn.Length, Is.EqualTo(3));
@@ -132,11 +131,11 @@ public class LazyDataSourceTests
     {
         // Arrange
         var lastAccessTime = File.GetLastAccessTime(csvFilePath);
-        
+
         // Act - creating query should not read file
         var queryFrame = CsvExtensions.ScanCsvAsQueryFrame(csvFilePath);
         var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
-        
+
         // Assert - file should not have been accessed for data (schema inference may access it briefly)
         // We test that the query was built without full execution
         Assert.That(queryFrame.IsLazy, Is.True);
@@ -248,11 +247,11 @@ public class LazyDataSourceTests
         // Assert
         Assert.That(columns, Is.Not.Null);
         Assert.That(columns, Has.Count.EqualTo(3));
-        
+
         var nameColumn = columns["Name"];
         var ageColumn = columns["Age"];
         var salaryColumn = columns["Salary"];
-        
+
         Assert.That(nameColumn.Length, Is.EqualTo(3));
         Assert.That(ageColumn.Length, Is.EqualTo(3));
         Assert.That(salaryColumn.Length, Is.EqualTo(3));
@@ -264,7 +263,7 @@ public class LazyDataSourceTests
         // Act - creating query should not fully process file
         var queryFrame = JsonExtensions.ScanJsonAsQueryFrame(jsonFilePath);
         var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
-        
+
         // Assert - query should be lazy
         Assert.That(queryFrame.IsLazy, Is.True);
         Assert.That(filteredQuery.IsLazy, Is.True);
@@ -290,7 +289,7 @@ public class LazyDataSourceTests
     public void JsonLazySource_EmptyFile_HandlesGracefully()
     {
         // Act & Assert - should throw because empty JSON array has no schema to infer
-        Assert.Throws<DataSourceException>(() => 
+        Assert.Throws<DataSourceException>(() =>
         {
             var source = JsonExtensions.ScanJson(emptyJsonFilePath);
             var schema = source.Schema; // This should throw
@@ -354,7 +353,7 @@ public class LazyDataSourceTests
         // Arrange & Act
         var eagerCsvFrame = CsvExtensions.ReadCsvAsFrame(csvFilePath);
         var lazyCsvFrame = CsvExtensions.ScanCsvAsQueryFrame(csvFilePath).Collect();
-        
+
         var eagerJsonFrame = JsonExtensions.ReadJsonAsFrame(jsonFilePath);
         var lazyJsonFrame = JsonExtensions.ScanJsonAsQueryFrame(jsonFilePath).Collect();
 
@@ -444,7 +443,7 @@ public class LazyDataSourceTests
         {
             // Arrange - record file access time
             var initialAccessTime = File.GetLastAccessTime(filePath);
-            
+
             // Act - build complex query chain
             QueryFrame query;
             if (filePath.EndsWith(".csv"))
@@ -454,11 +453,11 @@ public class LazyDataSourceTests
                     .Filter(ColumnExpressions.Col("Age") > 25)
                     .Select("Name", "Salary")
                     .Filter(ColumnExpressions.Col("Salary") > 70000);
-                
+
                 // Assert - query should be lazy and no full execution should have occurred
                 Assert.That(query.IsLazy, Is.True, $"Initial query should be lazy for {filePath}");
                 Assert.That(complexQuery.IsLazy, Is.True, $"Complex query should be lazy for {filePath}");
-                
+
                 // Only after Collect() should we get results
                 var result = complexQuery.Collect();
                 Assert.That(result.RowCount, Is.GreaterThanOrEqualTo(0), $"Should get valid results for {filePath}");
@@ -470,11 +469,11 @@ public class LazyDataSourceTests
                     .Filter(ColumnExpressions.Col("Age") > 25.0) // Use double for JSON
                     .Select("Name", "Salary")
                     .Filter(ColumnExpressions.Col("Salary") > 70000.0); // Use double for JSON
-                
+
                 // Assert - query should be lazy and no full execution should have occurred
                 Assert.That(query.IsLazy, Is.True, $"Initial query should be lazy for {filePath}");
                 Assert.That(complexQuery.IsLazy, Is.True, $"Complex query should be lazy for {filePath}");
-                
+
                 // Only after Collect() should we get results
                 var result = complexQuery.Collect();
                 Assert.That(result.RowCount, Is.GreaterThanOrEqualTo(0), $"Should get valid results for {filePath}");
@@ -509,12 +508,12 @@ public class LazyDataSourceTests
             // Assert
             var schema = source.Schema;
             Assert.That(schema.ColumnNames, Has.Count.EqualTo(3), $"Should have 3 columns for {filePath}");
-            
+
             var columnNames = new[] { "Name", "Age", "Salary" };
             for (int i = 0; i < columnNames.Length; i++)
             {
                 var actualType = schema.GetColumnType(columnNames[i]);
-                Assert.That(actualType, Is.EqualTo(expectedTypes[i]), 
+                Assert.That(actualType, Is.EqualTo(expectedTypes[i]),
                     $"Column {columnNames[i]} should be {expectedTypes[i].Name} for {filePath}");
             }
         }
@@ -543,7 +542,7 @@ public class LazyDataSourceTests
         {
             // Record initial file access time
             var initialAccessTime = File.GetLastAccessTime(filePath);
-            
+
             // Act - eager reading should immediately process the file
             NivaraFrame frame;
             if (readMethod == "CSV")
@@ -554,23 +553,23 @@ public class LazyDataSourceTests
             {
                 frame = JsonExtensions.ReadJsonAsFrame(filePath);
             }
-            
+
             // Assert - data should be immediately available
             Assert.That(frame, Is.Not.Null, $"Frame should be immediately available for {readMethod}");
             Assert.That(frame.RowCount, Is.EqualTo(3), $"Should have 3 rows for {readMethod}");
             Assert.That(frame.ColumnCount, Is.EqualTo(3), $"Should have 3 columns for {readMethod}");
-            
+
             // Verify data is accessible without additional IO
             var nameColumn = frame.GetColumn<string>("Name");
             Assert.That(nameColumn[0], Is.EqualTo("Alice"), $"Data should be immediately accessible for {readMethod}");
-            
+
             // Verify no lazy behavior - accessing data multiple times should not trigger additional IO
             var accessTime1 = File.GetLastAccessTime(filePath);
             var value1 = nameColumn[1];
             var accessTime2 = File.GetLastAccessTime(filePath);
             var value2 = nameColumn[2];
             var accessTime3 = File.GetLastAccessTime(filePath);
-            
+
             // File access times should not change during data access (data is already loaded)
             Assert.That(accessTime2, Is.EqualTo(accessTime1), $"No additional IO should occur during data access for {readMethod}");
             Assert.That(accessTime3, Is.EqualTo(accessTime1), $"No additional IO should occur during repeated access for {readMethod}");
@@ -608,22 +607,22 @@ public class LazyDataSourceTests
         var csvFrame = CsvExtensions.ReadCsvAsFrame(inconsistentCsvPath);
         Assert.That(csvFrame, Is.Not.Null, "CSV frame should be created even with inconsistent data");
         Assert.That(csvFrame.RowCount, Is.EqualTo(3), "Should process all rows despite inconsistencies");
-        
+
         // Verify schema inference handles mixed types by falling back to string
         var csvSchema = csvFrame.Schema;
         // Age column should fall back to string due to mixed types
         Assert.That(csvSchema.GetColumnType("Age"), Is.EqualTo(typeof(string)), "Mixed type column should fall back to string");
-        
+
         // Test JSON data consistency - should handle mixed types gracefully
         var jsonFrame = JsonExtensions.ReadJsonAsFrame(malformedJsonPath);
         Assert.That(jsonFrame, Is.Not.Null, "JSON frame should be created even with mixed types");
         Assert.That(jsonFrame.RowCount, Is.EqualTo(3), "Should process all rows despite type inconsistencies");
-        
+
         // Verify schema inference handles mixed types by falling back to string
         var jsonSchema = jsonFrame.Schema;
         Assert.That(jsonSchema.GetColumnType("Age"), Is.EqualTo(typeof(string)), "Mixed type JSON column should fall back to string");
         Assert.That(jsonSchema.GetColumnType("Salary"), Is.EqualTo(typeof(string)), "Mixed type JSON column should fall back to string");
-        
+
         // Clean up test files
         File.Delete(inconsistentCsvPath);
         File.Delete(malformedJsonPath);

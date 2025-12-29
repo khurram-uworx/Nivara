@@ -1,5 +1,5 @@
-using NUnit.Framework;
 using Nivara.IO;
+using NUnit.Framework;
 
 namespace Nivara.Tests.IO;
 
@@ -24,7 +24,7 @@ public class ParquetWriterTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile, options));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
             Assert.That(new FileInfo(tempFile).Length, Is.GreaterThan(0));
@@ -55,7 +55,7 @@ public class ParquetWriterTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrowAsync(async () => await ParquetWriter.WriteParquetAsync(frame, tempFile));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
             Assert.That(new FileInfo(tempFile).Length, Is.GreaterThan(0));
@@ -82,7 +82,7 @@ public class ParquetWriterTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
             Assert.That(new FileInfo(tempFile).Length, Is.GreaterThan(0));
@@ -148,7 +148,7 @@ public class ParquetWriterTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, stream, options));
-            
+
             // Verify data was written
             Assert.That(stream.Length, Is.GreaterThan(0));
         }
@@ -167,7 +167,7 @@ public class ParquetWriterTests
             ("IntColumn", NivaraColumn<int>.Create(new[] { 1, 2 })),
             ("StringColumn", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" }))
         );
-        
+
         var frame2 = NivaraFrame.Create(
             ("IntColumn", NivaraColumn<int>.Create(new[] { 3, 4 })),
             ("StringColumn", NivaraColumn<string>.CreateForReferenceType(new[] { "c", "d" }))
@@ -180,7 +180,7 @@ public class ParquetWriterTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrow(() => ParquetWriter.WriteParquetBatch(frames, tempFile));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
             Assert.That(new FileInfo(tempFile).Length, Is.GreaterThan(0));
@@ -202,7 +202,7 @@ public class ParquetWriterTests
         var frame1 = NivaraFrame.Create(
             ("IntColumn", NivaraColumn<int>.Create(new[] { 1, 2 }))
         );
-        
+
         var frame2 = NivaraFrame.Create(
             ("StringColumn", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" }))
         );
@@ -231,10 +231,10 @@ public class ParquetWriterTests
         // Arrange
         var nullableIntArray = new int?[] { 1, null, 3, null, 5 };
         var intColumn = NivaraColumn<int>.CreateFromNullable(nullableIntArray);
-        
+
         var stringArray = new string[] { "a", null!, "c", null!, "e" };
         var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringArray);
-        
+
         var frame = NivaraFrame.Create(
             ("NullableIntColumn", intColumn),
             ("NullableStringColumn", stringColumn)
@@ -246,7 +246,7 @@ public class ParquetWriterTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
             Assert.That(new FileInfo(tempFile).Length, Is.GreaterThan(0));
@@ -270,7 +270,7 @@ public class ParquetWriterTests
             new DateTime(2023, 6, 15),
             new DateTime(2023, 12, 31)
         });
-        
+
         var frame = NivaraFrame.Create(("DateTimeColumn", dateTimeColumn));
         var tempFile = Path.GetTempFileName();
 
@@ -278,7 +278,7 @@ public class ParquetWriterTests
         {
             // Act & Assert - should not throw
             Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile));
-            
+
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
             Assert.That(new FileInfo(tempFile).Length, Is.GreaterThan(0));

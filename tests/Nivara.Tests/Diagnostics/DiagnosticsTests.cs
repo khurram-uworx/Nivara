@@ -1,6 +1,5 @@
-using NUnit.Framework;
-using Nivara;
 using Nivara.Diagnostics;
+using NUnit.Framework;
 
 namespace Nivara.Tests;
 
@@ -84,7 +83,7 @@ public class DiagnosticsTests
         // Arrange
         DiagnosticsTracker.IsEnabled = true;
         DiagnosticsTracker.ClearRecordedOperations();
-        
+
         var values1 = new[] { 1, 2, 3, 4, 5 };
         var values2 = new[] { 2, 3, 4, 5, 6 };
         var column1 = NivaraColumn<int>.Create(values1);
@@ -113,7 +112,7 @@ public class DiagnosticsTests
         // Arrange
         DiagnosticsTracker.IsEnabled = false;
         DiagnosticsTracker.ClearRecordedOperations();
-        
+
         var values1 = new[] { 1, 2, 3, 4, 5 };
         var values2 = new[] { 2, 3, 4, 5, 6 };
         var column1 = NivaraColumn<int>.Create(values1);
@@ -133,7 +132,7 @@ public class DiagnosticsTests
         // Arrange
         DiagnosticsTracker.IsEnabled = true;
         DiagnosticsTracker.ClearRecordedOperations();
-        
+
         var values1 = new[] { 1, 2, 3, 4, 5 };
         var values2 = new[] { 2, 3, 4, 5, 6 };
         var column1 = NivaraColumn<int>.Create(values1);

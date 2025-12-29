@@ -1,7 +1,6 @@
 using Apache.Arrow.Types;
 using Nivara.IO;
 using NUnit.Framework;
-using Parquet.Schema;
 
 namespace Nivara.Tests.IO;
 
@@ -31,7 +30,7 @@ public class TypeMapperTests
         foreach (var (clrType, expectedArrowType) in testCases)
         {
             var result = TypeMapper.MapClrToArrow(clrType);
-            Assert.That(result.GetType(), Is.EqualTo(expectedArrowType), 
+            Assert.That(result.GetType(), Is.EqualTo(expectedArrowType),
                 $"CLR type {clrType.Name} should map to Arrow type {expectedArrowType.Name}");
         }
     }
@@ -40,7 +39,7 @@ public class TypeMapperTests
     public void MapClrToArrow_DateTime_ReturnsTimestampType()
     {
         var result = TypeMapper.MapClrToArrow(typeof(DateTime));
-        
+
         Assert.That(result, Is.InstanceOf<TimestampType>());
         var timestampType = (TimestampType)result;
         Assert.That(timestampType.Unit, Is.EqualTo(TimeUnit.Microsecond));
@@ -84,7 +83,7 @@ public class TypeMapperTests
         {
             var ex = Assert.Throws<UnsupportedTypeException>(() => TypeMapper.MapClrToArrow(unsupportedType));
             Assert.That(ex!.UnsupportedType, Is.EqualTo(unsupportedType));
-            Assert.That(ex.SuggestedAlternatives, Is.Not.Empty, 
+            Assert.That(ex.SuggestedAlternatives, Is.Not.Empty,
                 $"Should provide suggestions for unsupported type {unsupportedType.Name}");
         }
     }
@@ -117,7 +116,7 @@ public class TypeMapperTests
     {
         var timestampType = new TimestampType(TimeUnit.Microsecond, TimeZoneInfo.Utc);
         var result = TypeMapper.MapArrowToClr(timestampType);
-        
+
         Assert.That(result, Is.EqualTo(typeof(DateTime)));
     }
 
@@ -138,7 +137,7 @@ public class TypeMapperTests
         foreach (var (clrType, fieldName) in testCases)
         {
             var field = TypeMapper.CreateParquetField(fieldName, clrType);
-            
+
             Assert.That(field.Name, Is.EqualTo(fieldName));
             Assert.That(field.ClrType, Is.EqualTo(clrType));
         }
@@ -163,9 +162,9 @@ public class TypeMapperTests
     [Test]
     public void CreateParquetField_UnsupportedType_ThrowsUnsupportedTypeException()
     {
-        var ex = Assert.Throws<UnsupportedTypeException>(() => 
+        var ex = Assert.Throws<UnsupportedTypeException>(() =>
             TypeMapper.CreateParquetField("UnsupportedField", typeof(Guid)));
-        
+
         Assert.That(ex!.UnsupportedType, Is.EqualTo(typeof(Guid)));
         Assert.That(ex.SuggestedAlternatives, Contains.Item("string"));
         Assert.That(ex.SuggestedAlternatives, Contains.Item("byte[]"));
@@ -267,7 +266,7 @@ public class TypeMapperTests
         {
             var arrowType = TypeMapper.MapClrToArrow(originalType);
             var roundTripType = TypeMapper.MapArrowToClr(arrowType);
-            
+
             Assert.That(roundTripType, Is.EqualTo(originalType),
                 $"Round-trip mapping should preserve type {originalType.Name}");
         }
