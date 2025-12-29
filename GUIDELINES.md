@@ -1627,6 +1627,88 @@ if (arrowTable.ColumnCount == 0)
 }
 ```
 
+## Extension Methods Implementation
+
+### Extension Method Design Patterns
+**Decision**: Follow existing CSV/JSON extension method patterns with both instance methods and static factory methods
+**Rationale**: Provides consistent API experience across all I/O operations. Instance extension methods enable fluent chaining while static methods provide clear entry points.
+
+**Pattern**: Dual extension method approach
+```csharp
+// Instance extension methods for fluent API
+public static void ToParquet(this NivaraFrame frame, string filePath, ParquetWriteOptions? options = null)
+public static Task ToParquetAsync(this NivaraFrame frame, string filePath, ParquetWriteOptions? options = null)
+
+// Static methods for loading (following CSV/JSON pattern)
+public static NivaraFrame LoadParquet(string filePath, ParquetReadOptions? options = null)
+public static Task<NivaraFrame> LoadParquetAsync(string filePath, ParquetReadOptions? options = null)
+```
+
+### Arrow Extension Method Design
+**Decision**: Make `FromArrowTable` an extension method on `Table` rather than a static method
+**Rationale**: Enables fluent method chaining and follows the same pattern as `ToArrowTable`. Provides more natural API for round-trip operations.
+
+**Pattern**: Bidirectional extension methods
+```csharp
+// NivaraFrame to Arrow
+public static Table ToArrowTable(this NivaraFrame frame, ArrowConversionOptions? options = null)
+
+// Arrow to NivaraFrame (extension method on Table)
+public static NivaraFrame FromArrowTable(this Table arrowTable, ArrowConversionOptions? options = null)
+
+// Enables fluent chaining
+var roundTrip = frame.ToArrowTable().FromArrowTable();
+```
+
+### Stream-based Extension Methods
+**Decision**: Provide separate stream-based methods with clear naming (`ToParquetStream`, `LoadParquetFromStream`)
+**Rationale**: Distinguishes between file-based and stream-based operations. Prevents method overload ambiguity and makes resource management expectations clear.
+
+**Pattern**: Explicit stream method naming
+```csharp
+// File-based methods
+public static void ToParquet(this NivaraFrame frame, string filePath, ...)
+public static NivaraFrame LoadParquet(string filePath, ...)
+
+// Stream-based methods with explicit naming
+public static void ToParquetStream(this NivaraFrame frame, Stream stream, ...)
+public static NivaraFrame LoadParquetFromStream(Stream stream, ...)
+```
+
+### Extension Method Testing Strategy
+**Decision**: Test both API design aspects (method chaining, overloads, async variants) and basic functionality
+**Rationale**: Extension methods are primarily about API design, so tests should verify the API works as intended rather than deep functionality (which is tested in the underlying classes).
+
+**Coverage**: Extension method tests focus on:
+- Method availability and overloads
+- Null parameter validation
+- Method chaining capabilities
+- Sync/async variant availability
+- Default parameter handling
+- Generic type constraint behavior
+
+### Extension Method Gotchas
+**Problem**: Extension methods on null objects still throw ArgumentNullException
+**Solution**: Test null parameter scenarios explicitly to ensure proper error handling
+```csharp
+// Test null extension method calls
+NivaraFrame frame = null!;
+Assert.Throws<ArgumentNullException>(() => frame.ToArrowTable());
+
+Table table = null!;
+Assert.Throws<ArgumentNullException>(() => table.FromArrowTable());
+```
+
+**Problem**: Static methods in extension classes need explicit class qualification in tests
+**Solution**: Use full class name when calling static methods in tests
+```csharp
+// WRONG - compiler error if method is static
+Assert.Throws<ArgumentNullException>(() => LoadParquet(null!));
+
+// CORRECT - explicit class qualification
+Assert.Throws<ArgumentNullException>(() => NivaraFrameExtensions.LoadParquet(null!));
+```
+
 ## Parquet I/O Implementation
 
 ### Parquet.Net API Usage Patterns

@@ -761,11 +761,13 @@ tests/
 The `Nivara.Extensions` package provides additional functionality that requires third-party dependencies:
 
 - **CSV Support**: Reading and writing CSV files using CsvHelper
-- **Arrow/Parquet I/O**: ✅ **Parquet I/O Complete** - Comprehensive Parquet reading and writing capabilities with schema validation
+- ✅ Arrow/Parquet I/O: ✅ **Complete** - Comprehensive Arrow and Parquet I/O capabilities with fluent extension methods
   - CLR ↔ Arrow type conversion with support for all primitive types
   - CLR ↔ Parquet type conversion with nullable type handling
   - ✅ **Parquet Reader**: File and stream reading with async support
   - ✅ **Parquet Writer**: File and stream writing with configurable compression and batch operations
+  - ✅ **Arrow Interoperability**: Bidirectional conversion between NivaraFrame/NivaraSeries and Apache Arrow formats
+  - ✅ **Extension Methods**: Fluent API with both instance extension methods and static factory methods
   - ✅ **Schema Validation**: Type compatibility checking with detailed error messages
   - ✅ **Error Handling**: Comprehensive exception hierarchy with context information
   - Timezone-aware DateTime conversion
@@ -821,22 +823,26 @@ var frame = NivaraFrame.Create(
     ("Flags", NivaraColumn<bool>.Create(boolData))
 );
 
-// Convert NivaraFrame to Arrow Table
-var arrowTable = ArrowInterop.ToArrowTable(frame);
+// Convert NivaraFrame to Arrow Table using extension methods
+var arrowTable = frame.ToArrowTable();
 Console.WriteLine($"Arrow table: {arrowTable.RowCount} rows, {arrowTable.ColumnCount} columns");
 
-// Convert Arrow Table back to NivaraFrame
-var restoredFrame = ArrowInterop.FromArrowTable(arrowTable);
+// Convert Arrow Table back to NivaraFrame using extension methods
+var restoredFrame = arrowTable.FromArrowTable();
 Console.WriteLine($"Restored frame: {restoredFrame.RowCount} rows, {restoredFrame.ColumnCount} columns");
 
-// Convert NivaraSeries to Arrow Array
+// Convert NivaraSeries to Arrow Array using extension methods
 var series = NivaraSeries<double>.Create(new[] { 1.1, 2.2, 3.3, 4.4 });
-var arrowArray = ArrowInterop.ToArrowArray(series);
+var arrowArray = series.ToArrowArray();
 Console.WriteLine($"Arrow array length: {arrowArray.Length}");
 
-// Convert Arrow Array back to NivaraSeries
-var restoredSeries = ArrowInterop.FromArrowArray<double>(arrowArray);
+// Convert Arrow Array back to NivaraSeries using extension methods
+var restoredSeries = arrowArray.ToNivaraSeries<double>();
 Console.WriteLine($"Restored series length: {restoredSeries.Length}");
+
+// Static methods are also available for explicit calls
+var arrowTableStatic = ArrowInterop.ToArrowTable(frame);
+var restoredFrameStatic = ArrowInterop.FromArrowTable(arrowTable);
 
 // Handle nullable data
 var nullableData = new int?[] { 1, null, 3, null, 5 };
@@ -844,8 +850,8 @@ var nullableColumn = NivaraColumn<int>.CreateFromNullable(nullableData);
 var frameWithNulls = NivaraFrame.Create(("NullableNumbers", nullableColumn));
 
 // Arrow conversion preserves null information
-var arrowTableWithNulls = ArrowInterop.ToArrowTable(frameWithNulls);
-var restoredFrameWithNulls = ArrowInterop.FromArrowTable(arrowTableWithNulls);
+var arrowTableWithNulls = frameWithNulls.ToArrowTable();
+var restoredFrameWithNulls = arrowTableWithNulls.FromArrowTable();
 
 // Verify null preservation
 var restoredColumn = restoredFrameWithNulls.GetColumn("NullableNumbers");
@@ -860,7 +866,7 @@ var options = new ArrowConversionOptions
     ValidateTypes = true                // Validate type compatibility
 };
 
-var customArrowTable = ArrowInterop.ToArrowTable(frame, options);
+var customArrowTable = frame.ToArrowTable(options);
 ```
 
 #### Parquet File I/O
@@ -870,7 +876,7 @@ Read and write Parquet files with comprehensive schema validation and error hand
 ```csharp
 using Nivara.IO;
 
-// Write Parquet file (async)
+// Write Parquet file using extension methods (async)
 var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
 var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d", "e" });
 var frame = NivaraFrame.Create(
@@ -878,15 +884,30 @@ var frame = NivaraFrame.Create(
     ("Letters", stringColumn)
 );
 
-await ParquetWriter.WriteParquetAsync(frame, "output.parquet");
+await frame.ToParquetAsync("output.parquet");
 Console.WriteLine("Parquet file written successfully");
 
-// Write Parquet file (sync)
-ParquetWriter.WriteParquet(frame, "output_sync.parquet");
+// Write Parquet file using extension methods (sync)
+frame.ToParquet("output_sync.parquet");
 
-// Write to stream
+// Write to stream using extension methods
 using var memoryStream = new MemoryStream();
-await ParquetWriter.WriteParquetAsync(frame, memoryStream);
+await frame.ToParquetStreamAsync(memoryStream);
+
+// Load Parquet file using extension methods (async)
+var readFrame = await NivaraFrameExtensions.LoadParquetAsync("output.parquet");
+Console.WriteLine($"Loaded {readFrame.RowCount} rows, {readFrame.ColumnCount} columns");
+
+// Load Parquet file using extension methods (sync)
+var frameSync = NivaraFrameExtensions.LoadParquet("output.parquet");
+
+// Load from stream using extension methods
+using var fileStream = File.OpenRead("output.parquet");
+var frameFromStream = await NivaraFrameExtensions.LoadParquetFromStreamAsync(fileStream);
+
+// Static methods are also available for explicit calls
+await ParquetWriter.WriteParquetAsync(frame, "output.parquet");
+var readFrameStatic = await ParquetReader.ReadParquetAsync("output.parquet");
 
 // Custom writing options
 var writeOptions = new ParquetWriteOptions
@@ -897,7 +918,7 @@ var writeOptions = new ParquetWriteOptions
     WriteMetadata = true           // Include metadata (default: true)
 };
 
-await ParquetWriter.WriteParquetAsync(frame, "custom_output.parquet", writeOptions);
+await frame.ToParquetAsync("custom_output.parquet", writeOptions);
 
 // Batch writing - write multiple frames to single file
 var frame1 = NivaraFrame.Create(
@@ -919,18 +940,7 @@ var nullableColumn = NivaraColumn<int>.CreateFromNullable(nullableData);
 var frameWithNulls = NivaraFrame.Create(("NullableNumbers", nullableColumn));
 
 // Parquet writing preserves null information
-await ParquetWriter.WriteParquetAsync(frameWithNulls, "with_nulls.parquet");
-
-// Read Parquet file (async)
-var readFrame = await ParquetReader.ReadParquetAsync("output.parquet");
-Console.WriteLine($"Loaded {readFrame.RowCount} rows, {readFrame.ColumnCount} columns");
-
-// Read Parquet file (sync)
-var frameSync = ParquetReader.ReadParquet("output.parquet");
-
-// Read from stream
-using var fileStream = File.OpenRead("output.parquet");
-var frameFromStream = await ParquetReader.ReadParquetAsync(fileStream);
+await frameWithNulls.ToParquetAsync("with_nulls.parquet");
 
 // Custom reading options
 var readOptions = new ParquetReadOptions
@@ -940,7 +950,7 @@ var readOptions = new ParquetReadOptions
     StreamRowGroups = false    // Stream row groups for large files (default: false)
 };
 
-var frameWithOptions = await ParquetReader.ReadParquetAsync("output.parquet", readOptions);
+var frameWithOptions = await NivaraFrameExtensions.LoadParquetAsync("output.parquet", readOptions);
 
 // Streaming for large files (simplified implementation)
 foreach (var chunk in ParquetReader.ReadParquetStreaming("huge_data.parquet"))
@@ -956,7 +966,7 @@ try
     var unsupportedFrame = NivaraFrame.Create(
         ("GuidColumn", NivaraColumn<Guid>.Create(new[] { Guid.NewGuid() }))
     );
-    await ParquetWriter.WriteParquetAsync(unsupportedFrame, "invalid.parquet");
+    await unsupportedFrame.ToParquetAsync("invalid.parquet");
 }
 catch (SchemaValidationException ex)
 {
@@ -1043,6 +1053,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ Arrow/Parquet type mapping system with comprehensive CLR ↔ Arrow ↔ Parquet conversion
 - ✅ Arrow interoperability with bidirectional conversion (ToArrowTable, FromArrowTable, ToArrowArray, FromArrowArray)
 - ✅ Parquet I/O operations with reading and writing support (file/stream, async/sync, batch operations)
+- ✅ Extension methods and fluent API for Arrow and Parquet operations with method chaining support
 
 ### Upcoming Features
 - 🔄 Data source scanning (CSV, JSON) with lazy evaluation
