@@ -1033,3 +1033,280 @@ destination[i] = (T)(object)((dynamic)x[i]! + (dynamic)y[i]!)!;
 
 **Problem**: Expression evaluation needs to handle all column types dynamically
 **Solution**: Use switch expressions on Type with fallback to generic object columns for unknown types
+
+## Arrow/Parquet I/O Implementation
+
+### Project Structure and Namespace Organization
+**Decision**: Keep Arrow and Parquet implementations in Nivara.Extensions project, core I/O abstractions in Nivara project
+**Rationale**: Maintains separation between core library (dependency-free) and extensions (third-party dependencies). Apache.Arrow and Parquet.Net packages are already referenced in Nivara.Extensions.
+
+**Pattern**: Core abstractions in Nivara, implementations in Extensions
+```csharp
+// Core abstractions (Nivara project)
+namespace Nivara.IO;
+- NivaraIOException           # Base I/O exception
+- UnsupportedTypeException    # Type conversion errors  
+- DataCorruptionException     # Data integrity errors
+
+// Implementations (Nivara.Extensions project)
+namespace Nivara.Extensions.IO;
+- ArrowConversionOptions      # Arrow conversion configuration
+- ParquetReadOptions          # Parquet reading configuration
+- ParquetWriteOptions         # Parquet writing configuration
+- ArrowInterop               # Arrow conversion implementation
+- ParquetReader              # Parquet reading implementation
+- ParquetWriter              # Parquet writing implementation
+```
+
+### Exception Hierarchy Design
+**Decision**: Created comprehensive I/O exception hierarchy in core Nivara project
+**Rationale**: Provides specific error types for different I/O failure modes while maintaining consistency with existing exception patterns. Core exceptions can be used by any I/O implementation.
+
+**Pattern**: Hierarchical exceptions with context information
+```csharp
+// Base exception with file path and operation context
+public class NivaraIOException : Exception
+{
+    public string? FilePath { get; init; }
+    public string? OperationContext { get; init; }
+}
+
+// Specific exception types inherit from base
+public sealed class UnsupportedTypeException : NivaraIOException
+{
+    public Type UnsupportedType { get; init; }
+    public IReadOnlyList<string> SuggestedAlternatives { get; init; }
+}
+```
+
+### Configuration Options Architecture
+**Decision**: Separate configuration classes for different I/O operations (ArrowConversionOptions, ParquetReadOptions, ParquetWriteOptions)
+**Rationale**: Provides fine-grained control over I/O behavior while maintaining clear separation of concerns. Each operation type has its own specific configuration needs.
+
+**Pattern**: Options classes with sensible defaults and comprehensive documentation
+```csharp
+public class ArrowConversionOptions
+{
+    public bool UseZeroCopy { get; set; } = true;           // Performance optimization
+    public TimeZoneInfo TimeZone { get; set; } = TimeZoneInfo.Utc;  // DateTime handling
+    public bool ValidateTypes { get; set; } = true;        // Type safety
+    public Encoding StringEncoding { get; set; } = Encoding.UTF8;   // Text encoding
+}
+```
+
+### Namespace Structure for I/O Operations
+**Decision**: Use `Nivara.Extensions.IO` namespace for all Arrow/Parquet implementations
+**Rationale**: Consistent with existing CSV implementation pattern. Keeps all I/O extensions in the same namespace while separating from core functionality.
+
+**Structure**:
+```
+src/Nivara/IO/                    # Core I/O abstractions
+├── IOExceptions.cs               # Exception hierarchy
+
+src/Nivara.Extensions/IO/         # Third-party I/O implementations  
+├── ArrowConversionOptions.cs     # Arrow configuration
+├── ParquetReadOptions.cs         # Parquet read configuration
+├── ParquetWriteOptions.cs        # Parquet write configuration
+├── ArrowInterop.cs              # Arrow conversion logic
+├── ParquetReader.cs             # Parquet reading logic
+├── ParquetWriter.cs             # Parquet writing logic
+├── CsvDataSource.cs             # Existing CSV implementation
+└── CsvExtensions.cs             # Existing CSV extensions
+```
+
+### I/O Implementation Patterns
+**Decision**: Static classes for stateless I/O operations with options pattern for configuration
+**Rationale**: Follows existing CSV implementation pattern. Static methods are appropriate for stateless operations, while options classes provide flexible configuration.
+
+**Pattern**: Static classes with options parameters
+```csharp
+public static class ArrowInterop
+{
+    public static Table ToArrowTable(NivaraFrame frame, ArrowConversionOptions? options = null);
+    public static NivaraFrame FromArrowTable(Table arrowTable, ArrowConversionOptions? options = null);
+}
+
+public static class ParquetReader
+{
+    public static Task<NivaraFrame> ReadParquetAsync(string filePath, ParquetReadOptions? options = null);
+    public static NivaraFrame ReadParquet(string filePath, ParquetReadOptions? options = null);
+}
+```
+
+### Package Dependencies Strategy
+**Decision**: Apache.Arrow and Parquet.Net packages are already referenced in Nivara.Extensions project
+**Rationale**: Maintains core library independence from third-party dependencies. Extensions project can use specialized libraries for specific I/O formats.
+
+**Current Dependencies** (already in Nivara.Extensions.csproj):
+- Apache.Arrow 22.1.0 - Arrow format support
+- Parquet.Net 5.4.0 - Parquet format support
+- CsvHelper 33.0.1 - CSV format support (existing)
+
+### Error Handling Strategy
+**Decision**: Comprehensive error context with file paths, operation types, and suggested alternatives
+**Rationale**: Helps users quickly identify and resolve I/O issues. Provides actionable error messages with context about what went wrong and how to fix it.
+
+**Pattern**: Context-rich error messages
+```csharp
+// Include file path and operation context
+throw new NivaraIOException("Failed to read Parquet file", filePath, "ParquetReader.ReadParquet");
+
+// Include suggested alternatives for unsupported types
+throw new UnsupportedTypeException(typeof(Guid), new[] { "string", "byte[]" });
+
+// Include affected data ranges for corruption errors
+throw new DataCorruptionException("Invalid data detected", filePath, "ParquetReader", 
+    new[] { "Column1", "Column2" }, new Range(100, 200));
+```
+
+### Testing Strategy for I/O Operations
+**Decision**: Unit tests for configuration classes and exception types, integration tests for actual I/O operations
+**Rationale**: Configuration and exception classes can be tested in isolation. I/O operations will require integration tests with actual Arrow/Parquet data in subsequent tasks.
+
+**Pattern**: Test configuration and error handling first, then integration
+```csharp
+// Unit tests for configuration (current task)
+[Test] public void ArrowConversionOptions_DefaultValues() { /* test defaults */ }
+[Test] public void ParquetWriteOptions_CompressionValidation() { /* test validation */ }
+
+// Integration tests for I/O operations (future tasks)  
+[Test] public void ArrowInterop_RoundTripPreservesData() { /* test with real data */ }
+[Test] public void ParquetReader_HandlesLargeFiles() { /* test with real files */ }
+```
+
+### Build Verification Strategy
+**Decision**: Verify both Nivara and Nivara.Extensions projects build successfully after structural changes
+**Rationale**: Ensures new namespace structure doesn't break existing functionality. Both projects must compile cleanly before proceeding to implementation tasks.
+
+**Pattern**: Build verification after structural changes
+```bash
+# Verify core project builds
+dotnet build src/Nivara/Nivara.csproj
+
+# Verify extensions project builds  
+dotnet build src/Nivara.Extensions/Nivara.Extensions.csproj
+```
+
+### Future Implementation Notes
+**Note**: This task only sets up the project structure and core interfaces. Actual Arrow/Parquet conversion logic will be implemented in subsequent tasks following the established patterns.
+
+**Next Steps**: 
+- Task 2: Implement type mapping system
+- Task 3: Implement Arrow interoperability  
+- Task 4: Implement Parquet I/O operations
+- Task 5+: Add streaming, batching, and optimization features
+
+### Type Mapping System Implementation
+**Decision**: Created comprehensive TypeMapper class with CLR ↔ Arrow ↔ Parquet type mappings using static dictionaries and dynamic dispatch
+**Rationale**: Provides fast, consistent type conversion across all I/O operations. Static dictionaries avoid reflection overhead while dynamic dispatch handles runtime type scenarios.
+
+**Pattern**: Dictionary-based type mapping with fallback error handling
+```csharp
+// Static type mapping dictionaries
+private static readonly Dictionary<Type, IArrowType> ClrToArrowMap = new()
+{
+    { typeof(bool), BooleanType.Default },
+    { typeof(int), Int32Type.Default },
+    // ... other mappings
+};
+
+// Dynamic dispatch for type conversion
+return elementType switch
+{
+    Type t when t == typeof(int) => CreateArrowArray<int>(values),
+    Type t when t == typeof(string) => CreateArrowArray<string>(values),
+    _ => throw new UnsupportedTypeException(elementType, GetTypeSuggestions(elementType))
+};
+```
+
+### Nullable Type Handling in I/O Operations
+**Decision**: Extract underlying type using `Nullable.GetUnderlyingType()` for nullable value types, treat reference types as inherently nullable
+**Rationale**: Consistent with .NET nullable semantics. Arrow and Parquet handle nullability at the column level, not the type level.
+
+**Pattern**: Nullable type extraction and handling
+```csharp
+// Extract underlying type for nullable value types
+var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
+var isNullable = Nullable.GetUnderlyingType(clrType) != null || !actualType.IsValueType;
+
+// Use actual type for mapping, preserve nullability information
+var arrowType = ClrToArrowMap[actualType];
+var parquetField = new DataField<T>(name, isNullable);
+```
+
+### Error Handling with Type Suggestions
+**Decision**: Provide context-specific suggestions for unsupported types based on common conversion patterns
+**Rationale**: Helps users quickly identify appropriate alternative types. Reduces trial-and-error when working with unsupported types.
+
+**Pattern**: Context-aware error messages with suggestions
+```csharp
+private static List<string> GetTypeSuggestions(Type unsupportedType)
+{
+    return unsupportedType switch
+    {
+        Type t when t == typeof(Guid) => new List<string> { "string", "byte[]" },
+        Type t when t == typeof(TimeSpan) => new List<string> { "long (ticks)", "double (seconds)" },
+        Type t when t.IsEnum => new List<string> { "int", "string" },
+        _ => new List<string> { "bool", "int", "long", "float", "double", "DateTime", "string" }
+    };
+}
+```
+
+### InternalsVisibleTo Pattern for Extensions Testing
+**Decision**: Added InternalsVisibleTo attribute to Nivara.Extensions project for test access to internal classes
+**Rationale**: Allows comprehensive testing of internal implementation classes while keeping them hidden from public API. Follows same pattern as core Nivara project.
+
+**Pattern**: Assembly attribute in project file
+```xml
+<ItemGroup>
+  <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+    <_Parameter1>Nivara.Tests</_Parameter1>
+  </AssemblyAttribute>
+</ItemGroup>
+```
+
+### Type Mapping Testing Strategy
+**Decision**: Comprehensive unit tests covering all supported types, edge cases, and error conditions
+**Rationale**: Type mapping is foundational to I/O correctness. Tests verify bidirectional mapping consistency and proper error handling.
+
+**Coverage**: 15 test cases covering:
+- All supported primitive type mappings (CLR ↔ Arrow ↔ Parquet)
+- Nullable type handling and nullability preservation
+- Unsupported type error handling with suggestions
+- Round-trip mapping consistency
+- Special cases (DateTime timezone handling, enum suggestions)
+- Type support validation methods
+
+### Type Mapping Gotchas
+**Problem**: Arrow TimestampType timezone format varies between "UTC" and "+00:00"
+**Solution**: Use flexible assertions that accept both formats
+```csharp
+// WRONG - assumes specific timezone format
+Assert.That(timestampType.Timezone, Is.EqualTo("UTC"));
+
+// CORRECT - accepts both common UTC representations
+Assert.That(timestampType.Timezone, Is.EqualTo("+00:00").Or.EqualTo("UTC"));
+```
+
+**Problem**: Parquet.Net HasNulls property is obsolete, use IsNullable instead
+**Solution**: Update test assertions to use current API
+```csharp
+// WRONG - obsolete property
+Assert.That(field.HasNulls, Is.True);
+
+// CORRECT - current property
+Assert.That(field.IsNullable, Is.True);
+```
+
+**Problem**: Complex tuple type inference in test arrays
+**Solution**: Use explicit tuple type declarations
+```csharp
+// WRONG - compiler cannot infer complex tuple types
+var testCases = new[] { (BooleanType.Default, typeof(bool)) };
+
+// CORRECT - explicit tuple type declaration
+var testCases = new (IArrowType ArrowType, Type ExpectedClrType)[]
+{
+    (BooleanType.Default, typeof(bool))
+};
+```

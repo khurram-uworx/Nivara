@@ -755,9 +755,42 @@ tests/
 The `Nivara.Extensions` package provides additional functionality that requires third-party dependencies:
 
 - **CSV Support**: Reading and writing CSV files using CsvHelper
-- **Parquet Support**: Integration with Parquet.Net for columnar file format
-- **Arrow Support**: Apache Arrow integration for interoperability
+- **Arrow/Parquet I/O**: ✅ **Type Mapping Complete** - Comprehensive type mapping system for Apache Arrow and Parquet formats
+  - CLR ↔ Arrow type conversion with support for all primitive types
+  - CLR ↔ Parquet type conversion with nullable type handling
+  - Timezone-aware DateTime conversion
+  - Context-specific error messages with type suggestions
 - **ML.NET Integration**: Machine learning pipeline integration
+
+#### Arrow/Parquet Type Mapping
+
+The type mapping system provides seamless conversion between .NET types and columnar formats:
+
+```csharp
+using Nivara.Extensions.IO;
+
+// Supported types for Arrow/Parquet conversion:
+// - Primitives: bool, int, long, float, double, byte, short, uint, ulong, ushort, sbyte
+// - DateTime with timezone handling
+// - string with Unicode support
+// - Nullable value types (int?, bool?, DateTime?, etc.)
+// - Reference types (inherently nullable)
+
+// Type mapping validation
+bool isArrowSupported = TypeMapper.IsArrowSupported(typeof(int));     // true
+bool isParquetSupported = TypeMapper.IsParquetSupported(typeof(Guid)); // false
+
+// Error handling provides helpful suggestions
+try 
+{
+    var arrowType = TypeMapper.MapClrToArrow(typeof(Guid));
+}
+catch (UnsupportedTypeException ex)
+{
+    // ex.SuggestedAlternatives contains ["string", "byte[]"]
+    Console.WriteLine($"Consider using: {string.Join(", ", ex.SuggestedAlternatives)}");
+}
+```
 
 To use CSV functionality:
 
@@ -821,13 +854,15 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ QueryFrame with fluent API for lazy query construction and execution
 - ✅ Query operations (Filter, Select, GroupBy) with schema transformation
 - ✅ Query planning and execution infrastructure with optimization analysis
-- ✅ Comprehensive test suite with 309 passing tests
+- ✅ Arrow/Parquet type mapping system with comprehensive CLR ↔ Arrow ↔ Parquet conversion
+- ✅ Comprehensive test suite with 324 passing tests (including 15 new I/O type mapping tests)
 
 ### Upcoming Features
 - 🔄 Data source scanning (CSV, JSON) with lazy evaluation
 - 🔄 Query optimization passes (predicate pushdown, operation fusion)
 - 🔄 Advanced aggregation functions (Sum, Count, Average, etc.)
-- 📋 I/O operations (CSV, JSON, Parquet)
+- 🔄 Arrow interoperability (ToArrowTable, FromArrowTable conversion methods)
+- 🔄 Parquet I/O operations (reading and writing with streaming support)
 - 📋 Grouping with aggregation functions
 - 📋 Joining operations between frames
 
