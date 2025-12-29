@@ -70,7 +70,7 @@ public sealed class QueryPlan
     private Schema ComputeResultSchema()
     {
         var schema = Source.Schema;
-        
+
         foreach (var operation in Operations)
         {
             try
@@ -95,7 +95,7 @@ public sealed class QueryPlan
     {
         var operationNames = Operations.Select(op => op.OperationType);
         var pipeline = string.Join(" -> ", operationNames);
-        
+
         return $"QueryPlan {{ Source: {Source.GetType().Name}, Pipeline: {pipeline}, ResultSchema: {ResultSchema} }}";
     }
 }
@@ -116,25 +116,25 @@ public static class QueryPlanAnalyzer
             throw new ArgumentNullException(nameof(plan));
 
         var explanation = new System.Text.StringBuilder();
-        
+
         explanation.AppendLine("Query Execution Plan:");
         explanation.AppendLine($"├─ Source: {plan.Source.GetType().Name}");
         explanation.AppendLine($"│  └─ Schema: {plan.Source.Schema}");
         explanation.AppendLine($"│  └─ Lazy: {plan.Source.IsLazy}");
-        
+
         if (plan.Operations.Count > 0)
         {
             explanation.AppendLine("├─ Operations:");
-            
+
             var currentSchema = plan.Source.Schema;
             for (int i = 0; i < plan.Operations.Count; i++)
             {
                 var operation = plan.Operations[i];
                 var isLast = i == plan.Operations.Count - 1;
                 var prefix = isLast ? "└─" : "├─";
-                
+
                 explanation.AppendLine($"│  {prefix} {i + 1}. {operation.OperationType}");
-                
+
                 try
                 {
                     var newSchema = operation.TransformSchema(currentSchema);
@@ -150,9 +150,9 @@ public static class QueryPlanAnalyzer
                 }
             }
         }
-        
+
         explanation.AppendLine($"└─ Result Schema: {plan.ResultSchema}");
-        
+
         return explanation.ToString();
     }
 
@@ -198,7 +198,7 @@ public static class QueryPlanAnalyzer
         // Check for unused columns
         var sourceColumns = plan.Source.Schema.ColumnNames.Count;
         var resultColumns = plan.ResultSchema.ColumnNames.Count;
-        
+
         if (resultColumns < sourceColumns && !selectOperations.Any())
         {
             suggestions.Add("Some columns are unused - consider adding explicit column selection for better performance");

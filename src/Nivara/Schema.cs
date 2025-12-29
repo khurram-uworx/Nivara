@@ -23,7 +23,7 @@ public sealed class Schema
             throw new ArgumentNullException(nameof(columns));
 
         var columnList = columns.ToList();
-        
+
         // Validate column names
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var typeDict = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
@@ -183,7 +183,7 @@ public sealed class Schema
             throw new ArgumentNullException(nameof(columnNames));
 
         var selectedNames = columnNames.ToList();
-        
+
         // Validate all columns exist
         foreach (var name in selectedNames)
         {
@@ -193,7 +193,7 @@ public sealed class Schema
 
         var newColumns = selectedNames.Select(name => (name, columnTypes[name]));
         var newMetadata = selectedNames.ToDictionary(
-            name => name, 
+            name => name,
             name => metadata.TryGetValue(name, out var meta) ? meta : new ColumnMetadata(),
             StringComparer.OrdinalIgnoreCase);
 
@@ -382,13 +382,13 @@ public sealed class ColumnMetadata
     public override string ToString()
     {
         var parts = new List<string>();
-        
+
         if (!IsNullable)
             parts.Add("NOT NULL");
-        
+
         if (DefaultValue != null)
             parts.Add($"DEFAULT {DefaultValue}");
-        
+
         if (!string.IsNullOrEmpty(Description))
             parts.Add($"DESC '{Description}'");
 

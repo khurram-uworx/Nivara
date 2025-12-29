@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.Tensors;
 
 namespace Nivara.Memory;

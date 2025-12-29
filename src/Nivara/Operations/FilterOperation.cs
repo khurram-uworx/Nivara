@@ -63,7 +63,7 @@ internal sealed class FilterOperation : IQueryOperation
 
             // Apply the mask to all columns
             var filteredColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-            
+
             foreach (var kvp in input)
             {
                 var filteredColumn = ApplyMask(kvp.Value, mask);
@@ -90,7 +90,7 @@ internal sealed class FilterOperation : IQueryOperation
             throw new ArgumentException("Column and mask must have the same length");
 
         var filteredIndices = new List<int>();
-        
+
         for (int i = 0; i < mask.Length; i++)
         {
             if (mask[i] == true) // Only include rows where mask is true
@@ -112,7 +112,7 @@ internal sealed class FilterOperation : IQueryOperation
     private static IColumn CreateFilteredColumn(IColumn column, List<int> indices)
     {
         var elementType = column.ElementType;
-        
+
         // Use dynamic dispatch to create the appropriate column type
         return elementType switch
         {
@@ -136,7 +136,7 @@ internal sealed class FilterOperation : IQueryOperation
     private static IColumn CreateFilteredColumnTyped<T>(IColumn column, List<int> indices)
     {
         var filteredArray = new T[indices.Count];
-        
+
         for (int i = 0; i < indices.Count; i++)
         {
             var value = column.GetValue(indices[i]);
@@ -152,7 +152,7 @@ internal sealed class FilterOperation : IQueryOperation
     private static IColumn CreateFilteredColumnGeneric(IColumn column, List<int> indices)
     {
         var filteredArray = new object[indices.Count];
-        
+
         for (int i = 0; i < indices.Count; i++)
         {
             filteredArray[i] = column.GetValue(indices[i])!;

@@ -1,7 +1,5 @@
 using Apache.Arrow;
-using Apache.Arrow.Arrays;
 using Apache.Arrow.Types;
-using Nivara.IO;
 
 namespace Nivara.IO;
 
@@ -55,13 +53,13 @@ public static class ArrowInterop
                 {
                     var column = frame.GetColumn(columnName);
                     var arrowType = TypeMapper.MapClrToArrow(column.ElementType);
-                    
+
                     // For DateTime columns, use the timezone from options
                     if (column.ElementType == typeof(DateTime) && arrowType is TimestampType)
                     {
                         arrowType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
                     }
-                    
+
                     // Create field with proper nullability
                     var field = new Field(columnName, arrowType, nullable: true);
                     fields.Add(field);
@@ -83,7 +81,7 @@ public static class ArrowInterop
 
             var schema = new Apache.Arrow.Schema(fields, null);
             var recordBatch = new RecordBatch(schema, arrowArrays, frame.RowCount);
-            
+
             return Table.TableFromRecordBatches(schema, new[] { recordBatch });
         }
         catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException and not DataCorruptionException)
@@ -132,11 +130,11 @@ public static class ArrowInterop
             {
                 var field = arrowTable.Schema.GetFieldByIndex(fieldIndex);
                 var columnName = field.Name;
-                
+
                 try
                 {
                     var arrowColumn = arrowTable.Column(fieldIndex);
-                    
+
                     // Convert Arrow column to Nivara column
                     var column = ConvertArrowColumnToNivaraColumn(arrowColumn, field.DataType, options);
                     columns.Add((columnName, column));
@@ -199,7 +197,7 @@ public static class ArrowInterop
             {
                 data[i] = series[i];
             }
-            
+
             var column = NivaraColumn<T>.Create(data);
             return ConvertColumnToArrowArray(column, options);
         }
@@ -244,7 +242,7 @@ public static class ArrowInterop
 
             // Extract data directly from the Arrow array
             var data = new List<T>();
-            
+
             for (int i = 0; i < arrowArray.Length; i++)
             {
                 if (arrowArray.IsNull(i))
@@ -257,7 +255,7 @@ public static class ArrowInterop
                     data.Add(value);
                 }
             }
-            
+
             return NivaraSeries<T>.Create(data.ToArray());
         }
         catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException)
@@ -299,7 +297,7 @@ public static class ArrowInterop
     private static IArrowArray ConvertColumnToArrowArray(IColumn column, ArrowConversionOptions options)
     {
         var elementType = column.ElementType;
-        
+
         return elementType switch
         {
             Type t when t == typeof(bool) => ConvertColumnToArrowArrayTyped<bool>(column, options),
@@ -360,7 +358,7 @@ public static class ArrowInterop
 
         // Fallback to copying approach
         var builder = new BooleanArray.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -387,7 +385,7 @@ public static class ArrowInterop
 
         // Fallback to copying approach
         var builder = new Int32Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -405,7 +403,7 @@ public static class ArrowInterop
     private static IArrowArray CreateInt64Array(NivaraColumn<long> column, ArrowConversionOptions options)
     {
         var builder = new Int64Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -423,7 +421,7 @@ public static class ArrowInterop
     private static IArrowArray CreateFloatArray(NivaraColumn<float> column, ArrowConversionOptions options)
     {
         var builder = new FloatArray.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -450,7 +448,7 @@ public static class ArrowInterop
 
         // Fallback to copying approach
         var builder = new DoubleArray.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -468,7 +466,7 @@ public static class ArrowInterop
     private static IArrowArray CreateStringArray(NivaraColumn<string> column, ArrowConversionOptions options)
     {
         var builder = new StringArray.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -487,7 +485,7 @@ public static class ArrowInterop
     {
         var timestampType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
         var builder = new TimestampArray.Builder(timestampType);
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -522,7 +520,7 @@ public static class ArrowInterop
     private static IArrowArray CreateUInt8Array(NivaraColumn<byte> column, ArrowConversionOptions options)
     {
         var builder = new UInt8Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -540,7 +538,7 @@ public static class ArrowInterop
     private static IArrowArray CreateInt16Array(NivaraColumn<short> column, ArrowConversionOptions options)
     {
         var builder = new Int16Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -558,7 +556,7 @@ public static class ArrowInterop
     private static IArrowArray CreateUInt32Array(NivaraColumn<uint> column, ArrowConversionOptions options)
     {
         var builder = new UInt32Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -576,7 +574,7 @@ public static class ArrowInterop
     private static IArrowArray CreateUInt64Array(NivaraColumn<ulong> column, ArrowConversionOptions options)
     {
         var builder = new UInt64Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -594,7 +592,7 @@ public static class ArrowInterop
     private static IArrowArray CreateUInt16Array(NivaraColumn<ushort> column, ArrowConversionOptions options)
     {
         var builder = new UInt16Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -612,7 +610,7 @@ public static class ArrowInterop
     private static IArrowArray CreateInt8Array(NivaraColumn<sbyte> column, ArrowConversionOptions options)
     {
         var builder = new Int8Array.Builder();
-        
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -630,7 +628,7 @@ public static class ArrowInterop
     private static IColumn ConvertArrowColumnToNivaraColumn(Column arrowColumn, IArrowType arrowType, ArrowConversionOptions options)
     {
         var clrType = TypeMapper.MapArrowToClr(arrowType);
-        
+
         return clrType switch
         {
             Type t when t == typeof(bool) => ConvertArrowColumnToNivaraColumnTyped<bool>(arrowColumn, options),
@@ -657,7 +655,7 @@ public static class ArrowInterop
     {
         // Calculate total length across all chunks
         int totalLength = (int)arrowColumn.Length;
-        
+
         if (totalLength == 0)
         {
             return NivaraColumn<T>.Create(System.Array.Empty<T>());
@@ -667,10 +665,10 @@ public static class ArrowInterop
 
         // Get the ChunkedArray
         var chunkedArray = arrowColumn.Data;
-        
+
         // Try to get the number of chunks using ArrayCount property
         int chunkCount = chunkedArray.ArrayCount;
-        
+
         if (chunkCount == 0)
         {
             // No chunks, return empty column
@@ -681,7 +679,7 @@ public static class ArrowInterop
         for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
         {
             var chunk = chunkedArray.Array(chunkIndex);
-            
+
             for (int i = 0; i < chunk.Length; i++)
             {
                 if (chunk.IsNull(i))
@@ -701,7 +699,7 @@ public static class ArrowInterop
             // For value types, we need to create an array of nullable values with the correct type
             var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
             var nullableArray = System.Array.CreateInstance(nullableType, values.Count);
-            
+
             for (int i = 0; i < values.Count; i++)
             {
                 var nullableValue = values[i];
@@ -717,7 +715,7 @@ public static class ArrowInterop
                     nullableArray.SetValue(null, i);
                 }
             }
-            
+
             return NivaraColumn<T>.CreateFromNullable(nullableArray);
         }
         else
@@ -763,16 +761,16 @@ public static class ArrowInterop
     {
         var timestampValue = timestampArray.GetValue(index)!.Value;
         var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-        
+
         // Convert from microseconds since Unix epoch to DateTime
         var dateTime = unixEpoch.AddMicroseconds(timestampValue);
-        
+
         // Convert to the specified timezone if needed
         if (options.TimeZone != TimeZoneInfo.Utc)
         {
             dateTime = TimeZoneInfo.ConvertTimeFromUtc(dateTime, options.TimeZone);
         }
-        
+
         return dateTime;
     }
 
@@ -888,7 +886,7 @@ public static class ArrowInterop
         // 1. The column has no nulls (or we can handle the null mask efficiently)
         // 2. The underlying storage is compatible with Arrow's memory layout
         // 3. The data is contiguous in memory
-        
+
         // For now, zero-copy is not implemented for boolean arrays due to bit-packing complexity
         // This is a fallback that returns null to use the copying approach
         return null;
@@ -905,7 +903,7 @@ public static class ArrowInterop
         // 1. The column has no nulls (or we can handle the null mask efficiently)
         // 2. The underlying storage is compatible with Arrow's memory layout
         // 3. The data is contiguous in memory
-        
+
         // Check if column has nulls - zero-copy is more complex with nulls
         if (column.HasNulls)
         {
@@ -922,7 +920,7 @@ public static class ArrowInterop
             // 1. Get the underlying memory buffer from the column
             // 2. Create an Arrow array that shares this buffer
             // 3. Handle memory ownership and lifecycle properly
-            
+
             // For now, return null to use copying approach
             return null;
         }
@@ -944,7 +942,7 @@ public static class ArrowInterop
         // 1. The column has no nulls (or we can handle the null mask efficiently)
         // 2. The underlying storage is compatible with Arrow's memory layout
         // 3. The data is contiguous in memory
-        
+
         // Check if column has nulls - zero-copy is more complex with nulls
         if (column.HasNulls)
         {
@@ -961,7 +959,7 @@ public static class ArrowInterop
             // 1. Get the underlying memory buffer from the column
             // 2. Create an Arrow array that shares this buffer
             // 3. Handle memory ownership and lifecycle properly
-            
+
             // For now, return null to use copying approach
             return null;
         }

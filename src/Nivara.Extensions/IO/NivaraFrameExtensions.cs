@@ -1,5 +1,4 @@
 using Apache.Arrow;
-using Nivara.IO;
 
 namespace Nivara.IO;
 
@@ -27,7 +26,7 @@ public static class NivaraFrameExtensions
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(filePath);
-        
+
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
@@ -50,7 +49,7 @@ public static class NivaraFrameExtensions
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(filePath);
-        
+
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
@@ -70,7 +69,7 @@ public static class NivaraFrameExtensions
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(stream);
-        
+
         if (!stream.CanWrite)
             throw new ArgumentException("Stream must be writable", nameof(stream));
 
@@ -93,7 +92,7 @@ public static class NivaraFrameExtensions
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(stream);
-        
+
         if (!stream.CanWrite)
             throw new ArgumentException("Stream must be writable", nameof(stream));
 
@@ -113,7 +112,7 @@ public static class NivaraFrameExtensions
     public static NivaraFrame LoadParquet(string filePath, ParquetReadOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(filePath);
-        
+
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
@@ -135,7 +134,7 @@ public static class NivaraFrameExtensions
     public static Task<NivaraFrame> LoadParquetAsync(string filePath, ParquetReadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filePath);
-        
+
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
@@ -154,7 +153,7 @@ public static class NivaraFrameExtensions
     public static NivaraFrame LoadParquetFromStream(Stream stream, ParquetReadOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        
+
         if (!stream.CanRead)
             throw new ArgumentException("Stream must be readable", nameof(stream));
 
@@ -175,7 +174,7 @@ public static class NivaraFrameExtensions
     public static Task<NivaraFrame> LoadParquetFromStreamAsync(Stream stream, ParquetReadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        
+
         if (!stream.CanRead)
             throw new ArgumentException("Stream must be readable", nameof(stream));
 
@@ -197,7 +196,7 @@ public static class NivaraFrameExtensions
     public static Table ToArrowTable(this NivaraFrame frame, ArrowConversionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(frame);
-        
+
         return ArrowInterop.ToArrowTable(frame, options);
     }
 
@@ -212,7 +211,7 @@ public static class NivaraFrameExtensions
     public static NivaraFrame FromArrowTable(this Table arrowTable, ArrowConversionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(arrowTable);
-        
+
         return ArrowInterop.FromArrowTable(arrowTable, options);
     }
 

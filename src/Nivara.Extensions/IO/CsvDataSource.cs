@@ -1,7 +1,7 @@
 using CsvHelper;
 using CsvHelper.Configuration;
-using System.Globalization;
 using Nivara.Exceptions;
+using System.Globalization;
 
 namespace Nivara.IO;
 
@@ -81,7 +81,7 @@ internal sealed class CsvLazySource : IQuerySource
     {
         this.filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
-        
+
         lazySchema = new Lazy<Schema>(InferSchema);
     }
 
@@ -101,7 +101,7 @@ internal sealed class CsvLazySource : IQuerySource
 
             // Read all records as dynamic objects
             var records = csv.GetRecords<dynamic>().ToList();
-            
+
             if (records.Count == 0)
             {
                 // Return empty columns based on schema
@@ -116,7 +116,7 @@ internal sealed class CsvLazySource : IQuerySource
 
             // Convert records to columns
             var columns = new Dictionary<string, IColumn>();
-            
+
             foreach (var columnName in Schema.ColumnNames)
             {
                 var columnType = Schema.GetColumnType(columnName);
@@ -151,7 +151,7 @@ internal sealed class CsvLazySource : IQuerySource
             // Read sample rows for type inference
             var sampleRecords = new List<dynamic>();
             int rowsRead = 0;
-            
+
             while (csv.Read() && rowsRead < options.SchemaInferenceRows)
             {
                 sampleRecords.Add(csv.GetRecord<dynamic>());
@@ -160,7 +160,7 @@ internal sealed class CsvLazySource : IQuerySource
 
             // Infer types for each column
             var columnDefinitions = new List<(string Name, Type Type)>();
-            
+
             foreach (var header in headers)
             {
                 var inferredType = InferColumnType(sampleRecords, header);
@@ -184,7 +184,7 @@ internal sealed class CsvLazySource : IQuerySource
     private static Type InferColumnType(List<dynamic> sampleRecords, string columnName)
     {
         var values = new List<string>();
-        
+
         foreach (var record in sampleRecords)
         {
             var dict = (IDictionary<string, object>)record;
@@ -200,13 +200,13 @@ internal sealed class CsvLazySource : IQuerySource
         // Try to infer type based on successful parsing
         if (values.All(v => int.TryParse(v, out _)))
             return typeof(int);
-        
+
         if (values.All(v => double.TryParse(v, out _)))
             return typeof(double);
-        
+
         if (values.All(v => bool.TryParse(v, out _)))
             return typeof(bool);
-        
+
         if (values.All(v => DateTime.TryParse(v, out _)))
             return typeof(DateTime);
 
@@ -223,12 +223,12 @@ internal sealed class CsvLazySource : IQuerySource
     private static Array ExtractColumnData(List<dynamic> records, string columnName, Type columnType)
     {
         var array = Array.CreateInstance(columnType, records.Count);
-        
+
         for (int i = 0; i < records.Count; i++)
         {
             var dict = (IDictionary<string, object>)records[i];
             object? value = null;
-            
+
             if (dict.TryGetValue(columnName, out var rawValue) && rawValue != null)
             {
                 var stringValue = rawValue.ToString();
@@ -238,10 +238,10 @@ internal sealed class CsvLazySource : IQuerySource
             {
                 value = GetDefaultValue(columnType);
             }
-            
+
             array.SetValue(value, i);
         }
-        
+
         return array;
     }
 
@@ -260,16 +260,16 @@ internal sealed class CsvLazySource : IQuerySource
         {
             if (targetType == typeof(string))
                 return value;
-            
+
             if (targetType == typeof(int))
                 return int.Parse(value);
-            
+
             if (targetType == typeof(double))
                 return double.Parse(value);
-            
+
             if (targetType == typeof(bool))
                 return bool.Parse(value);
-            
+
             if (targetType == typeof(DateTime))
                 return DateTime.Parse(value);
 
@@ -300,14 +300,14 @@ internal sealed class CsvLazySource : IQuerySource
     {
         // Create empty typed array
         var emptyArray = Array.CreateInstance(columnType, 0);
-        
+
         // Use reflection to call the appropriate Create method
         var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
             .GetMethod("Create", new[] { columnType.MakeArrayType() });
-        
+
         if (createMethod == null)
             throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-        
+
         return (IColumn)createMethod.Invoke(null, new object[] { emptyArray })!;
     }
 
@@ -322,10 +322,10 @@ internal sealed class CsvLazySource : IQuerySource
         // Use reflection to call the appropriate Create method
         var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
             .GetMethod("Create", new[] { columnType.MakeArrayType() });
-        
+
         if (createMethod == null)
             throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-        
+
         return (IColumn)createMethod.Invoke(null, new object[] { data })!;
     }
 }

@@ -1,5 +1,3 @@
-using System.Numerics;
-
 namespace Nivara;
 
 /// <summary>
@@ -222,7 +220,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new ArgumentNullException(nameof(other));
 
         var alignedPairs = GetAlignedPairs(other);
-        
+
         if (alignedPairs.Count == 0)
         {
             // No matching indices, return empty series
@@ -257,13 +255,13 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new ArgumentNullException(nameof(other));
 
         var alignedPairs = GetAlignedPairs(other);
-        
+
         if (alignedPairs.Count == 0)
         {
             // No matching indices, return empty series
             var empty = Array.Empty<T>();
             var emptyIndex = Array.Empty<object>();
-            return (NivaraSeries<T>.Create(empty, emptyIndex), 
+            return (NivaraSeries<T>.Create(empty, emptyIndex),
                     NivaraSeries<T>.Create(empty, emptyIndex));
         }
 
@@ -298,7 +296,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new ArgumentNullException(nameof(other));
 
         var (alignedLeft, alignedRight) = AlignBoth(other);
-        
+
         if (alignedLeft.Length == 0)
         {
             // No matching indices, return empty series
@@ -324,7 +322,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new ArgumentNullException(nameof(other));
 
         var (alignedLeft, alignedRight) = AlignBoth(other);
-        
+
         if (alignedLeft.Length == 0)
         {
             // No matching indices, return empty series

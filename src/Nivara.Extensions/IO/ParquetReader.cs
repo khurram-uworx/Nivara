@@ -1,12 +1,5 @@
-using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Threading.Tasks;
-using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
-using Nivara.IO;
 
 namespace Nivara.IO;
 
@@ -29,7 +22,7 @@ public static class ParquetReader
     public static async Task<NivaraFrame> ReadParquetAsync(string filePath, ParquetReadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filePath);
-        
+
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"Parquet file not found: {filePath}");
 
@@ -63,14 +56,14 @@ public static class ParquetReader
     public static async Task<NivaraFrame> ReadParquetAsync(Stream stream, ParquetReadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
-        
+
         options ??= new ParquetReadOptions();
 
         try
         {
             // Use low-level ParquetReader API
             using var parquetReader = await Parquet.ParquetReader.CreateAsync(stream);
-            
+
             if (parquetReader.RowGroupCount == 0)
             {
                 // Create an empty frame with a dummy column
@@ -121,7 +114,7 @@ public static class ParquetReader
     public static IEnumerable<NivaraFrame> ReadParquetStreaming(string filePath, ParquetReadOptions? options = null, long memoryBudget = 256L * 1024 * 1024)
     {
         ArgumentNullException.ThrowIfNull(filePath);
-        
+
         if (!File.Exists(filePath))
             throw new FileNotFoundException($"Parquet file not found: {filePath}");
 
@@ -136,16 +129,16 @@ public static class ParquetReader
     private static IEnumerable<NivaraFrame> ReadParquetStreamingInternal(string filePath, ParquetReadOptions options, long memoryBudget)
     {
         using var bufferManager = new StreamingBufferManager(memoryBudget);
-        
+
         using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-        
+
         // For now, return the entire file as a single chunk with memory management
         // True streaming would require processing row groups individually
         var frame = ReadParquet(fileStream, options);
-        
+
         // Force garbage collection if memory usage is high
         bufferManager.TryCollectGarbage();
-        
+
         yield return frame;
     }
 
@@ -156,7 +149,7 @@ public static class ParquetReader
     {
         var schema = parquetReader.Schema;
         var dataFields = schema.GetDataFields();
-        
+
         if (dataFields.Length == 0)
         {
             // Create an empty frame with a dummy column
@@ -184,7 +177,7 @@ public static class ParquetReader
         for (int rowGroupIndex = 0; rowGroupIndex < parquetReader.RowGroupCount; rowGroupIndex++)
         {
             using var rowGroupReader = parquetReader.OpenRowGroupReader(rowGroupIndex);
-            
+
             if (rowGroupIndex == 0)
             {
                 // Initialize columns on first row group
@@ -192,16 +185,16 @@ public static class ParquetReader
                 {
                     var field = dataFields[columnIndex];
                     var columnName = field.Name;
-                    
+
                     // Skip the dummy column used for empty files
                     if (columnName == "_empty")
                         continue;
-                    
+
                     try
                     {
                         // Check for cancellation before processing each column
                         cancellationToken.ThrowIfCancellationRequested();
-                        
+
                         // Read column data using the correct API
                         var columnData = await rowGroupReader.ReadColumnAsync(field);
                         var column = CreateNivaraColumnFromParquetData(columnData, field);
@@ -270,7 +263,7 @@ public static class ParquetReader
     {
         // Handle nullable types
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
-        
+
         return TypeMapper.GetSupportedTypes().Contains(actualType);
     }
 
@@ -306,7 +299,7 @@ public static class ParquetReader
     private static NivaraColumn<T> CreateNivaraColumn<T>(DataColumn columnData) where T : struct
     {
         var length = columnData.Data.Length;
-        
+
         // Use buffer pool for large arrays to reduce allocations
         T?[] nullableArray;
         if (length > 1024)
@@ -316,7 +309,7 @@ public static class ParquetReader
             try
             {
                 nullableArray = new T?[length];
-                
+
                 for (int i = 0; i < length; i++)
                 {
                     var value = columnData.Data.GetValue(i);
@@ -346,7 +339,7 @@ public static class ParquetReader
         {
             // For small arrays, use direct allocation
             nullableArray = new T?[length];
-            
+
             for (int i = 0; i < length; i++)
             {
                 var value = columnData.Data.GetValue(i);

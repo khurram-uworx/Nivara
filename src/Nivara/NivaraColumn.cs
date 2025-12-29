@@ -1,8 +1,5 @@
-using System.Numerics.Tensors;
 using Nivara.Diagnostics;
-using Nivara.Exceptions;
 using Nivara.Memory;
-using Nivara.Tensors;
 
 namespace Nivara;
 
@@ -52,7 +49,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     public object? GetValue(int index)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        
+
         if (index < 0 || index >= Length)
             throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}. Valid range is 0 to {Length - 1}");
 
@@ -68,7 +65,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         get
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            
+
             if (index < 0 || index >= Length)
                 throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}. Valid range is 0 to {Length - 1}");
 
@@ -109,7 +106,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         get
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            
+
             // Use the StorageType property from the storage interface
             var storageType = storage.StorageType;
 
@@ -201,7 +198,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Validate the array type - it should be T?[] where T is a value type
         var actualElementType = values.GetType().GetElementType();
         var expectedNullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-        
+
         if (actualElementType != expectedNullableType)
             throw new ArgumentException($"Array element type must be {expectedNullableType.Name}, but was {actualElementType?.Name}");
 
@@ -279,13 +276,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Enhanced validation with clear error messages
         if (start < 0)
             throw new ArgumentOutOfRangeException(nameof(start), start, $"Start index cannot be negative. Provided: {start}");
-        
+
         if (length < 0)
             throw new ArgumentOutOfRangeException(nameof(length), length, $"Length cannot be negative. Provided: {length}");
-        
+
         if (start > Length)
             throw new ArgumentOutOfRangeException(nameof(start), start, $"Start index {start} is out of range for column of length {Length}. Valid range is 0 to {Length}");
-        
+
         if (start + length > Length)
             throw new ArgumentOutOfRangeException(nameof(length), length, $"Slice range [{start}, {start + length}) exceeds column bounds [0, {Length}). Maximum length from start {start} is {Length - start}");
 
@@ -415,7 +412,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         // Determine which kernel will actually be used
         var kernelType = DetermineKernelType();
-        
+
         // Record diagnostic information
         var diagnostic = new OperationDiagnostics(
             "ScalarMultiplication",
@@ -460,7 +457,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         // Determine which kernel will actually be used
         var kernelType = DetermineKernelType();
-        
+
         // Record diagnostic information
         var diagnostic = new OperationDiagnostics(
             "ElementwiseAddition",
@@ -764,7 +761,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         // Determine which kernel will actually be used
         var kernelType = DetermineKernelType();
-        
+
         // Record diagnostic information
         var diagnostic = new OperationDiagnostics(
             "ScalarEquals",
@@ -1511,7 +1508,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
 
         var nullMask = storage.NullMask;
         var indices = new List<int>();
-        
+
         for (int i = 0; i < nullMask.Length; i++)
         {
             if (nullMask[i])
@@ -1659,7 +1656,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             {
                 if (!hasValidValue)
                     throw new InvalidOperationException($"Cannot forward fill: null value at index {i} has no preceding non-null value. Consider using FillNull() with a default value instead.");
-                
+
                 newData[i] = lastValidValue!;
             }
             else
@@ -1707,7 +1704,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             {
                 if (!hasValidValue)
                     throw new InvalidOperationException($"Cannot backward fill: null value at index {i} has no following non-null value. Consider using FillNull() with a default value instead.");
-                
+
                 newData[i] = nextValidValue!;
             }
             else

@@ -1,5 +1,3 @@
-using Nivara;
-
 namespace Nivara.Diagnostics;
 
 /// <summary>

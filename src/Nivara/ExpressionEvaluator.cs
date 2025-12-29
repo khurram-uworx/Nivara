@@ -48,7 +48,7 @@ internal sealed class ExpressionEvaluator
     public NivaraColumn<bool> EvaluateBoolean(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
     {
         var result = Evaluate(expression, input);
-        
+
         if (result is not NivaraColumn<bool> boolColumn)
         {
             throw new QueryExecutionException($"Expression '{expression.Name}' must evaluate to a boolean column, but got {result.ElementType.Name}");
@@ -84,7 +84,7 @@ internal sealed class ExpressionEvaluator
     {
         // Get the length from any input column
         var length = input.Values.FirstOrDefault()?.Length ?? 1;
-        
+
         // Create a constant column with the literal value
         return CreateConstantColumn(literal.Value, length);
     }
@@ -106,6 +106,8 @@ internal sealed class ExpressionEvaluator
             BinaryOperator.Subtract => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => SubtractValues(l, r)),
             BinaryOperator.Multiply => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => MultiplyValues(l, r)),
             BinaryOperator.Divide => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => DivideValues(l, r)),
+            BinaryOperator.And => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => AndValues(l, r)),
+            BinaryOperator.Or => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => OrValues(l, r)),
             _ => throw new NotSupportedException($"Binary operator {binary.Operator} is not supported")
         };
     }
@@ -150,6 +152,8 @@ internal sealed class ExpressionEvaluator
             BinaryOperator.Subtract => ApplyBinaryOperation(column, scalarColumn, (l, r) => SubtractValues(l, r)),
             BinaryOperator.Multiply => ApplyBinaryOperation(column, scalarColumn, (l, r) => MultiplyValues(l, r)),
             BinaryOperator.Divide => ApplyBinaryOperation(column, scalarColumn, (l, r) => DivideValues(l, r)),
+            BinaryOperator.And => ApplyBinaryOperation(column, scalarColumn, (l, r) => AndValues(l, r)),
+            BinaryOperator.Or => ApplyBinaryOperation(column, scalarColumn, (l, r) => OrValues(l, r)),
             _ => throw new NotSupportedException($"Scalar operator {scalar.Operator} is not supported")
         };
     }
@@ -219,7 +223,7 @@ internal sealed class ExpressionEvaluator
             throw new ArgumentException("Columns must have the same length for binary operations");
 
         var resultArray = new object?[left.Length];
-        
+
         for (int i = 0; i < left.Length; i++)
         {
             var leftValue = left.GetValue(i);
@@ -243,7 +247,7 @@ internal sealed class ExpressionEvaluator
             throw new ArgumentException("Columns must have the same length for comparison operations");
 
         var resultArray = new bool[left.Length];
-        
+
         for (int i = 0; i < left.Length; i++)
         {
             var leftValue = left.GetValue(i);
@@ -258,7 +262,7 @@ internal sealed class ExpressionEvaluator
     private static object? AddValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
-        
+
         return (left, right) switch
         {
             (int l, int r) => l + r,
@@ -273,7 +277,7 @@ internal sealed class ExpressionEvaluator
     private static object? SubtractValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
-        
+
         return (left, right) switch
         {
             (int l, int r) => l - r,
@@ -288,7 +292,7 @@ internal sealed class ExpressionEvaluator
     private static object? MultiplyValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
-        
+
         return (left, right) switch
         {
             (int l, int r) => l * r,
@@ -303,7 +307,7 @@ internal sealed class ExpressionEvaluator
     private static object? DivideValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
-        
+
         return (left, right) switch
         {
             (int l, int r) => r != 0 ? (double)l / r : throw new DivideByZeroException(),
@@ -315,52 +319,74 @@ internal sealed class ExpressionEvaluator
         };
     }
 
+    private static object? AndValues(object? left, object? right)
+    {
+        if (left == null || right == null) return null;
+
+        return (left, right) switch
+        {
+            (bool l, bool r) => l && r,
+            _ => Convert.ToBoolean(left) && Convert.ToBoolean(right)
+        };
+    }
+
+    private static object? OrValues(object? left, object? right)
+    {
+        if (left == null || right == null) return null;
+
+        return (left, right) switch
+        {
+            (bool l, bool r) => l || r,
+            _ => Convert.ToBoolean(left) || Convert.ToBoolean(right)
+        };
+    }
+
     // Comparison operation implementations
     private static bool CompareEqual(object? left, object? right)
     {
         if (left == null && right == null) return true;
         if (left == null || right == null) return false;
-        
+
         return left.Equals(right);
     }
 
     private static bool CompareGreaterThan(object? left, object? right)
     {
         if (left == null || right == null) return false;
-        
+
         if (left is IComparable leftComparable)
             return leftComparable.CompareTo(right) > 0;
-        
+
         throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 
     private static bool CompareLessThan(object? left, object? right)
     {
         if (left == null || right == null) return false;
-        
+
         if (left is IComparable leftComparable)
             return leftComparable.CompareTo(right) < 0;
-        
+
         throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 
     private static bool CompareGreaterThanOrEqual(object? left, object? right)
     {
         if (left == null || right == null) return false;
-        
+
         if (left is IComparable leftComparable)
             return leftComparable.CompareTo(right) >= 0;
-        
+
         throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 
     private static bool CompareLessThanOrEqual(object? left, object? right)
     {
         if (left == null || right == null) return false;
-        
+
         if (left is IComparable leftComparable)
             return leftComparable.CompareTo(right) <= 0;
-        
+
         throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 }

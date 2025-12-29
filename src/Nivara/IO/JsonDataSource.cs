@@ -1,5 +1,5 @@
-using System.Text.Json;
 using Nivara.Exceptions;
+using System.Text.Json;
 
 namespace Nivara.IO;
 
@@ -52,7 +52,7 @@ internal sealed class JsonLazySource : IQuerySource
     {
         this.filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
-        
+
         lazySchema = new Lazy<Schema>(InferSchema);
     }
 
@@ -68,7 +68,7 @@ internal sealed class JsonLazySource : IQuerySource
         try
         {
             var jsonText = File.ReadAllText(filePath);
-            
+
             if (options.IsArray)
             {
                 var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
@@ -107,7 +107,7 @@ internal sealed class JsonLazySource : IQuerySource
 
         // Convert records to columns
         var columns = new Dictionary<string, IColumn>();
-        
+
         foreach (var columnName in Schema.ColumnNames)
         {
             var columnType = Schema.GetColumnType(columnName);
@@ -128,7 +128,7 @@ internal sealed class JsonLazySource : IQuerySource
         {
             var jsonText = File.ReadAllText(filePath);
             JsonElement[] sampleRecords;
-            
+
             if (options.IsArray)
             {
                 var allRecords = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
@@ -160,7 +160,7 @@ internal sealed class JsonLazySource : IQuerySource
 
             // Infer types for each property
             var columnDefinitions = new List<(string Name, Type Type)>();
-            
+
             foreach (var propertyName in allPropertyNames)
             {
                 var inferredType = InferPropertyType(sampleRecords, propertyName);
@@ -184,10 +184,10 @@ internal sealed class JsonLazySource : IQuerySource
     private static Type InferPropertyType(JsonElement[] sampleRecords, string propertyName)
     {
         var values = new List<JsonElement>();
-        
+
         foreach (var record in sampleRecords)
         {
-            if (record.ValueKind == JsonValueKind.Object && 
+            if (record.ValueKind == JsonValueKind.Object &&
                 record.TryGetProperty(propertyName, out var property) &&
                 property.ValueKind != JsonValueKind.Null)
             {
@@ -224,11 +224,11 @@ internal sealed class JsonLazySource : IQuerySource
     private static Array ExtractColumnData(JsonElement[] records, string propertyName, Type columnType)
     {
         var array = Array.CreateInstance(columnType, records.Length);
-        
+
         for (int i = 0; i < records.Length; i++)
         {
             object? value = null;
-            
+
             if (records[i].ValueKind == JsonValueKind.Object &&
                 records[i].TryGetProperty(propertyName, out var property))
             {
@@ -238,10 +238,10 @@ internal sealed class JsonLazySource : IQuerySource
             {
                 value = GetDefaultValue(columnType);
             }
-            
+
             array.SetValue(value, i);
         }
-        
+
         return array;
     }
 
@@ -260,16 +260,16 @@ internal sealed class JsonLazySource : IQuerySource
         {
             if (targetType == typeof(string))
                 return jsonElement.GetString();
-            
+
             if (targetType == typeof(int))
                 return jsonElement.GetInt32();
-            
+
             if (targetType == typeof(double))
                 return jsonElement.GetDouble();
-            
+
             if (targetType == typeof(bool))
                 return jsonElement.GetBoolean();
-            
+
             if (targetType == typeof(DateTime))
                 return jsonElement.GetDateTime();
 
@@ -301,14 +301,14 @@ internal sealed class JsonLazySource : IQuerySource
     {
         // Create empty typed array
         var emptyArray = Array.CreateInstance(columnType, 0);
-        
+
         // Use reflection to call the appropriate Create method
         var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
             .GetMethod("Create", new[] { columnType.MakeArrayType() });
-        
+
         if (createMethod == null)
             throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-        
+
         return (IColumn)createMethod.Invoke(null, new object[] { emptyArray })!;
     }
 
@@ -323,10 +323,10 @@ internal sealed class JsonLazySource : IQuerySource
         // Use reflection to call the appropriate Create method
         var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
             .GetMethod("Create", new[] { columnType.MakeArrayType() });
-        
+
         if (createMethod == null)
             throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-        
+
         return (IColumn)createMethod.Invoke(null, new object[] { data })!;
     }
 }

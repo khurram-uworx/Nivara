@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.Diagnostics;
 
 namespace Nivara.Memory;

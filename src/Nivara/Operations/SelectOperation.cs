@@ -54,7 +54,7 @@ internal sealed class SelectOperation : IQueryOperation
 
         // Build the new schema with selected columns
         var selectedColumns = new List<(string Name, Type Type)>();
-        
+
         foreach (var column in Columns)
         {
             var columnName = GetColumnName(column, inputSchema);

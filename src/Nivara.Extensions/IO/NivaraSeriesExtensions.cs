@@ -1,6 +1,4 @@
 using Apache.Arrow;
-using Apache.Arrow.Arrays;
-using Nivara.IO;
 
 namespace Nivara.IO;
 
@@ -25,7 +23,7 @@ public static class NivaraSeriesExtensions
     public static IArrowArray ToArrowArray<T>(this NivaraSeries<T> series, ArrowConversionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(series);
-        
+
         return ArrowInterop.ToArrowArray(series, options);
     }
 
@@ -41,7 +39,7 @@ public static class NivaraSeriesExtensions
     public static NivaraSeries<T> ToNivaraSeries<T>(this IArrowArray arrowArray, ArrowConversionOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(arrowArray);
-        
+
         return ArrowInterop.FromArrowArray<T>(arrowArray, options);
     }
 }

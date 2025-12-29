@@ -24,7 +24,7 @@ public sealed class NivaraFrame : IFrame
             throw new ArgumentNullException(nameof(namedColumns));
 
         var columnList = namedColumns.ToList();
-        
+
         // Validate we have at least one column
         if (columnList.Count == 0)
             throw new ArgumentException("Frame must contain at least one column", nameof(namedColumns));
@@ -33,23 +33,23 @@ public sealed class NivaraFrame : IFrame
         var columnDict = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
         var schemaColumns = new List<(string Name, Type Type)>();
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        
+
         int? expectedLength = null;
-        
+
         foreach (var (name, column) in columnList)
         {
             // Validate column name
             if (string.IsNullOrWhiteSpace(name))
                 throw new ArgumentException("Column names cannot be null or whitespace", nameof(namedColumns));
-            
+
             // Validate column is not null
             if (column == null)
                 throw new ArgumentException($"Column '{name}' cannot be null", nameof(namedColumns));
-            
+
             // Check for duplicate names (case-insensitive)
             if (!names.Add(name))
                 throw new ArgumentException($"Duplicate column name '{name}' found. Column names must be unique (case-insensitive)", nameof(namedColumns));
-            
+
             // Validate column lengths match
             if (expectedLength == null)
             {
@@ -63,7 +63,7 @@ public sealed class NivaraFrame : IFrame
                     $"to match existing columns [{existingColumns}]. All columns in a frame must have the same length.",
                     nameof(namedColumns));
             }
-            
+
             columnDict[name] = column;
             schemaColumns.Add((name, column.ElementType));
         }
@@ -231,7 +231,7 @@ public sealed class NivaraFrame : IFrame
 
         var newColumns = columns.Concat(new[] { new KeyValuePair<string, IColumn>(name, column) });
         var namedColumns = newColumns.Select(kvp => (kvp.Key, kvp.Value));
-        
+
         return new NivaraFrame(namedColumns);
     }
 
@@ -257,7 +257,7 @@ public sealed class NivaraFrame : IFrame
 
         var newColumns = columns.Where(kvp => !string.Equals(kvp.Key, name, StringComparison.OrdinalIgnoreCase));
         var namedColumns = newColumns.Select(kvp => (kvp.Key, kvp.Value));
-        
+
         return new NivaraFrame(namedColumns);
     }
 
@@ -290,7 +290,7 @@ public sealed class NivaraFrame : IFrame
             throw new ArgumentNullException(nameof(columnNames));
 
         var selectedNames = columnNames.ToList();
-        
+
         if (selectedNames.Count == 0)
             throw new ArgumentException("Must specify at least one column name", nameof(columnNames));
 

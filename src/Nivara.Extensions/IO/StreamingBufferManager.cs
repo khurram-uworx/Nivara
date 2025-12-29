@@ -137,7 +137,7 @@ internal sealed class StreamingBufferManager : IDisposable
     /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>An async enumerable of memory chunks.</returns>
     public async IAsyncEnumerable<ReadOnlyMemory<byte>> CreateStreamingReader(
-        Stream stream, 
+        Stream stream,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         if (disposed)

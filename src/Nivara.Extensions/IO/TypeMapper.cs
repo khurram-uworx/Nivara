@@ -1,7 +1,5 @@
-using Apache.Arrow;
 using Apache.Arrow.Types;
 using Parquet.Schema;
-using Nivara.IO;
 
 namespace Nivara.IO;
 
@@ -110,7 +108,7 @@ internal static class TypeMapper
     {
         ArgumentNullException.ThrowIfNull(name);
         ArgumentNullException.ThrowIfNull(clrType);
-        
+
         if (string.IsNullOrWhiteSpace(name))
             throw new ArgumentException("Field name cannot be empty or whitespace", nameof(name));
 
@@ -157,7 +155,7 @@ internal static class TypeMapper
     public static bool IsParquetSupported(Type clrType)
     {
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
-        
+
         return actualType == typeof(bool) ||
                actualType == typeof(int) ||
                actualType == typeof(long) ||

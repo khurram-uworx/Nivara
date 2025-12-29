@@ -75,7 +75,7 @@ public sealed class QueryFrame : IDisposable
 
         var filterOperation = new FilterOperation(condition);
         var newOperations = operations.Concat(new[] { filterOperation });
-        
+
         return new QueryFrame(source, newOperations);
     }
 
@@ -98,7 +98,7 @@ public sealed class QueryFrame : IDisposable
 
         var selectOperation = new SelectOperation(columns);
         var newOperations = operations.Concat(new[] { selectOperation });
-        
+
         return new QueryFrame(source, newOperations);
     }
 
@@ -143,7 +143,7 @@ public sealed class QueryFrame : IDisposable
         var expressions = columnNames.Select(name => ColumnExpressions.Col(name)).ToArray();
         var groupByOperation = new GroupByOperation(expressions);
         var newOperations = operations.Concat(new[] { groupByOperation });
-        
+
         return new QueryFrame(source, newOperations);
     }
 
@@ -166,7 +166,7 @@ public sealed class QueryFrame : IDisposable
 
         var groupByOperation = new GroupByOperation(columns);
         var newOperations = operations.Concat(new[] { groupByOperation });
-        
+
         return new QueryFrame(source, newOperations);
     }
 
@@ -227,10 +227,10 @@ public sealed class QueryFrame : IDisposable
 
         var operationNames = operations.Select(op => op.OperationType);
         var pipeline = string.Join(" -> ", operationNames);
-        
+
         if (string.IsNullOrEmpty(pipeline))
             return $"QueryFrame {{ Source: {source.GetType().Name}, Operations: None }}";
-        
+
         return $"QueryFrame {{ Source: {source.GetType().Name}, Pipeline: {pipeline} }}";
     }
 

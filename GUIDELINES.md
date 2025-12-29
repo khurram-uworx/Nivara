@@ -2812,3 +2812,247 @@ catch (Exception ex)
     // Includes: operation type, file path, underlying error details
 }
 ```
+
+## Query Execution Engine and Optimization Implementation
+
+### Query Optimization Architecture
+**Decision**: Implement optimization as separate passes in QueryOptimizer class
+**Rationale**: Modular design allows individual optimizations to be enabled/disabled and makes the system easier to test and maintain. Each optimization pass is independent and can be applied in sequence.
+
+**Pattern**: Sequential optimization passes with fallback safety
+```csharp
+public QueryPlan Optimize(QueryPlan plan)
+{
+    try
+    {
+        var optimizedPlan = plan;
+        optimizedPlan = ApplyPredicatePushdown(optimizedPlan);
+        optimizedPlan = ApplyOperationFusion(optimizedPlan);
+        optimizedPlan = ApplyColumnElimination(optimizedPlan);
+        optimizedPlan = ApplyOperationReordering(optimizedPlan);
+        return optimizedPlan;
+    }
+    catch (Exception)
+    {
+        // If optimization fails, return the original plan
+        // Optimization should never break a valid query
+        return plan;
+    }
+}
+```
+
+### Optimization Pass Implementations
+
+#### 1. Predicate Pushdown Optimization
+**Decision**: Move filter operations as early as possible in the query pipeline
+**Rationale**: Filtering data early reduces the amount of data processed by subsequent operations, improving performance significantly.
+
+**Implementation Strategy**:
+- Collect all filter operations from the pipeline
+- Analyze dependencies between filters and other operations
+- Move filters before operations that don't depend on them
+- Preserve semantic correctness by checking column availability
+
+**Key Considerations**:
+- Select operations may eliminate columns needed by filters
+- GroupBy operations change the data structure
+- Conservative approach: only push down when safe
+
+#### 2. Operation Fusion Optimization
+**Decision**: Combine compatible operations into single operations
+**Rationale**: Reduces the number of passes over data and can enable more efficient execution.
+
+**Fusion Rules**:
+- **Multiple Filters**: Combine using AND logic with BinaryExpression
+- **Multiple Selects**: Use the final select operation (later selects override earlier ones)
+- **Conservative Approach**: Only fuse when semantically safe
+
+**Pattern**: Type-based fusion logic
+```csharp
+private static IQueryOperation? FuseOperations(IQueryOperation first, IQueryOperation second)
+{
+    // Fuse multiple filter operations
+    if (first is FilterOperation filter1 && second is FilterOperation filter2)
+    {
+        var combinedCondition = new BinaryExpression(BinaryOperator.And, filter1.Condition, filter2.Condition);
+        return new FilterOperation(combinedCondition);
+    }
+    
+    // Fuse multiple select operations (take the final projection)
+    if (first is SelectOperation select1 && second is SelectOperation select2)
+    {
+        // Validate that select2 columns are available from select1
+        return CanFuseSelects(select1, select2) ? select2 : null;
+    }
+    
+    return null; // Cannot fuse these operations
+}
+```
+
+#### 3. Column Elimination Optimization
+**Decision**: Remove unused columns early in the pipeline
+**Rationale**: Reduces memory usage and I/O overhead by eliminating columns that aren't referenced in the query.
+
+**Implementation Strategy**:
+- Analyze all operations to determine which columns are actually used
+- Add a Select operation at the beginning if unused columns are detected
+- Preserve all columns if no explicit column usage is found (conservative)
+
+**Column Usage Analysis**:
+```csharp
+private static HashSet<string> AnalyzeColumnUsage(QueryPlan plan)
+{
+    var usedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    
+    foreach (var operation in plan.Operations)
+    {
+        if (operation is FilterOperation filter)
+            usedColumns.UnionWith(GetReferencedColumns(filter.Condition));
+        else if (operation is SelectOperation select)
+            foreach (var column in select.Columns)
+                usedColumns.UnionWith(GetReferencedColumns(column));
+        // ... handle other operation types
+    }
+    
+    // If no operations use columns explicitly, assume all columns are used
+    if (usedColumns.Count == 0)
+        usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
+    
+    return usedColumns;
+}
+```
+
+#### 4. Operation Reordering Optimization
+**Decision**: Reorder operations for better performance while preserving semantics
+**Rationale**: Some operation orders are more efficient than others (e.g., filters before selects).
+
+**Reordering Rules**:
+- **Filters First**: Move filter operations early to reduce data volume
+- **Selects After Filters**: Column selection after filtering is more efficient
+- **GroupBy Last**: Grouping operations should come after filtering and selection
+- **Conservative Safety**: Only reorder when semantically safe
+
+**Safety Validation**:
+```csharp
+private static bool IsReorderingSafe(List<IQueryOperation> original, List<IQueryOperation> reordered, Schema sourceSchema)
+{
+    // Conservative approach - only allow reordering of simple operations
+    var allowedTypes = new[] { "Filter", "Select" };
+    var originalTypes = original.Select(op => op.OperationType).ToList();
+    var reorderedTypes = reordered.Select(op => op.OperationType).ToList();
+    
+    return originalTypes.All(t => allowedTypes.Contains(t)) && 
+           reorderedTypes.All(t => allowedTypes.Contains(t));
+}
+```
+
+### Expression Analysis for Optimization
+**Decision**: Recursive expression analysis to extract column references
+**Rationale**: Optimizations need to understand which columns are referenced by expressions to make safe transformations.
+
+**Pattern**: Visitor pattern for expression traversal
+```csharp
+private static HashSet<string> GetReferencedColumns(ColumnExpression expression)
+{
+    var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    
+    if (expression is ColumnReference columnRef)
+    {
+        columns.Add(columnRef.ColumnName);
+    }
+    else if (expression is BinaryExpression binary)
+    {
+        columns.UnionWith(GetReferencedColumns(binary.Left));
+        columns.UnionWith(GetReferencedColumns(binary.Right));
+    }
+    else if (expression is ComparisonExpression comparison)
+    {
+        columns.UnionWith(GetReferencedColumns(comparison.Left));
+        if (comparison.Right is ColumnExpression rightExpr)
+            columns.UnionWith(GetReferencedColumns(rightExpr));
+    }
+    // ... handle other expression types
+    
+    return columns;
+}
+```
+
+### Query Optimization Diagnostics
+**Decision**: Provide optimization analysis and suggestions to users
+**Rationale**: Helps users understand query performance characteristics and identify optimization opportunities.
+
+**Implementation**: Static analysis method that examines query plans
+```csharp
+public static IReadOnlyList<string> AnalyzeOptimizationOpportunities(QueryPlan plan)
+{
+    var suggestions = new List<string>();
+    
+    // Check for multiple filter operations
+    var filterCount = plan.Operations.Count(op => op.OperationType == "Filter");
+    if (filterCount > 1)
+        suggestions.Add($"Found {filterCount} filter operations - consider combining them for better performance");
+    
+    // Check for predicate pushdown opportunities
+    if (plan.Source.IsLazy && filterCount > 0)
+        suggestions.Add("Filter operations on lazy source detected - predicate pushdown optimization available");
+    
+    // Check for column elimination opportunities
+    var sourceColumnCount = plan.Source.Schema.ColumnNames.Count;
+    var resultColumnCount = plan.ResultSchema.ColumnNames.Count;
+    if (resultColumnCount < sourceColumnCount)
+        suggestions.Add($"Query uses {resultColumnCount} of {sourceColumnCount} columns - consider adding explicit column selection");
+    
+    return suggestions;
+}
+```
+
+### Property-Based Testing for Query Optimization
+**Decision**: Implement comprehensive property tests to validate optimization correctness
+**Rationale**: Query optimization is complex and error-prone. Property tests ensure that optimizations preserve query semantics across all scenarios.
+
+**Key Properties Tested**:
+- **Property 8: Collect execution barrier** - Multiple Collect() calls produce identical results
+- **Property 9: Query optimization during execution** - Optimization preserves query semantics
+- **Property 16: Comprehensive query optimization** - All optimization passes preserve correctness
+
+**Testing Strategy**:
+```csharp
+// Test that optimization preserves semantics
+var baselineQuery = source.Filter(condition);
+var optimizableQuery = source.Select(allColumns).Filter(condition); // Suboptimal order
+
+var baselineResult = baselineQuery.Collect();
+var optimizedResult = optimizableQuery.Collect();
+
+// Results should be identical despite different optimization opportunities
+Assert.That(optimizedResult.RowCount, Is.EqualTo(baselineResult.RowCount));
+// ... verify data equality
+```
+
+### Optimization Safety Principles
+**Decision**: Always prioritize correctness over performance
+**Rationale**: A correct but slow query is better than a fast but incorrect query.
+
+**Safety Guidelines**:
+1. **Conservative Analysis**: When in doubt, don't optimize
+2. **Fallback Safety**: If optimization fails, return original plan
+3. **Semantic Preservation**: Never change query results
+4. **Dependency Checking**: Validate column availability before transformations
+5. **Type Safety**: Ensure schema transformations are valid
+
+### Future Optimization Opportunities
+**Identified Areas for Enhancement**:
+- **Cost-Based Optimization**: Use statistics to choose optimal execution plans
+- **Join Reordering**: Optimize join order based on selectivity estimates
+- **Index Utilization**: Push predicates to data sources that support indexing
+- **Parallel Execution**: Identify operations that can be parallelized
+- **Materialization Points**: Choose optimal points to materialize intermediate results
+
+### Lessons Learned from Implementation
+**Expression System Integration**: The optimization system relies heavily on the expression system for analyzing column dependencies. The recursive expression analysis pattern proved essential for safe optimization.
+
+**Schema Transformation Validation**: Every optimization must validate that schema transformations are valid. The immutable schema design made this validation straightforward and safe.
+
+**Testing Complexity**: Property-based testing was crucial for validating optimization correctness. Simple unit tests were insufficient to catch edge cases in optimization logic.
+
+**Performance vs. Correctness Trade-offs**: The conservative approach to optimization ensures correctness but may miss some optimization opportunities. This trade-off was intentional to prioritize reliability.

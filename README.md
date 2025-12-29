@@ -1370,6 +1370,7 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ QueryFrame with fluent API for lazy query construction and execution
 - ✅ Query operations (Filter, Select, GroupBy) with schema transformation
 - ✅ Query planning and execution infrastructure with optimization analysis
+- ✅ Query execution engine with comprehensive optimization passes (predicate pushdown, operation fusion, column elimination, operation reordering)
 - ✅ DataFrame operations infrastructure with execution strategies and query node hierarchy
 - ✅ Arrow/Parquet type mapping system with comprehensive CLR ↔ Arrow ↔ Parquet conversion
 - ✅ Arrow interoperability with bidirectional conversion (ToArrowTable, FromArrowTable, ToArrowArray, FromArrowArray)
@@ -1380,7 +1381,8 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 
 ### Upcoming Features
 - ✅ Data source scanning (CSV, JSON) with lazy evaluation - **Complete**
-- 🔄 Query optimization passes (predicate pushdown, operation fusion)
+- ✅ Query optimization passes (predicate pushdown, operation fusion) - **Complete**
+- ✅ Query execution engine with comprehensive optimization - **Complete**
 - 🔄 Advanced aggregation functions (Sum, Count, Average, etc.)
 - 🔄 Parquet streaming and batch operations (advanced features)
 - 📋 Grouping with aggregation functions

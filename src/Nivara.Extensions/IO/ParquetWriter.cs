@@ -1,7 +1,5 @@
-using Parquet;
 using Parquet.Data;
 using Parquet.Schema;
-using Nivara.IO;
 
 namespace Nivara.IO;
 
@@ -219,7 +217,7 @@ public static class ParquetWriter
         // Parquet requires at least one field, so create a dummy field for empty frames
         var dummyField = new DataField<int>("_empty");
         var emptySchema = new ParquetSchema(dummyField);
-        
+
         using var emptyWriter = await Parquet.ParquetWriter.CreateAsync(emptySchema, stream);
         using var emptyRowGroup = emptyWriter.CreateRowGroup();
         var emptyColumn = new DataColumn(dummyField, Array.Empty<int>());
@@ -268,7 +266,7 @@ public static class ParquetWriter
         for (int i = 1; i < frames.Count; i++)
         {
             var currentFrame = frames[i];
-            
+
             if (!AreFramesSchemaCompatible(firstFrame, currentFrame))
             {
                 throw new SchemaValidationException(
@@ -323,18 +321,18 @@ public static class ParquetWriter
     {
         // Create Parquet schema
         var fields = new List<DataField>();
-        
+
         for (int i = 0; i < frame.ColumnCount; i++)
         {
             var columnName = frame.ColumnNames[i];
             var columnType = frame.Schema.GetColumnType(columnName);
-            
+
             var field = TypeMapper.CreateParquetField(columnName, columnType);
             fields.Add(field);
         }
 
         var schema = new ParquetSchema(fields.ToArray());
-        
+
         // Create Parquet writer
         using var parquetWriter = await Parquet.ParquetWriter.CreateAsync(schema, stream);
         using var rowGroupWriter = parquetWriter.CreateRowGroup();
@@ -344,16 +342,16 @@ public static class ParquetWriter
         {
             // Check for cancellation before processing each column
             cancellationToken.ThrowIfCancellationRequested();
-            
+
             var columnName = frame.ColumnNames[i];
             var columnType = frame.Schema.GetColumnType(columnName);
             var field = fields[i];
-            
+
             try
             {
                 var columnData = ExtractColumnDataArray(frame, columnName, columnType);
                 var dataColumn = new DataColumn(field, columnData);
-                
+
                 await rowGroupWriter.WriteColumnAsync(dataColumn);
             }
             catch (Exception ex)
@@ -486,7 +484,7 @@ public static class ParquetWriter
         {
             var columnName = firstFrame.ColumnNames[columnIndex];
             var columnType = firstFrame.Schema.GetColumnType(columnName);
-            
+
             var concatenatedColumn = ConcatenateColumn(frames, columnName, columnType);
             concatenatedColumns.Add((columnName, concatenatedColumn));
         }
@@ -540,7 +538,7 @@ public static class ParquetWriter
                 foreach (var frame in frames)
                 {
                     var column = frame.GetColumn<T>(columnName);
-                    
+
                     for (int i = 0; i < column.Length; i++)
                     {
                         nullableArray[currentIndex] = column.IsNull(i) ? null : column[i];
@@ -559,7 +557,7 @@ public static class ParquetWriter
             foreach (var frame in frames)
             {
                 var column = frame.GetColumn<T>(columnName);
-                
+
                 for (int i = 0; i < column.Length; i++)
                 {
                     nullableArray[currentIndex] = column.IsNull(i) ? null : column[i];
@@ -589,7 +587,7 @@ public static class ParquetWriter
                 foreach (var frame in frames)
                 {
                     var column = frame.GetColumn<string>(columnName);
-                    
+
                     for (int i = 0; i < column.Length; i++)
                     {
                         values[currentIndex] = column.IsNull(i) ? null! : column[i];
@@ -608,7 +606,7 @@ public static class ParquetWriter
             foreach (var frame in frames)
             {
                 var column = frame.GetColumn<string>(columnName);
-                
+
                 for (int i = 0; i < column.Length; i++)
                 {
                     values[currentIndex] = column.IsNull(i) ? null! : column[i];

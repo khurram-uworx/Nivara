@@ -1,5 +1,4 @@
 using Nivara.Memory;
-using Nivara.Tensors;
 
 namespace Nivara;
 

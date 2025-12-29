@@ -55,7 +55,7 @@ internal sealed class GroupByOperation : IQueryOperation
         // For now, GroupBy returns only the grouped columns
         // In a full implementation, this would include aggregation columns
         var groupedColumns = new List<(string Name, Type Type)>();
-        
+
         foreach (var column in GroupByColumns)
         {
             var columnName = GetColumnName(column, inputSchema);
@@ -84,7 +84,7 @@ internal sealed class GroupByOperation : IQueryOperation
 
             // Evaluate each group by column
             var groupByValues = new List<(string Name, IColumn Column)>();
-            
+
             foreach (var columnExpr in GroupByColumns)
             {
                 var columnName = GetColumnName(columnExpr, input);
@@ -134,7 +134,7 @@ internal sealed class GroupByOperation : IQueryOperation
     private static IColumn CreateDistinctColumn(IColumn column, List<int> indices)
     {
         var elementType = column.ElementType;
-        
+
         // Use dynamic dispatch to create the appropriate column type
         return elementType switch
         {
@@ -158,7 +158,7 @@ internal sealed class GroupByOperation : IQueryOperation
     private static IColumn CreateDistinctColumnTyped<T>(IColumn column, List<int> indices)
     {
         var distinctArray = new T[indices.Count];
-        
+
         for (int i = 0; i < indices.Count; i++)
         {
             var value = column.GetValue(indices[i]);
@@ -174,7 +174,7 @@ internal sealed class GroupByOperation : IQueryOperation
     private static IColumn CreateDistinctColumnGeneric(IColumn column, List<int> indices)
     {
         var distinctArray = new object[indices.Count];
-        
+
         for (int i = 0; i < indices.Count; i++)
         {
             distinctArray[i] = column.GetValue(indices[i])!;

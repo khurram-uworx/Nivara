@@ -22,7 +22,7 @@ internal sealed class QueryExecutor
         {
             // Execute the data source to get initial columns
             var currentColumns = plan.Source.Execute();
-            
+
             if (currentColumns == null)
                 throw new QueryExecutionException("Data source returned null columns");
 
@@ -32,7 +32,7 @@ internal sealed class QueryExecutor
                 try
                 {
                     currentColumns = operation.Execute(currentColumns);
-                    
+
                     if (currentColumns == null)
                         throw new QueryExecutionException($"Operation '{operation.OperationType}' returned null columns");
                 }
@@ -73,7 +73,7 @@ internal sealed class QueryExecutor
         {
             // Apply optimization if optimizer is provided
             var optimizedPlan = optimizer?.Optimize(plan) ?? plan;
-            
+
             // Execute the optimized plan
             return Execute(optimizedPlan);
         }
@@ -97,10 +97,10 @@ internal sealed class QueryExecutor
         {
             // Validate that the result schema can be computed
             var resultSchema = plan.ResultSchema;
-            
+
             // Validate that each operation can transform the schema correctly
             var currentSchema = plan.Source.Schema;
-            
+
             foreach (var operation in plan.Operations)
             {
                 currentSchema = operation.TransformSchema(currentSchema);
@@ -128,10 +128,10 @@ internal sealed class QueryExecutor
         try
         {
             int cost = 0;
-            
+
             // Base cost for data source
             cost += plan.Source.IsLazy ? 10 : 5; // Lazy sources have higher initial cost
-            
+
             // Add cost for each operation
             foreach (var operation in plan.Operations)
             {

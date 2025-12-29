@@ -374,7 +374,9 @@ public enum BinaryOperator
     Add,
     Subtract,
     Multiply,
-    Divide
+    Divide,
+    And,
+    Or
 }
 
 /// <summary>
@@ -406,7 +408,7 @@ public sealed class BinaryExpression : ColumnExpression
         Operator = @operator;
         Left = left ?? throw new ArgumentNullException(nameof(left));
         Right = right ?? throw new ArgumentNullException(nameof(right));
-        
+
         // Determine result type based on operands
         ResultType = DetermineResultType(left.ResultType, right.ResultType);
     }
@@ -447,10 +449,10 @@ public sealed class BinaryExpression : ColumnExpression
 
         // Numeric type promotion
         var numericTypes = new[] { typeof(double), typeof(float), typeof(long), typeof(int), typeof(short), typeof(byte) };
-        
+
         var leftIndex = Array.IndexOf(numericTypes, leftType);
         var rightIndex = Array.IndexOf(numericTypes, rightType);
-        
+
         if (leftIndex >= 0 && rightIndex >= 0)
             return numericTypes[Math.Min(leftIndex, rightIndex)];
 
@@ -465,6 +467,8 @@ public sealed class BinaryExpression : ColumnExpression
             BinaryOperator.Subtract => "-",
             BinaryOperator.Multiply => "*",
             BinaryOperator.Divide => "/",
+            BinaryOperator.And => "&&",
+            BinaryOperator.Or => "||",
             _ => op.ToString()
         };
     }
@@ -585,6 +589,8 @@ public sealed class ScalarExpression : ColumnExpression
             BinaryOperator.Subtract => "-",
             BinaryOperator.Multiply => "*",
             BinaryOperator.Divide => "/",
+            BinaryOperator.And => "&&",
+            BinaryOperator.Or => "||",
             _ => op.ToString()
         };
     }
