@@ -1626,3 +1626,167 @@ if (arrowTable.ColumnCount == 0)
     return NivaraFrame.Create(("EmptyColumn", emptyColumn));
 }
 ```
+
+## Parquet I/O Implementation
+
+### Parquet.Net API Usage Patterns
+**Decision**: Use `Parquet.ParquetReader.CreateAsync()` for reading and `Parquet.ParquetWriter.CreateAsync()` for writing
+**Rationale**: Follows Parquet.Net best practices for async I/O operations. Provides proper resource management and streaming support.
+
+**Pattern**: Proper Parquet file reading
+```csharp
+// Reading with proper resource management
+using var parquetReader = await Parquet.ParquetReader.CreateAsync(stream);
+using var rowGroupReader = parquetReader.OpenRowGroupReader(rowGroupIndex);
+var columnData = await rowGroupReader.ReadColumnAsync(field);
+```
+
+### Parquet Schema Validation Strategy
+**Decision**: Validate Parquet schema against supported types before processing data
+**Rationale**: Provides early error detection and clear error messages for unsupported types. Prevents runtime failures during data conversion.
+
+**Pattern**: Schema validation with detailed error messages
+```csharp
+private static void ValidateParquetSchema(ParquetSchema schema)
+{
+    var dataFields = schema.GetDataFields();
+    var unsupportedFields = new List<string>();
+
+    foreach (var field in dataFields)
+    {
+        if (!IsTypeSupported(field.ClrType))
+        {
+            unsupportedFields.Add($"{field.Name} ({field.ClrType.Name})");
+        }
+    }
+
+    if (unsupportedFields.Count > 0)
+    {
+        var supportedTypes = string.Join(", ", TypeMapper.GetSupportedTypes().Select(t => t.Name));
+        throw new SchemaValidationException($"Unsupported field types found: {string.Join(", ", unsupportedFields)}. Supported types: {supportedTypes}");
+    }
+}
+```
+
+### Null Handling in Parquet Conversion
+**Decision**: Use `CreateFromNullable()` for value types and `CreateForReferenceType()` for reference types when creating NivaraColumns from Parquet data
+**Rationale**: Leverages existing NivaraColumn API for proper null handling. Avoids direct access to internal storage classes.
+
+**Pattern**: Type-appropriate column creation
+```csharp
+// For value types - use nullable arrays
+private static NivaraColumn<T> CreateNivaraColumn<T>(DataColumn columnData) where T : struct
+{
+    var nullableArray = new T?[columnData.Data.Length];
+    
+    for (int i = 0; i < columnData.Data.Length; i++)
+    {
+        var value = columnData.Data.GetValue(i);
+        nullableArray[i] = value != null ? (T)Convert.ChangeType(value, typeof(T)) : null;
+    }
+    
+    return NivaraColumn<T>.CreateFromNullable(nullableArray);
+}
+
+// For reference types - use null-aware creation
+private static NivaraColumn<string> CreateStringColumn(DataColumn columnData)
+{
+    var values = new string[columnData.Data.Length];
+    
+    for (int i = 0; i < columnData.Data.Length; i++)
+    {
+        var value = columnData.Data.GetValue(i);
+        values[i] = value?.ToString(); // null stays null
+    }
+    
+    return NivaraColumn<string>.CreateForReferenceType(values);
+}
+```
+
+### Empty Frame Handling in Parquet I/O
+**Decision**: Create dummy columns with "_empty" name for empty frames since NivaraFrame requires at least one column
+**Rationale**: NivaraFrame constructor requires at least one column, but Parquet files can be truly empty. Dummy column approach maintains API consistency.
+
+**Pattern**: Empty frame handling
+```csharp
+// Handle empty Parquet files
+if (parquetReader.RowGroupCount == 0)
+{
+    var emptyColumn = NivaraColumn<int>.Create(Array.Empty<int>());
+    return NivaraFrame.Create(("_empty", emptyColumn));
+}
+
+// Detect and handle dummy columns when reading
+if (dataFields.Length == 1 && dataFields[0].Name == "_empty")
+{
+    var emptyColumn = NivaraColumn<int>.Create(Array.Empty<int>());
+    return NivaraFrame.Create(("_empty", emptyColumn));
+}
+```
+
+### Error Handling in Parquet Operations
+**Decision**: Use specific exception types (NivaraIOException, SchemaValidationException, DataCorruptionException) with detailed context
+**Rationale**: Provides precise error information for debugging and user feedback. Includes file paths, operation context, and affected data ranges.
+
+**Pattern**: Context-rich error handling
+```csharp
+try
+{
+    var columnData = await rowGroupReader.ReadColumnAsync(field);
+    var column = CreateNivaraColumnFromParquetData(columnData, field);
+}
+catch (Exception ex)
+{
+    throw new DataCorruptionException($"Failed to read column '{columnName}': {ex.Message}", ex)
+    {
+        AffectedColumns = new[] { columnName },
+        AffectedRowRange = new Range(0, 1000) // Reasonable default range
+    };
+}
+```
+
+### Parquet I/O Gotchas
+**Problem**: Cannot access internal MemoryStorage constructor from Extensions project
+**Solution**: Use public NivaraColumn API methods (CreateFromNullable, CreateForReferenceType) instead of direct storage access
+```csharp
+// WRONG - trying to access internal storage
+var storage = new MemoryStorage<T>(data, nullMask); // Compiler error - internal class
+
+// CORRECT - use public API
+var nullableArray = new T?[length];
+// ... populate nullableArray ...
+return NivaraColumn<T>.CreateFromNullable(nullableArray);
+```
+
+**Problem**: Parquet.Net ParquetReader doesn't have ThriftMetadata property in newer versions
+**Solution**: Use reasonable default values for error context instead of accessing unavailable metadata
+```csharp
+// WRONG - accessing unavailable property
+var range = new Range(0, (int)parquetReader.ThriftMetadata.RowGroups[index].TotalByteSize);
+
+// CORRECT - use reasonable default
+var range = new Range(0, 1000); // Use default range for error context
+```
+
+**Problem**: NivaraFrame.Create expects array parameter, not List
+**Solution**: Convert List to array before passing to Create method
+```csharp
+// WRONG - passing List directly
+return NivaraFrame.Create(columns); // Compiler error if columns is List
+
+// CORRECT - convert to array
+return NivaraFrame.Create(columns.ToArray());
+```
+
+### Parquet Testing Strategy
+**Decision**: Focus on schema validation and error handling in initial implementation, defer integration tests to later tasks
+**Rationale**: Core functionality needs to be solid before adding comprehensive integration tests. Schema validation catches most issues early.
+
+**Coverage**: Initial implementation covers:
+- File and stream reading methods (async and sync)
+- Schema validation with detailed error messages
+- Empty file handling with dummy columns
+- Type conversion for all supported types
+- Error handling with proper exception types
+- Streaming interface (simplified implementation)
+

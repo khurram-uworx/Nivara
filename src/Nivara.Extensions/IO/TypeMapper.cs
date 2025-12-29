@@ -161,6 +161,15 @@ internal static class TypeMapper
     }
 
     /// <summary>
+    /// Gets all supported CLR types for I/O operations
+    /// </summary>
+    /// <returns>A collection of supported CLR types</returns>
+    public static IEnumerable<Type> GetSupportedTypes()
+    {
+        return ClrToArrowMap.Keys;
+    }
+
+    /// <summary>
     /// Gets suggested alternative types for unsupported types
     /// </summary>
     /// <param name="unsupportedType">The unsupported type</param>

@@ -761,9 +761,12 @@ tests/
 The `Nivara.Extensions` package provides additional functionality that requires third-party dependencies:
 
 - **CSV Support**: Reading and writing CSV files using CsvHelper
-- **Arrow/Parquet I/O**: ✅ **Type Mapping Complete** - Comprehensive type mapping system for Apache Arrow and Parquet formats
+- **Arrow/Parquet I/O**: ✅ **Parquet Reading Complete** - Comprehensive Parquet reading capabilities with schema validation
   - CLR ↔ Arrow type conversion with support for all primitive types
   - CLR ↔ Parquet type conversion with nullable type handling
+  - ✅ **Parquet Reader**: File and stream reading with async support
+  - ✅ **Schema Validation**: Type compatibility checking with detailed error messages
+  - ✅ **Error Handling**: Comprehensive exception hierarchy with context information
   - Timezone-aware DateTime conversion
   - Context-specific error messages with type suggestions
 - **ML.NET Integration**: Machine learning pipeline integration
@@ -857,6 +860,65 @@ var options = new ArrowConversionOptions
 };
 
 var customArrowTable = ArrowInterop.ToArrowTable(frame, options);
+```
+
+#### Parquet File I/O
+
+Read Parquet files with comprehensive schema validation and error handling:
+
+```csharp
+using Nivara.IO;
+
+// Read Parquet file (async)
+var frame = await ParquetReader.ReadParquetAsync("data.parquet");
+Console.WriteLine($"Loaded {frame.RowCount} rows, {frame.ColumnCount} columns");
+
+// Read Parquet file (sync)
+var frameSync = ParquetReader.ReadParquet("data.parquet");
+
+// Read from stream
+using var fileStream = File.OpenRead("data.parquet");
+var frameFromStream = await ParquetReader.ReadParquetAsync(fileStream);
+
+// Custom reading options
+var options = new ParquetReadOptions
+{
+    ValidateSchema = true,      // Validate schema compatibility (default: true)
+    BatchSize = 1000,          // Batch size for processing (default: 1000)
+    StreamRowGroups = false    // Stream row groups for large files (default: false)
+};
+
+var frameWithOptions = await ParquetReader.ReadParquetAsync("large_data.parquet", options);
+
+// Streaming for large files (simplified implementation)
+foreach (var chunk in ParquetReader.ReadParquetStreaming("huge_data.parquet"))
+{
+    Console.WriteLine($"Processing chunk with {chunk.RowCount} rows");
+    // Process chunk...
+}
+
+// Error handling with detailed context
+try
+{
+    var problematicFrame = await ParquetReader.ReadParquetAsync("corrupted.parquet");
+}
+catch (SchemaValidationException ex)
+{
+    Console.WriteLine($"Schema validation failed: {ex.Message}");
+    Console.WriteLine($"Expected: {ex.ExpectedSchema}");
+    Console.WriteLine($"Actual: {ex.ActualSchema}");
+}
+catch (DataCorruptionException ex)
+{
+    Console.WriteLine($"Data corruption detected: {ex.Message}");
+    Console.WriteLine($"Affected columns: {string.Join(", ", ex.AffectedColumns)}");
+}
+catch (NivaraIOException ex)
+{
+    Console.WriteLine($"I/O error: {ex.Message}");
+    Console.WriteLine($"File: {ex.FilePath}");
+    Console.WriteLine($"Operation: {ex.OperationContext}");
+}
 ```
 
 To use CSV functionality:

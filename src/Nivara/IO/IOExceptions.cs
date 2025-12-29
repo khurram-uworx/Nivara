@@ -97,6 +97,50 @@ public sealed class UnsupportedTypeException : NivaraIOException
 }
 
 /// <summary>
+/// Exception thrown when schema validation fails during I/O operations
+/// </summary>
+public sealed class SchemaValidationException : NivaraIOException
+{
+    /// <summary>
+    /// Initializes a new instance of SchemaValidationException
+    /// </summary>
+    /// <param name="message">The error message</param>
+    public SchemaValidationException(string message) : base(message)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of SchemaValidationException with type mismatches and schema details
+    /// </summary>
+    /// <param name="message">The error message</param>
+    /// <param name="typeMismatches">The type mismatches found</param>
+    /// <param name="expectedSchema">The expected schema description</param>
+    /// <param name="actualSchema">The actual schema description</param>
+    public SchemaValidationException(string message, IEnumerable<string> typeMismatches, string expectedSchema, string actualSchema)
+        : base(message)
+    {
+        TypeMismatches = typeMismatches.ToList();
+        ExpectedSchema = expectedSchema;
+        ActualSchema = actualSchema;
+    }
+
+    /// <summary>
+    /// Gets the list of type mismatches found during validation
+    /// </summary>
+    public IReadOnlyList<string> TypeMismatches { get; init; } = new List<string>();
+
+    /// <summary>
+    /// Gets the expected schema description
+    /// </summary>
+    public string ExpectedSchema { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the actual schema description
+    /// </summary>
+    public string ActualSchema { get; init; } = string.Empty;
+}
+
+/// <summary>
 /// Exception thrown when data corruption is detected during I/O operations
 /// </summary>
 public sealed class DataCorruptionException : NivaraIOException
@@ -106,6 +150,15 @@ public sealed class DataCorruptionException : NivaraIOException
     /// </summary>
     /// <param name="message">The error message</param>
     public DataCorruptionException(string message) : base(message)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of DataCorruptionException with inner exception
+    /// </summary>
+    /// <param name="message">The error message</param>
+    /// <param name="innerException">The inner exception</param>
+    public DataCorruptionException(string message, Exception innerException) : base(message, innerException)
     {
     }
 
