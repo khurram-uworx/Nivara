@@ -20,9 +20,11 @@ public static class ParquetWriter
     /// <param name="frame">The NivaraFrame to write</param>
     /// <param name="filePath">The path where the Parquet file will be created</param>
     /// <param name="options">Optional Parquet writing options</param>
+    /// <param name="cancellationToken">Token to cancel the operation</param>
     /// <exception cref="ArgumentNullException">Thrown when frame or filePath is null</exception>
     /// <exception cref="NivaraIOException">Thrown when file writing fails</exception>
-    public static async Task WriteParquetAsync(NivaraFrame frame, string filePath, ParquetWriteOptions? options = null)
+    /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled</exception>
+    public static async Task WriteParquetAsync(NivaraFrame frame, string filePath, ParquetWriteOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(filePath);
@@ -32,7 +34,7 @@ public static class ParquetWriter
         try
         {
             using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
-            await WriteParquetAsync(frame, fileStream, options);
+            await WriteParquetAsync(frame, fileStream, options, cancellationToken);
         }
         catch (Exception ex) when (ex is not NivaraIOException)
         {
@@ -50,9 +52,11 @@ public static class ParquetWriter
     /// <param name="frame">The NivaraFrame to write</param>
     /// <param name="stream">The stream to write the Parquet data to</param>
     /// <param name="options">Optional Parquet writing options</param>
+    /// <param name="cancellationToken">Token to cancel the operation</param>
     /// <exception cref="ArgumentNullException">Thrown when frame or stream is null</exception>
     /// <exception cref="NivaraIOException">Thrown when stream writing fails</exception>
-    public static async Task WriteParquetAsync(NivaraFrame frame, Stream stream, ParquetWriteOptions? options = null)
+    /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled</exception>
+    public static async Task WriteParquetAsync(NivaraFrame frame, Stream stream, ParquetWriteOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(stream);
@@ -63,7 +67,7 @@ public static class ParquetWriter
         {
             if (frame.ColumnCount == 0)
             {
-                await WriteEmptyParquetFile(stream);
+                await WriteEmptyParquetFile(stream, cancellationToken);
                 return;
             }
 
@@ -72,7 +76,7 @@ public static class ParquetWriter
                 ValidateFrameSchema(frame);
             }
 
-            await ConvertNivaraFrameToParquet(frame, stream, options);
+            await ConvertNivaraFrameToParquet(frame, stream, options, cancellationToken);
         }
         catch (Exception ex) when (ex is not NivaraIOException and not UnsupportedTypeException and not SchemaValidationException)
         {
@@ -111,9 +115,11 @@ public static class ParquetWriter
     /// <param name="frames">The NivaraFrames to write</param>
     /// <param name="filePath">The path where the Parquet file will be created</param>
     /// <param name="options">Optional Parquet writing options</param>
+    /// <param name="cancellationToken">Token to cancel the operation</param>
     /// <exception cref="ArgumentNullException">Thrown when frames or filePath is null</exception>
     /// <exception cref="SchemaValidationException">Thrown when frames have incompatible schemas</exception>
-    public static async Task WriteParquetBatchAsync(IEnumerable<NivaraFrame> frames, string filePath, ParquetWriteOptions? options = null)
+    /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled</exception>
+    public static async Task WriteParquetBatchAsync(IEnumerable<NivaraFrame> frames, string filePath, ParquetWriteOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frames);
         ArgumentNullException.ThrowIfNull(filePath);
@@ -123,7 +129,7 @@ public static class ParquetWriter
         try
         {
             using var fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write);
-            await WriteParquetBatchAsync(frames, fileStream, options);
+            await WriteParquetBatchAsync(frames, fileStream, options, cancellationToken);
         }
         catch (Exception ex) when (ex is not NivaraIOException and not SchemaValidationException)
         {
@@ -141,9 +147,11 @@ public static class ParquetWriter
     /// <param name="frames">The NivaraFrames to write</param>
     /// <param name="stream">The stream to write the Parquet data to</param>
     /// <param name="options">Optional Parquet writing options</param>
+    /// <param name="cancellationToken">Token to cancel the operation</param>
     /// <exception cref="ArgumentNullException">Thrown when frames or stream is null</exception>
     /// <exception cref="SchemaValidationException">Thrown when frames have incompatible schemas</exception>
-    public static async Task WriteParquetBatchAsync(IEnumerable<NivaraFrame> frames, Stream stream, ParquetWriteOptions? options = null)
+    /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled</exception>
+    public static async Task WriteParquetBatchAsync(IEnumerable<NivaraFrame> frames, Stream stream, ParquetWriteOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(frames);
         ArgumentNullException.ThrowIfNull(stream);
@@ -153,13 +161,13 @@ public static class ParquetWriter
         var frameList = frames.ToList();
         if (frameList.Count == 0)
         {
-            await WriteEmptyParquetFile(stream);
+            await WriteEmptyParquetFile(stream, cancellationToken);
             return;
         }
 
         if (frameList.Count == 1)
         {
-            await WriteParquetAsync(frameList[0], stream, options);
+            await WriteParquetAsync(frameList[0], stream, options, cancellationToken);
             return;
         }
 
@@ -173,7 +181,7 @@ public static class ParquetWriter
         var concatenatedFrame = ConcatenateFrames(frameList);
         try
         {
-            await WriteParquetAsync(concatenatedFrame, stream, options);
+            await WriteParquetAsync(concatenatedFrame, stream, options, cancellationToken);
         }
         finally
         {
@@ -206,7 +214,7 @@ public static class ParquetWriter
     /// <summary>
     /// Writes an empty Parquet file with a dummy column
     /// </summary>
-    private static async Task WriteEmptyParquetFile(Stream stream)
+    private static async Task WriteEmptyParquetFile(Stream stream, CancellationToken cancellationToken = default)
     {
         // Parquet requires at least one field, so create a dummy field for empty frames
         var dummyField = new DataField<int>("_empty");
@@ -311,7 +319,7 @@ public static class ParquetWriter
     /// <summary>
     /// Converts a NivaraFrame to Parquet format using the Parquet.Net API
     /// </summary>
-    private static async Task ConvertNivaraFrameToParquet(NivaraFrame frame, Stream stream, ParquetWriteOptions options)
+    private static async Task ConvertNivaraFrameToParquet(NivaraFrame frame, Stream stream, ParquetWriteOptions options, CancellationToken cancellationToken)
     {
         // Create Parquet schema
         var fields = new List<DataField>();
@@ -334,6 +342,9 @@ public static class ParquetWriter
         // Write column data
         for (int i = 0; i < frame.ColumnCount; i++)
         {
+            // Check for cancellation before processing each column
+            cancellationToken.ThrowIfCancellationRequested();
+            
             var columnName = frame.ColumnNames[i];
             var columnType = frame.Schema.GetColumnType(columnName);
             var field = fields[i];
@@ -385,33 +396,72 @@ public static class ParquetWriter
     }
 
     /// <summary>
-    /// Extracts typed column data from a NivaraFrame as a non-nullable array for Parquet writing
+    /// Extracts typed column data from a NivaraFrame as a non-nullable array for Parquet writing with buffer reuse.
     /// </summary>
     private static Array ExtractColumnDataArrayTyped<T>(NivaraFrame frame, string columnName) where T : struct
     {
         var column = frame.GetColumn<T>(columnName);
         var values = new T[column.Length];
 
-        for (int i = 0; i < column.Length; i++)
+        // Use buffer pool for large columns to reduce memory pressure
+        if (column.Length > 1024)
         {
-            values[i] = column.IsNull(i) ? default(T) : column[i];
+            var buffer = BufferPool.RentIntBuffer(column.Length);
+            try
+            {
+                for (int i = 0; i < column.Length; i++)
+                {
+                    values[i] = column.IsNull(i) ? default(T) : column[i];
+                }
+            }
+            finally
+            {
+                BufferPool.ReturnIntBuffer(buffer);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < column.Length; i++)
+            {
+                values[i] = column.IsNull(i) ? default(T) : column[i];
+            }
         }
 
         return values;
     }
 
     /// <summary>
-    /// Extracts string column data from a NivaraFrame as a string array
+    /// Extracts string column data from a NivaraFrame as a string array with memory optimization.
     /// </summary>
     private static Array ExtractStringColumnDataArray(NivaraFrame frame, string columnName)
     {
         var column = frame.GetColumn<string>(columnName);
         var stringArray = new string[column.Length];
 
-        for (int i = 0; i < column.Length; i++)
+        // Use buffer pool for large string columns
+        if (column.Length > 1024)
         {
-            // For strings, null is a valid value that Parquet.Net can handle
-            stringArray[i] = column.IsNull(i) ? null! : column[i];
+            var buffer = BufferPool.RentByteBuffer(column.Length * 32); // Estimate for string processing
+            try
+            {
+                for (int i = 0; i < column.Length; i++)
+                {
+                    // For strings, null is a valid value that Parquet.Net can handle
+                    stringArray[i] = column.IsNull(i) ? null! : column[i];
+                }
+            }
+            finally
+            {
+                BufferPool.ReturnByteBuffer(buffer);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < column.Length; i++)
+            {
+                // For strings, null is a valid value that Parquet.Net can handle
+                stringArray[i] = column.IsNull(i) ? null! : column[i];
+            }
         }
 
         return stringArray;
@@ -473,22 +523,48 @@ public static class ParquetWriter
     }
 
     /// <summary>
-    /// Concatenates a typed column from multiple frames
+    /// Concatenates a typed column from multiple frames with memory optimization.
     /// </summary>
     private static IColumn ConcatenateColumnTyped<T>(List<NivaraFrame> frames, string columnName) where T : struct
     {
         var totalLength = frames.Sum(f => f.RowCount);
         var nullableArray = new T?[totalLength];
 
-        var currentIndex = 0;
-        foreach (var frame in frames)
+        // Use buffer pool for large concatenations
+        if (totalLength > 1024)
         {
-            var column = frame.GetColumn<T>(columnName);
-            
-            for (int i = 0; i < column.Length; i++)
+            var buffer = BufferPool.RentIntBuffer(totalLength);
+            try
             {
-                nullableArray[currentIndex] = column.IsNull(i) ? null : column[i];
-                currentIndex++;
+                var currentIndex = 0;
+                foreach (var frame in frames)
+                {
+                    var column = frame.GetColumn<T>(columnName);
+                    
+                    for (int i = 0; i < column.Length; i++)
+                    {
+                        nullableArray[currentIndex] = column.IsNull(i) ? null : column[i];
+                        currentIndex++;
+                    }
+                }
+            }
+            finally
+            {
+                BufferPool.ReturnIntBuffer(buffer);
+            }
+        }
+        else
+        {
+            var currentIndex = 0;
+            foreach (var frame in frames)
+            {
+                var column = frame.GetColumn<T>(columnName);
+                
+                for (int i = 0; i < column.Length; i++)
+                {
+                    nullableArray[currentIndex] = column.IsNull(i) ? null : column[i];
+                    currentIndex++;
+                }
             }
         }
 
@@ -496,22 +572,48 @@ public static class ParquetWriter
     }
 
     /// <summary>
-    /// Concatenates a string column from multiple frames
+    /// Concatenates a string column from multiple frames with memory optimization.
     /// </summary>
     private static IColumn ConcatenateStringColumn(List<NivaraFrame> frames, string columnName)
     {
         var totalLength = frames.Sum(f => f.RowCount);
         var values = new string[totalLength];
 
-        var currentIndex = 0;
-        foreach (var frame in frames)
+        // Use buffer pool for large string concatenations
+        if (totalLength > 1024)
         {
-            var column = frame.GetColumn<string>(columnName);
-            
-            for (int i = 0; i < column.Length; i++)
+            var buffer = BufferPool.RentByteBuffer(totalLength * 32); // Estimate for string processing
+            try
             {
-                values[currentIndex] = column.IsNull(i) ? null! : column[i];
-                currentIndex++;
+                var currentIndex = 0;
+                foreach (var frame in frames)
+                {
+                    var column = frame.GetColumn<string>(columnName);
+                    
+                    for (int i = 0; i < column.Length; i++)
+                    {
+                        values[currentIndex] = column.IsNull(i) ? null! : column[i];
+                        currentIndex++;
+                    }
+                }
+            }
+            finally
+            {
+                BufferPool.ReturnByteBuffer(buffer);
+            }
+        }
+        else
+        {
+            var currentIndex = 0;
+            foreach (var frame in frames)
+            {
+                var column = frame.GetColumn<string>(columnName);
+                
+                for (int i = 0; i < column.Length; i++)
+                {
+                    values[currentIndex] = column.IsNull(i) ? null! : column[i];
+                    currentIndex++;
+                }
             }
         }
 

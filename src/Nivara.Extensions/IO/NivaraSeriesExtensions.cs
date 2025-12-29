@@ -24,6 +24,8 @@ public static class NivaraSeriesExtensions
     /// <exception cref="UnsupportedTypeException">Thrown when the series type is not supported</exception>
     public static IArrowArray ToArrowArray<T>(this NivaraSeries<T> series, ArrowConversionOptions? options = null)
     {
+        ArgumentNullException.ThrowIfNull(series);
+        
         return ArrowInterop.ToArrowArray(series, options);
     }
 
@@ -38,6 +40,8 @@ public static class NivaraSeriesExtensions
     /// <exception cref="UnsupportedTypeException">Thrown when the Arrow array type is not supported</exception>
     public static NivaraSeries<T> ToNivaraSeries<T>(this IArrowArray arrowArray, ArrowConversionOptions? options = null)
     {
+        ArgumentNullException.ThrowIfNull(arrowArray);
+        
         return ArrowInterop.FromArrowArray<T>(arrowArray, options);
     }
 }

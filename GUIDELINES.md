@@ -1034,11 +1034,141 @@ destination[i] = (T)(object)((dynamic)x[i]! + (dynamic)y[i]!)!;
 **Problem**: Expression evaluation needs to handle all column types dynamically
 **Solution**: Use switch expressions on Type with fallback to generic object columns for unknown types
 
-## Arrow/Parquet I/O Implementation
+## Arrow/Parquet I/O Performance Optimizations
 
-### Project Structure and Namespace Organization
-**Decision**: Keep Arrow and Parquet implementations in Nivara.Extensions project, core I/O abstractions in Nivara project
-**Rationale**: Maintains separation between core library (dependency-free) and extensions (third-party dependencies). Apache.Arrow and Parquet.Net packages are already referenced in Nivara.Extensions.
+### Async Operations with Cancellation Support
+**Decision**: Added comprehensive cancellation token support to all async I/O operations
+**Rationale**: Enables proper cancellation of long-running I/O operations and prevents resource leaks. All async methods now accept CancellationToken parameters and check for cancellation at appropriate points.
+
+**Pattern**: Cancellation token propagation through all async operations
+```csharp
+// All async I/O methods now support cancellation
+public static async Task<NivaraFrame> ReadParquetAsync(string filePath, ParquetReadOptions? options = null, CancellationToken cancellationToken = default)
+{
+    // Check for cancellation before processing each column
+    cancellationToken.ThrowIfCancellationRequested();
+    
+    var columnData = await rowGroupReader.ReadColumnAsync(field);
+    // ... processing
+}
+```
+
+### Buffer Pooling for Memory Optimization
+**Decision**: Implemented BufferPool class for reusing byte, int, and double arrays during I/O operations
+**Rationale**: Reduces memory allocations and garbage collection pressure when processing large datasets. Particularly effective for columns with more than 1024 elements.
+
+**Pattern**: Buffer rental and return for large data processing
+```csharp
+// Use buffer pool for large arrays to reduce allocations
+if (length > 1024)
+{
+    var buffer = BufferPool.RentIntBuffer(length);
+    try
+    {
+        // Process data using buffer
+        for (int i = 0; i < length; i++)
+        {
+            // Processing logic
+        }
+    }
+    finally
+    {
+        BufferPool.ReturnIntBuffer(buffer);
+    }
+}
+```
+
+### Streaming Buffer Management
+**Decision**: Created StreamingBufferManager for bounded memory usage during large dataset processing
+**Rationale**: Ensures memory usage remains bounded regardless of dataset size. Provides configurable memory budgets and automatic garbage collection triggers.
+
+**Pattern**: Memory-bounded streaming operations
+```csharp
+// Streaming with memory budget management
+using var bufferManager = new StreamingBufferManager(memoryBudget: 256L * 1024 * 1024);
+
+// Rent buffers within memory budget
+var buffer = bufferManager.RentBuffer(chunkSize);
+try
+{
+    // Process data chunk
+}
+finally
+{
+    bufferManager.ReturnBuffer(buffer);
+}
+
+// Automatic garbage collection when memory usage is high
+bufferManager.TryCollectGarbage();
+```
+
+### Memory Usage Thresholds
+**Decision**: Use 1024-element threshold for enabling buffer pooling optimizations
+**Rationale**: Small arrays (< 1024 elements) have minimal allocation overhead, while larger arrays benefit significantly from pooling. This threshold balances performance gains against pooling overhead.
+
+**Thresholds**:
+- **Buffer Pooling**: Enabled for arrays > 1024 elements
+- **String Processing**: 32-byte estimate per string for buffer sizing
+- **Memory Budget**: Default 256MB for streaming operations
+- **Garbage Collection**: Triggered at 80% of memory budget
+
+### Performance Monitoring Integration
+**Decision**: Integrated buffer pool statistics and memory usage tracking
+**Rationale**: Enables monitoring of memory optimization effectiveness and debugging of memory-related issues.
+
+**Pattern**: Performance monitoring and diagnostics
+```csharp
+// Get buffer pool statistics
+var (byteBuffers, intBuffers, doubleBuffers) = BufferPool.GetPoolStatistics();
+
+// Monitor streaming buffer manager usage
+var currentUsage = bufferManager.CurrentMemoryUsage;
+var isOverBudget = bufferManager.IsMemoryBudgetExceeded;
+```
+
+### I/O Operation Optimizations
+**Decision**: Applied buffer pooling to all major I/O operations (Parquet reading/writing, column extraction, frame concatenation)
+**Rationale**: Consistent memory optimization across all I/O paths ensures predictable performance characteristics regardless of operation type.
+
+**Optimized Operations**:
+- Parquet column data extraction and creation
+- String column processing with estimated buffer sizing
+- Frame concatenation for batch operations
+- Arrow array conversion (future enhancement)
+
+### Error Handling with Resource Cleanup
+**Decision**: Proper resource cleanup in all buffer pooling operations using try/finally blocks
+**Rationale**: Ensures buffers are returned to pools even when exceptions occur, preventing memory leaks and pool exhaustion.
+
+**Pattern**: Exception-safe buffer management
+```csharp
+var buffer = BufferPool.RentIntBuffer(length);
+try
+{
+    // Risky operations that might throw
+    ProcessData(buffer);
+}
+finally
+{
+    // Always return buffer to pool
+    BufferPool.ReturnIntBuffer(buffer);
+}
+```
+
+### Future Performance Enhancements
+**Note**: Current implementation provides foundation for additional optimizations:
+- Zero-copy Arrow array creation using memory-mapped files
+- Parallel column processing for multi-core systems
+- Adaptive buffer sizing based on dataset characteristics
+- Memory-mapped Parquet reading for very large files
+
+### Performance Testing Recommendations
+**Testing Strategy**: Performance optimizations should be validated with:
+- Large dataset processing (> 1GB Parquet files)
+- Memory usage monitoring during long-running operations
+- Cancellation token responsiveness testing
+- Buffer pool effectiveness measurement
+- Garbage collection frequency analysis
 
 **Pattern**: Core abstractions in Nivara, implementations in Extensions
 ```csharp
@@ -2106,3 +2236,130 @@ Assert.Throws<ArgumentNullException>(() => ParquetWriter.WriteParquet(frame, (st
 
 **Problem**: Frame concatenation requires proper resource disposal
 **Solution**: Always dispose concatenated frames in finally blocks to prevent memory leaks
+
+## Comprehensive Error Handling Implementation
+
+### Parameter Validation Strategy
+**Decision**: Use `ArgumentNullException.ThrowIfNull()` consistently across all public methods with additional validation for specific parameter types
+**Rationale**: Provides consistent error handling and clear error messages. Modern .NET approach is more concise than manual null checks.
+
+**Pattern**: Comprehensive parameter validation
+```csharp
+// Basic null validation
+ArgumentNullException.ThrowIfNull(frame);
+ArgumentNullException.ThrowIfNull(filePath);
+
+// Additional validation for specific types
+if (string.IsNullOrWhiteSpace(filePath))
+    throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
+
+if (!stream.CanWrite)
+    throw new ArgumentException("Stream must be writable", nameof(stream));
+```
+
+### Exception Context Enhancement
+**Decision**: Wrap all low-level exceptions with context-rich NivaraIOException types that include operation context, file paths, and affected data ranges
+**Rationale**: Provides better debugging experience and helps users quickly identify the source of issues.
+
+**Pattern**: Context-rich exception wrapping with operation context
+```csharp
+try
+{
+    // Core operation logic
+    var result = PerformOperation();
+    return result;
+}
+catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException and not DataCorruptionException)
+{
+    throw new NivaraIOException($"Failed to perform operation: {ex.Message}", ex)
+    {
+        OperationContext = "ClassName.MethodName",
+        FilePath = filePath // when applicable
+    };
+}
+```
+
+### Column-Level Error Handling
+**Decision**: Provide detailed error context for column-specific failures including column names and affected row ranges
+**Rationale**: Helps users identify exactly which data is causing issues, especially important for large datasets.
+
+**Pattern**: Column-specific error context
+```csharp
+try
+{
+    var column = ProcessColumn(columnName, columnData);
+    return column;
+}
+catch (Exception ex) when (ex is not UnsupportedTypeException)
+{
+    throw new DataCorruptionException($"Failed to process column '{columnName}': {ex.Message}", ex)
+    {
+        AffectedColumns = new[] { columnName },
+        AffectedRowRange = new Range(0, rowCount),
+        OperationContext = "ClassName.MethodName"
+    };
+}
+```
+
+### Extension Method Parameter Validation
+**Decision**: Add parameter validation to all extension methods to provide early error detection and consistent behavior
+**Rationale**: Extension methods are often the first point of contact for users, so they should provide clear error messages for invalid inputs.
+
+**Pattern**: Extension method validation
+```csharp
+public static void ToParquet(this NivaraFrame frame, string filePath, ParquetWriteOptions? options = null)
+{
+    ArgumentNullException.ThrowIfNull(frame);
+    ArgumentNullException.ThrowIfNull(filePath);
+    
+    if (string.IsNullOrWhiteSpace(filePath))
+        throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
+
+    // Delegate to underlying implementation
+    ParquetWriter.WriteParquet(frame, filePath, options);
+}
+```
+
+### Error Handling Testing Strategy
+**Decision**: Test both successful operations and all error conditions to ensure proper exception types and messages
+**Rationale**: Error handling is critical for user experience. Tests verify that users get helpful error messages rather than cryptic internal exceptions.
+
+**Coverage**: Error handling tests should cover:
+- Null parameter validation for all public methods
+- Invalid parameter validation (empty strings, non-readable streams, etc.)
+- Type conversion errors with proper suggestions
+- File I/O errors with proper context
+- Data corruption scenarios with affected column/row information
+
+### Error Handling Gotchas
+**Problem**: Duplicate try blocks can cause compilation errors
+**Solution**: Carefully review try-catch structure when refactoring error handling code
+```csharp
+// WRONG - duplicate try blocks
+try
+{
+try
+{
+    // operation
+}
+
+// CORRECT - single try block
+try
+{
+    // operation
+}
+catch (Exception ex)
+{
+    // error handling
+}
+```
+
+**Problem**: Exception filtering can become complex with multiple exception types
+**Solution**: Use clear when clauses and document which exceptions are allowed to bubble up
+```csharp
+// Clear exception filtering
+catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException and not DataCorruptionException)
+{
+    // Wrap only unexpected exceptions
+}
+```

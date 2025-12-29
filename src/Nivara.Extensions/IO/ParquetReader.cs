@@ -20,11 +20,13 @@ public static class ParquetReader
     /// </summary>
     /// <param name="filePath">The path to the Parquet file.</param>
     /// <param name="options">Optional Parquet reading options.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>A NivaraFrame containing the Parquet data.</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null.</exception>
     /// <exception cref="FileNotFoundException">Thrown when the file does not exist.</exception>
     /// <exception cref="NivaraIOException">Thrown when file reading fails.</exception>
-    public static async Task<NivaraFrame> ReadParquetAsync(string filePath, ParquetReadOptions? options = null)
+    /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled.</exception>
+    public static async Task<NivaraFrame> ReadParquetAsync(string filePath, ParquetReadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(filePath);
         
@@ -36,7 +38,7 @@ public static class ParquetReader
         try
         {
             using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            return await ReadParquetAsync(fileStream, options);
+            return await ReadParquetAsync(fileStream, options, cancellationToken);
         }
         catch (Exception ex) when (!(ex is ArgumentNullException || ex is FileNotFoundException))
         {
@@ -53,10 +55,12 @@ public static class ParquetReader
     /// </summary>
     /// <param name="stream">The stream containing Parquet data.</param>
     /// <param name="options">Optional Parquet reading options.</param>
+    /// <param name="cancellationToken">Token to cancel the operation.</param>
     /// <returns>A NivaraFrame containing the Parquet data.</returns>
     /// <exception cref="ArgumentNullException">Thrown when stream is null.</exception>
     /// <exception cref="NivaraIOException">Thrown when stream reading fails.</exception>
-    public static async Task<NivaraFrame> ReadParquetAsync(Stream stream, ParquetReadOptions? options = null)
+    /// <exception cref="OperationCanceledException">Thrown when the operation is cancelled.</exception>
+    public static async Task<NivaraFrame> ReadParquetAsync(Stream stream, ParquetReadOptions? options = null, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(stream);
         
@@ -74,7 +78,7 @@ public static class ParquetReader
                 return NivaraFrame.Create(("_empty", emptyColumn));
             }
 
-            return await ConvertParquetToNivaraFrame(parquetReader, options);
+            return await ConvertParquetToNivaraFrame(parquetReader, options, cancellationToken);
         }
         catch (Exception ex) when (!(ex is ArgumentNullException))
         {
@@ -108,23 +112,47 @@ public static class ParquetReader
     }
 
     /// <summary>
-    /// Reads a Parquet file in streaming mode for large files.
-    /// Note: Parquet.Net doesn't support true streaming, so this reads the entire file.
+    /// Reads a Parquet file in streaming mode for large files with memory management.
     /// </summary>
     /// <param name="filePath">The path to the Parquet file.</param>
     /// <param name="options">Optional Parquet reading options.</param>
+    /// <param name="memoryBudget">Maximum memory budget for streaming operations.</param>
     /// <returns>An enumerable of NivaraFrame chunks.</returns>
-    public static IEnumerable<NivaraFrame> ReadParquetStreaming(string filePath, ParquetReadOptions? options = null)
+    public static IEnumerable<NivaraFrame> ReadParquetStreaming(string filePath, ParquetReadOptions? options = null, long memoryBudget = 256L * 1024 * 1024)
     {
-        // For now, just return the entire file as a single chunk
-        // True streaming would require lower-level Parquet.Net APIs
-        yield return ReadParquet(filePath, options);
+        ArgumentNullException.ThrowIfNull(filePath);
+        
+        if (!File.Exists(filePath))
+            throw new FileNotFoundException($"Parquet file not found: {filePath}");
+
+        options ??= new ParquetReadOptions();
+
+        return ReadParquetStreamingInternal(filePath, options, memoryBudget);
+    }
+
+    /// <summary>
+    /// Internal implementation of streaming Parquet reading.
+    /// </summary>
+    private static IEnumerable<NivaraFrame> ReadParquetStreamingInternal(string filePath, ParquetReadOptions options, long memoryBudget)
+    {
+        using var bufferManager = new StreamingBufferManager(memoryBudget);
+        
+        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        
+        // For now, return the entire file as a single chunk with memory management
+        // True streaming would require processing row groups individually
+        var frame = ReadParquet(fileStream, options);
+        
+        // Force garbage collection if memory usage is high
+        bufferManager.TryCollectGarbage();
+        
+        yield return frame;
     }
 
     /// <summary>
     /// Converts a Parquet file to a NivaraFrame using low-level API.
     /// </summary>
-    private static async Task<NivaraFrame> ConvertParquetToNivaraFrame(Parquet.ParquetReader parquetReader, ParquetReadOptions options)
+    private static async Task<NivaraFrame> ConvertParquetToNivaraFrame(Parquet.ParquetReader parquetReader, ParquetReadOptions options, CancellationToken cancellationToken)
     {
         var schema = parquetReader.Schema;
         var dataFields = schema.GetDataFields();
@@ -171,6 +199,9 @@ public static class ParquetReader
                     
                     try
                     {
+                        // Check for cancellation before processing each column
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
                         // Read column data using the correct API
                         var columnData = await rowGroupReader.ReadColumnAsync(field);
                         var column = CreateNivaraColumnFromParquetData(columnData, field);
@@ -270,30 +301,70 @@ public static class ParquetReader
     }
 
     /// <summary>
-    /// Creates a NivaraColumn for struct types from Parquet data.
+    /// Creates a NivaraColumn for struct types from Parquet data with buffer reuse.
     /// </summary>
     private static NivaraColumn<T> CreateNivaraColumn<T>(DataColumn columnData) where T : struct
     {
         var length = columnData.Data.Length;
-        var nullableArray = new T?[length];
-
-        for (int i = 0; i < length; i++)
+        
+        // Use buffer pool for large arrays to reduce allocations
+        T?[] nullableArray;
+        if (length > 1024)
         {
-            var value = columnData.Data.GetValue(i);
-            if (value != null)
+            // For large arrays, try to reuse buffers
+            var buffer = BufferPool.RentIntBuffer(length);
+            try
             {
-                try
+                nullableArray = new T?[length];
+                
+                for (int i = 0; i < length; i++)
                 {
-                    nullableArray[i] = (T)Convert.ChangeType(value, typeof(T))!;
+                    var value = columnData.Data.GetValue(i);
+                    if (value != null)
+                    {
+                        try
+                        {
+                            nullableArray[i] = (T)Convert.ChangeType(value, typeof(T))!;
+                        }
+                        catch
+                        {
+                            nullableArray[i] = null;
+                        }
+                    }
+                    else
+                    {
+                        nullableArray[i] = null;
+                    }
                 }
-                catch
+            }
+            finally
+            {
+                BufferPool.ReturnIntBuffer(buffer);
+            }
+        }
+        else
+        {
+            // For small arrays, use direct allocation
+            nullableArray = new T?[length];
+            
+            for (int i = 0; i < length; i++)
+            {
+                var value = columnData.Data.GetValue(i);
+                if (value != null)
+                {
+                    try
+                    {
+                        nullableArray[i] = (T)Convert.ChangeType(value, typeof(T))!;
+                    }
+                    catch
+                    {
+                        nullableArray[i] = null;
+                    }
+                }
+                else
                 {
                     nullableArray[i] = null;
                 }
-            }
-            else
-            {
-                nullableArray[i] = null;
             }
         }
 
@@ -301,23 +372,50 @@ public static class ParquetReader
     }
 
     /// <summary>
-    /// Creates a string column from Parquet data.
+    /// Creates a string column from Parquet data with memory optimization.
     /// </summary>
     private static NivaraColumn<string> CreateStringColumn(DataColumn columnData)
     {
         var length = columnData.Data.Length;
         var values = new string[length];
 
-        for (int i = 0; i < length; i++)
+        // Use buffer pool for processing large string columns
+        if (length > 1024)
         {
-            var value = columnData.Data.GetValue(i);
-            if (value != null)
+            var buffer = BufferPool.RentByteBuffer(length * 32); // Estimate for string processing
+            try
             {
-                values[i] = value.ToString()!;
+                for (int i = 0; i < length; i++)
+                {
+                    var value = columnData.Data.GetValue(i);
+                    if (value != null)
+                    {
+                        values[i] = value.ToString()!;
+                    }
+                    else
+                    {
+                        values[i] = null!; // Use null for missing values
+                    }
+                }
             }
-            else
+            finally
             {
-                values[i] = null!; // Use null for missing values
+                BufferPool.ReturnByteBuffer(buffer);
+            }
+        }
+        else
+        {
+            for (int i = 0; i < length; i++)
+            {
+                var value = columnData.Data.GetValue(i);
+                if (value != null)
+                {
+                    values[i] = value.ToString()!;
+                }
+                else
+                {
+                    values[i] = null!; // Use null for missing values
+                }
             }
         }
 

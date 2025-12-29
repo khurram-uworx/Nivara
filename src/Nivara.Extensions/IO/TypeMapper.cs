@@ -51,9 +51,12 @@ internal static class TypeMapper
     /// </summary>
     /// <param name="clrType">The CLR type to map</param>
     /// <returns>The corresponding Arrow type</returns>
+    /// <exception cref="ArgumentNullException">Thrown when clrType is null</exception>
     /// <exception cref="UnsupportedTypeException">Thrown when the CLR type is not supported</exception>
     public static IArrowType MapClrToArrow(Type clrType)
     {
+        ArgumentNullException.ThrowIfNull(clrType);
+
         // Handle nullable types by extracting the underlying type
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
@@ -72,9 +75,12 @@ internal static class TypeMapper
     /// </summary>
     /// <param name="arrowType">The Arrow type to map</param>
     /// <returns>The corresponding CLR type</returns>
+    /// <exception cref="ArgumentNullException">Thrown when arrowType is null</exception>
     /// <exception cref="UnsupportedTypeException">Thrown when the Arrow type is not supported</exception>
     public static Type MapArrowToClr(IArrowType arrowType)
     {
+        ArgumentNullException.ThrowIfNull(arrowType);
+
         var arrowTypeType = arrowType.GetType();
 
         if (ArrowToClrMap.TryGetValue(arrowTypeType, out var clrType))
@@ -97,9 +103,17 @@ internal static class TypeMapper
     /// <param name="name">The field name</param>
     /// <param name="clrType">The CLR type</param>
     /// <returns>A Parquet DataField</returns>
+    /// <exception cref="ArgumentNullException">Thrown when name or clrType is null</exception>
+    /// <exception cref="ArgumentException">Thrown when name is empty or whitespace</exception>
     /// <exception cref="UnsupportedTypeException">Thrown when the CLR type is not supported for Parquet</exception>
     public static DataField CreateParquetField(string name, Type clrType)
     {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(clrType);
+        
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Field name cannot be empty or whitespace", nameof(name));
+
         // Handle nullable types
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
         var isNullable = Nullable.GetUnderlyingType(clrType) != null || !actualType.IsValueType;

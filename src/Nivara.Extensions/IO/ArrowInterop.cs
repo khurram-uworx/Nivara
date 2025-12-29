@@ -23,54 +23,76 @@ public static class ArrowInterop
     /// <returns>An Apache Arrow Table</returns>
     /// <exception cref="ArgumentNullException">Thrown when frame is null</exception>
     /// <exception cref="UnsupportedTypeException">Thrown when a column type is not supported</exception>
+    /// <exception cref="NivaraIOException">Thrown when conversion fails</exception>
     public static Table ToArrowTable(NivaraFrame frame, ArrowConversionOptions? options = null)
     {
-        if (frame == null)
-            throw new ArgumentNullException(nameof(frame));
+        ArgumentNullException.ThrowIfNull(frame);
 
         options ??= new ArrowConversionOptions();
 
-        // Validate types if requested
-        if (options.ValidateTypes)
+        try
         {
-            ValidateFrameTypesForArrowConversion(frame);
-        }
-
-        // Handle empty frames
-        if (frame.ColumnCount == 0)
-        {
-            var emptySchema = new Apache.Arrow.Schema(new Field[0], null);
-            var emptyBatch = new RecordBatch(emptySchema, new IArrowArray[0], 0);
-            return Table.TableFromRecordBatches(emptySchema, new[] { emptyBatch });
-        }
-
-        var fields = new List<Field>();
-        var arrowArrays = new List<IArrowArray>();
-
-        foreach (var columnName in frame.ColumnNames)
-        {
-            var column = frame.GetColumn(columnName);
-            var arrowType = TypeMapper.MapClrToArrow(column.ElementType);
-            
-            // For DateTime columns, use the timezone from options
-            if (column.ElementType == typeof(DateTime) && arrowType is TimestampType)
+            // Validate types if requested
+            if (options.ValidateTypes)
             {
-                arrowType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
+                ValidateFrameTypesForArrowConversion(frame);
             }
+
+            // Handle empty frames
+            if (frame.ColumnCount == 0)
+            {
+                var emptySchema = new Apache.Arrow.Schema(new Field[0], null);
+                var emptyBatch = new RecordBatch(emptySchema, new IArrowArray[0], 0);
+                return Table.TableFromRecordBatches(emptySchema, new[] { emptyBatch });
+            }
+
+            var fields = new List<Field>();
+            var arrowArrays = new List<IArrowArray>();
+
+            foreach (var columnName in frame.ColumnNames)
+            {
+                try
+                {
+                    var column = frame.GetColumn(columnName);
+                    var arrowType = TypeMapper.MapClrToArrow(column.ElementType);
+                    
+                    // For DateTime columns, use the timezone from options
+                    if (column.ElementType == typeof(DateTime) && arrowType is TimestampType)
+                    {
+                        arrowType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
+                    }
+                    
+                    // Create field with proper nullability
+                    var field = new Field(columnName, arrowType, nullable: true);
+                    fields.Add(field);
+
+                    // Convert column to Arrow array
+                    var arrowArray = ConvertColumnToArrowArray(column, options);
+                    arrowArrays.Add(arrowArray);
+                }
+                catch (Exception ex) when (ex is not UnsupportedTypeException)
+                {
+                    throw new DataCorruptionException($"Failed to convert column '{columnName}' to Arrow format: {ex.Message}", ex)
+                    {
+                        AffectedColumns = new[] { columnName },
+                        AffectedRowRange = new Range(0, frame.RowCount),
+                        OperationContext = "ArrowInterop.ToArrowTable"
+                    };
+                }
+            }
+
+            var schema = new Apache.Arrow.Schema(fields, null);
+            var recordBatch = new RecordBatch(schema, arrowArrays, frame.RowCount);
             
-            // Create field with proper nullability
-            var field = new Field(columnName, arrowType, nullable: true);
-            fields.Add(field);
-
-            // Convert column to Arrow array
-            var arrowArray = ConvertColumnToArrowArray(column, options);
-            arrowArrays.Add(arrowArray);
+            return Table.TableFromRecordBatches(schema, new[] { recordBatch });
         }
-
-        var schema = new Apache.Arrow.Schema(fields, null);
-        var recordBatch = new RecordBatch(schema, arrowArrays, frame.RowCount);
-        
-        return Table.TableFromRecordBatches(schema, new[] { recordBatch });
+        catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException and not DataCorruptionException)
+        {
+            throw new NivaraIOException($"Failed to convert NivaraFrame to Arrow Table: {ex.Message}", ex)
+            {
+                OperationContext = "ArrowInterop.ToArrowTable"
+            };
+        }
     }
 
     /// <summary>
@@ -81,41 +103,64 @@ public static class ArrowInterop
     /// <returns>A NivaraFrame</returns>
     /// <exception cref="ArgumentNullException">Thrown when arrowTable is null</exception>
     /// <exception cref="UnsupportedTypeException">Thrown when an Arrow type is not supported</exception>
+    /// <exception cref="NivaraIOException">Thrown when conversion fails</exception>
     public static NivaraFrame FromArrowTable(Table arrowTable, ArrowConversionOptions? options = null)
     {
-        if (arrowTable == null)
-            throw new ArgumentNullException(nameof(arrowTable));
+        ArgumentNullException.ThrowIfNull(arrowTable);
 
         options ??= new ArrowConversionOptions();
 
-        // Validate types if requested
-        if (options.ValidateTypes)
+        try
         {
-            ValidateArrowTableTypesForNivaraConversion(arrowTable);
-        }
+            // Validate types if requested
+            if (options.ValidateTypes)
+            {
+                ValidateArrowTableTypesForNivaraConversion(arrowTable);
+            }
 
-        // Handle empty tables
-        if (arrowTable.ColumnCount == 0)
+            // Handle empty tables
+            if (arrowTable.ColumnCount == 0)
+            {
+                // Create a frame with a single empty column to satisfy NivaraFrame requirements
+                var emptyColumn = NivaraColumn<object>.Create(System.Array.Empty<object>());
+                return NivaraFrame.Create(("EmptyColumn", emptyColumn));
+            }
+
+            var columns = new List<(string Name, IColumn Column)>();
+
+            for (int fieldIndex = 0; fieldIndex < arrowTable.ColumnCount; fieldIndex++)
+            {
+                var field = arrowTable.Schema.GetFieldByIndex(fieldIndex);
+                var columnName = field.Name;
+                
+                try
+                {
+                    var arrowColumn = arrowTable.Column(fieldIndex);
+                    
+                    // Convert Arrow column to Nivara column
+                    var column = ConvertArrowColumnToNivaraColumn(arrowColumn, field.DataType, options);
+                    columns.Add((columnName, column));
+                }
+                catch (Exception ex) when (ex is not UnsupportedTypeException)
+                {
+                    throw new DataCorruptionException($"Failed to convert Arrow column '{columnName}' to Nivara format: {ex.Message}", ex)
+                    {
+                        AffectedColumns = new[] { columnName },
+                        AffectedRowRange = new Range(0, (int)arrowTable.RowCount),
+                        OperationContext = "ArrowInterop.FromArrowTable"
+                    };
+                }
+            }
+
+            return new NivaraFrame(columns);
+        }
+        catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException and not DataCorruptionException)
         {
-            // Create a frame with a single empty column to satisfy NivaraFrame requirements
-            var emptyColumn = NivaraColumn<object>.Create(System.Array.Empty<object>());
-            return NivaraFrame.Create(("EmptyColumn", emptyColumn));
+            throw new NivaraIOException($"Failed to convert Arrow Table to NivaraFrame: {ex.Message}", ex)
+            {
+                OperationContext = "ArrowInterop.FromArrowTable"
+            };
         }
-
-        var columns = new List<(string Name, IColumn Column)>();
-
-        for (int fieldIndex = 0; fieldIndex < arrowTable.ColumnCount; fieldIndex++)
-        {
-            var field = arrowTable.Schema.GetFieldByIndex(fieldIndex);
-            var columnName = field.Name;
-            var arrowColumn = arrowTable.Column(fieldIndex);
-            
-            // Convert Arrow column to Nivara column
-            var column = ConvertArrowColumnToNivaraColumn(arrowColumn, field.DataType, options);
-            columns.Add((columnName, column));
-        }
-
-        return new NivaraFrame(columns);
     }
 
     /// <summary>
@@ -127,34 +172,44 @@ public static class ArrowInterop
     /// <returns>An Apache Arrow Array</returns>
     /// <exception cref="ArgumentNullException">Thrown when series is null</exception>
     /// <exception cref="UnsupportedTypeException">Thrown when the series type is not supported</exception>
+    /// <exception cref="NivaraIOException">Thrown when conversion fails</exception>
     public static IArrowArray ToArrowArray<T>(NivaraSeries<T> series, ArrowConversionOptions? options = null)
     {
-        if (series == null)
-            throw new ArgumentNullException(nameof(series));
+        ArgumentNullException.ThrowIfNull(series);
 
         options ??= new ArrowConversionOptions();
 
-        // Validate types if requested
-        if (options.ValidateTypes)
+        try
         {
-            ValidateSeriesTypeForArrowConversion<T>();
-        }
+            // Validate types if requested
+            if (options.ValidateTypes)
+            {
+                ValidateSeriesTypeForArrowConversion<T>();
+            }
 
-        // Handle empty series
-        if (series.Length == 0)
-        {
-            return CreateEmptyArrowArray<T>();
-        }
+            // Handle empty series
+            if (series.Length == 0)
+            {
+                return CreateEmptyArrowArray<T>();
+            }
 
-        // Convert series to array and create a temporary column
-        var data = new T[series.Length];
-        for (int i = 0; i < series.Length; i++)
-        {
-            data[i] = series[i];
+            // Convert series to array and create a temporary column
+            var data = new T[series.Length];
+            for (int i = 0; i < series.Length; i++)
+            {
+                data[i] = series[i];
+            }
+            
+            var column = NivaraColumn<T>.Create(data);
+            return ConvertColumnToArrowArray(column, options);
         }
-        
-        var column = NivaraColumn<T>.Create(data);
-        return ConvertColumnToArrowArray(column, options);
+        catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException)
+        {
+            throw new NivaraIOException($"Failed to convert NivaraSeries<{typeof(T).Name}> to Arrow Array: {ex.Message}", ex)
+            {
+                OperationContext = "ArrowInterop.ToArrowArray"
+            };
+        }
     }
 
     /// <summary>
@@ -166,42 +221,52 @@ public static class ArrowInterop
     /// <returns>A NivaraSeries</returns>
     /// <exception cref="ArgumentNullException">Thrown when arrowArray is null</exception>
     /// <exception cref="UnsupportedTypeException">Thrown when the Arrow array type is not supported</exception>
+    /// <exception cref="NivaraIOException">Thrown when conversion fails</exception>
     public static NivaraSeries<T> FromArrowArray<T>(IArrowArray arrowArray, ArrowConversionOptions? options = null)
     {
-        if (arrowArray == null)
-            throw new ArgumentNullException(nameof(arrowArray));
+        ArgumentNullException.ThrowIfNull(arrowArray);
 
         options ??= new ArrowConversionOptions();
 
-        // Validate types if requested
-        if (options.ValidateTypes)
+        try
         {
-            ValidateArrowArrayTypeForNivaraConversion<T>(arrowArray);
-        }
-
-        // Handle empty arrays
-        if (arrowArray.Length == 0)
-        {
-            return NivaraSeries<T>.Create(System.Array.Empty<T>());
-        }
-
-        // Extract data directly from the Arrow array
-        var data = new List<T>();
-        
-        for (int i = 0; i < arrowArray.Length; i++)
-        {
-            if (arrowArray.IsNull(i))
+            // Validate types if requested
+            if (options.ValidateTypes)
             {
-                data.Add(default(T)!);
+                ValidateArrowArrayTypeForNivaraConversion<T>(arrowArray);
             }
-            else
+
+            // Handle empty arrays
+            if (arrowArray.Length == 0)
             {
-                var value = ExtractValueFromArrowArray<T>(arrowArray, i, options);
-                data.Add(value);
+                return NivaraSeries<T>.Create(System.Array.Empty<T>());
             }
+
+            // Extract data directly from the Arrow array
+            var data = new List<T>();
+            
+            for (int i = 0; i < arrowArray.Length; i++)
+            {
+                if (arrowArray.IsNull(i))
+                {
+                    data.Add(default(T)!);
+                }
+                else
+                {
+                    var value = ExtractValueFromArrowArray<T>(arrowArray, i, options);
+                    data.Add(value);
+                }
+            }
+            
+            return NivaraSeries<T>.Create(data.ToArray());
         }
-        
-        return NivaraSeries<T>.Create(data.ToArray());
+        catch (Exception ex) when (ex is not ArgumentNullException and not UnsupportedTypeException)
+        {
+            throw new NivaraIOException($"Failed to convert Arrow Array to NivaraSeries<{typeof(T).Name}>: {ex.Message}", ex)
+            {
+                OperationContext = "ArrowInterop.FromArrowArray"
+            };
+        }
     }
 
     /// <summary>

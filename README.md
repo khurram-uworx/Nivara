@@ -681,7 +681,9 @@ DiagnosticsTracker.IsEnabled = false;
 
 ## Error Handling
 
-Nivara provides clear error messages for common mistakes:
+Nivara provides comprehensive error handling with clear, context-specific error messages:
+
+### Core Operations Error Handling
 
 ```csharp
 var stringColumn = NivaraColumn<string>.Create(new[] { "1", "2", "3" });
@@ -706,6 +708,111 @@ var stringOrdering = stringColumn.GreaterThan("2");     // Works fine (lexicogra
 var guidColumn = NivaraColumn<Guid>.Create(new[] { Guid.NewGuid() });
 var guidEquals = guidColumn.Equals(Guid.Empty);         // Works fine
 var guidOrdering = guidColumn.GreaterThan(Guid.Empty);  // Works (Guid implements IComparable)
+```
+
+### I/O Operations Error Handling
+
+The Arrow/Parquet I/O system provides detailed error context with specific exception types:
+
+```csharp
+using Nivara.IO;
+
+try
+{
+    // Parameter validation with specific error messages
+    frame.ToParquet(""); // ArgumentException: File path cannot be empty or whitespace
+    
+    // Type validation with helpful suggestions
+    var unsupportedFrame = NivaraFrame.Create(
+        ("ID", NivaraColumn<Guid>.Create(new[] { Guid.NewGuid() }))
+    );
+    unsupportedFrame.ToParquet("output.parquet");
+}
+catch (UnsupportedTypeException ex)
+{
+    Console.WriteLine($"Unsupported type: {ex.UnsupportedType.Name}");
+    Console.WriteLine($"Suggested alternatives: {string.Join(", ", ex.SuggestedAlternatives)}");
+    // Output: "Suggested alternatives: string, byte[]"
+}
+catch (ArgumentException ex)
+{
+    Console.WriteLine($"Invalid parameter: {ex.Message}");
+}
+
+try
+{
+    // File I/O errors include operation context and file paths
+    var frame = await NivaraFrameExtensions.LoadParquetAsync("nonexistent.parquet");
+}
+catch (FileNotFoundException ex)
+{
+    Console.WriteLine($"File not found: {ex.Message}");
+}
+catch (NivaraIOException ex)
+{
+    Console.WriteLine($"I/O Error: {ex.Message}");
+    Console.WriteLine($"Operation: {ex.OperationContext}");
+    Console.WriteLine($"File: {ex.FilePath}");
+}
+
+try
+{
+    // Data corruption errors include affected columns and row ranges
+    var corruptedData = /* some corrupted data source */;
+    var frame = await ParquetReader.ReadParquetAsync(corruptedData);
+}
+catch (DataCorruptionException ex)
+{
+    Console.WriteLine($"Data corruption detected: {ex.Message}");
+    Console.WriteLine($"Affected columns: {string.Join(", ", ex.AffectedColumns)}");
+    Console.WriteLine($"Affected rows: {ex.AffectedRowRange}");
+    Console.WriteLine($"Operation: {ex.OperationContext}");
+}
+
+try
+{
+    // Schema validation errors provide detailed mismatch information
+    var incompatibleFrames = new[] { frame1, frame2 }; // Different schemas
+    await ParquetWriter.WriteParquetBatchAsync(incompatibleFrames, "batch.parquet");
+}
+catch (SchemaValidationException ex)
+{
+    Console.WriteLine($"Schema validation failed: {ex.Message}");
+    Console.WriteLine($"Expected schema: {ex.ExpectedSchema}");
+    Console.WriteLine($"Actual schema: {ex.ActualSchema}");
+    Console.WriteLine($"Type mismatches: {string.Join(", ", ex.TypeMismatches)}");
+}
+```
+
+### Exception Hierarchy
+
+Nivara uses a comprehensive exception hierarchy for precise error handling:
+
+- **`NivaraIOException`**: Base exception for all I/O operations with operation context and file path information
+- **`UnsupportedTypeException`**: Thrown when encountering unsupported types, includes suggested alternatives
+- **`SchemaValidationException`**: Thrown when schema validation fails, includes detailed mismatch information
+- **`DataCorruptionException`**: Thrown when data corruption is detected, includes affected columns and row ranges
+
+### Parameter Validation
+
+All public methods include comprehensive parameter validation:
+
+```csharp
+// Null parameter validation
+frame.ToParquet(null);              // ArgumentNullException
+arrowTable.FromArrowTable(null);    // ArgumentNullException
+
+// String parameter validation
+frame.ToParquet("");                // ArgumentException: cannot be empty or whitespace
+frame.ToParquet("   ");             // ArgumentException: cannot be empty or whitespace
+
+// Stream parameter validation
+var readOnlyStream = new MemoryStream(new byte[0], false);
+frame.ToParquetStream(readOnlyStream); // ArgumentException: Stream must be writable
+
+var writeOnlyStream = new MemoryStream();
+writeOnlyStream.Close();
+NivaraFrameExtensions.LoadParquetFromStream(writeOnlyStream); // ArgumentException: Stream must be readable
 ```
 
 ## Building from Source
@@ -805,6 +912,79 @@ catch (UnsupportedTypeException ex)
     Console.WriteLine($"Consider using: {string.Join(", ", ex.SuggestedAlternatives)}");
 }
 ```
+
+#### Performance Optimizations
+
+Nivara's Arrow/Parquet I/O includes comprehensive performance optimizations for large dataset processing:
+
+**Async Operations with Cancellation Support**:
+```csharp
+// All I/O operations support cancellation tokens
+var cancellationToken = new CancellationTokenSource(TimeSpan.FromMinutes(5)).Token;
+
+try
+{
+    var frame = await NivaraFrameExtensions.LoadParquetAsync("large_file.parquet", cancellationToken: cancellationToken);
+    await frame.ToParquetAsync("output.parquet", cancellationToken: cancellationToken);
+}
+catch (OperationCanceledException)
+{
+    Console.WriteLine("Operation was cancelled");
+}
+```
+
+**Memory Optimization with Buffer Pooling**:
+```csharp
+// Automatic buffer pooling for large datasets (> 1024 elements)
+// Reduces memory allocations and garbage collection pressure
+var largeFrame = NivaraFrame.Create(
+    ("Data", NivaraColumn<int>.Create(Enumerable.Range(0, 100000).ToArray()))
+);
+
+// Buffer pooling is automatically used during I/O operations
+await largeFrame.ToParquetAsync("large_output.parquet");
+
+// Get buffer pool statistics for monitoring
+var (byteBuffers, intBuffers, doubleBuffers) = BufferPool.GetPoolStatistics();
+Console.WriteLine($"Buffer pools: {byteBuffers} byte, {intBuffers} int, {doubleBuffers} double");
+```
+
+**Streaming with Memory Budget Management**:
+```csharp
+// Process large files with bounded memory usage
+var memoryBudget = 256L * 1024 * 1024; // 256MB limit
+
+foreach (var chunk in ParquetReader.ReadParquetStreaming("huge_file.parquet", memoryBudget: memoryBudget))
+{
+    Console.WriteLine($"Processing chunk: {chunk.RowCount} rows");
+    // Memory usage stays within budget
+    
+    // Process chunk and write results
+    var processed = ProcessChunk(chunk);
+    await processed.ToParquetAsync($"output_chunk_{DateTime.Now.Ticks}.parquet");
+}
+```
+
+**Performance Monitoring**:
+```csharp
+// Monitor I/O performance and memory usage
+using var bufferManager = new StreamingBufferManager(memoryBudget: 512L * 1024 * 1024);
+
+Console.WriteLine($"Memory budget: {bufferManager.MemoryBudget:N0} bytes");
+Console.WriteLine($"Current usage: {bufferManager.CurrentMemoryUsage:N0} bytes");
+Console.WriteLine($"Budget exceeded: {bufferManager.IsMemoryBudgetExceeded}");
+
+// Automatic garbage collection when memory usage is high
+bufferManager.TryCollectGarbage(); // Triggers GC at 80% of budget
+```
+
+**Optimization Features**:
+- **Buffer Pooling**: Automatic reuse of byte, int, and double arrays for large datasets
+- **Memory Budget Management**: Configurable memory limits with automatic garbage collection
+- **Cancellation Support**: All async operations support cancellation tokens with proper cleanup
+- **Streaming Operations**: Process large files with bounded memory usage
+- **Performance Thresholds**: Optimizations automatically enabled for arrays > 1024 elements
+- **Zero-Copy Operations**: Planned future enhancement for memory-mapped file access
 
 #### Arrow Interoperability
 
