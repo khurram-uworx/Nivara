@@ -1,4 +1,4 @@
-namespace Nivara.Extensions.IO;
+namespace Nivara.IO;
 
 /// <summary>
 /// Provides functionality for writing Nivara data structures to Parquet files

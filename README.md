@@ -145,7 +145,7 @@ Nivara automatically selects the appropriate storage implementation:
 
 ### Query Engine Foundation
 
-Nivara includes a foundational query engine infrastructure for building DataFrame-like operations:
+Nivara includes a comprehensive query engine infrastructure for building DataFrame-like operations:
 
 - **Schema System**: ✅ **Complete** - Immutable schema management with column metadata, type information, and transformation methods (WithColumn, WithoutColumn, SelectColumns)
 - **NivaraFrame**: ✅ **Complete** - Multi-column DataFrame-like structure with schema management, column validation, and immutable transformations
@@ -153,6 +153,12 @@ Nivara includes a foundational query engine infrastructure for building DataFram
 - **Column Expressions**: ✅ **Complete** - Composable expression system for building queries with operator overloading
 - **Query Operations**: ✅ **Complete** - Filter, Select, and GroupBy operations with schema transformation and execution
 - **Query Planning**: ✅ **Complete** - Infrastructure for building and optimizing query execution plans
+- **DataFrame Operations Infrastructure**: ✅ **Complete** - Core infrastructure for advanced DataFrame operations including:
+  - **ExecutionStrategy**: Enumeration for different execution approaches (Lazy, Eager, Streaming, Parallel)
+  - **ExecutionContext**: Configuration class for execution parameters, memory budgets, parallelism, and progress reporting
+  - **Generic IQueryOperation<T>**: Type-safe interface for composable query operations with transformation support
+  - **DataFrameOperation**: Abstract base class for DataFrame operations with execution strategy support
+  - **QueryNode Hierarchy**: Structured representation of query plans with visitor pattern support for optimization
 - **Type-Safe Interfaces**: Both generic and non-generic column interfaces for compile-time and runtime type handling
 - **Error Handling**: Comprehensive exception hierarchy with context-specific error messages
 
@@ -767,7 +773,7 @@ The `Nivara.Extensions` package provides additional functionality that requires 
 The type mapping system provides seamless conversion between .NET types and columnar formats:
 
 ```csharp
-using Nivara.Extensions.IO;
+using Nivara.IO;
 
 // Supported types for Arrow/Parquet conversion:
 // - Primitives: bool, int, long, float, double, byte, short, uint, ulong, ushort, sbyte
@@ -790,6 +796,67 @@ catch (UnsupportedTypeException ex)
     // ex.SuggestedAlternatives contains ["string", "byte[]"]
     Console.WriteLine($"Consider using: {string.Join(", ", ex.SuggestedAlternatives)}");
 }
+```
+
+#### Arrow Interoperability
+
+Convert between NivaraFrame/NivaraSeries and Apache Arrow formats:
+
+```csharp
+using Nivara.IO;
+using Apache.Arrow;
+
+// Create sample data
+var intData = new[] { 1, 2, 3, 4, 5 };
+var stringData = new[] { "apple", "banana", "cherry", "date", "elderberry" };
+var boolData = new[] { true, false, true, false, true };
+
+var frame = NivaraFrame.Create(
+    ("Numbers", NivaraColumn<int>.Create(intData)),
+    ("Fruits", NivaraColumn<string>.Create(stringData)),
+    ("Flags", NivaraColumn<bool>.Create(boolData))
+);
+
+// Convert NivaraFrame to Arrow Table
+var arrowTable = ArrowInterop.ToArrowTable(frame);
+Console.WriteLine($"Arrow table: {arrowTable.RowCount} rows, {arrowTable.ColumnCount} columns");
+
+// Convert Arrow Table back to NivaraFrame
+var restoredFrame = ArrowInterop.FromArrowTable(arrowTable);
+Console.WriteLine($"Restored frame: {restoredFrame.RowCount} rows, {restoredFrame.ColumnCount} columns");
+
+// Convert NivaraSeries to Arrow Array
+var series = NivaraSeries<double>.Create(new[] { 1.1, 2.2, 3.3, 4.4 });
+var arrowArray = ArrowInterop.ToArrowArray(series);
+Console.WriteLine($"Arrow array length: {arrowArray.Length}");
+
+// Convert Arrow Array back to NivaraSeries
+var restoredSeries = ArrowInterop.FromArrowArray<double>(arrowArray);
+Console.WriteLine($"Restored series length: {restoredSeries.Length}");
+
+// Handle nullable data
+var nullableData = new int?[] { 1, null, 3, null, 5 };
+var nullableColumn = NivaraColumn<int>.CreateFromNullable(nullableData);
+var frameWithNulls = NivaraFrame.Create(("NullableNumbers", nullableColumn));
+
+// Arrow conversion preserves null information
+var arrowTableWithNulls = ArrowInterop.ToArrowTable(frameWithNulls);
+var restoredFrameWithNulls = ArrowInterop.FromArrowTable(arrowTableWithNulls);
+
+// Verify null preservation
+var restoredColumn = restoredFrameWithNulls.GetColumn("NullableNumbers");
+Console.WriteLine($"Nulls preserved: {restoredColumn.HasNulls}"); // True
+Console.WriteLine($"Null count: {restoredColumn.NullCount}");     // 2
+
+// Custom conversion options
+var options = new ArrowConversionOptions
+{
+    TimeZone = TimeZoneInfo.Local,      // Handle DateTime timezone conversion
+    UseZeroCopy = true,                 // Enable zero-copy optimizations
+    ValidateTypes = true                // Validate type compatibility
+};
+
+var customArrowTable = ArrowInterop.ToArrowTable(frame, options);
 ```
 
 To use CSV functionality:
@@ -854,14 +921,15 @@ We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guid
 - ✅ QueryFrame with fluent API for lazy query construction and execution
 - ✅ Query operations (Filter, Select, GroupBy) with schema transformation
 - ✅ Query planning and execution infrastructure with optimization analysis
+- ✅ DataFrame operations infrastructure with execution strategies and query node hierarchy
 - ✅ Arrow/Parquet type mapping system with comprehensive CLR ↔ Arrow ↔ Parquet conversion
-- ✅ Comprehensive test suite with 324 passing tests (including 15 new I/O type mapping tests)
+- ✅ Arrow interoperability with bidirectional conversion (ToArrowTable, FromArrowTable, ToArrowArray, FromArrowArray)
+- ✅ Comprehensive test suite with 365 passing tests (including 28 new infrastructure tests)
 
 ### Upcoming Features
 - 🔄 Data source scanning (CSV, JSON) with lazy evaluation
 - 🔄 Query optimization passes (predicate pushdown, operation fusion)
 - 🔄 Advanced aggregation functions (Sum, Count, Average, etc.)
-- 🔄 Arrow interoperability (ToArrowTable, FromArrowTable conversion methods)
 - 🔄 Parquet I/O operations (reading and writing with streaming support)
 - 📋 Grouping with aggregation functions
 - 📋 Joining operations between frames

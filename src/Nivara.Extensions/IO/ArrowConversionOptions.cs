@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Nivara.Extensions.IO;
+namespace Nivara.IO;
 
 /// <summary>
 /// Configuration options for Arrow conversion operations

@@ -1,0 +1,180 @@
+namespace Nivara;
+
+/// <summary>
+/// Provides execution context and configuration for query operations
+/// </summary>
+public sealed class ExecutionContext
+{
+    /// <summary>
+    /// Initializes a new instance of ExecutionContext with default settings
+    /// </summary>
+    public ExecutionContext()
+    {
+        Strategy = ExecutionStrategy.Lazy;
+        MaxDegreeOfParallelism = Environment.ProcessorCount;
+        MemoryBudget = 1024 * 1024 * 1024; // 1GB default
+        CancellationToken = CancellationToken.None;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of ExecutionContext with specified strategy
+    /// </summary>
+    /// <param name="strategy">The execution strategy to use</param>
+    public ExecutionContext(ExecutionStrategy strategy) : this()
+    {
+        Strategy = strategy;
+    }
+
+    /// <summary>
+    /// Gets or sets the execution strategy
+    /// </summary>
+    public ExecutionStrategy Strategy { get; set; }
+
+    /// <summary>
+    /// Gets or sets the maximum degree of parallelism for parallel execution
+    /// </summary>
+    public int MaxDegreeOfParallelism { get; set; }
+
+    /// <summary>
+    /// Gets or sets the memory budget in bytes for operations
+    /// </summary>
+    public long MemoryBudget { get; set; }
+
+    /// <summary>
+    /// Gets or sets the cancellation token for operation cancellation
+    /// </summary>
+    public CancellationToken CancellationToken { get; set; }
+
+    /// <summary>
+    /// Gets or sets the progress reporter for long-running operations
+    /// </summary>
+    public IProgress<ExecutionProgress>? Progress { get; set; }
+
+    /// <summary>
+    /// Creates a copy of this execution context
+    /// </summary>
+    /// <returns>A new ExecutionContext with the same settings</returns>
+    public ExecutionContext Clone()
+    {
+        return new ExecutionContext
+        {
+            Strategy = Strategy,
+            MaxDegreeOfParallelism = MaxDegreeOfParallelism,
+            MemoryBudget = MemoryBudget,
+            CancellationToken = CancellationToken,
+            Progress = Progress
+        };
+    }
+
+    /// <summary>
+    /// Creates an execution context with the specified strategy
+    /// </summary>
+    /// <param name="strategy">The execution strategy</param>
+    /// <returns>A new ExecutionContext with the specified strategy</returns>
+    public static ExecutionContext WithStrategy(ExecutionStrategy strategy)
+    {
+        return new ExecutionContext(strategy);
+    }
+
+    /// <summary>
+    /// Creates an execution context for parallel execution with specified degree of parallelism
+    /// </summary>
+    /// <param name="maxDegreeOfParallelism">The maximum degree of parallelism</param>
+    /// <returns>A new ExecutionContext configured for parallel execution</returns>
+    public static ExecutionContext WithParallelism(int maxDegreeOfParallelism)
+    {
+        return new ExecutionContext(ExecutionStrategy.Parallel)
+        {
+            MaxDegreeOfParallelism = maxDegreeOfParallelism
+        };
+    }
+
+    /// <summary>
+    /// Creates an execution context with the specified memory budget
+    /// </summary>
+    /// <param name="memoryBudgetBytes">The memory budget in bytes</param>
+    /// <returns>A new ExecutionContext with the specified memory budget</returns>
+    public static ExecutionContext WithMemoryBudget(long memoryBudgetBytes)
+    {
+        return new ExecutionContext
+        {
+            MemoryBudget = memoryBudgetBytes
+        };
+    }
+
+    /// <summary>
+    /// Creates an execution context with the specified cancellation token
+    /// </summary>
+    /// <param name="cancellationToken">The cancellation token</param>
+    /// <returns>A new ExecutionContext with the specified cancellation token</returns>
+    public static ExecutionContext WithCancellation(CancellationToken cancellationToken)
+    {
+        return new ExecutionContext
+        {
+            CancellationToken = cancellationToken
+        };
+    }
+
+    /// <summary>
+    /// Returns a string representation of the execution context
+    /// </summary>
+    /// <returns>A formatted string describing the execution context</returns>
+    public override string ToString()
+    {
+        return $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes }}";
+    }
+}
+
+/// <summary>
+/// Represents progress information for long-running operations
+/// </summary>
+public sealed class ExecutionProgress
+{
+    /// <summary>
+    /// Initializes a new instance of ExecutionProgress
+    /// </summary>
+    /// <param name="operationName">The name of the current operation</param>
+    /// <param name="completedWork">The amount of work completed</param>
+    /// <param name="totalWork">The total amount of work</param>
+    public ExecutionProgress(string operationName, long completedWork, long totalWork)
+    {
+        OperationName = operationName ?? throw new ArgumentNullException(nameof(operationName));
+        CompletedWork = completedWork;
+        TotalWork = totalWork;
+    }
+
+    /// <summary>
+    /// Gets the name of the current operation
+    /// </summary>
+    public string OperationName { get; }
+
+    /// <summary>
+    /// Gets the amount of work completed
+    /// </summary>
+    public long CompletedWork { get; }
+
+    /// <summary>
+    /// Gets the total amount of work
+    /// </summary>
+    public long TotalWork { get; }
+
+    /// <summary>
+    /// Gets the completion percentage (0.0 to 1.0)
+    /// </summary>
+    public double PercentComplete => TotalWork > 0 ? (double)CompletedWork / TotalWork : 0.0;
+
+    /// <summary>
+    /// Gets a value indicating whether the operation is complete
+    /// </summary>
+    public bool IsComplete => CompletedWork >= TotalWork;
+
+    /// <summary>
+    /// Returns a string representation of the execution progress
+    /// </summary>
+    /// <returns>A formatted string describing the progress</returns>
+    public override string ToString()
+    {
+        var percentage = (PercentComplete * 100).ToString("F1");
+        return $"{OperationName}: {CompletedWork:N0}/{TotalWork:N0} ({percentage}%)";
+    }
+}

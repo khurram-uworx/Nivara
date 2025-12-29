@@ -1,4 +1,4 @@
-namespace Nivara.Extensions.IO;
+namespace Nivara.IO;
 
 /// <summary>
 /// Configuration options for Parquet reading operations

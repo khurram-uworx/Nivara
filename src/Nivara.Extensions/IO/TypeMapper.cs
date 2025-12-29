@@ -3,7 +3,7 @@ using Apache.Arrow.Types;
 using Parquet.Schema;
 using Nivara.IO;
 
-namespace Nivara.Extensions.IO;
+namespace Nivara.IO;
 
 /// <summary>
 /// Provides type mapping between CLR types, Apache Arrow types, and Parquet types
@@ -165,7 +165,7 @@ internal static class TypeMapper
     /// </summary>
     /// <param name="unsupportedType">The unsupported type</param>
     /// <returns>A list of suggested alternative type names</returns>
-    private static List<string> GetTypeSuggestions(Type unsupportedType)
+    public static List<string> GetTypeSuggestions(Type unsupportedType)
     {
         return unsupportedType switch
         {

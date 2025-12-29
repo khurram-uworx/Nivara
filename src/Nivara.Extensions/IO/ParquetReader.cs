@@ -1,4 +1,4 @@
-namespace Nivara.Extensions.IO;
+namespace Nivara.IO;
 
 /// <summary>
 /// Provides functionality for reading Parquet files into Nivara data structures

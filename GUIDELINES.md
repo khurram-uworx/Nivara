@@ -1049,7 +1049,7 @@ namespace Nivara.IO;
 - DataCorruptionException     # Data integrity errors
 
 // Implementations (Nivara.Extensions project)
-namespace Nivara.Extensions.IO;
+namespace Nivara.IO;
 - ArrowConversionOptions      # Arrow conversion configuration
 - ParquetReadOptions          # Parquet reading configuration
 - ParquetWriteOptions         # Parquet writing configuration
@@ -1095,7 +1095,7 @@ public class ArrowConversionOptions
 ```
 
 ### Namespace Structure for I/O Operations
-**Decision**: Use `Nivara.Extensions.IO` namespace for all Arrow/Parquet implementations
+**Decision**: Use `Nivara.IO` namespace for all Arrow/Parquet implementations
 **Rationale**: Consistent with existing CSV implementation pattern. Keeps all I/O extensions in the same namespace while separating from core functionality.
 
 **Structure**:
@@ -1309,4 +1309,320 @@ var testCases = new (IArrowType ArrowType, Type ExpectedClrType)[]
 {
     (BooleanType.Default, typeof(bool))
 };
+```
+
+## DataFrame Operations Infrastructure Implementation
+
+### Core Query Operation Infrastructure Design
+**Decision**: Created comprehensive query operation infrastructure with ExecutionStrategy enumeration, ExecutionContext class, generic IQueryOperation<T> interface, DataFrameOperation base class, and QueryNode hierarchy
+**Rationale**: Provides foundation for advanced DataFrame operations with different execution strategies (Lazy, Eager, Streaming, Parallel) and proper query plan representation for optimization.
+
+**Pattern**: Layered architecture with clear separation of concerns
+```csharp
+// Execution strategies for different use cases
+public enum ExecutionStrategy { Lazy, Eager, Streaming, Parallel }
+
+// Execution context with configuration and progress reporting
+public sealed class ExecutionContext
+{
+    public ExecutionStrategy Strategy { get; set; }
+    public int MaxDegreeOfParallelism { get; set; }
+    public long MemoryBudget { get; set; }
+    public CancellationToken CancellationToken { get; set; }
+    public IProgress<ExecutionProgress>? Progress { get; set; }
+}
+
+// Generic query operation interface
+public interface IQueryOperation<T>
+{
+    QueryPlan Plan { get; }
+    ExecutionStrategy Strategy { get; }
+    IQueryOperation<TResult> Transform<TResult>(Func<T, TResult> transform);
+    Task<T> ExecuteAsync(CancellationToken cancellationToken = default);
+}
+
+// Base class for DataFrame operations
+public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
+{
+    protected virtual NivaraFrame ExecuteLazy(ExecutionContext context);
+    protected virtual NivaraFrame ExecuteEager(ExecutionContext context);
+    protected virtual NivaraFrame ExecuteStreaming(ExecutionContext context);
+    protected virtual NivaraFrame ExecuteParallel(ExecutionContext context);
+}
+```
+
+### QueryNode Hierarchy for Query Plans
+**Decision**: Created comprehensive QueryNode hierarchy with visitor pattern support for query plan representation and traversal
+**Rationale**: Enables sophisticated query optimization by providing structured representation of query operations. Visitor pattern allows for easy extension of query analysis and transformation capabilities.
+
+**Pattern**: Abstract base class with concrete node types and visitor support
+```csharp
+// Base query node with common properties
+public abstract class QueryNode
+{
+    public List<QueryNode> Children { get; }
+    public Schema OutputSchema { get; }
+    public long EstimatedRowCount { get; set; }
+    public TimeSpan EstimatedExecutionTime { get; set; }
+    public abstract void Accept(IQueryNodeVisitor visitor);
+    public abstract T Accept<T>(IQueryNodeVisitor<T> visitor);
+}
+
+// Concrete node types for different operations
+public sealed class SourceNode : QueryNode { /* data source */ }
+public sealed class FilterNode : QueryNode { /* filter operations */ }
+public sealed class ProjectionNode : QueryNode { /* column selection */ }
+public sealed class GroupByNode : QueryNode { /* grouping operations */ }
+
+// Visitor interfaces for traversal and transformation
+public interface IQueryNodeVisitor { /* void visitor */ }
+public interface IQueryNodeVisitor<T> { /* transforming visitor */ }
+```
+
+### Execution Context and Progress Reporting
+**Decision**: Comprehensive ExecutionContext with progress reporting, cancellation support, and resource management
+**Rationale**: Provides fine-grained control over query execution behavior. Progress reporting enables user feedback for long-running operations. Resource management prevents memory issues with large datasets.
+
+**Pattern**: Builder-style factory methods for common configurations
+```csharp
+// Factory methods for common execution contexts
+var parallelContext = ExecutionContext.WithParallelism(8);
+var streamingContext = ExecutionContext.WithStrategy(ExecutionStrategy.Streaming);
+var budgetContext = ExecutionContext.WithMemoryBudget(512 * 1024 * 1024);
+var cancellableContext = ExecutionContext.WithCancellation(cancellationToken);
+
+// Progress reporting for long-running operations
+context.Progress?.Report(new ExecutionProgress("FilterOperation", 500, 1000));
+```
+
+### Public API Design Decisions
+**Decision**: Made QueryPlan, IQueryOperation, and related infrastructure public to support the generic IQueryOperation<T> interface
+**Rationale**: Generic interface requires public access to QueryPlan for type safety. Public API enables advanced users to create custom operations and execution strategies.
+
+**Pattern**: Public interfaces with internal implementation details
+```csharp
+// Public interfaces for extensibility
+public interface IQueryOperation<T> { /* generic interface */ }
+public interface IQueryOperation { /* non-generic interface */ }
+public sealed class QueryPlan { /* public for interface requirements */ }
+public abstract class DataFrameOperation { /* public base class */ }
+
+// Internal implementation details remain internal
+internal sealed class FilterOperation : IQueryOperation { /* internal implementations */ }
+internal sealed class SelectOperation : IQueryOperation { /* internal implementations */ }
+```
+
+### Testing Strategy for Query Infrastructure
+**Decision**: Comprehensive unit tests covering ExecutionContext, ExecutionProgress, and QueryNode hierarchy with visitor pattern testing
+**Rationale**: Query infrastructure is foundational to DataFrame operations correctness. Tests verify configuration handling, progress reporting, and query plan representation work correctly.
+
+**Coverage**: 20 test cases covering:
+- ExecutionContext creation, cloning, and factory methods
+- ExecutionProgress calculation and formatting
+- QueryNode hierarchy creation and property management
+- Visitor pattern implementation and traversal
+- ToString formatting and error handling
+- WithChildren immutability and node copying
+
+### Infrastructure Implementation Gotchas
+**Problem**: Generic IQueryOperation<T> interface requires public QueryPlan class
+**Solution**: Made QueryPlan and related classes public to support generic interface requirements
+```csharp
+// WRONG - internal QueryPlan with public generic interface
+internal sealed class QueryPlan { }
+public interface IQueryOperation<T> { QueryPlan Plan { get; } } // Compiler error
+
+// CORRECT - public QueryPlan for public interface
+public sealed class QueryPlan { }
+public interface IQueryOperation<T> { QueryPlan Plan { get; } } // Compiles correctly
+```
+
+**Problem**: QueryNode ToString methods need to include row count and schema information for debugging
+**Solution**: Override ToString in each concrete node type to include relevant debugging information
+```csharp
+// Base pattern for QueryNode ToString
+public override string ToString()
+{
+    var rowCountStr = EstimatedRowCount >= 0 ? EstimatedRowCount.ToString("N0") : "Unknown";
+    return $"{NodeType} [Specific Info, Rows: {rowCountStr}, Schema: {OutputSchema.ColumnNames.Count} columns]";
+}
+```
+
+**Problem**: ExecutionContext needs sensible defaults for all properties
+**Solution**: Provide reasonable defaults based on system capabilities
+```csharp
+// Sensible defaults based on system
+Strategy = ExecutionStrategy.Lazy; // Safe default
+MaxDegreeOfParallelism = Environment.ProcessorCount; // Use all cores
+MemoryBudget = 1024 * 1024 * 1024; // 1GB default budget
+CancellationToken = CancellationToken.None; // No cancellation by default
+```
+
+## Arrow Interoperability Implementation
+
+### Apache Arrow API Usage Patterns
+**Decision**: Use `Table.TableFromRecordBatches()` for creating Arrow tables, individual `Append()` calls for builders instead of `AppendRange()`
+**Rationale**: Follows Apache Arrow best practices and avoids API compatibility issues. Individual append calls provide better null handling control.
+
+**Pattern**: Proper Arrow table and array creation
+```csharp
+// Table creation with single RecordBatch
+var schema = new Apache.Arrow.Schema(fields, null);
+var recordBatch = new RecordBatch(schema, arrowArrays, frame.RowCount);
+return Table.TableFromRecordBatches(schema, new[] { recordBatch });
+
+// Array building with individual appends
+var builder = new Int32Array.Builder();
+for (int i = 0; i < column.Length; i++)
+{
+    if (column.IsNull(i))
+        builder.AppendNull();
+    else
+        builder.Append(column[i]);
+}
+return builder.Build();
+```
+
+### Dynamic Dispatch for Arrow Conversion
+**Decision**: Use type switching with dynamic dispatch for converting between Nivara columns and Arrow arrays
+**Rationale**: Avoids reflection overhead while maintaining type safety. Follows established patterns from NivaraColumn arithmetic operations.
+
+**Pattern**: Type switching for Arrow conversion
+```csharp
+// Convert column to Arrow array using dynamic dispatch
+return elementType switch
+{
+    Type t when t == typeof(bool) => ConvertColumnToArrowArrayTyped<bool>(column, options),
+    Type t when t == typeof(int) => ConvertColumnToArrowArrayTyped<int>(column, options),
+    Type t when t == typeof(string) => ConvertColumnToArrowArrayTyped<string>(column, options),
+    _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
+};
+```
+
+### Nullable Type Handling in Arrow Conversion
+**Decision**: Use reflection and `Activator.CreateInstance` for creating nullable value type instances during Arrow-to-Nivara conversion
+**Rationale**: Arrow arrays store nullability information separately from values. Need to reconstruct nullable types for value types while preserving null semantics.
+
+**Pattern**: Nullable type reconstruction
+```csharp
+// For value types, create nullable array with proper type
+if (typeof(T).IsValueType)
+{
+    var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
+    var nullableArray = System.Array.CreateInstance(nullableType, values.Count);
+    
+    for (int i = 0; i < values.Count; i++)
+    {
+        if (values[i] != null)
+        {
+            var nullableInstance = Activator.CreateInstance(nullableType, values[i]);
+            nullableArray.SetValue(nullableInstance, i);
+        }
+    }
+    
+    return NivaraColumn<T>.CreateFromNullable(nullableArray);
+}
+```
+
+### DateTime and Timezone Handling
+**Decision**: Convert all DateTime values to UTC for Arrow storage, handle timezone conversion during Arrow-to-DateTime conversion
+**Rationale**: Arrow TimestampType expects UTC timestamps. Provides consistent timezone handling across different data sources.
+
+**Pattern**: DateTime timezone normalization
+```csharp
+// Convert DateTime to UTC for Arrow storage
+var dateTime = column[i];
+if (dateTime.Kind == DateTimeKind.Unspecified)
+    dateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Utc);
+else if (dateTime.Kind == DateTimeKind.Local)
+    dateTime = dateTime.ToUniversalTime();
+
+// Convert from Arrow timestamp to DateTime with timezone
+var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+var dateTime = unixEpoch.AddMicroseconds(timestampValue);
+if (options.TimeZone != TimeZoneInfo.Utc)
+    dateTime = TimeZoneInfo.ConvertTimeFromUtc(dateTime, options.TimeZone);
+```
+
+### Arrow ChunkedArray Access Pattern
+**Decision**: Use `ArrayCount` property and `Array(index)` method to access chunks in Arrow columns
+**Rationale**: Arrow columns can contain multiple chunks. Must iterate through all chunks to extract complete data.
+
+**Pattern**: Multi-chunk Arrow column processing
+```csharp
+// Get the ChunkedArray and process all chunks
+var chunkedArray = arrowColumn.Data;
+int chunkCount = chunkedArray.ArrayCount;
+
+for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+{
+    var chunk = chunkedArray.Array(chunkIndex);
+    
+    for (int i = 0; i < chunk.Length; i++)
+    {
+        if (chunk.IsNull(i))
+            values.Add(default(T?));
+        else
+            values.Add(ExtractValueFromArrowArray<T>(chunk, i, options));
+    }
+}
+```
+
+### Arrow Interop Testing Strategy
+**Decision**: Comprehensive unit tests covering all supported types, null handling, empty data, and round-trip conversion
+**Rationale**: Arrow interoperability is foundational to I/O correctness. Tests verify data preservation across conversion boundaries.
+
+**Coverage**: 13 test cases covering:
+- Empty frame and series conversion
+- All supported primitive types (bool, int, long, float, double, string, DateTime, byte, short, uint, ulong, ushort, sbyte)
+- Null value handling and preservation
+- Multi-column frame conversion
+- Round-trip data preservation (Frame → Arrow → Frame, Series → Arrow → Series)
+- Error handling (null arguments)
+- Schema preservation and validation
+
+### Arrow Interop Gotchas
+**Problem**: Apache Arrow Schema constructor requires explicit null parameter for metadata
+**Solution**: Always pass `null` as second parameter when creating schemas without metadata
+```csharp
+// WRONG - missing metadata parameter
+var schema = new Apache.Arrow.Schema(fields);
+
+// CORRECT - explicit null metadata
+var schema = new Apache.Arrow.Schema(fields, null);
+```
+
+**Problem**: Arrow TimestampArray builder requires DateTimeOffset, not DateTime
+**Solution**: Convert DateTime to DateTimeOffset using Unix epoch calculation
+```csharp
+// WRONG - passing DateTime directly
+builder.Append(dateTime);
+
+// CORRECT - convert to DateTimeOffset
+var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+var microseconds = (long)(dateTime - unixEpoch).TotalMicroseconds;
+builder.Append(DateTimeOffset.FromUnixTimeMilliseconds(microseconds / 1000));
+```
+
+**Problem**: Empty Arrow tables still need valid schema and empty RecordBatch
+**Solution**: Create proper empty structures instead of returning null
+```csharp
+// WRONG - returning null or invalid empty table
+if (frame.ColumnCount == 0) return null;
+
+// CORRECT - create valid empty table structure
+var emptySchema = new Apache.Arrow.Schema(new Field[0], null);
+var emptyBatch = new RecordBatch(emptySchema, new IArrowArray[0], 0);
+return Table.TableFromRecordBatches(emptySchema, new[] { emptyBatch });
+```
+
+**Problem**: NivaraFrame requires at least one column, but Arrow tables can be truly empty
+**Solution**: Handle empty Arrow tables by creating a placeholder column
+```csharp
+// Handle truly empty Arrow tables
+if (arrowTable.ColumnCount == 0)
+{
+    var emptyColumn = NivaraColumn<object>.Create(System.Array.Empty<object>());
+    return NivaraFrame.Create(("EmptyColumn", emptyColumn));
+}
 ```

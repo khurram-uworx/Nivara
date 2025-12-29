@@ -1,5 +1,4 @@
 using Apache.Arrow.Types;
-using Nivara.Extensions.IO;
 using Nivara.IO;
 using NUnit.Framework;
 using Parquet.Schema;
