@@ -18,9 +18,6 @@ public class MLNetIntegrationTests
     [Test]
     public void MLNetTensorRoundTrip_PreservesData()
     {
-        // Feature: dataframe-library, Property 10: ML.NET Integration Round-Trip
-        // Validates: Requirements 3.4, 7.4
-        
         var testData = new[] { 1.0f, 2.5f, -3.7f, 0.0f, 42.1f };
 
         // Create a NivaraSeries from the data
@@ -34,7 +31,7 @@ public class MLNetIntegrationTests
 
         // Assert that data is preserved
         Assert.That(roundTripSeries.Length, Is.EqualTo(originalSeries.Length));
-        
+
         for (int i = 0; i < originalSeries.Length; i++)
         {
             var originalValue = originalSeries[i];
@@ -46,9 +43,6 @@ public class MLNetIntegrationTests
     [Test]
     public void NivaraFrameToDataView_PreservesStructure()
     {
-        // Feature: dataframe-library, Property 10: ML.NET Integration Round-Trip
-        // Validates: Requirements 3.4, 7.4
-
         var col1Data = new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f };
         var col2Data = new[] { 10.0f, 20.0f, 30.0f, 40.0f, 50.0f };
 
@@ -88,9 +82,6 @@ public class MLNetIntegrationTests
     [Test]
     public void FeatureVectorConversion_PreservesData()
     {
-        // Feature: dataframe-library, Property 10: ML.NET Integration Round-Trip
-        // Validates: Requirements 3.4, 7.4
-
         var data1 = new[] { 1.0f, 2.0f, 3.0f };
         var data2 = new[] { 4.0f, 5.0f, 6.0f };
 
@@ -127,9 +118,6 @@ public class MLNetIntegrationTests
     [Test]
     public void DenseTensorConversion_PreservesData()
     {
-        // Feature: dataframe-library, Property 10: ML.NET Integration Round-Trip
-        // Validates: Requirements 3.4, 7.4
-
         // Create 2D tensor
         var tensor = new float[3, 2] { { 1.0f, 2.0f }, { 3.0f, 4.0f }, { 5.0f, 6.0f } };
 
@@ -156,11 +144,8 @@ public class MLNetIntegrationTests
     [Test]
     public void SparseTensorConversion_PreservesNonZeroValues()
     {
-        // Feature: dataframe-library, Property 10: ML.NET Integration Round-Trip
-        // Validates: Requirements 3.4, 7.4
-
         var rowData = new[] { 1.0f, 0.0f, 3.5f, 0.0f, -2.1f };
-        
+
         // Create a single-row NivaraFrame
         var columns = new List<(string Name, IColumn Column)>();
         for (int i = 0; i < rowData.Length; i++)
@@ -185,7 +170,7 @@ public class MLNetIntegrationTests
         {
             var originalValue = rowData[col];
             var roundTripValue = roundTripFrame.GetColumn<float>($"Col_{col}")[0];
-            
+
             if (Math.Abs(originalValue) >= 1e-6f)
             {
                 // Non-zero values should be preserved
@@ -202,9 +187,6 @@ public class MLNetIntegrationTests
     [Test]
     public void TrainTestSplit_PreservesDataIntegrity()
     {
-        // Feature: dataframe-library, Property 10: ML.NET Integration Round-Trip
-        // Validates: Requirements 3.4, 7.4
-
         // Create test data
         var data = Enumerable.Range(1, 100).Select(i => (float)i).ToArray();
         var col = NivaraColumn<float>.Create(data);
@@ -240,7 +222,7 @@ public class MLNetIntegrationTests
         // All original values should be present
         var allValues = allTrainingValues.Union(allTestingValues);
         Assert.That(allValues.Count(), Is.EqualTo(100));
-        
+
         // Verify all original data is present using sequence equal instead of set equal
         var sortedAllValues = allValues.OrderBy(x => x).ToArray();
         var sortedExpected = data.OrderBy(x => x).ToArray();
@@ -250,9 +232,6 @@ public class MLNetIntegrationTests
     [Test]
     public void Normalization_ProducesZeroMeanUnitVariance()
     {
-        // Feature: dataframe-library, Property 10: ML.NET Integration Round-Trip
-        // Validates: Requirements 3.4, 7.4
-
         // Create test data with known statistics
         var data = new float[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f };
         var col = NivaraColumn<float>.Create(data);

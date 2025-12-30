@@ -1,6 +1,4 @@
 using Microsoft.ML;
-using Microsoft.ML.Data;
-using System.Numerics;
 
 namespace Nivara.MLNet;
 
@@ -127,7 +125,7 @@ public static class MLNetExtensions
     /// <param name="frame">The source NivaraFrame</param>
     /// <param name="labelColumn">The name of the label column</param>
     /// <returns>An array of labels</returns>
-    public static T[] ExtractLabels<T>(this NivaraFrame frame, string labelColumn) 
+    public static T[] ExtractLabels<T>(this NivaraFrame frame, string labelColumn)
         where T : struct
     {
         if (frame == null) throw new ArgumentNullException(nameof(frame));
@@ -135,7 +133,7 @@ public static class MLNetExtensions
 
         var column = frame.GetColumn<T>(labelColumn);
         var labels = new T[frame.RowCount];
-        
+
         for (int row = 0; row < frame.RowCount; row++)
         {
             labels[row] = column[row];
@@ -152,8 +150,8 @@ public static class MLNetExtensions
     /// <param name="randomSeed">Optional random seed for reproducible splits</param>
     /// <returns>A tuple containing (training data, testing data)</returns>
     public static (NivaraFrame Training, NivaraFrame Testing) TrainTestSplit(
-        this NivaraFrame frame, 
-        double trainRatio = 0.8, 
+        this NivaraFrame frame,
+        double trainRatio = 0.8,
         int? randomSeed = null)
     {
         if (frame == null) throw new ArgumentNullException(nameof(frame));
@@ -161,7 +159,7 @@ public static class MLNetExtensions
 
         var random = randomSeed.HasValue ? new Random(randomSeed.Value) : new Random();
         var indices = Enumerable.Range(0, frame.RowCount).ToArray();
-        
+
         // Shuffle indices
         for (int i = indices.Length - 1; i > 0; i--)
         {
@@ -194,7 +192,7 @@ public static class MLNetExtensions
 
         // Create a set of columns to normalize for quick lookup
         var columnsToNormalize = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
-        
+
         // Build a new list of columns, normalizing as needed
         var newColumns = new List<(string Name, IColumn Column)>();
 
@@ -218,7 +216,7 @@ public static class MLNetExtensions
     }
 
     // Private helper methods
-    
+
     private static float ConvertToFloat(object? value)
     {
         return value switch
@@ -238,7 +236,7 @@ public static class MLNetExtensions
     private static bool IsNumericColumn(NivaraFrame frame, string columnName)
     {
         var columnType = frame.Schema.GetColumnType(columnName);
-        return columnType == typeof(int) || columnType == typeof(long) || 
+        return columnType == typeof(int) || columnType == typeof(long) ||
                columnType == typeof(float) || columnType == typeof(double) ||
                columnType == typeof(decimal) || columnType == typeof(byte) ||
                columnType == typeof(short);
@@ -247,7 +245,7 @@ public static class MLNetExtensions
     private static IColumn NormalizeColumn(NivaraFrame frame, string columnName)
     {
         var columnType = frame.Schema.GetColumnType(columnName);
-        
+
         if (columnType == typeof(float))
         {
             var column = frame.GetColumn<float>(columnName);
@@ -258,7 +256,7 @@ public static class MLNetExtensions
             }
             var mean = values.Average();
             var stdDev = Math.Sqrt(values.Select(x => Math.Pow(x - mean, 2)).Average());
-            
+
             if (stdDev > 0)
             {
                 var normalized = values.Select(x => (float)((x - mean) / stdDev)).ToArray();
@@ -266,7 +264,7 @@ public static class MLNetExtensions
             }
             return NivaraColumn<float>.Create(values);
         }
-        
+
         if (columnType == typeof(double))
         {
             var column = frame.GetColumn<double>(columnName);
@@ -277,7 +275,7 @@ public static class MLNetExtensions
             }
             var mean = values.Average();
             var stdDev = Math.Sqrt(values.Select(x => Math.Pow(x - mean, 2)).Average());
-            
+
             if (stdDev > 0)
             {
                 var normalized = values.Select(x => (x - mean) / stdDev).ToArray();
@@ -338,7 +336,7 @@ public static class MLNetExtensions
     private static IColumn SelectRowsTyped<T>(IColumn column, int[] indices)
     {
         var selectedValues = new T[indices.Length];
-        
+
         // Try to access as a typed column first for better type preservation
         if (column is NivaraColumn<T> typedColumn)
         {
@@ -367,7 +365,7 @@ public static class MLNetExtensions
                 }
             }
         }
-        
+
         return NivaraColumn<T>.Create(selectedValues);
     }
 

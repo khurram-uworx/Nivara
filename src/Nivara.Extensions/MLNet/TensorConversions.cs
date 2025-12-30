@@ -18,7 +18,7 @@ public static class TensorConversions
         if (frame == null) throw new ArgumentNullException(nameof(frame));
 
         var tensor = new float[frame.RowCount, frame.ColumnCount];
-        
+
         for (int row = 0; row < frame.RowCount; row++)
         {
             for (int col = 0; col < frame.ColumnCount; col++)
@@ -58,12 +58,12 @@ public static class TensorConversions
         for (int col = 0; col < cols; col++)
         {
             var columnData = new float[rows];
-            
+
             for (int row = 0; row < rows; row++)
             {
                 columnData[row] = tensor[row, col];
             }
-            
+
             columns.Add((columnNames[col], NivaraColumn<float>.Create(columnData)));
         }
 
@@ -76,7 +76,7 @@ public static class TensorConversions
     /// <typeparam name="T">The numeric type</typeparam>
     /// <param name="series">The collection of NivaraSeries</param>
     /// <returns>An array of VBuffer tensors</returns>
-    public static VBuffer<T>[] ToBatchTensors<T>(this IEnumerable<NivaraSeries<T>> series) 
+    public static VBuffer<T>[] ToBatchTensors<T>(this IEnumerable<NivaraSeries<T>> series)
         where T : struct, INumber<T>
     {
         if (series == null) throw new ArgumentNullException(nameof(series));
@@ -91,7 +91,7 @@ public static class TensorConversions
     /// <typeparam name="T">The numeric type</typeparam>
     /// <param name="tensors">The array of VBuffer tensors</param>
     /// <returns>An array of NivaraSeries</returns>
-    public static NivaraSeries<T>[] FromBatchTensors<T>(VBuffer<T>[] tensors) 
+    public static NivaraSeries<T>[] FromBatchTensors<T>(VBuffer<T>[] tensors)
         where T : struct, INumber<T>
     {
         if (tensors == null) throw new ArgumentNullException(nameof(tensors));
@@ -122,7 +122,7 @@ public static class TensorConversions
                 var columnName = frame.ColumnNames[col];
                 var columnValue = frame.GetColumn(columnName).GetValue(row);
                 var value = ConvertToFloat(columnValue);
-                
+
                 if (Math.Abs(value) >= threshold)
                 {
                     denseValues.Add(value);
@@ -138,9 +138,9 @@ public static class TensorConversions
             else
             {
                 tensors[row] = new VBuffer<float>(
-                    frame.ColumnCount, 
-                    denseValues.Count, 
-                    denseValues.ToArray(), 
+                    frame.ColumnCount,
+                    denseValues.Count,
+                    denseValues.ToArray(),
                     indices.ToArray());
             }
         }
@@ -174,13 +174,13 @@ public static class TensorConversions
         for (int col = 0; col < columnCount; col++)
         {
             var columnData = new float[rowCount];
-            
+
             for (int row = 0; row < rowCount; row++)
             {
                 var tensor = sparseTensors[row];
                 columnData[row] = tensor.GetItemOrDefault(col);
             }
-            
+
             columns.Add((columnNames[col], NivaraColumn<float>.Create(columnData)));
         }
 
@@ -194,7 +194,7 @@ public static class TensorConversions
     /// <param name="series">The NivaraSeries to reshape</param>
     /// <param name="dimensions">The target dimensions</param>
     /// <returns>A multi-dimensional array representing the tensor</returns>
-    public static Array ReshapeToTensor<T>(this NivaraSeries<T> series, params int[] dimensions) 
+    public static Array ReshapeToTensor<T>(this NivaraSeries<T> series, params int[] dimensions)
         where T : struct, INumber<T>
     {
         if (series == null) throw new ArgumentNullException(nameof(series));
@@ -208,7 +208,7 @@ public static class TensorConversions
         var tensor = Array.CreateInstance(typeof(T), dimensions);
         var column = series.Values;
         var values = new T[column.Length];
-        
+
         // Copy values to the multi-dimensional array
         var indices = new int[dimensions.Length];
         for (int i = 0; i < values.Length; i++)
@@ -220,7 +220,7 @@ public static class TensorConversions
                 indices[dim] = temp % dimensions[dim];
                 temp /= dimensions[dim];
             }
-            
+
             tensor.SetValue(values[i], indices);
         }
 
@@ -233,7 +233,7 @@ public static class TensorConversions
     /// <typeparam name="T">The numeric type</typeparam>
     /// <param name="tensor">The multi-dimensional tensor</param>
     /// <returns>A flattened NivaraSeries</returns>
-    public static NivaraSeries<T> FlattenFromTensor<T>(Array tensor) 
+    public static NivaraSeries<T> FlattenFromTensor<T>(Array tensor)
         where T : struct, INumber<T>
     {
         if (tensor == null) throw new ArgumentNullException(nameof(tensor));
@@ -242,7 +242,7 @@ public static class TensorConversions
 
         var totalElements = tensor.Length;
         var values = new T[totalElements];
-        
+
         // Copy all values from the multi-dimensional array
         var enumerator = tensor.GetEnumerator();
         int index = 0;

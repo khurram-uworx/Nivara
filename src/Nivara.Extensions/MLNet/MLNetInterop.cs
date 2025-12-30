@@ -76,7 +76,7 @@ public static class MLNetInterop
     /// <typeparam name="T">The numeric type</typeparam>
     /// <param name="series">The NivaraSeries to convert</param>
     /// <returns>A tensor representation suitable for ML.NET</returns>
-    public static VBuffer<T> ToMLNetTensor<T>(this NivaraSeries<T> series) 
+    public static VBuffer<T> ToMLNetTensor<T>(this NivaraSeries<T> series)
         where T : struct, INumber<T>
     {
         if (series == null) throw new ArgumentNullException(nameof(series));
@@ -96,12 +96,12 @@ public static class MLNetInterop
     /// <typeparam name="T">The numeric type</typeparam>
     /// <param name="tensor">The ML.NET tensor</param>
     /// <returns>A NivaraSeries containing the tensor data</returns>
-    public static NivaraSeries<T> FromMLNetTensor<T>(VBuffer<T> tensor) 
+    public static NivaraSeries<T> FromMLNetTensor<T>(VBuffer<T> tensor)
         where T : struct, INumber<T>
     {
         var values = new T[tensor.Length];
         tensor.CopyTo(values);
-        
+
         return NivaraSeries<T>.Create(values);
     }
 
@@ -123,14 +123,14 @@ public static class MLNetInterop
         for (int row = 0; row < frame.RowCount; row++)
         {
             var features = new float[featureCount];
-            
+
             for (int col = 0; col < featureColumns.Length; col++)
             {
                 var columnName = featureColumns[col];
                 var columnValue = frame.GetColumn(columnName).GetValue(row);
                 features[col] = ConvertToFloat(columnValue);
             }
-            
+
             vectors[row] = new VBuffer<float>(featureCount, features);
         }
 
@@ -163,13 +163,13 @@ public static class MLNetInterop
         for (int featureIndex = 0; featureIndex < featureCount; featureIndex++)
         {
             var columnData = new float[rowCount];
-            
+
             for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
                 var vector = vectors[rowIndex];
                 columnData[rowIndex] = vector.GetItemOrDefault(featureIndex);
             }
-            
+
             columns.Add((featureNames[featureIndex], NivaraColumn<float>.Create(columnData)));
         }
 
@@ -206,23 +206,23 @@ public static class MLNetInterop
         for (int row = 0; row < frame.RowCount; row++)
         {
             var data = new ThreeColumnData();
-            
+
             // Map columns by name
             if (frame.HasColumn("Feature1"))
                 data.Feature1 = ConvertToFloat(frame.GetColumn("Feature1").GetValue(row));
             else
                 data.Feature1 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[0]).GetValue(row));
-                
+
             if (frame.HasColumn("Feature2"))
                 data.Feature2 = ConvertToFloat(frame.GetColumn("Feature2").GetValue(row));
             else if (frame.ColumnCount > 1)
                 data.Feature2 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[1]).GetValue(row));
-                
+
             if (frame.HasColumn("Label"))
                 data.Label = ConvertToFloat(frame.GetColumn("Label").GetValue(row));
             else if (frame.ColumnCount > 2)
                 data.Label = ConvertToFloat(frame.GetColumn(frame.ColumnNames[2]).GetValue(row));
-            
+
             yield return data;
         }
     }
@@ -236,7 +236,7 @@ public static class MLNetInterop
             {
                 values[col] = ConvertToFloat(frame.GetColumn(frame.ColumnNames[col]).GetValue(row));
             }
-            
+
             yield return new GenericData { Features = values };
         }
     }
@@ -288,7 +288,7 @@ public static class MLNetInterop
         var col1Name = columnNames.Length > 0 ? columnNames[0] : "Feature1";
         var col2Name = columnNames.Length > 1 ? columnNames[1] : "Feature2";
         var col3Name = columnNames.Length > 2 ? columnNames[2] : "Label";
-        
+
         var columns = new List<(string Name, IColumn Column)>
         {
             (col1Name, NivaraColumn<float>.Create(col1Data)),
@@ -302,13 +302,13 @@ public static class MLNetInterop
     private static NivaraFrame ConvertFromGenericData(IDataView dataView, MLContext mlContext, string[] columnNames)
     {
         var columns = new List<(string Name, IColumn Column)>();
-        
+
         // Process each column individually based on its type
         foreach (var columnName in columnNames)
         {
             var column = dataView.Schema[columnName];
             var columnType = column.Type;
-            
+
             try
             {
                 if (columnType == NumberDataViewType.Single)
@@ -357,17 +357,17 @@ public static class MLNetInterop
     {
         var values = new List<float>();
         var column = dataView.Schema[columnName];
-        
+
         using var cursor = dataView.GetRowCursor(new[] { column });
         var getter = cursor.GetGetter<float>(column);
-        
+
         while (cursor.MoveNext())
         {
             float value = 0f;
             getter(ref value);
             values.Add(value);
         }
-        
+
         return values.ToArray();
     }
 
@@ -375,17 +375,17 @@ public static class MLNetInterop
     {
         var values = new List<double>();
         var column = dataView.Schema[columnName];
-        
+
         using var cursor = dataView.GetRowCursor(new[] { column });
         var getter = cursor.GetGetter<double>(column);
-        
+
         while (cursor.MoveNext())
         {
             double value = 0.0;
             getter(ref value);
             values.Add(value);
         }
-        
+
         return values.ToArray();
     }
 
@@ -393,15 +393,15 @@ public static class MLNetInterop
     {
         var values = new List<float>();
         var column = dataView.Schema[columnName];
-        
+
         using var cursor = dataView.GetRowCursor(new[] { column });
         var getter = cursor.GetGetter<VBuffer<float>>(column);
-        
+
         while (cursor.MoveNext())
         {
             VBuffer<float> buffer = default;
             getter(ref buffer);
-            
+
             // For scalar values (like Score), take the first element
             // For vector values, we might want to handle differently
             if (buffer.Length > 0)
@@ -413,7 +413,7 @@ public static class MLNetInterop
                 values.Add(0f);
             }
         }
-        
+
         return values.ToArray();
     }
 

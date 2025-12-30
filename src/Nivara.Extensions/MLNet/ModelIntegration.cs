@@ -1,5 +1,4 @@
 using Microsoft.ML;
-using Microsoft.ML.Data;
 
 namespace Nivara.MLNet;
 
@@ -26,7 +25,7 @@ public class ModelIntegration
     /// <param name="labelColumn">The column containing binary labels</param>
     /// <returns>An ML.NET pipeline configured for binary classification</returns>
     public IEstimator<ITransformer> CreateBinaryClassificationPipeline(
-        string[] featureColumns, 
+        string[] featureColumns,
         string labelColumn = "Label")
     {
         if (featureColumns == null || featureColumns.Length == 0)
@@ -35,7 +34,7 @@ public class ModelIntegration
         return mlContext.Transforms.Concatenate("Features", featureColumns)
             .Append(mlContext.Transforms.NormalizeMinMax("Features"))
             .Append(mlContext.BinaryClassification.Trainers.SdcaLogisticRegression(
-                labelColumnName: labelColumn, 
+                labelColumnName: labelColumn,
                 featureColumnName: "Features"));
     }
 
@@ -46,7 +45,7 @@ public class ModelIntegration
     /// <param name="labelColumn">The column containing class labels</param>
     /// <returns>An ML.NET pipeline configured for multiclass classification</returns>
     public IEstimator<ITransformer> CreateMulticlassClassificationPipeline(
-        string[] featureColumns, 
+        string[] featureColumns,
         string labelColumn = "Label")
     {
         if (featureColumns == null || featureColumns.Length == 0)
@@ -56,7 +55,7 @@ public class ModelIntegration
             .Append(mlContext.Transforms.Concatenate("Features", featureColumns))
             .Append(mlContext.Transforms.NormalizeMinMax("Features"))
             .Append(mlContext.MulticlassClassification.Trainers.SdcaMaximumEntropy(
-                labelColumnName: labelColumn, 
+                labelColumnName: labelColumn,
                 featureColumnName: "Features"))
             .Append(mlContext.Transforms.Conversion.MapKeyToValue("PredictedLabel"));
     }
@@ -68,7 +67,7 @@ public class ModelIntegration
     /// <param name="labelColumn">The column containing target values</param>
     /// <returns>An ML.NET pipeline configured for regression</returns>
     public IEstimator<ITransformer> CreateRegressionPipeline(
-        string[] featureColumns, 
+        string[] featureColumns,
         string labelColumn = "Label")
     {
         if (featureColumns == null || featureColumns.Length == 0)
@@ -77,7 +76,7 @@ public class ModelIntegration
         return mlContext.Transforms.Concatenate("Features", featureColumns)
             .Append(mlContext.Transforms.NormalizeMinMax("Features"))
             .Append(mlContext.Regression.Trainers.Sdca(
-                labelColumnName: labelColumn, 
+                labelColumnName: labelColumn,
                 featureColumnName: "Features"));
     }
 
