@@ -205,6 +205,19 @@ public sealed class QueryFrame : IDisposable
     }
 
     /// <summary>
+    /// Returns diagnostic information about the query plan based on the specified mode
+    /// </summary>
+    /// <param name="mode">The diagnostic mode to use</param>
+    /// <returns>Diagnostic information formatted according to the mode</returns>
+    public string GetDiagnosticInfo(QueryDiagnosticMode mode = QueryDiagnosticMode.Basic)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var queryPlan = new QueryPlan(source, operations);
+        return QueryDiagnostics.GetDiagnosticInfo(queryPlan, mode);
+    }
+
+    /// <summary>
     /// Analyzes the query plan for potential optimization opportunities
     /// </summary>
     /// <returns>A list of optimization suggestions</returns>
@@ -214,6 +227,18 @@ public sealed class QueryFrame : IDisposable
 
         var queryPlan = new QueryPlan(source, operations);
         return QueryPlanAnalyzer.AnalyzeOptimizations(queryPlan);
+    }
+
+    /// <summary>
+    /// Analyzes the query plan for potential issues and provides recommendations
+    /// </summary>
+    /// <returns>A list of diagnostic recommendations</returns>
+    public IReadOnlyList<string> AnalyzeQueryPlan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var queryPlan = new QueryPlan(source, operations);
+        return QueryDiagnostics.AnalyzeQueryPlan(queryPlan);
     }
 
     /// <summary>

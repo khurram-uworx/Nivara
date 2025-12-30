@@ -20,32 +20,75 @@ internal sealed class QueryExecutor
 
         try
         {
+            // Validate the plan before execution
+            if (!ValidatePlan(plan))
+            {
+                var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+                throw new QueryExecutionException($"Query plan validation failed. {diagnosticInfo}");
+            }
+
             // Execute the data source to get initial columns
-            var currentColumns = plan.Source.Execute();
+            IReadOnlyDictionary<string, IColumn> currentColumns;
+
+            try
+            {
+                currentColumns = plan.Source.Execute();
+            }
+            catch (Exception ex)
+            {
+                var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan, ex);
+                throw new QueryExecutionException($"Data source execution failed: {ex.Message}. {diagnosticInfo}", ex);
+            }
 
             if (currentColumns == null)
-                throw new QueryExecutionException("Data source returned null columns");
+            {
+                var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+                throw new QueryExecutionException($"Data source returned null columns. {diagnosticInfo}");
+            }
 
             // Apply each operation in sequence
-            foreach (var operation in plan.Operations)
+            for (int i = 0; i < plan.Operations.Count; i++)
             {
+                var operation = plan.Operations[i];
+
                 try
                 {
+                    // Validate operation against current schema
+                    var currentSchema = CreateSchemaFromColumns(currentColumns);
+                    var transformedSchema = operation.TransformSchema(currentSchema);
+
                     currentColumns = operation.Execute(currentColumns);
 
                     if (currentColumns == null)
-                        throw new QueryExecutionException($"Operation '{operation.OperationType}' returned null columns");
+                    {
+                        var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+                        throw new QueryExecutionException($"Operation '{operation.OperationType}' at position {i + 1} returned null columns. {diagnosticInfo}");
+                    }
+
+                    // Validate that the operation produced the expected schema
+                    var actualSchema = CreateSchemaFromColumns(currentColumns);
+                    if (!actualSchema.IsCompatibleWith(transformedSchema, requireExactMatch: false))
+                    {
+                        throw new QueryExecutionException(
+                            $"Operation '{operation.OperationType}' at position {i + 1} produced unexpected schema. " +
+                            $"Expected: {transformedSchema}, Actual: {actualSchema}");
+                    }
                 }
                 catch (Exception ex) when (ex is not QueryExecutionException)
                 {
-                    throw new QueryExecutionException($"Operation '{operation.OperationType}' failed: {ex.Message}", ex);
+                    var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan, ex);
+                    throw new QueryExecutionException(
+                        $"Operation '{operation.OperationType}' at position {i + 1} failed: {ex.Message}. {diagnosticInfo}",
+                        operation.OperationType,
+                        ex);
                 }
             }
 
             // Create the final frame from the result columns
             if (currentColumns.Count == 0)
             {
-                throw new QueryExecutionException("Query execution resulted in no columns");
+                var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+                throw new QueryExecutionException($"Query execution resulted in no columns. {diagnosticInfo}");
             }
 
             var namedColumns = currentColumns.Select(kvp => (kvp.Key, kvp.Value));
@@ -53,7 +96,8 @@ internal sealed class QueryExecutor
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
-            throw new QueryExecutionException($"Query execution failed: {ex.Message}", ex);
+            var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan, ex);
+            throw new QueryExecutionException($"Query execution failed: {ex.Message}. {diagnosticInfo}", ex);
         }
     }
 
@@ -150,5 +194,16 @@ internal sealed class QueryExecutor
         {
             return int.MaxValue; // Return maximum cost if estimation fails
         }
+    }
+
+    /// <summary>
+    /// Creates a schema from a collection of columns
+    /// </summary>
+    /// <param name="columns">The columns to create schema from</param>
+    /// <returns>A schema representing the columns</returns>
+    private static Schema CreateSchemaFromColumns(IReadOnlyDictionary<string, IColumn> columns)
+    {
+        var schemaColumns = columns.Select(kvp => (kvp.Key, kvp.Value.ElementType));
+        return new Schema(schemaColumns);
     }
 }

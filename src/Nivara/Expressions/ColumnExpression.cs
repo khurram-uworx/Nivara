@@ -11,7 +11,7 @@ public abstract class ColumnExpression
     /// <summary>
     /// Gets the result type of this expression
     /// </summary>
-    public abstract Type ResultType { get; }
+    public virtual Type ResultType { get; protected set; } = typeof(object);
 
     /// <summary>
     /// Gets the name of this expression for display purposes
@@ -299,7 +299,7 @@ public sealed class ColumnReference : ColumnExpression
     public string ColumnName { get; }
 
     /// <inheritdoc />
-    public override Type ResultType { get; }
+    public override Type ResultType { get; protected set; }
 
     /// <inheritdoc />
     public override string Name => ColumnName;
@@ -314,7 +314,13 @@ public sealed class ColumnReference : ColumnExpression
         }
 
         var actualType = schema.GetColumnType(ColumnName);
-        if (ResultType != typeof(object) && ResultType != actualType)
+
+        // If ResultType was not explicitly set (i.e., it's object), update it to the actual schema type
+        if (ResultType == typeof(object))
+        {
+            ResultType = actualType;
+        }
+        else if (ResultType != actualType)
         {
             throw new SchemaValidationException($"Column '{ColumnName}' has type {actualType.Name} but expected {ResultType.Name}");
         }
@@ -348,7 +354,7 @@ public sealed class LiteralExpression : ColumnExpression
     public object? Value { get; }
 
     /// <inheritdoc />
-    public override Type ResultType { get; }
+    public override Type ResultType { get; protected set; }
 
     /// <inheritdoc />
     public override string Name => Value?.ToString() ?? "null";
@@ -429,7 +435,7 @@ public sealed class BinaryExpression : ColumnExpression
     public ColumnExpression Right { get; }
 
     /// <inheritdoc />
-    public override Type ResultType { get; }
+    public override Type ResultType { get; protected set; }
 
     /// <inheritdoc />
     public override string Name => $"({Left.Name} {GetOperatorSymbol(Operator)} {Right.Name})";
@@ -439,6 +445,18 @@ public sealed class BinaryExpression : ColumnExpression
     {
         Left.Validate(schema);
         Right.Validate(schema);
+
+        // Validate type compatibility for arithmetic operations
+        if (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
+            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide)
+        {
+            if (!TypeCompatibilityValidator.AreArithmeticCompatible(Left.ResultType, Right.ResultType))
+            {
+                throw new SchemaValidationException(
+                    $"Binary {Operator} operation requires arithmetic-compatible types. " +
+                    $"Left operand type: {Left.ResultType.Name}, Right operand type: {Right.ResultType.Name}");
+            }
+        }
     }
 
     private static Type DetermineResultType(Type leftType, Type rightType)
@@ -516,8 +534,63 @@ public sealed class ComparisonExpression : ColumnExpression
     /// <inheritdoc />
     public override void Validate(Schema schema)
     {
+        // Validate left first so we know its resolved type
         Left.Validate(schema);
+
+        // Validate right operand normally (literals are no-ops)
         Right.Validate(schema);
+
+        // Validate type compatibility for comparison operations
+        bool compatible = TypeCompatibilityValidator.AreComparisonCompatible(Left.ResultType, Right.ResultType);
+
+        // If not compatible, allow literal coercion where reasonable
+        if (!compatible)
+        {
+            if (Right is LiteralExpression lit && Left.ResultType != typeof(object) && lit.Value != null)
+            {
+                try
+                {
+                    Convert.ChangeType(lit.Value, Left.ResultType);
+                    compatible = true;
+                }
+                catch
+                {
+                    // conversion failed, leave compatible=false
+                }
+            }
+
+            if (!compatible && Left is LiteralExpression litLeft && Right.ResultType != typeof(object) && litLeft.Value != null)
+            {
+                try
+                {
+                    Convert.ChangeType(litLeft.Value, Right.ResultType);
+                    compatible = true;
+                }
+                catch
+                {
+                    // conversion failed
+                }
+            }
+        }
+
+        if (!compatible)
+        {
+            throw new SchemaValidationException(
+                $"Comparison {Operator} operation requires compatible types. Left operand type: {Left.ResultType.Name}, Right operand type: {Right.ResultType.Name}");
+        }
+
+        // Validate that both operand types support comparison
+        if (!TypeCompatibilityValidator.SupportsComparison(Left.ResultType))
+        {
+            throw new SchemaValidationException(
+                $"Comparison {Operator} operation: Left operand type {Left.ResultType.Name} does not support comparison operations");
+        }
+
+        if (!TypeCompatibilityValidator.SupportsComparison(Right.ResultType))
+        {
+            throw new SchemaValidationException(
+                $"Comparison {Operator} operation: Right operand type {Right.ResultType.Name} does not support comparison operations");
+        }
     }
 
     private static string GetOperatorSymbol(ComparisonOperator op)
@@ -570,7 +643,7 @@ public sealed class ScalarExpression : ColumnExpression
     public object Scalar { get; }
 
     /// <inheritdoc />
-    public override Type ResultType { get; }
+    public override Type ResultType { get; protected set; }
 
     /// <inheritdoc />
     public override string Name => $"({Column.Name} {GetOperatorSymbol(Operator)} {Scalar})";
@@ -579,6 +652,18 @@ public sealed class ScalarExpression : ColumnExpression
     public override void Validate(Schema schema)
     {
         Column.Validate(schema);
+
+        // Validate type compatibility for scalar operations
+        if (Scalar != null && (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
+            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide))
+        {
+            if (!TypeCompatibilityValidator.AreArithmeticCompatible(Column.ResultType, Scalar.GetType()))
+            {
+                throw new SchemaValidationException(
+                    $"Scalar {Operator} operation requires arithmetic-compatible types. " +
+                    $"Column type: {Column.ResultType.Name}, Scalar type: {Scalar.GetType().Name}");
+            }
+        }
     }
 
     private static string GetOperatorSymbol(BinaryOperator op)
