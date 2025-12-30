@@ -206,4 +206,91 @@ public static class QueryPlanAnalyzer
 
         return suggestions;
     }
+
+    /// <summary>
+    /// Generates diagnostic information about query execution context
+    /// </summary>
+    /// <param name="queryPlan">The query plan</param>
+    /// <param name="executionError">The execution error, if any</param>
+    /// <returns>Diagnostic information string</returns>
+    public static string GenerateDiagnosticInfo(QueryPlan queryPlan, Exception? executionError = null)
+    {
+        if (queryPlan == null)
+            throw new ArgumentNullException(nameof(queryPlan));
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Query Diagnostic Information:");
+        sb.AppendLine("============================");
+        sb.AppendLine();
+
+        // Basic query information
+        sb.AppendLine($"Source: {queryPlan.Source.GetType().Name}");
+        sb.AppendLine($"Operations Count: {queryPlan.Operations.Count}");
+        sb.AppendLine($"Input Columns: {queryPlan.Source.Schema.ColumnNames.Count}");
+        sb.AppendLine($"Output Columns: {queryPlan.ResultSchema.ColumnNames.Count}");
+        sb.AppendLine();
+
+        // Schema information
+        sb.AppendLine("Input Schema:");
+        foreach (var column in queryPlan.Source.Schema.ColumnNames)
+        {
+            var type = queryPlan.Source.Schema.GetColumnType(column);
+            sb.AppendLine($"  {column}: {type.Name}");
+        }
+        sb.AppendLine();
+
+        sb.AppendLine("Output Schema:");
+        foreach (var column in queryPlan.ResultSchema.ColumnNames)
+        {
+            var type = queryPlan.ResultSchema.GetColumnType(column);
+            sb.AppendLine($"  {column}: {type.Name}");
+        }
+        sb.AppendLine();
+
+        // Operation details
+        if (queryPlan.Operations.Count > 0)
+        {
+            sb.AppendLine("Operation Details:");
+            for (int i = 0; i < queryPlan.Operations.Count; i++)
+            {
+                var operation = queryPlan.Operations[i];
+                sb.AppendLine($"  {i + 1}. {operation.OperationType}");
+
+                var details = GetOperationDetails(operation);
+                if (!string.IsNullOrEmpty(details))
+                {
+                    sb.AppendLine($"     {details}");
+                }
+            }
+            sb.AppendLine();
+        }
+
+        // Error information
+        if (executionError != null)
+        {
+            sb.AppendLine("Execution Error:");
+            sb.AppendLine($"  Type: {executionError.GetType().Name}");
+            sb.AppendLine($"  Message: {executionError.Message}");
+
+            if (executionError.InnerException != null)
+            {
+                sb.AppendLine($"  Inner Exception: {executionError.InnerException.GetType().Name}");
+                sb.AppendLine($"  Inner Message: {executionError.InnerException.Message}");
+            }
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
+    }
+
+    private static string GetOperationDetails(IQueryOperation operation)
+    {
+        return operation switch
+        {
+            FilterOperation filter => $"Condition: {filter.Condition}",
+            SelectOperation select => $"Columns: {string.Join(", ", select.Columns.Select(c => c.Name))}",
+            GroupByOperation groupBy => $"Group By: {string.Join(", ", groupBy.GroupByColumns.Select(c => c.Name))}",
+            _ => string.Empty
+        };
+    }
 }

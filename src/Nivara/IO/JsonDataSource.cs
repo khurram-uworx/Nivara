@@ -42,6 +42,7 @@ internal sealed class JsonLazySource : IQuerySource
     private readonly string filePath;
     private readonly JsonOptions options;
     private readonly Lazy<Schema> lazySchema;
+    private readonly DeferredErrorHandler errorHandler;
 
     /// <summary>
     /// Initializes a new instance of JsonLazySource
@@ -52,8 +53,9 @@ internal sealed class JsonLazySource : IQuerySource
     {
         this.filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
+        this.errorHandler = new DeferredErrorHandler();
 
-        lazySchema = new Lazy<Schema>(InferSchema);
+        lazySchema = new Lazy<Schema>(InferSchemaWithErrorHandling);
     }
 
     /// <inheritdoc />
@@ -65,24 +67,116 @@ internal sealed class JsonLazySource : IQuerySource
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
+        // Check for deferred errors first
+        errorHandler.ThrowIfHasDeferredErrors("JSON data source execution");
+
         try
         {
-            var jsonText = File.ReadAllText(filePath);
+            // Check file existence and accessibility first
+            if (!File.Exists(filePath))
+            {
+                throw new DataSourceException($"JSON file not found: '{filePath}'");
+            }
 
-            if (options.IsArray)
+            FileInfo fileInfo;
+            try
             {
-                var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
-                return ProcessJsonRecords(records ?? Array.Empty<JsonElement>());
+                fileInfo = new FileInfo(filePath);
             }
-            else
+            catch (Exception ex)
             {
-                var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
-                return ProcessJsonRecords(new[] { record });
+                throw new DataSourceException($"Cannot access JSON file '{filePath}': {ex.Message}", ex);
             }
+
+            if (fileInfo.Length == 0)
+            {
+                throw new DataSourceException($"{filePath}: JSON file is empty");
+            }
+
+            string jsonText;
+            try
+            {
+                jsonText = File.ReadAllText(filePath);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new DataSourceException($"Access denied to JSON file '{filePath}'. Check file permissions.", ex);
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                throw new DataSourceException($"Directory not found for JSON file '{filePath}': {ex.Message}", ex);
+            }
+            catch (FileNotFoundException ex)
+            {
+                throw new DataSourceException($"JSON file not found: '{filePath}': {ex.Message}", ex);
+            }
+            catch (IOException ex)
+            {
+                throw new DataSourceException($"IO error reading JSON file '{filePath}': {ex.Message}", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(jsonText))
+            {
+                throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
+            }
+
+            try
+            {
+                if (options.IsArray)
+                {
+                    var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
+                    return ProcessJsonRecords(records ?? Array.Empty<JsonElement>());
+                }
+                else
+                {
+                    var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
+                    return ProcessJsonRecords(new[] { record });
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
+            }
+            catch (NotSupportedException ex)
+            {
+                throw new DataSourceException($"Unsupported JSON format in file '{filePath}': {ex.Message}", ex);
+            }
+        }
+        catch (DataSourceException)
+        {
+            // Re-throw DataSourceException as-is
+            throw;
         }
         catch (Exception ex)
         {
             throw new DataSourceException($"Failed to read JSON file '{filePath}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Infers schema with deferred error handling for lazy operations
+    /// </summary>
+    /// <returns>The inferred schema</returns>
+    private Schema InferSchemaWithErrorHandling()
+    {
+        try
+        {
+            return InferSchema();
+        }
+        catch (Exception ex)
+        {
+            // If inference failed with a DataSourceException (schema-related problems such
+            // as empty arrays or missing properties), surface it now when Schema is accessed.
+            // Other exceptions related to transient file access can still be deferred.
+            if (ex is DataSourceException)
+                throw;
+
+            // For lazy sources, defer non-schema errors until execution
+            errorHandler.AddFileAccessError(filePath, ex, "ScanJson");
+
+            // Return a minimal schema to allow query building to continue
+            // The error will be reported when Execute() is called
+            return new Schema(new[] { ("placeholder", typeof(string)) });
         }
     }
 
@@ -126,36 +220,94 @@ internal sealed class JsonLazySource : IQuerySource
     {
         try
         {
-            var jsonText = File.ReadAllText(filePath);
+            // Check file existence and accessibility first
+            if (!File.Exists(filePath))
+            {
+                throw new DataSourceException($"JSON file not found: '{filePath}'");
+            }
+
+            string jsonText;
+            try
+            {
+                jsonText = File.ReadAllText(filePath);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new DataSourceException($"Access denied to JSON file '{filePath}'. Check file permissions.", ex);
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                throw new DataSourceException($"Directory not found for JSON file '{filePath}': {ex.Message}", ex);
+            }
+            catch (FileNotFoundException ex)
+            {
+                throw new DataSourceException($"JSON file not found: '{filePath}': {ex.Message}", ex);
+            }
+            catch (IOException ex)
+            {
+                throw new DataSourceException($"IO error reading JSON file '{filePath}': {ex.Message}", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(jsonText))
+            {
+                throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
+            }
+
             JsonElement[] sampleRecords;
 
-            if (options.IsArray)
+            try
             {
-                var allRecords = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
-                sampleRecords = allRecords?.Take(options.SchemaInferenceRecords).ToArray() ?? Array.Empty<JsonElement>();
+                if (options.IsArray)
+                {
+                    var allRecords = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
+                    if (allRecords == null)
+                    {
+                        throw new DataSourceException($"Failed to deserialize JSON array from file '{filePath}': result was null");
+                    }
+                    sampleRecords = allRecords.Take(options.SchemaInferenceRecords).ToArray();
+                }
+                else
+                {
+                    var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
+                    sampleRecords = new[] { record };
+                }
             }
-            else
+            catch (JsonException ex)
             {
-                var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
-                sampleRecords = new[] { record };
+                throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
+            }
+            catch (NotSupportedException ex)
+            {
+                throw new DataSourceException($"Unsupported JSON format in file '{filePath}': {ex.Message}", ex);
             }
 
             if (sampleRecords.Length == 0)
             {
-                throw new DataSourceException("No records found in JSON file for schema inference");
+                throw new DataSourceException($"No records found in JSON file for schema inference: '{filePath}'");
+            }
+
+            // Validate that records are objects
+            for (int i = 0; i < sampleRecords.Length; i++)
+            {
+                if (sampleRecords[i].ValueKind != JsonValueKind.Object)
+                {
+                    throw new DataSourceException($"Record {i + 1} in JSON file '{filePath}' is not an object. Expected JSON objects for tabular data.");
+                }
             }
 
             // Get all property names from sample records
             var allPropertyNames = new HashSet<string>();
             foreach (var record in sampleRecords)
             {
-                if (record.ValueKind == JsonValueKind.Object)
+                foreach (var property in record.EnumerateObject())
                 {
-                    foreach (var property in record.EnumerateObject())
-                    {
-                        allPropertyNames.Add(property.Name);
-                    }
+                    allPropertyNames.Add(property.Name);
                 }
+            }
+
+            if (allPropertyNames.Count == 0)
+            {
+                throw new DataSourceException($"No properties found in JSON records from file '{filePath}'");
             }
 
             // Infer types for each property
@@ -163,13 +315,25 @@ internal sealed class JsonLazySource : IQuerySource
 
             foreach (var propertyName in allPropertyNames)
             {
-                var inferredType = InferPropertyType(sampleRecords, propertyName);
-                columnDefinitions.Add((propertyName, inferredType));
+                try
+                {
+                    var inferredType = InferPropertyType(sampleRecords, propertyName);
+                    columnDefinitions.Add((propertyName, inferredType));
+                }
+                catch (Exception ex)
+                {
+                    throw new DataSourceException($"Type inference failed for property '{propertyName}' in JSON file '{filePath}': {ex.Message}", ex);
+                }
             }
 
             return new Schema(columnDefinitions);
         }
-        catch (Exception ex) when (!(ex is DataSourceException))
+        catch (DataSourceException)
+        {
+            // Re-throw DataSourceException as-is
+            throw;
+        }
+        catch (Exception ex)
         {
             throw new DataSourceException($"Failed to infer schema from JSON file '{filePath}': {ex.Message}", ex);
         }
@@ -347,7 +511,59 @@ internal sealed class JsonEagerSource : IQuerySource
     public JsonEagerSource(string filePath, JsonOptions options)
     {
         lazySource = new JsonLazySource(filePath, options);
-        lazyColumns = new Lazy<IReadOnlyDictionary<string, IColumn>>(lazySource.Execute);
+        // Eagerly validate common empty-file/empty-array cases before delegating to lazy execution.
+        lazyColumns = new Lazy<IReadOnlyDictionary<string, IColumn>>(() =>
+        {
+            // Check file existence and basic accessibility
+            if (!File.Exists(filePath))
+                throw new DataSourceException($"JSON file not found: '{filePath}'");
+
+            FileInfo fileInfo;
+            try
+            {
+                fileInfo = new FileInfo(filePath);
+            }
+            catch (Exception ex)
+            {
+                throw new DataSourceException($"Cannot access JSON file '{filePath}': {ex.Message}", ex);
+            }
+
+            if (fileInfo.Length == 0)
+                throw new DataSourceException($"JSON file is empty: '{filePath}'");
+
+            string jsonText;
+            try
+            {
+                jsonText = File.ReadAllText(filePath);
+            }
+            catch (Exception ex)
+            {
+                throw new DataSourceException($"IO error reading JSON file '{filePath}': {ex.Message}", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(jsonText))
+                throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
+
+            // If JSON is an array, ensure there is at least one record for schema inference
+            if (options.IsArray)
+            {
+                try
+                {
+                    var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
+                    if (records == null || records.Length == 0)
+                    {
+                        throw new DataSourceException($"No records found in JSON file for schema inference: '{filePath}'");
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
+                }
+            }
+
+            // Delegate to lazy execution for the full processing
+            return lazySource.Execute();
+        });
     }
 
     /// <inheritdoc />

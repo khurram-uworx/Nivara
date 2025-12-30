@@ -369,7 +369,7 @@ The query engine supports several core operations:
 
 #### Query Diagnostics and Optimization
 
-The query engine provides comprehensive diagnostic information:
+The query engine provides comprehensive diagnostic information with multiple diagnostic modes:
 
 ```csharp
 var query = employees.AsQueryFrame()
@@ -393,6 +393,36 @@ Query Execution Plan:
 └─ Result Schema: Name: String, Department: String
 */
 
+// Get diagnostic information with different levels of detail
+var basicDiagnostics = query.GetDiagnosticInfo(QueryDiagnosticMode.Basic);
+var detailedDiagnostics = query.GetDiagnosticInfo(QueryDiagnosticMode.Detailed);
+var performanceDiagnostics = query.GetDiagnosticInfo(QueryDiagnosticMode.Performance);
+var comprehensiveDiagnostics = query.GetDiagnosticInfo(QueryDiagnosticMode.Comprehensive);
+
+Console.WriteLine("Basic Diagnostics:");
+Console.WriteLine(basicDiagnostics);
+/* Output:
+Query Plan: 3 operations
+Source: MemoryQuerySource (Eager)
+Input Columns: 4
+Output Columns: 2
+Operations: Filter → Filter → Select
+*/
+
+Console.WriteLine("Performance Analysis:");
+Console.WriteLine(performanceDiagnostics);
+/* Output:
+Performance Analysis:
+===================
+Estimated Execution Cost: Medium
+Optimization Opportunities:
+  • Multiple filter operations (2) detected - consider combining into single projection
+Resource Analysis:
+  Data Source Type: Eager (immediate I/O)
+  Pipeline Length: 3 operations
+  Column Reduction: 4 → 2
+*/
+
 // Analyze optimization opportunities
 var optimizations = query.AnalyzeOptimizations();
 foreach (var suggestion in optimizations)
@@ -400,8 +430,19 @@ foreach (var suggestion in optimizations)
     Console.WriteLine($"Optimization: {suggestion}");
 }
 /* Possible output:
-Optimization: Found 2 filter operations - consider combining them for better performance
+Optimization: Multiple filter operations detected - consider combining them for better performance
+Optimization: Some columns are unused - consider adding explicit column selection for better performance
 */
+
+// Get comprehensive query plan analysis with recommendations
+var recommendations = query.AnalyzeQueryPlan();
+foreach (var recommendation in recommendations)
+{
+    Console.WriteLine($"Recommendation: {recommendation}");
+}
+
+// Set global diagnostic mode for all queries
+QueryDiagnostics.GlobalMode = QueryDiagnosticMode.Performance;
 
 // Schema information is available before execution
 var resultSchema = query.Schema;

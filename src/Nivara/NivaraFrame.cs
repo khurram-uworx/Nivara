@@ -229,6 +229,9 @@ public sealed class NivaraFrame : IFrame
                 $"All columns must have the same length.",
                 nameof(column));
 
+        // Validate column type compatibility if needed for operations
+        ValidateColumnTypeForAddition(name, column.ElementType);
+
         var newColumns = columns.Concat(new[] { new KeyValuePair<string, IColumn>(name, column) });
         var namedColumns = newColumns.Select(kvp => (kvp.Key, kvp.Value));
 
@@ -334,6 +337,51 @@ public sealed class NivaraFrame : IFrame
     public override int GetHashCode()
     {
         return base.GetHashCode();
+    }
+
+    /// <summary>
+    /// Validates that a column type is compatible for addition to this frame
+    /// </summary>
+    /// <param name="columnName">The name of the column being added</param>
+    /// <param name="columnType">The type of the column being added</param>
+    private void ValidateColumnTypeForAddition(string columnName, Type columnType)
+    {
+        // Basic type validation - ensure it's a supported type
+        var supportedTypes = TypeCompatibilityValidator.GetNumericTypes()
+            .Concat(new[] { typeof(string), typeof(bool), typeof(DateTime), typeof(object) })
+            .ToList();
+
+        if (!supportedTypes.Contains(columnType) && !columnType.IsEnum)
+        {
+            var supportedTypeNames = string.Join(", ", supportedTypes.Select(t => t.Name));
+            throw new ColumnTypeMismatchException(
+                columnName,
+                typeof(object), // Expected type (generic)
+                columnType);
+        }
+    }
+
+    /// <summary>
+    /// Validates schema compatibility between two frames for operations like joins
+    /// </summary>
+    /// <param name="other">The other frame to validate compatibility with</param>
+    /// <param name="operationName">The name of the operation for error messages</param>
+    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible</exception>
+    public void ValidateSchemaCompatibility(NivaraFrame other, string operationName)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (!Schema.IsCompatibleWith(other.Schema, requireExactMatch: false))
+        {
+            throw new SchemaValidationException(
+                $"Schema incompatibility detected for operation '{operationName}'. " +
+                $"This frame has schema: {Schema}. Other frame has schema: {other.Schema}.",
+                Schema,
+                other.Schema);
+        }
     }
 
     /// <inheritdoc />
