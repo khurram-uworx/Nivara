@@ -71,6 +71,7 @@ internal sealed class CsvLazySource : IQuerySource
     private readonly string filePath;
     private readonly CsvOptions options;
     private readonly Lazy<Schema> lazySchema;
+    private readonly DeferredErrorHandler errorHandler;
 
     /// <summary>
     /// Initializes a new instance of CsvLazySource
@@ -81,8 +82,9 @@ internal sealed class CsvLazySource : IQuerySource
     {
         this.filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
         this.options = options ?? throw new ArgumentNullException(nameof(options));
+        this.errorHandler = new DeferredErrorHandler();
 
-        lazySchema = new Lazy<Schema>(InferSchema);
+        lazySchema = new Lazy<Schema>(InferSchemaWithErrorHandling);
     }
 
     /// <inheritdoc />
@@ -94,13 +96,71 @@ internal sealed class CsvLazySource : IQuerySource
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
+        // Check for deferred errors first
+        errorHandler.ThrowIfHasDeferredErrors("CSV data source execution");
+
         try
         {
-            using var reader = new StringReader(File.ReadAllText(filePath));
+            // Check file existence and accessibility first
+            if (!File.Exists(filePath))
+            {
+                throw new DataSourceException($"CSV file not found: '{filePath}'");
+            }
+
+            FileInfo fileInfo;
+            try
+            {
+                fileInfo = new FileInfo(filePath);
+            }
+            catch (Exception ex)
+            {
+                throw new DataSourceException($"Cannot access CSV file '{filePath}': {ex.Message}", ex);
+            }
+
+            if (fileInfo.Length == 0)
+            {
+                throw new DataSourceException($"CSV file is empty: '{filePath}'");
+            }
+
+            string fileContent;
+            try
+            {
+                fileContent = File.ReadAllText(filePath);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new DataSourceException($"Access denied to CSV file '{filePath}'. Check file permissions.", ex);
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                throw new DataSourceException($"Directory not found for CSV file '{filePath}': {ex.Message}", ex);
+            }
+            catch (FileNotFoundException ex)
+            {
+                throw new DataSourceException($"CSV file not found: '{filePath}': {ex.Message}", ex);
+            }
+            catch (IOException ex)
+            {
+                throw new DataSourceException($"IO error reading CSV file '{filePath}': {ex.Message}", ex);
+            }
+
+            using var reader = new StringReader(fileContent);
             using var csv = new CsvReader(reader, options.ToCsvConfiguration());
 
             // Read all records as dynamic objects
-            var records = csv.GetRecords<dynamic>().ToList();
+            List<dynamic> records;
+            try
+            {
+                records = csv.GetRecords<dynamic>().ToList();
+            }
+            catch (Exception ex) when (ex.GetType().Name.Contains("Csv"))
+            {
+                throw new DataSourceException($"CSV parsing error in file '{filePath}': {ex.Message}", ex);
+            }
+            catch (Exception ex)
+            {
+                throw new DataSourceException($"Unexpected error parsing CSV file '{filePath}': {ex.Message}", ex);
+            }
 
             if (records.Count == 0)
             {
@@ -126,9 +186,35 @@ internal sealed class CsvLazySource : IQuerySource
 
             return columns;
         }
+        catch (DataSourceException)
+        {
+            // Re-throw DataSourceException as-is
+            throw;
+        }
         catch (Exception ex)
         {
             throw new DataSourceException($"Failed to read CSV file '{filePath}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Infers schema with deferred error handling for lazy operations
+    /// </summary>
+    /// <returns>The inferred schema</returns>
+    private Schema InferSchemaWithErrorHandling()
+    {
+        try
+        {
+            return InferSchema();
+        }
+        catch (Exception ex)
+        {
+            // For lazy sources, defer schema inference errors until execution
+            errorHandler.AddFileAccessError(filePath, ex, "ScanCsv");
+
+            // Return a minimal schema to allow query building to continue
+            // The error will be reported when Execute() is called
+            return new Schema(new[] { ("placeholder", typeof(string)) });
         }
     }
 
@@ -140,22 +226,100 @@ internal sealed class CsvLazySource : IQuerySource
     {
         try
         {
-            using var reader = new StringReader(File.ReadAllText(filePath));
+            // Check file existence and accessibility first
+            if (!File.Exists(filePath))
+            {
+                throw new DataSourceException($"CSV file not found: '{filePath}'");
+            }
+
+            string fileContent;
+            try
+            {
+                fileContent = File.ReadAllText(filePath);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                throw new DataSourceException($"Access denied to CSV file '{filePath}'. Check file permissions.", ex);
+            }
+            catch (DirectoryNotFoundException ex)
+            {
+                throw new DataSourceException($"Directory not found for CSV file '{filePath}': {ex.Message}", ex);
+            }
+            catch (FileNotFoundException ex)
+            {
+                throw new DataSourceException($"CSV file not found: '{filePath}': {ex.Message}", ex);
+            }
+            catch (IOException ex)
+            {
+                throw new DataSourceException($"IO error reading CSV file '{filePath}': {ex.Message}", ex);
+            }
+
+            if (string.IsNullOrWhiteSpace(fileContent))
+            {
+                throw new DataSourceException($"CSV file is empty or contains only whitespace: '{filePath}'");
+            }
+
+            using var reader = new StringReader(fileContent);
             using var csv = new CsvReader(reader, options.ToCsvConfiguration());
 
             // Read header to get column names
-            csv.Read();
-            csv.ReadHeader();
-            var headers = csv.HeaderRecord ?? throw new DataSourceException("No headers found in CSV file");
+            bool headerRead;
+            try
+            {
+                headerRead = csv.Read();
+                if (!headerRead)
+                {
+                    throw new DataSourceException($"CSV file contains no data: '{filePath}'");
+                }
+
+                csv.ReadHeader();
+            }
+            catch (Exception ex) when (ex.GetType().Name.Contains("Csv"))
+            {
+                throw new DataSourceException($"CSV header parsing error in file '{filePath}': {ex.Message}", ex);
+            }
+
+            var headers = csv.HeaderRecord;
+            if (headers == null || headers.Length == 0)
+            {
+                throw new DataSourceException($"No headers found in CSV file: '{filePath}'");
+            }
+
+            // Validate headers
+            for (int i = 0; i < headers.Length; i++)
+            {
+                if (string.IsNullOrWhiteSpace(headers[i]))
+                {
+                    throw new DataSourceException($"Empty or whitespace header found at column {i + 1} in CSV file: '{filePath}'");
+                }
+            }
+
+            // Check for duplicate headers
+            var duplicateHeaders = headers.GroupBy(h => h, StringComparer.OrdinalIgnoreCase)
+                                         .Where(g => g.Count() > 1)
+                                         .Select(g => g.Key)
+                                         .ToList();
+
+            if (duplicateHeaders.Count > 0)
+            {
+                throw new DataSourceException($"Duplicate headers found in CSV file '{filePath}': {string.Join(", ", duplicateHeaders)}");
+            }
 
             // Read sample rows for type inference
             var sampleRecords = new List<dynamic>();
             int rowsRead = 0;
 
-            while (csv.Read() && rowsRead < options.SchemaInferenceRows)
+            try
             {
-                sampleRecords.Add(csv.GetRecord<dynamic>());
-                rowsRead++;
+                while (csv.Read() && rowsRead < options.SchemaInferenceRows)
+                {
+                    sampleRecords.Add(csv.GetRecord<dynamic>());
+                    rowsRead++;
+                }
+            }
+            catch (Exception ex) when (ex.GetType().Name.Contains("Csv"))
+            {
+                throw new DataSourceException($"CSV data parsing error in file '{filePath}': {ex.Message}", ex);
             }
 
             // Infer types for each column
@@ -163,13 +327,25 @@ internal sealed class CsvLazySource : IQuerySource
 
             foreach (var header in headers)
             {
-                var inferredType = InferColumnType(sampleRecords, header);
-                columnDefinitions.Add((Name: header, Type: inferredType));
+                try
+                {
+                    var inferredType = InferColumnType(sampleRecords, header);
+                    columnDefinitions.Add((Name: header, Type: inferredType));
+                }
+                catch (Exception ex)
+                {
+                    throw new DataSourceException($"Type inference failed for column '{header}' in CSV file '{filePath}': {ex.Message}", ex);
+                }
             }
 
             return new Schema(columnDefinitions);
         }
-        catch (Exception ex) when (!(ex is DataSourceException))
+        catch (DataSourceException)
+        {
+            // Re-throw DataSourceException as-is
+            throw;
+        }
+        catch (Exception ex)
         {
             throw new DataSourceException($"Failed to infer schema from CSV file '{filePath}': {ex.Message}", ex);
         }

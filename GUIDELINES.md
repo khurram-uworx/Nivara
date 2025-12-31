@@ -3056,3 +3056,155 @@ Assert.That(optimizedResult.RowCount, Is.EqualTo(baselineResult.RowCount));
 **Testing Complexity**: Property-based testing was crucial for validating optimization correctness. Simple unit tests were insufficient to catch edge cases in optimization logic.
 
 **Performance vs. Correctness Trade-offs**: The conservative approach to optimization ensures correctness but may miss some optimization opportunities. This trade-off was intentional to prioritize reliability.
+
+## Error Handling and Diagnostics Implementation
+
+### Diagnostic Mode Architecture
+**Decision**: Separate diagnostic modes (None, Basic, Detailed, Performance, Comprehensive) with static QueryDiagnostics class
+**Rationale**: Provides flexible diagnostic information without performance overhead when not needed. Static class allows global configuration while instance methods provide query-specific analysis.
+
+**Pattern**: Use enum for diagnostic levels and static methods for analysis
+```csharp
+// Global diagnostic mode setting
+QueryDiagnostics.GlobalMode = QueryDiagnosticMode.Performance;
+
+// Query-specific diagnostic information
+var diagnostics = queryFrame.GetDiagnosticInfo(QueryDiagnosticMode.Comprehensive);
+var recommendations = queryFrame.AnalyzeQueryPlan();
+```
+
+### Deferred Error Handling Strategy
+**Decision**: DeferredErrorHandler class for lazy operations with error collection and reporting at execution time
+**Rationale**: Lazy operations should defer all errors until Collect() to maintain lazy semantics. Allows query building to continue even with file access issues.
+
+**Pattern**: Collect errors during lazy operations, report during execution
+```csharp
+// In lazy data sources
+try {
+    return InferSchema();
+} catch (Exception ex) {
+    errorHandler.AddFileAccessError(filePath, ex, "ScanCsv");
+    return new Schema(new[] { ("placeholder", typeof(string)) }); // Minimal schema
+}
+
+// At execution time
+errorHandler.ThrowIfHasDeferredErrors("CSV data source execution");
+```
+
+### File IO Error Handling Enhancement
+**Decision**: Comprehensive file access validation with specific exception types for different failure modes
+**Rationale**: File operations have many failure modes (permissions, missing files, corruption). Specific error messages help users diagnose and fix issues quickly.
+
+**Pattern**: Check file existence, permissions, and content before processing
+```csharp
+// File existence and accessibility checks
+if (!File.Exists(filePath))
+    throw new DataSourceException($"File not found: '{filePath}'");
+
+try {
+    fileContent = File.ReadAllText(filePath);
+} catch (UnauthorizedAccessException ex) {
+    throw new DataSourceException($"Access denied to file '{filePath}'. Check permissions.", ex);
+} catch (IOException ex) {
+    throw new DataSourceException($"IO error reading file '{filePath}': {ex.Message}", ex);
+}
+```
+
+### CsvHelper Exception Handling Gotcha
+**Problem**: CsvHelper.Exceptions namespace doesn't exist in newer versions
+**Solution**: Use generic exception catching with type name checking for CSV-specific errors
+```csharp
+// WRONG - CsvHelper.Exceptions namespace doesn't exist
+using CsvHelper.Exceptions;
+catch (CsvHelperException ex) { ... }
+
+// CORRECT - use generic exception catching
+catch (Exception ex) when (ex.GetType().Name.Contains("Csv")) {
+    throw new DataSourceException($"CSV parsing error: {ex.Message}", ex);
+}
+```
+
+### Deferred Error Handling Challenges
+**Problem**: Returning placeholder schemas during error deferral can cause downstream schema validation failures
+**Lesson**: Deferred error handling requires careful balance between lazy semantics and schema consistency. Placeholder schemas should be designed to pass basic validation while still allowing error reporting at execution time.
+
+**Consideration**: May need to revisit deferred error strategy to avoid schema validation cascading failures in tests. Alternative approaches:
+- Fail fast on schema inference errors even in lazy mode
+- Use more sophisticated placeholder schemas that match expected column types
+- Implement schema validation bypass for placeholder schemas
+
+### Diagnostic Integration Benefits
+**Achievement**: Successfully integrated diagnostic modes with QueryFrame providing multiple levels of analysis
+- Basic: Simple operation count and schema information
+- Detailed: Complete query plan explanation with schema transformations
+- Performance: Execution cost estimates and optimization opportunities
+- Comprehensive: All diagnostic information plus recommendations
+
+**Usage**: Diagnostic information helps users understand query performance characteristics and optimization opportunities without requiring deep knowledge of the query engine internals.
+
+## Expression Validation and Type Resolution
+
+### ColumnReference Type Resolution Issue
+**Problem**: ColumnReference expressions created with `Col("columnName")` defaulted to `typeof(object)` for ResultType, causing type compatibility validation failures during schema validation.
+**Root Cause**: The `ColumnReference.Validate()` method checked column existence and type compatibility but didn't update the `ResultType` property to match the actual schema type.
+**Solution**: Made `ResultType` property settable with protected setter and updated `ColumnReference.Validate()` to set `ResultType` to the actual schema type when it was initially `typeof(object)`.
+
+**Pattern**: Expression validation should update type information based on schema
+```csharp
+public override void Validate(Schema schema)
+{
+    // Validate column exists
+    if (!schema.HasColumn(ColumnName))
+        throw new SchemaValidationException($"Column '{ColumnName}' not found...");
+
+    var actualType = schema.GetColumnType(ColumnName);
+    
+    // Update ResultType if it wasn't explicitly set
+    if (ResultType == typeof(object))
+    {
+        ResultType = actualType;
+    }
+    else if (ResultType != actualType)
+    {
+        throw new SchemaValidationException($"Type mismatch...");
+    }
+}
+```
+
+### Expression Validation Error Messages
+**Problem**: `TypeCompatibilityValidator.ValidateComparisonCompatibility()` was using operation names as column names in `ColumnTypeMismatchException`, causing confusing error messages.
+**Solution**: Replaced calls to validator methods with direct type checking and `SchemaValidationException` with descriptive messages.
+
+**Pattern**: Use appropriate exception types for different validation contexts
+```csharp
+// WRONG - uses ColumnTypeMismatchException for expression validation
+TypeCompatibilityValidator.ValidateComparisonCompatibility(leftType, rightType, operationName);
+
+// CORRECT - use SchemaValidationException with descriptive message
+if (!TypeCompatibilityValidator.AreComparisonCompatible(Left.ResultType, Right.ResultType))
+{
+    throw new SchemaValidationException(
+        $"Comparison {Operator} operation requires compatible types. " +
+        $"Left operand type: {Left.ResultType.Name}, Right operand type: {Right.ResultType.Name}");
+}
+```
+
+### Virtual vs Abstract Properties with Setters
+**Decision**: Changed `ResultType` from abstract to virtual property with protected setter
+**Rationale**: Allows base class to provide default implementation while enabling derived classes to update the property during validation. Abstract properties with setters require all derived classes to implement both getter and setter.
+
+**Pattern**: Use virtual properties with protected setters for properties that need runtime updates
+```csharp
+// Base class
+public virtual Type ResultType { get; protected set; } = typeof(object);
+
+// Derived class can override if needed
+public override Type ResultType { get; protected set; }
+
+// Or use inherited implementation and update during validation
+public override void Validate(Schema schema)
+{
+    // ... validation logic ...
+    ResultType = actualType; // Update inherited property
+}
+```
