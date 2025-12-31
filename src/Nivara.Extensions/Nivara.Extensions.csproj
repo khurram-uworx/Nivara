@@ -7,7 +7,7 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
-    <PackageVersion>0.3.0</PackageVersion>
+    <PackageVersion>0.4.0</PackageVersion>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <Authors>Khurram</Authors>
     <Description>High-performance columnar DataFrame library for .NET</Description>
