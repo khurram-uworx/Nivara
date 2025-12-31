@@ -1,106 +1,142 @@
-# Contributing to Nivara DataFrame Library
+# Contributing to Nivara
 
-Thank you for your interest in contributing to Nivara! This document provides guidelines and information for contributors.
+Thank you for your interest in contributing to **Nivara**, a high-performance, columnar DataFrame library for .NET. This document defines **how humans contribute** to the project: workflow, structure, standards, and review expectations.
+
+> **Important**
+> - This file is **human-owned**.
+> - AI tools may **suggest** changes, but should not directly modify this file.
+> - Architectural rationale, gotchas, and LLM-specific learnings belong in **GUIDELINES.md**, not here.
+> - Feature descriptions and user-facing documentation belong in **README.md**, not here.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - .NET 10.0 SDK or later
 - Git
 - A code editor (Visual Studio, VS Code, or JetBrains Rider recommended)
 
-### Setting Up Development Environment
-1. **Clone the repository**
-   ```bash
-   git clone https://github.com/khurram-uworx/nivara.git
-   cd nivara
-   ```
-2. **Restore dependencies**
-   ```bash
-   dotnet restore
-   ```
-3. **Build the project**
-   ```bash
-   dotnet build
-   ```
-4. **Run tests**
-   ```bash
-   dotnet test
-   ```
+### Repository Setup
 
----
+Clone the repository and restore dependencies:
 
-## 📦 Project Structure
 ```bash
-src/
-├── Nivara/                 # Core library (dependency-free)
-│   ├── Diagnostics/        # Performance analysis and diagnostic tools
-│   ├── Exceptions/         # Custom exception hierarchy
-│   ├── Expressions/        # Query expression system
-│   ├── IO/                 # Built-in IO functionality (JSON, etc.)
-│   ├── Memory/             # Memory-based storage implementations
-│   ├── Tensors/            # Tensor-based storage implementations
-│   └── [Root Files]        # Core interfaces and main classes
-├── Nivara.Extensions/      # Extension methods and third-party integrations
-│   └── IO/                 # Third-party IO functionality (CSV, Parquet, etc.)
-samples/
-├── Nivara.SampleApp/       # Sample applications
-tests/
-├── Nivara.Tests/           # Unit and property tests
-│   ├── Diagnostics/        # Tests for diagnostic functionality
-│   ├── Memory/             # Tests for memory storage
-│   ├── Tensors/            # Tests for tensor storage
-│   └── [Root]              # Tests for core functionality
+git clone https://github.com/khurram-uworx/nivara.git
+cd nivara
+dotnet restore
+```
+
+### Build
+
+```bash
+dotnet build
+```
+
+### Run Tests
+
+```bash
+dotnet test
 ```
 
 ---
 
-## 📋 Development Process
+## 🗂️ Project Structure
 
-### Finding Work
-- Review the [project status](#project-status) in the README.
-- Look for issues labeled `good first issue` or `help wanted`.
+Understanding the repository layout is essential before making changes.
 
-### Implementation Workflow
-1. **Choose a Task**: Select an available task from the task list.
-2. **Review Specifications**: Read the relevant requirements and design sections.
-3. **Create Branch**: Create a feature branch for your work.
-4. **Implement**: Follow the coding standards and implement the feature.
-5. **Test**: Add comprehensive unit and property-based tests.
-6. **Document**: Update documentation and examples as needed.
-7. **Submit PR**: Create a pull request with a clear description.
+### Core Library
+
+```
+src/Nivara/
+├── Diagnostics/           # Performance analysis and diagnostic tools
+├── Exceptions/            # Custom exception hierarchy
+├── Expressions/           # Query expression system
+├── IO/                    # Built-in IO (JSON, core data sources)
+├── Memory/                # Memory-based storage (non-vectorizable types)
+├── Tensors/               # Tensor-based storage (vectorizable types)
+├── Schema.cs              # Schema management
+├── NivaraColumn.cs        # Column implementation
+├── NivaraSeries.cs        # Series implementation
+├── NivaraFrame.cs         # DataFrame implementation
+└── [Query Engine Files]   # Query planning and execution
+```
+
+### Extensions
+
+Third-party dependencies and optional integrations live in a separate project:
+
+```
+src/Nivara.Extensions/
+└── IO/
+    ├── CsvDataSource.cs   # CSV support (CsvHelper)
+    └── CsvExtensions.cs   # CSV factory methods
+```
+
+### Tests
+
+Tests mirror the source structure for discoverability:
+
+```
+samples/
+├── Nivara.SampleApp/       # Sample applications
+tests/Nivara.Tests/
+├── Diagnostics/
+├── Expressions/
+├── Memory/
+├── Tensors/
+├── SchemaTests.cs
+├── NivaraColumnTests.cs
+├── NivaraSeriesTests.cs
+└── NivaraFrameTests.cs
+```
+
+---
+
+## 🔄 Development Workflow
+
+1. **Choose a Task**
+   - Pick an issue or roadmap item that aligns with project goals.
+
+2. **Create a Branch**
+   - Use a descriptive feature or fix branch name.
+
+3. **Implement Changes**
+   - Follow coding standards and existing architectural patterns.
+   - Keep changes focused and incremental.
+
+4. **Add Tests**
+   - All new behavior must be covered by appropriate tests.
+
+5. **Update Documentation**
+   - User-facing changes → update **README.md**
+   - Do *not* add rationale or lessons learned here (use GUIDELINES.md instead).
+
+6. **Submit a Pull Request**
+   - Provide a clear description of what changed and why.
 
 ---
 
 ## 🧪 Testing Guidelines
 
-### Test Requirements
-All contributions must include appropriate tests:
-- **Unit Tests**: Specific examples and edge cases using NUnit.
-- **Property-Based Tests**: Universal properties using FsCheck.NET.
-- **Integration Tests**: End-to-end scenarios where applicable.
+All contributions must include tests where applicable.
 
-### Test Structure
-```bash
-tests/Nivara.Tests/
-├── Unit/                    # Unit tests for specific functionality
-├── Properties/              # Property-based tests for correctness
-├── Integration/             # Integration tests
-└── Performance/             # Performance and benchmark tests
-```
+### Test Types
+
+- **Unit Tests**: Concrete examples and edge cases (NUnit)
+- **Property-Based Tests**: Invariants and universal properties (FsCheck.NET)
+- **Integration Tests**: End-to-end scenarios where relevant
+- **Performance Tests**: Benchmarks for performance-critical paths
 
 ### Running Tests
+
 ```bash
-# Run all tests
+# All tests
 dotnet test
-# Run specific test project
-dotnet test tests/Nivara.Tests
-# Run with coverage
+
+# With coverage
 dotnet test --collect:"XPlat Code Coverage"
-# Run property-based tests with verbose output
-dotnet test --logger "console;verbosity=detailed"
 ```
 
 ---
@@ -108,84 +144,64 @@ dotnet test --logger "console;verbosity=detailed"
 ## 📝 Coding Standards
 
 ### C# Conventions
-- **Private fields**: Use simple `Type fieldName` (no underscore prefix).
-- **Local variables**: Use camelCase.
-- **Public properties**: Use PascalCase.
-- **Method organization**: Static public → public instance → private methods.
-- **Local functions**: Keep at the top of containing method.
 
-### Code Quality
-- Use meaningful variable and method names.
-- Add XML documentation for public APIs.
-- Follow SOLID principles.
-- Minimize memory allocations.
+- Public APIs use **PascalCase**
+- Local variables use **camelCase**
+- Private fields use simple names (no underscore prefix)
+- Static public methods first, then instance methods, then private methods
+- Add XML documentation to all public APIs
 
----
+### Code Quality Expectations
 
-## 🔧 Performance Guidelines
-
-### Memory Management
-- Use memory pools for frequently allocated objects.
-- Prefer `stackalloc` for small, short-lived arrays.
-- Implement `IDisposable` for types that manage resources.
-- Use `Span<T>` and `Memory<T>` for zero-copy operations.
-
-### SIMD Optimization
-- Use `System.Numerics.Vector<T>` for vectorized operations.
-- Ensure data is properly aligned for SIMD operations.
-- Provide scalar fallbacks for non-SIMD hardware.
-- Test performance on different architectures.
-
-### Benchmarking
-- Use BenchmarkDotNet for performance measurements.
-- Include benchmarks for performance-critical code.
-- Test on multiple platforms (Windows, Linux, macOS).
-- Document performance characteristics.
+- Prefer clarity over cleverness
+- Avoid unnecessary allocations
+- Follow SOLID principles
+- Use `Span<T>` / `Memory<T>` where appropriate
+- Use `unsafe` code only when clearly justified and documented
 
 ---
 
-## 🔄 Pull Request Process
+## 📦 Performance and Benchmarks
+
+- Use **BenchmarkDotNet** for performance measurements
+- Include benchmarks for performance-sensitive code
+- Validate behavior on multiple platforms when possible
+
+---
+
+## 🔁 Pull Request Process
 
 ### Before Submitting
-1. Ensure all tests pass.
-2. Update documentation as needed.
-3. Add appropriate tests for new functionality.
-4. Follow the coding standards.
-5. Update the task status if implementing a planned task.
 
-### PR Template
-```markdown
-**Description**
-Brief description of changes.
+- All tests pass
+- Documentation updated if behavior is user-visible
+- Code follows project standards
+- Changes are limited to the intended scope
 
-**Related Issue/Task**
-Link to related issue or task from the task list.
+### Review Requirements
 
-**Type of Change**
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Breaking change
-- [ ] Documentation update
-- [ ] Performance improvement
-
-**Testing**
-- [ ] Unit tests added/updated
-- [ ] Property-based tests added/updated
-```
+- CI must be green
+- At least one maintainer review
+- Clear commit history (squash merges preferred)
 
 ---
 
-## 📞 Getting Help
-- **Discussions**: Use GitHub Discussions for questions.
-- **Issues**: Report bugs and request features via GitHub Issues.
-- **Documentation**: Check the docs/ directory for guides.
+## 🏷️ Versioning
+
+Nivara follows **Semantic Versioning**:
+
+- **MAJOR** – breaking changes
+- **MINOR** – new features (backward compatible)
+- **PATCH** – bug fixes
 
 ---
 
-## 🙏 Recognition
-Contributors will be recognized in:
-- Release notes for their contributions.
-- Contributors section in documentation.
-- GitHub contributors list.
+## 💬 Getting Help
 
-Thank you for contributing to Nivara! 🚀
+- GitHub Issues – bugs and feature requests
+- GitHub Discussions – questions and design discussions
+
+---
+
+Thank you for contributing to Nivara. Your help makes the project better 🚀
+
