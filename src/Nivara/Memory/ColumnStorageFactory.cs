@@ -1,3 +1,5 @@
+using System.Reflection;
+
 namespace Nivara.Memory;
 
 /// <summary>
@@ -5,6 +7,44 @@ namespace Nivara.Memory;
 /// </summary>
 internal static class ColumnStorageFactory
 {
+    /// <summary>
+    /// Try to create a TensorStorage&lt;T&gt; instance using the provided element type and data array.
+    /// Returns null when construction fails.
+    /// </summary>
+    static object? tryCreateFromArray(Type elementType, Array dataArray, bool[]? nullMask = null)
+    {
+        if (elementType == null) throw new ArgumentNullException(nameof(elementType));
+        if (dataArray == null) throw new ArgumentNullException(nameof(dataArray));
+
+        try
+        {
+            var tensorType = typeof(TensorStorage<>).MakeGenericType(elementType);
+
+            // Prefer ctor (T[] data, bool[]? nullMask) then fallback to (T[] data)
+            var ctor = tensorType.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, new Type[] { dataArray.GetType(), typeof(bool[]) }, null)
+                       ?? tensorType.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, new Type[] { dataArray.GetType() }, null)
+                       // Fallback when exact runtime array type differs (e.g., elementType[])
+                       ?? tensorType.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, new Type[] { elementType.MakeArrayType(), typeof(bool[]) }, null)
+                       ?? tensorType.GetConstructor(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public, null, new Type[] { elementType.MakeArrayType() }, null);
+
+            if (ctor == null)
+                return null;
+
+            object? instance;
+            var parameters = ctor.GetParameters();
+            if (parameters.Length == 2)
+                instance = ctor.Invoke(new object?[] { dataArray, nullMask });
+            else
+                instance = ctor.Invoke(new object?[] { dataArray });
+
+            return instance;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     /// <summary>
     /// Helper method for creating storage with nullable value types
     /// Creates tensor storage for nullable value types
@@ -92,9 +132,23 @@ internal static class ColumnStorageFactory
     /// <returns>An appropriate storage implementation</returns>
     static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values)
     {
-        // For now, use memory storage for all types
-        // Tensor storage optimization will be implemented in a future iteration
-        // when we can properly handle the generic constraints
+        // Prefer tensor-backed storage for vectorizable unmanaged value types.
+        if (IsVectorizable<T>() && typeof(T).IsValueType)
+        {
+            try
+            {
+                var array = values.ToArray();
+                var obj = tryCreateFromArray(typeof(T), array, null);
+                if (obj is IColumnStorage<T> storage)
+                    return storage;
+            }
+            catch
+            {
+                // fall through to MemoryStorage
+            }
+        }
+
+        // For reference types, non-vectorizable value types, or on failure above use MemoryStorage.
         return new MemoryStorage<T>(values, detectNulls: !typeof(T).IsValueType);
     }
 
@@ -106,6 +160,53 @@ internal static class ColumnStorageFactory
     /// <returns>An appropriate storage implementation</returns>
     static IColumnStorage<T> Create<T>(ReadOnlySpan<T?> values) where T : struct
     {
+        // For nullable value types that are vectorizable create tensor-backed storage when possible
+        if (IsVectorizable<T>())
+        {
+            try
+            {
+                if (values.IsEmpty)
+                {
+                    var emptyArray = Array.CreateInstance(typeof(T), 0);
+                    var objEmpty = tryCreateFromArray(typeof(T), emptyArray, null);
+                    if (objEmpty is IColumnStorage<T> stEmpty)
+                        return stEmpty;
+                }
+                else
+                {
+                    var dataArray = new T[values.Length];
+                    var nullMask = new bool[values.Length];
+                    bool hasNulls = false;
+
+                    for (int i = 0; i < values.Length; i++)
+                    {
+                        var v = values[i];
+                        if (v.HasValue)
+                        {
+                            dataArray[i] = v.GetValueOrDefault();
+                            nullMask[i] = false;
+                        }
+                        else
+                        {
+                            dataArray[i] = default!;
+                            nullMask[i] = true;
+                            hasNulls = true;
+                        }
+                    }
+
+                    bool[]? maybeMask = hasNulls ? nullMask : null;
+                    var obj = tryCreateFromArray(typeof(T), dataArray, maybeMask);
+                    if (obj is IColumnStorage<T> st)
+                        return st;
+                }
+            }
+            catch
+            {
+                // fall back to memory path
+            }
+        }
+
+        // Fallback to existing memory-backed helper
         return createMemoryStorage(values);
     }
 
