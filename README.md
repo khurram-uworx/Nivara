@@ -84,13 +84,17 @@ var dropped = column.DropNulls(); // [1, 3]
 
 ## Vectorized Operations
 
-For vectorizable types, Nivara automatically uses SIMD-accelerated kernels:
+For vectorizable types, Nivara automatically uses SIMD-accelerated kernels backed by `System.Numerics.Tensors`:
 
 ```csharp
 var a = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 });
 var b = a * 1.5;
 var c = a + b;
 ```
+
+Nivara automatically selects the optimal storage backend:
+- **TensorStorage**: For vectorizable types (`int`, `float`, `double`, `bool`) using `System.Numerics.Tensors`
+- **MemoryStorage**: For non-vectorizable types (`string`, `Guid`, reference types) using `Memory<T>`
 
 Vectorization is applied opportunistically and safely, with scalar fallbacks when required.
 
@@ -166,10 +170,10 @@ The integrations are shipped as a separate package so the core Nivara runtime re
 
 Nivara currently supports:
 
-- Typed, immutable columns and frames
+- Typed, immutable columns and frames with automatic storage selection
 - Explicit null handling with fill and drop operations
-- Vectorized arithmetic and comparisons
-- Tensor-backed numeric helpers
+- Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
+- High-performance tensor-backed storage for numeric types
 - Query diagnostics and plan inspection
 - Schema-aware lazy query construction
 - CSV and JSON lazy data sources

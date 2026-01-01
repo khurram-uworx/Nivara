@@ -81,8 +81,28 @@ public static class TensorConversions
     {
         if (series == null) throw new ArgumentNullException(nameof(series));
 
-        // TODO: Implement conversion to ML.NET VBuffer format
-        throw new NotImplementedException("ToMLNetTensor conversion requires separate implementation");
+        var seriesList = series.ToList();
+        if (seriesList.Count == 0)
+            return Array.Empty<VBuffer<T>>();
+
+        var tensors = new VBuffer<T>[seriesList.Count];
+
+        for (int i = 0; i < seriesList.Count; i++)
+        {
+            var currentSeries = seriesList[i];
+            var values = new T[currentSeries.Length];
+            
+            // Extract values from the series
+            for (int j = 0; j < currentSeries.Length; j++)
+            {
+                values[j] = currentSeries.Values[j];
+            }
+
+            // Create dense VBuffer (all values are significant)
+            tensors[i] = new VBuffer<T>(values.Length, values);
+        }
+
+        return tensors;
     }
 
     /// <summary>
@@ -95,9 +115,45 @@ public static class TensorConversions
         where T : struct, INumber<T>
     {
         if (tensors == null) throw new ArgumentNullException(nameof(tensors));
+        if (tensors.Length == 0)
+            return Array.Empty<NivaraSeries<T>>();
 
-        // TODO: Implement conversion from ML.NET VBuffer format
-        throw new NotImplementedException("FromMLNetTensor conversion requires separate implementation");
+        var seriesArray = new NivaraSeries<T>[tensors.Length];
+
+        for (int i = 0; i < tensors.Length; i++)
+        {
+            var tensor = tensors[i];
+            var values = new T[tensor.Length];
+
+            // Extract values from VBuffer (handles both dense and sparse)
+            if (tensor.IsDense)
+            {
+                // Dense tensor - copy all values
+                var denseValues = tensor.GetValues();
+                for (int j = 0; j < denseValues.Length; j++)
+                {
+                    values[j] = denseValues[j];
+                }
+            }
+            else
+            {
+                // Sparse tensor - fill with defaults and set non-zero values
+                Array.Fill(values, T.Zero);
+                var sparseValues = tensor.GetValues();
+                var sparseIndices = tensor.GetIndices();
+                
+                for (int j = 0; j < sparseValues.Length; j++)
+                {
+                    values[sparseIndices[j]] = sparseValues[j];
+                }
+            }
+
+            // Create series with sequential integer indices
+            var seriesIndices = Enumerable.Range(0, values.Length).Cast<object>().ToArray();
+            seriesArray[i] = NivaraSeries<T>.Create(values, seriesIndices);
+        }
+
+        return seriesArray;
     }
 
     /// <summary>
@@ -207,11 +263,10 @@ public static class TensorConversions
 
         var tensor = Array.CreateInstance(typeof(T), dimensions);
         var column = series.Values;
-        var values = new T[column.Length];
 
         // Copy values to the multi-dimensional array
         var indices = new int[dimensions.Length];
-        for (int i = 0; i < values.Length; i++)
+        for (int i = 0; i < column.Length; i++)
         {
             // Convert linear index to multi-dimensional indices
             var temp = i;
@@ -221,7 +276,7 @@ public static class TensorConversions
                 temp /= dimensions[dim];
             }
 
-            tensor.SetValue(values[i], indices);
+            tensor.SetValue(column[i], indices);
         }
 
         return tensor;

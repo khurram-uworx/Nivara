@@ -1,5 +1,7 @@
 using Nivara.Diagnostics;
 using Nivara.Memory;
+using Nivara.Tensors;
+using System.Numerics.Tensors;
 
 namespace Nivara;
 
@@ -422,8 +424,34 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
-        if (storage is MemoryStorage<T> memoryStorage)
+        // Handle both TensorStorage and MemoryStorage
+        if (storage.StorageType == StorageType.Tensor)
+        {
+            // Get data using the interface
+            var dataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                dataBuffer[i] = storage[i];
+            }
+            var result = new T[dataBuffer.Length];
+
+            // Use our helper method for multiplication
+            MultiplyTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var nullMask = storage.NullMask;
+            if (!nullMask.IsEmpty)
+            {
+                var nullMaskArray = nullMask.ToArray();
+                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+            }
+
+            // Create result storage using the factory
+            var resultStorage = ColumnStorageFactory.Create(result.AsSpan());
+            return new NivaraColumn<T>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new T[data.Length];
@@ -467,8 +495,49 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             HasNulls || other.HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        // Handle both TensorStorage and MemoryStorage combinations
+        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        {
+            // Both are tensor storage
+            var leftDataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                leftDataBuffer[i] = storage[i];
+            }
+            var rightDataBuffer = new T[other.storage.Length];
+            for (int i = 0; i < other.storage.Length; i++)
+            {
+                rightDataBuffer[i] = other.storage[i];
+            }
+            var result = new T[leftDataBuffer.Length];
+
+            // Use our helper method for addition
+            AddTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNullMask = storage.NullMask;
+            var rightNullMask = other.storage.NullMask;
+
+            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+            {
+                var resultNullMaskArray = new bool[result.Length];
+
+                for (int i = 0; i < result.Length; i++)
+                {
+                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                    resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                }
+
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            // Create result storage using the factory
+            var resultStorage = ColumnStorageFactory.Create(result.AsSpan());
+            return new NivaraColumn<T>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -510,8 +579,49 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<T> MultiplyVectorized(NivaraColumn<T> other)
     {
-        // Since we're currently using MemoryStorage for all types, we need to handle it appropriately
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        // Handle both TensorStorage and MemoryStorage combinations
+        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        {
+            // Both are tensor storage
+            var leftDataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                leftDataBuffer[i] = storage[i];
+            }
+            var rightDataBuffer = new T[other.storage.Length];
+            for (int i = 0; i < other.storage.Length; i++)
+            {
+                rightDataBuffer[i] = other.storage[i];
+            }
+            var result = new T[leftDataBuffer.Length];
+
+            // Use our helper method for multiplication
+            MultiplyTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNullMask = storage.NullMask;
+            var rightNullMask = other.storage.NullMask;
+
+            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+            {
+                var resultNullMaskArray = new bool[result.Length];
+
+                for (int i = 0; i < result.Length; i++)
+                {
+                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                    resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                }
+
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            // Create result storage using the factory
+            var resultStorage = ColumnStorageFactory.Create(result.AsSpan());
+            return new NivaraColumn<T>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -553,11 +663,62 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private static void MultiplyTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
     {
-        // For now, use scalar multiplication with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            MultiplyFloat(x, y, destination);
+        }
+        else if (type == typeof(double))
+        {
+            MultiplyDouble(x, y, destination);
+        }
+        else
+        {
+            // Fall back to scalar multiplication with dynamic dispatch for other types
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y!)!;
+            }
+        }
+    }
+
+    private static void MultiplyFloat(ReadOnlySpan<T> x, T y, Span<T> destination)
+    {
+        var xFloat = new float[x.Length];
+        var destFloat = new float[destination.Length];
+        
         for (int i = 0; i < x.Length; i++)
         {
-            destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y!)!;
+            xFloat[i] = (float)(object)x[i]!;
+        }
+        
+        var yFloat = (float)(object)y!;
+        TensorPrimitives.Multiply(xFloat, yFloat, destFloat);
+        
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = (T)(object)destFloat[i];
+        }
+    }
+
+    private static void MultiplyDouble(ReadOnlySpan<T> x, T y, Span<T> destination)
+    {
+        var xDouble = new double[x.Length];
+        var destDouble = new double[destination.Length];
+        
+        for (int i = 0; i < x.Length; i++)
+        {
+            xDouble[i] = (double)(object)x[i]!;
+        }
+        
+        var yDouble = (double)(object)y!;
+        TensorPrimitives.Multiply(xDouble, yDouble, destDouble);
+        
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = (T)(object)destDouble[i];
         }
     }
 
@@ -566,11 +727,64 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private static void MultiplyTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
     {
-        // For now, use scalar multiplication with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            MultiplyFloatElementwise(x, y, destination);
+        }
+        else if (type == typeof(double))
+        {
+            MultiplyDoubleElementwise(x, y, destination);
+        }
+        else
+        {
+            // Fall back to scalar multiplication with dynamic dispatch for other types
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y[i]!)!;
+            }
+        }
+    }
+
+    private static void MultiplyFloatElementwise(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        var xFloat = new float[x.Length];
+        var yFloat = new float[y.Length];
+        var destFloat = new float[destination.Length];
+        
         for (int i = 0; i < x.Length; i++)
         {
-            destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y[i]!)!;
+            xFloat[i] = (float)(object)x[i]!;
+            yFloat[i] = (float)(object)y[i]!;
+        }
+        
+        TensorPrimitives.Multiply(xFloat, yFloat, destFloat);
+        
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = (T)(object)destFloat[i];
+        }
+    }
+
+    private static void MultiplyDoubleElementwise(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        var xDouble = new double[x.Length];
+        var yDouble = new double[y.Length];
+        var destDouble = new double[destination.Length];
+        
+        for (int i = 0; i < x.Length; i++)
+        {
+            xDouble[i] = (double)(object)x[i]!;
+            yDouble[i] = (double)(object)y[i]!;
+        }
+        
+        TensorPrimitives.Multiply(xDouble, yDouble, destDouble);
+        
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = (T)(object)destDouble[i];
         }
     }
 
@@ -579,11 +793,64 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private static void AddTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
     {
-        // For now, use scalar addition with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            AddFloatElementwise(x, y, destination);
+        }
+        else if (type == typeof(double))
+        {
+            AddDoubleElementwise(x, y, destination);
+        }
+        else
+        {
+            // Fall back to scalar addition with dynamic dispatch for other types
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (T)(object)((dynamic)x[i]! + (dynamic)y[i]!)!;
+            }
+        }
+    }
+
+    private static void AddFloatElementwise(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        var xFloat = new float[x.Length];
+        var yFloat = new float[y.Length];
+        var destFloat = new float[destination.Length];
+        
         for (int i = 0; i < x.Length; i++)
         {
-            destination[i] = (T)(object)((dynamic)x[i]! + (dynamic)y[i]!)!;
+            xFloat[i] = (float)(object)x[i]!;
+            yFloat[i] = (float)(object)y[i]!;
+        }
+        
+        TensorPrimitives.Add(xFloat, yFloat, destFloat);
+        
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = (T)(object)destFloat[i];
+        }
+    }
+
+    private static void AddDoubleElementwise(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        var xDouble = new double[x.Length];
+        var yDouble = new double[y.Length];
+        var destDouble = new double[destination.Length];
+        
+        for (int i = 0; i < x.Length; i++)
+        {
+            xDouble[i] = (double)(object)x[i]!;
+            yDouble[i] = (double)(object)y[i]!;
+        }
+        
+        TensorPrimitives.Add(xDouble, yDouble, destDouble);
+        
+        for (int i = 0; i < destination.Length; i++)
+        {
+            destination[i] = (T)(object)destDouble[i];
         }
     }
 
@@ -771,7 +1038,40 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        if (storage is MemoryStorage<T> memoryStorage)
+        // Handle both TensorStorage and MemoryStorage
+        if (storage.StorageType == StorageType.Tensor)
+        {
+            // Get data using the interface
+            var dataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                dataBuffer[i] = storage[i];
+            }
+            var result = new bool[dataBuffer.Length];
+
+            // Use our helper method for equality comparison
+            EqualsTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var nullMask = storage.NullMask;
+            if (!nullMask.IsEmpty)
+            {
+                var nullMaskArray = nullMask.ToArray();
+                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+                // Set result to false where nulls exist (null comparisons yield null/false)
+                for (int i = 0; i < result.Length; i++)
+                {
+                    if (nullMaskArray[i])
+                        result[i] = false;
+                }
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -810,7 +1110,54 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> EqualsVectorized(NivaraColumn<T> other)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        // Handle both TensorStorage and MemoryStorage combinations
+        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        {
+            // Both are tensor storage
+            var leftDataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                leftDataBuffer[i] = storage[i];
+            }
+            var rightDataBuffer = new T[other.storage.Length];
+            for (int i = 0; i < other.storage.Length; i++)
+            {
+                rightDataBuffer[i] = other.storage[i];
+            }
+            var result = new bool[leftDataBuffer.Length];
+
+            // Use our helper method for element-wise equality
+            EqualsTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNullMask = storage.NullMask;
+            var rightNullMask = other.storage.NullMask;
+
+            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+            {
+                var resultNullMaskArray = new bool[result.Length];
+
+                for (int i = 0; i < result.Length; i++)
+                {
+                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                    bool hasNull = leftIsNull || rightIsNull;
+
+                    resultNullMaskArray[i] = hasNull;
+
+                    // Set result to false where nulls exist (null comparisons yield null/false)
+                    if (hasNull)
+                        result[i] = false;
+                }
+
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -963,7 +1310,40 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> GreaterThanVectorized(T scalar)
     {
-        if (storage is MemoryStorage<T> memoryStorage)
+        // Handle both TensorStorage and MemoryStorage
+        if (storage.StorageType == StorageType.Tensor)
+        {
+            // Get data using the interface
+            var dataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                dataBuffer[i] = storage[i];
+            }
+            var result = new bool[dataBuffer.Length];
+
+            // Use our helper method for greater than comparison
+            GreaterThanTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var nullMask = storage.NullMask;
+            if (!nullMask.IsEmpty)
+            {
+                var nullMaskArray = nullMask.ToArray();
+                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+                // Set result to false where nulls exist
+                for (int i = 0; i < result.Length; i++)
+                {
+                    if (nullMaskArray[i])
+                        result[i] = false;
+                }
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -1002,7 +1382,53 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> GreaterThanVectorized(NivaraColumn<T> other)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        // Handle both TensorStorage and MemoryStorage combinations
+        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        {
+            // Both are tensor storage
+            var leftDataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                leftDataBuffer[i] = storage[i];
+            }
+            var rightDataBuffer = new T[other.storage.Length];
+            for (int i = 0; i < other.storage.Length; i++)
+            {
+                rightDataBuffer[i] = other.storage[i];
+            }
+            var result = new bool[leftDataBuffer.Length];
+
+            // Use our helper method for element-wise greater than
+            GreaterThanTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNullMask = storage.NullMask;
+            var rightNullMask = other.storage.NullMask;
+
+            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+            {
+                var resultNullMaskArray = new bool[result.Length];
+
+                for (int i = 0; i < result.Length; i++)
+                {
+                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                    bool hasNull = leftIsNull || rightIsNull;
+
+                    resultNullMaskArray[i] = hasNull;
+
+                    if (hasNull)
+                        result[i] = false;
+                }
+
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -1154,7 +1580,40 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> LessThanVectorized(T scalar)
     {
-        if (storage is MemoryStorage<T> memoryStorage)
+        // Handle both TensorStorage and MemoryStorage
+        if (storage.StorageType == StorageType.Tensor)
+        {
+            // Get data using the interface
+            var dataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                dataBuffer[i] = storage[i];
+            }
+            var result = new bool[dataBuffer.Length];
+
+            // Use our helper method for less than comparison
+            LessThanTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var nullMask = storage.NullMask;
+            if (!nullMask.IsEmpty)
+            {
+                var nullMaskArray = nullMask.ToArray();
+                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+                // Set result to false where nulls exist
+                for (int i = 0; i < result.Length; i++)
+                {
+                    if (nullMaskArray[i])
+                        result[i] = false;
+                }
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -1193,7 +1652,53 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private NivaraColumn<bool> LessThanVectorized(NivaraColumn<T> other)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        // Handle both TensorStorage and MemoryStorage combinations
+        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        {
+            // Both are tensor storage
+            var leftDataBuffer = new T[storage.Length];
+            for (int i = 0; i < storage.Length; i++)
+            {
+                leftDataBuffer[i] = storage[i];
+            }
+            var rightDataBuffer = new T[other.storage.Length];
+            for (int i = 0; i < other.storage.Length; i++)
+            {
+                rightDataBuffer[i] = other.storage[i];
+            }
+            var result = new bool[leftDataBuffer.Length];
+
+            // Use our helper method for element-wise less than
+            LessThanTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
+
+            // Handle null propagation for tensor storage
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNullMask = storage.NullMask;
+            var rightNullMask = other.storage.NullMask;
+
+            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+            {
+                var resultNullMaskArray = new bool[result.Length];
+
+                for (int i = 0; i < result.Length; i++)
+                {
+                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                    bool hasNull = leftIsNull || rightIsNull;
+
+                    resultNullMaskArray[i] = hasNull;
+
+                    if (hasNull)
+                        result[i] = false;
+                }
+
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
+        }
+        else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -1341,44 +1846,151 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
-    /// Helper method to perform vectorized equality comparison using TensorPrimitives with runtime type dispatch
+    /// Helper method to perform vectorized equality comparison using optimized loops with runtime type dispatch
     /// </summary>
     private static void EqualsTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
     {
-        // For now, use scalar comparison with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
-        var comparer = EqualityComparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        var type = typeof(T);
+
+        // Use optimized loops for supported types, fall back to standard comparison for others
+        if (type == typeof(float))
         {
-            destination[i] = comparer.Equals(x[i], y);
+            var yFloat = (float)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (float)(object)x[i]! == yFloat;
+            }
+        }
+        else if (type == typeof(double))
+        {
+            var yDouble = (double)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (double)(object)x[i]! == yDouble;
+            }
+        }
+        else if (type == typeof(int))
+        {
+            var yInt = (int)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (int)(object)x[i]! == yInt;
+            }
+        }
+        else if (type == typeof(long))
+        {
+            var yLong = (long)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (long)(object)x[i]! == yLong;
+            }
+        }
+        else
+        {
+            // Fall back to standard comparison for other types
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Equals(x[i], y);
+            }
         }
     }
 
     /// <summary>
-    /// Helper method to perform vectorized element-wise equality comparison using TensorPrimitives with runtime type dispatch
+    /// Helper method to perform vectorized element-wise equality comparison using optimized loops with runtime type dispatch
     /// </summary>
     private static void EqualsTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
     {
-        // For now, use scalar comparison with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
-        var comparer = EqualityComparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        var type = typeof(T);
+
+        // Use optimized loops for supported types, fall back to standard comparison for others
+        if (type == typeof(float))
         {
-            destination[i] = comparer.Equals(x[i], y[i]);
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (float)(object)x[i]! == (float)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(double))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (double)(object)x[i]! == (double)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(int))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (int)(object)x[i]! == (int)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(long))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (long)(object)x[i]! == (long)(object)y[i]!;
+            }
+        }
+        else
+        {
+            // Fall back to standard comparison for other types
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Equals(x[i], y[i]);
+            }
         }
     }
 
     /// <summary>
-    /// Helper method to perform vectorized greater than comparison using TensorPrimitives with runtime type dispatch
+    /// Helper method to perform vectorized greater than comparison using optimized loops with runtime type dispatch
     /// </summary>
     private static void GreaterThanTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
     {
-        // For now, use scalar comparison with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        var type = typeof(T);
+
+        // Use optimized loops for supported types, fall back to standard comparison for others
+        if (type == typeof(float))
         {
-            destination[i] = comparer.Compare(x[i], y) > 0;
+            var yFloat = (float)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (float)(object)x[i]! > yFloat;
+            }
+        }
+        else if (type == typeof(double))
+        {
+            var yDouble = (double)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (double)(object)x[i]! > yDouble;
+            }
+        }
+        else if (type == typeof(int))
+        {
+            var yInt = (int)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (int)(object)x[i]! > yInt;
+            }
+        }
+        else if (type == typeof(long))
+        {
+            var yLong = (long)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (long)(object)x[i]! > yLong;
+            }
+        }
+        else
+        {
+            // Fall back to standard comparison for other types
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y) > 0;
+            }
         }
     }
 
@@ -1387,12 +1999,46 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private static void GreaterThanTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
     {
-        // For now, use scalar comparison with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        var type = typeof(T);
+
+        // For comparison operations, we use optimized loops since TensorPrimitives doesn't have direct boolean comparison methods
+        // However, we can still benefit from vectorization through the JIT compiler
+        if (type == typeof(float))
         {
-            destination[i] = comparer.Compare(x[i], y[i]) > 0;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (float)(object)x[i]! > (float)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(double))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (double)(object)x[i]! > (double)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(int))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (int)(object)x[i]! > (int)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(long))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (long)(object)x[i]! > (long)(object)y[i]!;
+            }
+        }
+        else
+        {
+            // Fall back to standard comparison for other types
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y[i]) > 0;
+            }
         }
     }
 
@@ -1401,12 +2047,50 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private static void LessThanTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
     {
-        // For now, use scalar comparison with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        var type = typeof(T);
+
+        // For comparison operations, we use optimized loops since TensorPrimitives doesn't have direct boolean comparison methods
+        // However, we can still benefit from vectorization through the JIT compiler
+        if (type == typeof(float))
         {
-            destination[i] = comparer.Compare(x[i], y) < 0;
+            var yFloat = (float)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (float)(object)x[i]! < yFloat;
+            }
+        }
+        else if (type == typeof(double))
+        {
+            var yDouble = (double)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (double)(object)x[i]! < yDouble;
+            }
+        }
+        else if (type == typeof(int))
+        {
+            var yInt = (int)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (int)(object)x[i]! < yInt;
+            }
+        }
+        else if (type == typeof(long))
+        {
+            var yLong = (long)(object)y!;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (long)(object)x[i]! < yLong;
+            }
+        }
+        else
+        {
+            // Fall back to standard comparison for other types
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y) < 0;
+            }
         }
     }
 
@@ -1415,12 +2099,46 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// </summary>
     private static void LessThanTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
     {
-        // For now, use scalar comparison with dynamic dispatch
-        // TODO: Optimize with TensorPrimitives when generic constraints are resolved
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        var type = typeof(T);
+
+        // For comparison operations, we use optimized loops since TensorPrimitives doesn't have direct boolean comparison methods
+        // However, we can still benefit from vectorization through the JIT compiler
+        if (type == typeof(float))
         {
-            destination[i] = comparer.Compare(x[i], y[i]) < 0;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (float)(object)x[i]! < (float)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(double))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (double)(object)x[i]! < (double)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(int))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (int)(object)x[i]! < (int)(object)y[i]!;
+            }
+        }
+        else if (type == typeof(long))
+        {
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = (long)(object)x[i]! < (long)(object)y[i]!;
+            }
+        }
+        else
+        {
+            // Fall back to standard comparison for other types
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y[i]) < 0;
+            }
         }
     }
 

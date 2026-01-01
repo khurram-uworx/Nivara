@@ -141,6 +141,26 @@ if (typeof(T) == typeof(int))
 }
 ```
 
+### Safe Type Conversion Pattern for TensorPrimitives
+**Problem**: MemoryMarshal.Cast requires unmanaged constraints that generic methods can't provide
+**Solution**: Use `(T)(object)` casting pattern for safe type conversion in generic contexts
+```csharp
+// WRONG - MemoryMarshal.Cast requires unmanaged constraint
+var xFloat = MemoryMarshal.Cast<T, float>(x); // Compiler error CS0453
+
+// CORRECT - safe type conversion pattern
+if (type == typeof(float))
+{
+    var yFloat = (float)(object)y!;
+    for (int i = 0; i < x.Length; i++)
+    {
+        destination[i] = (float)(object)x[i]! > yFloat;
+    }
+}
+```
+
+**Rationale**: The `(T)(object)` pattern provides safe type conversion without requiring generic constraints. While it involves boxing/unboxing, it's more reliable than MemoryMarshal.Cast which requires unmanaged constraints that can't be applied to static methods in generic classes (CS0080).
+
 ## Testing Lessons Learned
 
 ### TestCase Limitations with Nulls
@@ -320,6 +340,163 @@ Assert.Throws<ArgumentException>(() => { var result = column1 + column2; });
 **Tried**: Using NaN values to represent nulls in floating-point columns
 **Failed**: Doesn't work for integer types, inconsistent behavior across types
 **Learned**: Explicit null masks provide predictable behavior across all data types
+
+## System.Numerics.Tensors API Usage Patterns
+
+### Tensor Creation and Data Access
+**Decision**: Use `Tensor.Create(T[], ReadOnlySpan<IntPtr>)` for creating tensors from arrays, `FlattenTo(Span<T>)` for accessing tensor data
+**Rationale**: System.Numerics.Tensors API requires arrays for tensor creation and provides `FlattenTo` method for efficient data extraction. Direct span access methods like `AsReadOnlySpan()` are not available.
+
+**Pattern**: Proper tensor creation and data access
+```csharp
+// Tensor creation from array with dimensions
+var dataArray = values.ToArray();
+var tensor = Tensor.Create(dataArray, [values.Length]);
+
+// Data access using FlattenTo
+var buffer = new T[tensor.FlattenedLength];
+tensor.FlattenTo(buffer);
+return buffer[index]; // Access specific element
+
+// Span access for operations
+var span = buffer.AsSpan();
+```
+
+### Empty Tensor Handling
+**Decision**: Use `Tensor.Create<T>(Array.Empty<T>())` for creating empty tensors
+**Rationale**: Empty ReadOnlySpan<int> cannot be used directly with Tensor.Create. Array.Empty<T>() provides the correct empty array for tensor creation.
+
+**Pattern**: Empty tensor creation
+```csharp
+// WRONG - ReadOnlySpan<int>.Empty causes compilation errors
+_data = Tensor.Create<T>(ReadOnlySpan<int>.Empty);
+
+// CORRECT - use Array.Empty<T>() for empty tensors
+_data = Tensor.Create<T>(Array.Empty<T>());
+```
+
+### Nullable Value Type Handling with Tensors
+**Decision**: Extract values from nullable types before creating tensors, create separate null mask tensor
+**Rationale**: Tensors work with concrete types, not nullable types. Null information is stored in a separate boolean tensor for efficient vectorized operations.
+
+**Pattern**: Nullable type processing for tensors
+```csharp
+// Process nullable values into separate data and null mask arrays
+var dataArray = new T[values.Length];
+var nullMaskArray = new bool[values.Length];
+bool hasAnyNulls = false;
+
+for (int i = 0; i < values.Length; i++)
+{
+    if (values[i].HasValue)
+    {
+        dataArray[i] = values[i]!.Value; // Use null-forgiving operator
+        nullMaskArray[i] = false;
+    }
+    else
+    {
+        dataArray[i] = default(T);
+        nullMaskArray[i] = true;
+        hasAnyNulls = true;
+    }
+}
+
+// Create tensors from processed arrays
+_data = Tensor.Create(dataArray, [values.Length]);
+_nullMask = hasAnyNulls ? Tensor.Create(nullMaskArray, [values.Length]) : null;
+```
+
+### Tensor Slicing Operations
+**Decision**: Use `FlattenTo` to extract data, slice as span, then create new tensor from sliced array
+**Rationale**: Direct tensor slicing APIs are not available. FlattenTo provides efficient data extraction for slicing operations.
+
+**Pattern**: Tensor slicing implementation
+```csharp
+// Extract data using FlattenTo
+var dataBuffer = new T[_data.FlattenedLength];
+_data.FlattenTo(dataBuffer);
+
+// Slice as span and convert back to array
+var slicedDataArray = dataBuffer.AsSpan(start, length).ToArray();
+var slicedData = Tensor.Create(slicedDataArray, [length]);
+
+// Handle null mask slicing similarly
+if (_nullMask != null)
+{
+    var nullMaskBuffer = new bool[_nullMask.FlattenedLength];
+    _nullMask.FlattenTo(nullMaskBuffer);
+    var slicedNullMaskArray = nullMaskBuffer.AsSpan(start, length).ToArray();
+    slicedNullMask = Tensor.Create(slicedNullMaskArray, [length]);
+}
+```
+
+### Cross-Project Tensor Usage
+**Decision**: Add `using System.Numerics.Tensors;` to any file that creates or manipulates tensors
+**Rationale**: Tensor creation and manipulation requires the System.Numerics.Tensors namespace. Helper classes in other projects (like NullableStorageHelper) need this import when working with tensors.
+
+**Pattern**: Consistent using statements for tensor operations
+```csharp
+// Always include when working with tensors
+using System.Numerics.Tensors;
+using Nivara.Tensors; // For TensorStorage<T>
+
+// Create tensors in helper methods
+return new TensorStorage<T>(dataArray, hasNulls ? Tensor.Create(nullMaskArray, [values.Length]) : null);
+```
+
+### Performance Considerations with FlattenTo
+**Decision**: Cache flattened data when multiple accesses are needed, use direct FlattenTo for single access
+**Rationale**: FlattenTo creates a copy of tensor data. For single element access, the copy overhead is acceptable. For multiple accesses, caching the flattened data improves performance.
+
+**Pattern**: Efficient tensor data access
+```csharp
+// Single element access - direct FlattenTo
+public T this[int index]
+{
+    get
+    {
+        var buffer = new T[_data.FlattenedLength];
+        _data.FlattenTo(buffer);
+        return buffer[index];
+    }
+}
+
+// Multiple element access - consider caching (future optimization)
+// Could cache flattened data for repeated access patterns
+```
+
+### Tensor Disposal and Resource Management
+**Decision**: Tensors in System.Numerics.Tensors don't require explicit disposal
+**Rationale**: Unlike some tensor libraries, System.Numerics.Tensors manages memory automatically. No explicit cleanup is needed in Dispose methods.
+
+**Pattern**: Tensor disposal handling
+```csharp
+public void Dispose()
+{
+    if (!_disposed)
+    {
+        // Tensors don't require explicit disposal in System.Numerics.Tensors
+        _disposed = true;
+    }
+}
+```
+
+## TensorStorage Implementation Lessons Learned
+
+### API Evolution from Arrays to Tensors
+**Problem**: Original implementation used arrays with comment "will be optimized with System.Numerics.Tensors later"
+**Solution**: Proper tensor implementation using System.Numerics.Tensors API with FlattenTo for data access
+**Lesson**: Follow through on architectural decisions. Placeholder implementations should be replaced with proper implementations as soon as the required APIs are understood.
+
+### Tensor API Learning Curve
+**Problem**: Initial attempts used non-existent methods like `AsReadOnlySpan()` on tensors
+**Solution**: Research actual API through documentation and use `FlattenTo` for data extraction
+**Lesson**: When working with new APIs, always verify method availability through official documentation rather than assuming based on similar APIs.
+
+### Null-Forgiving Operator Usage
+**Problem**: Compiler warnings about nullable value types even when null checks are present
+**Solution**: Use null-forgiving operator (`!`) when you know the value is not null after explicit checks
+**Lesson**: In nullable contexts, use null-forgiving operator judiciously after explicit null checks to satisfy compiler analysis.
 
 ---
 
@@ -2091,6 +2268,84 @@ if (column.ElementType == typeof(DateTime) && arrowType is TimestampType)
 ### Configuration Testing Gotchas
 **Problem**: Testing timezone-specific functionality can cause Arrow type mismatches
 **Solution**: Use UTC timezone in tests to avoid compatibility issues, or ensure consistent timezone usage throughout the conversion pipeline
+
+## ML.NET Integration Implementation
+
+### VBuffer Conversion Strategy
+**Decision**: Implemented bidirectional conversion between NivaraSeries and ML.NET VBuffer format with support for both dense and sparse tensors
+**Rationale**: VBuffer is ML.NET's standard format for feature vectors. Supporting both dense and sparse formats enables efficient memory usage for different data patterns.
+
+**Pattern**: Handle both dense and sparse VBuffers transparently
+```csharp
+// Dense VBuffer conversion
+var vbuffers = seriesList.ToBatchTensors(); // Creates dense VBuffers
+var reconstructedSeries = TensorConversions.FromBatchTensors(vbuffers);
+
+// Sparse VBuffer handling
+if (tensor.IsDense)
+{
+    var denseValues = tensor.GetValues();
+    // Process all values
+}
+else
+{
+    // Sparse tensor - fill with defaults and set non-zero values
+    Array.Fill(values, T.Zero);
+    var sparseValues = tensor.GetValues();
+    var sparseIndices = tensor.GetIndices();
+    // Process only non-zero values
+}
+```
+
+### Tensor Reshaping Implementation
+**Decision**: Implemented multi-dimensional tensor reshaping with row-major order indexing
+**Rationale**: Consistent with .NET Array conventions and most ML frameworks. Provides efficient conversion between linear series data and multi-dimensional tensor representations.
+
+**Pattern**: Linear index to multi-dimensional index conversion
+```csharp
+// Convert linear index to multi-dimensional indices
+var temp = i;
+for (int dim = dimensions.Length - 1; dim >= 0; dim--)
+{
+    indices[dim] = temp % dimensions[dim];
+    temp /= dimensions[dim];
+}
+tensor.SetValue(column[i], indices);
+```
+
+### ML.NET Integration Testing Strategy
+**Decision**: Comprehensive round-trip testing for all conversion methods with multiple numeric types
+**Rationale**: ML.NET integration is critical for machine learning workflows. Round-trip tests ensure data integrity across conversion boundaries.
+
+**Coverage**: 13 additional test cases covering:
+- VBuffer batch conversions (dense and sparse)
+- Tensor reshaping and flattening
+- Multiple numeric types (float, double, int)
+- Empty collection handling
+- Error conditions and edge cases
+- Round-trip data preservation
+- Dimension validation
+
+### ML.NET Integration Gotchas
+**Problem**: VBuffer constructor parameter order differs between dense and sparse formats
+**Solution**: Use appropriate constructor overloads for each format
+```csharp
+// Dense VBuffer
+var denseVBuffer = new VBuffer<T>(values.Length, values);
+
+// Sparse VBuffer  
+var sparseVBuffer = new VBuffer<T>(totalLength, nonZeroCount, values, indices);
+```
+
+**Problem**: NivaraSeries.Create parameter order is values first, then index
+**Solution**: Always pass values as first parameter, index as second
+```csharp
+// WRONG - index first
+NivaraSeries<T>.Create(indices, values);
+
+// CORRECT - values first
+NivaraSeries<T>.Create(values, indices);
+```
 
 **Problem**: Configuration options need to be tested for both enabled and disabled states
 **Solution**: Create separate test methods for each configuration state to ensure comprehensive coverage

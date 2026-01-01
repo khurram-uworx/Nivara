@@ -1,4 +1,5 @@
 using Nivara.Tensors;
+using System.Numerics.Tensors;
 
 namespace Nivara.Memory;
 
@@ -42,7 +43,18 @@ internal static class NullableStorageHelper
 
         var nullMask = hasNulls ? nullMaskArray : null;
 
-        return new TensorStorage<T>(dataArray, nullMask);
+        return new TensorStorage<T>(dataArray, hasNulls ? Tensor.Create(nullMaskArray, [values.Length]) : null);
+    }
+
+    /// <summary>
+    /// Creates tensor storage for nullable value types from array
+    /// </summary>
+    /// <typeparam name="T">The value type</typeparam>
+    /// <param name="values">The nullable values array</param>
+    /// <returns>A tensor storage instance</returns>
+    public static TensorStorage<T> CreateTensorStorage<T>(T?[] values) where T : unmanaged
+    {
+        return CreateTensorStorage(values.AsSpan());
     }
 
     /// <summary>
