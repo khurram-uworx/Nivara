@@ -13,6 +13,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     private readonly IColumnStorage<T> storage;
     private bool disposed;
 
+    public NivaraColumn() : this(ColumnStorageFactory.CreateStorage<T>(ReadOnlySpan<T>.Empty))
+    { }
+
     /// <summary>
     /// Initializes a new instance of NivaraColumn with the specified storage
     /// </summary>
@@ -142,7 +145,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// <returns>A new NivaraColumn instance</returns>
     public static NivaraColumn<T> Create(ReadOnlySpan<T> values)
     {
-        var storage = CreateStorage(values);
+        var storage = ColumnStorageFactory.CreateStorage(values);
         return new NivaraColumn<T>(storage);
     }
 
@@ -174,8 +177,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             throw new InvalidOperationException($"CreateForReferenceType can only be used with reference types. Use Create or CreateFromNullable for value types.");
 
         // For reference types, always detect nulls using MemoryStorage directly
-        var storage = new MemoryStorage<T>(values, detectNulls: true);
-        return new NivaraColumn<T>(storage);
+        //var storage = new MemoryStorage<T>(values, detectNulls: true);
+        return new NivaraColumn<T>(ColumnStorageFactory.CreateStorage(values));
     }
 
     /// <summary>
@@ -205,7 +208,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle empty array
         if (values.Length == 0)
         {
-            return new NivaraColumn<T>(new MemoryStorage<T>(ReadOnlySpan<T>.Empty));
+            return new NivaraColumn<T>();
         }
 
         // Process nullable values manually
@@ -234,32 +237,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
 
         var storage = new MemoryStorage<T>(data, nullMask);
         return new NivaraColumn<T>(storage);
-    }
-
-    /// <summary>
-    /// Creates appropriate storage for the given values based on type characteristics
-    /// </summary>
-    /// <param name="values">The values to store</param>
-    /// <returns>An appropriate storage implementation</returns>
-    private static IColumnStorage<T> CreateStorage(ReadOnlySpan<T> values)
-    {
-        // Use the factory to determine appropriate storage
-        if (ColumnStorageFactory.IsVectorizable<T>() && typeof(T).IsValueType)
-        {
-            // For vectorizable value types, we'll use tensor storage when available
-            // For now, the factory returns memory storage, but this will be optimized later
-            return ColumnStorageFactory.Create(values);
-        }
-        else if (typeof(T).IsClass)
-        {
-            // For reference types, always detect nulls using MemoryStorage directly
-            return new MemoryStorage<T>(values, detectNulls: true);
-        }
-        else
-        {
-            // For non-vectorizable value types, use memory storage
-            return ColumnStorageFactory.Create(values);
-        }
     }
 
     /// <summary>
@@ -1555,7 +1532,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         }
 
         // Create storage without null mask since all nulls are filled
-        var newStorage = CreateStorage(newData.AsSpan());
+        var newStorage = ColumnStorageFactory.CreateStorage(newData.AsSpan());
         return new NivaraColumn<T>(newStorage);
     }
 
@@ -1669,7 +1646,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         }
 
         // Create storage without null mask since all nulls are filled
-        var newStorage = CreateStorage(newData.AsSpan());
+        var newStorage = ColumnStorageFactory.CreateStorage(newData.AsSpan());
         return new NivaraColumn<T>(newStorage);
     }
 
@@ -1717,7 +1694,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         }
 
         // Create storage without null mask since all nulls are filled
-        var newStorage = CreateStorage(newData.AsSpan());
+        var newStorage = ColumnStorageFactory.CreateStorage(newData.AsSpan());
         return new NivaraColumn<T>(newStorage);
     }
 
@@ -1747,7 +1724,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         }
 
         // Create storage without null mask since all nulls are removed
-        var newStorage = CreateStorage(nonNullValues.ToArray().AsSpan());
+        var newStorage = ColumnStorageFactory.CreateStorage(nonNullValues.ToArray().AsSpan());
         return new NivaraColumn<T>(newStorage);
     }
 

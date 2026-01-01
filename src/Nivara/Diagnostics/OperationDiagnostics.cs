@@ -1,3 +1,5 @@
+using Nivara.Memory;
+
 namespace Nivara.Diagnostics;
 
 /// <summary>

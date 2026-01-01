@@ -1,3 +1,4 @@
+using Nivara.Memory;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -22,7 +23,7 @@ public class ColumnStorageFactoryTests
     [TestCase(new int[] { 42 })]
     public void ColumnStorageFactory_Create_VectorizableInt_SelectsVectorizableStorage(int[] values)
     {
-        var storage = ColumnStorageFactory.Create<int>(values);
+        var storage = ColumnStorageFactory.CreateStorage<int>(values);
 
         // Note: Current implementation always uses MemoryStorage, but we test the intended behavior
         // This test validates that the factory method works and the IsVectorizable method correctly identifies vectorizable types
@@ -38,7 +39,7 @@ public class ColumnStorageFactoryTests
     [TestCase(new float[] { })]
     public void ColumnStorageFactory_Create_VectorizableFloat_SelectsVectorizableStorage(float[] values)
     {
-        var storage = ColumnStorageFactory.Create<float>(values);
+        var storage = ColumnStorageFactory.CreateStorage<float>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<float>(), Is.True,
             "float should be identified as vectorizable type");
@@ -52,7 +53,7 @@ public class ColumnStorageFactoryTests
     [TestCase(new double[] { Math.PI, Math.E })]
     public void ColumnStorageFactory_Create_VectorizableDouble_SelectsVectorizableStorage(double[] values)
     {
-        var storage = ColumnStorageFactory.Create<double>(values);
+        var storage = ColumnStorageFactory.CreateStorage<double>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<double>(), Is.True,
             "double should be identified as vectorizable type");
@@ -67,7 +68,7 @@ public class ColumnStorageFactoryTests
     [TestCase(new bool[] { })]
     public void ColumnStorageFactory_Create_VectorizableBool_SelectsVectorizableStorage(bool[] values)
     {
-        var storage = ColumnStorageFactory.Create<bool>(values);
+        var storage = ColumnStorageFactory.CreateStorage<bool>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<bool>(), Is.True,
             "bool should be identified as vectorizable type");
@@ -84,7 +85,7 @@ public class ColumnStorageFactoryTests
     [TestCase(new ulong[] { 0, 1, ulong.MaxValue })]
     public void ColumnStorageFactory_Create_VectorizableNumericTypes_SelectsVectorizableStorage<T>(T[] values) where T : unmanaged
     {
-        var storage = ColumnStorageFactory.Create<T>(values);
+        var storage = ColumnStorageFactory.CreateStorage<T>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<T>(), Is.True,
             $"{typeof(T).Name} should be identified as vectorizable type");
@@ -115,7 +116,7 @@ public class ColumnStorageFactoryTests
 
         foreach (var values in testCases)
         {
-            var storage = ColumnStorageFactory.Create<string>(values);
+            var storage = ColumnStorageFactory.CreateStorage<string>(values);
 
             Assert.That(ColumnStorageFactory.IsVectorizable<string>(), Is.False,
                 "string should be identified as non-vectorizable type");
@@ -129,7 +130,7 @@ public class ColumnStorageFactoryTests
     public void ColumnStorageFactory_Create_NonVectorizableGuid_SelectsNonVectorizableStorage()
     {
         var values = new Guid[] { Guid.NewGuid(), Guid.Empty, Guid.NewGuid() };
-        var storage = ColumnStorageFactory.Create<Guid>(values);
+        var storage = ColumnStorageFactory.CreateStorage<Guid>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<Guid>(), Is.False,
             "Guid should be identified as non-vectorizable type");
@@ -142,7 +143,7 @@ public class ColumnStorageFactoryTests
     public void ColumnStorageFactory_Create_NonVectorizableDateTime_SelectsNonVectorizableStorage()
     {
         var values = new DateTime[] { DateTime.Now, DateTime.MinValue, DateTime.MaxValue };
-        var storage = ColumnStorageFactory.Create<DateTime>(values);
+        var storage = ColumnStorageFactory.CreateStorage<DateTime>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<DateTime>(), Is.False,
             "DateTime should be identified as non-vectorizable type");
@@ -155,7 +156,7 @@ public class ColumnStorageFactoryTests
     public void ColumnStorageFactory_Create_NonVectorizableObject_SelectsNonVectorizableStorage()
     {
         var values = new object[] { new object(), "string", 42, null! };
-        var storage = ColumnStorageFactory.Create<object>(values);
+        var storage = ColumnStorageFactory.CreateStorage<object>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<object>(), Is.False,
             "object should be identified as non-vectorizable type");
@@ -168,7 +169,7 @@ public class ColumnStorageFactoryTests
     public void ColumnStorageFactory_Create_NonVectorizableEnum_SelectsNonVectorizableStorage()
     {
         var values = new DayOfWeek[] { DayOfWeek.Monday, DayOfWeek.Friday, DayOfWeek.Sunday };
-        var storage = ColumnStorageFactory.Create<DayOfWeek>(values);
+        var storage = ColumnStorageFactory.CreateStorage<DayOfWeek>(values);
 
         Assert.That(ColumnStorageFactory.IsVectorizable<DayOfWeek>(), Is.False,
             "Enum types should be identified as non-vectorizable");
@@ -227,7 +228,7 @@ public class ColumnStorageFactoryTests
 
         foreach (var values in testCases)
         {
-            var storage = ColumnStorageFactory.Create<int>(values);
+            var storage = ColumnStorageFactory.CreateStorage<int>(values);
 
             Assert.That(storage, Is.Not.Null, "Storage should be created successfully");
             Assert.That(storage.Length, Is.EqualTo(values.Length), "Storage should preserve input length");
@@ -257,7 +258,7 @@ public class ColumnStorageFactoryTests
         foreach (var values in testCases)
         {
             // Use the regular Create method which handles reference types automatically
-            var storage = ColumnStorageFactory.Create<string>(values);
+            var storage = ColumnStorageFactory.CreateStorage<string>(values);
 
             Assert.That(storage, Is.Not.Null, "Storage should be created successfully");
             Assert.That(storage.Length, Is.EqualTo(values.Length), "Storage should preserve input length");

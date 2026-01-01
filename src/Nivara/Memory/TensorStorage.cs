@@ -1,6 +1,6 @@
 using Nivara.Diagnostics;
 
-namespace Nivara.Tensors;
+namespace Nivara.Memory;
 
 /// <summary>
 /// Tensor-backed storage implementation for vectorizable types.
