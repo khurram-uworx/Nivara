@@ -139,7 +139,7 @@ public sealed class ColumnDiagnostics
             return new PerformanceCharacteristics(
                 throughputMultiplier,
                 memoryEfficiency,
-                RecommendedKernel == KernelType.Vectorized);
+                IsVectorizable && IsHardwareAccelerated);
         }
     }
 
