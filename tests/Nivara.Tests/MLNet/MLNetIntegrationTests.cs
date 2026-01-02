@@ -2,12 +2,67 @@ using Microsoft.ML;
 using Nivara.MLNet;
 using NUnit.Framework;
 
-namespace Nivara.Tests;
+namespace Nivara.Tests.MLNet;
 
 [TestFixture]
 public class MLNetIntegrationTests
 {
-    private MLContext mlContext;
+    class RegressionData
+    {
+        public float Feature1 { get; set; }
+        public float Feature2 { get; set; }
+        public float Label { get; set; }
+    }
+
+    class RegressionPrediction
+    {
+        public float Score { get; set; }
+    }
+
+    MLContext mlContext;
+
+    [Test]
+    public void MLNetPipeline_WorksCorrectly()
+    {
+        // Create sample training data
+        var features1 = new float[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f };
+        var features2 = new float[] { 2.0f, 4.0f, 6.0f, 8.0f, 10.0f };
+        var labels = new float[] { 3.0f, 6.0f, 9.0f, 12.0f, 15.0f }; // features1 + features2
+
+        var trainingData = features1
+            .Select((f1, i) => new RegressionData
+            {
+                Feature1 = f1,
+                Feature2 = features2[i],
+                Label = labels[i]
+            })
+            .ToList();
+
+        IDataView trainingFrame = mlContext.Data.LoadFromEnumerable(trainingData);
+
+        // Create ML.NET pipeline
+        var modelIntegration = new ModelIntegration(mlContext);
+        var pipeline = modelIntegration.CreateRegressionPipeline(
+            new[] { "Feature1", "Feature2" },
+            "Label");
+
+        // Train model
+        var model = pipeline.Fit(trainingFrame);
+
+        // Make predictions
+        var engine = mlContext.Model.CreatePredictionEngine<RegressionData, RegressionPrediction>(model);
+
+        var prediction = engine.Predict(new RegressionData
+        {
+            Feature1 = 6.0f,
+            Feature2 = 12.0f
+        });
+
+        // Verify prediction structure
+        Assert.That(prediction, Is.Not.Null);
+        Assert.That(prediction.Score, Is.GreaterThan(0.0f), "Prediction should be positive");
+        Assert.That(prediction.Score, Is.LessThan(100.0f), "Prediction should be reasonable");
+    }
 
     [SetUp]
     public void Setup()
@@ -296,7 +351,7 @@ public class MLNetIntegrationTests
     {
         var emptySeries = Array.Empty<NivaraSeries<float>>();
         var vbuffers = emptySeries.ToBatchTensors();
-        
+
         Assert.That(vbuffers, Is.Empty);
     }
 
@@ -369,7 +424,7 @@ public class MLNetIntegrationTests
     {
         var emptyVBuffers = Array.Empty<Microsoft.ML.Data.VBuffer<float>>();
         var series = TensorConversions.FromBatchTensors(emptyVBuffers);
-        
+
         Assert.That(series, Is.Empty);
     }
 
@@ -394,11 +449,11 @@ public class MLNetIntegrationTests
 
         // Verify structure preservation
         Assert.That(reconstructedSeries.Length, Is.EqualTo(originalSeries.Length));
-        
+
         for (int i = 0; i < originalSeries.Length; i++)
         {
             Assert.That(reconstructedSeries[i].Length, Is.EqualTo(originalSeries[i].Length));
-            
+
             // Verify data preservation
             for (int j = 0; j < originalSeries[i].Length; j++)
             {
@@ -421,7 +476,7 @@ public class MLNetIntegrationTests
 
         Assert.That(reconstructedDoubleSeries.Length, Is.EqualTo(1));
         Assert.That(reconstructedDoubleSeries[0].Length, Is.EqualTo(3));
-        
+
         for (int i = 0; i < 3; i++)
         {
             Assert.That(reconstructedDoubleSeries[0].Values[i], Is.EqualTo(doubleSeries.Values[i]).Within(1e-15));
@@ -436,7 +491,7 @@ public class MLNetIntegrationTests
 
         Assert.That(reconstructedIntSeries.Length, Is.EqualTo(1));
         Assert.That(reconstructedIntSeries[0].Length, Is.EqualTo(4));
-        
+
         for (int i = 0; i < 4; i++)
         {
             Assert.That(reconstructedIntSeries[0].Values[i], Is.EqualTo(intSeries.Values[i]));
@@ -519,7 +574,7 @@ public class MLNetIntegrationTests
 
         // Verify data preservation
         Assert.That(reconstructedSeries.Length, Is.EqualTo(originalSeries.Length));
-        
+
         for (int i = 0; i < originalSeries.Length; i++)
         {
             Assert.That(reconstructedSeries.Values[i], Is.EqualTo(originalSeries.Values[i]).Within(1e-15));

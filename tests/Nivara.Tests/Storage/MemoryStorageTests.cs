@@ -1,7 +1,7 @@
-using Nivara.Memory;
+using Nivara.Storage;
 using NUnit.Framework;
 
-namespace Nivara.Tests;
+namespace Nivara.Tests.Storage;
 
 /// <summary>
 /// Tests for MemoryStorage implementation covering edge cases for string columns, empty arrays, single-element arrays, and null handling for reference types

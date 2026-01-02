@@ -1,6 +1,7 @@
+using Nivara.Storage;
 using NUnit.Framework;
 
-namespace Nivara.Tests;
+namespace Nivara.Tests.Storage;
 
 /// <summary>
 /// Tests for ColumnStorageFactory covering automatic storage selection for vectorizable and non-vectorizable types

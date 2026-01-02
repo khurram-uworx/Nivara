@@ -1,7 +1,7 @@
 using Nivara.Diagnostics;
 using System.Numerics.Tensors;
 
-namespace Nivara.Tensors;
+namespace Nivara.Storage;
 
 /// <summary>
 /// Tensor-backed storage implementation for vectorizable types.

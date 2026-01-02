@@ -19,7 +19,7 @@ public class QueryExecutionTests
         {
             File.WriteAllText(tempFile, testData);
 
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25);
 
             // Act - First Collect() call
@@ -64,7 +64,7 @@ public class QueryExecutionTests
         {
             File.WriteAllText(tempFile, testData);
 
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile);
+            var query = Csv.ScanCsvAsQueryFrame(tempFile);
 
             // Act - Dispose the query
             query.Dispose();
@@ -92,7 +92,7 @@ public class QueryExecutionTests
             File.WriteAllText(tempFile, testData);
 
             // Create a query with multiple filters (optimization opportunity)
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Filter(ColumnExpressions.Col("Salary") > 45000)
                 .Select("Name", "Age");
@@ -130,7 +130,7 @@ public class QueryExecutionTests
             File.WriteAllText(tempFile, testData);
 
             // Create a query with optimization opportunities
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Filter(ColumnExpressions.Col("Salary") > 45000)  // Multiple filters
                 .Select("Name", "Age");  // Select both columns at once

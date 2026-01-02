@@ -20,7 +20,7 @@ public class QueryOptimizerTests
             File.WriteAllText(tempFile, testData);
 
             // Create a query where filter comes after select (suboptimal)
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Select("Name", "Age")  // Select first
                 .Filter(ColumnExpressions.Col("Age") > 25);  // Filter after select
 
@@ -57,7 +57,7 @@ public class QueryOptimizerTests
             File.WriteAllText(tempFile, testData);
 
             // Create a query with multiple filters that can be fused
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Filter(ColumnExpressions.Col("Salary") > 35000);
 
@@ -93,7 +93,7 @@ public class QueryOptimizerTests
             File.WriteAllText(tempFile, testData);
 
             // Create a query that only uses some columns
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)  // Only uses Age and Name implicitly
                 .Select("Name");  // Only selects Name
 
@@ -127,7 +127,7 @@ public class QueryOptimizerTests
             File.WriteAllText(tempFile, testData);
 
             // Create a query where operations could be reordered for better performance
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Select("Name", "Age", "Salary")  // Select first (less optimal)
                 .Filter(ColumnExpressions.Col("Age") > 30);  // Filter after select (should be moved earlier)
 
@@ -170,7 +170,7 @@ public class QueryOptimizerTests
             File.WriteAllText(tempFile, testData);
 
             // Create a complex query with multiple optimization opportunities
-            var query = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Select("Name", "Age", "Salary", "Department")  // Column elimination opportunity
                 .Filter(ColumnExpressions.Col("Age") > 25)      // Filter 1
                 .Filter(ColumnExpressions.Col("Salary") > 45000) // Filter 2 (fusion opportunity)
@@ -218,11 +218,11 @@ public class QueryOptimizerTests
             File.WriteAllText(tempFile, testData);
 
             // Create two equivalent queries - one optimized, one not
-            var optimizedQuery = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var optimizedQuery = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Select("Name", "Age");
 
-            var unoptimizedQuery = CsvExtensions.ScanCsvAsQueryFrame(tempFile)
+            var unoptimizedQuery = Csv.ScanCsvAsQueryFrame(tempFile)
                 .Select("Name", "Age", "Salary")  // Select more columns first
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Select("Name", "Age");  // Then narrow down

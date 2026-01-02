@@ -1,6 +1,6 @@
 using Nivara.Diagnostics;
 
-namespace Nivara.Memory;
+namespace Nivara.Storage;
 
 /// <summary>
 /// Memory-backed storage implementation for non-vectorizable types.

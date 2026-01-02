@@ -9,6 +9,203 @@ namespace Nivara.MLNet;
 /// </summary>
 public static class MLNetInterop
 {
+    static IEnumerable<TwoColumnData> ConvertToTwoColumnData(NivaraFrame frame)
+    {
+        for (int row = 0; row < frame.RowCount; row++)
+        {
+            yield return new TwoColumnData
+            {
+                Col1 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[0]).GetValue(row)),
+                Col2 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[1]).GetValue(row))
+            };
+        }
+    }
+
+    static IEnumerable<TwoColumnFeatureData> ConvertToTwoColumnFeatureData(NivaraFrame frame)
+    {
+        for (int row = 0; row < frame.RowCount; row++)
+        {
+            yield return new TwoColumnFeatureData
+            {
+                Feature1 = ConvertToFloat(frame.GetColumn("Feature1").GetValue(row)),
+                Feature2 = ConvertToFloat(frame.GetColumn("Feature2").GetValue(row))
+            };
+        }
+    }
+
+    static IEnumerable<ThreeColumnData> ConvertToThreeColumnData(NivaraFrame frame)
+    {
+        for (int row = 0; row < frame.RowCount; row++)
+        {
+            var data = new ThreeColumnData();
+
+            // Map columns by name
+            if (frame.HasColumn("Feature1"))
+                data.Feature1 = ConvertToFloat(frame.GetColumn("Feature1").GetValue(row));
+            else
+                data.Feature1 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[0]).GetValue(row));
+
+            if (frame.HasColumn("Feature2"))
+                data.Feature2 = ConvertToFloat(frame.GetColumn("Feature2").GetValue(row));
+            else if (frame.ColumnCount > 1)
+                data.Feature2 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[1]).GetValue(row));
+
+            if (frame.HasColumn("Label"))
+                data.Label = ConvertToFloat(frame.GetColumn("Label").GetValue(row));
+            else if (frame.ColumnCount > 2)
+                data.Label = ConvertToFloat(frame.GetColumn(frame.ColumnNames[2]).GetValue(row));
+
+            yield return data;
+        }
+    }
+
+    static IEnumerable<GenericData> ConvertToGenericData(NivaraFrame frame)
+    {
+        for (int row = 0; row < frame.RowCount; row++)
+        {
+            var values = new float[frame.ColumnCount];
+            for (int col = 0; col < frame.ColumnCount; col++)
+            {
+                values[col] = ConvertToFloat(frame.GetColumn(frame.ColumnNames[col]).GetValue(row));
+            }
+
+            yield return new GenericData { Features = values };
+        }
+    }
+
+    static NivaraFrame ConvertFromGenericData(IDataView dataView, MLContext mlContext, string[] columnNames)
+    {
+        var columns = new List<(string Name, IColumn Column)>();
+
+        // Process each column individually based on its type
+        foreach (var columnName in columnNames)
+        {
+            var column = dataView.Schema[columnName];
+            var columnType = column.Type;
+
+            try
+            {
+                if (columnType == NumberDataViewType.Single)
+                {
+                    var values = ExtractFloatColumn(dataView, mlContext, columnName);
+                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
+                }
+                else if (columnType == NumberDataViewType.Double)
+                {
+                    var values = ExtractDoubleColumn(dataView, mlContext, columnName);
+                    columns.Add((columnName, NivaraColumn<double>.Create(values)));
+                }
+                else if (columnType is VectorDataViewType vectorType && vectorType.ItemType == NumberDataViewType.Single)
+                {
+                    // Handle VBuffer<float> columns (like Features or Score columns)
+                    var values = ExtractVBufferFloatColumn(dataView, mlContext, columnName);
+                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
+                }
+                else
+                {
+                    // For other types, try to convert to float as fallback
+                    var values = ExtractFloatColumn(dataView, mlContext, columnName);
+                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
+                }
+            }
+            catch
+            {
+                // If extraction fails, try VBuffer approach as fallback
+                try
+                {
+                    var values = ExtractVBufferFloatColumn(dataView, mlContext, columnName);
+                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
+                }
+                catch
+                {
+                    // Skip columns that can't be converted
+                    continue;
+                }
+            }
+        }
+
+        return new NivaraFrame(columns);
+    }
+
+    static float[] ExtractFloatColumn(IDataView dataView, MLContext mlContext, string columnName)
+    {
+        var values = new List<float>();
+        var column = dataView.Schema[columnName];
+
+        using var cursor = dataView.GetRowCursor(new[] { column });
+        var getter = cursor.GetGetter<float>(column);
+
+        while (cursor.MoveNext())
+        {
+            float value = 0f;
+            getter(ref value);
+            values.Add(value);
+        }
+
+        return values.ToArray();
+    }
+
+    static double[] ExtractDoubleColumn(IDataView dataView, MLContext mlContext, string columnName)
+    {
+        var values = new List<double>();
+        var column = dataView.Schema[columnName];
+
+        using var cursor = dataView.GetRowCursor(new[] { column });
+        var getter = cursor.GetGetter<double>(column);
+
+        while (cursor.MoveNext())
+        {
+            double value = 0.0;
+            getter(ref value);
+            values.Add(value);
+        }
+
+        return values.ToArray();
+    }
+
+    static float[] ExtractVBufferFloatColumn(IDataView dataView, MLContext mlContext, string columnName)
+    {
+        var values = new List<float>();
+        var column = dataView.Schema[columnName];
+
+        using var cursor = dataView.GetRowCursor(new[] { column });
+        var getter = cursor.GetGetter<VBuffer<float>>(column);
+
+        while (cursor.MoveNext())
+        {
+            VBuffer<float> buffer = default;
+            getter(ref buffer);
+
+            // For scalar values (like Score), take the first element
+            // For vector values, we might want to handle differently
+            if (buffer.Length > 0)
+            {
+                values.Add(buffer.GetItemOrDefault(0));
+            }
+            else
+            {
+                values.Add(0f);
+            }
+        }
+
+        return values.ToArray();
+    }
+
+    static float ConvertToFloat(object? value)
+    {
+        return value switch
+        {
+            null => 0f,
+            float f => f,
+            double d => (float)d,
+            int i => i,
+            long l => l,
+            decimal dec => (float)dec,
+            byte b => b,
+            short s => s,
+            _ => 0f // Default for unsupported types
+        };
+    }
     /// <summary>
     /// Converts a NivaraFrame to an ML.NET IDataView for use in ML.NET pipelines.
     /// </summary>
@@ -174,263 +371,6 @@ public static class MLNetInterop
         }
 
         return new NivaraFrame(columns);
-    }
-
-    // Private helper methods for different column structures
-    private static IEnumerable<TwoColumnData> ConvertToTwoColumnData(NivaraFrame frame)
-    {
-        for (int row = 0; row < frame.RowCount; row++)
-        {
-            yield return new TwoColumnData
-            {
-                Col1 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[0]).GetValue(row)),
-                Col2 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[1]).GetValue(row))
-            };
-        }
-    }
-
-    private static IEnumerable<TwoColumnFeatureData> ConvertToTwoColumnFeatureData(NivaraFrame frame)
-    {
-        for (int row = 0; row < frame.RowCount; row++)
-        {
-            yield return new TwoColumnFeatureData
-            {
-                Feature1 = ConvertToFloat(frame.GetColumn("Feature1").GetValue(row)),
-                Feature2 = ConvertToFloat(frame.GetColumn("Feature2").GetValue(row))
-            };
-        }
-    }
-
-    private static IEnumerable<ThreeColumnData> ConvertToThreeColumnData(NivaraFrame frame)
-    {
-        for (int row = 0; row < frame.RowCount; row++)
-        {
-            var data = new ThreeColumnData();
-
-            // Map columns by name
-            if (frame.HasColumn("Feature1"))
-                data.Feature1 = ConvertToFloat(frame.GetColumn("Feature1").GetValue(row));
-            else
-                data.Feature1 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[0]).GetValue(row));
-
-            if (frame.HasColumn("Feature2"))
-                data.Feature2 = ConvertToFloat(frame.GetColumn("Feature2").GetValue(row));
-            else if (frame.ColumnCount > 1)
-                data.Feature2 = ConvertToFloat(frame.GetColumn(frame.ColumnNames[1]).GetValue(row));
-
-            if (frame.HasColumn("Label"))
-                data.Label = ConvertToFloat(frame.GetColumn("Label").GetValue(row));
-            else if (frame.ColumnCount > 2)
-                data.Label = ConvertToFloat(frame.GetColumn(frame.ColumnNames[2]).GetValue(row));
-
-            yield return data;
-        }
-    }
-
-    private static IEnumerable<GenericData> ConvertToGenericData(NivaraFrame frame)
-    {
-        for (int row = 0; row < frame.RowCount; row++)
-        {
-            var values = new float[frame.ColumnCount];
-            for (int col = 0; col < frame.ColumnCount; col++)
-            {
-                values[col] = ConvertToFloat(frame.GetColumn(frame.ColumnNames[col]).GetValue(row));
-            }
-
-            yield return new GenericData { Features = values };
-        }
-    }
-
-    private static NivaraFrame ConvertFromTwoColumnData(IDataView dataView, MLContext mlContext, string[] columnNames)
-    {
-        var enumerable = mlContext.Data.CreateEnumerable<TwoColumnData>(dataView, reuseRowObject: false);
-        var rows = enumerable.ToList();
-
-        var col1Data = rows.Select(r => r.Col1).ToArray();
-        var col2Data = rows.Select(r => r.Col2).ToArray();
-
-        var columns = new List<(string Name, IColumn Column)>
-        {
-            (columnNames[0], NivaraColumn<float>.Create(col1Data)),
-            (columnNames[1], NivaraColumn<float>.Create(col2Data))
-        };
-
-        return new NivaraFrame(columns);
-    }
-
-    private static NivaraFrame ConvertFromTwoColumnFeatureData(IDataView dataView, MLContext mlContext, string[] columnNames)
-    {
-        var enumerable = mlContext.Data.CreateEnumerable<TwoColumnFeatureData>(dataView, reuseRowObject: false);
-        var rows = enumerable.ToList();
-
-        var feature1Data = rows.Select(r => r.Feature1).ToArray();
-        var feature2Data = rows.Select(r => r.Feature2).ToArray();
-
-        var columns = new List<(string Name, IColumn Column)>
-        {
-            ("Feature1", NivaraColumn<float>.Create(feature1Data)),
-            ("Feature2", NivaraColumn<float>.Create(feature2Data))
-        };
-
-        return new NivaraFrame(columns);
-    }
-
-    private static NivaraFrame ConvertFromThreeColumnData(IDataView dataView, MLContext mlContext, string[] columnNames)
-    {
-        var enumerable = mlContext.Data.CreateEnumerable<ThreeColumnData>(dataView, reuseRowObject: false);
-        var rows = enumerable.ToList();
-
-        var col1Data = rows.Select(r => r.Feature1).ToArray();
-        var col2Data = rows.Select(r => r.Feature2).ToArray();
-        var col3Data = rows.Select(r => r.Label).ToArray();
-
-        // Use the original column names if available, otherwise use defaults
-        var col1Name = columnNames.Length > 0 ? columnNames[0] : "Feature1";
-        var col2Name = columnNames.Length > 1 ? columnNames[1] : "Feature2";
-        var col3Name = columnNames.Length > 2 ? columnNames[2] : "Label";
-
-        var columns = new List<(string Name, IColumn Column)>
-        {
-            (col1Name, NivaraColumn<float>.Create(col1Data)),
-            (col2Name, NivaraColumn<float>.Create(col2Data)),
-            (col3Name, NivaraColumn<float>.Create(col3Data))
-        };
-
-        return new NivaraFrame(columns);
-    }
-
-    private static NivaraFrame ConvertFromGenericData(IDataView dataView, MLContext mlContext, string[] columnNames)
-    {
-        var columns = new List<(string Name, IColumn Column)>();
-
-        // Process each column individually based on its type
-        foreach (var columnName in columnNames)
-        {
-            var column = dataView.Schema[columnName];
-            var columnType = column.Type;
-
-            try
-            {
-                if (columnType == NumberDataViewType.Single)
-                {
-                    var values = ExtractFloatColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
-                }
-                else if (columnType == NumberDataViewType.Double)
-                {
-                    var values = ExtractDoubleColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<double>.Create(values)));
-                }
-                else if (columnType is VectorDataViewType vectorType && vectorType.ItemType == NumberDataViewType.Single)
-                {
-                    // Handle VBuffer<float> columns (like Features or Score columns)
-                    var values = ExtractVBufferFloatColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
-                }
-                else
-                {
-                    // For other types, try to convert to float as fallback
-                    var values = ExtractFloatColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
-                }
-            }
-            catch
-            {
-                // If extraction fails, try VBuffer approach as fallback
-                try
-                {
-                    var values = ExtractVBufferFloatColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
-                }
-                catch
-                {
-                    // Skip columns that can't be converted
-                    continue;
-                }
-            }
-        }
-
-        return new NivaraFrame(columns);
-    }
-
-    private static float[] ExtractFloatColumn(IDataView dataView, MLContext mlContext, string columnName)
-    {
-        var values = new List<float>();
-        var column = dataView.Schema[columnName];
-
-        using var cursor = dataView.GetRowCursor(new[] { column });
-        var getter = cursor.GetGetter<float>(column);
-
-        while (cursor.MoveNext())
-        {
-            float value = 0f;
-            getter(ref value);
-            values.Add(value);
-        }
-
-        return values.ToArray();
-    }
-
-    private static double[] ExtractDoubleColumn(IDataView dataView, MLContext mlContext, string columnName)
-    {
-        var values = new List<double>();
-        var column = dataView.Schema[columnName];
-
-        using var cursor = dataView.GetRowCursor(new[] { column });
-        var getter = cursor.GetGetter<double>(column);
-
-        while (cursor.MoveNext())
-        {
-            double value = 0.0;
-            getter(ref value);
-            values.Add(value);
-        }
-
-        return values.ToArray();
-    }
-
-    private static float[] ExtractVBufferFloatColumn(IDataView dataView, MLContext mlContext, string columnName)
-    {
-        var values = new List<float>();
-        var column = dataView.Schema[columnName];
-
-        using var cursor = dataView.GetRowCursor(new[] { column });
-        var getter = cursor.GetGetter<VBuffer<float>>(column);
-
-        while (cursor.MoveNext())
-        {
-            VBuffer<float> buffer = default;
-            getter(ref buffer);
-
-            // For scalar values (like Score), take the first element
-            // For vector values, we might want to handle differently
-            if (buffer.Length > 0)
-            {
-                values.Add(buffer.GetItemOrDefault(0));
-            }
-            else
-            {
-                values.Add(0f);
-            }
-        }
-
-        return values.ToArray();
-    }
-
-    private static float ConvertToFloat(object? value)
-    {
-        return value switch
-        {
-            null => 0f,
-            float f => f,
-            double d => (float)d,
-            int i => i,
-            long l => l,
-            decimal dec => (float)dec,
-            byte b => b,
-            short s => s,
-            _ => 0f // Default for unsupported types
-        };
     }
 }
 

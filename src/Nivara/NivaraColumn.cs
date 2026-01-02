@@ -1,6 +1,5 @@
 using Nivara.Diagnostics;
-using Nivara.Memory;
-using Nivara.Tensors;
+using Nivara.Storage;
 using System.Numerics.Tensors;
 
 namespace Nivara;
@@ -688,15 +687,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         var xFloat = new float[x.Length];
         var destFloat = new float[destination.Length];
-        
+
         for (int i = 0; i < x.Length; i++)
         {
             xFloat[i] = (float)(object)x[i]!;
         }
-        
+
         var yFloat = (float)(object)y!;
         TensorPrimitives.Multiply(xFloat, yFloat, destFloat);
-        
+
         for (int i = 0; i < destination.Length; i++)
         {
             destination[i] = (T)(object)destFloat[i];
@@ -707,15 +706,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         var xDouble = new double[x.Length];
         var destDouble = new double[destination.Length];
-        
+
         for (int i = 0; i < x.Length; i++)
         {
             xDouble[i] = (double)(object)x[i]!;
         }
-        
+
         var yDouble = (double)(object)y!;
         TensorPrimitives.Multiply(xDouble, yDouble, destDouble);
-        
+
         for (int i = 0; i < destination.Length; i++)
         {
             destination[i] = (T)(object)destDouble[i];
@@ -753,15 +752,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         var xFloat = new float[x.Length];
         var yFloat = new float[y.Length];
         var destFloat = new float[destination.Length];
-        
+
         for (int i = 0; i < x.Length; i++)
         {
             xFloat[i] = (float)(object)x[i]!;
             yFloat[i] = (float)(object)y[i]!;
         }
-        
+
         TensorPrimitives.Multiply(xFloat, yFloat, destFloat);
-        
+
         for (int i = 0; i < destination.Length; i++)
         {
             destination[i] = (T)(object)destFloat[i];
@@ -773,15 +772,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         var xDouble = new double[x.Length];
         var yDouble = new double[y.Length];
         var destDouble = new double[destination.Length];
-        
+
         for (int i = 0; i < x.Length; i++)
         {
             xDouble[i] = (double)(object)x[i]!;
             yDouble[i] = (double)(object)y[i]!;
         }
-        
+
         TensorPrimitives.Multiply(xDouble, yDouble, destDouble);
-        
+
         for (int i = 0; i < destination.Length; i++)
         {
             destination[i] = (T)(object)destDouble[i];
@@ -819,15 +818,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         var xFloat = new float[x.Length];
         var yFloat = new float[y.Length];
         var destFloat = new float[destination.Length];
-        
+
         for (int i = 0; i < x.Length; i++)
         {
             xFloat[i] = (float)(object)x[i]!;
             yFloat[i] = (float)(object)y[i]!;
         }
-        
+
         TensorPrimitives.Add(xFloat, yFloat, destFloat);
-        
+
         for (int i = 0; i < destination.Length; i++)
         {
             destination[i] = (T)(object)destFloat[i];
@@ -839,15 +838,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         var xDouble = new double[x.Length];
         var yDouble = new double[y.Length];
         var destDouble = new double[destination.Length];
-        
+
         for (int i = 0; i < x.Length; i++)
         {
             xDouble[i] = (double)(object)x[i]!;
             yDouble[i] = (double)(object)y[i]!;
         }
-        
+
         TensorPrimitives.Add(xDouble, yDouble, destDouble);
-        
+
         for (int i = 0; i < destination.Length; i++)
         {
             destination[i] = (T)(object)destDouble[i];

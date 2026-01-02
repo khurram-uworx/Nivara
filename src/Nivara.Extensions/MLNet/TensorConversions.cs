@@ -91,7 +91,7 @@ public static class TensorConversions
         {
             var currentSeries = seriesList[i];
             var values = new T[currentSeries.Length];
-            
+
             // Extract values from the series
             for (int j = 0; j < currentSeries.Length; j++)
             {
@@ -141,7 +141,7 @@ public static class TensorConversions
                 Array.Fill(values, T.Zero);
                 var sparseValues = tensor.GetValues();
                 var sparseIndices = tensor.GetIndices();
-                
+
                 for (int j = 0; j < sparseValues.Length; j++)
                 {
                     values[sparseIndices[j]] = sparseValues[j];

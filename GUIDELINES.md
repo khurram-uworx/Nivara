@@ -438,7 +438,7 @@ if (_nullMask != null)
 ```csharp
 // Always include when working with tensors
 using System.Numerics.Tensors;
-using Nivara.Tensors; // For TensorStorage<T>
+using Nivara.Storage; // For TensorStorage<T>
 
 // Create tensors in helper methods
 return new TensorStorage<T>(dataArray, hasNulls ? Tensor.Create(nullMaskArray, [values.Length]) : null);
@@ -601,7 +601,7 @@ internal sealed class CsvLazySource : IQuerySource
 }
 
 // Extensions: src/Nivara.Extensions/IO/CsvExtensions.cs
-public static class CsvExtensions
+public static class Csv
 {
     public static IQuerySource ScanCsv(string filePath) { ... }
 }
@@ -766,8 +766,7 @@ src/Nivara/
 | `Exceptions/` | `Nivara.Exceptions` | Custom exception types with context-specific error messages |
 | `Expressions/` | `Nivara.Expressions` | Column expressions, operators, query building |
 | `IO/` | `Nivara.IO` | Data source abstractions and built-in implementations |
-| `Memory/` | `Nivara.Memory` | Memory-based storage for non-vectorizable types |
-| `Tensors/` | `Nivara.Tensors` | Tensor-based storage for vectorizable types |
+| `Storage/` | `Nivara.Storage` | Tensor-based and Memory-based storage |
 | `[Root]` | `Nivara` | Core interfaces, main classes, schema management |
 
 ### Test Project Structure (`tests/Nivara.Tests/`)
@@ -796,8 +795,7 @@ tests/Nivara.Tests/
 // In core files that use moved classes
 using Nivara.Diagnostics;    // For ColumnDiagnostics, StorageType, etc.
 using Nivara.Exceptions;     // For custom exceptions
-using Nivara.Memory;         // For MemoryStorage
-using Nivara.Tensors;        // For TensorStorage
+using Nivara.Storage;         // For TensorStorage and MemoryStorage
 
 // In moved files that reference core classes
 using Nivara;                // For core interfaces and classes
@@ -836,9 +834,8 @@ When working with Nivara code:
    - `BinaryExpression`, `ComparisonExpression` - Operators
 
 4. **Storage**: Look in appropriate namespace
-   - `Nivara.Memory.MemoryStorage<T>` - Non-vectorizable types
-   - `Nivara.Tensors.TensorStorage<T>` - Vectorizable types
-   - `Nivara.Memory.NullableStorageHelper` - Nullable utilities
+   - `Nivara.Storage.MemoryStorage<T>` - Non-vectorizable types
+   - `Nivara.Storage.TensorStorage<T>` - Vectorizable types
 
 5. **Core**: Look in `Nivara` namespace
    - `NivaraColumn<T>`, `NivaraSeries<T>` - Main classes
@@ -2637,8 +2634,8 @@ public static NivaraFrame ReadCsvAsFrame(string filePath) => new CsvEagerSource(
 // Static factory classes for convenience
 public static class Csv
 {
-    public static QueryFrame ScanAsQueryFrame(string filePath) => CsvExtensions.ScanCsvAsQueryFrame(filePath);
-    public static NivaraFrame ReadAsFrame(string filePath) => CsvExtensions.ReadCsvAsFrame(filePath);
+    public static QueryFrame ScanAsQueryFrame(string filePath) => Csv.ScanCsvAsQueryFrame(filePath);
+    public static NivaraFrame ReadAsFrame(string filePath) => Csv.ReadCsvAsFrame(filePath);
 }
 ```
 
@@ -2756,8 +2753,8 @@ internal QueryFrame(IQuerySource source) { ... } // Can be used from Extensions
 
 **Pattern**: Extension class factory methods
 ```csharp
-// Extension class provides both source and QueryFrame factory methods
-public static class CsvExtensions
+// Class provides both source and QueryFrame factory methods
+public static class Csv
 {
     // Low-level source creation
     public static IQuerySource ScanCsv(string filePath) => new CsvLazySource(filePath);
@@ -2856,7 +2853,7 @@ foreach (var header in headers)
 **Pattern**: Transparent query engine integration
 ```csharp
 // Same query operations work for both lazy and eager sources
-var csvQuery = CsvExtensions.ScanCsvAsQueryFrame("data.csv")
+var csvQuery = Csv.ScanCsvAsQueryFrame("data.csv")
     .Filter(ColumnExpressions.Col("Age") > 30)
     .Select("Name", "Salary");
 
@@ -2948,7 +2945,7 @@ public IReadOnlyDictionary<string, IColumn> Execute()
 }
 
 // Subsequent data access requires no additional I/O
-var frame = CsvExtensions.ReadCsvAsFrame("data.csv"); // I/O happens here
+var frame = Csv.ReadCsvAsFrame("data.csv"); // I/O happens here
 var value1 = frame.GetColumn<string>("Name")[0];      // No I/O, data already loaded
 var value2 = frame.GetColumn<string>("Name")[1];      // No I/O, data already loaded
 ```
@@ -2971,12 +2968,12 @@ var value2 = frame.GetColumn<string>("Name")[1];      // No I/O, data already lo
 ```csharp
 // Test graceful degradation for mixed types
 var inconsistentData = "Name,Age\nAlice,30\nBob,not_a_number";
-var frame = CsvExtensions.ReadCsvAsFrame(inconsistentData);
+var frame = Csv.ReadCsvAsFrame(inconsistentData);
 Assert.That(frame.Schema.GetColumnType("Age"), Is.EqualTo(typeof(string))); // Falls back to string
 
 // Test error reporting for severe corruption
 var corruptData = ""; // Empty file with no headers
-Assert.Throws<DataSourceException>(() => CsvExtensions.ReadCsvAsFrame(corruptData));
+Assert.Throws<DataSourceException>(() => Csv.ReadCsvAsFrame(corruptData));
 ```
 
 ### Performance Characteristics Documentation
@@ -2999,13 +2996,13 @@ Assert.Throws<DataSourceException>(() => CsvExtensions.ReadCsvAsFrame(corruptDat
 **Pattern**: Transparent integration with different execution semantics
 ```csharp
 // Eager source - data loaded immediately
-var eagerFrame = CsvExtensions.ReadCsvAsFrame("data.csv");  // I/O happens here
+var eagerFrame = Csv.ReadCsvAsFrame("data.csv");  // I/O happens here
 var eagerQuery = eagerFrame.AsQueryFrame()                  // No additional I/O
     .Filter(ColumnExpressions.Col("Age") > 30)              // No I/O, data in memory
     .Collect();                                             // No I/O, just processing
 
 // Lazy source - data loaded on demand
-var lazyQuery = CsvExtensions.ScanCsvAsQueryFrame("data.csv") // Minimal I/O (schema only)
+var lazyQuery = Csv.ScanCsvAsQueryFrame("data.csv") // Minimal I/O (schema only)
     .Filter(ColumnExpressions.Col("Age") > 30)                // No I/O, building query
     .Collect();                                               // I/O happens here
 ```
@@ -3017,8 +3014,8 @@ var lazyQuery = CsvExtensions.ScanCsvAsQueryFrame("data.csv") // Minimal I/O (sc
 **Pattern**: Dual API approach for eager operations
 ```csharp
 // Extension methods on static classes
-var frame1 = CsvExtensions.ReadCsvAsFrame("data.csv");
-var frame2 = JsonExtensions.ReadJsonAsFrame("data.json");
+var frame1 = Csv.ReadCsvAsFrame("data.csv");
+var frame2 = Json.ReadJsonAsFrame("data.json");
 
 // Static factory classes
 var frame3 = Csv.ReadAsFrame("data.csv");
@@ -3049,7 +3046,7 @@ Assert.That(frame2.RowCount, Is.EqualTo(frame4.RowCount));
 **Pattern**: Full dataset retention with proper disposal
 ```csharp
 // Eager source keeps all data in memory
-using var frame = CsvExtensions.ReadCsvAsFrame("large_file.csv"); // Full file loaded
+using var frame = Csv.ReadCsvAsFrame("large_file.csv"); // Full file loaded
 // Data remains accessible throughout frame lifetime
 var column = frame.GetColumn<string>("Name"); // No additional I/O
 // Memory released when frame is disposed

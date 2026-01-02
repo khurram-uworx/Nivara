@@ -1,7 +1,7 @@
-using Nivara.Tensors;
+using Nivara.Storage;
 using NUnit.Framework;
 
-namespace Nivara.Tests;
+namespace Nivara.Tests.Storage;
 
 /// <summary>
 /// Tests for TensorStorage implementation covering null mask tracking, length preservation, and indexer access
