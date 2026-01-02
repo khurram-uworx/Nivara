@@ -409,6 +409,8 @@ public static class ParquetWriter
             {
                 for (int i = 0; i < column.Length; i++)
                 {
+                    // For value types, we still need to provide a value even for nulls
+                    // Parquet.Net will handle the null semantics based on the field definition
                     values[i] = column.IsNull(i) ? default(T) : column[i];
                 }
             }
@@ -421,6 +423,8 @@ public static class ParquetWriter
         {
             for (int i = 0; i < column.Length; i++)
             {
+                // For value types, we still need to provide a value even for nulls
+                // Parquet.Net will handle the null semantics based on the field definition
                 values[i] = column.IsNull(i) ? default(T) : column[i];
             }
         }

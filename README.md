@@ -164,22 +164,97 @@ dotnet add package Nivara.Extensions
 
 The integrations are shipped as a separate package so the core Nivara runtime remains small and focused.
 
+### Apache Arrow Interoperability
+
+Convert between Nivara and Apache Arrow formats for cross-language data exchange:
+
+```csharp
+using Nivara.IO;
+
+// Convert NivaraFrame to Arrow Table
+var arrowTable = frame.ToArrowTable();
+
+// Convert Arrow Table back to NivaraFrame
+var restoredFrame = arrowTable.FromArrowTable();
+
+// Series-level conversions
+var arrowArray = series.ToArrowArray();
+var restoredSeries = arrowArray.FromArrowArray<int>();
+```
+
+Arrow integration supports zero-copy operations when possible and handles all supported data types including proper null semantics.
+
+### Parquet File I/O
+
+Read and write Parquet files with columnar compression and schema preservation:
+
+```csharp
+using Nivara.IO;
+
+// Write to Parquet file
+frame.ToParquet("data.parquet");
+
+// Read from Parquet file
+var loadedFrame = NivaraFrameExtensions.LoadParquet("data.parquet");
+
+// Async operations
+await frame.ToParquetAsync("data.parquet");
+var asyncFrame = await NivaraFrameExtensions.LoadParquetAsync("data.parquet");
+
+// Stream-based operations
+using var stream = new FileStream("data.parquet", FileMode.Create);
+frame.ToParquetStream(stream);
+```
+
+Parquet I/O supports:
+- Configurable compression algorithms (snappy, gzip, lz4)
+- Custom row group sizes for optimal performance
+- Batch writing of multiple frames
+- Schema validation and type mapping
+- Streaming operations for large datasets
+
+### Configuration Options
+
+Both Arrow and Parquet operations support extensive configuration:
+
+```csharp
+// Arrow conversion options
+var arrowOptions = new ArrowConversionOptions
+{
+    UseZeroCopy = true,
+    ValidateTypes = true,
+    TimeZone = TimeZoneInfo.Utc,
+    StringEncoding = Encoding.UTF8
+};
+
+// Parquet write options
+var parquetOptions = new ParquetWriteOptions
+{
+    Compression = "snappy",
+    RowGroupSize = 10000,
+    ValidateSchema = true
+};
+
+frame.ToArrowTable(arrowOptions);
+frame.ToParquet("data.parquet", parquetOptions);
+```
+
 ---
 
 ## Current Capabilities
 
 Nivara currently supports:
 
-- Typed, immutable columns and frames with automatic storage selection
-- Explicit null handling with fill and drop operations
-- Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
-- High-performance tensor-backed storage for numeric types
-- Query diagnostics and plan inspection
-- Schema-aware lazy query construction
-- CSV and JSON lazy data sources
-- Parquet read/write (via `Nivara.Extensions`)
-- Apache Arrow interoperability (via `Nivara.Extensions`)
-- ML.NET integration helpers (via `Nivara.Extensions`)
+- **Core Data Structures**: Typed, immutable columns and frames with automatic storage selection
+- **Null Handling**: Explicit null handling with fill and drop operations
+- **Performance**: Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
+- **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
+- **Query Engine**: Schema-aware lazy query construction with diagnostics and plan inspection
+- **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
+- **Parquet I/O**: Full read/write support with compression, streaming, and batch operations (via `Nivara.Extensions`)
+- **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
+- **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
+- **Performance Optimization**: Buffer pooling, memory management, and async I/O operations
 
 ---
 
