@@ -276,6 +276,93 @@ public static NivaraColumn<T> CreateFromNullable(Array values)
 **Lesson**: Always check existing patterns in codebase first. Manual processing with GetValue() is often simpler than complex generic solutions.
 **Solution**: Use the simplest approach that works - manual array processing with runtime type checking
 
+### Property-Based Testing Implementation in C#
+**Decision**: Use NUnit parameterized tests instead of FsCheck for property-like testing
+**Rationale**: FsCheck adds complexity and dependencies. NUnit TestCase attributes with multiple test cases provide similar coverage with simpler implementation.
+**Lesson**: Property-based testing concepts can be implemented effectively using standard unit testing frameworks with carefully chosen test cases.
+
+**Pattern**: Convert property-based tests to parameterized unit tests
+```csharp
+// WRONG - using FsCheck (adds complexity and dependencies)
+[Property]
+public void PropertyTest(int[] values) { /* test logic */ }
+
+// CORRECT - using NUnit with multiple test cases
+[Test]
+public void PropertyLikeTest()
+{
+    var testCases = new[]
+    {
+        new int[] { 1, 2, 3 },
+        new int[] { -1, 0, 1 },
+        new int[] { int.MaxValue, int.MinValue }
+    };
+    
+    foreach (var values in testCases)
+    {
+        // Test logic that validates universal property
+    }
+}
+```
+
+### Null Handling Test Implementation Lessons
+**Problem**: TestCase attributes cannot use array creation expressions with null values
+**Solution**: Use regular Test methods with inline test data arrays
+**Lesson**: When TestCase attributes become complex or cause compiler errors, convert to regular Test methods with foreach loops over test cases.
+
+**Pattern**: Inline test data for complex scenarios
+```csharp
+// WRONG - TestCase with array creation (compiler error CS0182)
+[TestCase(new int?[] { 1, null, 3 })]
+public void TestMethod(int?[] values) { }
+
+// CORRECT - inline test data in regular test method
+[Test]
+public void TestMethod()
+{
+    var testCases = new[]
+    {
+        new int?[] { 1, null, 3 },
+        new int?[] { null, null, null },
+        new int?[] { 1, 2, 3 }
+    };
+    
+    foreach (var values in testCases)
+    {
+        // Test logic here
+    }
+}
+```
+
+### Nullable Reference Type Handling in Tests
+**Problem**: Nullable reference type arrays cannot be passed directly to methods expecting non-nullable arrays
+**Solution**: Use null-forgiving operator (!) when you know the array structure is valid
+**Lesson**: In test scenarios where you control the data structure, null-forgiving operator is appropriate for compiler satisfaction.
+
+**Pattern**: Null-forgiving operator in controlled test scenarios
+```csharp
+// WRONG - compiler error CS8620
+var column = NivaraColumn<string>.Create(new string?[] { "a", null, "c" });
+
+// CORRECT - use null-forgiving operator in tests
+var column = NivaraColumn<string>.Create(new string?[] { "a", null, "c" }!);
+```
+
+### Error Message Validation in Tests
+**Problem**: Hard-coded error message strings in tests break when implementation messages change
+**Solution**: Test for key phrases that capture the essential error information rather than exact strings
+**Lesson**: Focus on testing that error messages contain essential information rather than exact wording.
+
+**Pattern**: Flexible error message validation
+```csharp
+// WRONG - exact string matching (brittle)
+Assert.That(ex.Message, Is.EqualTo("CreateFromNullable only supports value types"));
+
+// CORRECT - key phrase matching (robust)
+Assert.That(ex.Message, Does.Contain("can only be used with value types"));
+Assert.That(ex.Message, Does.Contain("value types")); // Test essential concept
+```
+
 ## Type System Discoveries
 
 ### Vectorizable Types
@@ -498,9 +585,106 @@ public void Dispose()
 **Solution**: Use null-forgiving operator (`!`) when you know the value is not null after explicit checks
 **Lesson**: In nullable contexts, use null-forgiving operator judiciously after explicit null checks to satisfy compiler analysis.
 
----
+## Comprehensive Null Handling Testing Implementation
 
-**Note**: This document captures living knowledge and should be updated as new insights are discovered. Focus on "why" decisions were made and "what" didn't work, not "how" to implement (that belongs in CONTRIBUTING.md).
+### Property-Based Testing for Null Handling
+**Decision**: Implemented comprehensive null handling tests covering Properties 17, 18, and 19 from the design document
+**Rationale**: Null handling is critical for data integrity and requires thorough validation across all operations and edge cases.
+
+**Coverage**: Implemented 8 property-based tests and 13 error condition tests covering:
+- **Property 17**: Null mask maintenance during arithmetic, comparison, and element-wise operations
+- **Property 18**: Null checking methods (HasNulls, IsNull, NullCount, GetNullIndices)
+- **Property 19**: Null value filling with FillNull, FillNullForward, FillNullBackward
+
+### Null Handling Test Structure
+**Pattern**: Comprehensive test coverage using multiple test cases per property
+```csharp
+[Test]
+public void NullMaskMaintenance_ArithmeticOperations_PreservesNullPositions()
+{
+    // Feature: core-column-types, Property 17: Null mask maintenance
+    var testCases = new[]
+    {
+        new int?[] { 1, null, 3, null, 5 },
+        new int?[] { null, null, null },
+        new int?[] { 1, 2, 3 },
+        new int?[] { null }
+    };
+    
+    foreach (var values in testCases)
+    {
+        // Test null mask preservation across operations
+        var column = NivaraColumn<int>.CreateFromNullable(values);
+        var result = column.Multiply(5);
+        
+        // Verify null positions are preserved
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(result.IsNull(i), Is.EqualTo(values[i] == null));
+        }
+    }
+}
+```
+
+### Error Condition Testing for Null Handling
+**Decision**: Created comprehensive error condition tests for all null handling methods
+**Coverage**: 13 error condition tests covering:
+- FillNull error conditions (null fillValue for reference types, disposed columns)
+- FillNullForward/Backward error conditions (no valid values to fill from, disposed columns)
+- Null checking method error conditions (out-of-bounds access, disposed columns)
+- CreateFromNullable error conditions (null arrays, reference types)
+
+**Pattern**: Specific error validation with clear assertions
+```csharp
+[Test]
+public void FillNull_WithNullFillValueForReferenceTypes_ShouldThrowArgumentNullException()
+{
+    var stringColumn = NivaraColumn<string>.Create(new string?[] { "a", null, "c" }!);
+    
+    var ex = Assert.Throws<ArgumentNullException>(() => stringColumn.FillNull(null!));
+    
+    Assert.That(ex.ParamName, Is.EqualTo("fillValue"));
+    Assert.That(ex.Message, Does.Contain("Fill value cannot be null for reference type String"));
+}
+```
+
+### Test Organization and Maintainability
+**Decision**: Separated null handling tests into focused test classes
+**Structure**:
+- `NullHandlingPropertyTests.cs` - Property-based tests for core null handling functionality
+- `NullHandlingErrorConditionTests.cs` - Error condition tests for null handling methods
+
+**Benefits**:
+- Clear separation of concerns between property validation and error handling
+- Easy to locate and maintain specific test categories
+- Comprehensive coverage without overwhelming single test files
+
+### Null Handling Method Discovery
+**Lesson**: Discovered comprehensive null handling API during testing implementation
+**Available Methods**:
+- `FillNull(T fillValue)` - Replace nulls with specific value
+- `FillNullForward()` - Forward fill strategy
+- `FillNullBackward()` - Backward fill strategy
+- `DropNulls()` - Remove null values
+- `NullCount` - Property to get count of nulls
+- `GetNullIndices()` - Get indices of null values
+- `HasNulls` - Property to check for any nulls
+- `IsNull(int index)` - Check if specific index is null
+
+**Pattern**: Comprehensive null handling API provides multiple strategies for dealing with missing data
+```csharp
+// Different null handling strategies
+var filled = column.FillNull(defaultValue);           // Replace with default
+var forwardFilled = column.FillNullForward();         // Use previous value
+var backwardFilled = column.FillNullBackward();       // Use next value
+var cleaned = column.DropNulls();                     // Remove nulls entirely
+
+// Null inspection
+bool hasAnyNulls = column.HasNulls;
+int nullCount = column.NullCount;
+int[] nullPositions = column.GetNullIndices();
+bool isSpecificNull = column.IsNull(index);
+```
 
 ## Query Engine Foundation Implementation
 
@@ -3733,3 +3917,7 @@ Assert.Throws<KeyNotFoundException>(() => series.GetByLabel("missing")); // Not 
 - Concurrent operations maintain data integrity
 
 **Integration Quality**: High confidence in system reliability and performance for production use cases.
+
+---
+
+**Note**: This document captures living knowledge and should be updated as new insights are discovered. Focus on "why" decisions were made and "what" didn't work, not "how" to implement (that belongs in CONTRIBUTING.md).

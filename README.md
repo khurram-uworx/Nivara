@@ -246,7 +246,7 @@ frame.ToParquet("data.parquet", parquetOptions);
 Nivara currently supports:
 
 - **Core Data Structures**: Typed, immutable columns and frames with automatic storage selection
-- **Null Handling**: Explicit null handling with fill and drop operations
+- **Null Handling**: Explicit null handling with fill and drop operations, comprehensive null mask tracking
 - **Performance**: Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
 - **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
 - **Query Engine**: Schema-aware lazy query construction with diagnostics and plan inspection
