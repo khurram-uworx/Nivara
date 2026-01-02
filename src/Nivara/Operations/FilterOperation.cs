@@ -135,15 +135,45 @@ internal sealed class FilterOperation : IQueryOperation
     /// </summary>
     private static IColumn CreateFilteredColumnTyped<T>(IColumn column, List<int> indices)
     {
-        var filteredArray = new T[indices.Count];
-
-        for (int i = 0; i < indices.Count; i++)
+        // Check if T is a value type to determine which creation method to use
+        if (typeof(T).IsValueType)
         {
-            var value = column.GetValue(indices[i]);
-            filteredArray[i] = (T)value!;
-        }
+            // For value types, create nullable array and use CreateFromNullable
+            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
+            var filteredArray = System.Array.CreateInstance(nullableType, indices.Count);
 
-        return NivaraColumn<T>.Create(filteredArray);
+            for (int i = 0; i < indices.Count; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                if (value != null)
+                {
+                    var nullableInstance = Activator.CreateInstance(nullableType, value);
+                    filteredArray.SetValue(nullableInstance, i);
+                }
+                // null values remain null in the array
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
+                .Invoke(null, new object[] { filteredArray })!;
+        }
+        else
+        {
+            // For reference types, create regular array and use CreateForReferenceType
+            var filteredArray = new T[indices.Count];
+
+            for (int i = 0; i < indices.Count; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                filteredArray[i] = (T)value!; // Reference types can be null
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
+                .Invoke(null, new object[] { filteredArray })!;
+        }
     }
 
     /// <summary>

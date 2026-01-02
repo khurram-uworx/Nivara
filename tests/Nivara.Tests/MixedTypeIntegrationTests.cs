@@ -254,7 +254,6 @@ public class MixedTypeIntegrationTests
 
     [Test]
     [Category("Integration")]
-    [Ignore("Skipping due to FilterOperation null handling bug - needs investigation")]
     public void NullHandling_InMixedTypeOperations_WorksCorrectly()
     {
         // Arrange - Create mixed-type data with nulls

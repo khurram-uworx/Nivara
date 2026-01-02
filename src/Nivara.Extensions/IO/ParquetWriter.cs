@@ -1,5 +1,6 @@
 using Parquet.Data;
 using Parquet.Schema;
+using Nivara.Exceptions;
 
 namespace Nivara.IO;
 
@@ -280,6 +281,44 @@ public static class ParquetWriter
     }
 
     /// <summary>
+    /// Creates a Parquet DataField with explicit nullability based on actual column data
+    /// </summary>
+    private static DataField CreateParquetFieldWithNullability(string name, Type clrType, bool hasNulls)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(clrType);
+
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Field name cannot be empty or whitespace", nameof(name));
+
+        // Handle nullable types
+        var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
+        
+        // For value types, use hasNulls to determine nullability
+        // For reference types, they are inherently nullable
+        var isNullable = hasNulls || !actualType.IsValueType;
+
+        return actualType switch
+        {
+            Type t when t == typeof(bool) => new DataField<bool>(name, isNullable),
+            Type t when t == typeof(int) => new DataField<int>(name, isNullable),
+            Type t when t == typeof(long) => new DataField<long>(name, isNullable),
+            Type t when t == typeof(float) => new DataField<float>(name, isNullable),
+            Type t when t == typeof(double) => new DataField<double>(name, isNullable),
+            Type t when t == typeof(DateTime) => new DataField<DateTime>(name, isNullable),
+            Type t when t == typeof(string) => new DataField<string>(name, isNullable),
+            Type t when t == typeof(byte) => new DataField<byte>(name, isNullable),
+            Type t when t == typeof(short) => new DataField<short>(name, isNullable),
+            Type t when t == typeof(uint) => new DataField<uint>(name, isNullable),
+            Type t when t == typeof(ulong) => new DataField<ulong>(name, isNullable),
+            Type t when t == typeof(ushort) => new DataField<ushort>(name, isNullable),
+            Type t when t == typeof(sbyte) => new DataField<sbyte>(name, isNullable),
+            Type t when t == typeof(decimal) => new DataField<decimal>(name, isNullable),
+            _ => throw new UnsupportedTypeException(actualType, TypeMapper.GetTypeSuggestions(actualType))
+        };
+    }
+
+    /// <summary>
     /// Checks if two frames have compatible schemas
     /// </summary>
     private static bool AreFramesSchemaCompatible(NivaraFrame frame1, NivaraFrame frame2)
@@ -326,8 +365,11 @@ public static class ParquetWriter
         {
             var columnName = frame.ColumnNames[i];
             var columnType = frame.Schema.GetColumnType(columnName);
+            var column = frame.GetColumn(columnName);
 
-            var field = TypeMapper.CreateParquetField(columnName, columnType);
+            // Check if the column actually has nulls to determine nullability
+            var hasNulls = column.HasNulls;
+            var field = CreateParquetFieldWithNullability(columnName, columnType, hasNulls);
             fields.Add(field);
         }
 
@@ -372,64 +414,97 @@ public static class ParquetWriter
     {
         // Handle nullable types by extracting the underlying type
         var actualType = Nullable.GetUnderlyingType(columnType) ?? columnType;
+        var column = frame.GetColumn(columnName);
 
         return actualType switch
         {
-            Type t when t == typeof(bool) => ExtractColumnDataArrayTyped<bool>(frame, columnName),
-            Type t when t == typeof(int) => ExtractColumnDataArrayTyped<int>(frame, columnName),
-            Type t when t == typeof(long) => ExtractColumnDataArrayTyped<long>(frame, columnName),
-            Type t when t == typeof(float) => ExtractColumnDataArrayTyped<float>(frame, columnName),
-            Type t when t == typeof(double) => ExtractColumnDataArrayTyped<double>(frame, columnName),
-            Type t when t == typeof(DateTime) => ExtractColumnDataArrayTyped<DateTime>(frame, columnName),
-            Type t when t == typeof(byte) => ExtractColumnDataArrayTyped<byte>(frame, columnName),
-            Type t when t == typeof(short) => ExtractColumnDataArrayTyped<short>(frame, columnName),
-            Type t when t == typeof(uint) => ExtractColumnDataArrayTyped<uint>(frame, columnName),
-            Type t when t == typeof(ulong) => ExtractColumnDataArrayTyped<ulong>(frame, columnName),
-            Type t when t == typeof(ushort) => ExtractColumnDataArrayTyped<ushort>(frame, columnName),
-            Type t when t == typeof(sbyte) => ExtractColumnDataArrayTyped<sbyte>(frame, columnName),
-            Type t when t == typeof(decimal) => ExtractColumnDataArrayTyped<decimal>(frame, columnName),
+            Type t when t == typeof(bool) => ExtractColumnDataArrayTyped<bool>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(int) => ExtractColumnDataArrayTyped<int>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(long) => ExtractColumnDataArrayTyped<long>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(float) => ExtractColumnDataArrayTyped<float>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(double) => ExtractColumnDataArrayTyped<double>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(DateTime) => ExtractColumnDataArrayTyped<DateTime>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(byte) => ExtractColumnDataArrayTyped<byte>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(short) => ExtractColumnDataArrayTyped<short>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(uint) => ExtractColumnDataArrayTyped<uint>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(ulong) => ExtractColumnDataArrayTyped<ulong>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(ushort) => ExtractColumnDataArrayTyped<ushort>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(sbyte) => ExtractColumnDataArrayTyped<sbyte>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(decimal) => ExtractColumnDataArrayTyped<decimal>(frame, columnName, column.HasNulls),
             Type t when t == typeof(string) => ExtractStringColumnDataArray(frame, columnName),
             _ => throw new UnsupportedTypeException(actualType, TypeMapper.GetTypeSuggestions(actualType))
         };
     }
 
     /// <summary>
-    /// Extracts typed column data from a NivaraFrame as a non-nullable array for Parquet writing with buffer reuse.
+    /// Extracts typed column data from a NivaraFrame as a non-nullable or nullable array for Parquet writing with buffer reuse.
     /// </summary>
-    private static Array ExtractColumnDataArrayTyped<T>(NivaraFrame frame, string columnName) where T : struct
+    private static Array ExtractColumnDataArrayTyped<T>(NivaraFrame frame, string columnName, bool hasNulls) where T : struct
     {
         var column = frame.GetColumn<T>(columnName);
-        var values = new T[column.Length];
 
-        // Use buffer pool for large columns to reduce memory pressure
-        if (column.Length > 1024)
+        if (hasNulls)
         {
-            var buffer = BufferPool.RentIntBuffer(column.Length);
-            try
+            // Create nullable array when column has nulls
+            var nullableValues = new T?[column.Length];
+
+            // Use buffer pool for large columns to reduce memory pressure
+            if (column.Length > 1024)
+            {
+                var buffer = BufferPool.RentIntBuffer(column.Length);
+                try
+                {
+                    for (int i = 0; i < column.Length; i++)
+                    {
+                        nullableValues[i] = column.IsNull(i) ? null : column[i];
+                    }
+                }
+                finally
+                {
+                    BufferPool.ReturnIntBuffer(buffer);
+                }
+            }
+            else
             {
                 for (int i = 0; i < column.Length; i++)
                 {
-                    // For value types, we still need to provide a value even for nulls
-                    // Parquet.Net will handle the null semantics based on the field definition
-                    values[i] = column.IsNull(i) ? default(T) : column[i];
+                    nullableValues[i] = column.IsNull(i) ? null : column[i];
                 }
             }
-            finally
-            {
-                BufferPool.ReturnIntBuffer(buffer);
-            }
+
+            return nullableValues;
         }
         else
         {
-            for (int i = 0; i < column.Length; i++)
-            {
-                // For value types, we still need to provide a value even for nulls
-                // Parquet.Net will handle the null semantics based on the field definition
-                values[i] = column.IsNull(i) ? default(T) : column[i];
-            }
-        }
+            // Create non-nullable array when column has no nulls
+            var values = new T[column.Length];
 
-        return values;
+            // Use buffer pool for large columns to reduce memory pressure
+            if (column.Length > 1024)
+            {
+                var buffer = BufferPool.RentIntBuffer(column.Length);
+                try
+                {
+                    for (int i = 0; i < column.Length; i++)
+                    {
+                        values[i] = column[i];
+                    }
+                }
+                finally
+                {
+                    BufferPool.ReturnIntBuffer(buffer);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < column.Length; i++)
+                {
+                    values[i] = column[i];
+                }
+            }
+
+            return values;
+        }
     }
 
     /// <summary>

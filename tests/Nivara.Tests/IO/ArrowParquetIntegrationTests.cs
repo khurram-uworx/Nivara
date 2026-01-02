@@ -96,7 +96,6 @@ public class ArrowParquetIntegrationTests
     }
 
     [Test]
-    [Ignore("Null value preservation through Parquet round-trip needs investigation")]
     public void CompleteWorkflow_With_NullValues_PreservesNulls()
     {
         // Arrange - Create frame with null values
@@ -118,7 +117,30 @@ public class ArrowParquetIntegrationTests
             // Act - Complete workflow with nulls
             ParquetWriter.WriteParquet(originalFrame, parquetFile);
             var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
+            
+            // Debug: Check if nulls are preserved after Parquet round-trip
+            TestContext.Out.WriteLine("=== After Parquet round-trip ===");
+            var parquetIntColumn = frameFromParquet.GetColumn("NullableInts");
+            for (int i = 0; i < 5; i++)
+            {
+                var originalIntValue = originalFrame.GetColumn("NullableInts").GetValue(i);
+                var parquetIntValue = parquetIntColumn.GetValue(i);
+                TestContext.Out.WriteLine($"Index {i}: Original int = {originalIntValue}, Parquet int = {parquetIntValue}");
+            }
+            
             var arrowTable = ArrowInterop.ToArrowTable(frameFromParquet);
+            
+            // Debug: Check if nulls are preserved in Arrow table
+            TestContext.Out.WriteLine("=== After Arrow conversion ===");
+            var arrowIntColumn = arrowTable.Column(0); // Use index instead of name
+            for (int i = 0; i < 5; i++)
+            {
+                var originalIntValue = originalFrame.GetColumn("NullableInts").GetValue(i);
+                var arrowIsNull = arrowIntColumn.Data.Array(0).IsNull(i);
+                var arrowValue = arrowIsNull ? "null" : "non-null";
+                TestContext.Out.WriteLine($"Index {i}: Original int = {originalIntValue}, Arrow int = {arrowValue} (IsNull: {arrowIsNull})");
+            }
+            
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable);
 
             // Assert - Verify null preservation

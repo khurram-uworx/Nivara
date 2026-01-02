@@ -126,10 +126,14 @@ public static class ArrowInterop
 
             var columns = new List<(string Name, IColumn Column)>();
 
+            System.Diagnostics.Debug.WriteLine($"Converting Arrow table with {arrowTable.ColumnCount} columns");
+
             for (int fieldIndex = 0; fieldIndex < arrowTable.ColumnCount; fieldIndex++)
             {
                 var field = arrowTable.Schema.GetFieldByIndex(fieldIndex);
                 var columnName = field.Name;
+
+                System.Diagnostics.Debug.WriteLine($"Converting column '{columnName}' of type {field.DataType.GetType().Name}");
 
                 try
                 {
@@ -137,6 +141,9 @@ public static class ArrowInterop
 
                     // Convert Arrow column to Nivara column
                     var column = ConvertArrowColumnToNivaraColumn(arrowColumn, field.DataType, options);
+                    
+                    System.Diagnostics.Debug.WriteLine($"Created column '{columnName}' with HasNulls: {column.HasNulls}");
+                    
                     columns.Add((columnName, column));
                 }
                 catch (Exception ex) when (ex is not UnsupportedTypeException)
@@ -649,6 +656,53 @@ public static class ArrowInterop
     }
 
     /// <summary>
+    /// Converts an Arrow column to a NivaraColumn<int> with proper null handling
+    /// </summary>
+    private static IColumn ConvertArrowColumnToNivaraColumnInt(Column arrowColumn, ArrowConversionOptions options)
+    {
+        var chunkedArray = arrowColumn.Data;
+        int chunkCount = chunkedArray.ArrayCount;
+        int totalLength = (int)arrowColumn.Length;
+
+        if (totalLength == 0)
+        {
+            return NivaraColumn<int>.Create(System.Array.Empty<int>());
+        }
+
+        var values = new List<int?>();
+
+        // Process each chunk in the column
+        for (int chunkIndex = 0; chunkIndex < chunkCount; chunkIndex++)
+        {
+            var chunk = chunkedArray.Array(chunkIndex);
+
+            for (int i = 0; i < chunk.Length; i++)
+            {
+                if (chunk.IsNull(i))
+                {
+                    values.Add(null);
+                }
+                else
+                {
+                    var intArray = (Int32Array)chunk;
+                    var value = intArray.GetValue(i)!.Value;
+                    values.Add(value);
+                }
+            }
+        }
+
+        return NivaraColumn<int>.CreateFromNullable(values.ToArray());
+    }
+
+    /// <summary>
+    /// Creates a null value for the specified type
+    /// </summary>
+    private static T? CreateNullValue<T>()
+    {
+        return default(T?);
+    }
+
+    /// <summary>
     /// Converts a typed Arrow column to a Nivara column
     /// </summary>
     private static IColumn ConvertArrowColumnToNivaraColumnTyped<T>(Column arrowColumn, ArrowConversionOptions options)
@@ -684,11 +738,13 @@ public static class ArrowInterop
             {
                 if (chunk.IsNull(i))
                 {
-                    values.Add(default(T?));
+                    // Add null value using a helper method
+                    values.Add(CreateNullValue<T>());
                 }
                 else
                 {
-                    values.Add(ExtractValueFromArrowArray<T>(chunk, i, options));
+                    var extractedValue = ExtractValueFromArrowArray<T>(chunk, i, options);
+                    values.Add(extractedValue);
                 }
             }
         }
@@ -696,27 +752,23 @@ public static class ArrowInterop
         // Create appropriate Nivara column
         if (typeof(T).IsValueType)
         {
-            // For value types, we need to create an array of nullable values with the correct type
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var nullableArray = System.Array.CreateInstance(nullableType, values.Count);
-
-            for (int i = 0; i < values.Count; i++)
+            // For value types, create nullable array and use CreateFromNullable
+            return typeof(T) switch
             {
-                var nullableValue = values[i];
-                if (nullableValue != null)
-                {
-                    // Create a Nullable<T> instance with the value
-                    var nullableInstance = Activator.CreateInstance(nullableType, nullableValue);
-                    nullableArray.SetValue(nullableInstance, i);
-                }
-                else
-                {
-                    // Set null value
-                    nullableArray.SetValue(null, i);
-                }
-            }
-
-            return NivaraColumn<T>.CreateFromNullable(nullableArray);
+                Type t when t == typeof(int) => ConvertArrowColumnToNivaraColumnInt(arrowColumn, options),
+                Type t when t == typeof(long) => NivaraColumn<long>.CreateFromNullable(values.Cast<long?>().ToArray()),
+                Type t when t == typeof(float) => NivaraColumn<float>.CreateFromNullable(values.Cast<float?>().ToArray()),
+                Type t when t == typeof(double) => NivaraColumn<double>.CreateFromNullable(values.Cast<double?>().ToArray()),
+                Type t when t == typeof(bool) => NivaraColumn<bool>.CreateFromNullable(values.Cast<bool?>().ToArray()),
+                Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.CreateFromNullable(values.Cast<DateTime?>().ToArray()),
+                Type t when t == typeof(byte) => NivaraColumn<byte>.CreateFromNullable(values.Cast<byte?>().ToArray()),
+                Type t when t == typeof(short) => NivaraColumn<short>.CreateFromNullable(values.Cast<short?>().ToArray()),
+                Type t when t == typeof(uint) => NivaraColumn<uint>.CreateFromNullable(values.Cast<uint?>().ToArray()),
+                Type t when t == typeof(ulong) => NivaraColumn<ulong>.CreateFromNullable(values.Cast<ulong?>().ToArray()),
+                Type t when t == typeof(ushort) => NivaraColumn<ushort>.CreateFromNullable(values.Cast<ushort?>().ToArray()),
+                Type t when t == typeof(sbyte) => NivaraColumn<sbyte>.CreateFromNullable(values.Cast<sbyte?>().ToArray()),
+                _ => throw new UnsupportedTypeException(typeof(T))
+            };
         }
         else
         {
