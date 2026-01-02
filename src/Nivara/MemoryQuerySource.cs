@@ -7,6 +7,7 @@ internal sealed class MemoryQuerySource : IQuerySource
 {
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly Schema schema;
+    bool disposed;
 
     /// <summary>
     /// Initializes a new instance of MemoryQuerySource
@@ -21,7 +22,14 @@ internal sealed class MemoryQuerySource : IQuerySource
     }
 
     /// <inheritdoc />
-    public Schema Schema => schema;
+    public Schema Schema
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return schema;
+        }
+    }
 
     /// <inheritdoc />
     public bool IsLazy => false; // Memory sources are already materialized
@@ -29,7 +37,23 @@ internal sealed class MemoryQuerySource : IQuerySource
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        
         // Memory sources just return their columns directly
         return columns;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (!disposed)
+        {
+            // Dispose all columns
+            foreach (var column in columns.Values)
+            {
+                column?.Dispose();
+            }
+            disposed = true;
+        }
     }
 }

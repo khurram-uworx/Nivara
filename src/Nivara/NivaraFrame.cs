@@ -35,6 +35,7 @@ public sealed class NivaraFrame : IFrame
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         int? expectedLength = null;
+        long estimatedMemoryUsage = 0;
 
         foreach (var (name, column) in columnList)
         {
@@ -66,10 +67,16 @@ public sealed class NivaraFrame : IFrame
 
             columnDict[name] = column;
             schemaColumns.Add((name, column.ElementType));
+
+            // Estimate memory usage (rough approximation)
+            estimatedMemoryUsage += EstimateColumnMemoryUsage(column);
         }
 
         columns = columnDict;
         schema = new Schema(schemaColumns);
+
+        // Track this frame for resource management
+        ResourceManager.TrackResource(this, "NivaraFrame", estimatedMemoryUsage);
     }
 
     /// <summary>
@@ -389,6 +396,9 @@ public sealed class NivaraFrame : IFrame
     {
         if (!disposed)
         {
+            // Untrack from resource manager
+            ResourceManager.UntrackResource(this);
+
             // Dispose all columns
             foreach (var column in columns.Values)
             {
@@ -396,5 +406,83 @@ public sealed class NivaraFrame : IFrame
             }
             disposed = true;
         }
+    }
+
+    /// <summary>
+    /// Estimates the memory usage of a column (rough approximation)
+    /// </summary>
+    /// <param name="column">The column to estimate</param>
+    /// <returns>Estimated memory usage in bytes</returns>
+    private static long EstimateColumnMemoryUsage(IColumn column)
+    {
+        if (column == null) return 0;
+
+        var elementType = column.ElementType;
+        var elementSize = GetTypeSize(elementType);
+        var baseMemory = column.Length * elementSize;
+
+        // Add overhead for null mask if present
+        if (column.HasNulls)
+        {
+            baseMemory += column.Length; // 1 byte per boolean in null mask
+        }
+
+        // Add some overhead for object structure
+        return baseMemory + 64; // 64 bytes overhead estimate
+    }
+
+    /// <summary>
+    /// Gets memory management recommendations for operations on this frame
+    /// </summary>
+    /// <param name="operationType">The type of operation being performed</param>
+    /// <returns>Memory management recommendations</returns>
+    public MemoryRecommendations GetMemoryRecommendations(string operationType = "general")
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var estimatedSize = EstimateFrameMemoryUsage();
+        return ResourceManager.GetMemoryRecommendations(estimatedSize, operationType);
+    }
+
+    /// <summary>
+    /// Estimates the total memory usage of this frame
+    /// </summary>
+    /// <returns>Estimated memory usage in bytes</returns>
+    private long EstimateFrameMemoryUsage()
+    {
+        long totalSize = 0;
+        foreach (var column in columns.Values)
+        {
+            totalSize += EstimateColumnMemoryUsage(column);
+        }
+        return totalSize;
+    }
+
+    /// <summary>
+    /// Gets the approximate size of a type in bytes
+    /// </summary>
+    /// <param name="type">The type to get size for</param>
+    /// <returns>Size in bytes</returns>
+    private static int GetTypeSize(Type type)
+    {
+        if (type == typeof(bool)) return 1;
+        if (type == typeof(byte) || type == typeof(sbyte)) return 1;
+        if (type == typeof(short) || type == typeof(ushort)) return 2;
+        if (type == typeof(int) || type == typeof(uint)) return 4;
+        if (type == typeof(long) || type == typeof(ulong)) return 8;
+        if (type == typeof(float)) return 4;
+        if (type == typeof(double)) return 8;
+        if (type == typeof(decimal)) return 16;
+        if (type == typeof(DateTime)) return 8;
+        if (type == typeof(Guid)) return 16;
+        
+        // For reference types, estimate pointer size + average string length
+        if (!type.IsValueType)
+        {
+            if (type == typeof(string)) return 50; // Average string estimate
+            return 8; // Pointer size on 64-bit systems
+        }
+
+        return 8; // Default estimate for unknown types
     }
 }

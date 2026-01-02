@@ -72,6 +72,7 @@ internal sealed class CsvLazySource : IQuerySource
     private readonly CsvOptions options;
     private readonly Lazy<Schema> lazySchema;
     private readonly DeferredErrorHandler errorHandler;
+    private bool disposed;
 
     /// <summary>
     /// Initializes a new instance of CsvLazySource
@@ -88,7 +89,14 @@ internal sealed class CsvLazySource : IQuerySource
     }
 
     /// <inheritdoc />
-    public Schema Schema => lazySchema.Value;
+    public Schema Schema
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return lazySchema.Value;
+        }
+    }
 
     /// <inheritdoc />
     public bool IsLazy => true;
@@ -96,6 +104,8 @@ internal sealed class CsvLazySource : IQuerySource
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        
         // Check for deferred errors first
         errorHandler.ThrowIfHasDeferredErrors("CSV data source execution");
 
@@ -504,6 +514,17 @@ internal sealed class CsvLazySource : IQuerySource
 
         return (IColumn)createMethod.Invoke(null, new object[] { data })!;
     }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (!disposed)
+        {
+            // CsvLazySource doesn't hold any unmanaged resources
+            // The errorHandler and lazySchema don't require disposal
+            disposed = true;
+        }
+    }
 }
 
 /// <summary>
@@ -513,6 +534,7 @@ internal sealed class CsvEagerSource : IQuerySource
 {
     private readonly CsvLazySource lazySource;
     private readonly Lazy<IReadOnlyDictionary<string, IColumn>> lazyColumns;
+    private bool disposed;
 
     /// <summary>
     /// Initializes a new instance of CsvEagerSource
@@ -526,7 +548,14 @@ internal sealed class CsvEagerSource : IQuerySource
     }
 
     /// <inheritdoc />
-    public Schema Schema => lazySource.Schema;
+    public Schema Schema
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return lazySource.Schema;
+        }
+    }
 
     /// <inheritdoc />
     public bool IsLazy => false;
@@ -534,6 +563,28 @@ internal sealed class CsvEagerSource : IQuerySource
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
+        ObjectDisposedException.ThrowIf(disposed, this);
         return lazyColumns.Value;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (!disposed)
+        {
+            // Dispose the underlying lazy source
+            lazySource?.Dispose();
+            
+            // Dispose columns if they have been materialized
+            if (lazyColumns.IsValueCreated)
+            {
+                foreach (var column in lazyColumns.Value.Values)
+                {
+                    column?.Dispose();
+                }
+            }
+            
+            disposed = true;
+        }
     }
 }

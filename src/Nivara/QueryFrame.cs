@@ -22,6 +22,23 @@ public sealed class QueryFrame : IDisposable
     {
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         operations = new List<IQueryOperation>();
+
+        // Track lazy queries for abandoned resource cleanup
+        if (source.IsLazy)
+        {
+            ResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
+            {
+                // Cleanup action for abandoned lazy queries
+                try
+                {
+                    source?.Dispose();
+                }
+                catch
+                {
+                    // Ignore disposal errors for abandoned resources
+                }
+            });
+        }
     }
 
     /// <summary>
@@ -34,6 +51,23 @@ public sealed class QueryFrame : IDisposable
     {
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         this.operations = operations?.ToList() ?? throw new ArgumentNullException(nameof(operations));
+
+        // Track lazy queries for abandoned resource cleanup
+        if (source.IsLazy)
+        {
+            ResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
+            {
+                // Cleanup action for abandoned lazy queries
+                try
+                {
+                    source?.Dispose();
+                }
+                catch
+                {
+                    // Ignore disposal errors for abandoned resources
+                }
+            });
+        }
     }
 
     /// <summary>
@@ -283,7 +317,11 @@ public sealed class QueryFrame : IDisposable
     {
         if (!disposed)
         {
-            // QueryFrame doesn't own the source, so we don't dispose it
+            // Untrack from resource manager
+            ResourceManager.UntrackResource(this);
+
+            // QueryFrame doesn't own the source in most cases, so we don't dispose it
+            // The source is typically owned by the caller or factory methods
             // Operations are value types or immutable, no disposal needed
             disposed = true;
         }

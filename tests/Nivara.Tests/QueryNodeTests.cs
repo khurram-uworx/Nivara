@@ -194,6 +194,11 @@ public class QueryNodeTests
         {
             return new Dictionary<string, IColumn>();
         }
+
+        public void Dispose()
+        {
+            // Test implementation - no resources to dispose
+        }
     }
 
     // Test visitor implementation

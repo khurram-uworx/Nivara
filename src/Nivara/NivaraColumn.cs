@@ -21,6 +21,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     internal NivaraColumn(IColumnStorage<T> storage)
     {
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
+
+        // Track column for resource management
+        var estimatedSize = EstimateMemoryUsage();
+        ResourceManager.TrackResource(this, $"NivaraColumn<{typeof(T).Name}>", estimatedSize);
     }
 
     /// <inheritdoc />
@@ -2489,8 +2493,58 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         if (!disposed)
         {
+            // Untrack from resource manager
+            ResourceManager.UntrackResource(this);
+
             storage?.Dispose();
             disposed = true;
         }
+    }
+
+    /// <summary>
+    /// Estimates the memory usage of this column
+    /// </summary>
+    /// <returns>Estimated memory usage in bytes</returns>
+    private long EstimateMemoryUsage()
+    {
+        var elementSize = GetTypeSize(typeof(T));
+        var baseMemory = Length * elementSize;
+
+        // Add overhead for null mask if present
+        if (HasNulls)
+        {
+            baseMemory += Length; // 1 byte per boolean in null mask
+        }
+
+        // Add some overhead for object structure
+        return baseMemory + 64; // 64 bytes overhead estimate
+    }
+
+    /// <summary>
+    /// Gets the approximate size of a type in bytes
+    /// </summary>
+    /// <param name="type">The type to get size for</param>
+    /// <returns>Size in bytes</returns>
+    private static int GetTypeSize(Type type)
+    {
+        if (type == typeof(bool)) return 1;
+        if (type == typeof(byte) || type == typeof(sbyte)) return 1;
+        if (type == typeof(short) || type == typeof(ushort)) return 2;
+        if (type == typeof(int) || type == typeof(uint)) return 4;
+        if (type == typeof(long) || type == typeof(ulong)) return 8;
+        if (type == typeof(float)) return 4;
+        if (type == typeof(double)) return 8;
+        if (type == typeof(decimal)) return 16;
+        if (type == typeof(DateTime)) return 8;
+        if (type == typeof(Guid)) return 16;
+        
+        // For reference types, estimate pointer size + average string length
+        if (!type.IsValueType)
+        {
+            if (type == typeof(string)) return 50; // Average string estimate
+            return 8; // Pointer size on 64-bit systems
+        }
+
+        return 8; // Default estimate for unknown types
     }
 }

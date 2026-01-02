@@ -4,7 +4,7 @@ namespace Nivara;
 /// Represents a data source that can be queried lazily or eagerly.
 /// Provides the foundation for all data input operations in the query engine.
 /// </summary>
-public interface IQuerySource
+public interface IQuerySource : IDisposable
 {
     /// <summary>
     /// Gets the schema of the data source
