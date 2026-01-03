@@ -7,6 +7,7 @@
     <File Path=".editorconfig" />
     <File Path=".github/workflows/ci.yml" />
     <File Path="ARCHITECTURE.md" />
+    <File Path="CHANGELOGS.md" />
     <File Path="CONTRIBUTING.md" />
     <File Path="Directory.Build.props" />
     <File Path="GUIDELINES.md" />
