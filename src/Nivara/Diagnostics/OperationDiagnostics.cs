@@ -114,9 +114,9 @@ public sealed class OperationDiagnostics
 /// </summary>
 public static class DiagnosticsTracker
 {
-    private static readonly object lockObject = new object();
-    private static readonly List<OperationDiagnostics> operations = new List<OperationDiagnostics>();
-    private static bool isEnabled = false;
+    static readonly object lockObject = new object();
+    static readonly List<OperationDiagnostics> operations = new List<OperationDiagnostics>();
+    static bool isEnabled = false;
 
     /// <summary>
     /// Gets or sets a value indicating whether diagnostic tracking is enabled

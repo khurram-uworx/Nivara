@@ -76,7 +76,7 @@ internal sealed class JsonLazySource : IQuerySource
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        
+
         // Check for deferred errors first
         errorHandler.ThrowIfHasDeferredErrors("JSON data source execution");
 
@@ -615,7 +615,7 @@ internal sealed class JsonEagerSource : IQuerySource
         {
             // Dispose the underlying lazy source
             lazySource?.Dispose();
-            
+
             // Dispose columns if they have been materialized
             if (lazyColumns.IsValueCreated)
             {
@@ -624,7 +624,7 @@ internal sealed class JsonEagerSource : IQuerySource
                     column?.Dispose();
                 }
             }
-            
+
             disposed = true;
         }
     }

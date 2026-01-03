@@ -33,6 +33,38 @@ public sealed class ColumnDiagnostics
     }
 
     /// <summary>
+    /// Gets the size in bytes of a single element of the specified type
+    /// </summary>
+    /// <param name="type">The type to get the size for</param>
+    /// <returns>The size in bytes</returns>
+    static long GetElementSize(Type type)
+    {
+        if (type == typeof(bool) || type == typeof(byte) || type == typeof(sbyte))
+            return 1;
+        if (type == typeof(short) || type == typeof(ushort))
+            return 2;
+        if (type == typeof(int) || type == typeof(uint) || type == typeof(float))
+            return 4;
+        if (type == typeof(long) || type == typeof(ulong) || type == typeof(double))
+            return 8;
+        if (type == typeof(decimal))
+            return 16;
+        if (type == typeof(Guid))
+            return 16;
+        if (type == typeof(DateTime) || type == typeof(DateTimeOffset))
+            return 8;
+        if (type == typeof(TimeSpan))
+            return 8;
+
+        // For reference types, estimate pointer size + average object overhead
+        if (!type.IsValueType)
+            return IntPtr.Size + 32; // Pointer + estimated object overhead
+
+        // For other value types, use a conservative estimate
+        return 32;
+    }
+
+    /// <summary>
     /// Gets the type of storage implementation being used
     /// </summary>
     public StorageType StorageType { get; }
@@ -141,38 +173,6 @@ public sealed class ColumnDiagnostics
                 memoryEfficiency,
                 IsVectorizable && IsHardwareAccelerated);
         }
-    }
-
-    /// <summary>
-    /// Gets the size in bytes of a single element of the specified type
-    /// </summary>
-    /// <param name="type">The type to get the size for</param>
-    /// <returns>The size in bytes</returns>
-    private static long GetElementSize(Type type)
-    {
-        if (type == typeof(bool) || type == typeof(byte) || type == typeof(sbyte))
-            return 1;
-        if (type == typeof(short) || type == typeof(ushort))
-            return 2;
-        if (type == typeof(int) || type == typeof(uint) || type == typeof(float))
-            return 4;
-        if (type == typeof(long) || type == typeof(ulong) || type == typeof(double))
-            return 8;
-        if (type == typeof(decimal))
-            return 16;
-        if (type == typeof(Guid))
-            return 16;
-        if (type == typeof(DateTime) || type == typeof(DateTimeOffset))
-            return 8;
-        if (type == typeof(TimeSpan))
-            return 8;
-
-        // For reference types, estimate pointer size + average object overhead
-        if (!type.IsValueType)
-            return IntPtr.Size + 32; // Pointer + estimated object overhead
-
-        // For other value types, use a conservative estimate
-        return 32;
     }
 
     /// <summary>

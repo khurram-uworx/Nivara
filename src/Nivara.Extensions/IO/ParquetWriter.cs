@@ -1,6 +1,5 @@
 using Parquet.Data;
 using Parquet.Schema;
-using Nivara.Exceptions;
 
 namespace Nivara.IO;
 
@@ -293,7 +292,7 @@ public static class ParquetWriter
 
         // Handle nullable types
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
-        
+
         // For value types, use hasNulls to determine nullability
         // For reference types, they are inherently nullable
         var isNullable = hasNulls || !actualType.IsValueType;

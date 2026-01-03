@@ -1,5 +1,3 @@
-using Apache.Arrow;
-using Apache.Arrow.Types;
 using Nivara.IO;
 using NUnit.Framework;
 
@@ -117,7 +115,7 @@ public class ArrowParquetIntegrationTests
             // Act - Complete workflow with nulls
             ParquetWriter.WriteParquet(originalFrame, parquetFile);
             var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
-            
+
             // Debug: Check if nulls are preserved after Parquet round-trip
             TestContext.Out.WriteLine("=== After Parquet round-trip ===");
             var parquetIntColumn = frameFromParquet.GetColumn("NullableInts");
@@ -127,9 +125,9 @@ public class ArrowParquetIntegrationTests
                 var parquetIntValue = parquetIntColumn.GetValue(i);
                 TestContext.Out.WriteLine($"Index {i}: Original int = {originalIntValue}, Parquet int = {parquetIntValue}");
             }
-            
+
             var arrowTable = ArrowInterop.ToArrowTable(frameFromParquet);
-            
+
             // Debug: Check if nulls are preserved in Arrow table
             TestContext.Out.WriteLine("=== After Arrow conversion ===");
             var arrowIntColumn = arrowTable.Column(0); // Use index instead of name
@@ -140,7 +138,7 @@ public class ArrowParquetIntegrationTests
                 var arrowValue = arrowIsNull ? "null" : "non-null";
                 TestContext.Out.WriteLine($"Index {i}: Original int = {originalIntValue}, Arrow int = {arrowValue} (IsNull: {arrowIsNull})");
             }
-            
+
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable);
 
             // Assert - Verify null preservation
@@ -155,18 +153,18 @@ public class ArrowParquetIntegrationTests
             {
                 var originalIntValue = originalFrame.GetColumn("NullableInts").GetValue(i);
                 var finalIntValue = finalIntColumn.GetValue(i);
-                
+
                 // Debug output for troubleshooting
                 TestContext.Out.WriteLine($"Index {i}: Original int = {originalIntValue}, Final int = {finalIntValue}");
-                
+
                 Assert.That(finalIntValue, Is.EqualTo(originalIntValue), $"Int value at index {i} should be preserved (including nulls)");
 
                 var originalStringValue = originalFrame.GetColumn("NullableStrings").GetValue(i);
                 var finalStringValue = finalStringColumn.GetValue(i);
-                
+
                 // Debug output for troubleshooting
                 TestContext.Out.WriteLine($"Index {i}: Original string = '{originalStringValue}', Final string = '{finalStringValue}'");
-                
+
                 Assert.That(finalStringValue, Is.EqualTo(originalStringValue), $"String value at index {i} should be preserved (including nulls)");
             }
         }
@@ -283,7 +281,7 @@ public class ArrowParquetIntegrationTests
         {
             // Act - Stream-based workflow
             using var memoryStream = new MemoryStream();
-            
+
             // Write to stream
             ParquetWriter.WriteParquet(originalFrame, memoryStream);
             Assert.That(memoryStream.Length, Is.GreaterThan(0), "Data should be written to stream");
@@ -291,7 +289,7 @@ public class ArrowParquetIntegrationTests
             // Read from stream
             memoryStream.Position = 0; // Reset position for reading
             var frameFromStream = ParquetReader.ReadParquet(memoryStream);
-            
+
             // Convert through Arrow
             var arrowTable = ArrowInterop.ToArrowTable(frameFromStream);
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable);
@@ -410,19 +408,19 @@ public class ArrowParquetIntegrationTests
         {
             // Act - Complete workflow with large dataset
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-            
+
             ParquetWriter.WriteParquet(originalFrame, parquetFile);
             var writeTime = stopwatch.ElapsedMilliseconds;
-            
+
             stopwatch.Restart();
             var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
             var readTime = stopwatch.ElapsedMilliseconds;
-            
+
             stopwatch.Restart();
             var arrowTable = ArrowInterop.ToArrowTable(frameFromParquet);
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable);
             var conversionTime = stopwatch.ElapsedMilliseconds;
-            
+
             stopwatch.Stop();
 
             // Assert - Data integrity and reasonable performance

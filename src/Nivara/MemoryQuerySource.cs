@@ -38,7 +38,7 @@ internal sealed class MemoryQuerySource : IQuerySource
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        
+
         // Memory sources just return their columns directly
         return columns;
     }

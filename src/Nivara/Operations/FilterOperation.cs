@@ -84,7 +84,7 @@ internal sealed class FilterOperation : IQueryOperation
     /// <param name="column">The column to filter</param>
     /// <param name="mask">The boolean mask indicating which rows to keep</param>
     /// <returns>A new column with filtered values</returns>
-    private static IColumn ApplyMask(IColumn column, NivaraColumn<bool> mask)
+    static IColumn ApplyMask(IColumn column, NivaraColumn<bool> mask)
     {
         if (column.Length != mask.Length)
             throw new ArgumentException("Column and mask must have the same length");
@@ -109,7 +109,7 @@ internal sealed class FilterOperation : IQueryOperation
     /// <param name="column">The source column</param>
     /// <param name="indices">The indices of values to include</param>
     /// <returns>A new column with filtered values</returns>
-    private static IColumn CreateFilteredColumn(IColumn column, List<int> indices)
+    static IColumn CreateFilteredColumn(IColumn column, List<int> indices)
     {
         var elementType = column.ElementType;
 
@@ -133,7 +133,7 @@ internal sealed class FilterOperation : IQueryOperation
     /// <summary>
     /// Creates a filtered column for a specific type
     /// </summary>
-    private static IColumn CreateFilteredColumnTyped<T>(IColumn column, List<int> indices)
+    static IColumn CreateFilteredColumnTyped<T>(IColumn column, List<int> indices)
     {
         // Check if T is a value type to determine which creation method to use
         if (typeof(T).IsValueType)
@@ -179,7 +179,7 @@ internal sealed class FilterOperation : IQueryOperation
     /// <summary>
     /// Creates a filtered column for unknown types using object column
     /// </summary>
-    private static IColumn CreateFilteredColumnGeneric(IColumn column, List<int> indices)
+    static IColumn CreateFilteredColumnGeneric(IColumn column, List<int> indices)
     {
         var filteredArray = new object[indices.Count];
 

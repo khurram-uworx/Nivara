@@ -131,7 +131,7 @@ internal sealed class GroupByOperation : IQueryOperation
     /// <param name="column">The source column</param>
     /// <param name="indices">The indices of values to include</param>
     /// <returns>A new column with distinct values</returns>
-    private static IColumn CreateDistinctColumn(IColumn column, List<int> indices)
+    static IColumn CreateDistinctColumn(IColumn column, List<int> indices)
     {
         var elementType = column.ElementType;
 
@@ -155,7 +155,7 @@ internal sealed class GroupByOperation : IQueryOperation
     /// <summary>
     /// Creates a distinct column for a specific type
     /// </summary>
-    private static IColumn CreateDistinctColumnTyped<T>(IColumn column, List<int> indices)
+    static IColumn CreateDistinctColumnTyped<T>(IColumn column, List<int> indices)
     {
         var distinctArray = new T[indices.Count];
 
@@ -171,7 +171,7 @@ internal sealed class GroupByOperation : IQueryOperation
     /// <summary>
     /// Creates a distinct column for unknown types using object column
     /// </summary>
-    private static IColumn CreateDistinctColumnGeneric(IColumn column, List<int> indices)
+    static IColumn CreateDistinctColumnGeneric(IColumn column, List<int> indices)
     {
         var distinctArray = new object[indices.Count];
 
@@ -189,7 +189,7 @@ internal sealed class GroupByOperation : IQueryOperation
     /// <param name="expression">The column expression</param>
     /// <param name="inputSchema">The input schema</param>
     /// <returns>The column name to use in the result</returns>
-    private static string GetColumnName(ColumnExpression expression, Schema inputSchema)
+    static string GetColumnName(ColumnExpression expression, Schema inputSchema)
     {
         // For simple column references, use the original column name
         if (expression is ColumnReference columnRef)
@@ -207,7 +207,7 @@ internal sealed class GroupByOperation : IQueryOperation
     /// <param name="expression">The column expression</param>
     /// <param name="input">The input columns</param>
     /// <returns>The column name to use in the result</returns>
-    private static string GetColumnName(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
+    static string GetColumnName(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
     {
         // For simple column references, use the original column name
         if (expression is ColumnReference columnRef)
@@ -225,7 +225,7 @@ internal sealed class GroupByOperation : IQueryOperation
     /// <param name="expression">The column expression</param>
     /// <param name="inputSchema">The input schema</param>
     /// <returns>The column type in the result</returns>
-    private static Type GetColumnType(ColumnExpression expression, Schema inputSchema)
+    static Type GetColumnType(ColumnExpression expression, Schema inputSchema)
     {
         // For simple column references, get the type from the schema
         if (expression is ColumnReference columnRef)

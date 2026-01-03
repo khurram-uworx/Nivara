@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Runtime.CompilerServices;
 
 namespace Nivara;
 
@@ -65,7 +64,7 @@ internal static class ResourceManager
         {
             // Find and remove the weak reference for this resource
             var keysToRemove = new List<WeakReference>();
-            
+
             foreach (var kvp in _trackedResources)
             {
                 var target = kvp.Key.Target;
@@ -206,7 +205,7 @@ internal static class ResourceManager
                 if (weakRef.Target == null)
                 {
                     keysToRemove.Add(weakRef);
-                    
+
                     // Collect cleanup actions to run outside the lock
                     if (info.CleanupAction != null)
                     {

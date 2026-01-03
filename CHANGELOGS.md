@@ -55,13 +55,13 @@ ReadOnlyMemory<T>? detection gotcha
 - Empty ReadOnlyMemory<T> has HasValue = true — always check length.
 ```csharp
 // Correct: check both HasValue and Length > 0
-public bool HasNulls => _nullMask.HasValue && _nullMask.Value.Length > 0;
+public bool HasNulls => nullMask.HasValue && nullMask.Value.Length > 0;
 ```
 
 Slicing empty memory gotcha
 ```csharp
-if (_nullMask.HasValue && _nullMask.Value.Length > 0)
-    slicedNullMask = _nullMask.Value.Slice(start, length);
+if (nullMask.HasValue && nullMask.Value.Length > 0)
+    slicedNullMask = nullMask.Value.Slice(start, length);
 ```
 
 Nullable generics & static constraints (CS0080)
@@ -89,8 +89,8 @@ if (typeof(T) == typeof(int))
 Tensor usage patterns
 - Use System.Numerics.Tensors.Tensor.Create from arrays; use FlattenTo for reads; create tensors from sliced arrays for slicing.
 ```csharp
-var dataBuffer = new T[_data.FlattenedLength];
-_data.FlattenTo(dataBuffer);
+var dataBuffer = new T[data.FlattenedLength];
+data.FlattenTo(dataBuffer);
 var sliced = Tensor.Create(dataBuffer.AsSpan(start, length).ToArray(), new[] { length });
 ```
 - For empty tensors use Array.Empty<T>().
@@ -165,7 +165,7 @@ Parquet read/write
   - For value types: build nullable arrays, use CreateFromNullable.
   - For reference types: build arrays preserving nulls.
 - For writing: Parquet.Net DataColumn expects non-nullable arrays matching DataField<T> generic type; pass default(T) for nulls and set field as nullable. Preserve string nulls as null, not empty string.
-- Empty frame handling: if Parquet requires fields and frame is empty, write a dummy "_empty" column.
+- Empty frame handling: if Parquet requires fields and frame is empty, write a dummy "empty" column.
 
 Representative Parquet write pattern
 ```csharp

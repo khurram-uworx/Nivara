@@ -1,5 +1,4 @@
 using NUnit.Framework;
-using Nivara;
 
 namespace Nivara.Tests;
 
@@ -20,10 +19,10 @@ public class NullHandlingErrorConditionTests
     public void FillNull_WithNullFillValueForReferenceTypes_ShouldThrowArgumentNullException()
     {
         var stringColumn = NivaraColumn<string>.Create(new string?[] { "a", null, "c" }!);
-        
+
         var ex = Assert.Throws<ArgumentNullException>(() => stringColumn.FillNull(null!),
             "FillNull with null fillValue for reference types should throw ArgumentNullException");
-        
+
         Assert.That(ex.ParamName, Is.EqualTo("fillValue"),
             "Exception should specify the fillValue parameter");
         Assert.That(ex.Message, Does.Contain("Fill value cannot be null for reference type String"),
@@ -39,7 +38,7 @@ public class NullHandlingErrorConditionTests
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
-        
+
         Assert.Throws<ObjectDisposedException>(() => column.FillNull(42),
             "FillNull on disposed column should throw ObjectDisposedException");
     }
@@ -56,10 +55,10 @@ public class NullHandlingErrorConditionTests
     public void FillNullForward_WithFirstElementNull_ShouldThrowInvalidOperationException()
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { null, 2, 3 });
-        
+
         var ex = Assert.Throws<InvalidOperationException>(() => column.FillNullForward(),
             "FillNullForward with first element null should throw InvalidOperationException");
-        
+
         Assert.That(ex.Message, Does.Contain("no preceding non-null value"),
             "Error message should explain the forward fill issue");
         Assert.That(ex.Message, Does.Contain("Consider using FillNull()"),
@@ -75,7 +74,7 @@ public class NullHandlingErrorConditionTests
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
-        
+
         Assert.Throws<ObjectDisposedException>(() => column.FillNullForward(),
             "FillNullForward on disposed column should throw ObjectDisposedException");
     }
@@ -92,10 +91,10 @@ public class NullHandlingErrorConditionTests
     public void FillNullBackward_WithLastElementNull_ShouldThrowInvalidOperationException()
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, 2, null });
-        
+
         var ex = Assert.Throws<InvalidOperationException>(() => column.FillNullBackward(),
             "FillNullBackward with last element null should throw InvalidOperationException");
-        
+
         Assert.That(ex.Message, Does.Contain("no following non-null value"),
             "Error message should explain the backward fill issue");
         Assert.That(ex.Message, Does.Contain("Consider using FillNull()"),
@@ -111,7 +110,7 @@ public class NullHandlingErrorConditionTests
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
-        
+
         Assert.Throws<ObjectDisposedException>(() => column.FillNullBackward(),
             "FillNullBackward on disposed column should throw ObjectDisposedException");
     }
@@ -128,15 +127,15 @@ public class NullHandlingErrorConditionTests
     public void IsNull_WithOutOfBoundsIndex_ShouldThrowIndexOutOfRangeException()
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
-        
+
         // Test negative index
         Assert.Throws<IndexOutOfRangeException>(() => column.IsNull(-1),
             "IsNull with negative index should throw IndexOutOfRangeException");
-        
+
         // Test index equal to length
         Assert.Throws<IndexOutOfRangeException>(() => column.IsNull(3),
             "IsNull with index equal to length should throw IndexOutOfRangeException");
-        
+
         // Test index greater than length
         Assert.Throws<IndexOutOfRangeException>(() => column.IsNull(10),
             "IsNull with index greater than length should throw IndexOutOfRangeException");
@@ -151,7 +150,7 @@ public class NullHandlingErrorConditionTests
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
-        
+
         Assert.Throws<ObjectDisposedException>(() => column.IsNull(0),
             "IsNull on disposed column should throw ObjectDisposedException");
     }
@@ -165,7 +164,7 @@ public class NullHandlingErrorConditionTests
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
-        
+
         Assert.Throws<ObjectDisposedException>(() => { var _ = column.HasNulls; },
             "HasNulls on disposed column should throw ObjectDisposedException");
     }
@@ -179,7 +178,7 @@ public class NullHandlingErrorConditionTests
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
-        
+
         Assert.Throws<ObjectDisposedException>(() => { var _ = column.NullCount; },
             "NullCount on disposed column should throw ObjectDisposedException");
     }
@@ -193,7 +192,7 @@ public class NullHandlingErrorConditionTests
     {
         var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
-        
+
         Assert.Throws<ObjectDisposedException>(() => column.GetNullIndices(),
             "GetNullIndices on disposed column should throw ObjectDisposedException");
     }
@@ -211,7 +210,7 @@ public class NullHandlingErrorConditionTests
     {
         var ex = Assert.Throws<ArgumentNullException>(() => NivaraColumn<int>.CreateFromNullable(null!),
             "CreateFromNullable with null array should throw ArgumentNullException");
-        
+
         Assert.That(ex.ParamName, Is.EqualTo("values"),
             "Exception should specify the values parameter");
     }
@@ -224,10 +223,10 @@ public class NullHandlingErrorConditionTests
     public void CreateFromNullable_WithReferenceType_ShouldThrowInvalidOperationException()
     {
         var stringArray = new string?[] { "a", null, "c" };
-        
+
         var ex = Assert.Throws<InvalidOperationException>(() => NivaraColumn<string>.CreateFromNullable(stringArray),
             "CreateFromNullable with reference type should throw InvalidOperationException");
-        
+
         Assert.That(ex.Message, Does.Contain("can only be used with value types"),
             "Error message should explain value type requirement");
     }

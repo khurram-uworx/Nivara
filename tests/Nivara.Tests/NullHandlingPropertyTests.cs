@@ -1,6 +1,4 @@
 using NUnit.Framework;
-using Nivara;
-using Nivara.Storage;
 
 namespace Nivara.Tests;
 
@@ -30,27 +28,27 @@ public class NullHandlingPropertyTests
             new int?[] { 1, 2, 3 },
             new int?[] { null }
         };
-        
+
         foreach (var values in testCases)
         {
             if (values.Length == 0) continue; // Skip empty arrays
-            
+
             var column = NivaraColumn<int>.CreateFromNullable(values);
             var scalar = 5;
-            
+
             // Test scalar multiplication
             var multiplied = column.Multiply(scalar);
-            
+
             for (int i = 0; i < values.Length; i++)
             {
                 if (values[i] == null)
                 {
-                    Assert.That(multiplied.IsNull(i), Is.True, 
+                    Assert.That(multiplied.IsNull(i), Is.True,
                         $"Position {i} should be null after scalar multiplication");
                 }
                 else
                 {
-                    Assert.That(multiplied.IsNull(i), Is.False, 
+                    Assert.That(multiplied.IsNull(i), Is.False,
                         $"Position {i} should not be null after scalar multiplication");
                     Assert.That(multiplied[i], Is.EqualTo(values[i]!.Value * scalar),
                         $"Position {i} should have correct multiplied value");
@@ -70,27 +68,27 @@ public class NullHandlingPropertyTests
             (new int?[] { 1, 2 }, new int?[] { null, null }),
             (new int?[] { null }, new int?[] { null })
         };
-        
+
         foreach (var (leftValues, rightValues) in testCases)
         {
             var leftColumn = NivaraColumn<int>.CreateFromNullable(leftValues);
             var rightColumn = NivaraColumn<int>.CreateFromNullable(rightValues);
-            
+
             // Test element-wise addition
             var result = leftColumn.Add(rightColumn);
-            
+
             for (int i = 0; i < leftValues.Length; i++)
             {
                 bool shouldBeNull = leftValues[i] == null || rightValues[i] == null;
-                
+
                 if (shouldBeNull)
                 {
-                    Assert.That(result.IsNull(i), Is.True, 
+                    Assert.That(result.IsNull(i), Is.True,
                         $"Position {i} should be null when either operand is null");
                 }
                 else
                 {
-                    Assert.That(result.IsNull(i), Is.False, 
+                    Assert.That(result.IsNull(i), Is.False,
                         $"Position {i} should not be null when both operands are non-null");
                     Assert.That(result[i], Is.EqualTo(leftValues[i]!.Value + rightValues[i]!.Value),
                         $"Position {i} should have correct sum value");
@@ -109,27 +107,27 @@ public class NullHandlingPropertyTests
             new int?[] { null, null, null },
             new int?[] { 1, 2, 3 }
         };
-        
+
         foreach (var values in testCases)
         {
             if (values.Length == 0) continue; // Skip empty arrays
-            
+
             var column = NivaraColumn<int>.CreateFromNullable(values);
             var compareValue = 2;
-            
+
             // Test scalar comparison
             var comparison = column.GreaterThan(compareValue);
-            
+
             for (int i = 0; i < values.Length; i++)
             {
                 if (values[i] == null)
                 {
-                    Assert.That(comparison.IsNull(i), Is.True, 
+                    Assert.That(comparison.IsNull(i), Is.True,
                         $"Position {i} should be null in comparison result when input is null");
                 }
                 else
                 {
-                    Assert.That(comparison.IsNull(i), Is.False, 
+                    Assert.That(comparison.IsNull(i), Is.False,
                         $"Position {i} should not be null in comparison result when input is non-null");
                     Assert.That(comparison[i], Is.EqualTo(values[i]!.Value > compareValue),
                         $"Position {i} should have correct comparison result");
@@ -160,16 +158,16 @@ public class NullHandlingPropertyTests
             (new int?[] { null }, 1),
             (new int?[] { }, 0)
         };
-        
+
         foreach (var (values, expectedNullCount) in testCases)
         {
             var column = NivaraColumn<int>.CreateFromNullable(values);
-            
+
             // Test HasNulls property
             bool expectedHasNulls = expectedNullCount > 0;
             Assert.That(column.HasNulls, Is.EqualTo(expectedHasNulls),
                 $"HasNulls should be {expectedHasNulls} for column with {expectedNullCount} nulls");
-            
+
             // Test individual null checks
             for (int i = 0; i < values.Length; i++)
             {
@@ -191,17 +189,17 @@ public class NullHandlingPropertyTests
             new string?[] { "a", "b", "c" },
             new string?[] { null }
         };
-        
+
         foreach (var values in testCases)
         {
             var column = NivaraColumn<string>.Create(values!); // Use null-forgiving operator
-            
+
             int expectedNullCount = values.Count(v => v == null);
             bool expectedHasNulls = expectedNullCount > 0;
-            
+
             Assert.That(column.HasNulls, Is.EqualTo(expectedHasNulls),
                 $"HasNulls should be {expectedHasNulls} for string column");
-            
+
             for (int i = 0; i < values.Length; i++)
             {
                 bool expectedIsNull = values[i] == null;
@@ -232,17 +230,17 @@ public class NullHandlingPropertyTests
             (new int?[] { 1, 2, 3 }, 0),
             (new int?[] { null }, -1)
         };
-        
+
         foreach (var (values, fillValue) in testCases)
         {
             var column = NivaraColumn<int>.CreateFromNullable(values);
-            
+
             // Test FillNull method
             var filled = column.FillNull(fillValue);
-            
+
             // Verify no nulls remain
             Assert.That(filled.HasNulls, Is.False, "Filled column should have no nulls");
-            
+
             // Verify values are correct
             for (int i = 0; i < values.Length; i++)
             {
@@ -252,7 +250,7 @@ public class NullHandlingPropertyTests
                 Assert.That(filled.IsNull(i), Is.False,
                     $"Position {i} should not be null after filling");
             }
-            
+
             // Verify original column is unchanged (immutability)
             for (int i = 0; i < values.Length; i++)
             {
@@ -273,16 +271,16 @@ public class NullHandlingPropertyTests
             (new string?[] { null, null }, "FILL"),
             (new string?[] { "x", "y", "z" }, "UNUSED")
         };
-        
+
         foreach (var (values, fillValue) in testCases)
         {
             var column = NivaraColumn<string>.Create(values!); // Use null-forgiving operator
-            
+
             var filled = column.FillNull(fillValue);
-            
+
             // Verify no nulls remain
             Assert.That(filled.HasNulls, Is.False, "Filled string column should have no nulls");
-            
+
             // Verify values are correct
             for (int i = 0; i < values.Length; i++)
             {
@@ -301,7 +299,7 @@ public class NullHandlingPropertyTests
         // Feature: core-column-types, Property 19: Null value filling
         var emptyColumn = NivaraColumn<int>.Create(new int[0]);
         var filled = emptyColumn.FillNull(42);
-        
+
         Assert.That(filled.Length, Is.EqualTo(0), "Filled empty column should remain empty");
         Assert.That(filled.HasNulls, Is.False, "Filled empty column should have no nulls");
     }

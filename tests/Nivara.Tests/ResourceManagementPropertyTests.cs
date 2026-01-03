@@ -1,6 +1,6 @@
-using NUnit.Framework;
-using Nivara.IO;
 using Nivara.Expressions;
+using Nivara.IO;
+using NUnit.Framework;
 
 namespace Nivara.Tests;
 
@@ -52,10 +52,10 @@ public class ResourceManagementPropertyTests
         // Act - Create and dispose frame
         frame = new NivaraFrame(columns);
         frameRef = new WeakReference(frame);
-        
+
         // Verify frame is tracked
         var statsBefore = ResourceManager.GetResourceStatistics();
-        Assert.That(statsBefore.TotalTrackedResources, Is.GreaterThan(0), 
+        Assert.That(statsBefore.TotalTrackedResources, Is.GreaterThan(0),
             "Frame and columns should be tracked before disposal");
 
         // Dispose the frame
@@ -112,7 +112,7 @@ public class ResourceManagementPropertyTests
             {"id": 3, "name": "Charlie", "age": 35}
         ]
         """;
-        
+
         try
         {
             File.WriteAllText(tempFile, testData);
@@ -181,7 +181,7 @@ public class ResourceManagementPropertyTests
         var disposeMethod = resourceType.GetMethod("Dispose", Type.EmptyTypes);
         Assert.That(disposeMethod, Is.Not.Null,
             $"{resourceType.Name} should have a public Dispose() method");
-        
+
         Assert.That(disposeMethod!.IsPublic, Is.True,
             $"{resourceType.Name}.Dispose() should be public");
 
@@ -190,7 +190,7 @@ public class ResourceManagementPropertyTests
         {
             var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
             var frame = new NivaraFrame(new[] { ("test", (IColumn)column) });
-            
+
             // Multiple dispose calls should not throw
             Assert.DoesNotThrow(() => frame.Dispose(),
                 "First Dispose() call should not throw");
@@ -224,7 +224,7 @@ public class ResourceManagementPropertyTests
         // Verify disposed column throws ObjectDisposedException
         Assert.Throws<ObjectDisposedException>(() => _ = column.Length,
             "Disposed column should throw ObjectDisposedException when accessed");
-        
+
         if (data.Length > 0)
         {
             Assert.Throws<ObjectDisposedException>(() => _ = column[0],
@@ -371,7 +371,7 @@ public class ResourceManagementPropertyTests
             var recommendationText = string.Join(" ", recommendations.Recommendations);
             if (operationType == "groupby")
             {
-                Assert.That(recommendationText.ToLowerInvariant().Contains("groupby") || 
+                Assert.That(recommendationText.ToLowerInvariant().Contains("groupby") ||
                            recommendationText.ToLowerInvariant().Contains("memory"),
                     Is.True, "GroupBy operations should have relevant recommendations");
             }
@@ -411,14 +411,14 @@ public class ResourceManagementPropertyTests
             var statsAfter = ResourceManager.GetResourceStatistics();
 
             // Assert - Verify statistics are accurate
-            Assert.That(statsAfter.TotalTrackedResources, 
+            Assert.That(statsAfter.TotalTrackedResources,
                 Is.GreaterThan(statsBefore.TotalTrackedResources),
                 "Total tracked resources should increase after creating frames");
 
             Assert.That(statsAfter.TrackedResourcesByType.ContainsKey("NivaraFrame"), Is.True,
                 "NivaraFrame resources should be tracked by type");
 
-            Assert.That(statsAfter.TotalEstimatedMemoryUsage, 
+            Assert.That(statsAfter.TotalEstimatedMemoryUsage,
                 Is.GreaterThan(statsBefore.TotalEstimatedMemoryUsage),
                 "Total estimated memory usage should increase");
 
@@ -437,17 +437,17 @@ public class ResourceManagementPropertyTests
 
                 // Verify statistics reflect disposal
                 var statsAfterDisposal = ResourceManager.GetResourceStatistics();
-                
+
                 // The total should be less than after creation, but may not be exactly equal to before
                 // due to remaining frames and columns still being tracked
-                Assert.That(statsAfterDisposal.TotalTrackedResources, 
+                Assert.That(statsAfterDisposal.TotalTrackedResources,
                     Is.LessThan(statsAfter.TotalTrackedResources),
                     "Total tracked resources should decrease after disposal");
             }
             else
             {
                 // If no frames to dispose, just verify tracking is working
-                Assert.That(statsAfter.TotalTrackedResources, 
+                Assert.That(statsAfter.TotalTrackedResources,
                     Is.GreaterThan(statsBefore.TotalTrackedResources),
                     "Resource tracking should be working");
             }

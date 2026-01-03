@@ -1,7 +1,6 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Expressions;
-using Nivara.IO;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -190,7 +189,7 @@ public class MixedTypeIntegrationTests
         Assert.That(ex2.Message, Contains.Substring("Int32"));
 
         // Index out of bounds in column
-        var ex3 = Assert.Throws<IndexOutOfRangeException>(() => 
+        var ex3 = Assert.Throws<IndexOutOfRangeException>(() =>
         {
             var value = column[10];
         });
@@ -278,7 +277,7 @@ public class MixedTypeIntegrationTests
             .Collect();
 
         // Assert - Verify null handling across different types
-        
+
         // Integer null handling
         Assert.That(intComparison.IsNull(1), Is.True, "null > 2 should be null");
         Assert.That(intComparison.IsNull(3), Is.True, "null > 2 should be null");
@@ -317,13 +316,13 @@ public class MixedTypeIntegrationTests
         // Act & Assert - Test schema validation in different contexts
 
         // Frame creation should validate column lengths
-        var frameEx = Assert.Throws<ArgumentException>(() => 
+        var frameEx = Assert.Throws<ArgumentException>(() =>
             NivaraFrame.Create(("Short", shortColumn), ("Long", longColumn)));
         Assert.That(frameEx.Message, Contains.Substring("length"));
 
         // Series creation should validate index length
         var indexColumn = NivaraColumn<object>.Create(new object[] { "x", "y", "z", "w" }); // Wrong length
-        var seriesEx = Assert.Throws<ArgumentException>(() => 
+        var seriesEx = Assert.Throws<ArgumentException>(() =>
             new NivaraSeries<int>(shortColumn, indexColumn));
         Assert.That(seriesEx.Message, Contains.Substring("length"));
 
@@ -358,7 +357,7 @@ public class MixedTypeIntegrationTests
         var doubleMemory = doubleColumn.Diagnostics.EstimatedMemoryUsage;
 
         // Assert - Verify memory usage is reasonable
-        
+
         // Integer column: 10000 * 4 bytes + overhead
         Assert.That(intMemory, Is.GreaterThan(40000), "Int column should use at least 40KB");
         Assert.That(intMemory, Is.LessThan(50000), "Int column should use less than 50KB");

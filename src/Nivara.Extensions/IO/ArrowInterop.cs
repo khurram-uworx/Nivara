@@ -141,9 +141,9 @@ public static class ArrowInterop
 
                     // Convert Arrow column to Nivara column
                     var column = ConvertArrowColumnToNivaraColumn(arrowColumn, field.DataType, options);
-                    
+
                     System.Diagnostics.Debug.WriteLine($"Created column '{columnName}' with HasNulls: {column.HasNulls}");
-                    
+
                     columns.Add((columnName, column));
                 }
                 catch (Exception ex) when (ex is not UnsupportedTypeException)

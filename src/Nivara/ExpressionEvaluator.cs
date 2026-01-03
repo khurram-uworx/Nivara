@@ -63,7 +63,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="columnRef">The column reference</param>
     /// <param name="input">The input columns</param>
     /// <returns>The referenced column</returns>
-    private static IColumn EvaluateColumnReference(ColumnReference columnRef, IReadOnlyDictionary<string, IColumn> input)
+    static IColumn EvaluateColumnReference(ColumnReference columnRef, IReadOnlyDictionary<string, IColumn> input)
     {
         if (!input.TryGetValue(columnRef.ColumnName, out var column))
         {
@@ -80,7 +80,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="literal">The literal expression</param>
     /// <param name="input">The input columns (used to determine result length)</param>
     /// <returns>A constant column with the literal value</returns>
-    private static IColumn EvaluateLiteral(LiteralExpression literal, IReadOnlyDictionary<string, IColumn> input)
+    static IColumn EvaluateLiteral(LiteralExpression literal, IReadOnlyDictionary<string, IColumn> input)
     {
         // Get the length from any input column
         var length = input.Values.FirstOrDefault()?.Length ?? 1;
@@ -95,7 +95,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="binary">The binary expression</param>
     /// <param name="input">The input columns</param>
     /// <returns>The result column</returns>
-    private IColumn EvaluateBinaryExpression(BinaryExpression binary, IReadOnlyDictionary<string, IColumn> input)
+    IColumn EvaluateBinaryExpression(BinaryExpression binary, IReadOnlyDictionary<string, IColumn> input)
     {
         var leftColumn = Evaluate(binary.Left, input);
         var rightColumn = Evaluate(binary.Right, input);
@@ -118,7 +118,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="comparison">The comparison expression</param>
     /// <param name="input">The input columns</param>
     /// <returns>A boolean column with comparison results</returns>
-    private IColumn EvaluateComparisonExpression(ComparisonExpression comparison, IReadOnlyDictionary<string, IColumn> input)
+    IColumn EvaluateComparisonExpression(ComparisonExpression comparison, IReadOnlyDictionary<string, IColumn> input)
     {
         var leftColumn = Evaluate(comparison.Left, input);
         var rightColumn = Evaluate(comparison.Right, input);
@@ -141,7 +141,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="scalar">The scalar expression</param>
     /// <param name="input">The input columns</param>
     /// <returns>The result column</returns>
-    private IColumn EvaluateScalarExpression(ScalarExpression scalar, IReadOnlyDictionary<string, IColumn> input)
+    IColumn EvaluateScalarExpression(ScalarExpression scalar, IReadOnlyDictionary<string, IColumn> input)
     {
         var column = Evaluate(scalar.Column, input);
         var scalarColumn = CreateConstantColumn(scalar.Scalar, column.Length);
@@ -164,7 +164,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="value">The constant value</param>
     /// <param name="length">The length of the column</param>
     /// <returns>A constant column</returns>
-    private static IColumn CreateConstantColumn(object? value, int length)
+    static IColumn CreateConstantColumn(object? value, int length)
     {
         if (value == null)
         {
@@ -193,7 +193,7 @@ internal sealed class ExpressionEvaluator
     /// <summary>
     /// Creates a constant column for a specific type
     /// </summary>
-    private static IColumn CreateConstantColumnTyped<T>(T value, int length)
+    static IColumn CreateConstantColumnTyped<T>(T value, int length)
     {
         var array = new T[length];
         Array.Fill(array, value);
@@ -203,7 +203,7 @@ internal sealed class ExpressionEvaluator
     /// <summary>
     /// Creates a constant column for unknown types using object column
     /// </summary>
-    private static IColumn CreateConstantColumnGeneric(object value, int length)
+    static IColumn CreateConstantColumnGeneric(object value, int length)
     {
         var array = new object[length];
         Array.Fill(array, value);
@@ -217,7 +217,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="right">The right column</param>
     /// <param name="operation">The operation to apply</param>
     /// <returns>The result column</returns>
-    private static IColumn ApplyBinaryOperation(IColumn left, IColumn right, Func<object?, object?, object?> operation)
+    static IColumn ApplyBinaryOperation(IColumn left, IColumn right, Func<object?, object?, object?> operation)
     {
         if (left.Length != right.Length)
             throw new ArgumentException("Columns must have the same length for binary operations");
@@ -241,7 +241,7 @@ internal sealed class ExpressionEvaluator
     /// <param name="right">The right column</param>
     /// <param name="operation">The comparison operation to apply</param>
     /// <returns>A boolean column with comparison results</returns>
-    private static NivaraColumn<bool> ApplyComparisonOperation(IColumn left, IColumn right, Func<object?, object?, bool> operation)
+    static NivaraColumn<bool> ApplyComparisonOperation(IColumn left, IColumn right, Func<object?, object?, bool> operation)
     {
         if (left.Length != right.Length)
             throw new ArgumentException("Columns must have the same length for comparison operations");
@@ -259,7 +259,7 @@ internal sealed class ExpressionEvaluator
     }
 
     // Arithmetic operation implementations
-    private static object? AddValues(object? left, object? right)
+    static object? AddValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
 
@@ -274,7 +274,7 @@ internal sealed class ExpressionEvaluator
         };
     }
 
-    private static object? SubtractValues(object? left, object? right)
+    static object? SubtractValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
 
@@ -289,7 +289,7 @@ internal sealed class ExpressionEvaluator
         };
     }
 
-    private static object? MultiplyValues(object? left, object? right)
+    static object? MultiplyValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
 
@@ -304,7 +304,7 @@ internal sealed class ExpressionEvaluator
         };
     }
 
-    private static object? DivideValues(object? left, object? right)
+    static object? DivideValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
 
@@ -319,7 +319,7 @@ internal sealed class ExpressionEvaluator
         };
     }
 
-    private static object? AndValues(object? left, object? right)
+    static object? AndValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
 
@@ -330,7 +330,7 @@ internal sealed class ExpressionEvaluator
         };
     }
 
-    private static object? OrValues(object? left, object? right)
+    static object? OrValues(object? left, object? right)
     {
         if (left == null || right == null) return null;
 
@@ -342,7 +342,7 @@ internal sealed class ExpressionEvaluator
     }
 
     // Comparison operation implementations
-    private static bool CompareEqual(object? left, object? right)
+    static bool CompareEqual(object? left, object? right)
     {
         if (left == null && right == null) return true;
         if (left == null || right == null) return false;
@@ -350,7 +350,7 @@ internal sealed class ExpressionEvaluator
         return left.Equals(right);
     }
 
-    private static bool CompareGreaterThan(object? left, object? right)
+    static bool CompareGreaterThan(object? left, object? right)
     {
         if (left == null || right == null) return false;
 
@@ -360,7 +360,7 @@ internal sealed class ExpressionEvaluator
         throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 
-    private static bool CompareLessThan(object? left, object? right)
+    static bool CompareLessThan(object? left, object? right)
     {
         if (left == null || right == null) return false;
 
@@ -370,7 +370,7 @@ internal sealed class ExpressionEvaluator
         throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 
-    private static bool CompareGreaterThanOrEqual(object? left, object? right)
+    static bool CompareGreaterThanOrEqual(object? left, object? right)
     {
         if (left == null || right == null) return false;
 
@@ -380,7 +380,7 @@ internal sealed class ExpressionEvaluator
         throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 
-    private static bool CompareLessThanOrEqual(object? left, object? right)
+    static bool CompareLessThanOrEqual(object? left, object? right)
     {
         if (left == null || right == null) return false;
 

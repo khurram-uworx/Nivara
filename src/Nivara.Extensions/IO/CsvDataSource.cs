@@ -105,7 +105,7 @@ internal sealed class CsvLazySource : IQuerySource
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        
+
         // Check for deferred errors first
         errorHandler.ThrowIfHasDeferredErrors("CSV data source execution");
 
@@ -574,7 +574,7 @@ internal sealed class CsvEagerSource : IQuerySource
         {
             // Dispose the underlying lazy source
             lazySource?.Dispose();
-            
+
             // Dispose columns if they have been materialized
             if (lazyColumns.IsValueCreated)
             {
@@ -583,7 +583,7 @@ internal sealed class CsvEagerSource : IQuerySource
                     column?.Dispose();
                 }
             }
-            
+
             disposed = true;
         }
     }

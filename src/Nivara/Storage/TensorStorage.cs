@@ -10,9 +10,9 @@ namespace Nivara.Storage;
 /// <typeparam name="T">The unmanaged type of elements to store</typeparam>
 internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
 {
-    private readonly Tensor<T> _data;
-    private readonly Tensor<bool>? _nullMask;
-    private bool _disposed;
+    readonly Tensor<T> data;
+    readonly Tensor<bool>? nullMask;
+    bool disposed;
 
     /// <summary>
     /// Initializes a new instance of TensorStorage with the specified values
@@ -22,13 +22,13 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         if (values.IsEmpty)
         {
-            _data = Tensor.Create<T>(Array.Empty<T>());
-            _nullMask = null;
+            data = Tensor.Create<T>(Array.Empty<T>());
+            nullMask = null;
         }
         else
         {
-            _data = Tensor.Create(values.ToArray(), [values.Length]);
-            _nullMask = null;
+            data = Tensor.Create(values.ToArray(), [values.Length]);
+            nullMask = null;
         }
     }
 
@@ -40,8 +40,8 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         if (values.IsEmpty)
         {
-            _data = Tensor.Create<T>(Array.Empty<T>());
-            _nullMask = null;
+            data = Tensor.Create<T>(Array.Empty<T>());
+            nullMask = null;
             return;
         }
 
@@ -64,8 +64,8 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             }
         }
 
-        _data = Tensor.Create(dataArray, [values.Length]);
-        _nullMask = hasAnyNulls ? Tensor.Create(nullMaskArray, [values.Length]) : null;
+        data = Tensor.Create(dataArray, [values.Length]);
+        nullMask = hasAnyNulls ? Tensor.Create(nullMaskArray, [values.Length]) : null;
     }
 
     /// <summary>
@@ -75,24 +75,24 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     /// <param name="nullMask">The optional null mask tensor</param>
     internal TensorStorage(Tensor<T> data, Tensor<bool>? nullMask = null)
     {
-        _data = data ?? throw new ArgumentNullException(nameof(data));
-        _nullMask = nullMask;
+        this.data = data ?? throw new ArgumentNullException(nameof(data));
+        this.nullMask = nullMask;
 
         // Validate that null mask has same length as data if provided
-        if (_nullMask != null && _nullMask.FlattenedLength != _data.FlattenedLength)
+        if (this.nullMask != null && this.nullMask.FlattenedLength != this.data.FlattenedLength)
         {
             throw new ArgumentException("Null mask length must match data length", nameof(nullMask));
         }
     }
 
     /// <inheritdoc />
-    public int Length => (int)_data.FlattenedLength;
+    public int Length => (int)data.FlattenedLength;
 
     /// <inheritdoc />
     public bool IsVectorizable => true;
 
     /// <inheritdoc />
-    public bool HasNulls => _nullMask != null;
+    public bool HasNulls => nullMask != null;
 
     /// <inheritdoc />
     public StorageType StorageType => StorageType.Tensor;
@@ -102,12 +102,12 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_nullMask == null) return ReadOnlySpan<bool>.Empty;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            if (nullMask == null) return ReadOnlySpan<bool>.Empty;
 
             // Use FlattenTo to get the data as a span
-            var buffer = new bool[_nullMask.FlattenedLength];
-            _nullMask.FlattenTo(buffer);
+            var buffer = new bool[nullMask.FlattenedLength];
+            nullMask.FlattenTo(buffer);
             return buffer.AsSpan();
         }
     }
@@ -117,14 +117,14 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            ObjectDisposedException.ThrowIf(disposed, this);
 
             if (index < 0 || index >= Length)
                 throw new IndexOutOfRangeException($"Index {index} is out of range for storage of length {Length}");
 
             // Use FlattenTo to get the data as a span
-            var buffer = new T[_data.FlattenedLength];
-            _data.FlattenTo(buffer);
+            var buffer = new T[data.FlattenedLength];
+            data.FlattenTo(buffer);
             return buffer[index];
         }
     }
@@ -132,7 +132,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     /// <inheritdoc />
     public IColumnStorage<T> Slice(int start, int length)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(disposed, this);
 
         if (start < 0)
             throw new ArgumentOutOfRangeException(nameof(start), "Start index cannot be negative");
@@ -147,17 +147,17 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
         }
 
         // Get data as span and slice it
-        var dataBuffer = new T[_data.FlattenedLength];
-        _data.FlattenTo(dataBuffer);
+        var dataBuffer = new T[data.FlattenedLength];
+        data.FlattenTo(dataBuffer);
         var slicedDataArray = dataBuffer.AsSpan(start, length).ToArray();
         var slicedData = Tensor.Create(slicedDataArray, [length]);
 
         // Create sliced null mask if it exists
         Tensor<bool>? slicedNullMask = null;
-        if (_nullMask != null)
+        if (nullMask != null)
         {
-            var nullMaskBuffer = new bool[_nullMask.FlattenedLength];
-            _nullMask.FlattenTo(nullMaskBuffer);
+            var nullMaskBuffer = new bool[nullMask.FlattenedLength];
+            nullMask.FlattenTo(nullMaskBuffer);
             var slicedNullMaskArray = nullMaskBuffer.AsSpan(start, length).ToArray();
             slicedNullMask = Tensor.Create(slicedNullMaskArray, [length]);
         }
@@ -172,8 +172,8 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _data;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return data;
         }
     }
 
@@ -184,18 +184,18 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _nullMask;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return nullMask;
         }
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!_disposed)
+        if (!disposed)
         {
             // Tensors don't require explicit disposal in System.Numerics.Tensors
-            _disposed = true;
+            disposed = true;
         }
     }
 }

@@ -2537,7 +2537,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         if (type == typeof(decimal)) return 16;
         if (type == typeof(DateTime)) return 8;
         if (type == typeof(Guid)) return 16;
-        
+
         // For reference types, estimate pointer size + average string length
         if (!type.IsValueType)
         {

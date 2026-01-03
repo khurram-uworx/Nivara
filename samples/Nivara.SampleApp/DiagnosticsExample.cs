@@ -7,6 +7,27 @@ namespace Nivara.SampleApp;
 /// </summary>
 public static class DiagnosticsExample
 {
+    static void ShowColumnDiagnostics(string title, ColumnDiagnostics diagnostics)
+    {
+        Console.WriteLine($"{title}:");
+        Console.WriteLine($"  Storage Type: {diagnostics.StorageType}");
+        Console.WriteLine($"  Is Vectorizable: {diagnostics.IsVectorizable}");
+        Console.WriteLine($"  Element Type: {diagnostics.ElementType.Name}");
+        Console.WriteLine($"  Length: {diagnostics.Length}");
+        Console.WriteLine($"  Has Nulls: {diagnostics.HasNulls}");
+        Console.WriteLine($"  Hardware Accelerated: {diagnostics.IsHardwareAccelerated}");
+        Console.WriteLine($"  Vector Size: {diagnostics.VectorSize} bytes");
+        Console.WriteLine($"  Recommended Kernel: {diagnostics.RecommendedKernel}");
+        Console.WriteLine($"  Estimated Memory: {diagnostics.EstimatedMemoryUsage:N0} bytes");
+
+        var performance = diagnostics.Performance;
+        Console.WriteLine($"  Performance:");
+        Console.WriteLine($"    Throughput Multiplier: {performance.ThroughputMultiplier:F1}x");
+        Console.WriteLine($"    Memory Efficiency: {performance.MemoryEfficiency:P1}");
+        Console.WriteLine($"    Supports Vectorization: {performance.SupportsVectorization}");
+        Console.WriteLine();
+    }
+
     public static void RunExample()
     {
         Console.WriteLine("=== Nivara Diagnostics Example ===\n");
@@ -92,26 +113,5 @@ public static class DiagnosticsExample
         DiagnosticsTracker.ClearRecordedOperations();
 
         Console.WriteLine("\n=== Example Complete ===");
-    }
-
-    private static void ShowColumnDiagnostics(string title, ColumnDiagnostics diagnostics)
-    {
-        Console.WriteLine($"{title}:");
-        Console.WriteLine($"  Storage Type: {diagnostics.StorageType}");
-        Console.WriteLine($"  Is Vectorizable: {diagnostics.IsVectorizable}");
-        Console.WriteLine($"  Element Type: {diagnostics.ElementType.Name}");
-        Console.WriteLine($"  Length: {diagnostics.Length}");
-        Console.WriteLine($"  Has Nulls: {diagnostics.HasNulls}");
-        Console.WriteLine($"  Hardware Accelerated: {diagnostics.IsHardwareAccelerated}");
-        Console.WriteLine($"  Vector Size: {diagnostics.VectorSize} bytes");
-        Console.WriteLine($"  Recommended Kernel: {diagnostics.RecommendedKernel}");
-        Console.WriteLine($"  Estimated Memory: {diagnostics.EstimatedMemoryUsage:N0} bytes");
-
-        var performance = diagnostics.Performance;
-        Console.WriteLine($"  Performance:");
-        Console.WriteLine($"    Throughput Multiplier: {performance.ThroughputMultiplier:F1}x");
-        Console.WriteLine($"    Memory Efficiency: {performance.MemoryEfficiency:P1}");
-        Console.WriteLine($"    Supports Vectorization: {performance.SupportsVectorization}");
-        Console.WriteLine();
     }
 }

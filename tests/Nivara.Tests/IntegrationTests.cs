@@ -1,6 +1,5 @@
 using Nivara.Diagnostics;
 using Nivara.Expressions;
-using Nivara.IO;
 using NUnit.Framework;
 using System.Numerics;
 
@@ -261,7 +260,7 @@ public class IntegrationTests
         var stringDiagnostics = stringColumn.Diagnostics;
 
         // Small column should use scalar due to overhead
-        Assert.That(smallDiagnostics.RecommendedKernel, Is.EqualTo(KernelType.Scalar), 
+        Assert.That(smallDiagnostics.RecommendedKernel, Is.EqualTo(KernelType.Scalar),
             "Small columns should use scalar kernel due to vectorization overhead");
 
         // Large column should use vectorized if hardware supports it and size is large enough

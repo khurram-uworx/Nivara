@@ -9,9 +9,9 @@ namespace Nivara.Storage;
 /// <typeparam name="T">The type of elements to store</typeparam>
 internal sealed class MemoryStorage<T> : IColumnStorage<T>
 {
-    private readonly ReadOnlyMemory<T> _data;
-    private readonly ReadOnlyMemory<bool>? _nullMask;
-    private bool _disposed;
+    readonly ReadOnlyMemory<T> data;
+    readonly ReadOnlyMemory<bool>? nullMask;
+    bool disposed;
 
     /// <summary>
     /// Initializes a new instance of MemoryStorage with the specified values
@@ -22,8 +22,8 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     {
         if (values.IsEmpty)
         {
-            _data = ReadOnlyMemory<T>.Empty;
-            _nullMask = null;
+            data = ReadOnlyMemory<T>.Empty;
+            nullMask = null;
             return;
         }
 
@@ -52,13 +52,13 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
                 }
             }
 
-            _data = new ReadOnlyMemory<T>(dataArray);
-            _nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray!) : null;
+            data = new ReadOnlyMemory<T>(dataArray);
+            nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray!) : null;
         }
         else
         {
-            _data = new ReadOnlyMemory<T>(dataArray);
-            _nullMask = null;
+            data = new ReadOnlyMemory<T>(dataArray);
+            nullMask = null;
         }
     }
 
@@ -69,18 +69,18 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     /// <param name="nullMask">The optional null mask memory</param>
     internal MemoryStorage(ReadOnlyMemory<T> data, ReadOnlyMemory<bool>? nullMask = null)
     {
-        _data = data;
-        _nullMask = nullMask;
+        this.data = data;
+        this.nullMask = nullMask;
     }
 
     /// <inheritdoc />
-    public int Length => _data.Length;
+    public int Length => data.Length;
 
     /// <inheritdoc />
     public bool IsVectorizable => false;
 
     /// <inheritdoc />
-    public bool HasNulls => _nullMask.HasValue && _nullMask.Value.Length > 0;
+    public bool HasNulls => nullMask.HasValue && nullMask.Value.Length > 0;
 
     /// <inheritdoc />
     public StorageType StorageType => StorageType.Memory;
@@ -90,8 +90,8 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _nullMask.HasValue ? _nullMask.Value.Span : ReadOnlySpan<bool>.Empty;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return nullMask.HasValue ? nullMask.Value.Span : ReadOnlySpan<bool>.Empty;
         }
     }
 
@@ -100,19 +100,19 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
+            ObjectDisposedException.ThrowIf(disposed, this);
 
             if (index < 0 || index >= Length)
                 throw new IndexOutOfRangeException($"Index {index} is out of range for storage of length {Length}");
 
-            return _data.Span[index];
+            return data.Span[index];
         }
     }
 
     /// <inheritdoc />
     public IColumnStorage<T> Slice(int start, int length)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
+        ObjectDisposedException.ThrowIf(disposed, this);
 
         if (start < 0)
             throw new ArgumentOutOfRangeException(nameof(start), "Start index cannot be negative");
@@ -127,13 +127,13 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
         }
 
         // Create sliced data memory
-        var slicedData = _data.Slice(start, length);
+        var slicedData = data.Slice(start, length);
 
         // Create sliced null mask if it exists
         ReadOnlyMemory<bool>? slicedNullMask = null;
-        if (_nullMask.HasValue && _nullMask.Value.Length > 0)
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
         {
-            slicedNullMask = _nullMask.Value.Slice(start, length);
+            slicedNullMask = nullMask.Value.Slice(start, length);
         }
 
         return new MemoryStorage<T>(slicedData, slicedNullMask);
@@ -146,8 +146,8 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _data;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return data;
         }
     }
 
@@ -158,19 +158,19 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     {
         get
         {
-            ObjectDisposedException.ThrowIf(_disposed, this);
-            return _nullMask;
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return nullMask;
         }
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (!_disposed)
+        if (!disposed)
         {
             // Memory<T> doesn't require explicit disposal, but we mark as disposed
             // to prevent further access
-            _disposed = true;
+            disposed = true;
         }
     }
 }

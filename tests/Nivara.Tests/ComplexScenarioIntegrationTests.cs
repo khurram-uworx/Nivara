@@ -1,7 +1,6 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Expressions;
-using Nivara.IO;
 using NUnit.Framework;
 using System.Numerics;
 
@@ -56,7 +55,7 @@ public class ComplexScenarioIntegrationTests
         {
             Assert.That(resultSalaries[i], Is.GreaterThan(50000.0), $"Row {i} should have salary > 50000");
             Assert.That(resultDepartments[i], Is.EqualTo("Dept1"), $"Row {i} should be in Dept1");
-            
+
             // Verify the original employee was active
             var originalIndex = resultIds[i] - 1; // IDs are 1-based
             Assert.That(isActive[originalIndex], Is.True, $"Row {i} should have been active");
@@ -72,7 +71,7 @@ public class ComplexScenarioIntegrationTests
     public void SeriesOperations_WithComplexAlignment_HandlesEdgeCases()
     {
         // Arrange - Create series with various alignment scenarios
-        
+
         // Series 1: Sequential labels
         var series1Values = NivaraColumn<double>.Create(new[] { 10.0, 20.0, 30.0, 40.0, 50.0 });
         var series1Index = NivaraColumn<object>.Create(new object[] { "A", "B", "C", "D", "E" });
@@ -253,7 +252,7 @@ public class ComplexScenarioIntegrationTests
         var largeDiag = largeColumn.Diagnostics;
 
         // Assert - Verify performance characteristics scale appropriately
-        
+
         // All should be vectorizable types
         Assert.That(smallDiag.IsVectorizable, Is.True, "All int columns should be vectorizable");
         Assert.That(mediumDiag.IsVectorizable, Is.True, "All int columns should be vectorizable");
