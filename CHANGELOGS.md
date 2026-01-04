@@ -95,6 +95,12 @@ var sliced = Tensor.Create(dataBuffer.AsSpan(start, length).ToArray(), new[] { l
 ```
 - For empty tensors use Array.Empty<T>().
 
+Tensor interop gotchas
+- Tensor.Lengths returns nint[], not int[] — cast to int for test assertions: `(int)tensor.Lengths[0]`.
+- Method overload resolution: disambiguate 1D vs 2D tensor methods with explicit parameters: `FromTensor<T>(tensor, null)` for 2D.
+- Zero-copy limitations: NivaraColumn doesn't expose underlying data as Span; tensor interop requires copying data element-by-element.
+- Empty frame construction: NivaraFrame requires at least one column; create minimal empty column for empty tensor cases.
+
 Kernel selection
 - DetermineKernelType() pattern:
   - If not vectorizable → Scalar
@@ -129,6 +135,8 @@ TESTING LESSONS & PATTERNS
 - Reflection cannot pass Span<T> in MethodInfo.Invoke; convert to array first.
 - Test for key phrases in error messages rather than exact message strings.
 - Property-like tests can be implemented with parameterized test suites (NUnit) rather than full FsCheck.
+- Native integer types (nint): use nint for test assertions when comparing tensor dimensions.
+- Method overload disambiguation: use explicit parameters to resolve ambiguous generic method calls in tests.
 
 Representative testing pattern for null handling
 ```csharp
@@ -224,6 +232,7 @@ KNOWN ISSUES & TODO (prioritized)
 - FilterOperation null handling: NRE in specific filter-null scenarios (investigate and fix).
 - Zero-copy Arrow arrays: placeholder implementation; real zero-copy requires exposing underlying buffer ownership — consider as advanced optimization.
 - Improve column creation dynamic dispatch coverage for less common CLR types.
+- Internal Span access: consider adding internal AsSpan() methods to NivaraColumn for zero-copy tensor interop scenarios.
 
 --------------------------------------------------------------------------------
 QUICK REFERENCE

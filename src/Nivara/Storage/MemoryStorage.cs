@@ -164,6 +164,24 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     }
 
     /// <inheritdoc />
+    ReadOnlySpan<T> IColumnStorage<T>.AsSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return data.Span;
+    }
+
+    /// <inheritdoc />
+    Span<T> IColumnStorage<T>.AsWritableSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // For memory storage, we need to create a writable copy
+        // since our data is ReadOnlyMemory<T>
+        var writableArray = data.ToArray();
+        return writableArray.AsSpan();
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         if (!disposed)

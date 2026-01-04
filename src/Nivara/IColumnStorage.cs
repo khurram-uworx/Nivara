@@ -52,4 +52,20 @@ internal interface IColumnStorage<T> : IDisposable
     /// Used for performance analysis and kernel selection.
     /// </summary>
     StorageType StorageType { get; }
+
+    /// <summary>
+    /// Gets a read-only span view of the underlying data.
+    /// Provides zero-copy access to the storage data for high-performance operations.
+    /// </summary>
+    /// <returns>A read-only span over the storage data</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support span access</exception>
+    internal ReadOnlySpan<T> AsSpan();
+
+    /// <summary>
+    /// Gets a writable span view of the underlying data.
+    /// Provides zero-copy access for scenarios requiring data mutation.
+    /// </summary>
+    /// <returns>A writable span over the storage data</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support writable span access</exception>
+    internal Span<T> AsWritableSpan();
 }

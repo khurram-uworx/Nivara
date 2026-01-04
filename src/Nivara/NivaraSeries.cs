@@ -1,3 +1,6 @@
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
+
 namespace Nivara;
 
 /// <summary>
@@ -123,6 +126,18 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return values.IsNull(position);
+    }
+
+    /// <summary>
+    /// Determines whether the value at the specified position is valid (not null)
+    /// </summary>
+    /// <param name="position">The zero-based position to check</param>
+    /// <returns>true if the value at the specified position is valid (not null); otherwise, false</returns>
+    /// <exception cref="IndexOutOfRangeException">Thrown when position is out of bounds</exception>
+    public bool IsValid(int position)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return !values.IsNull(position);
     }
 
     /// <summary>
@@ -348,6 +363,92 @@ public sealed class NivaraSeries<T> : IDisposable
         return new NivaraSeries<T>(resultValues, index);
     }
 
+    // Aggregate Functions
+
+    /// <summary>
+    /// Computes the sum of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The sum of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty</exception>
+    public T Sum()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute sum of empty series. Series must contain at least one element.");
+
+        // Check if T is a supported numeric type
+        if (!IsNumericType(typeof(T)))
+            throw new InvalidOperationException($"Sum operation is not supported for type {typeof(T).Name}. Only numeric types support sum operations.");
+
+        return SumVectorized();
+    }
+
+    /// <summary>
+    /// Computes the average (arithmetic mean) of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The average of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public T Average()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute average of empty series. Series must contain at least one element.");
+
+        // Check if T is a supported numeric type
+        if (!IsNumericType(typeof(T)))
+            throw new InvalidOperationException($"Average operation is not supported for type {typeof(T).Name}. Only numeric types support average operations.");
+
+        return AverageVectorized();
+    }
+
+    /// <summary>
+    /// Finds the minimum value among all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The minimum value among all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public T Min()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute minimum of empty series. Series must contain at least one element.");
+
+        // Check if T is a supported comparable type
+        if (!IsComparableType(typeof(T)))
+            throw new InvalidOperationException($"Min operation is not supported for type {typeof(T).Name}. Only comparable types support min operations.");
+
+        return MinVectorized();
+    }
+
+    /// <summary>
+    /// Finds the maximum value among all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The maximum value among all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public T Max()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute maximum of empty series. Series must contain at least one element.");
+
+        // Check if T is a supported comparable type
+        if (!IsComparableType(typeof(T)))
+            throw new InvalidOperationException($"Max operation is not supported for type {typeof(T).Name}. Only comparable types support max operations.");
+
+        return MaxVectorized();
+    }
+
     /// <summary>
     /// Creates a new series from the specified values with optional index labels
     /// </summary>
@@ -405,6 +506,25 @@ public sealed class NivaraSeries<T> : IDisposable
         // Convert string array to object array
         var objectIndex = index.Cast<object>().ToArray();
         return Create(values, objectIndex);
+    }
+
+    /// <summary>
+    /// Creates an empty series with no values
+    /// </summary>
+    /// <returns>An empty NivaraSeries instance</returns>
+    internal static NivaraSeries<T> Empty()
+    {
+        var emptyValues = NivaraColumn<T>.Create(ReadOnlySpan<T>.Empty);
+        return new NivaraSeries<T>(emptyValues);
+    }
+
+    /// <summary>
+    /// Initializes an empty series
+    /// </summary>
+    internal NivaraSeries()
+    {
+        this.values = NivaraColumn<T>.Create(ReadOnlySpan<T>.Empty);
+        this.index = CreateDefaultIndex(0);
     }
 
     /// <summary>
@@ -478,6 +598,314 @@ public sealed class NivaraSeries<T> : IDisposable
         }
 
         return NivaraColumn<object>.CreateForReferenceType(indexValues);
+    }
+
+    /// <summary>
+    /// Performs vectorized sum computation using TensorPrimitives when possible
+    /// </summary>
+    private T SumVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute sum: all values are null. Series must contain at least one valid value.");
+
+            return SumTensorPrimitive(validValues.ToArray().AsSpan());
+        }
+
+        // All values are valid, use direct span access
+        return SumTensorPrimitive(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs vectorized average computation using TensorPrimitives when possible
+    /// </summary>
+    private T AverageVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute average: all values are null. Series must contain at least one valid value.");
+
+            var sum = SumTensorPrimitive(validValues.ToArray().AsSpan());
+            return DivideByCount(sum, validValues.Count);
+        }
+
+        // All values are valid, use direct span access
+        var totalSum = SumTensorPrimitive(values.AsSpan());
+        return DivideByCount(totalSum, Length);
+    }
+
+    /// <summary>
+    /// Performs vectorized min computation using TensorPrimitives when possible
+    /// </summary>
+    private T MinVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute minimum: all values are null. Series must contain at least one valid value.");
+
+            return MinTensorPrimitive(validValues.ToArray().AsSpan());
+        }
+
+        // All values are valid, use direct span access
+        return MinTensorPrimitive(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs vectorized max computation using TensorPrimitives when possible
+    /// </summary>
+    private T MaxVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute maximum: all values are null. Series must contain at least one valid value.");
+
+            return MaxTensorPrimitive(validValues.ToArray().AsSpan());
+        }
+
+        // All values are valid, use direct span access
+        return MaxTensorPrimitive(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized sum using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    private static T SumTensorPrimitive(ReadOnlySpan<T> values)
+    {
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            var floatValues = new float[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                floatValues[i] = (float)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Sum(floatValues.AsSpan());
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleValues = new double[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                doubleValues[i] = (double)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Sum(doubleValues.AsSpan());
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to scalar sum for other types
+            T result = default(T)!;
+            for (int i = 0; i < values.Length; i++)
+            {
+                result = (T)(object)((dynamic)result! + (dynamic)values[i]!)!;
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized min using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    private static T MinTensorPrimitive(ReadOnlySpan<T> values)
+    {
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            var floatValues = new float[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                floatValues[i] = (float)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Min(floatValues.AsSpan());
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleValues = new double[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                doubleValues[i] = (double)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Min(doubleValues.AsSpan());
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to scalar min for other types
+            T result = values[0];
+            var comparer = Comparer<T>.Default;
+            for (int i = 1; i < values.Length; i++)
+            {
+                if (comparer.Compare(values[i], result) < 0)
+                    result = values[i];
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized max using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    private static T MaxTensorPrimitive(ReadOnlySpan<T> values)
+    {
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            var floatValues = new float[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                floatValues[i] = (float)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Max(floatValues.AsSpan());
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleValues = new double[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                doubleValues[i] = (double)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Max(doubleValues.AsSpan());
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to scalar max for other types
+            T result = values[0];
+            var comparer = Comparer<T>.Default;
+            for (int i = 1; i < values.Length; i++)
+            {
+                if (comparer.Compare(values[i], result) > 0)
+                    result = values[i];
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to divide a sum by count for average calculation
+    /// </summary>
+    private static T DivideByCount(T sum, int count)
+    {
+        var type = typeof(T);
+
+        if (type == typeof(float))
+        {
+            var floatSum = (float)(object)sum!;
+            var result = floatSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleSum = (double)(object)sum!;
+            var result = doubleSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(int))
+        {
+            var intSum = (int)(object)sum!;
+            var result = intSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(long))
+        {
+            var longSum = (long)(object)sum!;
+            var result = longSum / count;
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to dynamic division for other types
+            return (T)(object)((dynamic)sum! / count)!;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to check if a type is numeric and supports arithmetic operations
+    /// </summary>
+    private static bool IsNumericType(Type type)
+    {
+        return type == typeof(int) ||
+               type == typeof(float) ||
+               type == typeof(double) ||
+               type == typeof(long) ||
+               type == typeof(short) ||
+               type == typeof(byte) ||
+               type == typeof(sbyte) ||
+               type == typeof(uint) ||
+               type == typeof(ulong) ||
+               type == typeof(ushort) ||
+               type == typeof(decimal);
+    }
+
+    /// <summary>
+    /// Helper method to check if a type supports comparison operations
+    /// </summary>
+    private static bool IsComparableType(Type type)
+    {
+        // All numeric types support comparison
+        if (IsNumericType(type))
+            return true;
+
+        // String supports comparison
+        if (type == typeof(string))
+            return true;
+
+        // DateTime and other common comparable types
+        if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan))
+            return true;
+
+        // Guid supports comparison
+        if (type == typeof(Guid))
+            return true;
+
+        // Check if type implements IComparable<T> or IComparable
+        return typeof(IComparable<>).MakeGenericType(type).IsAssignableFrom(type) ||
+               typeof(IComparable).IsAssignableFrom(type);
     }
 
     /// <inheritdoc />

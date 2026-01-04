@@ -190,6 +190,29 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     }
 
     /// <inheritdoc />
+    ReadOnlySpan<T> IColumnStorage<T>.AsSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Get data as span - this creates a temporary buffer but provides span access
+        var buffer = new T[data.FlattenedLength];
+        data.FlattenTo(buffer);
+        return buffer.AsSpan();
+    }
+
+    /// <inheritdoc />
+    Span<T> IColumnStorage<T>.AsWritableSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // For tensor storage, we need to be careful about mutations
+        // This creates a copy that can be written to
+        var buffer = new T[data.FlattenedLength];
+        data.FlattenTo(buffer);
+        return buffer.AsSpan();
+    }
+
+    /// <inheritdoc />
     public void Dispose()
     {
         if (!disposed)

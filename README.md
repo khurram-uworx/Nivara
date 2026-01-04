@@ -154,6 +154,37 @@ File I/O is deferred until `Collect()` is called.
 
 ---
 
+## Aggregate Functions
+
+Nivara provides efficient aggregate functions with automatic vectorization:
+
+```csharp
+var data = new[] { 1, 2, 3, 4, 5 };
+var series = NivaraSeries<int>.Create(data);
+
+Console.WriteLine(series.Sum());     // 15
+Console.WriteLine(series.Average()); // 3
+Console.WriteLine(series.Min());     // 1
+Console.WriteLine(series.Max());     // 5
+```
+
+Aggregate functions automatically use `TensorPrimitives` for vectorizable types (float, double) and handle null values gracefully:
+
+```csharp
+// Vectorized operations for float/double
+var floats = NivaraSeries<float>.Create(new[] { 1.5f, 2.5f, 3.5f });
+var sum = floats.Sum(); // Uses TensorPrimitives.Sum for performance
+
+// Null-aware aggregation
+var nullableData = new int?[] { 1, null, 3, null, 5 };
+var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+var series = new NivaraSeries<int>(column);
+
+Console.WriteLine(series.Sum()); // 9 (ignores nulls)
+```
+
+---
+
 ## Extensions & Integrations
 
 Additional I/O adapters and integrations are provided in the separate `Nivara.Extensions` package (install when you need these features):
@@ -251,6 +282,7 @@ Nivara currently supports:
 - **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
 - **Query Engine**: Schema-aware lazy query construction with diagnostics and plan inspection
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
+- **Aggregate Functions**: Sum, Average, Min, Max with vectorized operations and null-aware computation
 - **Parquet I/O**: Full read/write support with compression, streaming, and batch operations (via `Nivara.Extensions`)
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
@@ -262,7 +294,6 @@ Nivara currently supports:
 
 The following features are still planned or in-progress:
 
-- Aggregations (Sum, Min, Max, Mean)
 - Join operations
 - GroupBy aggregations
 - Streaming and parallel execution strategies

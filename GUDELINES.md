@@ -220,7 +220,57 @@ Optimization remains predictable and correct.
 
 ---
 
-## Diagnostics & Observability
+## Interoperability & External APIs
+
+### Zero-Copy Aspirations vs Reality
+
+**Problem**  
+High-performance systems often promise zero-copy operations for interoperability.
+
+**Constraint**  
+True zero-copy requires:
+- Shared memory layout assumptions
+- Compatible lifetime management
+- Exposed internal data structures
+
+**Pattern That Worked**  
+Design for zero-copy but implement with copying initially. Optimize to true zero-copy only when:
+- Performance profiling proves it's necessary
+- Internal APIs can safely expose underlying data
+- Memory layout compatibility is guaranteed
+
+**Negative Rule**  
+Do not compromise internal API design for theoretical zero-copy benefits.
+
+**Outcome**  
+Systems remain flexible and correct while preserving optimization opportunities.
+
+---
+
+### Method Overload Resolution in Generic Contexts
+
+**Problem**  
+Generic methods with similar signatures create ambiguous overload resolution.
+
+**Constraint**  
+Type inference often fails when:
+- Multiple generic methods match the same call pattern
+- Optional parameters create multiple valid resolutions
+- Return types differ but parameters are identical
+
+**Pattern That Worked**  
+Design method signatures to be unambiguous:
+- Use different parameter counts or types
+- Provide explicit disambiguation parameters
+- Consider separate method names for fundamentally different operations
+
+**Negative Rule**  
+Do not rely on return type differences alone to distinguish overloads.
+
+**Outcome**  
+API calls become predictable and less error-prone.
+
+---
 
 ### Make Performance Explainable
 
@@ -241,6 +291,33 @@ Do not hide execution behavior from users.
 
 **Outcome**  
 Users gain insight and confidence without needing internal knowledge.
+
+---
+
+## Type System & Platform Compatibility
+
+### Native Integer Types in Cross-Platform APIs
+
+**Problem**  
+Modern .NET uses native-sized integers (nint) for performance-critical operations.
+
+**Constraint**  
+Native integers create compatibility issues:
+- Test assertions expect specific integer types
+- Serialization and interop may assume fixed sizes
+- Generic constraints become more complex
+
+**Pattern That Worked**  
+Handle native integers explicitly:
+- Cast to expected types in test assertions
+- Document when APIs return native vs fixed-size integers
+- Provide conversion helpers when needed
+
+**Negative Rule**  
+Do not assume nint and int are interchangeable in all contexts.
+
+**Outcome**  
+Code works correctly across different architectures and runtime versions.
 
 ---
 

@@ -2488,6 +2488,31 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         return result;
     }
 
+    /// <summary>
+    /// Gets a read-only span view of the underlying data.
+    /// Provides zero-copy access to the column data for high-performance operations.
+    /// </summary>
+    /// <returns>A read-only span over the column data</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support span access</exception>
+    internal ReadOnlySpan<T> AsSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return storage.AsSpan();
+    }
+
+    /// <summary>
+    /// Gets a writable span view of the underlying data.
+    /// Provides zero-copy access for scenarios requiring data mutation.
+    /// Note: This may create a copy for immutable storage implementations.
+    /// </summary>
+    /// <returns>A writable span over the column data</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support writable span access</exception>
+    internal Span<T> AsWritableSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return storage.AsWritableSpan();
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
