@@ -1,6 +1,4 @@
 using NUnit.Framework;
-using Nivara;
-using System;
 
 namespace Nivara.Tests;
 
@@ -390,7 +388,7 @@ public class NivaraSeriesAggregateTests
         // Act & Assert
         var minEx = Assert.Throws<InvalidOperationException>(() => series.Min());
         var maxEx = Assert.Throws<InvalidOperationException>(() => series.Max());
-        
+
         Assert.That(minEx.Message, Does.Contain("Min operation is not supported"));
         Assert.That(maxEx.Message, Does.Contain("Max operation is not supported"));
     }

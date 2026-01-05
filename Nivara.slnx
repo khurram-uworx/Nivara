@@ -1,5 +1,4 @@
 <Solution>
-  <Folder Name="/docs/" />
   <Folder Name="/samples/">
     <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
   </Folder>

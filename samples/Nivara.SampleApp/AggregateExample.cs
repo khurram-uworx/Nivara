@@ -1,5 +1,3 @@
-using Nivara;
-
 namespace Nivara.SampleApp;
 
 public static class AggregateExample
@@ -66,7 +64,7 @@ public static class AggregateExample
         Console.WriteLine($"Data: [{string.Join(", ", stringData)}]");
         Console.WriteLine($"Min: {stringSeries.Min()} (lexicographic)");
         Console.WriteLine($"Max: {stringSeries.Max()} (lexicographic)");
-        
+
         try
         {
             stringSeries.Sum();
