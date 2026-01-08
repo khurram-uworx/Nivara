@@ -247,6 +247,95 @@ public class MedianAggregation : AggregationFunction
 
 ---
 
+## Row Operations
+
+Nivara provides efficient row-level operations for filtering and slicing DataFrames while preserving schema and handling null values correctly.
+
+### Filtering with Boolean Masks
+
+Filter rows using boolean masks for precise control over which rows to include:
+
+```csharp
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000, 80000 }))
+);
+
+// Create a boolean mask (e.g., from a condition)
+var mask = NivaraColumn<bool>.Create(new[] { true, false, true, false });
+
+// Filter the frame using the mask
+var filtered = frame.FilterByMask(mask);
+// Result: Alice (25, 50000) and Charlie (35, 70000)
+```
+
+Boolean masks can be generated from any condition or expression evaluation, providing flexible filtering capabilities.
+
+### Row Slicing Operations
+
+Take the first n rows from a DataFrame:
+
+```csharp
+// Take first 3 rows
+var firstThree = frame.Take(3);
+Console.WriteLine(firstThree.RowCount); // 3
+```
+
+Skip the first n rows and return the rest:
+
+```csharp
+// Skip first 2 rows, return remaining
+var remaining = frame.Skip(2);
+Console.WriteLine(remaining.RowCount); // 2 (Charlie and Diana)
+```
+
+Combine Skip and Take for precise row ranges:
+
+```csharp
+// Skip first 1 row, then take next 2 rows
+var middle = frame.Skip(1).Take(2);
+// Result: Bob (30, 60000) and Charlie (35, 70000)
+```
+
+### Arbitrary Row Ranges
+
+Use Slice for arbitrary row ranges with start index and length:
+
+```csharp
+// Get rows 1-2 (0-based indexing)
+var slice = frame.Slice(1, 2);
+// Result: Bob (30, 60000) and Charlie (35, 70000)
+```
+
+### Null Value Handling
+
+All row operations properly handle null values and preserve null masks:
+
+```csharp
+var nullableData = new int?[] { 1, null, 3, null, 5 };
+var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+var frame = NivaraFrame.Create(("Numbers", column));
+
+// Filter preserves null semantics
+var mask = NivaraColumn<bool>.Create(new[] { true, true, false, true, false });
+var filtered = frame.FilterByMask(mask);
+// Result: [1, null, null] with proper null tracking
+```
+
+### Edge Case Handling
+
+Row operations handle edge cases gracefully:
+
+- **Empty results**: Return empty DataFrames with preserved schema
+- **Out-of-bounds parameters**: Clamp to valid ranges or return empty results
+- **Zero-length operations**: Return appropriate empty or full results
+- **Schema preservation**: All operations maintain column names and types
+
+Row operations are designed to be composable, efficient, and predictable across all data types and scenarios.
+
+---
+
 ## Aggregate Functions
 
 Nivara provides efficient aggregate functions with automatic vectorization:
@@ -375,6 +464,7 @@ Nivara currently supports:
 - **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
 - **Query Engine**: Schema-aware lazy query construction with diagnostics and plan inspection
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
+- **Row Operations**: Filtering with boolean masks, slicing with Take/Skip operations, and arbitrary row range selection
 - **Aggregate Functions**: Sum, Average, Min, Max with vectorized operations and null-aware computation
 - **Grouping Operations**: Hash-based GroupBy with composite key support and efficient group management
 - **Aggregation Framework**: Extensible aggregation system with built-in functions (Count, Sum, Min, Max, Mean) and vectorized execution
@@ -391,7 +481,6 @@ The following features are still planned or in-progress:
 
 - Join operations (Inner, Left, Right, Full Outer)
 - Sorting operations (single and multi-column)
-- Row filtering and slicing operations
 - Column transformations and projections
 - Query optimization engine
 - Streaming and parallel execution strategies

@@ -491,3 +491,56 @@ This document is intentionally **opinionated and distilled**. It should evolve s
 
 If a lesson only applies to a specific implementation, it does **not** belong here.
 
+
+---
+
+## DataFrame Row Operations
+
+### Filtering and Slicing Implementation
+
+**Problem**  
+DataFrame operations need efficient row-level filtering and slicing while preserving schema and handling null values correctly.
+
+**Constraint**  
+- Must work across all column types (numeric, string, nullable)
+- Must preserve null masks during operations
+- Must handle edge cases (empty results, out-of-bounds parameters)
+- Must maintain schema consistency
+
+**Pattern That Worked**  
+Implement operations at the NivaraFrame level using:
+- `FilterByMask()` for boolean mask-based filtering
+- `Take(n)` for getting first n rows
+- `Skip(n)` for skipping first n rows  
+- `Slice(start, length)` for arbitrary row ranges
+- Delegate to column-level `Slice()` methods when available
+- Use reflection fallback for type-agnostic column operations
+
+**Negative Rule**  
+Do not implement filtering logic separately for each column type - use unified approach with type dispatch.
+
+**Outcome**  
+Row operations work consistently across all data types with proper null handling and schema preservation.
+
+---
+
+### Column Type Dispatch for Operations
+
+**Problem**  
+Operations need to work on columns of unknown types at runtime while maintaining type safety.
+
+**Constraint**  
+Generic constraints become unwieldy for operations that must work on any column type.
+
+**Pattern That Worked**  
+Use pattern matching on `Type` objects with fallback to generic object handling:
+- Match common types explicitly (int, double, string, bool, etc.)
+- Use reflection to call typed methods when available
+- Provide object-based fallback for unknown types
+- Handle value types vs reference types appropriately
+
+**Negative Rule**  
+Do not attempt to constrain all operations with generic type parameters - runtime dispatch is more flexible.
+
+**Outcome**  
+Operations work reliably across all supported types with good performance for common cases.
