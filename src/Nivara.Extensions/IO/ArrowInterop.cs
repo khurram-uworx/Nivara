@@ -493,6 +493,11 @@ public static class ArrowInterop
         var timestampType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
         var builder = new TimestampArray.Builder(timestampType);
 
+        // Define safe DateTime range for Arrow conversion
+        // Arrow supports timestamps from 1677-09-21 to 2262-04-11 (approximately)
+        var minSafeDateTime = new DateTime(1677, 9, 21, 0, 0, 0, DateTimeKind.Utc);
+        var maxSafeDateTime = new DateTime(2262, 4, 11, 23, 47, 16, DateTimeKind.Utc);
+
         for (int i = 0; i < column.Length; i++)
         {
             if (column.IsNull(i))
@@ -502,7 +507,7 @@ public static class ArrowInterop
             else
             {
                 var dateTime = column[i];
-                // Convert DateTime to microseconds since Unix epoch
+                // Convert DateTime to UTC
                 if (dateTime.Kind == DateTimeKind.Unspecified)
                 {
                     dateTime = DateTime.SpecifyKind(dateTime, DateTimeKind.Utc);
@@ -512,9 +517,20 @@ public static class ArrowInterop
                     dateTime = dateTime.ToUniversalTime();
                 }
 
-                var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-                var microseconds = (long)(dateTime - unixEpoch).TotalMicroseconds;
-                builder.Append(DateTimeOffset.FromUnixTimeMilliseconds(microseconds / 1000));
+                // Clamp DateTime to safe range before conversion
+                if (dateTime < minSafeDateTime)
+                {
+                    dateTime = minSafeDateTime;
+                }
+                else if (dateTime > maxSafeDateTime)
+                {
+                    dateTime = maxSafeDateTime;
+                }
+
+                // Convert to DateTimeOffset for the builder
+                var dateTimeOffset = new DateTimeOffset(dateTime, TimeSpan.Zero);
+                
+                builder.Append(dateTimeOffset);
             }
         }
 
@@ -699,7 +715,14 @@ public static class ArrowInterop
     /// </summary>
     private static T? CreateNullValue<T>()
     {
-        return default(T?);
+        if (typeof(T).IsValueType)
+        {
+            return default(T?); // This should be null for nullable value types
+        }
+        else
+        {
+            return default(T); // This should be null for reference types
+        }
     }
 
     /// <summary>
@@ -715,7 +738,8 @@ public static class ArrowInterop
             return NivaraColumn<T>.Create(System.Array.Empty<T>());
         }
 
-        var values = new List<T?>();
+        // Use object list to avoid generic nullable type issues with T?
+        var values = new List<object?>();
 
         // Get the ChunkedArray
         var chunkedArray = arrowColumn.Data;
@@ -738,8 +762,7 @@ public static class ArrowInterop
             {
                 if (chunk.IsNull(i))
                 {
-                    // Add null value using a helper method
-                    values.Add(CreateNullValue<T>());
+                    values.Add(null);
                 }
                 else
                 {
@@ -756,30 +779,43 @@ public static class ArrowInterop
             return typeof(T) switch
             {
                 Type t when t == typeof(int) => ConvertArrowColumnToNivaraColumnInt(arrowColumn, options),
-                Type t when t == typeof(long) => NivaraColumn<long>.CreateFromNullable(values.Cast<long?>().ToArray()),
-                Type t when t == typeof(float) => NivaraColumn<float>.CreateFromNullable(values.Cast<float?>().ToArray()),
-                Type t when t == typeof(double) => NivaraColumn<double>.CreateFromNullable(values.Cast<double?>().ToArray()),
-                Type t when t == typeof(bool) => NivaraColumn<bool>.CreateFromNullable(values.Cast<bool?>().ToArray()),
-                Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.CreateFromNullable(values.Cast<DateTime?>().ToArray()),
-                Type t when t == typeof(byte) => NivaraColumn<byte>.CreateFromNullable(values.Cast<byte?>().ToArray()),
-                Type t when t == typeof(short) => NivaraColumn<short>.CreateFromNullable(values.Cast<short?>().ToArray()),
-                Type t when t == typeof(uint) => NivaraColumn<uint>.CreateFromNullable(values.Cast<uint?>().ToArray()),
-                Type t when t == typeof(ulong) => NivaraColumn<ulong>.CreateFromNullable(values.Cast<ulong?>().ToArray()),
-                Type t when t == typeof(ushort) => NivaraColumn<ushort>.CreateFromNullable(values.Cast<ushort?>().ToArray()),
-                Type t when t == typeof(sbyte) => NivaraColumn<sbyte>.CreateFromNullable(values.Cast<sbyte?>().ToArray()),
+                Type t when t == typeof(long) => CreateNullableColumn<long>(values),
+                Type t when t == typeof(float) => CreateNullableColumn<float>(values),
+                Type t when t == typeof(double) => CreateNullableColumn<double>(values),
+                Type t when t == typeof(bool) => CreateNullableColumn<bool>(values),
+                Type t when t == typeof(DateTime) => CreateNullableColumn<DateTime>(values),
+                Type t when t == typeof(byte) => CreateNullableColumn<byte>(values),
+                Type t when t == typeof(short) => CreateNullableColumn<short>(values),
+                Type t when t == typeof(uint) => CreateNullableColumn<uint>(values),
+                Type t when t == typeof(ulong) => CreateNullableColumn<ulong>(values),
+                Type t when t == typeof(ushort) => CreateNullableColumn<ushort>(values),
+                Type t when t == typeof(sbyte) => CreateNullableColumn<sbyte>(values),
                 _ => throw new UnsupportedTypeException(typeof(T))
             };
         }
         else
         {
-            // For reference types, convert nulls to actual null values
+            // For reference types, convert to typed array
             var referenceValues = new T[totalLength];
             for (int i = 0; i < totalLength; i++)
             {
-                referenceValues[i] = values[i] == null ? default(T)! : values[i]!;
+                referenceValues[i] = values[i] == null ? default(T)! : (T)values[i]!;
             }
             return NivaraColumn<T>.CreateForReferenceType(referenceValues);
         }
+    }
+
+    /// <summary>
+    /// Creates a nullable column from a list of object values
+    /// </summary>
+    private static IColumn CreateNullableColumn<T>(List<object?> values) where T : struct
+    {
+        var nullableArray = new T?[values.Count];
+        for (int i = 0; i < values.Count; i++)
+        {
+            nullableArray[i] = values[i] == null ? null : (T)values[i]!;
+        }
+        return NivaraColumn<T>.CreateFromNullable(nullableArray);
     }
 
     /// <summary>
@@ -787,6 +823,12 @@ public static class ArrowInterop
     /// </summary>
     private static T ExtractValueFromArrowArray<T>(IArrowArray array, int index, ArrowConversionOptions options)
     {
+        // This method should only be called for non-null values
+        if (array.IsNull(index))
+        {
+            throw new InvalidOperationException($"ExtractValueFromArrowArray called for null value at index {index}");
+        }
+
         return array switch
         {
             BooleanArray boolArray when typeof(T) == typeof(bool) => (T)(object)boolArray.GetValue(index)!.Value,
