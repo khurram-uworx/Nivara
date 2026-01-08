@@ -321,7 +321,85 @@ Code works correctly across different architectures and runtime versions.
 
 ---
 
-## Testing Strategies That Scale
+## Aggregation & Grouping Operations
+
+### Composite Key Design for Grouping
+
+**Problem**  
+Grouping operations need to handle multiple columns with different types and null values efficiently.
+
+**Constraint**  
+Simple string concatenation for composite keys:
+- Fails with null values
+- Creates ambiguous keys (e.g., "AB" + "C" vs "A" + "BC")
+- Poor performance for numeric types
+- Inconsistent hash distribution
+
+**Pattern That Worked**  
+Create a dedicated composite key class with proper equality, hashing, and null handling:
+- Use object arrays to preserve type information
+- Implement proper GetHashCode using HashCode.Add for each component
+- Handle nulls explicitly in equality comparisons
+- Provide meaningful ToString for debugging
+
+**Negative Rule**  
+Never use string concatenation or simple tuple hashing for composite keys in production grouping operations.
+
+**Outcome**  
+Grouping becomes reliable, performant, and debuggable across all data types.
+
+---
+
+### Nullable Type Handling in Generic Operations
+
+**Problem**  
+Runtime type dispatch fails when dealing with nullable value types (e.g., `int?` vs `int`).
+
+**Constraint**  
+Type switch expressions don't automatically handle nullable variants:
+- `typeof(int?)` doesn't match `typeof(int)` patterns
+- Aggregation functions need to work on both nullable and non-nullable columns
+- Type validation becomes complex with nullable generics
+
+**Pattern That Worked**  
+Use `Nullable.GetUnderlyingType()` to normalize types before dispatch:
+- Extract underlying type for nullable types, use original type for non-nullable
+- Apply type-specific logic to the underlying type
+- Handle null extraction at the value level, not the type level
+
+**Negative Rule**  
+Do not create separate code paths for nullable and non-nullable variants of the same underlying type.
+
+**Outcome**  
+Single code path handles both nullable and non-nullable types correctly, reducing complexity and maintenance burden.
+
+---
+
+### Vectorization Strategy for Aggregations
+
+**Problem**  
+Aggregation functions need to balance performance with correctness across diverse data types.
+
+**Constraint**  
+TensorPrimitives only supports specific types (float, double) and requires contiguous memory:
+- Not all numeric types are vectorizable
+- Null values break vectorization assumptions
+- Mixed-type operations complicate vectorization
+
+**Pattern That Worked**  
+Implement a fallback hierarchy:
+1. Use TensorPrimitives for supported types (float, double) when no nulls present
+2. Fall back to scalar operations for unsupported types or when nulls exist
+3. Extract valid values first, then apply vectorized operations to clean data
+4. Always provide scalar implementations as the baseline
+
+**Negative Rule**  
+Never assume vectorization is always faster - measure and provide fallbacks.
+
+**Outcome**  
+Aggregations are both fast (when vectorizable) and correct (always), with predictable behavior across all scenarios.
+
+---
 
 ### Property-Based Testing
 
@@ -339,6 +417,34 @@ Do not rely solely on example-based tests for core logic.
 
 **Outcome**  
 Subtle correctness issues are caught early.
+
+---
+
+### Testing Strategy for Complex Operations
+
+**Problem**  
+Complex operations like grouping and aggregation have many edge cases and type combinations that are difficult to test comprehensively.
+
+**Constraint**  
+Manual test case enumeration:
+- Misses edge cases with null values
+- Doesn't cover all type combinations
+- Becomes unmaintainable as operations grow
+- Fails to catch subtle correctness issues
+
+**Pattern That Worked**  
+Combine comprehensive unit testing with systematic edge case coverage:
+- Test each operation with multiple data types (int, double, string, nullable types)
+- Explicitly test null handling scenarios
+- Test empty inputs and single-element inputs
+- Test error conditions with descriptive assertions
+- Group related tests in nested test classes for organization
+
+**Negative Rule**  
+Do not rely on "happy path" testing alone for complex data operations.
+
+**Outcome**  
+High confidence in correctness across all supported scenarios, with clear test organization that makes maintenance easier.
 
 ---
 

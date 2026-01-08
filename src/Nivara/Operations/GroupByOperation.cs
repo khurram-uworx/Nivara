@@ -1,13 +1,147 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
+using System.Collections.Concurrent;
+using System.Numerics.Tensors;
 
 namespace Nivara;
 
 /// <summary>
-/// Represents a group by operation that groups rows by specified columns
+/// Represents grouped data with efficient access to groups and their indices
 /// </summary>
-internal sealed class GroupByOperation : IQueryOperation
+public sealed class GroupedData
 {
+    readonly Dictionary<GroupKey, List<int>> groups;
+    readonly string[] keyColumnNames;
+    readonly IReadOnlyDictionary<string, IColumn> sourceColumns;
+
+    /// <summary>
+    /// Initializes a new instance of GroupedData
+    /// </summary>
+    /// <param name="groups">The groups with their row indices</param>
+    /// <param name="keyColumnNames">The names of the key columns</param>
+    /// <param name="sourceColumns">The source columns</param>
+    internal GroupedData(Dictionary<GroupKey, List<int>> groups, string[] keyColumnNames, IReadOnlyDictionary<string, IColumn> sourceColumns)
+    {
+        this.groups = groups ?? throw new ArgumentNullException(nameof(groups));
+        this.keyColumnNames = keyColumnNames ?? throw new ArgumentNullException(nameof(keyColumnNames));
+        this.sourceColumns = sourceColumns ?? throw new ArgumentNullException(nameof(sourceColumns));
+    }
+
+    /// <summary>
+    /// Gets the number of groups
+    /// </summary>
+    public int GroupCount => groups.Count;
+
+    /// <summary>
+    /// Gets the names of the key columns
+    /// </summary>
+    public IReadOnlyList<string> KeyColumnNames => keyColumnNames;
+
+    /// <summary>
+    /// Gets all group keys
+    /// </summary>
+    public IEnumerable<GroupKey> GroupKeys => groups.Keys;
+
+    /// <summary>
+    /// Gets the row indices for a specific group
+    /// </summary>
+    /// <param name="key">The group key</param>
+    /// <returns>The row indices for the group</returns>
+    public IReadOnlyList<int> GetGroupIndices(GroupKey key)
+    {
+        return groups.TryGetValue(key, out var indices) ? indices : Array.Empty<int>();
+    }
+
+    /// <summary>
+    /// Gets all groups with their indices
+    /// </summary>
+    /// <returns>An enumerable of group key and indices pairs</returns>
+    public IEnumerable<(GroupKey Key, IReadOnlyList<int> Indices)> GetAllGroups()
+    {
+        return groups.Select(kvp => (kvp.Key, (IReadOnlyList<int>)kvp.Value));
+    }
+
+    /// <summary>
+    /// Gets the source columns
+    /// </summary>
+    public IReadOnlyDictionary<string, IColumn> SourceColumns => sourceColumns;
+}
+
+/// <summary>
+/// Represents a composite key for grouping operations with proper equality and hashing
+/// </summary>
+public sealed class GroupKey : IEquatable<GroupKey>
+{
+    readonly object?[] values;
+    readonly int hashCode;
+
+    /// <summary>
+    /// Initializes a new instance of GroupKey
+    /// </summary>
+    /// <param name="values">The key values</param>
+    public GroupKey(params object?[] values)
+    {
+        this.values = values ?? throw new ArgumentNullException(nameof(values));
+        hashCode = ComputeHashCode(values);
+    }
+
+    /// <summary>
+    /// Gets the key values
+    /// </summary>
+    public IReadOnlyList<object?> Values => values;
+
+    /// <inheritdoc />
+    public bool Equals(GroupKey? other)
+    {
+        if (other is null) return false;
+        if (ReferenceEquals(this, other)) return true;
+        if (values.Length != other.values.Length) return false;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (!Equals(values[i], other.values[i]))
+                return false;
+        }
+
+        return true;
+    }
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => Equals(obj as GroupKey);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => hashCode;
+
+    /// <summary>
+    /// Computes a hash code for the given values
+    /// </summary>
+    /// <param name="values">The values to hash</param>
+    /// <returns>The computed hash code</returns>
+    static int ComputeHashCode(object?[] values)
+    {
+        var hash = new HashCode();
+        foreach (var value in values)
+        {
+            hash.Add(value);
+        }
+        return hash.ToHashCode();
+    }
+
+    /// <inheritdoc />
+    public override string ToString()
+    {
+        var valueStrings = values.Select(v => v?.ToString() ?? "null");
+        return $"({string.Join(", ", valueStrings)})";
+    }
+}
+
+/// <summary>
+/// Represents a group by operation that groups rows by specified columns with hash-based grouping
+/// </summary>
+public sealed class GroupByOperation : IQueryOperation
+{
+    readonly ColumnExpression[] groupByColumns;
+
     /// <summary>
     /// Initializes a new instance of GroupByOperation
     /// </summary>
@@ -16,19 +150,16 @@ internal sealed class GroupByOperation : IQueryOperation
     /// <exception cref="ArgumentException">Thrown when no columns are specified</exception>
     public GroupByOperation(ColumnExpression[] groupByColumns)
     {
-        if (groupByColumns == null)
-            throw new ArgumentNullException(nameof(groupByColumns));
+        this.groupByColumns = groupByColumns ?? throw new ArgumentNullException(nameof(groupByColumns));
 
         if (groupByColumns.Length == 0)
             throw new ArgumentException("Must specify at least one column expression for grouping", nameof(groupByColumns));
-
-        GroupByColumns = groupByColumns.ToArray(); // Create a defensive copy
     }
 
     /// <summary>
     /// Gets the column expressions to group by
     /// </summary>
-    public IReadOnlyList<ColumnExpression> GroupByColumns { get; }
+    public IReadOnlyList<ColumnExpression> GroupByColumns => groupByColumns;
 
     /// <inheritdoc />
     public string OperationType => "GroupBy";
@@ -77,47 +208,21 @@ internal sealed class GroupByOperation : IQueryOperation
 
         try
         {
-            // For this basic implementation, we'll return distinct values of the grouped columns
-            // A full implementation would support aggregation functions
-            var evaluator = new ExpressionEvaluator();
-            var groupedColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            // Create grouped data using hash-based grouping
+            var keyColumnNames = GroupByColumns.Select(expr => GetColumnName(expr, input)).ToArray();
+            var groupedData = CreateGroupsInternal(input, keyColumnNames);
+            
+            // Create result columns with distinct key values
+            var resultColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
 
-            // Evaluate each group by column
-            var groupByValues = new List<(string Name, IColumn Column)>();
-
-            foreach (var columnExpr in GroupByColumns)
+            foreach (var keyColumnName in keyColumnNames)
             {
-                var columnName = GetColumnName(columnExpr, input);
-                var column = evaluator.Evaluate(columnExpr, input);
-                groupByValues.Add((columnName, column));
+                var sourceColumn = input[keyColumnName];
+                var distinctValues = ExtractDistinctKeyValues(groupedData, keyColumnName, sourceColumn);
+                resultColumns[keyColumnName] = distinctValues;
             }
 
-            // Create a composite key for each row and find unique combinations
-            var rowCount = groupByValues.First().Column.Length;
-            var uniqueRows = new Dictionary<string, int>();
-            var firstOccurrences = new List<int>();
-
-            for (int i = 0; i < rowCount; i++)
-            {
-                // Create a composite key from all group by column values
-                var keyParts = groupByValues.Select(gv => gv.Column.GetValue(i)?.ToString() ?? "null");
-                var compositeKey = string.Join("|", keyParts);
-
-                if (!uniqueRows.ContainsKey(compositeKey))
-                {
-                    uniqueRows[compositeKey] = i;
-                    firstOccurrences.Add(i);
-                }
-            }
-
-            // Create result columns with only the first occurrence of each unique combination
-            foreach (var (name, column) in groupByValues)
-            {
-                var distinctColumn = CreateDistinctColumn(column, firstOccurrences);
-                groupedColumns[name] = distinctColumn;
-            }
-
-            return groupedColumns;
+            return resultColumns;
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
@@ -126,61 +231,87 @@ internal sealed class GroupByOperation : IQueryOperation
     }
 
     /// <summary>
-    /// Creates a new column containing only the values at the specified indices
+    /// Creates grouped data using hash-based grouping with vectorized key comparison
     /// </summary>
-    /// <param name="column">The source column</param>
-    /// <param name="indices">The indices of values to include</param>
-    /// <returns>A new column with distinct values</returns>
-    static IColumn CreateDistinctColumn(IColumn column, List<int> indices)
+    /// <param name="input">The input columns</param>
+    /// <param name="keyColumns">The key column names</param>
+    /// <returns>The grouped data</returns>
+    static GroupedData CreateGroupsInternal(IReadOnlyDictionary<string, IColumn> input, string[] keyColumns)
     {
-        var elementType = column.ElementType;
+        var firstColumn = input.Values.First();
+        var rowCount = firstColumn.Length;
+        var groups = new Dictionary<GroupKey, List<int>>();
 
-        // Use dynamic dispatch to create the appropriate column type
+        // Get key columns
+        var keyColumnData = keyColumns.Select(name => input[name]).ToArray();
+
+        // Group rows by creating composite keys
+        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        {
+            // Create composite key for this row
+            var keyValues = new object?[keyColumns.Length];
+            for (int keyIndex = 0; keyIndex < keyColumns.Length; keyIndex++)
+            {
+                keyValues[keyIndex] = keyColumnData[keyIndex].GetValue(rowIndex);
+            }
+
+            var groupKey = new GroupKey(keyValues);
+
+            // Add row to appropriate group
+            if (!groups.TryGetValue(groupKey, out var rowIndices))
+            {
+                rowIndices = new List<int>();
+                groups[groupKey] = rowIndices;
+            }
+
+            rowIndices.Add(rowIndex);
+        }
+
+        return new GroupedData(groups, keyColumns, input);
+    }
+
+    /// <summary>
+    /// Extracts distinct key values from grouped data for a specific column
+    /// </summary>
+    /// <param name="groupedData">The grouped data</param>
+    /// <param name="columnName">The column name</param>
+    /// <param name="sourceColumn">The source column</param>
+    /// <returns>A column with distinct key values</returns>
+    static IColumn ExtractDistinctKeyValues(GroupedData groupedData, string columnName, IColumn sourceColumn)
+    {
+        var keyColumnIndex = Array.IndexOf(groupedData.KeyColumnNames.ToArray(), columnName);
+        if (keyColumnIndex == -1)
+            throw new ArgumentException($"Column '{columnName}' is not a key column", nameof(columnName));
+
+        var distinctValues = groupedData.GroupKeys
+            .Select(key => key.Values[keyColumnIndex])
+            .ToArray();
+
+        return CreateColumnFromValues(sourceColumn.ElementType, distinctValues);
+    }
+
+    /// <summary>
+    /// Creates a column from an array of values with proper type handling
+    /// </summary>
+    /// <param name="elementType">The element type</param>
+    /// <param name="values">The values</param>
+    /// <returns>A new column</returns>
+    static IColumn CreateColumnFromValues(Type elementType, object?[] values)
+    {
         return elementType switch
         {
-            Type t when t == typeof(int) => CreateDistinctColumnTyped<int>(column, indices),
-            Type t when t == typeof(double) => CreateDistinctColumnTyped<double>(column, indices),
-            Type t when t == typeof(float) => CreateDistinctColumnTyped<float>(column, indices),
-            Type t when t == typeof(long) => CreateDistinctColumnTyped<long>(column, indices),
-            Type t when t == typeof(string) => CreateDistinctColumnTyped<string>(column, indices),
-            Type t when t == typeof(bool) => CreateDistinctColumnTyped<bool>(column, indices),
-            Type t when t == typeof(decimal) => CreateDistinctColumnTyped<decimal>(column, indices),
-            Type t when t == typeof(byte) => CreateDistinctColumnTyped<byte>(column, indices),
-            Type t when t == typeof(short) => CreateDistinctColumnTyped<short>(column, indices),
-            Type t when t == typeof(DateTime) => CreateDistinctColumnTyped<DateTime>(column, indices),
-            _ => CreateDistinctColumnGeneric(column, indices)
+            Type t when t == typeof(int) => NivaraColumn<int>.Create(values.Cast<int>().ToArray()),
+            Type t when t == typeof(double) => NivaraColumn<double>.Create(values.Cast<double>().ToArray()),
+            Type t when t == typeof(float) => NivaraColumn<float>.Create(values.Cast<float>().ToArray()),
+            Type t when t == typeof(long) => NivaraColumn<long>.Create(values.Cast<long>().ToArray()),
+            Type t when t == typeof(string) => NivaraColumn<string>.Create(values.Cast<string>().ToArray()),
+            Type t when t == typeof(bool) => NivaraColumn<bool>.Create(values.Cast<bool>().ToArray()),
+            Type t when t == typeof(decimal) => NivaraColumn<decimal>.Create(values.Cast<decimal>().ToArray()),
+            Type t when t == typeof(byte) => NivaraColumn<byte>.Create(values.Cast<byte>().ToArray()),
+            Type t when t == typeof(short) => NivaraColumn<short>.Create(values.Cast<short>().ToArray()),
+            Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.Create(values.Cast<DateTime>().ToArray()),
+            _ => NivaraColumn<object>.Create(values.Where(v => v != null).ToArray()!)
         };
-    }
-
-    /// <summary>
-    /// Creates a distinct column for a specific type
-    /// </summary>
-    static IColumn CreateDistinctColumnTyped<T>(IColumn column, List<int> indices)
-    {
-        var distinctArray = new T[indices.Count];
-
-        for (int i = 0; i < indices.Count; i++)
-        {
-            var value = column.GetValue(indices[i]);
-            distinctArray[i] = (T)value!;
-        }
-
-        return NivaraColumn<T>.Create(distinctArray);
-    }
-
-    /// <summary>
-    /// Creates a distinct column for unknown types using object column
-    /// </summary>
-    static IColumn CreateDistinctColumnGeneric(IColumn column, List<int> indices)
-    {
-        var distinctArray = new object[indices.Count];
-
-        for (int i = 0; i < indices.Count; i++)
-        {
-            distinctArray[i] = column.GetValue(indices[i])!;
-        }
-
-        return NivaraColumn<object>.Create(distinctArray);
     }
 
     /// <summary>
@@ -237,10 +368,7 @@ internal sealed class GroupByOperation : IQueryOperation
         return expression.ResultType;
     }
 
-    /// <summary>
-    /// Returns a string representation of the group by operation
-    /// </summary>
-    /// <returns>A string representation</returns>
+    /// <inheritdoc />
     public override string ToString()
     {
         var columnNames = GroupByColumns.Select(c => c.Name);

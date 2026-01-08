@@ -154,6 +154,99 @@ File I/O is deferred until `Collect()` is called.
 
 ---
 
+## Grouping and Aggregation
+
+Nivara provides comprehensive grouping and aggregation operations with hash-based grouping and vectorized aggregations:
+
+### GroupBy Operations
+
+Group data by one or more columns with efficient hash-based grouping:
+
+```csharp
+using Nivara.Expressions;
+
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Alice", "Charlie" })),
+    ("Department", NivaraColumn<string>.Create(new[] { "IT", "HR", "IT", "Finance" })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 75000, 65000, 78000, 85000 }))
+);
+
+// Group by single column
+var groupedByName = frame.AsQueryFrame()
+    .GroupBy("Name")
+    .Collect();
+
+// Group by multiple columns
+var groupedByNameAndDept = frame.AsQueryFrame()
+    .GroupBy("Name", "Department")
+    .Collect();
+```
+
+GroupBy operations handle:
+- **Multiple grouping keys** with composite key generation
+- **Null values** as distinct groups
+- **Efficient hashing** for all data types
+- **Schema preservation** with proper type inference
+
+### Aggregation Functions
+
+Apply aggregations to grouped or ungrouped data with automatic vectorization:
+
+```csharp
+// Built-in aggregation functions
+var countAgg = AggregationFunctions.Count();
+var sumAgg = AggregationFunctions.Sum();
+var avgAgg = AggregationFunctions.Mean();
+var minAgg = AggregationFunctions.Min();
+var maxAgg = AggregationFunctions.Max();
+
+// Apply to column data
+var salaryColumn = frame.GetColumn<double>("Salary");
+var allIndices = Enumerable.Range(0, salaryColumn.Length).ToList();
+
+Console.WriteLine($"Total salary: {sumAgg.Apply(salaryColumn, allIndices)}");
+Console.WriteLine($"Average salary: {avgAgg.Apply(salaryColumn, allIndices)}");
+Console.WriteLine($"Employee count: {countAgg.Apply(salaryColumn, allIndices)}");
+```
+
+Aggregation features:
+- **Vectorized operations** using TensorPrimitives for float/double types
+- **Null-aware computation** (nulls are ignored in calculations)
+- **Type-safe results** with appropriate return types (e.g., Sum returns long for integers)
+- **Extensible architecture** for custom aggregation functions
+- **Automatic fallbacks** to scalar operations when vectorization isn't available
+
+### Custom Aggregation Functions
+
+Create custom aggregations by extending the base class:
+
+```csharp
+public class MedianAggregation : AggregationFunction
+{
+    public override string Name => "Median";
+    
+    public override Type GetResultType(Type inputType) => inputType;
+    
+    public override object? Apply(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        // Extract valid values and compute median
+        var validValues = new List<object>();
+        foreach (var index in groupIndices)
+        {
+            var value = column.GetValue(index);
+            if (value != null) validValues.Add(value);
+        }
+        
+        if (validValues.Count == 0) return null;
+        
+        // Implement median calculation logic
+        // ...
+    }
+}
+```
+
+---
+
 ## Aggregate Functions
 
 Nivara provides efficient aggregate functions with automatic vectorization:
@@ -283,6 +376,8 @@ Nivara currently supports:
 - **Query Engine**: Schema-aware lazy query construction with diagnostics and plan inspection
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
 - **Aggregate Functions**: Sum, Average, Min, Max with vectorized operations and null-aware computation
+- **Grouping Operations**: Hash-based GroupBy with composite key support and efficient group management
+- **Aggregation Framework**: Extensible aggregation system with built-in functions (Count, Sum, Min, Max, Mean) and vectorized execution
 - **Parquet I/O**: Full read/write support with compression, streaming, and batch operations (via `Nivara.Extensions`)
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
@@ -294,8 +389,11 @@ Nivara currently supports:
 
 The following features are still planned or in-progress:
 
-- Join operations
-- GroupBy aggregations
+- Join operations (Inner, Left, Right, Full Outer)
+- Sorting operations (single and multi-column)
+- Row filtering and slicing operations
+- Column transformations and projections
+- Query optimization engine
 - Streaming and parallel execution strategies
 
 ---
