@@ -469,7 +469,7 @@ public sealed class NivaraFrame : IFrame
         if (length < 0)
             throw new ArgumentOutOfRangeException(nameof(length), "Length cannot be negative");
         if (start + length > RowCount)
-            throw new ArgumentOutOfRangeException(nameof(length), 
+            throw new ArgumentOutOfRangeException(nameof(length),
                 $"Start + length ({start + length}) exceeds frame row count ({RowCount})");
 
         if (length == 0)
@@ -494,6 +494,54 @@ public sealed class NivaraFrame : IFrame
         }
 
         return new NivaraFrame(slicedColumns);
+    }
+
+    /// <summary>
+    /// Creates a new frame by reordering rows using the specified indices
+    /// </summary>
+    /// <param name="indices">The indices specifying the new row order</param>
+    /// <returns>A new NivaraFrame with rows reordered according to the indices</returns>
+    /// <exception cref="ArgumentNullException">Thrown when indices is null</exception>
+    /// <exception cref="ArgumentException">Thrown when indices length doesn't match row count or contains invalid indices</exception>
+    public NivaraFrame ReorderByIndices(int[] indices)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (indices == null)
+            throw new ArgumentNullException(nameof(indices));
+
+        if (indices.Length != RowCount)
+            throw new ArgumentException(
+                $"Indices length ({indices.Length}) must match frame row count ({RowCount})",
+                nameof(indices));
+
+        // Validate all indices are within bounds
+        for (int i = 0; i < indices.Length; i++)
+        {
+            if (indices[i] < 0 || indices[i] >= RowCount)
+            {
+                throw new ArgumentException(
+                    $"Index {indices[i]} at position {i} is out of bounds. Valid range is 0 to {RowCount - 1}",
+                    nameof(indices));
+            }
+        }
+
+        // If indices are already in order, return a copy
+        if (indices.SequenceEqual(Enumerable.Range(0, RowCount)))
+        {
+            var identityColumns = columns.Select(kvp => (kvp.Key, kvp.Value));
+            return new NivaraFrame(identityColumns);
+        }
+
+        // Reorder all columns using the indices
+        var reorderedColumns = new List<(string Name, IColumn Column)>();
+        foreach (var kvp in columns)
+        {
+            var reorderedColumn = ReorderColumn(kvp.Value, indices);
+            reorderedColumns.Add((kvp.Key, reorderedColumn));
+        }
+
+        return new NivaraFrame(reorderedColumns);
     }
 
     /// <summary>
@@ -762,7 +810,7 @@ public sealed class NivaraFrame : IFrame
         // Use reflection to call the Slice method on the typed column
         var columnType = column.GetType();
         var sliceMethod = columnType.GetMethod("Slice", new[] { typeof(int), typeof(int) });
-        
+
         if (sliceMethod != null)
         {
             return (IColumn)sliceMethod.Invoke(column, new object[] { start, length })!;
@@ -771,6 +819,94 @@ public sealed class NivaraFrame : IFrame
         // Fallback: create filtered column using indices
         var indices = Enumerable.Range(start, length).ToList();
         return CreateFilteredColumn(column, indices);
+    }
+
+    /// <summary>
+    /// Reorders a column using the specified indices
+    /// </summary>
+    /// <param name="column">The column to reorder</param>
+    /// <param name="indices">The indices specifying the new order</param>
+    /// <returns>A reordered column</returns>
+    static IColumn ReorderColumn(IColumn column, int[] indices)
+    {
+        var elementType = column.ElementType;
+
+        // Use dynamic dispatch to create the appropriate column type
+        return elementType switch
+        {
+            Type t when t == typeof(int) => ReorderColumnTyped<int>(column, indices),
+            Type t when t == typeof(double) => ReorderColumnTyped<double>(column, indices),
+            Type t when t == typeof(float) => ReorderColumnTyped<float>(column, indices),
+            Type t when t == typeof(long) => ReorderColumnTyped<long>(column, indices),
+            Type t when t == typeof(string) => ReorderColumnTyped<string>(column, indices),
+            Type t when t == typeof(bool) => ReorderColumnTyped<bool>(column, indices),
+            Type t when t == typeof(decimal) => ReorderColumnTyped<decimal>(column, indices),
+            Type t when t == typeof(byte) => ReorderColumnTyped<byte>(column, indices),
+            Type t when t == typeof(short) => ReorderColumnTyped<short>(column, indices),
+            Type t when t == typeof(DateTime) => ReorderColumnTyped<DateTime>(column, indices),
+            _ => ReorderColumnGeneric(column, indices)
+        };
+    }
+
+    /// <summary>
+    /// Reorders a column for a specific type
+    /// </summary>
+    static IColumn ReorderColumnTyped<T>(IColumn column, int[] indices)
+    {
+        // Check if T is a value type to determine which creation method to use
+        if (typeof(T).IsValueType)
+        {
+            // For value types, create nullable array and use CreateFromNullable
+            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
+            var reorderedArray = System.Array.CreateInstance(nullableType, indices.Length);
+
+            for (int i = 0; i < indices.Length; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                if (value != null)
+                {
+                    var nullableInstance = Activator.CreateInstance(nullableType, value);
+                    reorderedArray.SetValue(nullableInstance, i);
+                }
+                // null values remain null in the array
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
+                .Invoke(null, new object[] { reorderedArray })!;
+        }
+        else
+        {
+            // For reference types, create regular array and use CreateForReferenceType
+            var reorderedArray = new T[indices.Length];
+
+            for (int i = 0; i < indices.Length; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                reorderedArray[i] = (T)value!; // Reference types can be null
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
+                .Invoke(null, new object[] { reorderedArray })!;
+        }
+    }
+
+    /// <summary>
+    /// Reorders a column for unknown types using object column
+    /// </summary>
+    static IColumn ReorderColumnGeneric(IColumn column, int[] indices)
+    {
+        var reorderedArray = new object[indices.Length];
+
+        for (int i = 0; i < indices.Length; i++)
+        {
+            reorderedArray[i] = column.GetValue(indices[i])!;
+        }
+
+        return NivaraColumn<object>.Create(reorderedArray);
     }
 
     /// <summary>

@@ -544,3 +544,88 @@ Do not attempt to constrain all operations with generic type parameters - runtim
 
 **Outcome**  
 Operations work reliably across all supported types with good performance for common cases.
+
+---
+
+## DataFrame Sorting Operations
+
+### Multi-Column Sorting Implementation
+
+**Problem**  
+DataFrame sorting needs to handle multiple sort keys with different directions and null ordering strategies while maintaining performance and correctness.
+
+**Constraint**  
+- Must work across all column types (numeric, string, nullable)
+- Must preserve stable sort semantics when requested
+- Must handle null values according to specified ordering (nulls first/last)
+- Must support both ascending and descending directions per column
+- Must validate that columns are comparable before attempting sort
+
+**Pattern That Worked**  
+Implement sorting using a multi-step approach:
+- Create `SortKey` class to encapsulate column name, direction, and null ordering
+- Use `MultiColumnComparer` that implements `IComparer<int>` to compare row indices
+- Compute sort indices first, then reorder all columns using the same indices
+- Use stable sorting (OrderBy) by default, with option for unstable (Array.Sort) for performance
+- Validate column types implement `IComparable` or `IComparable<T>` before sorting
+
+**Negative Rule**  
+Do not attempt to sort columns directly - always sort indices and then reorder all columns consistently.
+
+**Outcome**  
+Sorting works reliably across all data types with proper null handling and maintains referential integrity between columns.
+
+---
+
+### Column Reordering Strategy
+
+**Problem**  
+Reordering DataFrame rows requires efficiently rearranging all columns while preserving data integrity and null masks.
+
+**Constraint**  
+- Must work with any column type (value types, reference types, nullable types)
+- Must preserve null values and their positions correctly
+- Must validate indices are within bounds and handle edge cases
+- Must maintain column type information during reordering
+
+**Pattern That Worked**  
+Implement `ReorderByIndices` method that:
+- Validates indices array length matches row count
+- Validates all indices are within valid range [0, rowCount)
+- Uses type dispatch to call appropriate reordering method for each column type
+- For value types: creates nullable arrays and uses `CreateFromNullable`
+- For reference types: creates typed arrays and uses `CreateForReferenceType`
+- Handles identity reordering efficiently (when indices are [0,1,2,...])
+
+**Negative Rule**  
+Do not use reflection for column reordering in performance-critical paths - use type dispatch with explicit type handling.
+
+**Outcome**  
+Row reordering is efficient and type-safe, with proper null preservation across all supported column types.
+
+---
+
+### Sorting Null Value Handling
+
+**Problem**  
+Null values in sortable columns need consistent ordering behavior that users can control.
+
+**Constraint**  
+- Different databases and systems have different default null ordering
+- Users need control over whether nulls appear first or last
+- Null comparison must be consistent across all column types
+- Must work with both nullable value types and reference types
+
+**Pattern That Worked**  
+Implement explicit null ordering in the comparer:
+- Check for null values before attempting comparison
+- Apply null ordering strategy (NullsFirst/NullsLast) consistently
+- Handle null-to-null comparisons as equal (return 0)
+- Only compare non-null values using `IComparable.CompareTo`
+- Provide sensible defaults (NullsLast) while allowing user control
+
+**Negative Rule**  
+Never rely on default null comparison behavior - always handle nulls explicitly in custom comparers.
+
+**Outcome**  
+Null handling in sorting is predictable and user-controllable, working consistently across all column types.

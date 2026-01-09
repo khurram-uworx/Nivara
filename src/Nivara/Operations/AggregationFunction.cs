@@ -1,5 +1,4 @@
 using System.Numerics.Tensors;
-using Nivara.Exceptions;
 
 namespace Nivara;
 
@@ -95,7 +94,7 @@ public abstract class AggregationFunction
     {
         // Handle nullable types by checking the underlying type
         var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-        
+
         return underlyingType == typeof(int) ||
                underlyingType == typeof(float) ||
                underlyingType == typeof(double) ||
@@ -181,10 +180,10 @@ public sealed class SumAggregation : AggregationFunction
     public override Type GetResultType(Type inputType)
     {
         ValidateInputType(inputType);
-        
+
         // Handle nullable types by checking the underlying type
         var underlyingType = Nullable.GetUnderlyingType(inputType) ?? inputType;
-        
+
         // Return appropriate sum type based on input - follow NivaraSeries patterns
         return underlyingType switch
         {
@@ -264,7 +263,7 @@ public sealed class SumAggregation : AggregationFunction
         {
             floatValues[i] = (float)validValues[i];
         }
-        
+
         var result = TensorPrimitives.Sum(floatValues.AsSpan());
         return (double)result; // Return as double for consistency
     }
@@ -281,14 +280,14 @@ public sealed class SumAggregation : AggregationFunction
         {
             doubleValues[i] = (double)validValues[i];
         }
-        
+
         return TensorPrimitives.Sum(doubleValues.AsSpan());
     }
 
     /// <summary>
     /// Performs typed sum aggregation with proper type conversion
     /// </summary>
-    static TResult SumVectorized<TInput, TResult>(List<object> validValues, 
+    static TResult SumVectorized<TInput, TResult>(List<object> validValues,
         Func<TResult, TInput, TResult> addFunc, TResult identity)
         where TInput : struct
         where TResult : struct
@@ -369,7 +368,7 @@ public sealed class MinAggregation : AggregationFunction
         {
             floatValues[i] = (float)validValues[i];
         }
-        
+
         return TensorPrimitives.Min(floatValues.AsSpan());
     }
 
@@ -383,7 +382,7 @@ public sealed class MinAggregation : AggregationFunction
         {
             doubleValues[i] = (double)validValues[i];
         }
-        
+
         return TensorPrimitives.Min(doubleValues.AsSpan());
     }
 
@@ -457,7 +456,7 @@ public sealed class MaxAggregation : AggregationFunction
         {
             floatValues[i] = (float)validValues[i];
         }
-        
+
         return TensorPrimitives.Max(floatValues.AsSpan());
     }
 
@@ -471,7 +470,7 @@ public sealed class MaxAggregation : AggregationFunction
         {
             doubleValues[i] = (double)validValues[i];
         }
-        
+
         return TensorPrimitives.Max(doubleValues.AsSpan());
     }
 
@@ -507,7 +506,7 @@ public sealed class MeanAggregation : AggregationFunction
     public override Type GetResultType(Type inputType)
     {
         ValidateInputType(inputType);
-        
+
         // Mean always returns double for numeric types
         return typeof(double);
     }
@@ -537,7 +536,7 @@ public sealed class MeanAggregation : AggregationFunction
         // Calculate sum and divide by count
         var sumAggregation = new SumAggregation();
         var sum = sumAggregation.Apply(column, groupIndices);
-        
+
         if (sum == null)
             return null;
 

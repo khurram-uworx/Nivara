@@ -1,5 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
+using Nivara.Operations;
 
 namespace Nivara;
 
@@ -202,6 +203,62 @@ public sealed class QueryFrame : IDisposable
         var newOperations = operations.Concat(new[] { groupByOperation });
 
         return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
+    /// Adds a sort operation to the query pipeline for single column sorting
+    /// </summary>
+    /// <param name="columnName">The name of the column to sort by</param>
+    /// <param name="direction">The sort direction (ascending or descending)</param>
+    /// <param name="nullOrdering">How to order null values (nulls first or nulls last)</param>
+    /// <param name="stable">Whether to use stable sorting (preserves relative order of equal elements)</param>
+    /// <returns>A new QueryFrame with the sort operation added</returns>
+    /// <exception cref="ArgumentException">Thrown when columnName is null or whitespace</exception>
+    public QueryFrame Sort(string columnName, SortDirection direction = SortDirection.Ascending,
+        NullOrdering nullOrdering = NullOrdering.NullsLast, bool stable = true)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (string.IsNullOrWhiteSpace(columnName))
+            throw new ArgumentException("Column name cannot be null or whitespace", nameof(columnName));
+
+        var sortOperation = new SortOperation(columnName, direction, nullOrdering, stable);
+        var newOperations = operations.Concat(new[] { sortOperation });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
+    /// Adds a sort operation to the query pipeline for multi-column sorting
+    /// </summary>
+    /// <param name="sortKeys">The sort keys defining the sort order and priority</param>
+    /// <param name="stable">Whether to use stable sorting (preserves relative order of equal elements)</param>
+    /// <returns>A new QueryFrame with the sort operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when sortKeys is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no sort keys are provided</exception>
+    public QueryFrame Sort(IEnumerable<SortKey> sortKeys, bool stable = true)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (sortKeys == null)
+            throw new ArgumentNullException(nameof(sortKeys));
+
+        var sortOperation = new SortOperation(sortKeys, stable);
+        var newOperations = operations.Concat(new[] { sortOperation });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
+    /// Adds a sort operation to the query pipeline for multi-column sorting
+    /// </summary>
+    /// <param name="sortKeys">The sort keys defining the sort order and priority</param>
+    /// <returns>A new QueryFrame with the sort operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when sortKeys is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no sort keys are provided</exception>
+    public QueryFrame Sort(params SortKey[] sortKeys)
+    {
+        return Sort(sortKeys, stable: true);
     }
 
     /// <summary>

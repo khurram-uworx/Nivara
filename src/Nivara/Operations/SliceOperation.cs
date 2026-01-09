@@ -106,7 +106,7 @@ internal sealed class SliceOperation : IQueryOperation
         // Use reflection to call the Slice method on the typed column
         var columnType = column.GetType();
         var sliceMethod = columnType.GetMethod("Slice", new[] { typeof(int), typeof(int) });
-        
+
         if (sliceMethod != null)
         {
             return (IColumn)sliceMethod.Invoke(column, new object[] { start, length })!;

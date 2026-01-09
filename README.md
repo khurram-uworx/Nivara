@@ -298,6 +298,74 @@ var middle = frame.Skip(1).Take(2);
 // Result: Bob (30, 60000) and Charlie (35, 70000)
 ```
 
+### Sorting Operations
+
+Sort DataFrames by one or multiple columns with full control over sort direction and null handling:
+
+```csharp
+using Nivara.Operations;
+
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie", "Alice", "Bob", "Diana" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 35, 25, 30, 40 })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 70000, 50000, 60000, 80000 }))
+);
+
+// Single column sorting (ascending by default)
+var sortedByAge = frame.AsQueryFrame()
+    .Sort("Age")
+    .Collect();
+// Result: Alice (25), Bob (30), Charlie (35), Diana (40)
+
+// Single column sorting with explicit direction
+var sortedBySalaryDesc = frame.AsQueryFrame()
+    .Sort("Salary", SortDirection.Descending)
+    .Collect();
+// Result: Diana (80000), Charlie (70000), Bob (60000), Alice (50000)
+```
+
+Multi-column sorting with priority order:
+
+```csharp
+// Sort by Department first, then by Salary within each department
+var multiSorted = frame.AsQueryFrame()
+    .Sort(new[]
+    {
+        new SortKey("Department", SortDirection.Ascending),
+        new SortKey("Salary", SortDirection.Descending)
+    })
+    .Collect();
+```
+
+Null value handling in sorting:
+
+```csharp
+var frameWithNulls = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
+    ("Score", NivaraColumn<int>.CreateFromNullable(new int?[] { 85, null, 92 }))
+);
+
+// Sort with nulls first
+var nullsFirst = frameWithNulls.AsQueryFrame()
+    .Sort("Score", SortDirection.Ascending, NullOrdering.NullsFirst)
+    .Collect();
+// Result: Bob (null), Alice (85), Charlie (92)
+
+// Sort with nulls last (default)
+var nullsLast = frameWithNulls.AsQueryFrame()
+    .Sort("Score", SortDirection.Ascending, NullOrdering.NullsLast)
+    .Collect();
+// Result: Alice (85), Charlie (92), Bob (null)
+```
+
+Sorting features:
+- **Multi-column sorting** with configurable priority order
+- **Stable sorting** preserves relative order of equal elements
+- **Null ordering control** (nulls first or nulls last)
+- **Type-safe comparisons** with validation of comparable types
+- **Efficient implementation** using index-based reordering
+- **Schema preservation** maintains all column types and metadata
+
 ### Arbitrary Row Ranges
 
 Use Slice for arbitrary row ranges with start index and length:

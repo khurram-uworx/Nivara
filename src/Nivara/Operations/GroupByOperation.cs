@@ -1,7 +1,5 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
-using System.Collections.Concurrent;
-using System.Numerics.Tensors;
 
 namespace Nivara;
 
@@ -211,7 +209,7 @@ public sealed class GroupByOperation : IQueryOperation
             // Create grouped data using hash-based grouping
             var keyColumnNames = GroupByColumns.Select(expr => GetColumnName(expr, input)).ToArray();
             var groupedData = CreateGroupsInternal(input, keyColumnNames);
-            
+
             // Create result columns with distinct key values
             var resultColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
 

@@ -529,7 +529,7 @@ public static class ArrowInterop
 
                 // Convert to DateTimeOffset for the builder
                 var dateTimeOffset = new DateTimeOffset(dateTime, TimeSpan.Zero);
-                
+
                 builder.Append(dateTimeOffset);
             }
         }
