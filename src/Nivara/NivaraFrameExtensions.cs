@@ -1,5 +1,4 @@
 using Nivara.Exceptions;
-using Nivara.Expressions;
 
 namespace Nivara;
 
@@ -34,13 +33,13 @@ public static class NivaraFrameExtensions
 
         // Get the source column
         var sourceColumn = frame.GetColumn<T>(columnName);
-        
+
         // Transform the column
         var transformedColumn = sourceColumn.Transform(transform);
-        
+
         // Determine result column name
         var finalResultColumnName = resultColumnName ?? columnName;
-        
+
         // If replacing existing column, remove it first
         NivaraFrame resultFrame;
         if (string.Equals(columnName, finalResultColumnName, StringComparison.OrdinalIgnoreCase))
@@ -53,7 +52,7 @@ public static class NivaraFrameExtensions
             // Adding new column alongside existing
             resultFrame = frame;
         }
-        
+
         // Add the transformed column
         return resultFrame.WithColumn(finalResultColumnName, transformedColumn);
     }
@@ -80,20 +79,20 @@ public static class NivaraFrameExtensions
         {
             // Get the source column
             var sourceColumn = frame.GetColumn(columnName);
-            
+
             // Apply transformation using reflection to handle different types
             var transformedColumn = TransformColumnGeneric(sourceColumn, transform);
-            
+
             // Determine result column name
             var finalResultColumnName = resultColumnName ?? columnName;
-            
+
             // If replacing existing column, remove it first
             if (string.Equals(columnName, finalResultColumnName, StringComparison.OrdinalIgnoreCase))
             {
                 // Replacing existing column
                 resultFrame = resultFrame.WithoutColumn(columnName);
             }
-            
+
             // Add the transformed column
             resultFrame = resultFrame.WithColumn(finalResultColumnName, transformedColumn);
         }
@@ -131,7 +130,7 @@ public static class NivaraFrameExtensions
 
             var column = frame.GetColumn(originalName);
             var finalName = newName ?? originalName;
-            
+
             selectedColumns.Add((finalName, column));
         }
 
@@ -338,7 +337,7 @@ public static class NivaraFrameExtensions
 
         var col1 = frame.GetColumn<T1>(sourceColumn1);
         var resultColumn = col1.Transform(computation);
-        
+
         return frame.WithColumn(resultColumnName, resultColumn);
     }
 
@@ -399,7 +398,7 @@ public static class NivaraFrameExtensions
                 try
                 {
                     var computedValue = computation(col1[i], col2[i]);
-                    
+
                     // Check if the computed value is null for reference types
                     if (!typeof(TResult).IsValueType && computedValue == null)
                     {
@@ -471,7 +470,7 @@ public static class NivaraFrameExtensions
     private static IColumn TransformColumnGeneric(IColumn sourceColumn, Func<object, object> transform)
     {
         var elementType = sourceColumn.ElementType;
-        
+
         // Use reflection to call the appropriate Transform method
         var transformMethod = typeof(NivaraColumn<>)
             .MakeGenericType(elementType)
@@ -482,7 +481,7 @@ public static class NivaraFrameExtensions
 
         // Create a typed transformation function
         var typedTransform = CreateTypedTransform(transform, elementType);
-        
+
         return (IColumn)transformMethod.Invoke(sourceColumn, new[] { typedTransform })!;
     }
 
@@ -496,7 +495,7 @@ public static class NivaraFrameExtensions
     {
         // Create a delegate of type Func<T, object> where T is the source type
         var delegateType = typeof(Func<,>).MakeGenericType(sourceType, typeof(object));
-        
+
         // Create the typed wrapper function
         var method = typeof(NivaraFrameExtensions)
             .GetMethod(nameof(TypedTransformWrapper), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!

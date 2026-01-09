@@ -1,5 +1,5 @@
-using NUnit.Framework;
 using Nivara.Exceptions;
+using NUnit.Framework;
 
 namespace Nivara.Tests;
 
@@ -128,7 +128,7 @@ public class FrameProjectionTests
         // Assert
         Assert.That(transformed.ColumnCount, Is.EqualTo(3));
         Assert.That(transformed.ColumnNames, Does.Contain("IntCol"));
-        
+
         var intCol = transformed.GetColumn<int>("IntCol");
         Assert.That(intCol[0], Is.EqualTo(2));
         Assert.That(intCol[1], Is.EqualTo(4));
@@ -145,10 +145,10 @@ public class FrameProjectionTests
         Assert.That(transformed.ColumnCount, Is.EqualTo(4));
         Assert.That(transformed.ColumnNames, Does.Contain("IntCol")); // Original preserved
         Assert.That(transformed.ColumnNames, Does.Contain("DoubledInt")); // New column added
-        
+
         var originalCol = transformed.GetColumn<int>("IntCol");
         var doubledCol = transformed.GetColumn<int>("DoubledInt");
-        
+
         Assert.That(originalCol[0], Is.EqualTo(1)); // Original unchanged
         Assert.That(doubledCol[0], Is.EqualTo(2)); // New column transformed
     }
@@ -158,14 +158,14 @@ public class FrameProjectionTests
     {
         // Act
         var computed = testFrame.WithComputedColumn<int, double, double>(
-            "IntCol", "DoubleCol", 
-            (i, d) => i + d, 
+            "IntCol", "DoubleCol",
+            (i, d) => i + d,
             "Sum");
 
         // Assert
         Assert.That(computed.ColumnCount, Is.EqualTo(4));
         Assert.That(computed.ColumnNames, Does.Contain("Sum"));
-        
+
         var sumCol = computed.GetColumn<double>("Sum");
         Assert.That(sumCol[0], Is.EqualTo(2.1).Within(0.001)); // 1 + 1.1
         Assert.That(sumCol[1], Is.EqualTo(4.2).Within(0.001)); // 2 + 2.2
@@ -175,7 +175,7 @@ public class FrameProjectionTests
     public void Select_WithNonExistentColumn_ShouldThrowColumnNotFoundException()
     {
         // Act & Assert
-        Assert.Throws<ColumnNotFoundException>(() => 
+        Assert.Throws<ColumnNotFoundException>(() =>
             testFrame.Select("NonExistent"));
     }
 
@@ -183,7 +183,7 @@ public class FrameProjectionTests
     public void RenameColumn_WithNonExistentColumn_ShouldThrowColumnNotFoundException()
     {
         // Act & Assert
-        Assert.Throws<ColumnNotFoundException>(() => 
+        Assert.Throws<ColumnNotFoundException>(() =>
             testFrame.RenameColumn("NonExistent", "NewName"));
     }
 
@@ -191,7 +191,7 @@ public class FrameProjectionTests
     public void Exclude_AllColumns_ShouldThrowInvalidOperationException()
     {
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => 
+        Assert.Throws<InvalidOperationException>(() =>
             testFrame.Exclude("IntCol", "StringCol", "DoubleCol"));
     }
 

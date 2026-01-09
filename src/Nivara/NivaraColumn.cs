@@ -2317,7 +2317,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 try
                 {
                     var transformedValue = transform(storage[i]);
-                    
+
                     // Check if the transformed value is null for reference types
                     if (!typeof(TResult).IsValueType && transformedValue == null)
                     {
@@ -2417,7 +2417,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 try
                 {
                     var transformedValue = transform(storage[i]);
-                    
+
                     // Check if the transformed value is null for reference types
                     if (!typeof(TResult).IsValueType && transformedValue == null)
                     {

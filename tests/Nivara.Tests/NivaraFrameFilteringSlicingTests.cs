@@ -24,14 +24,14 @@ public class NivaraFrameFilteringSlicingTests
         // Assert
         Assert.That(filtered.RowCount, Is.EqualTo(3), "Filtered frame should have 3 rows");
         Assert.That(filtered.ColumnCount, Is.EqualTo(2), "Filtered frame should preserve column count");
-        
+
         var filteredNumbers = filtered.GetColumn<int>("Numbers");
         var filteredLetters = filtered.GetColumn<string>("Letters");
-        
+
         Assert.That(filteredNumbers[0], Is.EqualTo(1), "First filtered number should be 1");
         Assert.That(filteredNumbers[1], Is.EqualTo(3), "Second filtered number should be 3");
         Assert.That(filteredNumbers[2], Is.EqualTo(5), "Third filtered number should be 5");
-        
+
         Assert.That(filteredLetters[0], Is.EqualTo("a"), "First filtered letter should be 'a'");
         Assert.That(filteredLetters[1], Is.EqualTo("c"), "Second filtered letter should be 'c'");
         Assert.That(filteredLetters[2], Is.EqualTo("e"), "Third filtered letter should be 'e'");

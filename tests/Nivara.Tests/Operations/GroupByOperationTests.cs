@@ -1,9 +1,5 @@
-using NUnit.Framework;
-using Nivara;
 using Nivara.Expressions;
-using System;
-using System.Collections.Generic;
-using System.Linq;
+using NUnit.Framework;
 
 namespace Nivara.Tests.Operations;
 
@@ -98,9 +94,9 @@ public class GroupByOperationTests
             ["Department"] = deptColumn
         };
 
-        var operation = new GroupByOperation(new[] { 
-            ColumnExpressions.Col("Name"), 
-            ColumnExpressions.Col("Department") 
+        var operation = new GroupByOperation(new[] {
+            ColumnExpressions.Col("Name"),
+            ColumnExpressions.Col("Department")
         });
 
         // Act
@@ -115,7 +111,7 @@ public class GroupByOperationTests
         var deptResultColumn = result["Department"];
 
         // Distinct combinations: (Alice,IT), (Bob,HR), (Alice,Finance) = 3 combinations
-        Assert.That(nameResultColumn.Length, Is.EqualTo(3)); 
+        Assert.That(nameResultColumn.Length, Is.EqualTo(3));
         Assert.That(deptResultColumn.Length, Is.EqualTo(3));
     }
 
@@ -139,7 +135,7 @@ public class GroupByOperationTests
         // Assert
         Assert.That(result, Has.Count.EqualTo(1));
         var resultColumn = result["Name"];
-        
+
         // Should have distinct values including null
         Assert.That(resultColumn.Length, Is.EqualTo(3)); // Alice, null, Bob
     }
@@ -175,9 +171,9 @@ public class GroupByOperationTests
             ("Salary", typeof(double))
         });
 
-        var operation = new GroupByOperation(new[] { 
-            ColumnExpressions.Col("Name"), 
-            ColumnExpressions.Col("Age") 
+        var operation = new GroupByOperation(new[] {
+            ColumnExpressions.Col("Name"),
+            ColumnExpressions.Col("Age")
         });
 
         // Act
@@ -195,9 +191,9 @@ public class GroupByOperationTests
     public void ToString_ReturnsFormattedString()
     {
         // Arrange
-        var operation = new GroupByOperation(new[] { 
-            ColumnExpressions.Col("Name"), 
-            ColumnExpressions.Col("Department") 
+        var operation = new GroupByOperation(new[] {
+            ColumnExpressions.Col("Name"),
+            ColumnExpressions.Col("Department")
         });
 
         // Act

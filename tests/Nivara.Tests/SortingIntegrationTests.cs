@@ -13,21 +13,21 @@ public class SortingIntegrationTests
     public void SortingWorkflow_CompleteExample_ShouldWorkEndToEnd()
     {
         // Arrange - Create a sample employee dataset
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] 
-        { 
-            "Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Eve Adams" 
+        var names = NivaraColumn<string>.CreateForReferenceType(new[]
+        {
+            "Alice Johnson", "Bob Smith", "Charlie Brown", "Diana Prince", "Eve Adams"
         });
-        var departments = NivaraColumn<string>.CreateForReferenceType(new[] 
-        { 
-            "Engineering", "Sales", "Engineering", "Marketing", "Sales" 
+        var departments = NivaraColumn<string>.CreateForReferenceType(new[]
+        {
+            "Engineering", "Sales", "Engineering", "Marketing", "Sales"
         });
-        var salaries = NivaraColumn<double>.Create(new[] 
-        { 
-            75000.0, 65000.0, 85000.0, 70000.0, 68000.0 
+        var salaries = NivaraColumn<double>.Create(new[]
+        {
+            75000.0, 65000.0, 85000.0, 70000.0, 68000.0
         });
-        var ages = NivaraColumn<int>.Create(new[] 
-        { 
-            28, 35, 42, 31, 29 
+        var ages = NivaraColumn<int>.Create(new[]
+        {
+            28, 35, 42, 31, 29
         });
 
         var frame = NivaraFrame.Create(
@@ -45,7 +45,7 @@ public class SortingIntegrationTests
         // Assert 1: Verify salary sorting
         var sortedSalaries = sortedBySalary.GetColumn<double>("Salary");
         var sortedNames = sortedBySalary.GetColumn<string>("Name");
-        
+
         Assert.That(sortedSalaries.ToArray(), Is.EqualTo(new[] { 85000.0, 75000.0, 70000.0, 68000.0, 65000.0 }));
         Assert.That(sortedNames.ToArray(), Is.EqualTo(new[] { "Charlie Brown", "Alice Johnson", "Diana Prince", "Eve Adams", "Bob Smith" }));
 
@@ -55,7 +55,7 @@ public class SortingIntegrationTests
             new SortKey("Department", SortDirection.Ascending),
             new SortKey("Salary", SortDirection.Descending)
         };
-        
+
         var multiSorted = frame.AsQueryFrame()
             .Sort(sortKeys)
             .Collect();
@@ -96,9 +96,9 @@ public class SortingIntegrationTests
     public void SortingWithFiltering_CombinedOperations_ShouldWorkCorrectly()
     {
         // Arrange
-        var names = NivaraColumn<string>.CreateForReferenceType(new[] 
-        { 
-            "Alice", "Bob", "Charlie", "Diana", "Eve", "Frank" 
+        var names = NivaraColumn<string>.CreateForReferenceType(new[]
+        {
+            "Alice", "Bob", "Charlie", "Diana", "Eve", "Frank"
         });
         var ages = NivaraColumn<int>.Create(new[] { 25, 35, 45, 30, 28, 50 });
         var salaries = NivaraColumn<double>.Create(new[] { 50000.0, 60000.0, 80000.0, 55000.0, 52000.0, 90000.0 });
@@ -111,7 +111,7 @@ public class SortingIntegrationTests
 
         // Act: Filter employees over 30, then sort by salary descending
         var mask = NivaraColumn<bool>.Create(new[] { false, true, true, false, false, true }); // Bob, Charlie, Frank
-        
+
         var result = frame.FilterByMask(mask)
             .AsQueryFrame()
             .Sort("Salary", SortDirection.Descending)
@@ -200,17 +200,17 @@ public class SortingIntegrationTests
 
         // Act & Assert - Should complete without timeout
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-        
+
         var sorted = largeFrame.AsQueryFrame()
             .Sort("Value", SortDirection.Descending)
             .Collect();
-        
+
         stopwatch.Stop();
 
         // Verify sorting worked correctly
         var sortedValues = sorted.GetColumn<double>("Value");
         Assert.That(sorted.RowCount, Is.EqualTo(rowCount));
-        
+
         // Check that values are in descending order
         for (int i = 0; i < sortedValues.Length - 1; i++)
         {
@@ -219,7 +219,7 @@ public class SortingIntegrationTests
         }
 
         // Performance assertion - should complete in reasonable time (adjust as needed)
-        Assert.That(stopwatch.ElapsedMilliseconds, Is.LessThan(60000), 
+        Assert.That(stopwatch.ElapsedMilliseconds, Is.LessThan(60000),
             $"Sorting {rowCount} rows took {stopwatch.ElapsedMilliseconds}ms, which may be too slow");
 
         Console.WriteLine($"Sorted {rowCount} rows in {stopwatch.ElapsedMilliseconds}ms");

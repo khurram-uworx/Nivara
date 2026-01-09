@@ -133,7 +133,7 @@ internal sealed class ProjectionOperation : IQueryOperation
     /// <returns>A string representation</returns>
     public override string ToString()
     {
-        var mappings = columnMappings.Select(kvp => 
+        var mappings = columnMappings.Select(kvp =>
             kvp.Value == null ? kvp.Key : $"{kvp.Key} -> {kvp.Value}");
         return $"Project({string.Join(", ", mappings)})";
     }

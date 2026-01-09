@@ -1,4 +1,3 @@
-using Nivara.Exceptions;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -165,10 +164,10 @@ public class NivaraFrameSortingTests
         var doubles = NivaraColumn<double>.Create(new[] { 1.1, 2.2, 3.3 });
         var strings = NivaraColumn<string>.Create(new[] { "one", "two", "three" });
         var booleans = NivaraColumn<bool>.Create(new[] { true, false, true });
-        var dates = NivaraColumn<DateTime>.Create(new[] { 
-            new DateTime(2023, 1, 1), 
-            new DateTime(2023, 2, 1), 
-            new DateTime(2023, 3, 1) 
+        var dates = NivaraColumn<DateTime>.Create(new[] {
+            new DateTime(2023, 1, 1),
+            new DateTime(2023, 2, 1),
+            new DateTime(2023, 3, 1)
         });
 
         var frame = NivaraFrame.Create(
@@ -189,10 +188,10 @@ public class NivaraFrameSortingTests
         Assert.That(reordered.GetColumn<double>("Doubles").ToArray(), Is.EqualTo(new[] { 3.3, 1.1, 2.2 }));
         Assert.That(reordered.GetColumn<string>("Strings").ToArray(), Is.EqualTo(new[] { "three", "one", "two" }));
         Assert.That(reordered.GetColumn<bool>("Booleans").ToArray(), Is.EqualTo(new[] { true, true, false }));
-        Assert.That(reordered.GetColumn<DateTime>("Dates").ToArray(), Is.EqualTo(new[] { 
-            new DateTime(2023, 3, 1), 
-            new DateTime(2023, 1, 1), 
-            new DateTime(2023, 2, 1) 
+        Assert.That(reordered.GetColumn<DateTime>("Dates").ToArray(), Is.EqualTo(new[] {
+            new DateTime(2023, 3, 1),
+            new DateTime(2023, 1, 1),
+            new DateTime(2023, 2, 1)
         }));
     }
 

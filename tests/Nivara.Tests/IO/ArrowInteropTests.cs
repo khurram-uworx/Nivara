@@ -551,7 +551,7 @@ public class ArrowInteropTests
 
         // Act & Assert - This should work since int is supported
         Assert.DoesNotThrow(() => ArrowInterop.FromArrowTable(table, options));
-        
+
         var result = ArrowInterop.FromArrowTable(table, options);
         Assert.That(result.ColumnCount, Is.EqualTo(1));
         Assert.That(result.RowCount, Is.EqualTo(1));
@@ -621,7 +621,7 @@ public class ArrowInteropTests
         // Test unsupported type error message
         var guidSeries = NivaraSeries<Guid>.Create(new[] { Guid.NewGuid() });
         var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(guidSeries));
-        
+
         Assert.That(ex!.Message, Does.Contain("Guid"));
         Assert.That(ex.Message, Does.Contain("not supported"));
         Assert.That(ex.SuggestedAlternatives, Contains.Item("string"));
@@ -654,7 +654,7 @@ public class ArrowInteropTests
     public void ArrowRoundTripDataPreservation_AllSupportedTypes_PreservesDataExactly()
     {
         // Feature: arrow-parquet-io, Property 1: Arrow Round-Trip Data Preservation
-        
+
         var testCases = new[]
         {
             // Boolean data with nulls
@@ -744,11 +744,11 @@ public class ArrowInteropTests
                         {
                             Assert.That(roundTripValue, Is.TypeOf<DateTime>());
                             var roundTripDateTime = (DateTime)roundTripValue!;
-                            
+
                             // Arrow has limited DateTime range, so values outside this range get clamped
                             var minSafeDateTime = new DateTime(1677, 9, 21, 0, 0, 0, DateTimeKind.Utc);
                             var maxSafeDateTime = new DateTime(2262, 4, 11, 23, 47, 16, DateTimeKind.Utc);
-                            
+
                             DateTime expectedDateTime;
                             if (dateTimeVal < minSafeDateTime)
                             {
@@ -764,7 +764,7 @@ public class ArrowInteropTests
                                 // So we need to truncate the original DateTime to microsecond precision for comparison
                                 expectedDateTime = new DateTime(dateTimeVal.Ticks / 10 * 10, dateTimeVal.Kind);
                             }
-                            
+
                             Assert.That(roundTripDateTime, Is.EqualTo(expectedDateTime),
                                 $"Column '{columnName}' DateTime value at index {i} should be preserved within Arrow's supported range and microsecond precision");
                         }
@@ -783,7 +783,7 @@ public class ArrowInteropTests
     public void ArrowRoundTripDataPreservation_MultiColumnFrames_PreservesAllData()
     {
         // Feature: arrow-parquet-io, Property 1: Arrow Round-Trip Data Preservation
-        
+
         // Test multi-column frames with different combinations
         var testFrames = new[]
         {
@@ -859,7 +859,7 @@ public class ArrowInteropTests
     public void ArrowRoundTripDataPreservation_WithDifferentOptions_PreservesDataConsistently()
     {
         // Feature: arrow-parquet-io, Property 1: Arrow Round-Trip Data Preservation
-        
+
         // Test that different conversion options don't affect data preservation
         var testFrame = CreateMultiColumnFrame(new Dictionary<string, object>
         {
@@ -902,16 +902,16 @@ public class ArrowInteropTests
                     {
                         var originalValue = originalColumn.GetValue(i);
                         var roundTripValue = roundTripColumn.GetValue(i);
-                        
+
                         if (originalValue is DateTime dateTimeVal)
                         {
                             Assert.That(roundTripValue, Is.TypeOf<DateTime>());
                             var roundTripDateTime = (DateTime)roundTripValue!;
-                            
+
                             // Arrow has limited DateTime range, so values outside this range get clamped
                             var minSafeDateTime = new DateTime(1677, 9, 21, 0, 0, 0, DateTimeKind.Utc);
                             var maxSafeDateTime = new DateTime(2262, 4, 11, 23, 47, 16, DateTimeKind.Utc);
-                            
+
                             DateTime expectedDateTime;
                             if (dateTimeVal < minSafeDateTime)
                             {
@@ -927,7 +927,7 @@ public class ArrowInteropTests
                                 // So we need to truncate the original DateTime to microsecond precision for comparison
                                 expectedDateTime = new DateTime(dateTimeVal.Ticks / 10 * 10, dateTimeVal.Kind);
                             }
-                            
+
                             Assert.That(roundTripDateTime, Is.EqualTo(expectedDateTime),
                                 $"Value preservation should be consistent across options for column '{columnName}' at index {i} (DateTime clamped to Arrow range and truncated to microsecond precision)");
                         }
@@ -946,14 +946,14 @@ public class ArrowInteropTests
     public void ArrowRoundTripDataPreservation_SeriesLevel_PreservesDataExactly()
     {
         // Feature: arrow-parquet-io, Property 1: Arrow Round-Trip Data Preservation
-        
+
         // Test series-level round-trip preservation for specific types
         // Test int series
         var intData = new[] { 1, 2, 3, 4, 5 };
         var intSeries = NivaraSeries<int>.Create(intData);
         var intArrowArray = ArrowInterop.ToArrowArray(intSeries);
         var intRoundTripSeries = ArrowInterop.FromArrowArray<int>(intArrowArray);
-        
+
         Assert.That(intRoundTripSeries.Length, Is.EqualTo(intSeries.Length), "Int series length should be preserved");
         for (int i = 0; i < intSeries.Length; i++)
         {
@@ -965,7 +965,7 @@ public class ArrowInteropTests
         var stringSeries = NivaraSeries<string>.Create(stringData);
         var stringArrowArray = ArrowInterop.ToArrowArray(stringSeries);
         var stringRoundTripSeries = ArrowInterop.FromArrowArray<string>(stringArrowArray);
-        
+
         Assert.That(stringRoundTripSeries.Length, Is.EqualTo(stringSeries.Length), "String series length should be preserved");
         for (int i = 0; i < stringSeries.Length; i++)
         {
@@ -977,7 +977,7 @@ public class ArrowInteropTests
         var boolSeries = NivaraSeries<bool>.Create(boolData);
         var boolArrowArray = ArrowInterop.ToArrowArray(boolSeries);
         var boolRoundTripSeries = ArrowInterop.FromArrowArray<bool>(boolArrowArray);
-        
+
         Assert.That(boolRoundTripSeries.Length, Is.EqualTo(boolSeries.Length), "Bool series length should be preserved");
         for (int i = 0; i < boolSeries.Length; i++)
         {
@@ -989,13 +989,13 @@ public class ArrowInteropTests
         var doubleSeries = NivaraSeries<double>.Create(doubleData);
         var doubleArrowArray = ArrowInterop.ToArrowArray(doubleSeries);
         var doubleRoundTripSeries = ArrowInterop.FromArrowArray<double>(doubleArrowArray);
-        
+
         Assert.That(doubleRoundTripSeries.Length, Is.EqualTo(doubleSeries.Length), "Double series length should be preserved");
         for (int i = 0; i < doubleSeries.Length; i++)
         {
             var originalValue = doubleSeries[i];
             var roundTripValue = doubleRoundTripSeries[i];
-            
+
             if (double.IsNaN(originalValue))
             {
                 Assert.That(double.IsNaN(roundTripValue), Is.True, $"Double series NaN value at index {i} should be preserved");
@@ -1016,28 +1016,28 @@ public class ArrowInteropTests
     public void SupportedTypeCoverage_AllDeclaredTypes_ConvertSuccessfully()
     {
         // Feature: arrow-parquet-io, Property 6: Supported Type Coverage
-        
+
         // Get all supported types from TypeMapper
         var supportedTypes = TypeMapper.GetSupportedTypes().ToList();
-        
+
         // Verify that all required types from Requirement 1.5 are supported
         var requiredTypes = new[] { typeof(bool), typeof(int), typeof(float), typeof(double), typeof(DateTime), typeof(string) };
         foreach (var requiredType in requiredTypes)
         {
-            Assert.That(supportedTypes, Contains.Item(requiredType), 
+            Assert.That(supportedTypes, Contains.Item(requiredType),
                 $"Required type {requiredType.Name} from Requirement 1.5 should be supported");
         }
-        
+
         // Test each supported type with sample data
         foreach (var type in supportedTypes)
         {
             // Create test data for each type
             var testData = CreateSampleDataForType(type);
             var columnName = $"{type.Name}Column";
-            
+
             // Create a frame with the test data
             var frame = CreateFrameForType(columnName, type, testData);
-            
+
             // Test ToArrowTable conversion
             Table arrowTable;
             try
@@ -1052,7 +1052,7 @@ public class ArrowInteropTests
                 Assert.Fail($"ToArrowTable failed for supported type {type.Name}: {ex.Message}");
                 return; // This line won't be reached, but helps with flow analysis
             }
-            
+
             // Test FromArrowTable conversion
             NivaraFrame roundTripFrame;
             try
@@ -1067,15 +1067,15 @@ public class ArrowInteropTests
                 Assert.Fail($"FromArrowTable failed for supported type {type.Name}: {ex.Message}");
                 return; // This line won't be reached, but helps with flow analysis
             }
-            
+
             // Verify the column type is preserved
             var roundTripColumn = roundTripFrame.GetColumn(columnName);
-            Assert.That(roundTripColumn.ElementType, Is.EqualTo(type), 
+            Assert.That(roundTripColumn.ElementType, Is.EqualTo(type),
                 $"Round-trip should preserve element type for {type.Name}");
-            
+
             // Test series-level conversion for the type
             var series = CreateSeriesForType(type, testData);
-            
+
             // Test ToArrowArray conversion
             IArrowArray arrowArray;
             try
@@ -1089,17 +1089,17 @@ public class ArrowInteropTests
                 Assert.Fail($"ToArrowArray failed for supported type {type.Name}: {ex.Message}");
                 return; // This line won't be reached, but helps with flow analysis
             }
-            
+
             // Test FromArrowArray conversion
             try
             {
                 var roundTripSeries = CallFromArrowArrayGeneric(arrowArray, type);
                 Assert.That(roundTripSeries, Is.Not.Null, $"FromArrowArray should succeed for supported type {type.Name}");
-                
+
                 // Get the length using reflection since we have an object
                 var lengthProperty = roundTripSeries.GetType().GetProperty("Length");
                 var seriesLength = (int)lengthProperty!.GetValue(roundTripSeries)!;
-                Assert.That(seriesLength, Is.EqualTo(arrowArray.Length), 
+                Assert.That(seriesLength, Is.EqualTo(arrowArray.Length),
                     $"Round-trip series should preserve length for type {type.Name}");
             }
             catch (Exception ex)
@@ -1108,14 +1108,14 @@ public class ArrowInteropTests
                 return; // This line won't be reached, but helps with flow analysis
             }
         }
-        
+
         // Verify that TypeMapper.IsArrowSupported returns true for all supported types
         foreach (var type in supportedTypes)
         {
-            Assert.That(TypeMapper.IsArrowSupported(type), Is.True, 
+            Assert.That(TypeMapper.IsArrowSupported(type), Is.True,
                 $"TypeMapper.IsArrowSupported should return true for declared supported type {type.Name}");
         }
-        
+
         // Verify that TypeMapper.MapClrToArrow works for all supported types
         foreach (var type in supportedTypes)
         {

@@ -93,7 +93,7 @@ public class ColumnTransformationTests
         var column = NivaraColumn<int>.Create(data);
 
         // Act & Assert
-        var ex = Assert.Throws<InvalidOperationException>(() => 
+        var ex = Assert.Throws<InvalidOperationException>(() =>
             column.Transform(x => 10 / x));
 
         Assert.That(ex.Message, Does.Contain("Transformation function threw an exception at index 1"));

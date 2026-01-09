@@ -1,7 +1,6 @@
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Text.Json;
 using Nivara.IO;
 using NUnit.Framework;
+using System.Text.Json;
 
 namespace Nivara.Tests.IO;
 
@@ -431,7 +430,7 @@ public class IOExceptionTests
             };
 
             var json = JsonSerializer.Serialize(essentialInfo);
-            
+
             // Verify that serialization succeeds and contains expected information
             Assert.That(json, Is.Not.Null.And.Not.Empty);
             Assert.That(json, Does.Contain(exception.GetType().Name));
