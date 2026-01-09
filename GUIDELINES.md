@@ -485,11 +485,86 @@ High confidence in correctness across all supported scenarios, with clear test o
 
 ---
 
-## Closing Note
+## DataFrame Column Transformations
 
-This document is intentionally **opinionated and distilled**. It should evolve slowly and only when a *new, broadly applicable lesson* is learned.
+### Type-Safe Column Transformations
 
-If a lesson only applies to a specific implementation, it does **not** belong here.
+**Problem**  
+DataFrame operations need to transform column data while preserving type safety and null handling.
+
+**Constraint**  
+- Must work across all column types (value types, reference types, nullable types)
+- Must preserve null values correctly during transformations
+- Must handle transformation exceptions gracefully
+- Must maintain performance for large datasets
+
+**Pattern That Worked**  
+Implement transformations at the column level with proper null propagation:
+- Add `Transform<TResult>` method to `NivaraColumn<T>` that applies function element-wise
+- Check for null values before applying transformation function
+- Propagate nulls through transformations (null input → null output)
+- Handle exceptions during transformation with clear error context
+- Use appropriate column creation methods based on result type (value vs reference types)
+
+**Negative Rule**  
+Do not apply transformations without checking for null values first - this leads to unexpected exceptions.
+
+**Outcome**  
+Column transformations work reliably across all data types with predictable null handling and clear error reporting.
+
+---
+
+### DataFrame Projection Operations
+
+**Problem**  
+DataFrame operations need to select and rename columns while maintaining schema consistency.
+
+**Constraint**  
+- Must validate that source columns exist before projection
+- Must handle column renaming without name conflicts
+- Must preserve column data and types during projection
+- Must integrate with existing query operation infrastructure
+
+**Pattern That Worked**  
+Implement projection as a query operation that works on column dictionaries:
+- Create `ProjectionOperation` that implements `IQueryOperation` interface
+- Validate column existence during schema transformation phase
+- Use column mappings (original name → new name) to handle renaming
+- Preserve original column objects during projection (no data copying)
+- Validate result column names are unique to prevent conflicts
+
+**Negative Rule**  
+Do not inherit from `DataFrameOperation` for simple operations - implement `IQueryOperation` directly for better flexibility.
+
+**Outcome**  
+Projection operations integrate cleanly with the query system while providing efficient column selection and renaming.
+
+---
+
+### Extension Method Design for DataFrames
+
+**Problem**  
+DataFrame operations need fluent API support while maintaining type safety and performance.
+
+**Constraint**  
+- Must provide intuitive method names and overloads
+- Must handle edge cases (empty selections, name conflicts) gracefully
+- Must integrate with existing DataFrame methods
+- Must support both simple and complex transformation scenarios
+
+**Pattern That Worked**  
+Create extension methods that delegate to core DataFrame functionality:
+- Provide multiple overloads for different use cases (single column, multiple columns, etc.)
+- Use descriptive parameter names and comprehensive validation
+- Delegate to existing DataFrame methods when possible (avoid duplication)
+- Handle complex scenarios (multi-column computations) with proper null checking
+- Use reflection judiciously for generic scenarios while providing typed overloads for common cases
+
+**Negative Rule**  
+Do not duplicate DataFrame functionality in extension methods - delegate to core methods to maintain consistency.
+
+**Outcome**  
+Extension methods provide a rich, fluent API while maintaining the reliability and performance of core DataFrame operations.
 
 
 ---
@@ -629,3 +704,11 @@ Never rely on default null comparison behavior - always handle nulls explicitly 
 
 **Outcome**  
 Null handling in sorting is predictable and user-controllable, working consistently across all column types.
+
+---
+
+## Closing Note
+
+This document is intentionally **opinionated and distilled**. It should evolve slowly and only when a *new, broadly applicable lesson* is learned.
+
+If a lesson only applies to a specific implementation, it does **not** belong here.

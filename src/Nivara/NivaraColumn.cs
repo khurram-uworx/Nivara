@@ -2280,6 +2280,206 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         return new NivaraColumn<T>(newStorage);
     }
 
+    // Transformation Operations
+
+    /// <summary>
+    /// Applies a transformation function to each element in the column.
+    /// Creates a new column with the transformed values while preserving null semantics.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result column</typeparam>
+    /// <param name="transform">The transformation function to apply to each element</param>
+    /// <returns>A new column with transformed values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when transform is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when transformation throws an exception</exception>
+    public NivaraColumn<TResult> Transform<TResult>(Func<T, TResult> transform)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (transform == null)
+            throw new ArgumentNullException(nameof(transform));
+
+        var result = new TResult[Length];
+        var resultNullMask = new bool[Length];
+        bool hasResultNulls = false;
+
+        // Apply transformation with proper null handling
+        for (int i = 0; i < Length; i++)
+        {
+            if (IsNull(i))
+            {
+                // Null values remain null in the result
+                result[i] = default(TResult)!;
+                resultNullMask[i] = true;
+                hasResultNulls = true;
+            }
+            else
+            {
+                try
+                {
+                    var transformedValue = transform(storage[i]);
+                    
+                    // Check if the transformed value is null for reference types
+                    if (!typeof(TResult).IsValueType && transformedValue == null)
+                    {
+                        result[i] = default(TResult)!;
+                        resultNullMask[i] = true;
+                        hasResultNulls = true;
+                    }
+                    else
+                    {
+                        result[i] = transformedValue;
+                        resultNullMask[i] = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Transformation function threw an exception at index {i}. " +
+                        $"Input value: {storage[i]}, Exception: {ex.Message}", ex);
+                }
+            }
+        }
+
+        // Create result column with appropriate null mask
+        ReadOnlyMemory<bool>? finalNullMask = hasResultNulls ? new ReadOnlyMemory<bool>(resultNullMask) : null;
+
+        if (typeof(TResult).IsValueType)
+        {
+            // For value types, use CreateFromNullable if there are nulls
+            if (hasResultNulls)
+            {
+                var nullableType = typeof(Nullable<>).MakeGenericType(typeof(TResult));
+                var nullableArray = System.Array.CreateInstance(nullableType, Length);
+
+                for (int i = 0; i < Length; i++)
+                {
+                    if (resultNullMask[i])
+                    {
+                        nullableArray.SetValue(null, i);
+                    }
+                    else
+                    {
+                        var nullableInstance = Activator.CreateInstance(nullableType, result[i]);
+                        nullableArray.SetValue(nullableInstance, i);
+                    }
+                }
+
+                return (NivaraColumn<TResult>)typeof(NivaraColumn<>)
+                    .MakeGenericType(typeof(TResult))
+                    .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
+                    .Invoke(null, new object[] { nullableArray })!;
+            }
+            else
+            {
+                // No nulls, use regular Create
+                return NivaraColumn<TResult>.Create(result);
+            }
+        }
+        else
+        {
+            // For reference types, use CreateForReferenceType
+            return NivaraColumn<TResult>.CreateForReferenceType(result);
+        }
+    }
+
+    /// <summary>
+    /// Applies a transformation function to each non-null element in the column.
+    /// Null values are preserved as null in the result without applying the transformation.
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result column</typeparam>
+    /// <param name="transform">The transformation function to apply to non-null elements</param>
+    /// <returns>A new column with transformed values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when transform is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when transformation throws an exception</exception>
+    public NivaraColumn<TResult> TransformNonNull<TResult>(Func<T, TResult> transform)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (transform == null)
+            throw new ArgumentNullException(nameof(transform));
+
+        var result = new TResult[Length];
+        var resultNullMask = new bool[Length];
+        bool hasResultNulls = false;
+
+        // Apply transformation only to non-null values
+        for (int i = 0; i < Length; i++)
+        {
+            if (IsNull(i))
+            {
+                // Preserve null values without transformation
+                result[i] = default(TResult)!;
+                resultNullMask[i] = true;
+                hasResultNulls = true;
+            }
+            else
+            {
+                try
+                {
+                    var transformedValue = transform(storage[i]);
+                    
+                    // Check if the transformed value is null for reference types
+                    if (!typeof(TResult).IsValueType && transformedValue == null)
+                    {
+                        result[i] = default(TResult)!;
+                        resultNullMask[i] = true;
+                        hasResultNulls = true;
+                    }
+                    else
+                    {
+                        result[i] = transformedValue;
+                        resultNullMask[i] = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    throw new InvalidOperationException(
+                        $"Transformation function threw an exception at index {i}. " +
+                        $"Input value: {storage[i]}, Exception: {ex.Message}", ex);
+                }
+            }
+        }
+
+        // Create result column with appropriate null mask
+        if (typeof(TResult).IsValueType)
+        {
+            // For value types, use CreateFromNullable if there are nulls
+            if (hasResultNulls)
+            {
+                var nullableType = typeof(Nullable<>).MakeGenericType(typeof(TResult));
+                var nullableArray = System.Array.CreateInstance(nullableType, Length);
+
+                for (int i = 0; i < Length; i++)
+                {
+                    if (resultNullMask[i])
+                    {
+                        nullableArray.SetValue(null, i);
+                    }
+                    else
+                    {
+                        var nullableInstance = Activator.CreateInstance(nullableType, result[i]);
+                        nullableArray.SetValue(nullableInstance, i);
+                    }
+                }
+
+                return (NivaraColumn<TResult>)typeof(NivaraColumn<>)
+                    .MakeGenericType(typeof(TResult))
+                    .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
+                    .Invoke(null, new object[] { nullableArray })!;
+            }
+            else
+            {
+                // No nulls, use regular Create
+                return NivaraColumn<TResult>.Create(result);
+            }
+        }
+        else
+        {
+            // For reference types, use CreateForReferenceType
+            return NivaraColumn<TResult>.CreateForReferenceType(result);
+        }
+    }
+
     /// <summary>
     /// Determines which kernel type should be used for operations on this column
     /// </summary>

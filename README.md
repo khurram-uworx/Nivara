@@ -398,6 +398,157 @@ Row operations handle edge cases gracefully:
 - **Empty results**: Return empty DataFrames with preserved schema
 - **Out-of-bounds parameters**: Clamp to valid ranges or return empty results
 - **Zero-length operations**: Return appropriate empty or full results
+
+---
+
+## Column Transformations and Projections
+
+Nivara provides powerful column transformation and projection capabilities that maintain type safety while enabling flexible data manipulation.
+
+### Column Transformations
+
+Transform individual columns with element-wise operations while preserving null semantics:
+
+```csharp
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35 })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000 }))
+);
+
+// Transform a single column
+var frameWithAgeInMonths = frame.WithTransformedColumn<int, int>(
+    "Age", 
+    age => age * 12, 
+    "AgeInMonths"
+);
+// Result: AgeInMonths column with values [300, 360, 420]
+
+// Transform and replace existing column
+var frameWithUpdatedSalary = frame.WithTransformedColumn<double, double>(
+    "Salary",
+    salary => salary * 1.1 // 10% raise
+);
+// Result: Salary column updated with 10% increase
+```
+
+Multi-column transformations for computed columns:
+
+```csharp
+// Create computed column from two source columns
+var frameWithBonus = frame.WithComputedColumn<int, double, double>(
+    "Age",
+    "Salary", 
+    (age, salary) => age > 30 ? salary * 0.1 : salary * 0.05,
+    "Bonus"
+);
+// Result: Bonus column based on age and salary
+```
+
+### Column Projections and Selection
+
+Select specific columns from a DataFrame:
+
+```csharp
+// Select specific columns by name
+var nameAndAge = frame.Select("Name", "Age");
+// Result: DataFrame with only Name and Age columns
+
+// Select columns using IEnumerable
+var selectedColumns = frame.Select(new[] { "Name", "Salary" });
+// Result: DataFrame with Name and Salary columns
+```
+
+Column selection with renaming:
+
+```csharp
+// Select and rename columns
+var renamedFrame = frame.SelectAndRename(new Dictionary<string, string?>
+{
+    { "Name", "EmployeeName" },
+    { "Age", "YearsOld" },
+    { "Salary", null } // Keep original name
+});
+// Result: Columns renamed to EmployeeName, YearsOld, Salary
+```
+
+### Column Renaming
+
+Rename individual or multiple columns:
+
+```csharp
+// Rename a single column
+var renamedSingle = frame.RenameColumn("Age", "YearsOld");
+
+// Rename multiple columns
+var renamedMultiple = frame.RenameColumns(new Dictionary<string, string>
+{
+    { "Name", "EmployeeName" },
+    { "Age", "YearsOld" }
+});
+```
+
+### Column Exclusion
+
+Remove unwanted columns from a DataFrame:
+
+```csharp
+// Exclude specific columns
+var withoutAge = frame.Exclude("Age");
+// Result: DataFrame with Name and Salary columns only
+
+// Exclude multiple columns
+var nameOnly = frame.Exclude("Age", "Salary");
+// Result: DataFrame with only Name column
+```
+
+### Null Handling in Transformations
+
+Column transformations properly handle null values with predictable behavior:
+
+```csharp
+var nullableData = new int?[] { 1, null, 3, null, 5 };
+var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+var frame = NivaraFrame.Create(("Numbers", column));
+
+// Transform with null propagation
+var doubled = frame.WithTransformedColumn<int, int>(
+    "Numbers",
+    x => x * 2,
+    "Doubled"
+);
+// Result: Doubled column = [2, null, 6, null, 10]
+// Nulls are preserved without applying the transformation function
+```
+
+Multi-column computations handle nulls by propagating them:
+
+```csharp
+var frame = NivaraFrame.Create(
+    ("A", NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 })),
+    ("B", NivaraColumn<int>.CreateFromNullable(new int?[] { 2, 4, null }))
+);
+
+var sum = frame.WithComputedColumn<int, int, int>(
+    "A", "B",
+    (a, b) => a + b,
+    "Sum"
+);
+// Result: Sum column = [3, null, null]
+// Any null input produces null output
+```
+
+### Transformation Features
+
+Column transformation capabilities include:
+
+- **Type-safe transformations** with compile-time type checking
+- **Null propagation** - null inputs always produce null outputs
+- **Exception handling** with clear error context including row indices
+- **Performance optimization** for vectorizable operations
+- **Flexible API** supporting both simple and complex transformation scenarios
+- **Schema validation** ensuring result columns have appropriate types
+- **Memory efficiency** through lazy evaluation and minimal copying
 - **Schema preservation**: All operations maintain column names and types
 
 Row operations are designed to be composable, efficient, and predictable across all data types and scenarios.
@@ -533,6 +684,9 @@ Nivara currently supports:
 - **Query Engine**: Schema-aware lazy query construction with diagnostics and plan inspection
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
 - **Row Operations**: Filtering with boolean masks, slicing with Take/Skip operations, and arbitrary row range selection
+- **Sorting Operations**: Multi-column sorting with configurable direction, null ordering, and stable sort semantics
+- **Column Transformations**: Type-safe element-wise transformations with null propagation and exception handling
+- **Column Projections**: Flexible column selection, renaming, exclusion, and computed column generation
 - **Aggregate Functions**: Sum, Average, Min, Max with vectorized operations and null-aware computation
 - **Grouping Operations**: Hash-based GroupBy with composite key support and efficient group management
 - **Aggregation Framework**: Extensible aggregation system with built-in functions (Count, Sum, Min, Max, Mean) and vectorized execution
@@ -548,8 +702,6 @@ Nivara currently supports:
 The following features are still planned or in-progress:
 
 - Join operations (Inner, Left, Right, Full Outer)
-- Sorting operations (single and multi-column)
-- Column transformations and projections
 - Query optimization engine
 - Streaming and parallel execution strategies
 

@@ -83,28 +83,28 @@ public class NivaraFrameExtensionsTests
     public void LoadParquet_WithNullPath_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => NivaraFrameExtensions.LoadParquet(null!));
+        Assert.Throws<ArgumentNullException>(() => NivaraFrameIOExtensions.LoadParquet(null!));
     }
 
     [Test]
     public void LoadParquetAsync_WithNullPath_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameExtensions.LoadParquetAsync(null!));
+        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameIOExtensions.LoadParquetAsync(null!));
     }
 
     [Test]
     public void LoadParquetFromStream_WithNullStream_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => NivaraFrameExtensions.LoadParquetFromStream(null!));
+        Assert.Throws<ArgumentNullException>(() => NivaraFrameIOExtensions.LoadParquetFromStream(null!));
     }
 
     [Test]
     public void LoadParquetFromStreamAsync_WithNullStream_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameExtensions.LoadParquetFromStreamAsync(null!));
+        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameIOExtensions.LoadParquetFromStreamAsync(null!));
     }
 
     [Test]
@@ -168,8 +168,8 @@ public class NivaraFrameExtensionsTests
             Assert.DoesNotThrow(() => frame.ToParquet(tempFile));
             Assert.DoesNotThrowAsync(async () => await frame.ToParquetAsync(tempFile));
 
-            Assert.DoesNotThrow(() => NivaraFrameExtensions.LoadParquet(tempFile));
-            Assert.DoesNotThrowAsync(async () => await NivaraFrameExtensions.LoadParquetAsync(tempFile));
+            Assert.DoesNotThrow(() => NivaraFrameIOExtensions.LoadParquet(tempFile));
+            Assert.DoesNotThrowAsync(async () => await NivaraFrameIOExtensions.LoadParquetAsync(tempFile));
         }
         finally
         {

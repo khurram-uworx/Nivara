@@ -9,7 +9,7 @@ namespace Nivara.IO;
 /// These extension methods provide idiomatic C# integration with Arrow and Parquet I/O operations,
 /// following .NET naming conventions and supporting both synchronous and asynchronous variants.
 /// </remarks>
-public static class NivaraFrameExtensions
+public static class NivaraFrameIOExtensions
 {
     #region Parquet Extensions
 
