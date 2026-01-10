@@ -850,6 +850,171 @@ Join operations provide:
 
 ---
 
+## DataFrame Concatenation
+
+Nivara provides flexible concatenation operations for combining multiple DataFrames either vertically (appending rows) or horizontally (appending columns).
+
+### Vertical Concatenation (Row Append)
+
+Combine DataFrames by appending rows, with configurable handling of schema mismatches:
+
+```csharp
+var frame1 = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
+);
+
+var frame2 = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie", "Diana" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 35, 28 }))
+);
+
+// Simple vertical concatenation
+var combined = frame1.ConcatenateVertical(frame2);
+// Result: 4 rows with Alice, Bob, Charlie, Diana
+
+// Alternative syntax
+var appended = frame1.Append(frame2);
+// Same result as ConcatenateVertical
+```
+
+### Handling Schema Mismatches
+
+Control how schema differences are handled during vertical concatenation:
+
+```csharp
+var employees = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
+);
+
+var contractors = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Charlie" })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000.0 }))
+    // Missing Age column, has Salary column instead
+);
+
+// Fill missing columns with nulls (default behavior)
+var combined = employees.ConcatenateVertical(contractors, ConcatenationMismatchHandling.FillWithNulls);
+// Result: 3 rows, Charlie has null Age, Alice/Bob have null Salary
+
+// Error on schema mismatch
+try 
+{
+    var strict = employees.ConcatenateVertical(contractors, ConcatenationMismatchHandling.Error);
+}
+catch (SchemaValidationException ex)
+{
+    // Exception thrown due to missing columns
+}
+```
+
+### Horizontal Concatenation (Column Append)
+
+Combine DataFrames by appending columns, requiring matching row counts:
+
+```csharp
+var names = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30 }))
+);
+
+var details = NivaraFrame.Create(
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000.0, 60000.0 })),
+    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "Engineering", "Sales" }))
+);
+
+// Horizontal concatenation
+var complete = names.ConcatenateHorizontal(details);
+// Result: 2 rows with Name, Age, Salary, Department columns
+
+// Alternative syntax
+var combined = names.Combine(details);
+// Same result as ConcatenateHorizontal
+```
+
+### Multiple DataFrame Concatenation
+
+Concatenate multiple DataFrames in a single operation:
+
+```csharp
+var frames = new[] { frame1, frame2, frame3 };
+
+// Vertical concatenation of multiple frames
+var allRows = NivaraFrameExtensions.ConcatenateVertical(frames);
+
+// Horizontal concatenation of multiple frames
+var allColumns = NivaraFrameExtensions.ConcatenateHorizontal(frames);
+```
+
+### Null Value Preservation
+
+Concatenation operations properly preserve null values and null masks:
+
+```csharp
+var frameWithNulls = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.Create(new string?[] { "Alice", null }!)),
+    ("Age", NivaraColumn<int>.CreateFromNullable(new int?[] { 25, null }))
+);
+
+var frameWithoutNulls = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Bob", "Charlie" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 30, 35 }))
+);
+
+var result = frameWithNulls.ConcatenateVertical(frameWithoutNulls);
+// Result: Null values are preserved in their original positions
+// Row 1: Alice (25), Row 2: null (null), Row 3: Bob (30), Row 4: Charlie (35)
+```
+
+### Error Handling
+
+Concatenation operations provide clear error messages for common issues:
+
+```csharp
+// Row count mismatch in horizontal concatenation
+var twoRows = NivaraFrame.Create(("A", NivaraColumn<int>.Create(new[] { 1, 2 })));
+var oneRow = NivaraFrame.Create(("B", NivaraColumn<int>.Create(new[] { 3 })));
+
+try 
+{
+    var invalid = twoRows.ConcatenateHorizontal(oneRow);
+}
+catch (QueryExecutionException ex)
+{
+    // Clear error message about row count mismatch
+}
+
+// Column name conflicts in horizontal concatenation
+var left = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice" })));
+var right = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Bob" })));
+
+try 
+{
+    var conflict = left.ConcatenateHorizontal(right);
+}
+catch (QueryExecutionException ex)
+{
+    // Clear error message about column name conflict
+}
+```
+
+### Concatenation Features
+
+DataFrame concatenation provides:
+
+- **Flexible direction control**: Vertical (row append) and horizontal (column append)
+- **Schema mismatch handling**: Configurable strategies for missing columns
+- **Type safety**: Validates column type compatibility during concatenation
+- **Null preservation**: Maintains null values and null masks correctly
+- **Empty DataFrame handling**: Gracefully handles empty inputs
+- **Multiple frame support**: Concatenate many DataFrames in single operations
+- **Clear error messages**: Descriptive errors for invalid operations
+- **Performance optimization**: Efficient column copying and memory management
+- **Convenient aliases**: `Append()` and `Combine()` methods for common scenarios
+
+---
+
 ## Roadmap (Planned)
 
 The following features are still planned or in-progress:

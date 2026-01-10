@@ -469,6 +469,89 @@ High confidence in correctness across all supported scenarios, with clear test o
 
 ---
 
+---
+
+## DataFrame Concatenation Operations
+
+### Schema Compatibility Handling in Concatenation
+
+**Problem**  
+DataFrame concatenation operations need to handle schema mismatches between sources while maintaining data integrity.
+
+**Constraint**  
+- Vertical concatenation may encounter DataFrames with different column sets
+- Horizontal concatenation requires identical row counts and unique column names
+- Users need control over how mismatches are handled (error vs fill with nulls)
+
+**Pattern That Worked**  
+Implement configurable mismatch handling strategies:
+- Provide explicit enum options (Error, FillWithNulls) for vertical concatenation
+- Always use Error strategy for horizontal concatenation (column conflicts are unambiguous)
+- Validate schemas during TransformSchema phase to fail fast
+- Create null columns of appropriate types when filling missing columns
+
+**Negative Rule**  
+Do not silently ignore schema mismatches or apply implicit type conversions during concatenation.
+
+**Outcome**  
+Concatenation operations are predictable and user-controllable, with clear error messages when operations cannot proceed.
+
+---
+
+### Type-Safe Column Concatenation
+
+**Problem**  
+Concatenating columns requires handling different data types while preserving null semantics and type safety.
+
+**Constraint**  
+- Must work across all supported column types (value types, reference types, nullable types)
+- Must preserve null values correctly during concatenation
+- Must validate type compatibility between columns being concatenated
+- Must handle empty DataFrames gracefully
+
+**Pattern That Worked**  
+Use type dispatch with proper null handling:
+- Validate all columns have identical types before concatenation
+- For value types: create nullable arrays and use CreateFromNullable
+- For reference types: create typed arrays and use CreateForReferenceType
+- Handle empty sources by filtering them out before processing
+- Use reflection-based type dispatch for unknown types with object fallback
+
+**Negative Rule**  
+Never attempt to concatenate columns of different types - always validate type compatibility first.
+
+**Outcome**  
+Column concatenation works reliably across all data types with proper null preservation and clear error reporting for incompatible operations.
+
+---
+
+### Public API Design for Complex Operations
+
+**Problem**  
+Complex operations like concatenation need both low-level control and high-level convenience methods.
+
+**Constraint**  
+- Internal operation classes should remain internal for implementation flexibility
+- Public enums and types need to be accessible from extension methods
+- Users want both explicit control and convenient defaults
+- Multiple overloads should provide different levels of control
+
+**Pattern That Worked**  
+Layer the API with public enums and internal operations:
+- Define public enums (ConcatenationDirection, ConcatenationMismatchHandling) at namespace level
+- Keep operation classes internal but expose functionality through extension methods
+- Provide both single-frame and multi-frame overloads
+- Include convenient aliases (Append, Combine) for common use cases
+- Use sensible defaults (FillWithNulls for vertical, Error for horizontal)
+
+**Negative Rule**  
+Do not expose internal operation classes directly - always provide a clean public API through extension methods.
+
+**Outcome**  
+Users get a clean, discoverable API with appropriate levels of control while implementation details remain flexible.
+
+---
+
 ## AI-Specific Guidance
 
 ### Where Tokens Are Commonly Wasted

@@ -803,4 +803,159 @@ public static class NivaraFrameExtensions
     }
 
     #endregion
+
+    #region Concatenation Operations
+
+    /// <summary>
+    /// Concatenates multiple DataFrames vertically (appending rows)
+    /// </summary>
+    /// <param name="frames">The DataFrames to concatenate</param>
+    /// <param name="mismatchHandling">How to handle schema mismatches</param>
+    /// <returns>A new DataFrame containing all rows from the input DataFrames</returns>
+    /// <exception cref="ArgumentNullException">Thrown when frames is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no frames are provided</exception>
+    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    public static NivaraFrame ConcatenateVertical(
+        IEnumerable<NivaraFrame> frames,
+        ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.FillWithNulls)
+    {
+        if (frames == null)
+            throw new ArgumentNullException(nameof(frames));
+
+        var frameList = frames.ToList();
+        if (frameList.Count == 0)
+            throw new ArgumentException("Must provide at least one frame for concatenation", nameof(frames));
+
+        if (frameList.Count == 1)
+            return frameList[0];
+
+        // Convert frames to column dictionaries
+        var columnDictionaries = frameList.Select(frame =>
+            frame.ColumnNames.ToDictionary(name => name, name => frame.GetColumn(name), StringComparer.OrdinalIgnoreCase)
+        ).ToList();
+
+        var concatenationOperation = new ConcatenationOperation(
+            columnDictionaries.Skip(1).ToList(),
+            ConcatenationDirection.Vertical,
+            mismatchHandling);
+
+        // Execute the concatenation
+        var resultColumns = concatenationOperation.Execute(columnDictionaries[0]);
+
+        // Convert result back to NivaraFrame
+        var namedColumns = resultColumns.Select(kvp => (kvp.Key, kvp.Value));
+        return new NivaraFrame(namedColumns);
+    }
+
+    /// <summary>
+    /// Concatenates this DataFrame with another DataFrame vertically (appending rows)
+    /// </summary>
+    /// <param name="first">The first DataFrame</param>
+    /// <param name="second">The second DataFrame to append</param>
+    /// <param name="mismatchHandling">How to handle schema mismatches</param>
+    /// <returns>A new DataFrame containing rows from both DataFrames</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    public static NivaraFrame ConcatenateVertical(
+        this NivaraFrame first,
+        NivaraFrame second,
+        ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.FillWithNulls)
+    {
+        if (first == null)
+            throw new ArgumentNullException(nameof(first));
+        if (second == null)
+            throw new ArgumentNullException(nameof(second));
+
+        return ConcatenateVertical(new[] { first, second }, mismatchHandling);
+    }
+
+    /// <summary>
+    /// Concatenates multiple DataFrames horizontally (appending columns)
+    /// </summary>
+    /// <param name="frames">The DataFrames to concatenate</param>
+    /// <returns>A new DataFrame containing all columns from the input DataFrames</returns>
+    /// <exception cref="ArgumentNullException">Thrown when frames is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no frames are provided or row counts don't match</exception>
+    /// <exception cref="SchemaValidationException">Thrown when column names conflict</exception>
+    public static NivaraFrame ConcatenateHorizontal(IEnumerable<NivaraFrame> frames)
+    {
+        if (frames == null)
+            throw new ArgumentNullException(nameof(frames));
+
+        var frameList = frames.ToList();
+        if (frameList.Count == 0)
+            throw new ArgumentException("Must provide at least one frame for concatenation", nameof(frames));
+
+        if (frameList.Count == 1)
+            return frameList[0];
+
+        // Convert frames to column dictionaries
+        var columnDictionaries = frameList.Select(frame =>
+            frame.ColumnNames.ToDictionary(name => name, name => frame.GetColumn(name), StringComparer.OrdinalIgnoreCase)
+        ).ToList();
+
+        var concatenationOperation = new ConcatenationOperation(
+            columnDictionaries.Skip(1).ToList(),
+            ConcatenationDirection.Horizontal,
+            ConcatenationMismatchHandling.Error); // Horizontal concatenation always uses Error for mismatches
+
+        // Execute the concatenation
+        var resultColumns = concatenationOperation.Execute(columnDictionaries[0]);
+
+        // Convert result back to NivaraFrame
+        var namedColumns = resultColumns.Select(kvp => (kvp.Key, kvp.Value));
+        return new NivaraFrame(namedColumns);
+    }
+
+    /// <summary>
+    /// Concatenates this DataFrame with another DataFrame horizontally (appending columns)
+    /// </summary>
+    /// <param name="first">The first DataFrame</param>
+    /// <param name="second">The second DataFrame to append columns from</param>
+    /// <returns>A new DataFrame containing columns from both DataFrames</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="ArgumentException">Thrown when row counts don't match</exception>
+    /// <exception cref="SchemaValidationException">Thrown when column names conflict</exception>
+    public static NivaraFrame ConcatenateHorizontal(this NivaraFrame first, NivaraFrame second)
+    {
+        if (first == null)
+            throw new ArgumentNullException(nameof(first));
+        if (second == null)
+            throw new ArgumentNullException(nameof(second));
+
+        return ConcatenateHorizontal(new[] { first, second });
+    }
+
+    /// <summary>
+    /// Appends rows from another DataFrame to this DataFrame (alias for ConcatenateVertical)
+    /// </summary>
+    /// <param name="first">The first DataFrame</param>
+    /// <param name="second">The DataFrame to append</param>
+    /// <param name="mismatchHandling">How to handle schema mismatches</param>
+    /// <returns>A new DataFrame with appended rows</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    public static NivaraFrame Append(
+        this NivaraFrame first,
+        NivaraFrame second,
+        ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.FillWithNulls)
+    {
+        return first.ConcatenateVertical(second, mismatchHandling);
+    }
+
+    /// <summary>
+    /// Combines columns from another DataFrame with this DataFrame (alias for ConcatenateHorizontal)
+    /// </summary>
+    /// <param name="first">The first DataFrame</param>
+    /// <param name="second">The DataFrame to combine columns from</param>
+    /// <returns>A new DataFrame with combined columns</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="ArgumentException">Thrown when row counts don't match</exception>
+    /// <exception cref="SchemaValidationException">Thrown when column names conflict</exception>
+    public static NivaraFrame Combine(this NivaraFrame first, NivaraFrame second)
+    {
+        return first.ConcatenateHorizontal(second);
+    }
+
+    #endregion
 }
