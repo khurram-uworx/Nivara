@@ -904,3 +904,131 @@ Join operations fail fast with clear error messages, making debugging and fixing
 This document is intentionally **opinionated and distilled**. It should evolve slowly and only when a *new, broadly applicable lesson* is learned.
 
 If a lesson only applies to a specific implementation, it does **not** belong here.
+
+---
+
+## Query Optimization Engine Implementation
+
+### Optimization Rule Architecture
+
+**Problem**  
+Query optimization systems need to be extensible and maintainable while ensuring correctness.
+
+**Constraint**  
+- Optimization rules must be composable and independent
+- Failed optimizations should not break valid queries
+- Internal operation classes limit access to optimization details
+- Rules need to be prioritized and applied in correct order
+
+**Pattern That Worked**  
+Implement a rule-based optimization engine with:
+- Abstract `OptimizationRule` base class with priority system
+- `OptimizationEngine` that applies rules in priority order with error handling
+- Conservative optimization approach when internal details are inaccessible
+- Comprehensive statistics tracking and reporting for debugging
+
+**Negative Rule**  
+Never let optimization failures break query execution - always fall back to original plan.
+
+**Outcome**  
+Optimization system is extensible, safe, and provides detailed feedback for debugging and performance analysis.
+
+---
+
+### Working with Internal Operation Classes
+
+**Problem**  
+Query optimization requires analyzing operation details, but operation classes are internal for encapsulation.
+
+**Constraint**  
+- Cannot access internal properties like filter conditions or selected columns
+- Must work with public interfaces only (`IQueryOperation`, `OperationType`)
+- Need to maintain type safety while being generic
+
+**Pattern That Worked**  
+Use operation type strings and conservative analysis:
+- Dispatch on `OperationType` property instead of concrete types
+- Be conservative when internal details are inaccessible
+- Use schema transformation methods available on public interfaces
+- Provide fallback behavior that assumes worst-case scenarios
+
+**Negative Rule**  
+Do not attempt to use reflection or other mechanisms to access internal state - this breaks encapsulation and is fragile.
+
+**Outcome**  
+Optimization works safely with public interfaces while maintaining encapsulation boundaries.
+
+---
+
+### Visitor Pattern for Query Plans
+
+**Problem**  
+Query plan analysis and transformation requires traversing complex operation hierarchies.
+
+**Constraint**  
+- Need both read-only analysis and transformation capabilities
+- Must work with internal operation types through public interfaces
+- Should be extensible for new operation types
+
+**Pattern That Worked**  
+Implement visitor pattern with operation type dispatch:
+- Base visitor classes that dispatch on `OperationType` strings
+- Separate interfaces for analysis (`IQueryPlanVisitor`) and transformation (`IQueryPlanVisitor<T>`)
+- Default implementations that handle unknown operation types gracefully
+- Concrete visitors for specific tasks (statistics, validation)
+
+**Negative Rule**  
+Do not create visitors that depend on accessing internal operation state - use public interfaces only.
+
+**Outcome**  
+Flexible visitor system that works with encapsulated operations and is easily extensible.
+
+---
+
+### Optimization Statistics and Reporting
+
+**Problem**  
+Query optimization decisions need to be transparent and debuggable for performance tuning.
+
+**Constraint**  
+- Users need to understand what optimizations were applied
+- Failed optimizations should be reported with context
+- Performance impact estimates help guide optimization priorities
+
+**Pattern That Worked**  
+Comprehensive statistics tracking:
+- `OptimizationStatistics` class with timing, improvement estimates, and metadata
+- `OptimizationResult` that includes both successful and failed rule applications
+- Detailed reporting with human-readable explanations
+- Error context preservation for debugging failed optimizations
+
+**Negative Rule**  
+Do not hide optimization decisions from users - transparency builds trust and enables debugging.
+
+**Outcome**  
+Users can understand and debug query performance issues with clear optimization feedback.
+
+---
+
+### Conservative Optimization Strategy
+
+**Problem**  
+Query optimizations must preserve correctness while improving performance.
+
+**Constraint**  
+- Cannot access internal operation details for dependency analysis
+- Must work across different operation types safely
+- Optimization failures should not break queries
+
+**Pattern That Worked**  
+Be conservative when in doubt:
+- Only apply optimizations when safety can be verified through public interfaces
+- Use schema transformation methods to validate compatibility
+- Provide fallback behavior that assumes all columns/operations are needed
+- Wrap optimization attempts in try-catch with graceful degradation
+
+**Negative Rule**  
+Never apply an optimization unless its safety can be verified through available public interfaces.
+
+**Outcome**  
+Optimization system is safe and reliable, preferring correctness over aggressive optimization.

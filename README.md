@@ -681,7 +681,7 @@ Nivara currently supports:
 - **Null Handling**: Explicit null handling with fill and drop operations, comprehensive null mask tracking
 - **Performance**: Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
 - **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
-- **Query Engine**: Schema-aware lazy query construction with diagnostics and plan inspection
+- **Query Engine**: Schema-aware lazy query construction with automatic optimization, diagnostics and plan inspection
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
 - **Row Operations**: Filtering with boolean masks, slicing with Take/Skip operations, and arbitrary row range selection
 - **Sorting Operations**: Multi-column sorting with configurable direction, null ordering, and stable sort semantics
@@ -694,7 +694,7 @@ Nivara currently supports:
 - **Parquet I/O**: Full read/write support with compression, streaming, and batch operations (via `Nivara.Extensions`)
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
-- **Performance Optimization**: Buffer pooling, memory management, and async I/O operations
+- **Performance Optimization**: Buffer pooling, memory management, query optimization engine, and async I/O operations
 
 ---
 
@@ -1017,9 +1017,73 @@ DataFrame concatenation provides:
 
 ## Roadmap (Planned)
 
-The following features are still planned or in-progress:
+---
 
-- Query optimization engine
+## Query Optimization
+
+Nivara includes a sophisticated query optimization engine that automatically improves query performance while preserving correctness:
+
+### Automatic Optimizations
+
+The query optimizer applies several optimization strategies:
+
+```csharp
+using Nivara.Expressions;
+
+// This query has optimization opportunities
+var query = Csv.ScanAsQueryFrame("employees.csv")
+    .Select("Name", "Age", "Salary", "Department")  // Select all columns first
+    .Filter(ColumnExpressions.Col("Age") > 25)      // Filter after selection
+    .Filter(ColumnExpressions.Col("Salary") > 50000) // Multiple filters
+    .Select("Name", "Salary");                       // Final projection
+
+// The optimizer automatically:
+// 1. Pushes filters closer to the data source (predicate pushdown)
+// 2. Combines multiple filters into a single operation (operation fusion)
+// 3. Eliminates unused columns early (projection pushdown)
+// 4. Reorders operations for better performance
+
+var result = query.Collect(); // Optimizations applied during execution
+```
+
+### Optimization Strategies
+
+- **Predicate Pushdown**: Moves filter operations closer to data sources to reduce data movement
+- **Projection Pushdown**: Eliminates unused columns early in the pipeline to reduce memory usage
+- **Operation Fusion**: Combines compatible operations (multiple filters, projections) to reduce overhead
+- **Column Elimination**: Removes columns that aren't needed by subsequent operations
+
+### Optimization Transparency
+
+Get detailed information about applied optimizations:
+
+```csharp
+// Get optimization statistics
+var optimizer = new QueryOptimizer();
+var plan = query.GetQueryPlan();
+var result = optimizer.OptimizeWithStatistics(plan);
+
+Console.WriteLine(result.GenerateReport());
+// Shows:
+// - Which optimizations were applied
+// - Estimated performance improvements
+// - Optimization timing
+// - Before/after query plans
+```
+
+### Safety Guarantees
+
+- **Correctness Preserved**: Optimizations never change query results
+- **Conservative Approach**: When in doubt, the optimizer chooses correctness over performance
+- **Graceful Degradation**: Failed optimizations don't break queries
+- **Schema Validation**: All optimizations respect type safety and schema constraints
+
+---
+
+## Planned Features
+
+The following features are still in development:
+
 - Streaming and parallel execution strategies
 
 ---
