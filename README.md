@@ -687,6 +687,7 @@ Nivara currently supports:
 - **Sorting Operations**: Multi-column sorting with configurable direction, null ordering, and stable sort semantics
 - **Column Transformations**: Type-safe element-wise transformations with null propagation and exception handling
 - **Column Projections**: Flexible column selection, renaming, exclusion, and computed column generation
+- **Join Operations**: Inner, Left, Right, and Full Outer joins with flexible key mapping, column disambiguation, and null-aware matching
 - **Aggregate Functions**: Sum, Average, Min, Max with vectorized operations and null-aware computation
 - **Grouping Operations**: Hash-based GroupBy with composite key support and efficient group management
 - **Aggregation Framework**: Extensible aggregation system with built-in functions (Count, Sum, Min, Max, Mean) and vectorized execution
@@ -697,11 +698,162 @@ Nivara currently supports:
 
 ---
 
+## Join Operations
+
+Nivara provides comprehensive join operations for combining data from multiple DataFrames with full control over join types, key matching, and column name resolution.
+
+### Basic Join Operations
+
+Join DataFrames using common column names:
+
+```csharp
+var employees = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })),
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "David" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 }))
+);
+
+var departments = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.Create(new[] { 2, 3, 4, 5 })),
+    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "HR", "IT", "Finance", "Marketing" })),
+    ("Salary", NivaraColumn<decimal>.Create(new[] { 50000m, 60000m, 70000m, 80000m }))
+);
+
+// Inner join - returns only matching rows
+var innerJoin = employees.InnerJoin(departments, "Id");
+// Result: 3 rows (Id: 2, 3, 4) with columns from both DataFrames
+
+// Left join - returns all left rows with matching right rows
+var leftJoin = employees.LeftJoin(departments, "Id");
+// Result: 4 rows, Alice (Id=1) has null values for Department and Salary
+
+// Right join - returns all right rows with matching left rows  
+var rightJoin = employees.RightJoin(departments, "Id");
+// Result: 4 rows, Marketing department (Id=5) has null values for Name and Age
+
+// Full outer join - returns all rows from both DataFrames
+var fullJoin = employees.FullOuterJoin(departments, "Id");
+// Result: 5 rows, includes Alice (left only) and Marketing (right only)
+```
+
+### Join with Different Column Names
+
+Join DataFrames when join keys have different names:
+
+```csharp
+var customers = NivaraFrame.Create(
+    ("CustomerId", NivaraColumn<int>.Create(new[] { 1, 2, 3 })),
+    ("CustomerName", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" }))
+);
+
+var orders = NivaraFrame.Create(
+    ("OrderId", NivaraColumn<int>.Create(new[] { 101, 102, 103 })),
+    ("CustId", NivaraColumn<int>.Create(new[] { 2, 3, 4 })),
+    ("Amount", NivaraColumn<decimal>.Create(new[] { 100m, 200m, 300m }))
+);
+
+// Join using different column names
+var customerOrders = customers.InnerJoin(orders, "CustomerId", "CustId");
+// Result: Matches customers with their orders using CustomerId = CustId
+```
+
+### Column Name Conflict Resolution
+
+Handle column name conflicts with configurable disambiguation strategies:
+
+```csharp
+var leftFrame = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.Create(new[] { 1, 2 })),
+    ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B" }))
+);
+
+var rightFrame = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.Create(new[] { 1, 2 })),
+    ("Value", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y" }))
+);
+
+// Suffix disambiguation (default)
+var suffixResult = leftFrame.InnerJoin(rightFrame, "Id");
+// Result: Columns are Id, Value_left, Value_right
+
+// Prefix disambiguation
+var prefixResult = leftFrame.InnerJoin(rightFrame, "Id", 
+    ColumnDisambiguationStrategy.Prefix, "L", "R");
+// Result: Columns are Id, L_Value, R_Value
+
+// Error on conflicts
+try 
+{
+    var errorResult = leftFrame.InnerJoin(rightFrame, "Id", 
+        ColumnDisambiguationStrategy.Error);
+}
+catch (SchemaValidationException ex)
+{
+    // Exception thrown due to column name conflict
+}
+```
+
+### Null Value Handling in Joins
+
+Join operations handle null values with SQL-like semantics:
+
+```csharp
+var leftWithNulls = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.CreateFromNullable(new int?[] { 1, 2, null, 4 })),
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new string?[] { "Alice", "Bob", null, "David" }!))
+);
+
+var rightWithNulls = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.CreateFromNullable(new int?[] { 2, null, 4, 5 })),
+    ("Department", NivaraColumn<string>.CreateForReferenceType(new string?[] { "HR", null, "Finance", "Marketing" }!))
+);
+
+// Inner join with nulls
+var result = leftWithNulls.InnerJoin(rightWithNulls, "Id");
+// Result: Only rows with matching non-null IDs (Id=2 and Id=4)
+// Null values never match other null values
+```
+
+### Join Key Coalescing
+
+For outer joins, join key values are intelligently coalesced to show meaningful results:
+
+```csharp
+var left = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.Create(new[] { 1, 2, 3 })),
+    ("LeftData", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "C" }))
+);
+
+var right = NivaraFrame.Create(
+    ("Id", NivaraColumn<int>.Create(new[] { 2, 3, 4 })),
+    ("RightData", NivaraColumn<string>.CreateForReferenceType(new[] { "X", "Y", "Z" }))
+);
+
+var rightJoin = left.RightJoin(right, "Id");
+// Result: Id column shows [2, 3, 4] (actual join key values)
+// Not [2, 3, null] - the Id=4 row shows 4, not null
+```
+
+### Join Features
+
+Join operations provide:
+
+- **All SQL join types**: Inner, Left, Right, Full Outer joins
+- **Flexible key mapping**: Join on columns with different names
+- **Column disambiguation**: Configurable strategies for handling name conflicts
+- **Null-aware matching**: SQL-like null semantics (nulls don't match nulls)
+- **Type validation**: Ensures join key types are compatible
+- **Schema preservation**: Maintains column types and metadata
+- **Efficient algorithms**: Hash-based joins for optimal performance
+- **Key coalescing**: Intelligent join key handling in outer joins
+- **Error handling**: Clear validation messages for missing columns or type mismatches
+
+---
+
 ## Roadmap (Planned)
 
 The following features are still planned or in-progress:
 
-- Join operations (Inner, Left, Right, Full Outer)
 - Query optimization engine
 - Streaming and parallel execution strategies
 

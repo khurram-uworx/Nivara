@@ -707,6 +707,115 @@ Null handling in sorting is predictable and user-controllable, working consisten
 
 ---
 
+## DataFrame Join Operations
+
+### Join Key Coalescing for Outer Joins
+
+**Problem**  
+Outer joins (right and full outer) need to handle join key values correctly when one side has no match.
+
+**Constraint**  
+- Left join keys may be null when right rows have no left match
+- Right join keys may be null when left rows have no right match
+- Users expect to see the actual join key values, not nulls, in the result
+- Must work across all data types (value types, reference types, nullable types)
+
+**Pattern That Worked**  
+Implement coalesced join key columns that prefer left values when available, otherwise use right values:
+- Create `CreateCoalescedJoinKeyColumn` method that handles type dispatch
+- For each result row, use left join key value if left index >= 0, otherwise use right join key value
+- Handle both nullable value types and reference types appropriately
+- Use proper column creation methods based on the underlying type
+
+**Negative Rule**  
+Do not simply use left join key columns for outer joins - this loses information when left side has no match.
+
+**Outcome**  
+Outer join results show meaningful join key values instead of nulls, making the results more useful and intuitive.
+
+---
+
+### Join Index Computation Strategy
+
+**Problem**  
+Join operations need efficient algorithms to match rows between DataFrames while handling different join types and null values.
+
+**Constraint**  
+- Must handle multiple join keys with composite key matching
+- Must support all join types (inner, left, right, full outer)
+- Must handle null values correctly (nulls don't match other nulls)
+- Must be efficient for large datasets
+
+**Pattern That Worked**  
+Use hash-based join algorithm with proper null handling:
+- Build hash map for right DataFrame using composite keys
+- Exclude null values from hash map (nulls never match)
+- Iterate through left DataFrame and probe hash map for matches
+- Track matched right indices to identify unmatched rows for outer joins
+- Use separate index arrays for left and right sides with -1 indicating no match
+
+**Negative Rule**  
+Do not use nested loop joins as the primary algorithm - hash joins are much more efficient for most cases.
+
+**Outcome**  
+Join operations scale well with data size and handle all join types correctly with proper null semantics.
+
+---
+
+### Column Name Disambiguation in Joins
+
+**Problem**  
+Join operations often encounter column name conflicts between left and right DataFrames that must be resolved consistently.
+
+**Constraint**  
+- Users need control over how conflicts are resolved
+- Resolution strategy must be applied consistently across all conflicting columns
+- Must preserve original column names when no conflicts exist
+- Must provide clear error messages when conflicts cannot be resolved
+
+**Pattern That Worked**  
+Implement configurable disambiguation strategies:
+- `Prefix`: Add prefixes to conflicting columns (left_column, right_column)
+- `Suffix`: Add suffixes to conflicting columns (column_left, column_right)  
+- `Error`: Throw exception when conflicts are detected
+- Always exclude right join key columns from results (left join keys are kept)
+- Apply disambiguation only to columns that actually conflict
+
+**Negative Rule**  
+Do not automatically rename all columns - only rename when actual conflicts exist to preserve user expectations.
+
+**Outcome**  
+Join results have predictable column names with user control over conflict resolution, avoiding silent data loss or confusion.
+
+---
+
+### Join Type Validation and Error Handling
+
+**Problem**  
+Join operations have many potential failure modes that need clear, actionable error messages.
+
+**Constraint**  
+- Join key columns must exist in both DataFrames
+- Join key types must be compatible between left and right sides
+- Schema validation should happen before expensive computation
+- Error messages must be specific enough for users to fix issues
+
+**Pattern That Worked**  
+Implement comprehensive validation with specific error messages:
+- Validate join key existence in both schemas during `TransformSchema`
+- Check type compatibility using exact type matching (no implicit conversions)
+- Provide detailed error messages listing available columns when keys are missing
+- Wrap execution exceptions in `QueryExecutionException` with context
+- Validate schemas before computing join indices to fail fast
+
+**Negative Rule**  
+Do not allow implicit type conversions in join keys - require exact type matches to avoid subtle bugs.
+
+**Outcome**  
+Join operations fail fast with clear error messages, making debugging and fixing issues straightforward for users.
+
+---
+
 ## Closing Note
 
 This document is intentionally **opinionated and distilled**. It should evolve slowly and only when a *new, broadly applicable lesson* is learned.

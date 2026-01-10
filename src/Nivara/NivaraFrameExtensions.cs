@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Operations;
 
 namespace Nivara;
 
@@ -515,4 +516,291 @@ public static class NivaraFrameExtensions
     {
         return transform(input!);
     }
+
+    #region Join Operations
+
+    /// <summary>
+    /// Performs an inner join with another DataFrame
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="joinKey">The join key (same column name in both DataFrames)</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the inner join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame InnerJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string joinKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.Inner, new[] { new JoinKey(joinKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs an inner join with another DataFrame using different column names
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="leftKey">The join key column name in the left DataFrame</param>
+    /// <param name="rightKey">The join key column name in the right DataFrame</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the inner join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame InnerJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string leftKey,
+        string rightKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.Inner, new[] { new JoinKey(leftKey, rightKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs a left join with another DataFrame
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="joinKey">The join key (same column name in both DataFrames)</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the left join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame LeftJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string joinKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.Left, new[] { new JoinKey(joinKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs a left join with another DataFrame using different column names
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="leftKey">The join key column name in the left DataFrame</param>
+    /// <param name="rightKey">The join key column name in the right DataFrame</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the left join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame LeftJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string leftKey,
+        string rightKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.Left, new[] { new JoinKey(leftKey, rightKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs a right join with another DataFrame
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="joinKey">The join key (same column name in both DataFrames)</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the right join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame RightJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string joinKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.Right, new[] { new JoinKey(joinKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs a right join with another DataFrame using different column names
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="leftKey">The join key column name in the left DataFrame</param>
+    /// <param name="rightKey">The join key column name in the right DataFrame</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the right join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame RightJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string leftKey,
+        string rightKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.Right, new[] { new JoinKey(leftKey, rightKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs a full outer join with another DataFrame
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="joinKey">The join key (same column name in both DataFrames)</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the full outer join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame FullOuterJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string joinKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.FullOuter, new[] { new JoinKey(joinKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs a full outer join with another DataFrame using different column names
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="leftKey">The join key column name in the left DataFrame</param>
+    /// <param name="rightKey">The join key column name in the right DataFrame</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the full outer join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame FullOuterJoin(
+        this NivaraFrame left,
+        NivaraFrame right,
+        string leftKey,
+        string rightKey,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+
+        return left.Join(right, JoinType.FullOuter, new[] { new JoinKey(leftKey, rightKey) }, disambiguationStrategy, leftPrefix, rightPrefix);
+    }
+
+    /// <summary>
+    /// Performs a join with another DataFrame using multiple join keys
+    /// </summary>
+    /// <param name="left">The left DataFrame</param>
+    /// <param name="right">The right DataFrame</param>
+    /// <param name="joinType">The type of join to perform</param>
+    /// <param name="joinKeys">The join keys</param>
+    /// <param name="disambiguationStrategy">Strategy for handling column name conflicts</param>
+    /// <param name="leftPrefix">Prefix for left columns when using prefix disambiguation</param>
+    /// <param name="rightPrefix">Prefix for right columns when using prefix disambiguation</param>
+    /// <returns>A new DataFrame containing the join result</returns>
+    /// <exception cref="ArgumentNullException">Thrown when any parameter is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when join keys are incompatible</exception>
+    public static NivaraFrame Join(
+        this NivaraFrame left,
+        NivaraFrame right,
+        JoinType joinType,
+        JoinKey[] joinKeys,
+        ColumnDisambiguationStrategy disambiguationStrategy = ColumnDisambiguationStrategy.Suffix,
+        string leftPrefix = "left",
+        string rightPrefix = "right")
+    {
+        if (left == null)
+            throw new ArgumentNullException(nameof(left));
+        if (right == null)
+            throw new ArgumentNullException(nameof(right));
+        if (joinKeys == null)
+            throw new ArgumentNullException(nameof(joinKeys));
+
+        // Convert frames to column dictionaries
+        var leftColumns = left.ColumnNames.ToDictionary(name => name, name => left.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+        var rightColumns = right.ColumnNames.ToDictionary(name => name, name => right.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+
+        // Create and execute join operation
+        var joinOperation = new JoinOperation(
+            leftColumns,
+            rightColumns,
+            joinType,
+            joinKeys,
+            disambiguationStrategy,
+            leftPrefix,
+            rightPrefix);
+
+        // Execute the join (note: input parameter is not used for join operations)
+        var resultColumns = joinOperation.Execute(leftColumns);
+
+        // Convert result back to NivaraFrame
+        var namedColumns = resultColumns.Select(kvp => (kvp.Key, kvp.Value));
+        return new NivaraFrame(namedColumns);
+    }
+
+    #endregion
 }
