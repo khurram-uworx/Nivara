@@ -43,6 +43,33 @@ ARCHITECTURE DECISIONS (concise)
 
 - Query engine: expose generic IQueryOperation<T> and public QueryPlan to enable external extensions and optimizers; use immutable Schema and QueryPlan objects.
 
+- DataFrame operations: Implement as query operations (IQueryOperation) with schema validation in TransformSchema phase
+  - Concatenation: Use configurable mismatch handling (Error, FillWithNulls) for vertical, always Error for horizontal
+  - Joins: Hash-based algorithm with composite keys, exclude nulls from matching, coalesce join keys for outer joins
+  - Sorting: Sort indices first, then reorder all columns consistently, explicit null ordering (NullsFirst/NullsLast)
+  - Grouping: Use dedicated composite key class with proper equality/hashing, handle nulls explicitly
+
+- Fluent API design: Layer extension methods over core operations, delegate to existing infrastructure
+  - Use dynamic row objects (ExpandoObject) for predicate evaluation in Where() methods
+  - Maintain consistent method signatures between DataFrame and QueryFrame APIs
+  - Clear execution semantics: immediate execution on DataFrames, lazy via AsQueryFrame()
+
+- Query optimization: Rule-based engine with conservative approach
+  - Abstract OptimizationRule base class with priority system
+  - Use operation type strings for dispatch when internal details inaccessible
+  - Visitor pattern for query plan analysis and transformation
+  - Comprehensive statistics tracking and reporting
+
+- Execution strategies: Pluggable strategy pattern (lazy, eager, streaming, parallel)
+  - Cost estimation with operation-specific weights
+  - Async-first design with sync wrappers using GetAwaiter().GetResult()
+  - Intelligent parallel execution with heuristics for data size/operation type
+
+- Error handling: Structured exception hierarchy with query context
+  - Include failed query plan and operation references in exceptions
+  - Specific exception types for common failure modes
+  - Comprehensive validation with detailed error messages
+
 --------------------------------------------------------------------------------
 IMPLEMENTATION GOTCHAS & PATTERNS (grouped, one representative snippet per concept)
 
@@ -127,6 +154,32 @@ Diagnostics & operation tracking
 Memory & resource management
 - Implement IDisposable consistently for frames, columns, and data sources.
 - Provide ResourceManager for tracking with WeakReference; provide cleanup methods and conservative memory estimates.
+
+DataFrame operation patterns
+- Concatenation: Type dispatch with proper null handling, validate type compatibility, filter empty sources
+- Joins: Hash-based with composite keys, exclude nulls from matching, coalesce keys for outer joins
+- Sorting: Multi-step approach with index sorting then column reordering, explicit null ordering
+- Grouping: Composite key class with proper equality/hashing, handle nulls in keys
+- Filtering: Boolean mask-based with null propagation
+- Projection: Column dictionary operations with existence validation
+
+Query optimization patterns
+- Conservative approach: only optimize when safety verifiable through public interfaces
+- Operation type dispatch when internal details inaccessible
+- Visitor pattern for plan analysis with graceful handling of unknown types
+- Statistics tracking for transparency and debugging
+
+Execution strategy patterns
+- Strategy pattern with pluggable implementations
+- Cost estimation based on operation complexity and data size
+- Async-first with proper cancellation token propagation
+- Parallel execution with intelligent heuristics for overhead vs benefit
+
+Error handling patterns
+- Structured exceptions with query context and operation references
+- Schema validation in TransformSchema phase to fail fast
+- Detailed error messages with available options listed
+- Wrap execution exceptions with additional context
 
 --------------------------------------------------------------------------------
 TESTING LESSONS & PATTERNS

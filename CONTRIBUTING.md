@@ -127,6 +127,16 @@ All contributions must include tests where applicable.
 - **Integration Tests**: End-to-end scenarios where relevant
 - **Performance Tests**: Benchmarks for performance-critical paths
 
+### Testing Best Practices
+
+- Test each operation with multiple data types (int, double, string, nullable types)
+- Explicitly test null handling scenarios
+- Test empty inputs and single-element inputs
+- Test error conditions with descriptive assertions
+- Group related tests in nested test classes for organization
+- Use property-based tests to validate invariants across wide input spaces
+- Do not rely solely on example-based tests for core logic
+
 ### Running Tests
 
 ```bash
@@ -156,6 +166,20 @@ dotnet test --collect:"XPlat Code Coverage"
 - Follow SOLID principles
 - Use `Span<T>` / `Memory<T>` where appropriate
 - Use `unsafe` code only when clearly justified and documented
+
+### Architectural Principles
+
+- **Correctness Over Performance**: Never apply optimizations unless semantic safety can be proven
+- **Explicit Over Implicit**: Make execution boundaries, error conditions, and type behavior explicit
+- **Conservative Optimization**: If optimization safety is uncertain, skip the optimization
+- **Null Handling**: Use explicit boolean masks for null tracking, never sentinel values
+
+### Type System Guidelines
+
+- Prefer runtime type inspection over complex generic constraints
+- Use type-erased interfaces for runtime operations beneath generic APIs
+- Handle nullable types explicitly using `Nullable.GetUnderlyingType()`
+- Avoid reflection-heavy designs for core execution paths
 
 ---
 

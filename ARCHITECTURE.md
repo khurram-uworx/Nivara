@@ -404,28 +404,313 @@ Many design choices exist solely to surface errors as early as possible.
 
 ---
 
-## Notes on Reconsideration
+## Storage Architecture
 
-Decisions in this document are not immutable.
+### Column Storage Model
 
-However, revisiting a decision should:
-- Reference this document explicitly
-- Identify which constraints have changed
-- Explain why previous trade-offs no longer apply
+`NivaraColumn<T>` is the fundamental data container with these characteristics:
 
-If a reconsideration yields a **general lesson**, that lesson should be added to `GUIDELINES.md` — not duplicated here.
+- Strongly typed (`T` is never erased)
+- Immutable by design
+- Backed by contiguous memory
+- Optional null mask for explicit null tracking
+
+Each column owns:
+- A data buffer (`T[]`, `Memory<T>`, or tensor-backed storage)
+- A validity bitmap (when nulls are present)
+
+### Memory vs Tensor Storage Strategy
+
+Nivara distinguishes between two storage strategies based on data type characteristics:
+
+#### Memory Storage
+Used when:
+- `T` is not vectorizable (strings, objects, complex types)
+- Operations cannot be safely SIMD-accelerated
+
+Characteristics:
+- Simple memory layout using `Memory<T>`
+- Scalar execution paths
+- Predictable semantics
+- Lower memory overhead
+
+#### Tensor Storage
+Used when:
+- `T` supports SIMD operations (`int`, `float`, `double`, `bool`)
+- Operations are safe to vectorize
+
+Characteristics:
+- Uses `System.Numerics.Tensors` for storage
+- Automatic SIMD acceleration via `TensorPrimitives`
+- Falls back to scalar paths when required
+- Higher performance for mathematical operations
+
+This distinction is **internal** and transparent to users. The system automatically selects the optimal storage backend based on type analysis.
+
+### Vectorization Strategy
+
+**Decision**: Apply vectorization selectively and only where semantics are trivial.
+
+**Rationale**: SIMD execution provides performance gains but complicates control flow and debugging. Premature vectorization obscured correctness issues during development.
+
+**Implementation**:
+- Vectorization is applied opportunistically
+- Automatic fallback to scalar operations when vectorization isn't safe
+- Mixed execution paths with clear boundaries
+- Easier correctness validation through separation of concerns
 
 ---
 
-## Where to Put New Architecture Knowledge
+## Query Engine Architecture
 
-- **Reusable rules, invariants, and pitfalls** → [GUIDELINES](GUIDELINES.md)
-- **User-facing explanations** → [README](README.md)
-- **Workflow and process** → [CONTRIBUTING](CONTRIBUTING.md)
+### Lazy Query Construction
 
-When in doubt, do not duplicate — reference instead.
+The query engine uses a **lazy evaluation model** with explicit execution boundaries:
+
+```
+Data Source → QueryFrame (lazy) → Logical Plan → Physical Plan → Execution Kernels → Results
+```
+
+#### Planning Stages
+
+1. **Logical Plan Construction**
+   - Operation ordering and validation
+   - Predicate composition and simplification
+   - Projection pruning and column elimination
+   - Schema validation and type checking
+
+2. **Physical Plan Generation**
+   - Kernel selection (scalar vs vectorized)
+   - Vectorization decisions based on data types
+   - Null-aware execution path selection
+   - Resource allocation planning
+
+3. **Execution**
+   - Begins only when `Collect()` is invoked
+   - Applies optimizations transparently
+   - Handles errors with structured context
+
+### Query Optimization Engine
+
+The optimizer applies conservative, provably safe transformations:
+
+#### Optimization Strategies
+
+- **Predicate Pushdown**: Moves filter operations closer to data sources to reduce data movement
+- **Projection Pushdown**: Eliminates unused columns early in the pipeline to reduce memory usage  
+- **Operation Fusion**: Combines compatible operations (multiple filters, projections) to reduce overhead
+- **Column Elimination**: Removes columns that aren't needed by subsequent operations
+
+#### Safety Guarantees
+
+- **Correctness Preserved**: Optimizations never change query results
+- **Conservative Approach**: When in doubt, chooses correctness over performance
+- **Graceful Degradation**: Failed optimizations don't break queries
+- **Schema Validation**: All optimizations respect type safety and schema constraints
+
+### Execution Strategies
+
+Multiple execution strategies optimize performance for different use cases:
+
+#### Strategy Types
+
+1. **Lazy Execution (Default)**
+   - Builds query plans and optimizes before execution
+   - Optimal memory usage through deferred evaluation
+   - Best for complex queries with multiple operations
+
+2. **Eager Execution**
+   - Executes operations immediately without optimization
+   - Easier debugging with predictable execution order
+   - Good for simple, single-operation queries
+
+3. **Streaming Execution**
+   - Processes data in chunks for large datasets
+   - Controlled memory usage with configurable budgets
+   - Automatic chunk size calculation
+
+4. **Parallel Execution**
+   - Uses multiple threads for CPU-intensive operations
+   - Automatic detection of parallelizable operations
+   - Configurable degree of parallelism
+
+#### Execution Context Configuration
+
+```csharp
+var context = new ExecutionContext
+{
+    Strategy = ExecutionStrategy.Parallel,
+    MaxDegreeOfParallelism = Environment.ProcessorCount,
+    MemoryBudget = 1024 * 1024 * 1024, // 1GB
+    CancellationToken = cancellationToken,
+    Progress = progressReporter
+};
+```
 
 ---
 
-This document should evolve as Nivara grows, but its purpose should remain stable: **explain how the system works, not how to use it**.
+## Error Handling Architecture
+
+### Structured Exception Hierarchy
+
+Nivara uses a structured exception hierarchy that provides detailed context about failures:
+
+#### Exception Types
+
+- **JoinException**: Join operation failures with key and type information
+- **SchemaValidationException**: Schema mismatch details with specific error locations
+- **QueryExecutionException**: Query execution failures with plan context
+- **DataFrameOperationException**: General DataFrame operation errors
+
+#### Context Preservation
+
+Each exception includes:
+- Operation context and parameters
+- Query plan information (when applicable)
+- Schema details and type information
+- Suggested remediation steps
+
+### Performance Diagnostics
+
+#### Execution Diagnostics
+
+Track performance metrics and identify optimization opportunities:
+
+```csharp
+var diagnostics = new ExecutionDiagnostics();
+
+var result = DiagnosticHelper.ExecuteWithDiagnostics(
+    diagnostics,
+    "ComplexQuery",
+    () => /* operation */,
+    rowCount);
+
+Console.WriteLine(diagnostics.GenerateReport());
+```
+
+#### Diagnostic Features
+
+- **Operation-level timing** with nested scope support
+- **Memory usage tracking** with allocation patterns
+- **Automatic warning detection** for common performance issues
+- **Optimization tracking** with estimated performance improvements
+- **Comprehensive reporting** with human-readable analysis
+
+---
+
+## Type System Architecture
+
+### Type Erasure Strategy
+
+**Decision**: Introduce a **non-generic execution interface** beneath generic, user-facing APIs.
+
+**Context**: Execution and planning layers must operate on collections of columns with unknown concrete types at runtime.
+
+**Implementation**:
+- Generic APIs (`NivaraColumn<T>`, `NivaraFrame`) for compile-time safety
+- Non-generic interfaces (`IColumn`, `IFrame`) for runtime operations
+- Clear separation between compile-time and runtime concerns
+- Efficient dispatch without reflection overhead
+
+### Schema Enforcement
+
+**Decision**: Make schemas **explicit, immutable, and mandatory** for all frame operations.
+
+**Benefits**:
+- Early schema validation catches many classes of errors
+- Immutability simplifies reasoning about transformations
+- Explicit validation prevents runtime surprises
+
+**Implementation**:
+- Schema validation occurs at construction time
+- All transformations produce new schemas
+- Type compatibility checked before operations
+- Clear error messages for schema violations
+
+---
+
+## File I/O Architecture
+
+### Lazy Data Sources
+
+File-based data sources integrate seamlessly with the query engine:
+
+#### CSV/JSON Integration
+- Schema inference occurs lazily during query planning
+- Data is read in chunks during execution
+- Filters and projections are pushed down where possible
+- Automatic type detection with configurable overrides
+
+#### Parquet Integration (via Extensions)
+- Columnar format alignment with Nivara's architecture
+- Zero-copy operations where possible
+- Configurable compression and row group sizes
+- Streaming support for large files
+
+### Arrow Interoperability (via Extensions)
+
+#### Conversion Strategy
+- Bidirectional conversion between Nivara and Arrow formats
+- Type mapping with validation and error handling
+- Zero-copy optimization when memory layouts align
+- Proper null semantics preservation
+
+---
+
+## Memory Management
+
+### Buffer Management
+
+- **Pooled allocations** for frequently used buffer sizes
+- **Automatic cleanup** with deterministic disposal patterns
+- **Memory budget enforcement** in streaming scenarios
+- **Garbage collection optimization** through object lifetime management
+
+### Resource Management
+
+```csharp
+public class ResourceManager : IDisposable
+{
+    // Manages buffer pools, memory budgets, and cleanup
+    // Provides centralized resource allocation and tracking
+    // Enables memory pressure monitoring and response
+}
+```
+
+---
+
+## Testing Strategy
+
+**Decision**: Rely heavily on **property-based testing** for core logic.
+
+**Rationale**: Traditional unit tests failed to cover edge cases in expression evaluation and optimization. Property-based testing exposed subtle semantic bugs early and scales better with system complexity.
+
+**Implementation**:
+- Property-based tests for all core operations
+- Invariant checking across transformations
+- Randomized input generation with edge case coverage
+- Performance regression detection through benchmarking
+
+---
+
+## Extension Architecture
+
+### Modular Design
+
+Core Nivara runtime remains focused and lightweight:
+- Essential DataFrame operations in core library
+- Optional features in `Nivara.Extensions` package
+- Clear separation of concerns
+- Minimal dependencies in core package
+
+### Extension Points
+
+- **Custom aggregation functions** through base class extension
+- **Custom data sources** via interface implementation
+- **Custom execution strategies** through strategy pattern
+- **Custom optimization rules** via rule registration
+
+---
+
+This architecture enables Nivara to provide high performance and type safety while maintaining clear separation of concerns and extensibility for future enhancements.
 
