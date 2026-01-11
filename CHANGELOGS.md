@@ -70,6 +70,9 @@ ARCHITECTURE DECISIONS (concise)
   - Specific exception types for common failure modes
   - Comprehensive validation with detailed error messages
 
+- Target framework: .NET 10.0 with latest C# language features
+  - Rationale: leverage latest performance improvements and language features; System.Numerics.Tensors requires modern .NET
+
 --------------------------------------------------------------------------------
 IMPLEMENTATION GOTCHAS & PATTERNS (grouped, one representative snippet per concept)
 
@@ -190,6 +193,7 @@ TESTING LESSONS & PATTERNS
 - Property-like tests can be implemented with parameterized test suites (NUnit) rather than full FsCheck.
 - Native integer types (nint): use nint for test assertions when comparing tensor dimensions.
 - Method overload disambiguation: use explicit parameters to resolve ambiguous generic method calls in tests.
+- Property-based testing approach: Use descriptive test names with "Property" prefix and feature categories for organization.
 
 Representative testing pattern for null handling
 ```csharp
@@ -203,6 +207,21 @@ public void NullMaskMaintenance_ArithmeticOperations_PreservesNullPositions()
         var result = column.Multiply(5);
         for (int i = 0; i < values.Length; i++)
             Assert.That(result.IsNull(i), Is.EqualTo(values[i] == null));
+    }
+}
+```
+
+Property-based test pattern
+```csharp
+[Test]
+[Category("Feature: nivara-frame, Property 13: Type compatibility validation")]
+public void Property_ArithmeticCompatibility_ValidatesCorrectly()
+{
+    // Property: Compatible numeric types should validate successfully
+    foreach (var (leftType, rightType) in compatiblePairs)
+    {
+        Assert.DoesNotThrow(() => 
+            TypeCompatibilityValidator.ValidateArithmeticCompatibility(leftType, rightType, "test"));
     }
 }
 ```
@@ -245,18 +264,25 @@ CSV/JSON lazy vs eager sources
 - Eager sources wrap lazy ones and materialize immediately.
 - For CSV inference, prefer conservative detection (int → double → string) and fallback to string in ambiguous cases.
 
+Current dependency versions (Extensions only)
+- CsvHelper 33.1.0 (updated from 33.0.1)
+- Apache.Arrow 22.1.0
+- Parquet.Net 5.4.0
+- Microsoft.ML 5.0.0 (for ML.NET integration)
+
 --------------------------------------------------------------------------------
 PERFORMANCE & OPTIMIZATION PATTERNS
 - Vectorization: Check Vector.IsHardwareAccelerated and type vectorizability before using SIMD kernels.
 - Overhead threshold: prefer vectorization only when Length >= vectorSize * 4 (adjustable heuristics).
-- Buffer pooling: rent large arrays (>1024 elements) from BufferPool to reduce GC pressure.
+- Buffer pooling: rent large arrays (>1024 elements) from BufferPool (in Extensions) to reduce GC pressure.
 - FlattenTo: cache flattened tensor data if multiple accesses are needed; otherwise use FlattenTo for single access.
-- StreamingBufferManager: use a bounded buffer manager for large dataset streaming with memory budgets and GC triggers.
+- StreamingBufferManager: use a bounded buffer manager (in Extensions) for large dataset streaming with memory budgets and GC triggers.
 
 Thresholds & defaults used
 - Buffer pooling threshold: 1024 elements (configurable)
 - Default memory budget for streaming: 256 MB (example configuration)
 - Vectorization overhead threshold: ~4 * vectorSize (heuristic)
+- Unmanaged constraint: TensorStorage requires unmanaged types (int, float, double, long, bool)
 
 --------------------------------------------------------------------------------
 QUERY ENGINE & OPTIMIZATIONS
@@ -282,20 +308,24 @@ Testing resource management
 --------------------------------------------------------------------------------
 KNOWN ISSUES & TODO (prioritized)
 - Parquet round-trip: investigate nullable value type null preservation (high priority).
-- FilterOperation null handling: NRE in specific filter-null scenarios (investigate and fix).
 - Zero-copy Arrow arrays: placeholder implementation; real zero-copy requires exposing underlying buffer ownership — consider as advanced optimization.
 - Improve column creation dynamic dispatch coverage for less common CLR types.
 - Internal Span access: consider adding internal AsSpan() methods to NivaraColumn for zero-copy tensor interop scenarios.
+- Tensor interop: investigate more efficient conversion patterns for large datasets.
 
 --------------------------------------------------------------------------------
 QUICK REFERENCE
-- Vectorizable types (confirmed): int, float, double, bool
-- Common dependencies (Extensions only): CsvHelper 33.0.1, Apache.Arrow 22.1.0, Parquet.Net 5.4.0
+- Vectorizable types (confirmed): int, float, double, long, bool (requires unmanaged constraint)
+- Target framework: .NET 10.0 with System.Numerics.Tensors 10.0.1
+- Common dependencies (Extensions only): CsvHelper 33.1.0, Apache.Arrow 22.1.0, Parquet.Net 5.4.0, Microsoft.ML 5.0.0
 - Useful helpers:
   - ColumnDiagnostics, DiagnosticsTracker
   - ColumnStorageFactory.IsVectorizable<T>()
   - NivaraColumn<T>.CreateFromNullable(T?[] values)
   - Tensor.Create(array) + FlattenTo(buffer)
+- Storage selection: TensorStorage for vectorizable unmanaged types, MemoryStorage for others
+- Null handling: explicit boolean masks, no NaN-based semantics
+- Query execution: lazy by default, multiple strategies available (eager, streaming, parallel)
 
 --------------------------------------------------------------------------------
 MAINTENANCE GUIDELINES

@@ -391,6 +391,14 @@ Do not rely solely on example-based tests for core logic.
 **Outcome**  
 Subtle correctness issues are caught early.
 
+Property-like tests can be implemented with **parameterized test suites (NUnit)** rather than full FsCheck because:
+
+- FsCheck has a strong reputation in the F# community but is less visible in mainstream C# circles
+- FsCheck though is respected but is not cultural fit for C# and there are not many examples out there
+- LLMs might not have seen using FsCheck in C# and will struggle to suggest correct code
+- AI Agents therefore struggle when using FsCheck in C# codebase and we loose lot of AI credits
+- Therefore AI Agents should stay away from FsCheck
+
 ---
 
 ### Testing Strategy for Complex Operations

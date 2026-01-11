@@ -22,7 +22,6 @@ public class MLNetIntegrationTests
     MLContext mlContext;
 
     [Test]
-    [Ignore("Skipping ML")]
     public void MLNetPipeline_WorksCorrectly()
     {
         // Create sample training data

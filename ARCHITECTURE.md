@@ -31,24 +31,27 @@ Many implementation choices make more sense when viewed through this lens. These
 
 At a high level, Nivara consists of:
 
-- Columnar storage abstractions
-- Schema-aware frames
-- A lazy query layer
-- Execution kernels (scalar and vectorized)
-- Diagnostics and planning infrastructure
+- **Columnar storage abstractions** (`MemoryStorage<T>`, `TensorStorage<T>`)
+- **Schema-aware frames** (`NivaraFrame`, `QueryFrame`)
+- **A lazy query layer** with optimization engine
+- **Execution strategies** (lazy, eager, streaming, parallel)
+- **Operation implementations** (joins, aggregations, filtering, sorting)
+- **Diagnostics and planning infrastructure**
 
 ```
-Data Source (CSV / JSON)
+Data Source (CSV/Parquet/Arrow)
         ↓
-QueryFrame (lazy)
+QueryFrame (lazy construction)
         ↓
-Logical Plan
+Logical Plan (operations + schema)
         ↓
-Physical Plan
+Query Optimization (rule-based)
         ↓
-Execution Kernels
+Physical Plan (execution strategy + kernels)
         ↓
-Materialized Frame / Column
+Execution Engine (scalar/vectorized kernels)
+        ↓
+Materialized NivaraFrame
 ```
 
 ---
@@ -57,19 +60,38 @@ Materialized Frame / Column
 
 ### NivaraColumn<T>
 
-`NivaraColumn<T>` is the fundamental data container.
+`NivaraColumn<T>` is the fundamental data container implemented using a pluggable storage architecture.
 
 Key characteristics:
 
-- Strongly typed (`T` is never erased)
-- Immutable
-- Backed by contiguous memory
-- Optional null mask
+- **Strongly typed** (`T` is never erased at the API level)
+- **Immutable** (operations return new columns)
+- **Pluggable storage backend** (Memory vs Tensor storage)
+- **Explicit null handling** via optional boolean masks
 
-Each column owns:
+Each column delegates to an `IColumnStorage<T>` implementation:
 
-- A data buffer (`T[]`, `Memory<T>`, or tensor-backed storage)
-- A validity bitmap (when nulls are present)
+- **Data storage** (`MemoryStorage<T>` or `TensorStorage<T>`)
+- **Null mask** (when nulls are present)
+- **Type-specific operations** (scalar vs vectorized)
+
+### Storage Backend Selection
+
+The `ColumnStorageFactory` automatically selects the optimal storage backend:
+
+#### MemoryStorage<T>
+- Used for non-vectorizable types (strings, objects, complex types)
+- Simple `Memory<T>` backing with scalar operations
+- Predictable performance characteristics
+- Lower memory overhead
+
+#### TensorStorage<T>
+- Used for vectorizable types (`int`, `float`, `double`, `bool`)
+- Backed by `System.Numerics.Tensors`
+- Automatic SIMD acceleration via `TensorPrimitives`
+- Falls back to scalar operations when needed
+
+This selection is **transparent** to users and happens at column creation time.
 
 ### Null Representation Decision
 
@@ -104,33 +126,45 @@ Null-related behavior is a major source of subtle bugs.
 
 ## Memory vs Tensor Storage
 
-Nivara distinguishes between two storage strategies:
+Nivara uses a factory-based approach to select optimal storage:
 
-### Memory Storage
+### MemoryStorage<T>
 
-Used when:
+**Used when:**
+- `T` is not vectorizable (strings, objects, DateTime, etc.)
+- Operations cannot benefit from SIMD acceleration
 
-- `T` is not vectorizable
-- Operations cannot be safely SIMD-accelerated
+**Characteristics:**
+- Simple `Memory<T>` layout
+- Scalar execution paths only
+- Predictable semantics and performance
+- Lower memory overhead
+- Faster for non-numeric operations
 
-Characteristics:
+### TensorStorage<T>
 
-- Simple memory layout
-- Scalar execution
-- Predictable semantics
+**Used when:**
+- `T` supports SIMD operations (`int`, `float`, `double`, `bool`)
+- Operations can be safely vectorized
 
-### Tensor Storage
+**Characteristics:**
+- Uses `System.Numerics.Tensors` for storage
+- Automatic SIMD acceleration via `TensorPrimitives`
+- Falls back to scalar paths when vectorization isn't beneficial
+- Higher performance for mathematical operations
+- Slightly higher memory overhead
 
-Used when:
+### Automatic Selection
 
-- `T` supports SIMD operations
-- Operations are safe to vectorize
+The `ColumnStorageFactory.IsVectorizable<T>()` method determines storage type:
 
-Characteristics:
+```csharp
+// Automatically selects TensorStorage<int>
+var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
 
-- Uses `System.Numerics.Vector<T>`
-- Automatically selected
-- Falls back to scalar paths when required
+// Automatically selects MemoryStorage<string>
+var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
+```
 
 This distinction is **internal** and transparent to users.
 
@@ -226,87 +260,183 @@ Expressions are **pure** and side-effect free.
 
 ### QueryFrame
 
-`QueryFrame` represents a lazily constructed computation.
+`QueryFrame` represents a lazily constructed computation graph.
 
-Characteristics:
+**Characteristics:**
+- **Lazy construction** - no data processing until `Collect()`
+- **Operation chaining** - builds logical plans through method calls
+- **Schema validation** - validates operations before execution
+- **Optimization opportunities** - plans can be analyzed and optimized
 
-- No data is read or processed eagerly
-- Operations build a logical plan
-- Plans are validated before execution
+### Execution Strategies
 
-### Lazy Execution Model Decision
+Nivara supports multiple execution strategies via the `ExecutionStrategy` enum:
 
-**Decision**: Adopt a **lazy query construction model** with explicit execution boundaries.
+#### 1. Lazy (Default)
+- Builds complete query plan before execution
+- Applies optimizations transparently
+- Best memory efficiency through deferred evaluation
+- Optimal for complex multi-operation queries
 
-**Context**: Eager execution limits optimization opportunities and makes composition difficult.
+#### 2. Eager
+- Executes operations immediately without planning
+- Simpler debugging with predictable execution order
+- Good for simple, single-operation queries
+- No optimization overhead
 
-**Alternatives Considered**:
-- Fully eager execution
-- Partial eagerness with implicit triggers
+#### 3. Streaming
+- Processes data in configurable chunks
+- Controlled memory usage for large datasets
+- Automatic chunk size calculation
+- Suitable for datasets larger than available memory
 
-**Why This Was Chosen**:
-- Lazy plans allow validation and optimization before execution
-- Explicit execution points make behavior predictable
-
-**Consequences**:
-- Errors may surface later than construction time
-- Requires careful validation to avoid deferred failures
+#### 4. Parallel
+- Uses multiple threads for CPU-intensive operations
+- Automatic detection of parallelizable operations
+- Configurable degree of parallelism
+- Best for compute-heavy workloads on multi-core systems
 
 ### Planning Stages
 
-1. **Logical Plan**
-   - Operation ordering
-   - Predicate composition
-   - Projection pruning
+1. **Logical Plan Construction**
+   - Operation validation and type checking
+   - Schema transformation and compatibility verification
+   - Dependency analysis for optimization safety
 
-2. **Physical Plan**
-   - Kernel selection
-   - Vectorization decisions
-   - Null-aware execution paths
+2. **Query Optimization** (Lazy strategy only)
+   - Rule-based optimization engine
+   - Conservative transformations that preserve correctness
+   - Predicate pushdown, projection pruning, operation fusion
 
-Execution begins only when `Collect()` is invoked.
+3. **Physical Plan Generation**
+   - Execution strategy selection
+   - Kernel selection (scalar vs vectorized)
+   - Resource allocation and memory planning
 
-### Query Optimization Scope Decision
+4. **Execution**
+   - Triggered by `Collect()` or materialization methods
+   - Error handling with structured context
+   - Progress reporting and cancellation support
 
-**Decision**: Restrict optimizations to **conservative, provably safe transformations**.
+Execution begins only when `Collect()` or similar materialization methods are invoked.
 
-**Context**: Aggressive query reordering risks changing semantics in the presence of dependencies.
+## Query Optimization Engine
 
-**Alternatives Considered**:
-- Cost-based aggressive optimization
-- Heuristic reordering without dependency analysis
+### OptimizationEngine Architecture
 
-**Why This Was Chosen**:
-- Correctness regressions are extremely difficult to debug
-- Many optimizations provide marginal gains compared to their risk
+The `OptimizationEngine` applies rule-based optimizations to query plans:
 
-**Consequences**:
-- Some performance opportunities are intentionally skipped
-- System behavior remains predictable and correct
+**Core Components:**
+- **OptimizationRule** base class for implementing optimization strategies
+- **Rule prioritization** system for applying optimizations in correct order
+- **Statistics tracking** for performance analysis and debugging
+- **Conservative approach** that preserves correctness over aggressive optimization
+
+### Built-in Optimization Rules
+
+#### 1. PredicatePushdownRule
+- **Purpose**: Moves filter operations closer to data sources
+- **Benefit**: Reduces data movement and processing overhead
+- **Safety**: Only applied when predicate dependencies are verified
+
+#### 2. ProjectionPushdownRule  
+- **Purpose**: Eliminates unused columns early in the pipeline
+- **Benefit**: Reduces memory usage and I/O overhead
+- **Safety**: Analyzes column usage across entire query plan
+
+#### 3. ColumnEliminationRule
+- **Purpose**: Removes columns not needed by subsequent operations
+- **Benefit**: Minimizes memory footprint and processing time
+- **Safety**: Performs dependency analysis to ensure required columns are preserved
+
+#### 4. OperationFusionRule
+- **Purpose**: Combines compatible operations (multiple filters, projections)
+- **Benefit**: Reduces operation overhead and improves cache locality
+- **Safety**: Only fuses operations with identical semantics
+
+### Optimization Process
+
+```csharp
+var optimizer = new QueryOptimizer();
+var optimizedPlan = optimizer.Optimize(originalPlan);
+
+// Access optimization statistics
+var stats = optimizer.Engine.GetStatistics();
+foreach (var stat in stats)
+{
+    Console.WriteLine($"{stat.RuleName}: {stat.EstimatedImprovementPercent:F1}% improvement");
+}
+```
+
+### Safety Guarantees
+
+- **Correctness Preserved**: Optimizations never change query semantics or results
+- **Conservative Approach**: When optimization safety cannot be proven, the rule is skipped
+- **Graceful Degradation**: Failed optimizations don't break queries - original plan is used
+- **Schema Validation**: All optimizations respect type safety and schema constraints
+- **Dependency Analysis**: Rules analyze operation dependencies before applying transformations
 
 ---
 
-## Execution Kernels
+## DataFrame Operations Architecture
 
-Execution kernels are responsible for applying operations to data.
+### Operation Implementation Pattern
 
-Types of kernels:
+All DataFrame operations implement the `IQueryOperation` interface:
 
-- Scalar kernels
-- Vectorized (SIMD) kernels
-- Null-aware variants
+```csharp
+public interface IQueryOperation
+{
+    string OperationType { get; }
+    Schema TransformSchema(Schema inputSchema);
+    NivaraFrame Execute(NivaraFrame input);
+}
+```
 
-Kernel selection is driven by:
+### Core Operations
 
-- Data type
-- Presence of nulls
-- Operation semantics
+#### Filtering Operations
+- **FilterOperation**: Applies predicates to filter rows
+- **SliceOperation**: Extracts row ranges (Take, Skip, Slice)
+- **SelectOperation**: Applies complex selection criteria
 
-Kernels are designed to be:
+#### Transformation Operations  
+- **ProjectionOperation**: Selects and renames columns
+- **SortOperation**: Multi-column sorting with null ordering control
+- **GroupByOperation**: Groups data by key columns with aggregation support
 
-- Side-effect free
-- Easily testable
-- Benchmarkable in isolation
+#### Combination Operations
+- **JoinOperation**: Inner, left, right, and full outer joins with configurable conflict resolution
+- **ConcatenationOperation**: Vertical and horizontal DataFrame combination
+
+#### Aggregation Operations
+- **AggregationFunction**: Base class for Sum, Count, Mean, Min, Max, etc.
+- **Vectorized aggregations**: Automatic SIMD acceleration for numeric types
+- **Null-aware processing**: Proper null handling in all aggregation functions
+
+### Operation Integration
+
+Operations integrate seamlessly with the query system:
+
+1. **Schema Validation**: `TransformSchema()` validates compatibility before execution
+2. **Lazy Evaluation**: Operations build query plans in `QueryFrame`
+3. **Optimization**: Operations participate in query optimization rules
+4. **Error Handling**: Structured exceptions with operation context
+
+### Fluent API Integration
+
+Extension methods provide fluent APIs that delegate to core operations:
+
+```csharp
+// Extension method delegates to FilterOperation
+var filtered = frame.Where(row => row.Age > 25);
+
+// Extension method delegates to SortOperation  
+var sorted = frame.OrderBy("Name").ThenByDescending("Age");
+
+// Extension method delegates to JoinOperation
+var joined = left.Join(right, "Id", JoinType.Inner);
+```
 
 ### Type Erasure in Execution Engine Decision
 

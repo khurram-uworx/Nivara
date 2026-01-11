@@ -50,17 +50,23 @@ Understanding the repository layout is essential before making changes.
 
 ```
 src/Nivara/
-├── Diagnostics/           # Performance analysis and diagnostic tools
-├── Exceptions/            # Custom exception hierarchy
-├── Expressions/           # Query expression system
-├── IO/                    # Built-in IO (JSON, core data sources)
-├── Memory/                # Memory-based storage (non-vectorizable types)
-├── Tensors/               # Tensor-based storage (vectorizable types)
-├── Schema.cs              # Schema management
-├── NivaraColumn.cs        # Column implementation
-├── NivaraSeries.cs        # Series implementation
-├── NivaraFrame.cs         # DataFrame implementation
-└── [Query Engine Files]   # Query planning and execution
+├── Diagnostics/               # Performance analysis and diagnostic tools
+├── Exceptions/                # Custom exception hierarchy
+├── Expressions/               # Query expression system
+├── IO/                        # Built-in IO (core data sources)
+├── Operations/                # DataFrame operations (joins, aggregations, etc.)
+├── Storage/                   # Column storage implementations
+├── Tensors/                   # Tensor-based operations and interop
+├── Schema.cs                  # Schema management
+├── NivaraColumn.cs            # Column implementation
+├── NivaraSeries.cs            # Series implementation
+├── NivaraFrame.cs             # DataFrame implementation
+├── NivaraFrameExtensions.cs   # DataFrame extension methods
+├── QueryFrame.cs              # Lazy query frame
+├── QueryExecutor.cs           # Query execution engine
+├── QueryOptimizer.cs          # Query optimization
+├── ExecutionStrategy.cs       # Execution strategies (lazy, eager, parallel, streaming)
+└── [Other Query Engine Files] # Query planning and execution components
 ```
 
 ### Extensions
@@ -69,9 +75,18 @@ Third-party dependencies and optional integrations live in a separate project:
 
 ```
 src/Nivara.Extensions/
-└── IO/
-    ├── CsvDataSource.cs   # CSV support (CsvHelper)
-    └── CsvExtensions.cs   # CSV factory methods
+├── IO/
+│   ├── ArrowInterop.cs      # Apache Arrow integration
+│   ├── ParquetReader.cs     # Parquet file support
+│   ├── ParquetWriter.cs     # Parquet file writing
+│   ├── CsvDataSource.cs     # CSV support (CsvHelper)
+│   ├── CsvExtensions.cs     # CSV factory methods
+│   └── [Other IO Files]     # Buffer management, streaming, type mapping
+└── MLNet/
+    ├── MLNetExtensions.cs   # ML.NET integration
+    ├── MLNetInterop.cs      # ML.NET interoperability
+    ├── ModelIntegration.cs  # Model integration helpers
+    └── TensorConversions.cs # Tensor conversion utilities
 ```
 
 ### Tests
@@ -80,14 +95,23 @@ Tests mirror the source structure for discoverability:
 
 ```
 tests/Nivara.Tests/
-├── Diagnostics/
-├── Expressions/
-├── Memory/
-├── Tensors/
-├── SchemaTests.cs
-├── NivaraColumnTests.cs
-├── NivaraSeriesTests.cs
-└── NivaraFrameTests.cs
+├── Diagnostics/           # Diagnostic system tests
+├── Exceptions/            # Exception handling tests
+├── Expressions/           # Expression system tests
+├── IO/                    # Core I/O tests
+├── MLNet/                 # ML.NET integration tests
+├── Operations/            # DataFrame operations tests
+├── Storage/               # Storage implementation tests
+├── Tensors/               # Tensor operations tests
+├── SchemaTests.cs         # Schema validation tests
+├── NivaraColumnTests.cs   # Column implementation tests
+├── NivaraSeriesTests.cs   # Series implementation tests
+├── NivaraFrameTests.cs    # DataFrame core tests
+├── QueryFrameTests.cs     # Lazy query tests
+├── QueryExecutionTests.cs # Query execution tests
+├── QueryOptimizerTests.cs # Query optimization tests
+├── IntegrationTests.cs    # End-to-end integration tests
+└── [Property-based Tests] # Property tests
 ```
 
 ---
@@ -109,7 +133,9 @@ tests/Nivara.Tests/
 
 5. **Update Documentation**
    - User-facing changes → update **README.md**
-   - Do *not* add rationale or lessons learned here (use GUIDELINES.md instead).
+   - Implementation patterns and gotchas → update **CHANGELOGS.md**
+   - Transferable engineering lessons → consider **GUIDELINES.md** (but avoid project-specific details)
+   - Do *not* add architectural rationale to this file
 
 6. **Submit a Pull Request**
    - Provide a clear description of what changed and why.
@@ -123,9 +149,9 @@ All contributions must include tests where applicable.
 ### Test Types
 
 - **Unit Tests**: Concrete examples and edge cases (NUnit)
-- **Property-Based Tests**: Invariants and universal properties (FsCheck.NET)
-- **Integration Tests**: End-to-end scenarios where relevant
-- **Performance Tests**: Benchmarks for performance-critical paths
+- **Property-Based Tests**: Invariants and universal properties
+- **Integration Tests**: End-to-end scenarios and complex workflows
+- **Performance Tests**: Benchmarks for performance-critical paths (BenchmarkDotNet)
 
 ### Testing Best Practices
 
@@ -136,6 +162,9 @@ All contributions must include tests where applicable.
 - Group related tests in nested test classes for organization
 - Use property-based tests to validate invariants across wide input spaces
 - Do not rely solely on example-based tests for core logic
+- Test both immediate execution (DataFrame) and lazy execution (QueryFrame) paths
+- Validate query optimization behavior and execution strategies
+- Test interoperability with external formats (Arrow, Parquet, CSV) in Extensions
 
 ### Running Tests
 
@@ -145,6 +174,14 @@ dotnet test
 
 # With coverage
 dotnet test --collect:"XPlat Code Coverage"
+
+# Run specific test categories
+dotnet test --filter "Category=Unit"
+dotnet test --filter "Category=Integration"
+dotnet test --filter "Category=Property"
+
+# Run performance benchmarks (if available)
+dotnet run --project benchmarks --configuration Release
 ```
 
 ---
@@ -173,6 +210,9 @@ dotnet test --collect:"XPlat Code Coverage"
 - **Explicit Over Implicit**: Make execution boundaries, error conditions, and type behavior explicit
 - **Conservative Optimization**: If optimization safety is uncertain, skip the optimization
 - **Null Handling**: Use explicit boolean masks for null tracking, never sentinel values
+- **Immutable Data Model**: Operations return new data structures rather than modifying existing ones
+- **Schema-First Design**: Validate schemas early to catch errors before expensive operations
+- **Lazy vs Eager Execution**: Provide both immediate (DataFrame) and deferred (QueryFrame) execution models
 
 ### Type System Guidelines
 
@@ -180,6 +220,15 @@ dotnet test --collect:"XPlat Code Coverage"
 - Use type-erased interfaces for runtime operations beneath generic APIs
 - Handle nullable types explicitly using `Nullable.GetUnderlyingType()`
 - Avoid reflection-heavy designs for core execution paths
+- Use vectorization only when measurably beneficial and fallback to scalar operations
+
+### Query System Guidelines
+
+- Implement operations as `IQueryOperation` for integration with query planning
+- Use conservative optimization strategies that preserve correctness
+- Support multiple execution strategies (lazy, eager, parallel, streaming)
+- Provide comprehensive diagnostics and performance analysis capabilities
+- Validate schemas during `TransformSchema` phase to fail fast
 
 ---
 
@@ -188,6 +237,40 @@ dotnet test --collect:"XPlat Code Coverage"
 - Use **BenchmarkDotNet** for performance measurements
 - Include benchmarks for performance-sensitive code
 - Validate behavior on multiple platforms when possible
+- Test both vectorized and scalar code paths
+- Benchmark different execution strategies (lazy, eager, parallel, streaming)
+- Profile memory usage and allocation patterns
+- Compare performance against baseline implementations
+
+---
+
+## 🔧 Development Tools and Setup
+
+### Recommended Extensions (VS Code)
+
+- C# Dev Kit
+- .NET Install Tool
+- GitLens
+- Test Explorer UI
+
+### Recommended Extensions (Visual Studio)
+
+- BenchmarkDotNet templates
+- Code coverage tools
+
+### Build Configuration
+
+The project uses:
+- **.NET 10.0** as the target framework
+- **C# latest** language version
+- **Nullable reference types** enabled
+- **Unsafe code blocks** allowed for performance-critical paths
+- **System.Numerics.Tensors** for vectorization
+
+### Package Structure
+
+- **Nivara** (core): Zero external dependencies except System.Numerics.Tensors
+- **Nivara.Extensions**: Optional integrations with third-party libraries (CsvHelper, Apache Arrow, Parquet.Net, ML.NET)
 
 ---
 
@@ -195,10 +278,13 @@ dotnet test --collect:"XPlat Code Coverage"
 
 ### Before Submitting
 
-- All tests pass
+- All tests pass (unit, integration, and property-based tests)
 - Documentation updated if behavior is user-visible
-- Code follows project standards
+- Code follows project standards and architectural principles
 - Changes are limited to the intended scope
+- Performance impact has been considered and measured if relevant
+- Null handling follows explicit boolean mask patterns
+- New operations integrate with the query system where appropriate
 
 ### Review Requirements
 
@@ -220,8 +306,41 @@ Nivara follows **Semantic Versioning**:
 
 ## 💬 Getting Help
 
-- GitHub Issues – bugs and feature requests
-- GitHub Discussions – questions and design discussions
+- **GitHub Issues** – bugs and feature requests
+- **GitHub Discussions** – questions and design discussions
+- **CHANGELOGS.md** – implementation patterns, gotchas, and architectural decisions
+- **GUIDELINES.md** – transferable engineering lessons for similar systems
+
+---
+
+## 🎯 Contribution Areas
+
+We welcome contributions in these areas:
+
+### Core Library
+- Performance optimizations (with benchmarks)
+- New DataFrame operations
+- Query optimization rules
+- Execution strategy improvements
+- Better error messages and diagnostics
+
+### Extensions
+- New file format support
+- Enhanced ML.NET integration
+- Additional data source connectors
+- Streaming and large dataset optimizations
+
+### Testing & Quality
+- Property-based test coverage
+- Performance regression tests
+- Cross-platform compatibility testing
+- Memory usage optimization
+
+### Documentation
+- API documentation improvements
+- Usage examples and tutorials
+- Performance guides
+- Migration guides from other DataFrame libraries
 
 ---
 
