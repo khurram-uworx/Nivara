@@ -1032,3 +1032,109 @@ Never apply an optimization unless its safety can be verified through available 
 
 **Outcome**  
 Optimization system is safe and reliable, preferring correctness over aggressive optimization.
+
+---
+
+## Execution Engine Implementation
+
+### Strategy Pattern for Execution Modes
+
+**Problem**  
+Query execution needs to support different strategies (lazy, eager, streaming, parallel) with different performance characteristics.
+
+**Constraint**  
+- Each strategy has different memory and CPU trade-offs
+- Users need control over execution behavior
+- Strategies must be extensible and pluggable
+- Must maintain result consistency across strategies
+
+**Pattern That Worked**  
+Implement strategy pattern with pluggable execution strategies:
+- Define `IExecutionStrategy` interface with execute, validate, and cost estimation methods
+- Create concrete strategies for each execution mode
+- Use strategy registry with concurrent dictionary for thread safety
+- Provide cost estimation to help users choose appropriate strategies
+
+**Negative Rule**  
+Do not hardcode execution logic - always use pluggable strategy pattern for extensibility.
+
+**Outcome**  
+Execution system is flexible, extensible, and allows users to optimize for their specific use cases.
+
+---
+
+### Parallel Execution Design
+
+**Problem**  
+Parallel execution needs to balance performance gains with coordination overhead and memory usage.
+
+**Constraint**  
+- Not all operations benefit from parallelism
+- Small datasets have too much overhead for parallel processing
+- Thread coordination adds complexity and potential for bugs
+- Must gracefully fall back to sequential execution
+
+**Pattern That Worked**  
+Implement intelligent parallel execution with helper utilities:
+- Create `ParallelExecutionHelper` with chunk size calculation and parallel processing utilities
+- Use heuristics to determine when parallelism is beneficial (data size, operation type)
+- Provide async-first parallel operations with proper cancellation support
+- Cap parallelism at reasonable multiples of processor count to avoid context switching overhead
+
+**Negative Rule**  
+Never assume parallelism is always better - measure data size and operation characteristics before applying parallel processing.
+
+**Outcome**  
+Parallel execution provides performance benefits for appropriate workloads while avoiding overhead for small datasets.
+
+---
+
+### Execution Strategy Cost Estimation
+
+**Problem**  
+Users need guidance on which execution strategy to use for their specific workloads.
+
+**Constraint**  
+- Cost estimation must be fast (no actual execution)
+- Different strategies have different cost profiles
+- Must account for data size, operation types, and system resources
+
+**Pattern That Worked**  
+Implement cost estimation with operation-specific weights:
+- Assign base costs for each execution strategy
+- Add operation-specific costs based on complexity (Filter < Sort < GroupBy < Join)
+- Apply strategy-specific modifiers (lazy gets optimization discount, parallel gets parallelism discount)
+- Include overhead costs for coordination and materialization
+
+**Negative Rule**  
+Do not use simple operation counting - weight operations by their actual computational complexity.
+
+**Outcome**  
+Cost estimation helps users make informed decisions about execution strategies for their workloads.
+
+---
+
+### Async-First Execution Design
+
+**Problem**  
+Modern applications need async execution support for responsiveness and cancellation.
+
+**Constraint**  
+- Must support both sync and async execution patterns
+- Cancellation must work correctly across all strategies
+- Progress reporting should work for long-running operations
+- Must avoid blocking threads unnecessarily
+
+**Pattern That Worked**  
+Design async-first with sync wrappers:
+- Make async methods the primary implementation
+- Use `GetAwaiter().GetResult()` for sync wrappers (avoid `Task.Wait()` or `.Result`)
+- Pass `CancellationToken` through all async operations
+- Use `Task.Run` for CPU-bound work to avoid blocking the thread pool
+- Implement progress reporting through `IProgress<T>` interface
+
+**Negative Rule**  
+Do not use blocking async calls like `.Result` or `Task.Wait()` - use `GetAwaiter().GetResult()` for better exception handling.
+
+**Outcome**  
+Execution engine supports both sync and async patterns with proper cancellation and progress reporting.

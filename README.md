@@ -1080,11 +1080,193 @@ Console.WriteLine(result.GenerateReport());
 
 ---
 
+## Execution Strategies
+
+Nivara provides multiple execution strategies to optimize performance for different use cases and resource constraints:
+
+### Execution Strategy Types
+
+Choose the optimal execution strategy based on your workload:
+
+```csharp
+using Nivara;
+
+var engine = new ExecutionEngine();
+var plan = query.GetQueryPlan();
+
+// Lazy execution (default) - builds query plans and optimizes before execution
+var lazyContext = new ExecutionContext(ExecutionStrategy.Lazy);
+var lazyResult = engine.Execute(plan, lazyContext);
+
+// Eager execution - executes operations immediately without optimization
+var eagerContext = new ExecutionContext(ExecutionStrategy.Eager);
+var eagerResult = engine.Execute(plan, eagerContext);
+
+// Streaming execution - processes data in chunks for large datasets
+var streamingContext = new ExecutionContext(ExecutionStrategy.Streaming);
+var streamingResult = engine.Execute(plan, streamingContext);
+
+// Parallel execution - uses multiple threads for CPU-intensive operations
+var parallelContext = ExecutionContext.WithParallelism(Environment.ProcessorCount);
+var parallelResult = engine.Execute(plan, parallelContext);
+```
+
+### Lazy Execution (Default)
+
+Best for most scenarios, providing optimal memory usage and query optimization:
+
+```csharp
+// Lazy execution allows for query optimization and minimal memory usage
+var context = new ExecutionContext(ExecutionStrategy.Lazy);
+var result = engine.Execute(plan, context);
+
+// Benefits:
+// - Query optimization applied automatically
+// - Minimal memory footprint
+// - Deferred execution until results are needed
+// - Best for complex queries with multiple operations
+```
+
+### Eager Execution
+
+Executes operations immediately, useful for debugging and simple queries:
+
+```csharp
+// Eager execution for immediate results
+var context = new ExecutionContext(ExecutionStrategy.Eager);
+var result = engine.Execute(plan, context);
+
+// Benefits:
+// - Immediate execution and results
+// - Easier debugging (operations execute in order)
+// - Predictable memory usage patterns
+// - Good for simple, single-operation queries
+```
+
+### Streaming Execution
+
+Processes data in chunks to manage memory usage for large datasets:
+
+```csharp
+// Streaming execution with memory budget
+var context = ExecutionContext.WithMemoryBudget(512 * 1024 * 1024); // 512MB
+context.Strategy = ExecutionStrategy.Streaming;
+var result = engine.Execute(plan, context);
+
+// Benefits:
+// - Controlled memory usage
+// - Suitable for datasets larger than available memory
+// - Automatic chunk size calculation based on memory budget
+// - Graceful fallback for non-streamable operations
+```
+
+### Parallel Execution
+
+Uses multiple threads for CPU-intensive operations on multi-core systems:
+
+```csharp
+// Parallel execution with custom parallelism
+var context = ExecutionContext.WithParallelism(4); // Use 4 threads
+var result = engine.Execute(plan, context);
+
+// Benefits:
+// - Improved performance for parallelizable operations
+// - Automatic detection of suitable operations
+// - Configurable degree of parallelism
+// - Thread-safe execution with proper coordination
+```
+
+### Execution Context Configuration
+
+Fine-tune execution behavior with comprehensive configuration options:
+
+```csharp
+var context = new ExecutionContext
+{
+    Strategy = ExecutionStrategy.Parallel,
+    MaxDegreeOfParallelism = Environment.ProcessorCount,
+    MemoryBudget = 1024 * 1024 * 1024, // 1GB
+    CancellationToken = cancellationToken,
+    Progress = progressReporter
+};
+
+// Async execution with progress reporting
+var result = await engine.ExecuteAsync(plan, context);
+```
+
+### Execution Cost Estimation
+
+Get cost estimates to choose the optimal execution strategy:
+
+```csharp
+var engine = new ExecutionEngine();
+var plan = query.GetQueryPlan();
+
+// Compare costs across strategies
+var lazyCost = engine.EstimateExecutionCost(plan, new ExecutionContext(ExecutionStrategy.Lazy));
+var eagerCost = engine.EstimateExecutionCost(plan, new ExecutionContext(ExecutionStrategy.Eager));
+var parallelCost = engine.EstimateExecutionCost(plan, ExecutionContext.WithParallelism(4));
+
+Console.WriteLine($"Lazy: {lazyCost}, Eager: {eagerCost}, Parallel: {parallelCost}");
+
+// Choose strategy with lowest estimated cost
+var optimalStrategy = lazyCost <= eagerCost && lazyCost <= parallelCost 
+    ? ExecutionStrategy.Lazy 
+    : (eagerCost <= parallelCost ? ExecutionStrategy.Eager : ExecutionStrategy.Parallel);
+```
+
+### Progress Reporting and Cancellation
+
+Monitor long-running operations with progress reporting and cancellation support:
+
+```csharp
+var cancellationTokenSource = new CancellationTokenSource();
+var progress = new Progress<ExecutionProgress>(p => 
+{
+    Console.WriteLine($"{p.OperationName}: {p.PercentComplete:P1}");
+});
+
+var context = new ExecutionContext
+{
+    Strategy = ExecutionStrategy.Parallel,
+    CancellationToken = cancellationTokenSource.Token,
+    Progress = progress
+};
+
+// Cancel after 30 seconds
+cancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(30));
+
+try 
+{
+    var result = await engine.ExecuteAsync(plan, context);
+}
+catch (OperationCanceledException)
+{
+    Console.WriteLine("Execution was cancelled");
+}
+```
+
+### Execution Strategy Features
+
+The execution engine provides:
+
+- **Multiple strategies**: Lazy, Eager, Streaming, and Parallel execution modes
+- **Automatic optimization**: Query optimization applied transparently in lazy mode
+- **Resource management**: Memory budgets and parallelism control
+- **Progress reporting**: Real-time progress updates for long-running operations
+- **Cancellation support**: Graceful cancellation with cleanup
+- **Cost estimation**: Performance guidance for strategy selection
+- **Async support**: Full async/await support with proper exception handling
+- **Extensibility**: Pluggable strategy pattern for custom execution modes
+- **Safety**: Thread-safe execution with proper error handling and resource cleanup
+
+---
+
 ## Planned Features
 
 The following features are still in development:
 
-- Streaming and parallel execution strategies
+- Advanced streaming optimizations for very large datasets
 
 ---
 
