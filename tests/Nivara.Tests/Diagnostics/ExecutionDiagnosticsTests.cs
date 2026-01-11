@@ -1,5 +1,5 @@
-using NUnit.Framework;
 using Nivara.Diagnostics;
+using NUnit.Framework;
 
 namespace Nivara.Tests.Diagnostics;
 
@@ -21,7 +21,7 @@ public class ExecutionDiagnosticsTests
         // Assert
         var timings = diagnostics.OperationTimings;
         Assert.That(timings.Count, Is.EqualTo(1));
-        
+
         var timing = timings[0];
         Assert.That(timing.OperationType, Is.EqualTo("Filter"));
         Assert.That(timing.Duration, Is.EqualTo(duration));
@@ -74,21 +74,21 @@ public class ExecutionDiagnosticsTests
         // Arrange
         var diagnostics = new ExecutionDiagnostics();
         diagnostics.StartExecution();
-        
+
         // Add some sample data
         diagnostics.RecordOperationTiming("Filter", TimeSpan.FromMilliseconds(50), 1000, 1024);
         diagnostics.RecordOperationTiming("Sort", TimeSpan.FromMilliseconds(150), 1000, 2048);
-        
+
         diagnostics.RecordWarning(new PerformanceWarning(
             PerformanceWarningSeverity.Info,
             "Test warning",
             "Test suggestion"));
-            
+
         diagnostics.RecordOptimization(new OptimizationApplied(
             "Test Optimization",
             "Test description",
             10.0));
-        
+
         Thread.Sleep(10); // Small delay to ensure measurable execution time
         diagnostics.EndExecution();
 
@@ -113,12 +113,12 @@ public class ExecutionDiagnosticsTests
         diagnostics.StartExecution();
         diagnostics.ParallelismDegree = 4;
         diagnostics.ExecutionStrategy = ExecutionStrategy.Parallel;
-        
+
         diagnostics.RecordOperationTiming("Filter", TimeSpan.FromMilliseconds(100), 500, 1024);
         diagnostics.RecordOperationTiming("Sort", TimeSpan.FromMilliseconds(200), 500, 2048);
         diagnostics.RecordWarning(new PerformanceWarning(PerformanceWarningSeverity.Info, "Test", null));
         diagnostics.RecordOptimization(new OptimizationApplied("Test", "Test", null));
-        
+
         Thread.Sleep(10);
         diagnostics.EndExecution();
 
@@ -158,7 +158,7 @@ public class ExecutionDiagnosticsTests
         Assert.That(result, Is.EqualTo("success"));
         Assert.That(operationExecuted, Is.True);
         Assert.That(diagnostics.OperationTimings.Count, Is.EqualTo(1));
-        
+
         var timing = diagnostics.OperationTimings[0];
         Assert.That(timing.OperationType, Is.EqualTo("TestOperation"));
         Assert.That(timing.RowsProcessed, Is.EqualTo(100));
@@ -183,10 +183,10 @@ public class ExecutionDiagnosticsTests
         Assert.That(exception, Is.EqualTo(testException));
         Assert.That(diagnostics.OperationTimings.Count, Is.EqualTo(1));
         Assert.That(diagnostics.Warnings.Count, Is.EqualTo(1));
-        
+
         var timing = diagnostics.OperationTimings[0];
         Assert.That(timing.OperationType, Is.EqualTo("FailingOperation (Failed)"));
-        
+
         var warning = diagnostics.Warnings[0];
         Assert.That(warning.Severity, Is.EqualTo(PerformanceWarningSeverity.Critical));
         Assert.That(warning.Message, Does.Contain("FailingOperation failed"));
@@ -207,7 +207,7 @@ public class ExecutionDiagnosticsTests
 
         // Assert
         Assert.That(diagnostics.OperationTimings.Count, Is.EqualTo(1));
-        
+
         var timing = diagnostics.OperationTimings[0];
         Assert.That(timing.OperationType, Is.EqualTo("ScopedOperation"));
         Assert.That(timing.RowsProcessed, Is.EqualTo(200));

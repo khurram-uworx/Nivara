@@ -16,42 +16,42 @@ public static class DiagnosticHelper
     /// <param name="operation">The operation to execute</param>
     /// <param name="rowCount">The number of rows being processed</param>
     /// <returns>The result of the operation</returns>
-    public static T ExecuteWithDiagnostics<T>(ExecutionDiagnostics diagnostics, string operationType, 
+    public static T ExecuteWithDiagnostics<T>(ExecutionDiagnostics diagnostics, string operationType,
         Func<T> operation, long rowCount = 0)
     {
         var stopwatch = Stopwatch.StartNew();
         var initialMemory = GC.GetTotalMemory(false);
-        
+
         try
         {
             var result = operation();
             stopwatch.Stop();
-            
+
             var finalMemory = GC.GetTotalMemory(false);
             var memoryUsed = Math.Max(0, finalMemory - initialMemory);
-            
+
             diagnostics.RecordOperationTiming(operationType, stopwatch.Elapsed, rowCount, memoryUsed);
-            
+
             // Check for performance warnings
             CheckPerformanceWarnings(diagnostics, operationType, stopwatch.Elapsed, rowCount, memoryUsed);
-            
+
             return result;
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            
+
             // Record the failed operation
             var finalMemory = GC.GetTotalMemory(false);
             var memoryUsed = Math.Max(0, finalMemory - initialMemory);
             diagnostics.RecordOperationTiming($"{operationType} (Failed)", stopwatch.Elapsed, rowCount, memoryUsed);
-            
+
             // Record a critical warning about the failure
             diagnostics.RecordWarning(new PerformanceWarning(
                 PerformanceWarningSeverity.Critical,
                 $"Operation {operationType} failed: {ex.Message}",
                 "Check input data and operation parameters"));
-            
+
             throw;
         }
     }
@@ -65,42 +65,42 @@ public static class DiagnosticHelper
     /// <param name="operation">The async operation to execute</param>
     /// <param name="rowCount">The number of rows being processed</param>
     /// <returns>The result of the operation</returns>
-    public static async Task<T> ExecuteWithDiagnosticsAsync<T>(ExecutionDiagnostics diagnostics, string operationType, 
+    public static async Task<T> ExecuteWithDiagnosticsAsync<T>(ExecutionDiagnostics diagnostics, string operationType,
         Func<Task<T>> operation, long rowCount = 0)
     {
         var stopwatch = Stopwatch.StartNew();
         var initialMemory = GC.GetTotalMemory(false);
-        
+
         try
         {
             var result = await operation();
             stopwatch.Stop();
-            
+
             var finalMemory = GC.GetTotalMemory(false);
             var memoryUsed = Math.Max(0, finalMemory - initialMemory);
-            
+
             diagnostics.RecordOperationTiming(operationType, stopwatch.Elapsed, rowCount, memoryUsed);
-            
+
             // Check for performance warnings
             CheckPerformanceWarnings(diagnostics, operationType, stopwatch.Elapsed, rowCount, memoryUsed);
-            
+
             return result;
         }
         catch (Exception ex)
         {
             stopwatch.Stop();
-            
+
             // Record the failed operation
             var finalMemory = GC.GetTotalMemory(false);
             var memoryUsed = Math.Max(0, finalMemory - initialMemory);
             diagnostics.RecordOperationTiming($"{operationType} (Failed)", stopwatch.Elapsed, rowCount, memoryUsed);
-            
+
             // Record a critical warning about the failure
             diagnostics.RecordWarning(new PerformanceWarning(
                 PerformanceWarningSeverity.Critical,
                 $"Operation {operationType} failed: {ex.Message}",
                 "Check input data and operation parameters"));
-            
+
             throw;
         }
     }
@@ -113,7 +113,7 @@ public static class DiagnosticHelper
     /// <param name="duration">The duration of the operation</param>
     /// <param name="rowCount">The number of rows processed</param>
     /// <param name="memoryUsed">The memory used by the operation</param>
-    private static void CheckPerformanceWarnings(ExecutionDiagnostics diagnostics, string operationType, 
+    private static void CheckPerformanceWarnings(ExecutionDiagnostics diagnostics, string operationType,
         TimeSpan duration, long rowCount, long memoryUsed)
     {
         // Check for slow operations
@@ -159,7 +159,7 @@ public static class DiagnosticHelper
     /// <param name="duration">The duration of the operation</param>
     /// <param name="rowCount">The number of rows processed</param>
     /// <param name="memoryUsed">The memory used by the operation</param>
-    private static void CheckOperationSpecificWarnings(ExecutionDiagnostics diagnostics, string operationType, 
+    private static void CheckOperationSpecificWarnings(ExecutionDiagnostics diagnostics, string operationType,
         TimeSpan duration, long rowCount, long memoryUsed)
     {
         switch (operationType.ToLowerInvariant())
@@ -288,7 +288,7 @@ public sealed class DiagnosticScope : IDisposable
             stopwatch.Stop();
             var finalMemory = GC.GetTotalMemory(false);
             var memoryUsed = Math.Max(0, finalMemory - initialMemory);
-            
+
             diagnostics.RecordOperationTiming(operationType, stopwatch.Elapsed, rowCount, memoryUsed);
             disposed = true;
         }

@@ -899,6 +899,116 @@ Join operations fail fast with clear error messages, making debugging and fixing
 
 ---
 
+---
+
+## Fluent API Design for DataFrame Operations
+
+### Extension Method Integration Patterns
+
+**Problem**  
+DataFrame libraries need both materialized operations and lazy query building capabilities with consistent APIs.
+
+**Constraint**  
+- Users expect fluent method chaining for data operations
+- Must integrate with existing lazy query infrastructure
+- Need to support both immediate execution and deferred execution
+- Type safety must be preserved across all operation types
+
+**Pattern That Worked**  
+Layer fluent extension methods over existing operation infrastructure:
+- Create extension methods on NivaraFrame that delegate to existing operations
+- Use dynamic row objects for predicate evaluation in Where() methods
+- Provide both immediate execution (on DataFrames) and lazy execution (via AsQueryFrame())
+- Maintain consistent method signatures between DataFrame and QueryFrame APIs
+
+**Negative Rule**  
+Do not duplicate operation logic in extension methods - always delegate to core operation classes to maintain consistency and avoid bugs.
+
+**Outcome**  
+Users get intuitive, chainable APIs while the system maintains a single source of truth for operation logic.
+
+---
+
+### Dynamic Row Object Creation for Predicates
+
+**Problem**  
+Fluent filtering APIs need to evaluate user-provided predicates against DataFrame rows without knowing column types at compile time.
+
+**Constraint**  
+- Predicates use dynamic syntax (row.ColumnName > value)
+- Must work across all column types (value types, reference types, nullable types)
+- Need proper null handling during predicate evaluation
+- Must provide clear error messages when predicates fail
+
+**Pattern That Worked**  
+Create dynamic row objects using ExpandoObject with reflection-based value extraction:
+- Use ExpandoObject as IDictionary<string, object?> for dynamic property access
+- Extract values using reflection on column indexers
+- Handle null values explicitly before applying predicates
+- Wrap predicate evaluation in try-catch with contextual error messages
+
+**Negative Rule**  
+Never assume predicate evaluation will succeed - always wrap in exception handling with row index context for debugging.
+
+**Outcome**  
+Users can write natural predicate expressions while the system handles type diversity and provides clear error reporting.
+
+---
+
+### Fluent API Method Naming Conventions
+
+**Problem**  
+DataFrame operations need intuitive method names that align with user expectations from other data processing libraries.
+
+**Constraint**  
+- Must be discoverable through IntelliSense
+- Should align with LINQ conventions where appropriate
+- Need to avoid conflicts with existing NivaraFrame methods
+- Must clearly indicate immediate vs deferred execution
+
+**Pattern That Worked**  
+Use familiar method names with clear execution semantics:
+- `Where()` for filtering (immediate execution on DataFrames)
+- `OrderBy()` for sorting (immediate execution on DataFrames)  
+- `GroupBy()` for grouping (immediate execution on DataFrames)
+- `AsQueryFrame()` for converting to lazy evaluation
+- `Collect()` as execution barrier for lazy queries
+- `Collect()` as no-op for materialized DataFrames
+
+**Negative Rule**  
+Do not use ambiguous method names that don't clearly indicate whether execution is immediate or deferred.
+
+**Outcome**  
+Users can easily discover and use operations with predictable execution behavior.
+
+---
+
+### Integration with Existing Query Infrastructure
+
+**Problem**  
+Fluent APIs must integrate seamlessly with existing query planning, optimization, and execution infrastructure.
+
+**Constraint**  
+- Cannot break existing QueryFrame functionality
+- Must reuse existing operation classes (FilterOperation, SortOperation, etc.)
+- Need to maintain query optimization capabilities
+- Must support all execution strategies (lazy, eager, parallel, streaming)
+
+**Pattern That Worked**  
+Bridge pattern between fluent APIs and core infrastructure:
+- Extension methods convert parameters to appropriate operation classes
+- Use existing ColumnExpressions for type-safe query building
+- Delegate to existing ExecutionEngine and QueryExecutor
+- Maintain separation between public API and internal implementation
+
+**Negative Rule**  
+Never bypass existing query infrastructure in fluent APIs - always use the established execution pipeline to maintain consistency and optimization benefits.
+
+**Outcome**  
+Fluent APIs get all the benefits of the existing query system (optimization, multiple execution strategies, error handling) without code duplication.
+
+---
+
 ## Closing Note
 
 This document is intentionally **opinionated and distilled**. It should evolve slowly and only when a *new, broadly applicable lesson* is learned.

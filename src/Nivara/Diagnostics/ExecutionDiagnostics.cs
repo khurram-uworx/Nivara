@@ -164,14 +164,14 @@ public sealed class ExecutionDiagnostics
         {
             report.AppendLine("Operation Breakdown:");
             report.AppendLine("-------------------");
-            
+
             var totalOperationTime = operationTimings.Sum(t => t.Duration.TotalMilliseconds);
-            
+
             foreach (var timing in operationTimings.OrderByDescending(t => t.Duration))
             {
                 var percentage = totalOperationTime > 0 ? (timing.Duration.TotalMilliseconds / totalOperationTime) * 100 : 0;
                 var throughput = timing.Duration.TotalSeconds > 0 ? timing.RowsProcessed / timing.Duration.TotalSeconds : 0;
-                
+
                 report.AppendLine($"  {timing.OperationType,-15} {timing.Duration.TotalMilliseconds,8:F2} ms ({percentage,5:F1}%) " +
                                 $"{timing.RowsProcessed,10:N0} rows {throughput,10:F0} rows/sec " +
                                 $"{timing.MemoryUsed / 1024.0 / 1024.0,8:F2} MB");
@@ -214,18 +214,18 @@ public sealed class ExecutionDiagnostics
         // Performance Analysis
         report.AppendLine("Performance Analysis:");
         report.AppendLine("--------------------");
-        
+
         // Analyze execution efficiency
         if (TotalExecutionTime.TotalMilliseconds > 1000)
         {
             report.AppendLine("  • Long execution time detected - consider optimization opportunities");
         }
-        
+
         if (MemoryAllocated > 100 * 1024 * 1024) // 100MB
         {
             report.AppendLine("  • High memory usage detected - consider streaming or chunked processing");
         }
-        
+
         if (ParallelismDegree == 1 && operationTimings.Any(t => t.RowsProcessed > 10000))
         {
             report.AppendLine("  • Large dataset processed sequentially - consider parallel execution");
@@ -234,13 +234,13 @@ public sealed class ExecutionDiagnostics
         // Suggest optimizations based on operation patterns
         var filterOperations = operationTimings.Where(t => t.OperationType.Contains("Filter")).ToList();
         var sortOperations = operationTimings.Where(t => t.OperationType.Contains("Sort")).ToList();
-        
+
         if (sortOperations.Count > 0 && filterOperations.Count > 0)
         {
             var lastFilter = filterOperations.LastOrDefault();
             var firstSort = sortOperations.FirstOrDefault();
-            
-            if (lastFilter != null && firstSort != null && 
+
+            if (lastFilter != null && firstSort != null &&
                 operationTimings.IndexOf(firstSort) < operationTimings.IndexOf(lastFilter))
             {
                 report.AppendLine("  • Consider moving filter operations before sort operations for better performance");
@@ -258,7 +258,7 @@ public sealed class ExecutionDiagnostics
     {
         var totalRows = operationTimings.Sum(t => t.RowsProcessed);
         var averageThroughput = TotalExecutionTime.TotalSeconds > 0 ? totalRows / TotalExecutionTime.TotalSeconds : 0;
-        
+
         return new ExecutionSummary(
             TotalExecutionTime,
             MemoryAllocated,

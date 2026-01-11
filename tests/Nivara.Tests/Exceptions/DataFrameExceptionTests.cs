@@ -1,6 +1,6 @@
-using NUnit.Framework;
 using Nivara.Exceptions;
 using Nivara.Operations;
+using NUnit.Framework;
 
 namespace Nivara.Tests.Exceptions;
 
@@ -16,7 +16,7 @@ public class DataFrameExceptionTests
             ("id", typeof(int)),
             ("name", typeof(string))
         });
-        
+
         var actualSchema = new Schema(new[]
         {
             ("id", typeof(string)), // Type mismatch
@@ -30,16 +30,16 @@ public class DataFrameExceptionTests
         // Assert
         Assert.That(exception.ExpectedSchema, Is.EqualTo(expectedSchema));
         Assert.That(exception.ActualSchema, Is.EqualTo(actualSchema));
-        
+
         var mismatches = exception.Mismatches;
         Assert.That(mismatches.Count, Is.EqualTo(3)); // Missing 'name', extra 'age', type mismatch 'id'
-        
+
         // Check for missing column
         Assert.That(mismatches.Any(m => m.MismatchType == SchemaMismatchType.MissingColumn && m.ColumnName == "name"), Is.True);
-        
+
         // Check for extra column
         Assert.That(mismatches.Any(m => m.MismatchType == SchemaMismatchType.ExtraColumn && m.ColumnName == "age"), Is.True);
-        
+
         // Check for type mismatch
         Assert.That(mismatches.Any(m => m.MismatchType == SchemaMismatchType.TypeMismatch && m.ColumnName == "id"), Is.True);
     }
@@ -54,10 +54,10 @@ public class DataFrameExceptionTests
 
         // Act
         var exception = new JoinException(
-            "Join operation failed", 
-            JoinType.Inner, 
-            leftKeys, 
-            rightKeys, 
+            "Join operation failed",
+            JoinType.Inner,
+            leftKeys,
+            rightKeys,
             conflictReason);
 
         // Assert
@@ -65,7 +65,7 @@ public class DataFrameExceptionTests
         Assert.That(exception.LeftKeys, Is.EqualTo(leftKeys));
         Assert.That(exception.RightKeys, Is.EqualTo(rightKeys));
         Assert.That(exception.ConflictReason, Is.EqualTo(conflictReason));
-        
+
         var context = exception.GetDetailedContext();
         Assert.That(context, Does.Contain("Join Type: Inner"));
         Assert.That(context, Does.Contain("Left Keys: id, category"));
@@ -100,7 +100,7 @@ public class DataFrameExceptionTests
             ("id", typeof(int)),
             ("name", typeof(string))
         });
-        
+
         var actualSchema = new Schema(new[]
         {
             ("id", typeof(int)),

@@ -43,7 +43,7 @@ public abstract class DataFrameException : Exception
     /// <param name="failedPlan">The query plan that failed</param>
     /// <param name="failedOperation">The operation that failed</param>
     /// <param name="innerException">The inner exception</param>
-    protected DataFrameException(string message, QueryPlan? failedPlan, IQueryOperation? failedOperation, Exception innerException) 
+    protected DataFrameException(string message, QueryPlan? failedPlan, IQueryOperation? failedOperation, Exception innerException)
         : base(message, innerException)
     {
         FailedPlan = failedPlan;
@@ -123,8 +123,8 @@ public sealed class DataFrameSchemaValidationException : DataFrameException
     /// <param name="actualSchema">The actual schema</param>
     /// <param name="failedPlan">The query plan that failed</param>
     /// <param name="failedOperation">The operation that failed</param>
-    public DataFrameSchemaValidationException(string message, Schema expectedSchema, Schema actualSchema, 
-        QueryPlan? failedPlan, IQueryOperation? failedOperation) 
+    public DataFrameSchemaValidationException(string message, Schema expectedSchema, Schema actualSchema,
+        QueryPlan? failedPlan, IQueryOperation? failedOperation)
         : base(message, failedPlan, failedOperation)
     {
         ExpectedSchema = expectedSchema;
@@ -186,7 +186,7 @@ public sealed class DataFrameSchemaValidationException : DataFrameException
             {
                 var expectedType = ExpectedSchema.GetColumnType(columnName);
                 var actualType = ActualSchema.GetColumnType(columnName);
-                
+
                 if (expectedType != actualType)
                 {
                     mismatches.Add(new SchemaMismatch(
@@ -255,7 +255,7 @@ public sealed class JoinException : DataFrameException
     /// <param name="leftKeys">The left join keys</param>
     /// <param name="rightKeys">The right join keys</param>
     /// <param name="conflictReason">The reason for the join failure</param>
-    public JoinException(string message, JoinType joinType, string[] leftKeys, string[] rightKeys, string conflictReason) 
+    public JoinException(string message, JoinType joinType, string[] leftKeys, string[] rightKeys, string conflictReason)
         : base(message)
     {
         AttemptedJoinType = joinType;
@@ -275,7 +275,7 @@ public sealed class JoinException : DataFrameException
     /// <param name="failedPlan">The query plan that failed</param>
     /// <param name="failedOperation">The operation that failed</param>
     public JoinException(string message, JoinType joinType, string[] leftKeys, string[] rightKeys, string conflictReason,
-        QueryPlan? failedPlan, IQueryOperation? failedOperation) 
+        QueryPlan? failedPlan, IQueryOperation? failedOperation)
         : base(message, failedPlan, failedOperation)
     {
         AttemptedJoinType = joinType;
@@ -314,7 +314,7 @@ public sealed class JoinException : DataFrameException
         context.AppendLine($"Join Type: {AttemptedJoinType}");
         context.AppendLine($"Left Keys: {string.Join(", ", LeftKeys)}");
         context.AppendLine($"Right Keys: {string.Join(", ", RightKeys)}");
-        
+
         if (!string.IsNullOrEmpty(ConflictReason))
         {
             context.AppendLine($"Conflict Reason: {ConflictReason}");

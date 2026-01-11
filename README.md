@@ -298,6 +298,104 @@ var middle = frame.Skip(1).Take(2);
 // Result: Bob (30, 60000) and Charlie (35, 70000)
 ```
 
+---
+
+## Fluent API and Query Integration
+
+Nivara provides a comprehensive fluent API that integrates seamlessly with both materialized DataFrames and lazy query execution. This allows you to write expressive data processing pipelines using familiar method chaining syntax.
+
+### DataFrame Extension Methods
+
+The fluent API extends NivaraFrame with intuitive methods for common operations:
+
+```csharp
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })),
+    ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 }))
+);
+
+// Filter using dynamic predicates
+var adults = frame.Where(row => row.Age >= 30);
+
+// Sort by column (ascending or descending)
+var sortedByScore = frame.OrderBy("Score", ascending: false);
+
+// Group by columns
+var groupedByName = frame.GroupBy("Name");
+
+// Chain operations together
+var result = frame
+    .Where(row => row.Age > 25)
+    .OrderBy("Score", ascending: false)
+    .GroupBy("Name");
+```
+
+### Query Frame Integration
+
+Convert between materialized DataFrames and lazy QueryFrames seamlessly:
+
+```csharp
+// Convert DataFrame to QueryFrame for lazy evaluation
+var queryFrame = frame.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Age") > 27)
+    .Sort("Score", SortDirection.Descending);
+
+// Execute the query and materialize results
+var materializedResult = queryFrame.Collect();
+
+// Collect() on materialized DataFrames is a no-op
+var sameFrame = frame.Collect(); // Returns the same frame
+```
+
+### Execution Strategies
+
+The integration supports multiple execution strategies for different performance requirements:
+
+```csharp
+// Lazy evaluation (default) - builds query plan, executes on Collect()
+var lazyResult = frame.AsQueryFrame()
+    .Filter(ColumnExpressions.Col("Age") > 25)
+    .Collect();
+
+// Direct execution on materialized frames
+var directResult = frame.Where(row => row.Age > 25);
+```
+
+### Method Chaining Benefits
+
+The fluent API provides several advantages:
+
+- **Readable code**: Operations read like natural language
+- **Type safety**: All operations are strongly typed and validated
+- **Performance**: Lazy evaluation allows for query optimization
+- **Flexibility**: Mix and match materialized and lazy operations
+- **Consistency**: Same operations available on both DataFrames and QueryFrames
+
+### Advanced Query Patterns
+
+Combine fluent API with advanced query features:
+
+```csharp
+// Complex filtering with multiple conditions
+var complexFilter = frame
+    .Where(row => row.Age > 25 && row.Score > 80.0)
+    .OrderBy("Name")
+    .GroupBy("Age");
+
+// Integration with joins and concatenation
+var joined = leftFrame.InnerJoin(rightFrame, "Id")
+    .Where(row => row.Status == "Active")
+    .OrderBy("CreatedDate", ascending: false);
+
+// Projection and transformation
+var projected = frame
+    .Select("Name", "Age")
+    .WithTransformedColumn<int, string>("Age", age => $"{age} years old", "AgeDescription");
+```
+
+The fluent API makes Nivara's powerful DataFrame operations accessible through an intuitive, chainable interface while maintaining the library's core principles of type safety and explicit behavior.
+
 ### Sorting Operations
 
 Sort DataFrames by one or multiple columns with full control over sort direction and null handling:
