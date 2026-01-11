@@ -1138,3 +1138,105 @@ Do not use blocking async calls like `.Result` or `Task.Wait()` - use `GetAwaite
 
 **Outcome**  
 Execution engine supports both sync and async patterns with proper cancellation and progress reporting.
+
+## Comprehensive Error Handling Implementation
+
+### Exception Hierarchy Design for Query Systems
+
+**Problem**  
+Query execution systems need structured error handling that provides actionable context for debugging.
+
+**Constraint**  
+- Generic exceptions lose important context about query state and operation details
+- Users need to understand what went wrong and how to fix it
+- Exception hierarchies must be extensible for new operation types
+
+**Pattern That Worked**  
+Create a base exception class that captures query context:
+- Include failed query plan and operation references in base exception
+- Provide `GetDetailedContext()` method that generates comprehensive error reports
+- Create specific exception types for common failure modes (schema validation, joins)
+- Include structured data (mismatches, conflict reasons) alongside human-readable messages
+
+**Negative Rule**  
+Do not create exceptions that only contain error messages - always include structured context that can be programmatically analyzed.
+
+**Outcome**  
+Error handling becomes debuggable and actionable, with clear context about what failed and why.
+
+---
+
+### Execution Diagnostics Architecture
+
+**Problem**  
+Performance analysis requires comprehensive tracking of operation timing, memory usage, and optimization decisions.
+
+**Constraint**  
+- Diagnostic collection must have minimal performance impact when disabled
+- Must work across different execution strategies (lazy, eager, parallel)
+- Need both detailed operation-level metrics and high-level summaries
+
+**Pattern That Worked**  
+Implement layered diagnostic collection:
+- `ExecutionDiagnostics` class tracks timing, memory, warnings, and optimizations
+- `DiagnosticHelper` provides wrapper methods for automatic timing collection
+- `DiagnosticScope` enables scoped tracking with automatic disposal
+- Generate both detailed reports and concise summaries for different use cases
+
+**Negative Rule**  
+Never collect diagnostics by default in production - provide explicit opt-in mechanisms to avoid performance overhead.
+
+**Outcome**  
+Comprehensive performance analysis capabilities with minimal impact on normal execution paths.
+
+---
+
+### Performance Warning Detection
+
+**Problem**  
+Users need guidance about potential performance issues without being overwhelmed by false positives.
+
+**Constraint**  
+- Warning detection must be based on measurable metrics, not assumptions
+- Different operation types have different performance characteristics
+- Must provide actionable suggestions, not just problem identification
+
+**Pattern That Worked**  
+Implement operation-specific warning detection:
+- Use thresholds based on operation type and data size
+- Provide severity levels (Info, Warning, Critical) for appropriate prioritization
+- Include specific suggestions for improvement with each warning
+- Track patterns across operations (e.g., filter after sort) for workflow optimization
+
+**Negative Rule**  
+Do not generate warnings based on arbitrary thresholds - always consider operation context and data characteristics.
+
+**Outcome**  
+Users receive relevant, actionable performance guidance that helps optimize their queries.
+
+---
+
+### Diagnostic Integration Patterns
+
+**Problem**  
+Diagnostic collection must integrate seamlessly with existing operation execution without requiring major refactoring.
+
+**Constraint**  
+- Cannot break existing operation interfaces
+- Must work with both synchronous and asynchronous operations
+- Should provide consistent experience across all operation types
+
+**Pattern That Worked**  
+Use wrapper patterns and scoped contexts:
+- `DiagnosticHelper.ExecuteWithDiagnostics()` wraps existing operations
+- `DiagnosticScope` provides RAII-style timing collection
+- Async variants handle Task-based operations correctly
+- Exception handling preserves original exceptions while recording diagnostic context
+
+**Negative Rule**  
+Do not modify core operation classes to add diagnostic collection - use composition and wrapper patterns instead.
+
+**Outcome**  
+Diagnostic collection can be added to existing systems without breaking changes or performance impact.
+
+---

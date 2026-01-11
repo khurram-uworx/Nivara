@@ -698,6 +698,122 @@ Nivara currently supports:
 
 ---
 
+## Error Handling and Diagnostics
+
+Nivara provides comprehensive error handling and performance diagnostics to help developers identify and resolve issues in data processing pipelines.
+
+### Structured Exception Hierarchy
+
+Nivara uses a structured exception hierarchy that provides detailed context about failures:
+
+```csharp
+try
+{
+    var result = leftFrame.Join(rightFrame, "InvalidKey", JoinType.Inner);
+}
+catch (JoinException ex)
+{
+    Console.WriteLine($"Join failed: {ex.Message}");
+    Console.WriteLine($"Join type: {ex.AttemptedJoinType}");
+    Console.WriteLine($"Left keys: {string.Join(", ", ex.LeftKeys)}");
+    Console.WriteLine($"Right keys: {string.Join(", ", ex.RightKeys)}");
+    Console.WriteLine($"Reason: {ex.ConflictReason}");
+    
+    // Get comprehensive context
+    Console.WriteLine(ex.GetDetailedContext());
+}
+```
+
+### Schema Validation Errors
+
+Schema validation failures provide detailed mismatch information:
+
+```csharp
+try
+{
+    var concatenated = frame1.Concatenate(frame2, ConcatenationMismatchHandling.Error);
+}
+catch (DataFrameSchemaValidationException ex)
+{
+    Console.WriteLine($"Schema validation failed: {ex.Message}");
+    
+    foreach (var mismatch in ex.Mismatches)
+    {
+        Console.WriteLine($"  {mismatch.MismatchType}: {mismatch.Description}");
+    }
+}
+```
+
+### Execution Diagnostics
+
+Track performance metrics and identify optimization opportunities:
+
+```csharp
+var diagnostics = new ExecutionDiagnostics();
+
+// Execute operations with diagnostic tracking
+var result = DiagnosticHelper.ExecuteWithDiagnostics(
+    diagnostics,
+    "ComplexQuery",
+    () => frame
+        .Filter(row => row.GetValue<int>("Age") > 25)
+        .Sort("Name")
+        .GroupBy("Department")
+        .Aggregate("Salary", AggregationFunction.Mean),
+    frame.RowCount);
+
+// Generate comprehensive performance report
+Console.WriteLine(diagnostics.GenerateReport());
+
+// Get summary metrics
+var summary = diagnostics.GetSummary();
+Console.WriteLine($"Processed {summary.TotalRowsProcessed:N0} rows in {summary.TotalExecutionTime.TotalMilliseconds:F2}ms");
+Console.WriteLine($"Average throughput: {summary.AverageThroughput:F0} rows/sec");
+```
+
+### Performance Warnings
+
+Automatic detection of performance issues with actionable suggestions:
+
+```csharp
+var diagnostics = new ExecutionDiagnostics();
+diagnostics.StartExecution();
+
+// Simulate operations that trigger warnings
+using (var scope = DiagnosticHelper.CreateScope(diagnostics, "LargeSort"))
+{
+    scope.SetRowCount(1_000_000);
+    Thread.Sleep(3000); // Simulate slow operation
+}
+
+diagnostics.EndExecution();
+
+// Check for warnings
+foreach (var warning in diagnostics.Warnings)
+{
+    Console.WriteLine($"{warning.Severity}: {warning.Message}");
+    if (!string.IsNullOrEmpty(warning.Suggestion))
+    {
+        Console.WriteLine($"  Suggestion: {warning.Suggestion}");
+    }
+}
+```
+
+### Diagnostic Features
+
+Error handling and diagnostics provide:
+
+- **Structured exceptions** with operation context and query plan information
+- **Schema mismatch analysis** with detailed comparison and specific error locations
+- **Performance tracking** with operation-level timing and memory usage
+- **Automatic warning detection** for common performance issues
+- **Optimization tracking** with estimated performance improvements
+- **Comprehensive reporting** with human-readable analysis and suggestions
+- **Scoped diagnostic collection** for tracking nested operations
+- **Async operation support** for Task-based execution patterns
+
+---
+
 ## Join Operations
 
 Nivara provides comprehensive join operations for combining data from multiple DataFrames with full control over join types, key matching, and column name resolution.
@@ -1013,17 +1129,11 @@ DataFrame concatenation provides:
 - **Performance optimization**: Efficient column copying and memory management
 - **Convenient aliases**: `Append()` and `Combine()` methods for common scenarios
 
----
-
-## Roadmap (Planned)
-
----
-
-## Query Optimization
+### Query Optimization
 
 Nivara includes a sophisticated query optimization engine that automatically improves query performance while preserving correctness:
 
-### Automatic Optimizations
+#### Automatic Optimizations
 
 The query optimizer applies several optimization strategies:
 
@@ -1046,14 +1156,14 @@ var query = Csv.ScanAsQueryFrame("employees.csv")
 var result = query.Collect(); // Optimizations applied during execution
 ```
 
-### Optimization Strategies
+#### Optimization Strategies
 
 - **Predicate Pushdown**: Moves filter operations closer to data sources to reduce data movement
 - **Projection Pushdown**: Eliminates unused columns early in the pipeline to reduce memory usage
 - **Operation Fusion**: Combines compatible operations (multiple filters, projections) to reduce overhead
 - **Column Elimination**: Removes columns that aren't needed by subsequent operations
 
-### Optimization Transparency
+#### Optimization Transparency
 
 Get detailed information about applied optimizations:
 
@@ -1071,20 +1181,18 @@ Console.WriteLine(result.GenerateReport());
 // - Before/after query plans
 ```
 
-### Safety Guarantees
+#### Safety Guarantees
 
 - **Correctness Preserved**: Optimizations never change query results
 - **Conservative Approach**: When in doubt, the optimizer chooses correctness over performance
 - **Graceful Degradation**: Failed optimizations don't break queries
 - **Schema Validation**: All optimizations respect type safety and schema constraints
 
----
-
-## Execution Strategies
+### Execution Strategies
 
 Nivara provides multiple execution strategies to optimize performance for different use cases and resource constraints:
 
-### Execution Strategy Types
+#### Execution Strategy Types
 
 Choose the optimal execution strategy based on your workload:
 
@@ -1111,7 +1219,7 @@ var parallelContext = ExecutionContext.WithParallelism(Environment.ProcessorCoun
 var parallelResult = engine.Execute(plan, parallelContext);
 ```
 
-### Lazy Execution (Default)
+#### Lazy Execution (Default)
 
 Best for most scenarios, providing optimal memory usage and query optimization:
 
@@ -1127,7 +1235,7 @@ var result = engine.Execute(plan, context);
 // - Best for complex queries with multiple operations
 ```
 
-### Eager Execution
+#### Eager Execution
 
 Executes operations immediately, useful for debugging and simple queries:
 
@@ -1143,7 +1251,7 @@ var result = engine.Execute(plan, context);
 // - Good for simple, single-operation queries
 ```
 
-### Streaming Execution
+#### Streaming Execution
 
 Processes data in chunks to manage memory usage for large datasets:
 
@@ -1160,7 +1268,7 @@ var result = engine.Execute(plan, context);
 // - Graceful fallback for non-streamable operations
 ```
 
-### Parallel Execution
+#### Parallel Execution
 
 Uses multiple threads for CPU-intensive operations on multi-core systems:
 
@@ -1176,7 +1284,7 @@ var result = engine.Execute(plan, context);
 // - Thread-safe execution with proper coordination
 ```
 
-### Execution Context Configuration
+#### Execution Context Configuration
 
 Fine-tune execution behavior with comprehensive configuration options:
 
@@ -1194,7 +1302,7 @@ var context = new ExecutionContext
 var result = await engine.ExecuteAsync(plan, context);
 ```
 
-### Execution Cost Estimation
+#### Execution Cost Estimation
 
 Get cost estimates to choose the optimal execution strategy:
 
@@ -1215,7 +1323,7 @@ var optimalStrategy = lazyCost <= eagerCost && lazyCost <= parallelCost
     : (eagerCost <= parallelCost ? ExecutionStrategy.Eager : ExecutionStrategy.Parallel);
 ```
 
-### Progress Reporting and Cancellation
+#### Progress Reporting and Cancellation
 
 Monitor long-running operations with progress reporting and cancellation support:
 
@@ -1246,7 +1354,7 @@ catch (OperationCanceledException)
 }
 ```
 
-### Execution Strategy Features
+#### Execution Strategy Features
 
 The execution engine provides:
 
@@ -1262,19 +1370,8 @@ The execution engine provides:
 
 ---
 
-## Planned Features
-
-The following features are still in development:
-
-- Advanced streaming optimizations for very large datasets
-
----
-
 ## Stability
 
-Nivara is under active development.
-
-- Core concepts are stabilizing
 - APIs may evolve as additional features are added
 - Feedback and experimentation are encouraged
 
@@ -1289,4 +1386,3 @@ Nivara is under active development.
 ---
 
 Nivara aims to bring **predictable, high-performance data processing** to the .NET ecosystem — without sacrificing correctness or clarity.
-
