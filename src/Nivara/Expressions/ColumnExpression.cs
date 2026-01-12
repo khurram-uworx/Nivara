@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Helpers;
 
 namespace Nivara.Expressions;
 

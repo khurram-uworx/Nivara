@@ -1,3 +1,4 @@
+using Nivara.Execution;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -9,7 +10,7 @@ public class ExecutionContextTests
     public void Constructor_DefaultValues_SetsExpectedDefaults()
     {
         // Act
-        var context = new ExecutionContext();
+        var context = new NivaraExecutionContext();
 
         // Assert
         Assert.That(context.Strategy, Is.EqualTo(ExecutionStrategy.Lazy));
@@ -23,7 +24,7 @@ public class ExecutionContextTests
     public void Constructor_WithStrategy_SetsStrategy()
     {
         // Act
-        var context = new ExecutionContext(ExecutionStrategy.Parallel);
+        var context = new NivaraExecutionContext(ExecutionStrategy.Parallel);
 
         // Assert
         Assert.That(context.Strategy, Is.EqualTo(ExecutionStrategy.Parallel));
@@ -34,7 +35,7 @@ public class ExecutionContextTests
     public void Clone_CreatesIdenticalCopy()
     {
         // Arrange
-        var original = new ExecutionContext(ExecutionStrategy.Streaming)
+        var original = new NivaraExecutionContext(ExecutionStrategy.Streaming)
         {
             MaxDegreeOfParallelism = 4,
             MemoryBudget = 512 * 1024 * 1024
@@ -55,7 +56,7 @@ public class ExecutionContextTests
     public void WithStrategy_CreatesContextWithSpecifiedStrategy()
     {
         // Act
-        var context = ExecutionContext.WithStrategy(ExecutionStrategy.Eager);
+        var context = NivaraExecutionContext.WithStrategy(ExecutionStrategy.Eager);
 
         // Assert
         Assert.That(context.Strategy, Is.EqualTo(ExecutionStrategy.Eager));
@@ -65,7 +66,7 @@ public class ExecutionContextTests
     public void WithParallelism_CreatesParallelContextWithSpecifiedDegree()
     {
         // Act
-        var context = ExecutionContext.WithParallelism(8);
+        var context = NivaraExecutionContext.WithParallelism(8);
 
         // Assert
         Assert.That(context.Strategy, Is.EqualTo(ExecutionStrategy.Parallel));
@@ -79,7 +80,7 @@ public class ExecutionContextTests
         var budgetBytes = 256 * 1024 * 1024; // 256MB
 
         // Act
-        var context = ExecutionContext.WithMemoryBudget(budgetBytes);
+        var context = NivaraExecutionContext.WithMemoryBudget(budgetBytes);
 
         // Assert
         Assert.That(context.MemoryBudget, Is.EqualTo(budgetBytes));
@@ -93,7 +94,7 @@ public class ExecutionContextTests
         var token = cts.Token;
 
         // Act
-        var context = ExecutionContext.WithCancellation(token);
+        var context = NivaraExecutionContext.WithCancellation(token);
 
         // Assert
         Assert.That(context.CancellationToken, Is.EqualTo(token));
@@ -103,7 +104,7 @@ public class ExecutionContextTests
     public void ToString_ReturnsFormattedString()
     {
         // Arrange
-        var context = new ExecutionContext(ExecutionStrategy.Parallel)
+        var context = new NivaraExecutionContext(ExecutionStrategy.Parallel)
         {
             MaxDegreeOfParallelism = 4,
             MemoryBudget = 512 * 1024 * 1024

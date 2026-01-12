@@ -1,4 +1,6 @@
-namespace Nivara;
+using Nivara.Query;
+
+namespace Nivara.Helpers;
 
 /// <summary>
 /// A query source that wraps in-memory column data

@@ -1,8 +1,9 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
+using Nivara.Helpers;
 using Nivara.Operations;
 
-namespace Nivara;
+namespace Nivara.Query;
 
 /// <summary>
 /// Represents a lazy query frame that builds query plans without immediate execution.
@@ -27,7 +28,7 @@ public sealed class QueryFrame : IDisposable
         // Track lazy queries for abandoned resource cleanup
         if (source.IsLazy)
         {
-            ResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
+            NivaraResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
             {
                 // Cleanup action for abandoned lazy queries
                 try
@@ -56,7 +57,7 @@ public sealed class QueryFrame : IDisposable
         // Track lazy queries for abandoned resource cleanup
         if (source.IsLazy)
         {
-            ResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
+            NivaraResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
             {
                 // Cleanup action for abandoned lazy queries
                 try
@@ -375,7 +376,7 @@ public sealed class QueryFrame : IDisposable
         if (!disposed)
         {
             // Untrack from resource manager
-            ResourceManager.UntrackResource(this);
+            NivaraResourceManager.UntrackResource(this);
 
             // QueryFrame doesn't own the source in most cases, so we don't dispose it
             // The source is typically owned by the caller or factory methods

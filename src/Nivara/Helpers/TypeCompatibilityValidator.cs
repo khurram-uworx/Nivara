@@ -1,6 +1,6 @@
 using Nivara.Exceptions;
 
-namespace Nivara;
+namespace Nivara.Helpers;
 
 /// <summary>
 /// Provides comprehensive type compatibility validation for operations and expressions.

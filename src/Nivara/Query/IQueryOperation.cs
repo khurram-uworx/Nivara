@@ -1,4 +1,6 @@
-namespace Nivara;
+using Nivara.Execution;
+
+namespace Nivara.Query;
 
 /// <summary>
 /// Represents a generic query operation that can transform data in a query pipeline.

@@ -1,4 +1,4 @@
-namespace Nivara;
+namespace Nivara.Query;
 
 /// <summary>
 /// Represents a data source that can be queried lazily or eagerly.

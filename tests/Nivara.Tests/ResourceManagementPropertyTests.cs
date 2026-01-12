@@ -1,5 +1,7 @@
 using Nivara.Expressions;
+using Nivara.Helpers;
 using Nivara.IO;
+using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -15,14 +17,14 @@ public class ResourceManagementPropertyTests
     public void Setup()
     {
         // Force cleanup before each test to ensure clean state
-        ResourceManager.ForceCleanup();
+        NivaraResourceManager.ForceCleanup();
     }
 
     [TearDown]
     public void TearDown()
     {
         // Force cleanup after each test to prevent resource leaks
-        ResourceManager.ForceCleanup();
+        NivaraResourceManager.ForceCleanup();
     }
 
     /// <summary>
@@ -54,7 +56,7 @@ public class ResourceManagementPropertyTests
         frameRef = new WeakReference(frame);
 
         // Verify frame is tracked
-        var statsBefore = ResourceManager.GetResourceStatistics();
+        var statsBefore = NivaraResourceManager.GetResourceStatistics();
         Assert.That(statsBefore.TotalTrackedResources, Is.GreaterThan(0),
             "Frame and columns should be tracked before disposal");
 
@@ -85,10 +87,10 @@ public class ResourceManagementPropertyTests
         GC.Collect();
 
         // Force cleanup of abandoned resources
-        ResourceManager.ForceCleanup();
+        NivaraResourceManager.ForceCleanup();
 
         // Verify resources are cleaned up
-        var statsAfter = ResourceManager.GetResourceStatistics();
+        var statsAfter = NivaraResourceManager.GetResourceStatistics();
         Assert.That(statsAfter.AbandonedResourceCount, Is.EqualTo(0),
             "No abandoned resources should remain after disposal and cleanup");
     }
@@ -125,7 +127,7 @@ public class ResourceManagementPropertyTests
             queryRef = new WeakReference(queryFrame);
 
             // Verify query frame is tracked
-            var statsBefore = ResourceManager.GetResourceStatistics();
+            var statsBefore = NivaraResourceManager.GetResourceStatistics();
             Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQueryFrame"), Is.True,
                 "Lazy query frame should be tracked");
 
@@ -146,10 +148,10 @@ public class ResourceManagementPropertyTests
             GC.Collect();
 
             // Force cleanup of abandoned resources
-            ResourceManager.ForceCleanup();
+            NivaraResourceManager.ForceCleanup();
 
             // Verify resources are cleaned up
-            var statsAfter = ResourceManager.GetResourceStatistics();
+            var statsAfter = NivaraResourceManager.GetResourceStatistics();
             Assert.That(statsAfter.AbandonedResourceCount, Is.EqualTo(0),
                 "No abandoned resources should remain after disposal and cleanup");
         }
@@ -265,7 +267,7 @@ public class ResourceManagementPropertyTests
             CreateAndAbandonQueries(tempFiles, weakRefs);
 
             // Verify queries are tracked
-            var statsBefore = ResourceManager.GetResourceStatistics();
+            var statsBefore = NivaraResourceManager.GetResourceStatistics();
             Assert.That(statsBefore.TrackedResourcesByType.ContainsKey("LazyQueryFrame"), Is.True,
                 "Lazy query frames should be tracked");
 
@@ -279,9 +281,9 @@ public class ResourceManagementPropertyTests
             }
 
             // Force cleanup of abandoned resources multiple times
-            ResourceManager.ForceCleanup();
+            NivaraResourceManager.ForceCleanup();
             Thread.Sleep(50);
-            ResourceManager.ForceCleanup();
+            NivaraResourceManager.ForceCleanup();
 
             // Assert - Check if most queries are garbage collected (allow for some variance in GC behavior)
             int collectedCount = 0;
@@ -296,7 +298,7 @@ public class ResourceManagementPropertyTests
                 $"At least {queryCount / 2} out of {queryCount} abandoned query frames should be garbage collected");
 
             // Verify abandoned resources are cleaned up
-            var statsAfter = ResourceManager.GetResourceStatistics();
+            var statsAfter = NivaraResourceManager.GetResourceStatistics();
             Assert.That(statsAfter.AbandonedResourceCount, Is.LessThanOrEqualTo(queryCount / 2),
                 "Most abandoned resources should be automatically cleaned up");
         }
@@ -394,7 +396,7 @@ public class ResourceManagementPropertyTests
     {
         // Arrange
         var frames = new List<NivaraFrame>();
-        var statsBefore = ResourceManager.GetResourceStatistics();
+        var statsBefore = NivaraResourceManager.GetResourceStatistics();
 
         try
         {
@@ -408,7 +410,7 @@ public class ResourceManagementPropertyTests
             }
 
             // Get statistics after creation
-            var statsAfter = ResourceManager.GetResourceStatistics();
+            var statsAfter = NivaraResourceManager.GetResourceStatistics();
 
             // Assert - Verify statistics are accurate
             Assert.That(statsAfter.TotalTrackedResources,
@@ -432,11 +434,11 @@ public class ResourceManagementPropertyTests
                 }
 
                 // Force cleanup and give time for tracking updates
-                ResourceManager.ForceCleanup();
+                NivaraResourceManager.ForceCleanup();
                 Thread.Sleep(10);
 
                 // Verify statistics reflect disposal
-                var statsAfterDisposal = ResourceManager.GetResourceStatistics();
+                var statsAfterDisposal = NivaraResourceManager.GetResourceStatistics();
 
                 // The total should be less than after creation, but may not be exactly equal to before
                 // due to remaining frames and columns still being tracked

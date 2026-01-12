@@ -1,6 +1,7 @@
 using Nivara.Expressions;
+using Nivara.Query;
 
-namespace Nivara;
+namespace Nivara.Optimization;
 
 /// <summary>
 /// Optimization rule that fuses compatible operations to reduce intermediate allocations

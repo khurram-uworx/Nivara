@@ -1,6 +1,7 @@
 using Nivara.Exceptions;
+using Nivara.Query;
 
-namespace Nivara;
+namespace Nivara.Execution;
 
 /// <summary>
 /// Implements eager execution strategy that executes operations immediately without building query plans.
@@ -19,7 +20,7 @@ internal sealed class EagerExecutionStrategy : IExecutionStrategy
     }
 
     /// <inheritdoc />
-    public NivaraFrame Execute(QueryPlan plan, ExecutionContext context)
+    public NivaraFrame Execute(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null)
             throw new ArgumentNullException(nameof(plan));
@@ -83,7 +84,7 @@ internal sealed class EagerExecutionStrategy : IExecutionStrategy
     }
 
     /// <inheritdoc />
-    public async Task<NivaraFrame> ExecuteAsync(QueryPlan plan, ExecutionContext context)
+    public async Task<NivaraFrame> ExecuteAsync(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null)
             throw new ArgumentNullException(nameof(plan));
@@ -150,7 +151,7 @@ internal sealed class EagerExecutionStrategy : IExecutionStrategy
     }
 
     /// <inheritdoc />
-    public bool ValidatePlan(QueryPlan plan, ExecutionContext context)
+    public bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)
             return false;
@@ -168,7 +169,7 @@ internal sealed class EagerExecutionStrategy : IExecutionStrategy
     }
 
     /// <inheritdoc />
-    public long EstimateExecutionCost(QueryPlan plan, ExecutionContext context)
+    public long EstimateExecutionCost(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)
             return long.MaxValue;
@@ -215,7 +216,7 @@ internal sealed class EagerExecutionStrategy : IExecutionStrategy
     /// <param name="operationName">The name of the current operation</param>
     /// <param name="completedWork">The amount of work completed</param>
     /// <param name="totalWork">The total amount of work</param>
-    private static void ReportProgress(ExecutionContext context, string operationName, long completedWork, long totalWork)
+    private static void ReportProgress(NivaraExecutionContext context, string operationName, long completedWork, long totalWork)
     {
         if (context.Progress != null)
         {

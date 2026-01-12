@@ -1,6 +1,7 @@
 using Nivara.Exceptions;
+using Nivara.Query;
 
-namespace Nivara;
+namespace Nivara.Execution;
 
 /// <summary>
 /// Implements parallel execution strategy that uses multiple threads for parallelizable operations.
@@ -19,14 +20,14 @@ internal sealed class ParallelExecutionStrategy : IExecutionStrategy
     }
 
     /// <inheritdoc />
-    public NivaraFrame Execute(QueryPlan plan, ExecutionContext context)
+    public NivaraFrame Execute(QueryPlan plan, NivaraExecutionContext context)
     {
         // For synchronous execution, we'll use the async version and wait for it
         return ExecuteAsync(plan, context).GetAwaiter().GetResult();
     }
 
     /// <inheritdoc />
-    public async Task<NivaraFrame> ExecuteAsync(QueryPlan plan, ExecutionContext context)
+    public async Task<NivaraFrame> ExecuteAsync(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null)
             throw new ArgumentNullException(nameof(plan));
@@ -92,7 +93,7 @@ internal sealed class ParallelExecutionStrategy : IExecutionStrategy
     }
 
     /// <inheritdoc />
-    public bool ValidatePlan(QueryPlan plan, ExecutionContext context)
+    public bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)
             return false;
@@ -115,7 +116,7 @@ internal sealed class ParallelExecutionStrategy : IExecutionStrategy
     }
 
     /// <inheritdoc />
-    public long EstimateExecutionCost(QueryPlan plan, ExecutionContext context)
+    public long EstimateExecutionCost(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)
             return long.MaxValue;
@@ -173,7 +174,7 @@ internal sealed class ParallelExecutionStrategy : IExecutionStrategy
     private async Task<IReadOnlyDictionary<string, IColumn>> ExecuteOperationParallelAsync(
         IQueryOperation operation,
         IReadOnlyDictionary<string, IColumn> input,
-        ExecutionContext context)
+        NivaraExecutionContext context)
     {
         // Validate parallel configuration
         ParallelExecutionHelper.ValidateParallelConfiguration(context.MaxDegreeOfParallelism);
@@ -293,7 +294,7 @@ internal sealed class ParallelExecutionStrategy : IExecutionStrategy
     /// <param name="input">The input columns</param>
     /// <param name="context">The execution context</param>
     /// <returns>True if parallelism should be used, false otherwise</returns>
-    private static bool ShouldUseParallelism(IReadOnlyDictionary<string, IColumn> input, ExecutionContext context)
+    private static bool ShouldUseParallelism(IReadOnlyDictionary<string, IColumn> input, NivaraExecutionContext context)
     {
         // Get the total number of rows
         var totalRows = input.Values.FirstOrDefault()?.Length ?? 0;
@@ -308,7 +309,7 @@ internal sealed class ParallelExecutionStrategy : IExecutionStrategy
     /// </summary>
     /// <param name="context">The execution context to validate</param>
     /// <exception cref="QueryExecutionException">Thrown when configuration is invalid</exception>
-    private static void ValidateParallelismConfiguration(ExecutionContext context)
+    private static void ValidateParallelismConfiguration(NivaraExecutionContext context)
     {
         ParallelExecutionHelper.ValidateParallelConfiguration(context.MaxDegreeOfParallelism);
     }
@@ -320,7 +321,7 @@ internal sealed class ParallelExecutionStrategy : IExecutionStrategy
     /// <param name="operationName">The name of the current operation</param>
     /// <param name="completedWork">The amount of work completed</param>
     /// <param name="totalWork">The total amount of work</param>
-    private static void ReportProgress(ExecutionContext context, string operationName, long completedWork, long totalWork)
+    private static void ReportProgress(NivaraExecutionContext context, string operationName, long completedWork, long totalWork)
     {
         if (context.Progress != null)
         {

@@ -1,18 +1,18 @@
 using System.Collections.Concurrent;
 
-namespace Nivara;
+namespace Nivara.Helpers;
 
 /// <summary>
 /// Manages resources and cleanup for abandoned lazy queries and large dataset operations.
 /// Provides memory management guidance and automatic cleanup of orphaned resources.
 /// </summary>
-internal static class ResourceManager
+internal static class NivaraResourceManager
 {
     private static readonly ConcurrentDictionary<WeakReference, ResourceInfo> _trackedResources = new();
     private static readonly Timer _cleanupTimer;
     private static readonly object _lock = new object();
 
-    static ResourceManager()
+    static NivaraResourceManager()
     {
         // Run cleanup every 30 seconds
         _cleanupTimer = new Timer(CleanupAbandonedResources, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));

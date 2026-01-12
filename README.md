@@ -109,21 +109,6 @@ For comprehensive API documentation and advanced usage patterns, explore the sam
 
 ## Current Capabilities
 
-Nivara currently supports:
-
-- **Core Data Structures**: Typed, immutable columns and frames with automatic storage selection
-- **Null Handling**: Explicit null handling with fill and drop operations, comprehensive null mask tracking
-- **Performance**: Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
-- **Query Engine**: Schema-aware lazy query construction with automatic optimization, diagnostics and plan inspection
-- **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
-- **Operations**: Complete set of DataFrame operations (filter, sort, join, group, aggregate, transform)
-- **I/O Extensions**: Parquet and Apache Arrow support via `Nivara.Extensions`
-- **Performance Optimization**: Buffer pooling, memory management, query optimization engine, and async I/O operations
-
----
-
-## Current Capabilities
-
 Nivara aims to bring **predictable, high-performance data processing** to the .NET ecosystem — without sacrificing correctness or clarity.
 
 Nivara currently supports:

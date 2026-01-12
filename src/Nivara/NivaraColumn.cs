@@ -1,4 +1,5 @@
 using Nivara.Diagnostics;
+using Nivara.Helpers;
 using Nivara.Storage;
 using System.Numerics.Tensors;
 
@@ -24,7 +25,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
 
         // Track column for resource management
         var estimatedSize = EstimateMemoryUsage();
-        ResourceManager.TrackResource(this, $"NivaraColumn<{typeof(T).Name}>", estimatedSize);
+        NivaraResourceManager.TrackResource(this, $"NivaraColumn<{typeof(T).Name}>", estimatedSize);
     }
 
     /// <inheritdoc />
@@ -2719,7 +2720,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         if (!disposed)
         {
             // Untrack from resource manager
-            ResourceManager.UntrackResource(this);
+            NivaraResourceManager.UntrackResource(this);
 
             storage?.Dispose();
             disposed = true;

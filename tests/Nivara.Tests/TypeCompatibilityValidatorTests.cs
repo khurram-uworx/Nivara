@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Helpers;
 using NUnit.Framework;
 
 namespace Nivara.Tests;

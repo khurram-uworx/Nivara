@@ -1,35 +1,37 @@
 using Nivara.Expressions;
+using Nivara.Query;
 
-namespace Nivara;
+namespace Nivara.Optimization;
 
 /// <summary>
-/// Optimization rule that pushes column projections closer to data sources to reduce data movement
+/// Optimization rule that eliminates unused columns early in the pipeline
 /// </summary>
-public sealed class ProjectionPushdownRule : OptimizationRule
+public sealed class ColumnEliminationRule : OptimizationRule
 {
     /// <inheritdoc />
-    public override string Name => "Projection Pushdown";
+    public override string Name => "Column Elimination";
 
     /// <inheritdoc />
-    public override string Description => "Moves column selections closer to data sources to reduce data movement";
+    public override string Description => "Removes unused columns early in the pipeline to reduce memory usage";
 
     /// <inheritdoc />
-    public override int Priority => 90; // High priority, but after predicate pushdown
+    public override int Priority => 70; // Medium priority
 
     /// <inheritdoc />
     public override bool CanApply(QueryPlan plan)
     {
-        if (plan == null || plan.Operations.Count < 2)
+        if (plan == null || plan.Operations.Count == 0)
             return false;
 
-        // Check if there are projection opportunities
+        // Check if there are unused columns that can be eliminated
         var usedColumns = AnalyzeColumnUsage(plan);
         var sourceColumns = plan.Source.Schema.ColumnNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var unusedColumns = sourceColumns.Except(usedColumns, StringComparer.OrdinalIgnoreCase).ToList();
 
-        // If we use fewer columns than available and don't have early projection, we can optimize
-        var hasEarlyProjection = plan.Operations.Count > 0 && plan.Operations[0] is SelectOperation;
+        // Can apply if there are unused columns and no explicit select at the beginning
+        var hasEarlySelect = plan.Operations.Count > 0 && plan.Operations[0] is SelectOperation;
 
-        return usedColumns.Count < sourceColumns.Count && !hasEarlyProjection;
+        return unusedColumns.Count > 0 && !hasEarlySelect;
     }
 
     /// <inheritdoc />
@@ -38,21 +40,28 @@ public sealed class ProjectionPushdownRule : OptimizationRule
         var usedColumns = AnalyzeColumnUsage(plan);
         var operations = plan.Operations.ToList();
 
-        // If we already have a select operation at the beginning, don't add another
+        // If we already have a select operation at the beginning, don't modify
         if (operations.Count > 0 && operations[0] is SelectOperation)
         {
-            return plan; // Already optimized
+            return plan; // Already has column selection
         }
 
-        // Create a projection operation with only the used columns
-        var projectionExpressions = usedColumns
+        // Create a select operation with only the used columns
+        var usedColumnExpressions = usedColumns
+            .OrderBy(col => col, StringComparer.OrdinalIgnoreCase) // Consistent ordering
             .Select(col => ColumnExpressions.Col(col))
             .ToArray();
 
-        var projectionOperation = new SelectOperation(projectionExpressions);
+        if (usedColumnExpressions.Length == 0)
+        {
+            // If no columns are explicitly used, keep all columns
+            return plan;
+        }
 
-        // Add the projection at the beginning
-        var optimizedOperations = new List<IQueryOperation> { projectionOperation };
+        var selectOperation = new SelectOperation(usedColumnExpressions);
+
+        // Add the select operation at the beginning
+        var optimizedOperations = new List<IQueryOperation> { selectOperation };
         optimizedOperations.AddRange(operations);
 
         return new QueryPlan(plan.Source, optimizedOperations);
@@ -67,11 +76,11 @@ public sealed class ProjectionPushdownRule : OptimizationRule
         if (sourceColumnCount == 0)
             return 0.0;
 
-        // Estimate improvement based on column reduction
+        // Calculate improvement based on column reduction
         var columnReduction = (sourceColumnCount - usedColumnCount) / (double)sourceColumnCount;
 
-        // Projection pushdown can provide significant memory and I/O improvements
-        return columnReduction * 30.0; // Up to 30% improvement
+        // Column elimination can provide significant memory savings
+        return columnReduction * 35.0; // Up to 35% improvement
     }
 
     /// <summary>
@@ -89,7 +98,8 @@ public sealed class ProjectionPushdownRule : OptimizationRule
             switch (operation.OperationType)
             {
                 case "Filter":
-                    // We can't access filter conditions, so skip
+                    // We can't access filter conditions, so assume all source columns are used
+                    usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
                     break;
 
                 case "Select":
@@ -98,7 +108,7 @@ public sealed class ProjectionPushdownRule : OptimizationRule
                     break;
 
                 case "GroupBy":
-                    // We can't access group by columns, so assume all source columns are used
+                    // We can't access group by details, so assume all source columns are used
                     usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
                     break;
 
@@ -116,10 +126,16 @@ public sealed class ProjectionPushdownRule : OptimizationRule
                     // We can't access projection mappings, so assume all source columns are used
                     usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
                     break;
+
+                case "Concatenation":
+                    // Concatenation operations typically use all columns
+                    usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
+                    break;
             }
         }
 
-        // If no operations explicitly use columns, assume all columns are used
+        // Special case: if no operations explicitly reference columns,
+        // we need to be conservative and assume all columns are used
         if (usedColumns.Count == 0)
         {
             usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
@@ -158,6 +174,14 @@ public sealed class ProjectionPushdownRule : OptimizationRule
 
             case ScalarExpression scalar:
                 columns.UnionWith(GetReferencedColumns(scalar.Column));
+                break;
+
+            case LiteralExpression:
+                // Literal expressions don't reference columns
+                break;
+
+            default:
+                // For unknown expression types, be conservative and don't assume any columns
                 break;
         }
 

@@ -1,4 +1,6 @@
-namespace Nivara;
+using Nivara.Optimization;
+
+namespace Nivara.Query;
 
 /// <summary>
 /// Optimizes query plans by applying various optimization techniques

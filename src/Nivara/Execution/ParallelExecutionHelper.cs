@@ -1,7 +1,7 @@
 using Nivara.Exceptions;
 using System.Collections.Concurrent;
 
-namespace Nivara;
+namespace Nivara.Execution;
 
 /// <summary>
 /// Provides helper methods for parallel execution of DataFrame operations

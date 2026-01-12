@@ -1,6 +1,8 @@
 using CsvHelper;
 using CsvHelper.Configuration;
 using Nivara.Exceptions;
+using Nivara.Helpers;
+using Nivara.Query;
 using System.Globalization;
 
 namespace Nivara.IO;

@@ -1,3 +1,4 @@
+using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests;

@@ -1,4 +1,4 @@
-namespace Nivara;
+namespace Nivara.Query;
 
 /// <summary>
 /// Abstract base class for query plan nodes that represent operations in a query tree

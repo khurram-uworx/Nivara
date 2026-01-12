@@ -1,4 +1,6 @@
-namespace Nivara;
+using Nivara.Query;
+
+namespace Nivara.Optimization;
 
 /// <summary>
 /// Abstract base class for query optimization rules

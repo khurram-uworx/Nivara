@@ -1,14 +1,14 @@
-namespace Nivara;
+namespace Nivara.Execution;
 
 /// <summary>
 /// Provides execution context and configuration for query operations
 /// </summary>
-public sealed class ExecutionContext
+public sealed class NivaraExecutionContext
 {
     /// <summary>
     /// Initializes a new instance of ExecutionContext with default settings
     /// </summary>
-    public ExecutionContext()
+    public NivaraExecutionContext()
     {
         Strategy = ExecutionStrategy.Lazy;
         MaxDegreeOfParallelism = Environment.ProcessorCount;
@@ -20,7 +20,7 @@ public sealed class ExecutionContext
     /// Initializes a new instance of ExecutionContext with specified strategy
     /// </summary>
     /// <param name="strategy">The execution strategy to use</param>
-    public ExecutionContext(ExecutionStrategy strategy) : this()
+    public NivaraExecutionContext(ExecutionStrategy strategy) : this()
     {
         Strategy = strategy;
     }
@@ -54,9 +54,9 @@ public sealed class ExecutionContext
     /// Creates a copy of this execution context
     /// </summary>
     /// <returns>A new ExecutionContext with the same settings</returns>
-    public ExecutionContext Clone()
+    public NivaraExecutionContext Clone()
     {
-        return new ExecutionContext
+        return new NivaraExecutionContext
         {
             Strategy = Strategy,
             MaxDegreeOfParallelism = MaxDegreeOfParallelism,
@@ -71,9 +71,9 @@ public sealed class ExecutionContext
     /// </summary>
     /// <param name="strategy">The execution strategy</param>
     /// <returns>A new ExecutionContext with the specified strategy</returns>
-    public static ExecutionContext WithStrategy(ExecutionStrategy strategy)
+    public static NivaraExecutionContext WithStrategy(ExecutionStrategy strategy)
     {
-        return new ExecutionContext(strategy);
+        return new NivaraExecutionContext(strategy);
     }
 
     /// <summary>
@@ -81,9 +81,9 @@ public sealed class ExecutionContext
     /// </summary>
     /// <param name="maxDegreeOfParallelism">The maximum degree of parallelism</param>
     /// <returns>A new ExecutionContext configured for parallel execution</returns>
-    public static ExecutionContext WithParallelism(int maxDegreeOfParallelism)
+    public static NivaraExecutionContext WithParallelism(int maxDegreeOfParallelism)
     {
-        return new ExecutionContext(ExecutionStrategy.Parallel)
+        return new NivaraExecutionContext(ExecutionStrategy.Parallel)
         {
             MaxDegreeOfParallelism = maxDegreeOfParallelism
         };
@@ -94,9 +94,9 @@ public sealed class ExecutionContext
     /// </summary>
     /// <param name="memoryBudgetBytes">The memory budget in bytes</param>
     /// <returns>A new ExecutionContext with the specified memory budget</returns>
-    public static ExecutionContext WithMemoryBudget(long memoryBudgetBytes)
+    public static NivaraExecutionContext WithMemoryBudget(long memoryBudgetBytes)
     {
-        return new ExecutionContext
+        return new NivaraExecutionContext
         {
             MemoryBudget = memoryBudgetBytes
         };
@@ -107,9 +107,9 @@ public sealed class ExecutionContext
     /// </summary>
     /// <param name="cancellationToken">The cancellation token</param>
     /// <returns>A new ExecutionContext with the specified cancellation token</returns>
-    public static ExecutionContext WithCancellation(CancellationToken cancellationToken)
+    public static NivaraExecutionContext WithCancellation(CancellationToken cancellationToken)
     {
-        return new ExecutionContext
+        return new NivaraExecutionContext
         {
             CancellationToken = cancellationToken
         };

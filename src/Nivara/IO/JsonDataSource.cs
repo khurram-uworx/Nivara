@@ -1,4 +1,6 @@
 using Nivara.Exceptions;
+using Nivara.Helpers;
+using Nivara.Query;
 using System.Text.Json;
 
 namespace Nivara.IO;

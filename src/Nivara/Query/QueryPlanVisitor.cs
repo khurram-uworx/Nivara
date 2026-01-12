@@ -1,4 +1,4 @@
-namespace Nivara;
+namespace Nivara.Query;
 
 /// <summary>
 /// Visitor interface for traversing query plans

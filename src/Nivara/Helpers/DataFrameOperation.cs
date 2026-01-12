@@ -1,6 +1,10 @@
 using Nivara.Exceptions;
+using Nivara.Query;
+using ExecutionProgress = Nivara.Execution.ExecutionProgress;
+using ExecutionStrategy = Nivara.Execution.ExecutionStrategy;
+using NivaraExecutionContext = Nivara.Execution.NivaraExecutionContext;
 
-namespace Nivara;
+namespace Nivara.Helpers;
 
 /// <summary>
 /// Abstract base class for DataFrame operations that implement IQueryOperation&lt;NivaraFrame&gt;
@@ -46,7 +50,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// </summary>
     /// <param name="context">The execution context</param>
     /// <returns>The result of the operation</returns>
-    public virtual NivaraFrame Execute(ExecutionContext context)
+    public virtual NivaraFrame Execute(NivaraExecutionContext context)
     {
         if (context == null)
             throw new ArgumentNullException(nameof(context));
@@ -66,7 +70,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// </summary>
     /// <param name="context">The execution context</param>
     /// <returns>The result of the operation</returns>
-    protected virtual NivaraFrame ExecuteLazy(ExecutionContext context)
+    protected virtual NivaraFrame ExecuteLazy(NivaraExecutionContext context)
     {
         // Default implementation delegates to synchronous Execute
         return Execute();
@@ -77,7 +81,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// </summary>
     /// <param name="context">The execution context</param>
     /// <returns>The result of the operation</returns>
-    protected virtual NivaraFrame ExecuteEager(ExecutionContext context)
+    protected virtual NivaraFrame ExecuteEager(NivaraExecutionContext context)
     {
         // Default implementation delegates to synchronous Execute
         return Execute();
@@ -88,7 +92,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// </summary>
     /// <param name="context">The execution context</param>
     /// <returns>The result of the operation</returns>
-    protected virtual NivaraFrame ExecuteStreaming(ExecutionContext context)
+    protected virtual NivaraFrame ExecuteStreaming(NivaraExecutionContext context)
     {
         // Default implementation delegates to synchronous Execute
         // Derived classes can override for true streaming behavior
@@ -100,7 +104,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// </summary>
     /// <param name="context">The execution context</param>
     /// <returns>The result of the operation</returns>
-    protected virtual NivaraFrame ExecuteParallel(ExecutionContext context)
+    protected virtual NivaraFrame ExecuteParallel(NivaraExecutionContext context)
     {
         // Default implementation delegates to synchronous Execute
         // Derived classes can override for true parallel behavior
@@ -112,7 +116,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// </summary>
     /// <param name="context">The execution context to validate</param>
     /// <exception cref="QueryExecutionException">Thrown when the operation cannot be executed with the given context</exception>
-    protected virtual void ValidateExecutionContext(ExecutionContext context)
+    protected virtual void ValidateExecutionContext(NivaraExecutionContext context)
     {
         if (context == null)
             throw new ArgumentNullException(nameof(context));
@@ -131,7 +135,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// <param name="operationName">The name of the current operation</param>
     /// <param name="completedWork">The amount of work completed</param>
     /// <param name="totalWork">The total amount of work</param>
-    protected static void ReportProgress(ExecutionContext context, string operationName, long completedWork, long totalWork)
+    protected static void ReportProgress(NivaraExecutionContext context, string operationName, long completedWork, long totalWork)
     {
         if (context.Progress != null)
         {
@@ -145,7 +149,7 @@ public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
     /// </summary>
     /// <param name="context">The execution context</param>
     /// <exception cref="OperationCanceledException">Thrown when cancellation is requested</exception>
-    protected static void ThrowIfCancellationRequested(ExecutionContext context)
+    protected static void ThrowIfCancellationRequested(NivaraExecutionContext context)
     {
         context.CancellationToken.ThrowIfCancellationRequested();
     }

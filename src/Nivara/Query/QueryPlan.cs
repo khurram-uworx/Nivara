@@ -1,6 +1,6 @@
 using Nivara.Exceptions;
 
-namespace Nivara;
+namespace Nivara.Query;
 
 /// <summary>
 /// Represents a complete query execution plan with a data source and sequence of operations.

@@ -1,4 +1,5 @@
 using Nivara.Diagnostics;
+using Nivara.Execution;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Diagnostics;

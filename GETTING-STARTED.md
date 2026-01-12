@@ -856,6 +856,7 @@ Console.WriteLine(optimizationResult.GenerateReport());
 
 ```csharp
 using Nivara;
+using Nivara.Execution;
 
 var engine = new ExecutionEngine();
 var plan = query.GetQueryPlan();

@@ -1,7 +1,8 @@
 using Nivara.Exceptions;
+using Nivara.Query;
 using System.Collections.Concurrent;
 
-namespace Nivara;
+namespace Nivara.Execution;
 
 /// <summary>
 /// Executes query plans using different execution strategies.
@@ -34,7 +35,7 @@ public sealed class ExecutionEngine
     /// <param name="context">The execution context containing strategy and configuration</param>
     /// <returns>The materialized result of the query</returns>
     /// <exception cref="QueryExecutionException">Thrown when execution fails</exception>
-    public NivaraFrame Execute(QueryPlan plan, ExecutionContext context)
+    public NivaraFrame Execute(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null)
             throw new ArgumentNullException(nameof(plan));
@@ -69,7 +70,7 @@ public sealed class ExecutionEngine
     /// <returns>The materialized result of the query</returns>
     public NivaraFrame Execute(QueryPlan plan)
     {
-        return Execute(plan, new ExecutionContext(ExecutionStrategy.Lazy));
+        return Execute(plan, new NivaraExecutionContext(ExecutionStrategy.Lazy));
     }
 
     /// <summary>
@@ -78,7 +79,7 @@ public sealed class ExecutionEngine
     /// <param name="plan">The query plan to execute</param>
     /// <param name="context">The execution context containing strategy and configuration</param>
     /// <returns>A task representing the asynchronous execution</returns>
-    public async Task<NivaraFrame> ExecuteAsync(QueryPlan plan, ExecutionContext context)
+    public async Task<NivaraFrame> ExecuteAsync(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null)
             throw new ArgumentNullException(nameof(plan));
@@ -134,7 +135,7 @@ public sealed class ExecutionEngine
     /// <param name="plan">The query plan to validate</param>
     /// <param name="context">The execution context</param>
     /// <returns>True if the plan is valid for the given context, false otherwise</returns>
-    public bool ValidatePlan(QueryPlan plan, ExecutionContext context)
+    public bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)
             return false;
@@ -165,7 +166,7 @@ public sealed class ExecutionEngine
     /// <param name="plan">The query plan to analyze</param>
     /// <param name="context">The execution context</param>
     /// <returns>An estimated execution cost (higher values indicate more expensive operations)</returns>
-    public long EstimateExecutionCost(QueryPlan plan, ExecutionContext context)
+    public long EstimateExecutionCost(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)
             return long.MaxValue;
@@ -222,7 +223,7 @@ public interface IExecutionStrategy
     /// <param name="plan">The query plan to execute</param>
     /// <param name="context">The execution context</param>
     /// <returns>The materialized result</returns>
-    NivaraFrame Execute(QueryPlan plan, ExecutionContext context);
+    NivaraFrame Execute(QueryPlan plan, NivaraExecutionContext context);
 
     /// <summary>
     /// Executes a query plan asynchronously
@@ -230,7 +231,7 @@ public interface IExecutionStrategy
     /// <param name="plan">The query plan to execute</param>
     /// <param name="context">The execution context</param>
     /// <returns>A task representing the asynchronous execution</returns>
-    Task<NivaraFrame> ExecuteAsync(QueryPlan plan, ExecutionContext context);
+    Task<NivaraFrame> ExecuteAsync(QueryPlan plan, NivaraExecutionContext context);
 
     /// <summary>
     /// Validates that a query plan can be executed with this strategy
@@ -238,7 +239,7 @@ public interface IExecutionStrategy
     /// <param name="plan">The query plan to validate</param>
     /// <param name="context">The execution context</param>
     /// <returns>True if the plan is valid, false otherwise</returns>
-    bool ValidatePlan(QueryPlan plan, ExecutionContext context);
+    bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context);
 
     /// <summary>
     /// Estimates the execution cost for this strategy
@@ -246,5 +247,5 @@ public interface IExecutionStrategy
     /// <param name="plan">The query plan to analyze</param>
     /// <param name="context">The execution context</param>
     /// <returns>An estimated execution cost</returns>
-    long EstimateExecutionCost(QueryPlan plan, ExecutionContext context);
+    long EstimateExecutionCost(QueryPlan plan, NivaraExecutionContext context);
 }

@@ -1,3 +1,4 @@
+using Nivara.Execution;
 using System.Diagnostics;
 
 namespace Nivara.Diagnostics;

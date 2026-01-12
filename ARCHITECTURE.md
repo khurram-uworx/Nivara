@@ -31,23 +31,23 @@ Many implementation choices make more sense when viewed through this lens. These
 
 At a high level, Nivara consists of:
 
-- **Columnar storage abstractions** (`MemoryStorage<T>`, `TensorStorage<T>`)
-- **Schema-aware frames** (`NivaraFrame`, `QueryFrame`)
-- **A lazy query layer** with optimization engine
-- **Execution strategies** (lazy, eager, streaming, parallel)
-- **Operation implementations** (joins, aggregations, filtering, sorting)
-- **Diagnostics and planning infrastructure**
+- **Columnar storage abstractions** (`Nivara.Storage.MemoryStorage<T>`, `Nivara.Storage.TensorStorage<T>`)
+- **Schema-aware frames** (`NivaraFrame`, `Nivara.Query.QueryFrame`)
+- **A lazy query layer** with optimization engine (`Nivara.Query`, `Nivara.Optimization`)
+- **Execution strategies** (`Nivara.Execution` - lazy, eager, streaming, parallel)
+- **Operation implementations** (`Nivara.Operations` - joins, aggregations, filtering, sorting)
+- **Diagnostics and planning infrastructure** (`Nivara.Diagnostics`)
 
 ```
 Data Source (CSV/Parquet/Arrow)
         ↓
-QueryFrame (lazy construction)
+Nivara.Query.QueryFrame (lazy construction)
         ↓
 Logical Plan (operations + schema)
         ↓
-Query Optimization (rule-based)
+Query Optimization (Nivara.Optimization - rule-based)
         ↓
-Physical Plan (execution strategy + kernels)
+Physical Plan (Nivara.Execution strategy + kernels)
         ↓
 Execution Engine (scalar/vectorized kernels)
         ↓
@@ -71,7 +71,7 @@ Key characteristics:
 
 Each column delegates to an `IColumnStorage<T>` implementation:
 
-- **Data storage** (`MemoryStorage<T>` or `TensorStorage<T>`)
+- **Data storage** (`Nivara.Storage.MemoryStorage<T>` or `Nivara.Storage.TensorStorage<T>`)
 - **Null mask** (when nulls are present)
 - **Type-specific operations** (scalar vs vectorized)
 
@@ -156,7 +156,7 @@ Nivara uses a factory-based approach to select optimal storage:
 
 ### Automatic Selection
 
-The `ColumnStorageFactory.IsVectorizable<T>()` method determines storage type:
+The `Nivara.Storage.ColumnStorageFactory.IsVectorizable<T>()` method determines storage type:
 
 ```csharp
 // Automatically selects TensorStorage<int>
@@ -260,7 +260,7 @@ Expressions are **pure** and side-effect free.
 
 ### QueryFrame
 
-`QueryFrame` represents a lazily constructed computation graph.
+`Nivara.Query.QueryFrame` represents a lazily constructed computation graph.
 
 **Characteristics:**
 - **Lazy construction** - no data processing until `Collect()`
@@ -270,7 +270,7 @@ Expressions are **pure** and side-effect free.
 
 ### Execution Strategies
 
-Nivara supports multiple execution strategies via the `ExecutionStrategy` enum:
+Nivara supports multiple execution strategies via the `Nivara.Execution.ExecutionStrategy` enum:
 
 #### 1. Lazy (Default)
 - Builds complete query plan before execution
@@ -324,10 +324,10 @@ Execution begins only when `Collect()` or similar materialization methods are in
 
 ### OptimizationEngine Architecture
 
-The `OptimizationEngine` applies rule-based optimizations to query plans:
+The `Nivara.Optimization.OptimizationEngine` applies rule-based optimizations to query plans:
 
 **Core Components:**
-- **OptimizationRule** base class for implementing optimization strategies
+- **Nivara.Optimization.OptimizationRule** base class for implementing optimization strategies
 - **Rule prioritization** system for applying optimizations in correct order
 - **Statistics tracking** for performance analysis and debugging
 - **Conservative approach** that preserves correctness over aggressive optimization
@@ -338,26 +338,30 @@ The `OptimizationEngine` applies rule-based optimizations to query plans:
 - **Purpose**: Moves filter operations closer to data sources
 - **Benefit**: Reduces data movement and processing overhead
 - **Safety**: Only applied when predicate dependencies are verified
+- **Location**: `Nivara.Optimization.PredicatePushdownRule`
 
 #### 2. ProjectionPushdownRule  
 - **Purpose**: Eliminates unused columns early in the pipeline
 - **Benefit**: Reduces memory usage and I/O overhead
 - **Safety**: Analyzes column usage across entire query plan
+- **Location**: `Nivara.Optimization.ProjectionPushdownRule`
 
 #### 3. ColumnEliminationRule
 - **Purpose**: Removes columns not needed by subsequent operations
 - **Benefit**: Minimizes memory footprint and processing time
 - **Safety**: Performs dependency analysis to ensure required columns are preserved
+- **Location**: `Nivara.Optimization.ColumnEliminationRule`
 
 #### 4. OperationFusionRule
 - **Purpose**: Combines compatible operations (multiple filters, projections)
 - **Benefit**: Reduces operation overhead and improves cache locality
 - **Safety**: Only fuses operations with identical semantics
+- **Location**: `Nivara.Optimization.OperationFusionRule`
 
 ### Optimization Process
 
 ```csharp
-var optimizer = new QueryOptimizer();
+var optimizer = new Nivara.Query.QueryOptimizer();
 var optimizedPlan = optimizer.Optimize(originalPlan);
 
 // Access optimization statistics
@@ -382,7 +386,7 @@ foreach (var stat in stats)
 
 ### Operation Implementation Pattern
 
-All DataFrame operations implement the `IQueryOperation` interface:
+All DataFrame operations implement the `Nivara.Query.IQueryOperation` interface:
 
 ```csharp
 public interface IQueryOperation
@@ -396,21 +400,21 @@ public interface IQueryOperation
 ### Core Operations
 
 #### Filtering Operations
-- **FilterOperation**: Applies predicates to filter rows
-- **SliceOperation**: Extracts row ranges (Take, Skip, Slice)
-- **SelectOperation**: Applies complex selection criteria
+- **FilterOperation**: Applies predicates to filter rows (`Nivara.Operations.FilterOperation`)
+- **SliceOperation**: Extracts row ranges (Take, Skip, Slice) (`Nivara.Operations.SliceOperation`)
+- **SelectOperation**: Applies complex selection criteria (`Nivara.Operations.SelectOperation`)
 
 #### Transformation Operations  
-- **ProjectionOperation**: Selects and renames columns
-- **SortOperation**: Multi-column sorting with null ordering control
-- **GroupByOperation**: Groups data by key columns with aggregation support
+- **ProjectionOperation**: Selects and renames columns (`Nivara.Operations.ProjectionOperation`)
+- **SortOperation**: Multi-column sorting with null ordering control (`Nivara.Operations.SortOperation`)
+- **GroupByOperation**: Groups data by key columns with aggregation support (`Nivara.Operations.GroupByOperation`)
 
 #### Combination Operations
-- **JoinOperation**: Inner, left, right, and full outer joins with configurable conflict resolution
-- **ConcatenationOperation**: Vertical and horizontal DataFrame combination
+- **JoinOperation**: Inner, left, right, and full outer joins with configurable conflict resolution (`Nivara.Operations.JoinOperation`)
+- **ConcatenationOperation**: Vertical and horizontal DataFrame combination (`Nivara.Operations.ConcatenationOperation`)
 
 #### Aggregation Operations
-- **AggregationFunction**: Base class for Sum, Count, Mean, Min, Max, etc.
+- **AggregationFunction**: Base class for Sum, Count, Mean, Min, Max, etc. (`Nivara.Operations.AggregationFunction`)
 - **Vectorized aggregations**: Automatic SIMD acceleration for numeric types
 - **Null-aware processing**: Proper null handling in all aggregation functions
 
@@ -419,7 +423,7 @@ public interface IQueryOperation
 Operations integrate seamlessly with the query system:
 
 1. **Schema Validation**: `TransformSchema()` validates compatibility before execution
-2. **Lazy Evaluation**: Operations build query plans in `QueryFrame`
+2. **Lazy Evaluation**: Operations build query plans in `Nivara.Query.QueryFrame`
 3. **Optimization**: Operations participate in query optimization rules
 4. **Error Handling**: Structured exceptions with operation context
 
@@ -667,9 +671,9 @@ Multiple execution strategies optimize performance for different use cases:
 #### Execution Context Configuration
 
 ```csharp
-var context = new ExecutionContext
+var context = new Nivara.Execution.ExecutionContext
 {
-    Strategy = ExecutionStrategy.Parallel,
+    Strategy = Nivara.Execution.ExecutionStrategy.Parallel,
     MaxDegreeOfParallelism = Environment.ProcessorCount,
     MemoryBudget = 1024 * 1024 * 1024, // 1GB
     CancellationToken = cancellationToken,
@@ -707,9 +711,9 @@ Each exception includes:
 Track performance metrics and identify optimization opportunities:
 
 ```csharp
-var diagnostics = new ExecutionDiagnostics();
+var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
 
-var result = DiagnosticHelper.ExecuteWithDiagnostics(
+var result = Nivara.Diagnostics.DiagnosticHelper.ExecuteWithDiagnostics(
     diagnostics,
     "ComplexQuery",
     () => /* operation */,
@@ -806,6 +810,8 @@ public class ResourceManager : IDisposable
     // Enables memory pressure monitoring and response
 }
 ```
+
+**Location**: `Nivara.Helpers.ResourceManager`
 
 ---
 

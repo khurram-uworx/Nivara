@@ -1,4 +1,4 @@
-namespace Nivara;
+namespace Nivara.Execution;
 
 /// <summary>
 /// Defines the execution strategy for query operations

@@ -52,9 +52,13 @@ Understanding the repository layout is essential before making changes.
 src/Nivara/
 ├── Diagnostics/               # Performance analysis and diagnostic tools
 ├── Exceptions/                # Custom exception hierarchy
+├── Execution/                 # Execution strategies and engine
 ├── Expressions/               # Query expression system
+├── Helpers/                   # Utility classes and helpers
 ├── IO/                        # Built-in IO (core data sources)
 ├── Operations/                # DataFrame operations (joins, aggregations, etc.)
+├── Optimization/              # Query optimization rules
+├── Query/                     # Query engine and planning
 ├── Storage/                   # Column storage implementations
 ├── Tensors/                   # Tensor-based operations and interop
 ├── Schema.cs                  # Schema management
@@ -62,11 +66,9 @@ src/Nivara/
 ├── NivaraSeries.cs            # Series implementation
 ├── NivaraFrame.cs             # DataFrame implementation
 ├── NivaraFrameExtensions.cs   # DataFrame extension methods
-├── QueryFrame.cs              # Lazy query frame
-├── QueryExecutor.cs           # Query execution engine
-├── QueryOptimizer.cs          # Query optimization
-├── ExecutionStrategy.cs       # Execution strategies (lazy, eager, parallel, streaming)
-└── [Other Query Engine Files] # Query planning and execution components
+├── IColumn.cs                 # Column interface
+├── IColumnStorage.cs          # Column storage interface
+└── IFrame.cs                  # DataFrame interface
 ```
 
 ### Extensions
@@ -97,19 +99,20 @@ Tests mirror the source structure for discoverability:
 tests/Nivara.Tests/
 ├── Diagnostics/           # Diagnostic system tests
 ├── Exceptions/            # Exception handling tests
+├── Execution/             # Execution strategy tests
 ├── Expressions/           # Expression system tests
+├── Helpers/               # Helper utility tests
 ├── IO/                    # Core I/O tests
 ├── MLNet/                 # ML.NET integration tests
 ├── Operations/            # DataFrame operations tests
+├── Optimization/          # Query optimization tests
+├── Query/                 # Query engine tests
 ├── Storage/               # Storage implementation tests
 ├── Tensors/               # Tensor operations tests
 ├── SchemaTests.cs         # Schema validation tests
 ├── NivaraColumnTests.cs   # Column implementation tests
 ├── NivaraSeriesTests.cs   # Series implementation tests
 ├── NivaraFrameTests.cs    # DataFrame core tests
-├── QueryFrameTests.cs     # Lazy query tests
-├── QueryExecutionTests.cs # Query execution tests
-├── QueryOptimizerTests.cs # Query optimization tests
 ├── IntegrationTests.cs    # End-to-end integration tests
 └── [Property-based Tests] # Property tests
 ```

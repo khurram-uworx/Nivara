@@ -1,6 +1,6 @@
 using Nivara.Exceptions;
 
-namespace Nivara;
+namespace Nivara.Helpers;
 
 /// <summary>
 /// Handles deferred error reporting for lazy operations.

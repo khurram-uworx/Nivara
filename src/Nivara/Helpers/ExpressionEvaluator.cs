@@ -1,7 +1,7 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
 
-namespace Nivara;
+namespace Nivara.Helpers;
 
 /// <summary>
 /// Evaluates column expressions against input data to produce result columns

@@ -1,4 +1,6 @@
 using Nivara.Exceptions;
+using Nivara.Helpers;
+using Nivara.Query;
 
 namespace Nivara;
 
@@ -76,7 +78,7 @@ public sealed class NivaraFrame : IFrame
         schema = new Schema(schemaColumns);
 
         // Track this frame for resource management
-        ResourceManager.TrackResource(this, "NivaraFrame", estimatedMemoryUsage);
+        NivaraResourceManager.TrackResource(this, "NivaraFrame", estimatedMemoryUsage);
     }
 
     /// <summary>
@@ -626,7 +628,7 @@ public sealed class NivaraFrame : IFrame
         if (!disposed)
         {
             // Untrack from resource manager
-            ResourceManager.UntrackResource(this);
+            NivaraResourceManager.UntrackResource(this);
 
             // Dispose all columns
             foreach (var column in columns.Values)
@@ -670,7 +672,7 @@ public sealed class NivaraFrame : IFrame
         ObjectDisposedException.ThrowIf(disposed, this);
 
         var estimatedSize = EstimateFrameMemoryUsage();
-        return ResourceManager.GetMemoryRecommendations(estimatedSize, operationType);
+        return NivaraResourceManager.GetMemoryRecommendations(estimatedSize, operationType);
     }
 
     /// <summary>

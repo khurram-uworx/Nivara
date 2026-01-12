@@ -1,4 +1,4 @@
-namespace Nivara;
+namespace Nivara.Query;
 
 /// <summary>
 /// Defines the diagnostic modes available for query analysis and debugging.

@@ -22,10 +22,10 @@ Contents (high level)
 
 --------------------------------------------------------------------------------
 ARCHITECTURE DECISIONS (concise)
-- Storage strategy: default to MemoryStorage for non-vectorizable types and TensorStorage for vectorizable types. Use a factory (ColumnStorageFactory) and runtime type checks for selection.
+- Storage strategy: default to Nivara.Storage.MemoryStorage for non-vectorizable types and Nivara.Storage.TensorStorage for vectorizable types. Use a factory (Nivara.Storage.ColumnStorageFactory) and runtime type checks for selection.
   - Rationale: generic static constraints are limiting (CS0080); runtime dispatch is more flexible.
 
-- Vectorization detection: use factory-level checks such as ColumnStorageFactory.IsVectorizable<T>() rather than instance flags.
+- Vectorization detection: use factory-level checks such as Nivara.Storage.ColumnStorageFactory.IsVectorizable<T>() rather than instance flags.
   - Rationale: selection of storage vs arithmetic vectorization have different concerns; factory approach centralizes decisions.
 
 - Null semantics: explicit null masks (boolean masks) rather than NaN-based null semantics.
@@ -38,12 +38,12 @@ ARCHITECTURE DECISIONS (concise)
   - Rationale: preserves both semantics while allowing disambiguation when needed.
 
 - Diagnostics and kernel selection:
-  - Use ColumnDiagnostics for storage-level info and DiagnosticsTracker for operation-level tracking.
+  - Use Nivara.Diagnostics.ColumnDiagnostics for storage-level info and Nivara.Diagnostics.DiagnosticsTracker for operation-level tracking.
   - Centralize kernel selection logic in a single DetermineKernelType() method that checks vectorizability, hardware acceleration, and a size threshold.
 
-- Query engine: expose generic IQueryOperation<T> and public QueryPlan to enable external extensions and optimizers; use immutable Schema and QueryPlan objects.
+- Query engine: expose generic Nivara.Query.IQueryOperation<T> and public Nivara.Query.QueryPlan to enable external extensions and optimizers; use immutable Schema and QueryPlan objects.
 
-- DataFrame operations: Implement as query operations (IQueryOperation) with schema validation in TransformSchema phase
+- DataFrame operations: Implement as query operations (Nivara.Query.IQueryOperation) with schema validation in TransformSchema phase
   - Concatenation: Use configurable mismatch handling (Error, FillWithNulls) for vertical, always Error for horizontal
   - Joins: Hash-based algorithm with composite keys, exclude nulls from matching, coalesce join keys for outer joins
   - Sorting: Sort indices first, then reorder all columns consistently, explicit null ordering (NullsFirst/NullsLast)
@@ -55,12 +55,12 @@ ARCHITECTURE DECISIONS (concise)
   - Clear execution semantics: immediate execution on DataFrames, lazy via AsQueryFrame()
 
 - Query optimization: Rule-based engine with conservative approach
-  - Abstract OptimizationRule base class with priority system
+  - Abstract Nivara.Optimization.OptimizationRule base class with priority system
   - Use operation type strings for dispatch when internal details inaccessible
   - Visitor pattern for query plan analysis and transformation
   - Comprehensive statistics tracking and reporting
 
-- Execution strategies: Pluggable strategy pattern (lazy, eager, streaming, parallel)
+- Execution strategies: Pluggable strategy pattern (Nivara.Execution - lazy, eager, streaming, parallel)
   - Cost estimation with operation-specific weights
   - Async-first design with sync wrappers using GetAwaiter().GetResult()
   - Intelligent parallel execution with heuristics for data size/operation type
@@ -111,7 +111,7 @@ Safe conversion for tensor primitives / MemoryMarshal limitations
 if (typeof(T) == typeof(int))
 {
     var intValues = values.ToArray();
-    var intStorage = new TensorStorage<int>((ReadOnlySpan<int>)(object)intValues.AsSpan());
+    var intStorage = new Nivara.Storage.TensorStorage<int>((ReadOnlySpan<int>)(object)intValues.AsSpan());
     return (IColumnStorage<T>)(object)intStorage;
 }
 ```
@@ -151,12 +151,12 @@ Expression and operator overloading patterns
 - Override Equals/GetHashCode when adding custom equality operators.
 
 Diagnostics & operation tracking
-- ColumnDiagnostics: storage type, recommended kernel.
-- DiagnosticsTracker: enable/disable and collect operation-level metrics.
+- Nivara.Diagnostics.ColumnDiagnostics: storage type, recommended kernel.
+- Nivara.Diagnostics.DiagnosticsTracker: enable/disable and collect operation-level metrics.
 
 Memory & resource management
 - Implement IDisposable consistently for frames, columns, and data sources.
-- Provide ResourceManager for tracking with WeakReference; provide cleanup methods and conservative memory estimates.
+- Provide Nivara.Helpers.ResourceManager for tracking with WeakReference; provide cleanup methods and conservative memory estimates.
 
 DataFrame operation patterns
 - Concatenation: Type dispatch with proper null handling, validate type compatibility, filter empty sources
@@ -282,11 +282,11 @@ Thresholds & defaults used
 - Buffer pooling threshold: 1024 elements (configurable)
 - Default memory budget for streaming: 256 MB (example configuration)
 - Vectorization overhead threshold: ~4 * vectorSize (heuristic)
-- Unmanaged constraint: TensorStorage requires unmanaged types (int, float, double, long, bool)
+- Unmanaged constraint: Nivara.Storage.TensorStorage requires unmanaged types (int, float, double, long, bool)
 
 --------------------------------------------------------------------------------
 QUERY ENGINE & OPTIMIZATIONS
-- QueryPlan is immutable; optimization passes transform into a new QueryPlan.
+- Nivara.Query.QueryPlan is immutable; optimization passes transform into a new QueryPlan.
 - Optimizations applied conservatively: predicate pushdown, operation fusion, column elimination, and reordering when safe.
 - Always validate schema transformations; if optimization fails, fall back to original plan.
 - Use expression analysis (visitor) to discover referenced columns for column elimination and predicate pushdown.
@@ -297,7 +297,7 @@ Optimization safety rules
 
 --------------------------------------------------------------------------------
 RESOURCE MANAGEMENT & DIAGNOSTICS
-- ResourceManager tracks frames/columns via WeakReference and offers ForceCleanup() for tests.
+- Nivara.Helpers.ResourceManager tracks frames/columns via WeakReference and offers ForceCleanup() for tests.
 - Implement proper IDisposable and object disposed guards.
 - Provide diagnostic modes (None, Basic, Detailed, Performance, Comprehensive) with QueryDiagnostics for analysis output.
 - Deferred error handling in lazy sources: collect errors at scan time and throw during Collect().
@@ -319,13 +319,13 @@ QUICK REFERENCE
 - Target framework: .NET 10.0 with System.Numerics.Tensors 10.0.1
 - Common dependencies (Extensions only): CsvHelper 33.1.0, Apache.Arrow 22.1.0, Parquet.Net 5.4.0, Microsoft.ML 5.0.0
 - Useful helpers:
-  - ColumnDiagnostics, DiagnosticsTracker
-  - ColumnStorageFactory.IsVectorizable<T>()
+  - Nivara.Diagnostics.ColumnDiagnostics, Nivara.Diagnostics.DiagnosticsTracker
+  - Nivara.Storage.ColumnStorageFactory.IsVectorizable<T>()
   - NivaraColumn<T>.CreateFromNullable(T?[] values)
   - Tensor.Create(array) + FlattenTo(buffer)
-- Storage selection: TensorStorage for vectorizable unmanaged types, MemoryStorage for others
+- Storage selection: Nivara.Storage.TensorStorage for vectorizable unmanaged types, Nivara.Storage.MemoryStorage for others
 - Null handling: explicit boolean masks, no NaN-based semantics
-- Query execution: lazy by default, multiple strategies available (eager, streaming, parallel)
+- Query execution: lazy by default, multiple strategies available (Nivara.Execution - eager, streaming, parallel)
 
 --------------------------------------------------------------------------------
 MAINTENANCE GUIDELINES
