@@ -1,0 +1,246 @@
+using System.Numerics;
+using System.Numerics.Tensors;
+using Nivara;
+using Nivara.Tensors;
+
+namespace Nivara.Extensions.AutoDiff;
+
+/// <summary>
+/// Gradient-enabled tensor wrapper that tracks gradients and computation history for automatic differentiation.
+/// Built on top of NivaraColumn&lt;T&gt; to leverage existing vectorization, null handling, and storage backends.
+/// </summary>
+/// <typeparam name="T">The numeric type of the tensor that implements INumber&lt;T&gt;</typeparam>
+public sealed class GradTensor<T> : IDisposable where T : struct, INumber<T>
+{
+    private bool disposed;
+
+    /// <summary>
+    /// Gets the underlying data as a NivaraColumn&lt;T&gt;
+    /// </summary>
+    public NivaraColumn<T> Data { get; }
+
+    /// <summary>
+    /// Gets or sets the gradient data as a NivaraColumn&lt;T&gt;
+    /// </summary>
+    public NivaraColumn<T>? Grad { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether this tensor requires gradient computation
+    /// </summary>
+    public bool RequiresGrad { get; }
+
+    /// <summary>
+    /// Gets the number of elements in the tensor
+    /// </summary>
+    public int Length => Data.Length;
+
+    /// <summary>
+    /// Gets a value indicating whether this tensor contains any null values
+    /// </summary>
+    public bool HasNulls => Data.HasNulls;
+
+    /// <summary>
+    /// Gets the computation graph node for this tensor (null for leaf tensors)
+    /// </summary>
+    internal OpNode? GradFn { get; set; }
+
+    /// <summary>
+    /// Gets a value indicating whether this is a leaf tensor (no computation history)
+    /// </summary>
+    internal bool IsLeaf => GradFn == null;
+
+    /// <summary>
+    /// Initializes a new instance of GradTensor with the specified data and gradient requirements
+    /// </summary>
+    /// <param name="data">The underlying data as a NivaraColumn&lt;T&gt;</param>
+    /// <param name="requiresGrad">Whether this tensor should track gradients</param>
+    /// <exception cref="ArgumentNullException">Thrown when data is null</exception>
+    public GradTensor(NivaraColumn<T> data, bool requiresGrad = false)
+    {
+        Data = data ?? throw new ArgumentNullException(nameof(data));
+        RequiresGrad = requiresGrad;
+        GradFn = null; // Leaf tensor by default
+    }
+
+    /// <summary>
+    /// Creates a GradTensor from a NivaraColumn&lt;T&gt;
+    /// </summary>
+    /// <param name="column">The column to wrap</param>
+    /// <param name="requiresGrad">Whether the tensor should track gradients</param>
+    /// <returns>A new GradTensor instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when column is null</exception>
+    public static GradTensor<T> FromColumn(NivaraColumn<T> column, bool requiresGrad = false)
+    {
+        if (column == null)
+            throw new ArgumentNullException(nameof(column));
+
+        return new GradTensor<T>(column, requiresGrad);
+    }
+
+    /// <summary>
+    /// Creates a GradTensor from a NivaraSeries&lt;T&gt;
+    /// </summary>
+    /// <param name="series">The series to wrap</param>
+    /// <param name="requiresGrad">Whether the tensor should track gradients</param>
+    /// <returns>A new GradTensor instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when series is null</exception>
+    public static GradTensor<T> FromSeries(NivaraSeries<T> series, bool requiresGrad = false)
+    {
+        if (series == null)
+            throw new ArgumentNullException(nameof(series));
+
+        return new GradTensor<T>(series.Values, requiresGrad);
+    }
+
+    /// <summary>
+    /// Creates a GradTensor from an array of values
+    /// </summary>
+    /// <param name="array">The array of values</param>
+    /// <param name="requiresGrad">Whether the tensor should track gradients</param>
+    /// <returns>A new GradTensor instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when array is null</exception>
+    public static GradTensor<T> FromArray(T[] array, bool requiresGrad = false)
+    {
+        if (array == null)
+            throw new ArgumentNullException(nameof(array));
+
+        var column = NivaraColumn<T>.Create(array);
+        return new GradTensor<T>(column, requiresGrad);
+    }
+
+    /// <summary>
+    /// Converts this GradTensor back to a NivaraColumn&lt;T&gt;
+    /// </summary>
+    /// <returns>The underlying NivaraColumn&lt;T&gt;</returns>
+    public NivaraColumn<T> ToColumn()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return Data;
+    }
+
+    /// <summary>
+    /// Converts this GradTensor to a NivaraSeries&lt;T&gt;
+    /// </summary>
+    /// <returns>A new NivaraSeries&lt;T&gt; wrapping the data</returns>
+    public NivaraSeries<T> ToSeries()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return new NivaraSeries<T>(Data);
+    }
+
+    /// <summary>
+    /// Gets a tensor view of the data for operations requiring tensor semantics
+    /// </summary>
+    /// <returns>A Tensor&lt;T&gt; view of the data</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the data contains null values</exception>
+    public Tensor<T> AsTensor()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (HasNulls)
+        {
+            throw new InvalidOperationException("Cannot create tensor view from data with null values. Use ToColumn() or ToSeries() for null-aware operations.");
+        }
+
+        // Convert to series first, then to tensor
+        var series = ToSeries();
+        return series.ToTensor();
+    }
+
+    /// <summary>
+    /// Initiates backward pass computation from this tensor
+    /// </summary>
+    /// <param name="gradient">Optional gradient to use as starting point. If null, uses ones for scalar tensors</param>
+    /// <exception cref="InvalidOperationException">Thrown when called on non-scalar tensors or tensors that don't require gradients</exception>
+    public void Backward(GradTensor<T>? gradient = null)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (!RequiresGrad)
+        {
+            throw new InvalidOperationException("Cannot compute gradients for tensor that doesn't require gradients. Set requiresGrad=true when creating the tensor.");
+        }
+
+        if (Length != 1)
+        {
+            throw new InvalidOperationException($"Backward can only be called on scalar tensors (length=1). This tensor has length={Length}. For non-scalar tensors, provide a gradient argument.");
+        }
+
+        // Use ComputationGraph to perform backward pass
+        var gradientData = gradient?.Data ?? NivaraColumn<T>.Create(new T[] { T.One });
+        ComputationGraph.Backward(this, gradientData);
+    }
+
+    /// <summary>
+    /// Detaches this tensor from the computation graph, returning a new tensor without gradient tracking
+    /// </summary>
+    /// <returns>A new GradTensor with the same data but no gradient tracking</returns>
+    public GradTensor<T> Detach()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return new GradTensor<T>(Data, requiresGrad: false);
+    }
+
+    /// <summary>
+    /// Zeros the gradient of this tensor
+    /// </summary>
+    public void ZeroGrad()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        Grad = null;
+    }
+
+    /// <summary>
+    /// Gets the element at the specified index
+    /// </summary>
+    /// <param name="index">The zero-based index</param>
+    /// <returns>The element at the specified index</returns>
+    /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
+    public T this[int index]
+    {
+        get
+        {
+            ObjectDisposedException.ThrowIf(disposed, this);
+            return Data[index];
+        }
+    }
+
+    /// <summary>
+    /// Determines whether the element at the specified index is null
+    /// </summary>
+    /// <param name="index">The zero-based index to check</param>
+    /// <returns>true if the element is null; otherwise, false</returns>
+    /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
+    public bool IsNull(int index)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return Data.IsNull(index);
+    }
+
+    /// <summary>
+    /// Creates a string representation of this GradTensor
+    /// </summary>
+    /// <returns>A string representation showing data, gradient status, and computation graph info</returns>
+    public override string ToString()
+    {
+        if (disposed)
+            return "GradTensor<T> (disposed)";
+
+        var gradInfo = RequiresGrad ? (Grad != null ? "with grad" : "requires grad") : "no grad";
+        var graphInfo = IsLeaf ? "leaf" : "non-leaf";
+        return $"GradTensor<{typeof(T).Name}>[{Length}] ({gradInfo}, {graphInfo})";
+    }
+
+    /// <summary>
+    /// Releases all resources used by this GradTensor
+    /// </summary>
+    public void Dispose()
+    {
+        if (!disposed)
+        {
+            Data?.Dispose();
+            Grad?.Dispose();
+            disposed = true;
+        }
+    }
+}
