@@ -1,8 +1,7 @@
+using Nivara.Extensions.AutoDiff.Utilities;
+using Nivara.Tensors;
 using System.Numerics;
 using System.Numerics.Tensors;
-using Nivara;
-using Nivara.Tensors;
-using Nivara.Extensions.AutoDiff.Utilities;
 
 namespace Nivara.Extensions.AutoDiff;
 
@@ -61,7 +60,7 @@ public sealed class GradTensor<T> : IDisposable where T : struct, INumber<T>
     {
         // Validate that the type is supported for automatic differentiation
         TypeValidator.ValidateNumericType<T>();
-        
+
         Data = data ?? throw new ArgumentNullException(nameof(data));
         RequiresGrad = requiresGrad;
         GradFn = null; // Leaf tensor by default

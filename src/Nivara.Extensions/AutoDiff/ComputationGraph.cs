@@ -1,5 +1,4 @@
 using System.Numerics;
-using Nivara;
 
 namespace Nivara.Extensions.AutoDiff;
 
@@ -121,7 +120,7 @@ public sealed class ComputationGraph
     /// <typeparam name="T">The numeric type of the tensor</typeparam>
     /// <param name="tensor">The tensor to start mapping from</param>
     /// <param name="nodeToOutputMap">The map to populate</param>
-    private static void BuildNodeToOutputMap<T>(GradTensor<T> tensor, Dictionary<OpNode, GradTensor<T>> nodeToOutputMap) 
+    private static void BuildNodeToOutputMap<T>(GradTensor<T> tensor, Dictionary<OpNode, GradTensor<T>> nodeToOutputMap)
         where T : struct, INumber<T>
     {
         var visited = new HashSet<GradTensor<T>>();

@@ -1,7 +1,6 @@
-using NUnit.Framework;
-using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Extensions;
+using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -132,7 +131,7 @@ public class NivaraIntegrationTests
         NivaraFrame? frame = null;
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => 
+        Assert.Throws<ArgumentNullException>(() =>
             frame!.ToGradTensors<float>(new[] { "A" }));
     }
 
@@ -144,7 +143,7 @@ public class NivaraIntegrationTests
         var frame = NivaraFrame.Create(("A", col));
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => 
+        Assert.Throws<ArgumentNullException>(() =>
             frame.ToGradTensors<float>(null!));
     }
 
@@ -156,7 +155,7 @@ public class NivaraIntegrationTests
         var frame = NivaraFrame.Create(("A", col));
 
         // Act & Assert
-        Assert.Throws<ArgumentException>(() => 
+        Assert.Throws<ArgumentException>(() =>
             frame.ToGradTensors<float>(Array.Empty<string>()));
     }
 
@@ -168,8 +167,8 @@ public class NivaraIntegrationTests
         var doubleCol = NivaraColumn<double>.Create(new double[] { 3.0, 4.0 });
         var intCol = NivaraColumn<int>.Create(new int[] { 5, 6 });
         var frame = NivaraFrame.Create(
-            ("Float", floatCol), 
-            ("Double", doubleCol), 
+            ("Float", floatCol),
+            ("Double", doubleCol),
             ("Int", intCol));
 
         // Act
@@ -188,7 +187,7 @@ public class NivaraIntegrationTests
         // Arrange
         var tensor1 = GradTensor<float>.FromArray(new float[] { 1.0f }, requiresGrad: true);
         var tensor2 = GradTensor<float>.FromArray(new float[] { 2.0f }, requiresGrad: true);
-        
+
         // Set some gradients
         tensor1.Grad = NivaraColumn<float>.Create(new float[] { 0.5f });
         tensor2.Grad = NivaraColumn<float>.Create(new float[] { 0.3f });
@@ -238,7 +237,7 @@ public class NivaraIntegrationTests
         Assert.That(frame.RowCount, Is.EqualTo(2));
         Assert.That(frame.HasColumn("A"), Is.True);
         Assert.That(frame.HasColumn("B"), Is.True);
-        
+
         var colA = frame.GetColumn<float>("A");
         var colB = frame.GetColumn<float>("B");
         Assert.That(colA[0], Is.EqualTo(1.0f));
@@ -273,7 +272,7 @@ public class NivaraIntegrationTests
         // Arrange
         var tensor1 = GradTensor<float>.FromArray(new float[] { 1.0f, 2.0f }, requiresGrad: true);
         var tensor2 = GradTensor<float>.FromArray(new float[] { 3.0f, 4.0f }, requiresGrad: true);
-        
+
         // Set gradients
         tensor1.Grad = NivaraColumn<float>.Create(new float[] { 0.1f, 0.2f });
         tensor2.Grad = NivaraColumn<float>.Create(new float[] { 0.3f, 0.4f });
@@ -291,7 +290,7 @@ public class NivaraIntegrationTests
         Assert.That(gradFrame, Is.Not.Null);
         Assert.That(gradFrame!.ColumnCount, Is.EqualTo(2));
         Assert.That(gradFrame.RowCount, Is.EqualTo(2));
-        
+
         var gradA = gradFrame.GetColumn<float>("A");
         var gradB = gradFrame.GetColumn<float>("B");
         Assert.That(gradA[0], Is.EqualTo(0.1f));
@@ -393,10 +392,10 @@ public class NivaraIntegrationTests
         // Assert
         Assert.That(resultFrame.ColumnCount, Is.EqualTo(originalFrame.ColumnCount));
         Assert.That(resultFrame.RowCount, Is.EqualTo(originalFrame.RowCount));
-        
+
         var resultCol1 = resultFrame.GetColumn<float>("A");
         var resultCol2 = resultFrame.GetColumn<float>("B");
-        
+
         for (int i = 0; i < 3; i++)
         {
             Assert.That(resultCol1[i], Is.EqualTo(col1[i]));

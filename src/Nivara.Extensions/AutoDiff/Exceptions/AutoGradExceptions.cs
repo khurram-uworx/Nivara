@@ -41,7 +41,7 @@ public class AutoGradException : Exception
     /// <param name="message">The error message</param>
     /// <param name="operationContext">The context of the operation that failed</param>
     /// <param name="innerException">The inner exception that caused this error</param>
-    protected AutoGradException(string message, string? operationContext, Exception innerException) 
+    protected AutoGradException(string message, string? operationContext, Exception innerException)
         : base(message, innerException)
     {
         OperationContext = operationContext;
@@ -109,7 +109,7 @@ public sealed class GradientComputationException : AutoGradException
     /// </summary>
     /// <param name="message">The error message</param>
     /// <param name="innerException">The inner exception that caused the gradient computation to fail</param>
-    public GradientComputationException(string message, Exception innerException) 
+    public GradientComputationException(string message, Exception innerException)
         : base(message, innerException)
     {
     }

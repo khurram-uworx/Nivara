@@ -1,6 +1,6 @@
+using Nivara;
 using System.Numerics;
 using System.Text;
-using Nivara;
 
 namespace Nivara.Extensions.AutoDiff.Utilities;
 
@@ -145,7 +145,7 @@ public static class GradientUtils
             return;
 
         var grad = tensor.Grad;
-        
+
         // Calculate gradient norm (L2 norm)
         double normSquared = 0.0;
         for (int i = 0; i < grad.Length; i++)

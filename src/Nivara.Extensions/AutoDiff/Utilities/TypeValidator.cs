@@ -1,5 +1,5 @@
-using System.Numerics;
 using Nivara.Extensions.AutoDiff.Exceptions;
+using System.Numerics;
 
 namespace Nivara.Extensions.AutoDiff.Utilities;
 
@@ -17,7 +17,7 @@ public static class TypeValidator
     public static void ValidateNumericType<T>() where T : struct, INumber<T>
     {
         var type = typeof(T);
-        
+
         if (!IsSupportedType(type))
         {
             throw new AutoGradException(
@@ -64,7 +64,7 @@ public static class TypeValidator
     /// <typeparam name="T">The type of the first tensor</typeparam>
     /// <typeparam name="U">The type of the second tensor</typeparam>
     /// <exception cref="AutoGradException">Thrown when types are incompatible</exception>
-    public static void ValidateCompatibleTypes<T, U>() 
+    public static void ValidateCompatibleTypes<T, U>()
         where T : struct, INumber<T>
         where U : struct, INumber<U>
     {

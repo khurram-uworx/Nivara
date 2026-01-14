@@ -1,7 +1,6 @@
-using NUnit.Framework;
-using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Operations;
+using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -296,7 +295,7 @@ public class GradOperationsTests
 
         // Act
         var result = GradOperations.Relu(a);
-        
+
         // Create gradient output (all ones)
         var gradData = NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f, 1.0f });
         var grad = new GradTensor<float>(gradData, requiresGrad: false);

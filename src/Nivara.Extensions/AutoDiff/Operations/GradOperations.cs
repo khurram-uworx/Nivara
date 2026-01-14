@@ -1,8 +1,6 @@
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
-using Nivara;
-using Nivara.Tensors;
 
 namespace Nivara.Extensions.AutoDiff.Operations;
 
@@ -253,7 +251,7 @@ public static class GradOperations
     /// <returns>A new GradTensor containing the matrix multiplication result with gradient tracking</returns>
     /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
     /// <exception cref="ArgumentException">Thrown when matrix dimensions are incompatible</exception>
-    public static GradTensor<T> MatMul<T>(GradTensor<T> a, GradTensor<T> b, int aRows, int aCols, int bCols) 
+    public static GradTensor<T> MatMul<T>(GradTensor<T> a, GradTensor<T> b, int aRows, int aCols, int bCols)
         where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -616,7 +614,7 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
 
             TensorPrimitives.Subtract(aSpan, bSpan, resultSpan);
-            
+
             // Propagate null mask
             for (int i = 0; i < a.Length; i++)
             {
@@ -631,7 +629,7 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
             TensorPrimitives.Subtract(aSpan, bSpan, resultSpan);
-            
+
             // Propagate null mask
             for (int i = 0; i < a.Length; i++)
             {
@@ -676,7 +674,7 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
 
             TensorPrimitives.Divide(aSpan, bSpan, resultSpan);
-            
+
             // Propagate null mask
             for (int i = 0; i < a.Length; i++)
             {
@@ -691,7 +689,7 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
             TensorPrimitives.Divide(aSpan, bSpan, resultSpan);
-            
+
             // Propagate null mask
             for (int i = 0; i < a.Length; i++)
             {
@@ -735,7 +733,7 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
 
             TensorPrimitives.Negate(aSpan, resultSpan);
-            
+
             // Propagate null mask
             for (int i = 0; i < a.Length; i++)
             {
@@ -749,7 +747,7 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
             TensorPrimitives.Negate(aSpan, resultSpan);
-            
+
             // Propagate null mask
             for (int i = 0; i < a.Length; i++)
             {
@@ -802,7 +800,7 @@ public static class GradOperations
     /// <summary>
     /// Performs vectorized matrix multiplication using tensor operations
     /// </summary>
-    private static NivaraColumn<T> MatMulVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b, int aRows, int aCols, int bCols) 
+    private static NivaraColumn<T> MatMulVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b, int aRows, int aCols, int bCols)
         where T : struct, INumber<T>
     {
         var result = new T[aRows * bCols];

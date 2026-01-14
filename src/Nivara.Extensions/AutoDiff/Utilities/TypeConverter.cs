@@ -1,5 +1,5 @@
-using System.Numerics;
 using Nivara.Extensions.AutoDiff.Exceptions;
+using System.Numerics;
 
 namespace Nivara.Extensions.AutoDiff.Utilities;
 
@@ -20,7 +20,7 @@ public static class TypeConverter
     /// <exception cref="ArgumentNullException">Thrown when source is null</exception>
     /// <exception cref="AutoGradException">Thrown when conversion is not supported</exception>
     public static GradTensor<TTarget> Convert<TSource, TTarget>(
-        GradTensor<TSource> source, 
+        GradTensor<TSource> source,
         bool? requiresGrad = null)
         where TSource : struct, INumber<TSource>
         where TTarget : struct, INumber<TTarget>

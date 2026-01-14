@@ -1,6 +1,6 @@
-using System.Numerics;
 using Nivara;
 using Nivara.Extensions.AutoDiff.Utilities;
+using System.Numerics;
 
 namespace Nivara.Extensions.AutoDiff.Extensions;
 

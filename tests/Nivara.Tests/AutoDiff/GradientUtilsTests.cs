@@ -1,8 +1,7 @@
-using NUnit.Framework;
-using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Operations;
 using Nivara.Extensions.AutoDiff.Utilities;
+using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -21,11 +20,11 @@ public class GradientUtilsTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
         var a = new GradTensor<float>(aData, requiresGrad: true);
-        
+
         // Compute some gradients
         var result = GradOperations.Sum(a);
         result.Backward();
-        
+
         Assert.That(a.Grad, Is.Not.Null, "Gradient should exist before clearing");
 
         // Act
@@ -43,12 +42,12 @@ public class GradientUtilsTests
         var bData = NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f });
         var a = new GradTensor<float>(aData, requiresGrad: true);
         var b = new GradTensor<float>(bData, requiresGrad: true);
-        
+
         // Compute some gradients
         var result = GradOperations.Add(a, b);
         var sum = GradOperations.Sum(result);
         sum.Backward();
-        
+
         Assert.That(a.Grad, Is.Not.Null);
         Assert.That(b.Grad, Is.Not.Null);
 
@@ -107,7 +106,7 @@ public class GradientUtilsTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
         var a = new GradTensor<float>(aData, requiresGrad: true);
-        
+
         // Set gradient manually
         var gradData = NivaraColumn<float>.Create(new float[] { -5.0f, 2.0f, 10.0f });
         a.Grad = gradData;
@@ -139,7 +138,7 @@ public class GradientUtilsTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var a = new GradTensor<float>(aData, requiresGrad: true);
-        
+
         // Set gradient with norm = sqrt(3^2 + 4^2) = 5
         var gradData = NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f });
         a.Grad = gradData;
@@ -159,7 +158,7 @@ public class GradientUtilsTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var a = new GradTensor<float>(aData, requiresGrad: true);
-        
+
         // Set gradient with norm = sqrt(1 + 1) = sqrt(2) ≈ 1.414
         var gradData = NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f });
         a.Grad = gradData;
@@ -179,7 +178,7 @@ public class GradientUtilsTests
         // Arrange
         var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
         var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
-        
+
         // Set gradients: a.grad = [3], b.grad = [4]
         // Global norm = sqrt(9 + 16) = 5
         a.Grad = NivaraColumn<float>.Create(new float[] { 3.0f });
@@ -298,7 +297,7 @@ public class GradientUtilsTests
         // Arrange
         var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
         var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
-        
+
         var add = GradOperations.Add(a, b);
         var mul = GradOperations.Multiply(add, a);
         var sum = GradOperations.Sum(mul);
@@ -310,7 +309,7 @@ public class GradientUtilsTests
         Assert.That(info["TotalNodes"], Is.EqualTo(3)); // Add, Multiply, Sum
         Assert.That(info["IsLeaf"], Is.False);
         Assert.That(info["RequiresGrad"], Is.True);
-        
+
         var opCounts = (Dictionary<string, int>)info["OperationCounts"];
         Assert.That(opCounts["Add"], Is.EqualTo(1));
         Assert.That(opCounts["Multiply"], Is.EqualTo(1));
@@ -340,7 +339,7 @@ public class GradientUtilsTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var a = new GradTensor<float>(aData, requiresGrad: true);
-        
+
         var result = GradOperations.Sum(a);
         result.Backward();
 
@@ -365,7 +364,7 @@ public class GradientUtilsTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var a = new GradTensor<float>(aData, requiresGrad: true);
-        
+
         // Set gradient [3, 4] with norm = 5
         a.Grad = NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f });
 
@@ -396,7 +395,7 @@ public class GradientUtilsTests
         // Arrange
         var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
         var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
-        
+
         // Set gradients: a.grad = [3], b.grad = [4]
         // Global norm = sqrt(9 + 16) = 5
         a.Grad = NivaraColumn<float>.Create(new float[] { 3.0f });
@@ -468,9 +467,9 @@ public class GradientUtilsTests
     {
         // Arrange - simulate a simple training loop
         var weights = new GradTensor<float>(
-            NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f }), 
+            NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f }),
             requiresGrad: true);
-        
+
         var inputs = GradientUtils.Constant(new float[] { 1.0f, 2.0f });
         var targets = GradientUtils.Constant(new float[] { 3.0f });
 
@@ -478,18 +477,18 @@ public class GradientUtilsTests
         var predictions = GradOperations.Multiply(inputs, weights);
         var sum = GradOperations.Sum(predictions);
         var loss = GradOperations.Subtract(sum, targets);
-        
+
         // Backward pass
         loss.Backward();
-        
+
         // Check gradient exists
         Assert.That(GradientUtils.HasGradient(weights), Is.True);
         var gradNorm = GradientUtils.GetGradientNorm(weights);
         Assert.That(gradNorm, Is.GreaterThan(0.0));
-        
+
         // Clear gradients for next iteration
         GradientUtils.ZeroGrad(weights);
-        
+
         // Assert
         Assert.That(GradientUtils.HasGradient(weights), Is.False);
     }
@@ -499,12 +498,12 @@ public class GradientUtilsTests
     {
         // Arrange
         var weights = new GradTensor<float>(
-            NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f }), 
+            NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f }),
             requiresGrad: true);
-        
+
         // Set very large gradients
         weights.Grad = NivaraColumn<float>.Create(new float[] { 100.0f, 100.0f });
-        
+
         var initialNorm = GradientUtils.GetGradientNorm(weights);
         Assert.That(initialNorm, Is.GreaterThan(100.0));
 

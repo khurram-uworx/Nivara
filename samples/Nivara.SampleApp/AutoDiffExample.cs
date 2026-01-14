@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Operations;
 using Nivara.Extensions.AutoDiff.Utilities;
@@ -143,10 +142,10 @@ public static class AutoDiffExample
 
         // Create parameters for a simple model
         var weights = new GradTensor<float>(
-            NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f, 0.5f }), 
+            NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f, 0.5f }),
             requiresGrad: true);
         var bias = new GradTensor<float>(
-            NivaraColumn<float>.Create(new float[] { 0.1f }), 
+            NivaraColumn<float>.Create(new float[] { 0.1f }),
             requiresGrad: true);
 
         Console.WriteLine("Simulating a training loop with gradient utilities:");
@@ -157,11 +156,11 @@ public static class AutoDiffExample
         var input1 = GradientUtils.Constant(new float[] { 1.0f, 2.0f, 3.0f });
         var output1 = GradOperations.Sum(GradOperations.Multiply(input1, weights));
         output1 = GradOperations.Add(output1, bias);
-        
+
         output1.Backward();
         Console.WriteLine($"  Gradient norm: {GradientUtils.GetGradientNorm(weights):F4}");
         Console.WriteLine($"  Has gradient: {GradientUtils.HasGradient(weights)}");
-        
+
         // Clear gradients for next iteration
         GradientUtils.ZeroGrad(new[] { weights, bias });
         Console.WriteLine($"  After ZeroGrad: {GradientUtils.HasGradient(weights)}");
@@ -172,10 +171,10 @@ public static class AutoDiffExample
         var input2 = GradientUtils.Constant(new float[] { 10.0f, 20.0f, 30.0f });
         var output2 = GradOperations.Sum(GradOperations.Multiply(input2, weights));
         output2 = GradOperations.Add(output2, bias);
-        
+
         output2.Backward();
         Console.WriteLine($"  Gradient norm before clipping: {GradientUtils.GetGradientNorm(weights):F4}");
-        
+
         // Clip gradients to prevent exploding gradients
         GradientUtils.ClipGradNorm(weights, 5.0);
         Console.WriteLine($"  Gradient norm after clipping: {GradientUtils.GetGradientNorm(weights):F4}");
@@ -186,7 +185,7 @@ public static class AutoDiffExample
         var zeros = GradientUtils.Zeros<float>(3);
         var ones = GradientUtils.Ones<float>(3);
         var full = GradientUtils.Full(3, 7.5f);
-        
+
         Console.WriteLine($"  Zeros: [{zeros[0]}, {zeros[1]}, {zeros[2]}] (requiresGrad: {zeros.RequiresGrad})");
         Console.WriteLine($"  Ones: [{ones[0]}, {ones[1]}, {ones[2]}] (requiresGrad: {ones.RequiresGrad})");
         Console.WriteLine($"  Full(7.5): [{full[0]}, {full[1]}, {full[2]}] (requiresGrad: {full.RequiresGrad})");
@@ -199,13 +198,13 @@ public static class AutoDiffExample
         var result = GradOperations.Add(a, b);
         result = GradOperations.Multiply(result, a);
         result = GradOperations.Sum(result);
-        
+
         var graphInfo = GradientUtils.GetGraphInfo(result);
         Console.WriteLine($"  Total nodes: {graphInfo["TotalNodes"]}");
         Console.WriteLine($"  Is leaf: {graphInfo["IsLeaf"]}");
         Console.WriteLine($"  Can backward: {GradientUtils.CanBackward(result)}");
         Console.WriteLine();
-        
+
         Console.WriteLine("Graph summary:");
         Console.WriteLine(GradientUtils.PrintGraphSummary(result));
     }

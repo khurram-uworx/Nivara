@@ -1,9 +1,8 @@
-using NUnit.Framework;
-using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Exceptions;
 using Nivara.Extensions.AutoDiff.Extensions;
 using Nivara.Extensions.AutoDiff.Utilities;
+using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -270,7 +269,7 @@ public class TypeSafetyTests
     public void TypeValidator_ValidateScalar_NonScalar_ThrowsException()
     {
         // Act & Assert
-        var ex = Assert.Throws<AutoGradException>(() => 
+        var ex = Assert.Throws<AutoGradException>(() =>
             TypeValidator.ValidateScalar(5, "TestOperation"));
         Assert.That(ex.Message, Does.Contain("scalar"));
         Assert.That(ex.Message, Does.Contain("length=1"));
@@ -287,7 +286,7 @@ public class TypeSafetyTests
     public void TypeValidator_ValidateNonEmpty_Empty_ThrowsException()
     {
         // Act & Assert
-        var ex = Assert.Throws<AutoGradException>(() => 
+        var ex = Assert.Throws<AutoGradException>(() =>
             TypeValidator.ValidateNonEmpty(0, "TestOperation"));
         Assert.That(ex.Message, Does.Contain("empty"));
     }
@@ -303,7 +302,7 @@ public class TypeSafetyTests
     public void TypeValidator_ValidateShapeCompatibility_Incompatible_ThrowsException()
     {
         // Act & Assert
-        var ex = Assert.Throws<ShapeIncompatibilityException>(() => 
+        var ex = Assert.Throws<ShapeIncompatibilityException>(() =>
             TypeValidator.ValidateShapeCompatibility(5, 3, "TestOperation"));
         Assert.That(ex.Message, Does.Contain("Shape mismatch"));
         Assert.That(ex.Message, Does.Contain("expected length 3"));
