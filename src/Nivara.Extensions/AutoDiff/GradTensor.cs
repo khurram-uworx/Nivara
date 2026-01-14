@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Numerics.Tensors;
 using Nivara;
 using Nivara.Tensors;
+using Nivara.Extensions.AutoDiff.Utilities;
 
 namespace Nivara.Extensions.AutoDiff;
 
@@ -55,8 +56,12 @@ public sealed class GradTensor<T> : IDisposable where T : struct, INumber<T>
     /// <param name="data">The underlying data as a NivaraColumn&lt;T&gt;</param>
     /// <param name="requiresGrad">Whether this tensor should track gradients</param>
     /// <exception cref="ArgumentNullException">Thrown when data is null</exception>
+    /// <exception cref="AutoGradException">Thrown when T is not a supported type for automatic differentiation</exception>
     public GradTensor(NivaraColumn<T> data, bool requiresGrad = false)
     {
+        // Validate that the type is supported for automatic differentiation
+        TypeValidator.ValidateNumericType<T>();
+        
         Data = data ?? throw new ArgumentNullException(nameof(data));
         RequiresGrad = requiresGrad;
         GradFn = null; // Leaf tensor by default
@@ -276,6 +281,42 @@ public sealed class GradTensor<T> : IDisposable where T : struct, INumber<T>
         var gradInfo = RequiresGrad ? (Grad != null ? "with grad" : "requires grad") : "no grad";
         var graphInfo = IsLeaf ? "leaf" : "non-leaf";
         return $"GradTensor<{typeof(T).Name}>[{Length}] ({gradInfo}, {graphInfo})";
+    }
+
+    /// <summary>
+    /// Converts this GradTensor to a different numeric type.
+    /// </summary>
+    /// <typeparam name="TTarget">The target numeric type</typeparam>
+    /// <param name="requiresGrad">Optional override for gradient tracking. If null, preserves current setting</param>
+    /// <returns>A new GradTensor with the converted type</returns>
+    /// <exception cref="AutoGradException">Thrown when conversion is not supported</exception>
+    public GradTensor<TTarget> ConvertTo<TTarget>(bool? requiresGrad = null)
+        where TTarget : struct, INumber<TTarget>
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return TypeConverter.Convert<T, TTarget>(this, requiresGrad);
+    }
+
+    /// <summary>
+    /// Converts this GradTensor to float (single-precision).
+    /// </summary>
+    /// <param name="requiresGrad">Optional override for gradient tracking. If null, preserves current setting</param>
+    /// <returns>A new GradTensor with float type</returns>
+    public GradTensor<float> ToFloat(bool? requiresGrad = null)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return TypeConverter.ToFloat(this, requiresGrad);
+    }
+
+    /// <summary>
+    /// Converts this GradTensor to double (double-precision).
+    /// </summary>
+    /// <param name="requiresGrad">Optional override for gradient tracking. If null, preserves current setting</param>
+    /// <returns>A new GradTensor with double type</returns>
+    public GradTensor<double> ToDouble(bool? requiresGrad = null)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return TypeConverter.ToDouble(this, requiresGrad);
     }
 
     /// <summary>
