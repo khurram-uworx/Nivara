@@ -1,12 +1,14 @@
 using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Operations;
+using Nivara.Extensions.AutoDiff.Utilities;
 
 namespace Nivara.SampleApp;
 
 /// <summary>
 /// Demonstrates advanced automatic differentiation operations including
-/// reduction operations (Sum, Mean) and activation functions (ReLU, Sigmoid, Tanh).
+/// reduction operations (Sum, Mean), activation functions (ReLU, Sigmoid, Tanh),
+/// and gradient utilities for training workflows.
 /// </summary>
 public static class AutoDiffExample
 {
@@ -22,6 +24,9 @@ public static class AutoDiffExample
         Console.WriteLine();
 
         RunNeuralNetworkDemo();
+        Console.WriteLine();
+
+        RunGradientUtilitiesDemo();
         Console.WriteLine();
 
         Console.WriteLine("=== Example Complete ===");
@@ -129,5 +134,79 @@ public static class AutoDiffExample
         Console.WriteLine("These gradients show how to adjust weights and biases to increase the output.");
         Console.WriteLine("In a real neural network, you would use these gradients to update parameters:");
         Console.WriteLine("  new_weight = old_weight - learning_rate * gradient");
+    }
+
+    private static void RunGradientUtilitiesDemo()
+    {
+        Console.WriteLine("4. Gradient Utilities for Training Workflows");
+        Console.WriteLine("--------------------------------------------");
+
+        // Create parameters for a simple model
+        var weights = new GradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f, 0.5f }), 
+            requiresGrad: true);
+        var bias = new GradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.1f }), 
+            requiresGrad: true);
+
+        Console.WriteLine("Simulating a training loop with gradient utilities:");
+        Console.WriteLine();
+
+        // Iteration 1
+        Console.WriteLine("Iteration 1:");
+        var input1 = GradientUtils.Constant(new float[] { 1.0f, 2.0f, 3.0f });
+        var output1 = GradOperations.Sum(GradOperations.Multiply(input1, weights));
+        output1 = GradOperations.Add(output1, bias);
+        
+        output1.Backward();
+        Console.WriteLine($"  Gradient norm: {GradientUtils.GetGradientNorm(weights):F4}");
+        Console.WriteLine($"  Has gradient: {GradientUtils.HasGradient(weights)}");
+        
+        // Clear gradients for next iteration
+        GradientUtils.ZeroGrad(new[] { weights, bias });
+        Console.WriteLine($"  After ZeroGrad: {GradientUtils.HasGradient(weights)}");
+        Console.WriteLine();
+
+        // Iteration 2 - demonstrate gradient clipping
+        Console.WriteLine("Iteration 2 (with gradient clipping):");
+        var input2 = GradientUtils.Constant(new float[] { 10.0f, 20.0f, 30.0f });
+        var output2 = GradOperations.Sum(GradOperations.Multiply(input2, weights));
+        output2 = GradOperations.Add(output2, bias);
+        
+        output2.Backward();
+        Console.WriteLine($"  Gradient norm before clipping: {GradientUtils.GetGradientNorm(weights):F4}");
+        
+        // Clip gradients to prevent exploding gradients
+        GradientUtils.ClipGradNorm(weights, 5.0);
+        Console.WriteLine($"  Gradient norm after clipping: {GradientUtils.GetGradientNorm(weights):F4}");
+        Console.WriteLine();
+
+        // Demonstrate constant tensor creation
+        Console.WriteLine("Creating constant tensors (no gradient tracking):");
+        var zeros = GradientUtils.Zeros<float>(3);
+        var ones = GradientUtils.Ones<float>(3);
+        var full = GradientUtils.Full(3, 7.5f);
+        
+        Console.WriteLine($"  Zeros: [{zeros[0]}, {zeros[1]}, {zeros[2]}] (requiresGrad: {zeros.RequiresGrad})");
+        Console.WriteLine($"  Ones: [{ones[0]}, {ones[1]}, {ones[2]}] (requiresGrad: {ones.RequiresGrad})");
+        Console.WriteLine($"  Full(7.5): [{full[0]}, {full[1]}, {full[2]}] (requiresGrad: {full.RequiresGrad})");
+        Console.WriteLine();
+
+        // Demonstrate graph inspection
+        Console.WriteLine("Computation graph inspection:");
+        var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
+        var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
+        var result = GradOperations.Add(a, b);
+        result = GradOperations.Multiply(result, a);
+        result = GradOperations.Sum(result);
+        
+        var graphInfo = GradientUtils.GetGraphInfo(result);
+        Console.WriteLine($"  Total nodes: {graphInfo["TotalNodes"]}");
+        Console.WriteLine($"  Is leaf: {graphInfo["IsLeaf"]}");
+        Console.WriteLine($"  Can backward: {GradientUtils.CanBackward(result)}");
+        Console.WriteLine();
+        
+        Console.WriteLine("Graph summary:");
+        Console.WriteLine(GradientUtils.PrintGraphSummary(result));
     }
 }
