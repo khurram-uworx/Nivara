@@ -48,7 +48,7 @@ public sealed class ComputationGraph
             throw new InvalidOperationException("Cannot perform backward pass on tensor that doesn't require gradients");
         }
 
-        // Validate graph structure
+        // Validate graph structure (will throw if cycles detected)
         ValidateGraph(tensor);
 
         // Initialize gradient if not provided
@@ -64,18 +64,92 @@ public sealed class ComputationGraph
             }
         }
 
-        // Set initial gradient
+        // Set initial gradient for the root tensor
         tensor.Grad = gradient;
 
-        // Get topological ordering of nodes
+        // Build a map to track which tensor each OpNode produces
+        // This is needed because OpNode stores inputs but we need to know the output
+        var nodeToOutputMap = new Dictionary<OpNode, GradTensor<T>>();
+        BuildNodeToOutputMap(tensor, nodeToOutputMap);
+
+        // Get topological ordering of nodes (from inputs to outputs)
         var nodes = TopologicalSort(tensor);
 
-        // Apply backward functions in reverse topological order
+        // Apply backward functions in reverse topological order (from output to inputs)
+        // This ensures we process gradients from the output back to the inputs
         foreach (var node in nodes.AsEnumerable().Reverse())
         {
-            // Find the tensor this node belongs to and apply gradients
-            ApplyNodeGradients(node, tensor);
+            // Find the output tensor that this node produced
+            if (!nodeToOutputMap.TryGetValue(node, out var outputTensor))
+            {
+                // This shouldn't happen if the graph is properly constructed
+                throw new InvalidOperationException($"Could not find output tensor for operation '{node.OperationName}'");
+            }
+
+            // Get the gradient for the output tensor
+            var outputGrad = outputTensor.Grad;
+            if (outputGrad == null)
+            {
+                // If there's no gradient for this output, skip it
+                // This can happen for intermediate tensors that don't contribute to the final output
+                continue;
+            }
+
+            try
+            {
+                // Convert gradient to object column for the backward function
+                var gradAsObjects = new object[outputGrad.Length];
+                for (int i = 0; i < outputGrad.Length; i++)
+                {
+                    gradAsObjects[i] = outputGrad[i]!;
+                }
+                var gradColumn = NivaraColumn<object>.CreateForReferenceType(gradAsObjects);
+
+                // Apply the backward function - this will accumulate gradients into input tensors
+                node.Apply(gradColumn);
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException($"Failed to apply gradients for operation '{node.OperationName}': {ex.Message}", ex);
+            }
         }
+    }
+
+    /// <summary>
+    /// Builds a map from OpNode to the output tensor it produces
+    /// </summary>
+    /// <typeparam name="T">The numeric type of the tensor</typeparam>
+    /// <param name="tensor">The tensor to start mapping from</param>
+    /// <param name="nodeToOutputMap">The map to populate</param>
+    private static void BuildNodeToOutputMap<T>(GradTensor<T> tensor, Dictionary<OpNode, GradTensor<T>> nodeToOutputMap) 
+        where T : struct, INumber<T>
+    {
+        var visited = new HashSet<GradTensor<T>>();
+
+        void Visit(GradTensor<T> t)
+        {
+            if (visited.Contains(t))
+                return;
+
+            visited.Add(t);
+
+            // If this tensor has a GradFn, it means it was produced by an operation
+            if (t.GradFn != null)
+            {
+                nodeToOutputMap[t.GradFn] = t;
+
+                // Recursively visit input tensors
+                foreach (var input in t.GradFn.Inputs)
+                {
+                    if (input is GradTensor<T> inputTensor)
+                    {
+                        Visit(inputTensor);
+                    }
+                }
+            }
+        }
+
+        Visit(tensor);
     }
 
     /// <summary>
@@ -144,37 +218,6 @@ public sealed class ComputationGraph
         catch (InvalidOperationException ex) when (ex.Message.Contains("Circular dependency"))
         {
             throw new InvalidOperationException("Computation graph contains circular dependencies, which would cause infinite loops during backward pass", ex);
-        }
-    }
-
-    /// <summary>
-    /// Applies gradients from a computation node to its input tensors
-    /// </summary>
-    /// <typeparam name="T">The numeric type of the tensor</typeparam>
-    /// <param name="node">The computation node to apply</param>
-    /// <param name="outputTensor">The output tensor that this node produced</param>
-    private static void ApplyNodeGradients<T>(OpNode node, GradTensor<T> outputTensor) where T : struct, INumber<T>
-    {
-        if (outputTensor.Grad == null)
-            return;
-
-        try
-        {
-            // Convert gradient to object column for the backward function
-            // This is a temporary approach - in a full implementation, we'd have type-safe backward functions
-            var gradAsObjects = new object[outputTensor.Grad.Length];
-            for (int i = 0; i < outputTensor.Grad.Length; i++)
-            {
-                gradAsObjects[i] = outputTensor.Grad[i]!;
-            }
-            var gradColumn = NivaraColumn<object>.CreateForReferenceType(gradAsObjects);
-
-            // Apply the backward function
-            node.Apply(gradColumn);
-        }
-        catch (Exception ex)
-        {
-            throw new InvalidOperationException($"Failed to apply gradients for operation '{node.OperationName}': {ex.Message}", ex);
         }
     }
 

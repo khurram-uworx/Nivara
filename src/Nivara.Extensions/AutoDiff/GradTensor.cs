@@ -151,24 +151,71 @@ public sealed class GradTensor<T> : IDisposable where T : struct, INumber<T>
     /// Initiates backward pass computation from this tensor
     /// </summary>
     /// <param name="gradient">Optional gradient to use as starting point. If null, uses ones for scalar tensors</param>
-    /// <exception cref="InvalidOperationException">Thrown when called on non-scalar tensors or tensors that don't require gradients</exception>
+    /// <exception cref="InvalidOperationException">Thrown when called on non-scalar tensors without gradient, tensors that don't require gradients, or when computation graph has issues</exception>
+    /// <exception cref="ArgumentException">Thrown when gradient shape doesn't match tensor shape</exception>
     public void Backward(GradTensor<T>? gradient = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
+        // Validate that this tensor requires gradients
         if (!RequiresGrad)
         {
-            throw new InvalidOperationException("Cannot compute gradients for tensor that doesn't require gradients. Set requiresGrad=true when creating the tensor.");
+            throw new InvalidOperationException(
+                "Cannot compute gradients for tensor that doesn't require gradients. " +
+                "Set requiresGrad=true when creating the tensor.");
         }
 
-        if (Length != 1)
+        // Validate scalar tensor requirement when no gradient is provided
+        if (gradient == null && Length != 1)
         {
-            throw new InvalidOperationException($"Backward can only be called on scalar tensors (length=1). This tensor has length={Length}. For non-scalar tensors, provide a gradient argument.");
+            throw new InvalidOperationException(
+                $"Backward can only be called on scalar tensors (length=1) without providing a gradient. " +
+                $"This tensor has length={Length}. " +
+                $"For non-scalar tensors, provide a gradient argument with matching shape.");
         }
 
-        // Use ComputationGraph to perform backward pass
-        var gradientData = gradient?.Data ?? NivaraColumn<T>.Create(new T[] { T.One });
-        ComputationGraph.Backward(this, gradientData);
+        // Validate gradient shape if provided
+        if (gradient != null && gradient.Length != Length)
+        {
+            throw new ArgumentException(
+                $"Gradient shape mismatch: expected length {Length}, got {gradient.Length}",
+                nameof(gradient));
+        }
+
+        // Prepare gradient data
+        NivaraColumn<T> gradientData;
+        if (gradient != null)
+        {
+            gradientData = gradient.Data;
+        }
+        else
+        {
+            // For scalar tensors, use ones as default gradient
+            gradientData = NivaraColumn<T>.Create(new T[] { T.One });
+        }
+
+        try
+        {
+            // Use ComputationGraph to perform backward pass
+            ComputationGraph.Backward(this, gradientData);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Circular dependency"))
+        {
+            throw new InvalidOperationException(
+                "Cannot perform backward pass: computation graph contains circular dependencies. " +
+                "This typically indicates a bug in the operation implementation.", ex);
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("Could not find output tensor"))
+        {
+            throw new InvalidOperationException(
+                "Cannot perform backward pass: computation graph structure is invalid. " +
+                "This typically indicates a bug in the operation implementation.", ex);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"Failed to compute gradients during backward pass: {ex.Message}", ex);
+        }
     }
 
     /// <summary>
