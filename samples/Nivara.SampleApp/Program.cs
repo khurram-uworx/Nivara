@@ -13,3 +13,9 @@ Console.WriteLine();
 
 // Run the aggregate functions example
 AggregateExample.Run();
+
+Console.WriteLine();
+Console.WriteLine();
+
+// Run the automatic differentiation example
+AutoDiffExample.Run();
