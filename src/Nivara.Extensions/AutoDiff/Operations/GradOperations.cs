@@ -605,6 +605,8 @@ public static class GradOperations
     private static NivaraColumn<T> SubtractVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b) where T : struct, INumber<T>
     {
         var result = new T[a.Length];
+        var nullMask = new bool[a.Length];
+        bool hasNulls = false;
 
         // Use TensorPrimitives for optimized operations when available
         if (typeof(T) == typeof(float))
@@ -614,6 +616,13 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
 
             TensorPrimitives.Subtract(aSpan, bSpan, resultSpan);
+            
+            // Propagate null mask
+            for (int i = 0; i < a.Length; i++)
+            {
+                nullMask[i] = a.IsNull(i) || b.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
+            }
         }
         else if (typeof(T) == typeof(double))
         {
@@ -622,20 +631,32 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
             TensorPrimitives.Subtract(aSpan, bSpan, resultSpan);
+            
+            // Propagate null mask
+            for (int i = 0; i < a.Length; i++)
+            {
+                nullMask[i] = a.IsNull(i) || b.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
+            }
         }
         else
         {
             // Fallback to element-wise subtraction for other types
             for (int i = 0; i < a.Length; i++)
             {
-                if (!a.IsNull(i) && !b.IsNull(i))
+                nullMask[i] = a.IsNull(i) || b.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     result[i] = a[i] - b[i];
                 }
             }
         }
 
-        return NivaraColumn<T>.Create(result);
+        return CreateColumnWithNullMask(result, nullMask, hasNulls);
     }
 
     /// <summary>
@@ -644,6 +665,8 @@ public static class GradOperations
     private static NivaraColumn<T> DivideVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b) where T : struct, INumber<T>
     {
         var result = new T[a.Length];
+        var nullMask = new bool[a.Length];
+        bool hasNulls = false;
 
         // Use TensorPrimitives for optimized operations when available
         if (typeof(T) == typeof(float))
@@ -653,6 +676,13 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
 
             TensorPrimitives.Divide(aSpan, bSpan, resultSpan);
+            
+            // Propagate null mask
+            for (int i = 0; i < a.Length; i++)
+            {
+                nullMask[i] = a.IsNull(i) || b.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
+            }
         }
         else if (typeof(T) == typeof(double))
         {
@@ -661,20 +691,32 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
             TensorPrimitives.Divide(aSpan, bSpan, resultSpan);
+            
+            // Propagate null mask
+            for (int i = 0; i < a.Length; i++)
+            {
+                nullMask[i] = a.IsNull(i) || b.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
+            }
         }
         else
         {
             // Fallback to element-wise division for other types
             for (int i = 0; i < a.Length; i++)
             {
-                if (!a.IsNull(i) && !b.IsNull(i))
+                nullMask[i] = a.IsNull(i) || b.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     result[i] = a[i] / b[i];
                 }
             }
         }
 
-        return NivaraColumn<T>.Create(result);
+        return CreateColumnWithNullMask(result, nullMask, hasNulls);
     }
 
     /// <summary>
@@ -683,6 +725,8 @@ public static class GradOperations
     private static NivaraColumn<T> NegateVectorized<T>(NivaraColumn<T> a) where T : struct, INumber<T>
     {
         var result = new T[a.Length];
+        var nullMask = new bool[a.Length];
+        bool hasNulls = false;
 
         // Use TensorPrimitives for optimized operations when available
         if (typeof(T) == typeof(float))
@@ -691,6 +735,13 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
 
             TensorPrimitives.Negate(aSpan, resultSpan);
+            
+            // Propagate null mask
+            for (int i = 0; i < a.Length; i++)
+            {
+                nullMask[i] = a.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
+            }
         }
         else if (typeof(T) == typeof(double))
         {
@@ -698,20 +749,32 @@ public static class GradOperations
             var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
             TensorPrimitives.Negate(aSpan, resultSpan);
+            
+            // Propagate null mask
+            for (int i = 0; i < a.Length; i++)
+            {
+                nullMask[i] = a.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
+            }
         }
         else
         {
             // Fallback to element-wise negation for other types
             for (int i = 0; i < a.Length; i++)
             {
-                if (!a.IsNull(i))
+                nullMask[i] = a.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     result[i] = -a[i];
                 }
             }
         }
 
-        return NivaraColumn<T>.Create(result);
+        return CreateColumnWithNullMask(result, nullMask, hasNulls);
     }
 
     /// <summary>
@@ -859,6 +922,8 @@ public static class GradOperations
     private static NivaraColumn<T> ApplyRelu<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         var result = new T[input.Length];
+        var nullMask = new bool[input.Length];
+        bool hasNulls = false;
 
         // Use TensorPrimitives for optimized operations when available
         if (typeof(T) == typeof(float))
@@ -871,6 +936,8 @@ public static class GradOperations
             for (int i = 0; i < floatSpan.Length; i++)
             {
                 resultSpan[i] = Math.Max(0.0f, floatSpan[i]);
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
             }
         }
         else if (typeof(T) == typeof(double))
@@ -883,6 +950,8 @@ public static class GradOperations
             for (int i = 0; i < doubleSpan.Length; i++)
             {
                 resultSpan[i] = Math.Max(0.0, doubleSpan[i]);
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
             }
         }
         else
@@ -890,14 +959,19 @@ public static class GradOperations
             // Fallback for other types
             for (int i = 0; i < input.Length; i++)
             {
-                if (!input.IsNull(i))
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     result[i] = input[i] > T.Zero ? input[i] : T.Zero;
                 }
             }
         }
 
-        return NivaraColumn<T>.Create(result);
+        return CreateColumnWithNullMask(result, nullMask, hasNulls);
     }
 
     /// <summary>
@@ -925,6 +999,8 @@ public static class GradOperations
     private static NivaraColumn<T> ApplySigmoid<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         var result = new T[input.Length];
+        var nullMask = new bool[input.Length];
+        bool hasNulls = false;
 
         // Use TensorPrimitives for optimized operations when available
         if (typeof(T) == typeof(float))
@@ -937,6 +1013,8 @@ public static class GradOperations
             for (int i = 0; i < floatSpan.Length; i++)
             {
                 resultSpan[i] = 1.0f / (1.0f + MathF.Exp(-floatSpan[i]));
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
             }
         }
         else if (typeof(T) == typeof(double))
@@ -949,6 +1027,8 @@ public static class GradOperations
             for (int i = 0; i < doubleSpan.Length; i++)
             {
                 resultSpan[i] = 1.0 / (1.0 + Math.Exp(-doubleSpan[i]));
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
             }
         }
         else
@@ -956,7 +1036,12 @@ public static class GradOperations
             // Fallback for other types (using dynamic)
             for (int i = 0; i < input.Length; i++)
             {
-                if (!input.IsNull(i))
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     dynamic x = input[i];
                     result[i] = (T)(object)(1.0 / (1.0 + Math.Exp(-x)))!;
@@ -964,7 +1049,7 @@ public static class GradOperations
             }
         }
 
-        return NivaraColumn<T>.Create(result);
+        return CreateColumnWithNullMask(result, nullMask, hasNulls);
     }
 
     /// <summary>
@@ -994,6 +1079,8 @@ public static class GradOperations
     private static NivaraColumn<T> ApplyTanh<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         var result = new T[input.Length];
+        var nullMask = new bool[input.Length];
+        bool hasNulls = false;
 
         // Use TensorPrimitives for optimized operations when available
         if (typeof(T) == typeof(float))
@@ -1006,6 +1093,8 @@ public static class GradOperations
             for (int i = 0; i < floatSpan.Length; i++)
             {
                 resultSpan[i] = MathF.Tanh(floatSpan[i]);
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
             }
         }
         else if (typeof(T) == typeof(double))
@@ -1018,6 +1107,8 @@ public static class GradOperations
             for (int i = 0; i < doubleSpan.Length; i++)
             {
                 resultSpan[i] = Math.Tanh(doubleSpan[i]);
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i]) hasNulls = true;
             }
         }
         else
@@ -1025,7 +1116,12 @@ public static class GradOperations
             // Fallback for other types (using dynamic)
             for (int i = 0; i < input.Length; i++)
             {
-                if (!input.IsNull(i))
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     dynamic x = input[i];
                     result[i] = (T)(object)Math.Tanh(x)!;
@@ -1033,7 +1129,7 @@ public static class GradOperations
             }
         }
 
-        return NivaraColumn<T>.Create(result);
+        return CreateColumnWithNullMask(result, nullMask, hasNulls);
     }
 
     /// <summary>
@@ -1056,6 +1152,26 @@ public static class GradOperations
         }
 
         return NivaraColumn<T>.Create(result);
+    }
+
+    /// <summary>
+    /// Helper method to create a NivaraColumn with an explicit null mask
+    /// </summary>
+    private static NivaraColumn<T> CreateColumnWithNullMask<T>(T[] data, bool[] nullMask, bool hasNulls) where T : struct, INumber<T>
+    {
+        if (!hasNulls)
+        {
+            return NivaraColumn<T>.Create(data);
+        }
+
+        // Convert to nullable array for CreateFromNullable
+        var nullableData = new T?[data.Length];
+        for (int i = 0; i < data.Length; i++)
+        {
+            nullableData[i] = nullMask[i] ? null : data[i];
+        }
+
+        return NivaraColumn<T>.CreateFromNullable(nullableData);
     }
 
     #endregion
