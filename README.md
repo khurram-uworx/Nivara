@@ -8,6 +8,8 @@ Nivara is designed for developers who want predictable behavior, strong typing, 
 
 ## Why Nivara
 
+- https://khurram-uworx.github.io/2026/01/12/LLMs-Equalizers.html
+
 Most DataFrame-style libraries trade correctness and type safety for convenience. Nivara takes a different approach:
 
 - **Strong typing end-to-end** — column types are explicit and enforced
