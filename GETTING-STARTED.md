@@ -16,6 +16,7 @@ This guide provides comprehensive examples and tutorials for using Nivara's Data
 - [Joins and Concatenation](#joins-and-concatenation)
 - [Grouping and Aggregation](#grouping-and-aggregation)
 - [Advanced Features](#advanced-features)
+- [Automatic Differentiation](#automatic-differentiation)
 - [Extensions and I/O](#extensions-and-io)
 
 ---
@@ -938,6 +939,70 @@ Console.WriteLine(diagnostics.GenerateReport());
 var summary = diagnostics.GetSummary();
 Console.WriteLine($"Processed {summary.TotalRowsProcessed:N0} rows in {summary.TotalExecutionTime.TotalMilliseconds:F2}ms");
 Console.WriteLine($"Throughput: {summary.AverageThroughput:F0} rows/sec");
+```
+
+---
+
+## Automatic Differentiation
+
+Nivara provides experimental support for automatic differentiation (AutoDiff) on DataFrames, enabling gradient-based optimization and machine learning workflows directly on your data.
+
+### Converting to Gradient Tensors
+
+You can convert Columns, Series, or entire DataFrames into `GradTensor<T>` objects:
+
+```csharp
+using Nivara.Extensions.AutoDiff;
+
+var df = NivaraFrame.Create(
+    ("x", NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })),
+    ("y", NivaraColumn<float>.Create(new[] { 2.0f, 4.0f, 6.0f }))
+);
+
+// Convert to dictionary of GradTensors, enabling gradient tracking
+var tensors = df.ToGradTensors<float>(new[] { "x", "y" }, requiresGrad: true);
+
+var x = tensors["x"];
+var y = tensors["y"];
+```
+
+### Computing Gradients
+
+Perform operations on tensors and call `Backward()` to compute gradients:
+
+```csharp
+// Simple linear model: z = x * w + b
+var w = GradTensor<float>.CreateScalar(0.5f, requiresGrad: true);
+var b = GradTensor<float>.CreateScalar(0.1f, requiresGrad: true);
+
+var z = x * w + b;
+
+// Compute loss (e.g., Mean Squared Error vs target 'y')
+var diff = z - y;
+var loss = (diff * diff).Sum();
+
+// Backpropagate
+loss.Backward();
+
+// Access gradients
+Console.WriteLine($"w gradient: {w.Grad.GetData()[0]}");
+```
+
+### Retrieving Gradients
+
+Extract gradients back into a Nivara DataFrame for analysis:
+
+```csharp
+// Get a DataFrame containing gradients for all tracking tensors
+var gradFrame = tensors.ToGradientFrame();
+```
+
+### Zeroing Gradients
+
+When training in a loop, zero out gradients before the next pass:
+
+```csharp
+tensors.BatchZeroGrad();
 ```
 
 ---

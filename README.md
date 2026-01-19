@@ -135,6 +135,7 @@ Nivara currently supports:
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, and async I/O operations
+- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns, enabling custom loss functions and gradient-based optimization directly on DataFrames (via `Nivara.Extensions`)
 
 Nivara aims to bring **predictable, high-performance data processing** to the .NET ecosystem — without sacrificing correctness or clarity.
 
