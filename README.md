@@ -40,6 +40,7 @@ dotnet add package Nivara.Extensions
 
 ```csharp
 using Nivara;
+using Nivara.Linq;
 
 // Create typed columns
 var ages = NivaraColumn<int>.Create(new[] { 25, 30, 35 });
@@ -52,10 +53,11 @@ var frame = NivaraFrame.Create(
 );
 
 // Query with lazy evaluation
+// Query with lazy evaluation (LINQ-like)
 var adults = frame.AsQueryFrame()
-    .Filter(ColumnExpressions.Col("Age") > 30)
-    .Select("Name")
-    .Collect();
+    .Where(x => x["Age"] > 30)
+    .Select(x => x["Name"])
+    .ToNivaraFrame();
 
 Console.WriteLine(adults.RowCount); // 1 (Charlie)
 ```
@@ -70,7 +72,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 - Explicit null handling using validity masks (no NaN semantics)
 
 ### Query Engine
-- Lazy query construction with LINQ-like syntax
+- Lazy query construction with true LINQ-like syntax (Where, Select, OrderBy)
 - Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
 - Multiple execution strategies (lazy, eager, streaming, parallel)
 

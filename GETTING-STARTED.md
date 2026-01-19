@@ -209,38 +209,49 @@ var frame = NivaraFrame.Create(
     ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000, 80000 }))
 );
 
+// Using LINQ extensions (Recommended)
+using Nivara.Linq;
+
 // Filter rows
 var adults = frame.AsQueryFrame()
-    .Filter(ColumnExpressions.Col("Age") > 30)
-    .Collect();
+    .Where(x => x["Age"] > 30)
+    .ToNivaraFrame();
 // Result: Charlie (35) and Diana (40)
 
 // Select columns
 var names = frame.AsQueryFrame()
-    .Select("Name")
-    .Collect();
+    .Select(x => x["Name"])
+    .ToNivaraFrame();
 // Result: DataFrame with only Name column
 
 // Chain operations
 var result = frame.AsQueryFrame()
+    .Where(x => x["Salary"] > 55000)
+    .Select(x => x["Name"], x => x["Age"])
+    .ToNivaraFrame();
+// Result: Bob, Charlie, Diana with Name and Age columns
+
+// Legacy Fluent API
+var legacyResult = frame.AsQueryFrame()
     .Filter(ColumnExpressions.Col("Salary") > 55000)
     .Select("Name", "Age")
     .Collect();
-// Result: Bob, Charlie, Diana with Name and Age columns
+
 ```
 
 ### Complex Expressions
 
 ```csharp
 // Multiple conditions
+// Multiple conditions using LINQ
 var complexFilter = frame.AsQueryFrame()
-    .Filter(ColumnExpressions.Col("Age") > 25 & ColumnExpressions.Col("Salary") < 75000)
-    .Collect();
+    .Where(x => x["Age"] > 25 & x["Salary"] < 75000)
+    .ToNivaraFrame();
 
 // Arithmetic in expressions
 var bonusQuery = frame.AsQueryFrame()
-    .Filter(ColumnExpressions.Col("Salary") * 0.1 > 6000) // 10% bonus > $6000
-    .Collect();
+    .Where(x => x["Salary"] * 0.1 > 6000) // 10% bonus > $6000
+    .ToNivaraFrame();
 ```
 
 ### Lazy Evaluation
@@ -366,15 +377,17 @@ var slice = frame.Slice(1, 2); // Start at index 1, take 2 rows
 using Nivara.Operations;
 
 // Single column sorting
+// Single column sorting
 var sortedByAge = frame.AsQueryFrame()
-    .Sort("Age")
-    .Collect();
+    .OrderBy(x => x["Age"])
+    .ToNivaraFrame();
 // Result: Alice (25), Bob (30), Charlie (35), Diana (40)
 
 // Descending sort
+// Descending sort
 var sortedBySalaryDesc = frame.AsQueryFrame()
-    .Sort("Salary", SortDirection.Descending)
-    .Collect();
+    .OrderByDescending(x => x["Salary"])
+    .ToNivaraFrame();
 
 // Multi-column sorting
 var multiSorted = frame.AsQueryFrame()
