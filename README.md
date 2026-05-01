@@ -137,8 +137,6 @@ Nivara currently supports:
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, and async I/O operations
 - **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns, enabling custom loss functions and gradient-based optimization directly on DataFrames (via `Nivara.Extensions`)
 
-Nivara aims to bring **predictable, high-performance data processing** to the .NET ecosystem — without sacrificing correctness or clarity.
-
 ---
 
 ## Documentation
@@ -148,9 +146,3 @@ Nivara aims to bring **predictable, high-performance data processing** to the .N
 - [**CONTRIBUTING**](https://github.com/khurram-uworx/nivara/blob/main/CONTRIBUTING.md) — how to contribute to the project
 - [**GUIDELINES**](https://github.com/khurram-uworx/nivara/blob/main/GUIDELINES.md) — architectural rationale, lessons learned, and known gotchas
 
----
-
-## Stability
-
-- APIs may evolve as additional features are added
-- Feedback and experimentation are encouraged

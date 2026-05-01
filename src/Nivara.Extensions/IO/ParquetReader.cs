@@ -1,4 +1,3 @@
-using Parquet.Data;
 using Parquet.Schema;
 
 namespace Nivara.IO;
@@ -62,7 +61,7 @@ public static class ParquetReader
         try
         {
             // Use low-level ParquetReader API
-            using var parquetReader = await Parquet.ParquetReader.CreateAsync(stream);
+            await using var parquetReader = await Parquet.ParquetReader.CreateAsync(stream);
 
             if (parquetReader.RowGroupCount == 0)
             {
@@ -195,8 +194,7 @@ public static class ParquetReader
                         // Check for cancellation before processing each column
                         cancellationToken.ThrowIfCancellationRequested();
 
-                        // Read column data using the correct API
-                        var columnData = await rowGroupReader.ReadColumnAsync(field);
+                        var columnData = await ReadParquetColumnAsync(rowGroupReader, field, cancellationToken);
                         var column = CreateNivaraColumnFromParquetData(columnData, field);
                         columns.Add((columnName, column));
                     }
@@ -270,7 +268,46 @@ public static class ParquetReader
     /// <summary>
     /// Creates a NivaraColumn from Parquet column data.
     /// </summary>
-    private static IColumn CreateNivaraColumnFromParquetData(DataColumn columnData, DataField field)
+    private static async Task<Array> ReadParquetColumnAsync(Parquet.ParquetRowGroupReader rowGroupReader, DataField field, CancellationToken cancellationToken)
+    {
+        var length = checked((int)rowGroupReader.RowCount);
+        var elementType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
+
+        if (elementType == typeof(string))
+        {
+            var values = new string[length];
+            await rowGroupReader.ReadAsync(field, values, null, cancellationToken);
+            return values;
+        }
+
+        return elementType switch
+        {
+            Type t when t == typeof(bool) => await ReadParquetColumnAsync<bool>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(int) => await ReadParquetColumnAsync<int>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(long) => await ReadParquetColumnAsync<long>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(float) => await ReadParquetColumnAsync<float>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(double) => await ReadParquetColumnAsync<double>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(DateTime) => await ReadParquetColumnAsync<DateTime>(rowGroupReader, field, length, cancellationToken),
+            _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
+        };
+    }
+
+    private static async Task<Array> ReadParquetColumnAsync<T>(Parquet.ParquetRowGroupReader rowGroupReader, DataField field, int length, CancellationToken cancellationToken)
+        where T : struct
+    {
+        if (field.IsNullable)
+        {
+            var nullableValues = new T?[length];
+            await rowGroupReader.ReadAsync<T>(field, nullableValues, null, cancellationToken);
+            return nullableValues;
+        }
+
+        var values = new T[length];
+        await rowGroupReader.ReadAsync<T>(field, values, null, cancellationToken);
+        return values;
+    }
+
+    private static IColumn CreateNivaraColumnFromParquetData(Array columnData, DataField field)
     {
         var elementType = field.ClrType;
 
@@ -296,9 +333,9 @@ public static class ParquetReader
     /// <summary>
     /// Creates a NivaraColumn for struct types from Parquet data with buffer reuse.
     /// </summary>
-    private static NivaraColumn<T> CreateNivaraColumn<T>(DataColumn columnData) where T : struct
+    private static NivaraColumn<T> CreateNivaraColumn<T>(Array columnData) where T : struct
     {
-        var length = columnData.Data.Length;
+        var length = columnData.Length;
 
         // Use buffer pool for large arrays to reduce allocations
         T?[] nullableArray;
@@ -312,7 +349,7 @@ public static class ParquetReader
 
                 for (int i = 0; i < length; i++)
                 {
-                    var value = columnData.Data.GetValue(i);
+                    var value = columnData.GetValue(i);
                     if (value != null)
                     {
                         try
@@ -342,7 +379,7 @@ public static class ParquetReader
 
             for (int i = 0; i < length; i++)
             {
-                var value = columnData.Data.GetValue(i);
+                var value = columnData.GetValue(i);
                 if (value != null)
                 {
                     try
@@ -367,9 +404,9 @@ public static class ParquetReader
     /// <summary>
     /// Creates a string column from Parquet data with memory optimization.
     /// </summary>
-    private static NivaraColumn<string> CreateStringColumn(DataColumn columnData)
+    private static NivaraColumn<string> CreateStringColumn(Array columnData)
     {
-        var length = columnData.Data.Length;
+        var length = columnData.Length;
         var values = new string[length];
 
         // Use buffer pool for processing large string columns
@@ -380,7 +417,7 @@ public static class ParquetReader
             {
                 for (int i = 0; i < length; i++)
                 {
-                    var value = columnData.Data.GetValue(i);
+                    var value = columnData.GetValue(i);
                     if (value != null)
                     {
                         values[i] = value.ToString()!;
@@ -400,7 +437,7 @@ public static class ParquetReader
         {
             for (int i = 0; i < length; i++)
             {
-                var value = columnData.Data.GetValue(i);
+                var value = columnData.GetValue(i);
                 if (value != null)
                 {
                     values[i] = value.ToString()!;

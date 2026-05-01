@@ -198,7 +198,7 @@ Null handling is explicit and first-class:
 
 Null-related behavior is a major source of subtle bugs.
 
-> Detailed rules, edge cases, and LLM-specific guidance are documented in (GUIDELINES)[GUIDELINES.md]
+> Detailed rules, edge cases, and LLM-specific guidance are documented in [GUIDELINES](GUIDELINES.md)
 
 ---
 
@@ -850,3 +850,64 @@ Core Nivara runtime remains focused and lightweight:
 
 This architecture enables Nivara to provide high performance and type safety while maintaining clear separation of concerns and extensibility for future enhancements.
 
+---
+
+## Appendix: Quick Reference — Architecture Decisions
+
+This appendix summarizes key architecture decisions in concise form. See the relevant sections above for detailed rationale.
+
+### Storage & Vectorization
+
+- **Storage strategy**: Default to `MemoryStorage` for non-vectorizable types and `TensorStorage` for vectorizable types. Use `ColumnStorageFactory` with runtime type checks.
+  - Rationale: generic static constraints are limiting (CS0080); runtime dispatch is more flexible.
+- **Vectorization detection**: Use factory-level checks (`IsVectorizable<T>()`) rather than instance flags.
+  - Rationale: storage selection vs arithmetic vectorization have different concerns; factory centralizes decisions.
+- **Null semantics**: Explicit boolean masks, never NaN-based.
+  - Rationale: predictable across all types; NaN only works reliably for IEEE floats.
+- **Comparisons**: Return `NivaraColumn<bool>` with SQL-like null propagation (null compared to anything → null).
+  - Rationale: avoids surprising booleans, aligns with common DB semantics.
+
+### Series & Column Design
+
+- **Series indexing**: Both position-based (`this[int]`) and label-based (`this[object]`) indexers. Boxed ints route to label indexer.
+  - Rationale: preserves both semantics while allowing explicit disambiguation.
+- **Kernel selection**: Centralize in a single `DetermineKernelType()` method checking vectorizability, hardware acceleration, and size threshold.
+
+### Query Engine & Optimization
+
+- **Query engine**: Expose generic `IQueryOperation<T>` and public `QueryPlan` to enable external extensions; use immutable `Schema` and `QueryPlan` objects.
+- **Query optimization**: Rule-based engine with conservative approach.
+  - `OptimizationRule` base class with priority system.
+  - Operation type strings for dispatch when internal details inaccessible.
+  - Visitor pattern for plan analysis and transformation.
+  - Comprehensive statistics tracking and reporting.
+- **Optimization safety rules**:
+  - Do not change semantics to achieve performance.
+  - If uncertain, skip the optimization for that path.
+- **Immutable plans**: `QueryPlan` is immutable; optimization passes produce a new `QueryPlan`.
+- **Always validate schema transformations**; if optimization fails, fall back to original plan.
+- **Use expression analysis (visitor)** to discover referenced columns for column elimination and predicate pushdown.
+
+### DataFrame Operations
+
+- **Pattern**: Implement as `IQueryOperation` with schema validation in `TransformSchema` phase.
+- **Concatenation**: Configurable mismatch handling (`Error`, `FillWithNulls`) for vertical; always `Error` for horizontal.
+- **Joins**: Hash-based with composite keys, exclude nulls from matching, coalesce join keys for outer joins.
+- **Sorting**: Sort indices first, then reorder columns; explicit null ordering (`NullsFirst`/`NullsLast`).
+- **Grouping**: Dedicated composite key class with proper equality/hashing; handle nulls explicitly.
+- **Fluent API**: Extension methods over core operations. Use `ExpandoObject` for `Where()` predicates. Clear execution semantics: immediate on DataFrame, lazy via `AsQueryFrame()`.
+
+### Execution & Error Handling
+
+- **Execution strategies**: Pluggable strategy pattern (lazy, eager, streaming, parallel).
+  - Cost estimation with operation-specific weights.
+  - Async-first design with sync wrappers.
+  - Intelligent parallel execution heuristics.
+- **Error handling**: Structured exception hierarchy with query context.
+  - Include failed plan and operation references in exceptions.
+  - Specific exception types for common failure modes.
+
+### Target Framework
+
+- **.NET 10.0** with latest C# features.
+  - Rationale: leverage latest performance improvements; `System.Numerics.Tensors` requires modern .NET.

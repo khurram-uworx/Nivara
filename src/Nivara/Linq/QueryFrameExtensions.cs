@@ -1,6 +1,6 @@
 using Nivara.Expressions;
-using Nivara.Query;
 using Nivara.Operations;
+using Nivara.Query;
 
 namespace Nivara.Linq;
 
@@ -67,26 +67,26 @@ public static class QueryFrameExtensions
         ArgumentNullException.ThrowIfNull(keySelector);
 
         var expression = keySelector(RowExpressionBuilder.Instance);
-        
+
         // At the moment, SortOperation expects a column name. 
         // If the expression is a ColumnReference, we can extract the name.
         if (expression is ColumnReference colRef)
         {
-             return source.Sort(colRef.ColumnName, descending ? SortDirection.Descending : SortDirection.Ascending);
+            return source.Sort(colRef.ColumnName, descending ? SortDirection.Descending : SortDirection.Ascending);
         }
-        
+
         // If it's not a direct column reference (e.g. calculated), existing Sort might not support it directly 
         // unless we project it first. For now, assuming direct column reference or basic name resolution.
         // If the expression has a name (e.g. from an alias or base impl), we try that.
-        
+
         if (!string.IsNullOrEmpty(expression.Name) && !expression.Name.Contains("(")) // Simplistic check for now
         {
-             return source.Sort(expression.Name, descending ? SortDirection.Descending : SortDirection.Ascending);
+            return source.Sort(expression.Name, descending ? SortDirection.Descending : SortDirection.Ascending);
         }
 
         throw new NotSupportedException("OrderBy currently supports only direct column references or named expressions. Complex expressions must be selected/computed first.");
     }
-    
+
     /// <summary>
     /// Sorts the query frame in descending order
     /// </summary>
@@ -97,7 +97,7 @@ public static class QueryFrameExtensions
     {
         return source.OrderBy(keySelector, descending: true);
     }
-    
+
     /// <summary>
     /// Executes the query and returns a materialized NivaraFrame (Alias for Collect)
     /// </summary>
@@ -108,7 +108,7 @@ public static class QueryFrameExtensions
         ArgumentNullException.ThrowIfNull(source);
         return source.Collect();
     }
-    
+
     /// <summary>
     /// Executes the query and returns a materialized NivaraFrame (Alias for Collect, matching LINQ's ToList)
     /// </summary>

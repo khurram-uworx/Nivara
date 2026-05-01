@@ -1,4 +1,3 @@
-using Nivara.Expressions;
 using Nivara.Linq;
 using NUnit.Framework;
 
@@ -121,7 +120,7 @@ public class LinqQueryTests
         // Expected: 5, 4, 3 -> Sorted: 3, 4, 5 -> Letters: c, d, e
         Assert.That(result.RowCount, Is.EqualTo(3));
         Assert.That(result.ColumnNames.Count, Is.EqualTo(1));
-        
+
         var letters = result.GetColumn<string>("Letters");
         Assert.That(letters[0], Is.EqualTo("c")); // 3
         Assert.That(letters[1], Is.EqualTo("d")); // 4

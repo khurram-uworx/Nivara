@@ -5,40 +5,10 @@ Thank you for your interest in contributing to **Nivara**, a high-performance, c
 > **Important**
 > - This file is **human-owned**.
 > - AI tools may **suggest** changes, but should not directly modify this file.
-> - Architectural rationale, gotchas, and LLM-specific learnings belong in **GUIDELINES.md**, not here.
+> - Architecture decisions and rationale belong in **ARCHITECTURE.md**, not here.
+> - Project-specific implementation gotchas and AI coding guidance belong in **AGENTS.md**.
+> - Transferable engineering lessons belong in **GUIDELINES.md**.
 > - Feature descriptions and user-facing documentation belong in **README.md**, not here.
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-- .NET 10.0 SDK or later
-- Git
-- A code editor (Visual Studio, VS Code, or JetBrains Rider recommended)
-
-### Repository Setup
-
-Clone the repository and restore dependencies:
-
-```bash
-git clone https://github.com/khurram-uworx/nivara.git
-cd nivara
-dotnet restore
-```
-
-### Build
-
-```bash
-dotnet build
-```
-
-### Run Tests
-
-```bash
-dotnet test
-```
 
 ---
 
@@ -136,7 +106,8 @@ tests/Nivara.Tests/
 
 5. **Update Documentation**
    - User-facing changes → update **README.md**
-   - Implementation patterns and gotchas → update **CHANGELOGS.md**
+   - Architecture decisions and rationale → update **ARCHITECTURE.md**
+   - Implementation patterns and gotchas → update **AGENTS.md**
    - Transferable engineering lessons → consider **GUIDELINES.md** (but avoid project-specific details)
    - Do *not* add architectural rationale to this file
 
@@ -247,21 +218,7 @@ dotnet run --project benchmarks --configuration Release
 
 ---
 
-## 🔧 Development Tools and Setup
-
-### Recommended Extensions (VS Code)
-
-- C# Dev Kit
-- .NET Install Tool
-- GitLens
-- Test Explorer UI
-
-### Recommended Extensions (Visual Studio)
-
-- BenchmarkDotNet templates
-- Code coverage tools
-
-### Build Configuration
+## 🔧 Build Configuration
 
 The project uses:
 - **.NET 10.0** as the target framework
@@ -311,7 +268,8 @@ Nivara follows **Semantic Versioning**:
 
 - **GitHub Issues** – bugs and feature requests
 - **GitHub Discussions** – questions and design discussions
-- **CHANGELOGS.md** – implementation patterns, gotchas, and architectural decisions
+- **ARCHITECTURE.md** – architecture decisions and rationale
+- **AGENTS.md** – implementation patterns, gotchas, and AI-assisted coding guidance
 - **GUIDELINES.md** – transferable engineering lessons for similar systems
 
 ---
@@ -344,6 +302,16 @@ We welcome contributions in these areas:
 - Usage examples and tutorials
 - Performance guides
 - Migration guides from other DataFrame libraries
+
+---
+
+## 📐 Documentation Maintenance Guidelines
+
+When maintaining project documentation:
+
+- **Keep decisions short**: decision → rationale → link to example code if needed
+- **New discoveries**: add a single bullet under the relevant category and mark date + author; avoid appending chronological dumps
+- **When changing a decision**: update the earlier entry by marking it superseded with a one-line reason and link to the new rule
 
 ---
 

@@ -1,4 +1,3 @@
-using Parquet.Data;
 using Parquet.Schema;
 
 namespace Nivara.IO;
@@ -218,10 +217,9 @@ public static class ParquetWriter
         var dummyField = new DataField<int>("_empty");
         var emptySchema = new ParquetSchema(dummyField);
 
-        using var emptyWriter = await Parquet.ParquetWriter.CreateAsync(emptySchema, stream);
+        await using var emptyWriter = await Parquet.ParquetWriter.CreateAsync(emptySchema, stream);
         using var emptyRowGroup = emptyWriter.CreateRowGroup();
-        var emptyColumn = new DataColumn(dummyField, Array.Empty<int>());
-        await emptyRowGroup.WriteColumnAsync(emptyColumn);
+        await emptyRowGroup.WriteAsync<int>(dummyField, Array.Empty<int>(), null, null, cancellationToken);
     }
 
     /// <summary>
@@ -375,7 +373,7 @@ public static class ParquetWriter
         var schema = new ParquetSchema(fields.ToArray());
 
         // Create Parquet writer
-        using var parquetWriter = await Parquet.ParquetWriter.CreateAsync(schema, stream);
+        await using var parquetWriter = await Parquet.ParquetWriter.CreateAsync(schema, stream);
         using var rowGroupWriter = parquetWriter.CreateRowGroup();
 
         // Write column data
@@ -391,9 +389,7 @@ public static class ParquetWriter
             try
             {
                 var columnData = ExtractColumnDataArray(frame, columnName, columnType);
-                var dataColumn = new DataColumn(field, columnData);
-
-                await rowGroupWriter.WriteColumnAsync(dataColumn);
+                await WriteParquetColumnAsync(rowGroupWriter, field, columnData, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -404,6 +400,41 @@ public static class ParquetWriter
                 };
             }
         }
+    }
+
+    private static Task WriteParquetColumnAsync(Parquet.ParquetRowGroupWriter rowGroupWriter, DataField field, Array columnData, CancellationToken cancellationToken)
+    {
+        return columnData switch
+        {
+            bool[] values => rowGroupWriter.WriteAsync<bool>(field, values, null, null, cancellationToken),
+            bool?[] values => rowGroupWriter.WriteAsync<bool>(field, values, null, null, cancellationToken),
+            int[] values => rowGroupWriter.WriteAsync<int>(field, values, null, null, cancellationToken),
+            int?[] values => rowGroupWriter.WriteAsync<int>(field, values, null, null, cancellationToken),
+            long[] values => rowGroupWriter.WriteAsync<long>(field, values, null, null, cancellationToken),
+            long?[] values => rowGroupWriter.WriteAsync<long>(field, values, null, null, cancellationToken),
+            float[] values => rowGroupWriter.WriteAsync<float>(field, values, null, null, cancellationToken),
+            float?[] values => rowGroupWriter.WriteAsync<float>(field, values, null, null, cancellationToken),
+            double[] values => rowGroupWriter.WriteAsync<double>(field, values, null, null, cancellationToken),
+            double?[] values => rowGroupWriter.WriteAsync<double>(field, values, null, null, cancellationToken),
+            DateTime[] values => rowGroupWriter.WriteAsync<DateTime>(field, values, null, null, cancellationToken),
+            DateTime?[] values => rowGroupWriter.WriteAsync<DateTime>(field, values, null, null, cancellationToken),
+            byte[] values => rowGroupWriter.WriteAsync<byte>(field, values, null, null, cancellationToken),
+            byte?[] values => rowGroupWriter.WriteAsync<byte>(field, values, null, null, cancellationToken),
+            short[] values => rowGroupWriter.WriteAsync<short>(field, values, null, null, cancellationToken),
+            short?[] values => rowGroupWriter.WriteAsync<short>(field, values, null, null, cancellationToken),
+            uint[] values => rowGroupWriter.WriteAsync<uint>(field, values, null, null, cancellationToken),
+            uint?[] values => rowGroupWriter.WriteAsync<uint>(field, values, null, null, cancellationToken),
+            ulong[] values => rowGroupWriter.WriteAsync<ulong>(field, values, null, null, cancellationToken),
+            ulong?[] values => rowGroupWriter.WriteAsync<ulong>(field, values, null, null, cancellationToken),
+            ushort[] values => rowGroupWriter.WriteAsync<ushort>(field, values, null, null, cancellationToken),
+            ushort?[] values => rowGroupWriter.WriteAsync<ushort>(field, values, null, null, cancellationToken),
+            sbyte[] values => rowGroupWriter.WriteAsync<sbyte>(field, values, null, null, cancellationToken),
+            sbyte?[] values => rowGroupWriter.WriteAsync<sbyte>(field, values, null, null, cancellationToken),
+            decimal[] values => rowGroupWriter.WriteAsync<decimal>(field, values, null, null, cancellationToken),
+            decimal?[] values => rowGroupWriter.WriteAsync<decimal>(field, values, null, null, cancellationToken),
+            string[] values => rowGroupWriter.WriteAsync(field, values, null),
+            _ => throw new UnsupportedTypeException(columnData.GetType().GetElementType() ?? columnData.GetType(), TypeMapper.GetTypeSuggestions(columnData.GetType().GetElementType() ?? columnData.GetType()))
+        };
     }
 
     /// <summary>
