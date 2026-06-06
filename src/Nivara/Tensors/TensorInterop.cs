@@ -22,24 +22,7 @@ public static class TensorInterop
         where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(series);
-
-        if (series.Length == 0)
-        {
-            return Tensor.Create<T>(new T[0], new ReadOnlySpan<nint>(new nint[] { 0 }));
-        }
-
-        // Create a 1D tensor with the series data
-        var dimensions = new ReadOnlySpan<nint>(new nint[] { series.Length });
-        var data = new T[series.Length];
-
-        // Copy valid values to data array, using default(T) for invalid values
-        var seriesSpan = series.Values.AsSpan();
-        for (int i = 0; i < series.Length; i++)
-        {
-            data[i] = !series.IsNull(i) ? seriesSpan[i] : default(T);
-        }
-
-        return Tensor.Create<T>(data, dimensions);
+        return series.Values.ToTensor();
     }
 
     /// <summary>

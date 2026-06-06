@@ -308,6 +308,48 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         }
     }
 
+    // Tensor<T> Conversion
+
+    /// <summary>
+    /// Converts this column to a System.Numerics.Tensors.Tensor&lt;T&gt;.
+    /// The returned tensor owns a copy so column immutability is preserved.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the column contains null values</exception>
+    public Tensor<T> ToTensor()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (HasNulls)
+            throw new InvalidOperationException("Cannot convert column with null values to Tensor<T>. Use ToTensor(T defaultValue) to provide a null replacement.");
+
+        var rawSpan = storage.AsSpan();
+        var result = new T[rawSpan.Length];
+        rawSpan.CopyTo(result);
+        return Tensor.Create(result, new nint[] { result.Length });
+    }
+
+    /// <summary>
+    /// Converts this column to a Tensor&lt;T&gt;, replacing null values with the specified default.
+    /// </summary>
+    /// <param name="defaultValue">Value to use in place of nulls</param>
+    public Tensor<T> ToTensor(T defaultValue)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var rawSpan = storage.AsSpan();
+        var result = new T[rawSpan.Length];
+        rawSpan.CopyTo(result);
+        var nullMask = storage.NullMask;
+        if (!nullMask.IsEmpty)
+        {
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (nullMask[i]) result[i] = defaultValue;
+            }
+        }
+        return Tensor.Create(result, new nint[] { result.Length });
+    }
+
     // Arithmetic Operations
 
     /// <summary>

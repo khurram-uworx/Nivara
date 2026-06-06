@@ -324,3 +324,10 @@ MigrationBackup/
 
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
+
+# Memori logs
+/.memori/Log.*
+
+# CodeMemory index databases — add .codememory/ to exclude from version control
+.codememory/
+.codememory.json
