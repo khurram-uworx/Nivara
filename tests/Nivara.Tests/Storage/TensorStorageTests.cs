@@ -47,6 +47,29 @@ public class TensorStorageTests
         Assert.That(storage.NullMask.Length, Is.EqualTo(0), "Null mask should be empty when no nulls present");
     }
 
+    [Test]
+    public void AsTensorSpanIfNoNulls_WithoutNulls_ReturnsUnderlyingValues()
+    {
+        var storage = new TensorStorage<float>(new[] { 1.0f, 2.0f, 3.0f });
+
+        var span = storage.AsTensorSpanIfNoNulls();
+
+        Assert.That(span.Rank, Is.EqualTo(1));
+        Assert.That(span.Lengths[0], Is.EqualTo((nint)3));
+        Assert.That(span[0], Is.EqualTo(1.0f));
+        Assert.That(span[1], Is.EqualTo(2.0f));
+        Assert.That(span[2], Is.EqualTo(3.0f));
+    }
+
+    [Test]
+    public void AsTensorSpanIfNoNulls_WithNulls_Throws()
+    {
+        var storage = new TensorStorage<float>(new float?[] { 1.0f, null, 3.0f });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => storage.AsTensorSpanIfNoNulls());
+        Assert.That(ex.Message, Does.Contain("null values"));
+    }
+
     #endregion
 
     #region Property 4: Length preservation

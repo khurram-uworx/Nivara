@@ -1,6 +1,9 @@
 using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
+using System.Numerics;
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace Nivara;
 
@@ -210,6 +213,135 @@ public sealed class NivaraFrame : IFrame
             throw new ColumnNotFoundException(name, ColumnNames);
 
         return column;
+    }
+
+    /// <summary>
+    /// Converts all columns of type T to an array of Tensor&lt;T&gt;, one per column.
+    /// </summary>
+    /// <typeparam name="T">The numeric type of the columns to convert</typeparam>
+    /// <returns>An array of Tensor&lt;T&gt;, one per column</returns>
+    /// <exception cref="InvalidOperationException">Thrown when any column contains nulls or is not of type T</exception>
+    public Tensor<T>[] ToTensors<T>()
+        where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var tensors = new Tensor<T>[ColumnCount];
+        for (int i = 0; i < ColumnCount; i++)
+        {
+            var name = ColumnNames[i];
+            var col = GetColumn<T>(name);
+            tensors[i] = col.ToTensor();
+        }
+        return tensors;
+    }
+
+    /// <summary>
+    /// Computes one dot product per column against the supplied vector.
+    /// </summary>
+    public NivaraSeries<T> Dot<T>(NivaraSeries<T> vector)
+        where T : unmanaged, INumber<T>
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(vector);
+
+        if (vector.Length != RowCount)
+            throw new ArgumentException($"Vector length ({vector.Length}) must match frame row count ({RowCount})", nameof(vector));
+        if (vector.Values.HasNulls)
+            throw new InvalidOperationException("Cannot compute dot product with a vector that contains null values.");
+
+        var vectorSpan = vector.Values.AsSpan();
+        var scores = new T[ColumnCount];
+
+        for (int i = 0; i < ColumnCount; i++)
+        {
+            var column = GetColumn<T>(ColumnNames[i]);
+            if (column.HasNulls)
+                throw new InvalidOperationException($"Cannot compute dot product for column '{ColumnNames[i]}' because it contains null values.");
+
+            scores[i] = DotSpans(column.AsSpan(), vectorSpan);
+        }
+
+        return NivaraSeries<T>.Create(scores, ColumnNames.ToArray());
+    }
+
+    /// <summary>
+    /// Computes one cosine-similarity score per column against the supplied vector.
+    /// </summary>
+    public NivaraSeries<T> CosineSimilarity<T>(NivaraSeries<T> vector)
+        where T : unmanaged, INumber<T>
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(vector);
+
+        if (vector.Length != RowCount)
+            throw new ArgumentException($"Vector length ({vector.Length}) must match frame row count ({RowCount})", nameof(vector));
+        if (vector.Values.HasNulls)
+            throw new InvalidOperationException("Cannot compute cosine similarity with a vector that contains null values.");
+
+        var vectorSpan = vector.Values.AsSpan();
+        var scores = new T[ColumnCount];
+
+        for (int i = 0; i < ColumnCount; i++)
+        {
+            var column = GetColumn<T>(ColumnNames[i]);
+            if (column.HasNulls)
+                throw new InvalidOperationException($"Cannot compute cosine similarity for column '{ColumnNames[i]}' because it contains null values.");
+
+            scores[i] = CosineSimilaritySpans(column.AsSpan(), vectorSpan);
+        }
+
+        return NivaraSeries<T>.Create(scores, ColumnNames.ToArray());
+    }
+
+    private static T DotSpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
+        where T : unmanaged, INumber<T>
+    {
+        if (typeof(T) == typeof(float))
+        {
+            var result = TensorPrimitives.Dot(
+                MemoryMarshal.Cast<T, float>(left),
+                MemoryMarshal.Cast<T, float>(right));
+            return (T)(object)result;
+        }
+
+        if (typeof(T) == typeof(double))
+        {
+            var result = TensorPrimitives.Dot(
+                MemoryMarshal.Cast<T, double>(left),
+                MemoryMarshal.Cast<T, double>(right));
+            return (T)(object)result;
+        }
+
+        var sum = T.Zero;
+        for (int i = 0; i < left.Length; i++)
+        {
+            sum += left[i] * right[i];
+        }
+
+        return sum;
+    }
+
+    private static T CosineSimilaritySpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
+        where T : unmanaged, INumber<T>
+    {
+        if (typeof(T) == typeof(float))
+        {
+            var result = TensorPrimitives.CosineSimilarity(
+                MemoryMarshal.Cast<T, float>(left),
+                MemoryMarshal.Cast<T, float>(right));
+            return (T)(object)result;
+        }
+
+        if (typeof(T) == typeof(double))
+        {
+            var result = TensorPrimitives.CosineSimilarity(
+                MemoryMarshal.Cast<T, double>(left),
+                MemoryMarshal.Cast<T, double>(right));
+            return (T)(object)result;
+        }
+
+        throw new NotSupportedException($"Cosine similarity is currently supported only for float and double columns. Type {typeof(T).Name} is not supported.");
     }
 
     /// <summary>

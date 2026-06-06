@@ -49,27 +49,33 @@ public class TensorInteropTests
     }
 
     [Test]
-    public void ToTensor_WithNullValues_UsesDefaultForNulls()
+    public void ToTensor_WithNullValues_Throws()
     {
         // Arrange
-        var data = new float[] { 1.0f, 2.0f, 3.0f };
-        using var series = NivaraSeries<float>.Create(data);
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+        using var series = new NivaraSeries<float>(column);
 
-        // Simulate null at position 1 by creating a series with nulls
-        // Note: This would require a way to create series with nulls
-        // For now, test with valid data and verify behavior
+        // Act & Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => series.ToTensor());
+        Assert.That(ex.Message, Does.Contain("Cannot convert column with null values"));
+    }
+
+    [Test]
+    public void ToTensor_WithNullReplacement_ReplacesOnlyNullPositions()
+    {
+        // Arrange
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+        using var series = new NivaraSeries<float>(column);
 
         // Act
-        var tensor = series.ToTensor();
+        var tensor = series.ToTensor(-1.0f);
 
         // Assert
         Assert.That(tensor.Rank, Is.EqualTo(1));
         Assert.That(tensor.Lengths[0], Is.EqualTo((nint)3));
-
-        for (int i = 0; i < data.Length; i++)
-        {
-            Assert.That(tensor.AsTensorSpan()[i], Is.EqualTo(data[i]).Within(1e-6f));
-        }
+        Assert.That(tensor.AsTensorSpan()[0], Is.EqualTo(1.0f).Within(1e-6f));
+        Assert.That(tensor.AsTensorSpan()[1], Is.EqualTo(-1.0f).Within(1e-6f));
+        Assert.That(tensor.AsTensorSpan()[2], Is.EqualTo(3.0f).Within(1e-6f));
     }
 
     [Test]
@@ -541,6 +547,70 @@ public class TensorInteropTests
         }
     }
 
+    [Test]
+    public void FrameDot_WithProductColumns_ReturnsOneScorePerColumn()
+    {
+        // Arrange
+        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
+        using var products = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
+            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
+        });
+
+        // Act
+        using var scores = products.Dot(user);
+
+        // Assert
+        Assert.That(scores.Length, Is.EqualTo(3));
+        Assert.That(scores[0], Is.EqualTo(1.16f).Within(1e-6f));
+        Assert.That(scores[1], Is.EqualTo(0.50f).Within(1e-6f));
+        Assert.That(scores[2], Is.EqualTo(1.11f).Within(1e-6f));
+    }
+
+    [Test]
+    public void FrameCosineSimilarity_WithProductColumns_MatchesTensorPrimitives()
+    {
+        // Arrange
+        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
+        using var products = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
+            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
+        });
+
+        // Act
+        using var scores = products.CosineSimilarity(user);
+
+        // Assert
+        Assert.That(scores.Length, Is.EqualTo(3));
+        Assert.That(scores[0], Is.EqualTo(TensorPrimitives.CosineSimilarity(
+            new[] { 0.9f, 0.2f, 0.5f, 0.4f },
+            new[] { 0.8f, 0.1f, 0.6f, 0.3f })).Within(1e-6f));
+        Assert.That(scores[1], Is.EqualTo(TensorPrimitives.CosineSimilarity(
+            new[] { 0.1f, 0.9f, 0.2f, 0.7f },
+            new[] { 0.8f, 0.1f, 0.6f, 0.3f })).Within(1e-6f));
+        Assert.That(scores[2], Is.EqualTo(TensorPrimitives.CosineSimilarity(
+            new[] { 0.7f, 0.1f, 0.8f, 0.2f },
+            new[] { 0.8f, 0.1f, 0.6f, 0.3f })).Within(1e-6f));
+    }
+
+    [Test]
+    public void ArgSortDescending_ReturnsStableIndicesWithNullsLast()
+    {
+        // Arrange
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 0.5f, null, 0.9f, 0.9f, 0.1f });
+        using var series = new NivaraSeries<float>(column);
+
+        // Act
+        var indices = series.ArgSortDescending();
+
+        // Assert
+        Assert.That(indices, Is.EqualTo(new[] { 2, 3, 0, 4, 1 }));
+    }
+
     #endregion
 
     #region Edge Cases and Error Handling
@@ -552,7 +622,7 @@ public class TensorInteropTests
         NivaraSeries<float> nullSeries = null!;
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => nullSeries.ToTensor());
+        Assert.Throws<ArgumentNullException>(() => TensorInterop.ToTensor(nullSeries));
     }
 
     [Test]

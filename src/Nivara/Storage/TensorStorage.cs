@@ -12,6 +12,8 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
 {
     readonly Tensor<T> data;
     readonly Tensor<bool>? nullMask;
+    T[]? _flattenedCache;
+    bool[]? _nullMaskCache;
     bool disposed;
 
     /// <summary>
@@ -103,12 +105,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
         get
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            if (nullMask == null) return ReadOnlySpan<bool>.Empty;
-
-            // Use FlattenTo to get the data as a span
-            var buffer = new bool[nullMask.FlattenedLength];
-            nullMask.FlattenTo(buffer);
-            return buffer.AsSpan();
+            return GetFlattenedNullMask();
         }
     }
 
@@ -122,10 +119,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             if (index < 0 || index >= Length)
                 throw new IndexOutOfRangeException($"Index {index} is out of range for storage of length {Length}");
 
-            // Use FlattenTo to get the data as a span
-            var buffer = new T[data.FlattenedLength];
-            data.FlattenTo(buffer);
-            return buffer[index];
+            return GetFlattenedSpan()[index];
         }
     }
 
@@ -147,18 +141,14 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
         }
 
         // Get data as span and slice it
-        var dataBuffer = new T[data.FlattenedLength];
-        data.FlattenTo(dataBuffer);
-        var slicedDataArray = dataBuffer.AsSpan(start, length).ToArray();
+        var slicedDataArray = GetFlattenedSpan().Slice(start, length).ToArray();
         var slicedData = Tensor.Create(slicedDataArray, [length]);
 
         // Create sliced null mask if it exists
         Tensor<bool>? slicedNullMask = null;
         if (nullMask != null)
         {
-            var nullMaskBuffer = new bool[nullMask.FlattenedLength];
-            nullMask.FlattenTo(nullMaskBuffer);
-            var slicedNullMaskArray = nullMaskBuffer.AsSpan(start, length).ToArray();
+            var slicedNullMaskArray = GetFlattenedNullMask().Slice(start, length).ToArray();
             slicedNullMask = Tensor.Create(slicedNullMaskArray, [length]);
         }
 
@@ -189,15 +179,58 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
         }
     }
 
-    /// <inheritdoc />
-    ReadOnlySpan<T> IColumnStorage<T>.AsSpan()
+    /// <summary>
+    /// Gets a tensor span over the underlying tensor data when no null mask is present.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the storage contains null values.</exception>
+    internal TensorSpan<T> AsTensorSpanIfNoNulls()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        // Get data as span - this creates a temporary buffer but provides span access
+        if (HasNulls)
+            throw new InvalidOperationException("Cannot expose TensorSpan for tensor storage with null values.");
+
+        return data.AsTensorSpan();
+    }
+
+    /// <summary>
+    /// Gets the data as a span, using a cached flattened buffer when available.
+    /// </summary>
+    internal ReadOnlySpan<T> GetFlattenedSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (_flattenedCache != null)
+            return _flattenedCache.AsSpan();
+
         var buffer = new T[data.FlattenedLength];
         data.FlattenTo(buffer);
+        _flattenedCache = buffer;
         return buffer.AsSpan();
+    }
+
+    /// <summary>
+    /// Gets the null mask as a span, using a cached flattened buffer when available.
+    /// </summary>
+    internal ReadOnlySpan<bool> GetFlattenedNullMask()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (nullMask == null) return [];
+
+        if (_nullMaskCache != null)
+            return _nullMaskCache.AsSpan();
+
+        var buffer = new bool[nullMask.FlattenedLength];
+        nullMask.FlattenTo(buffer);
+        _nullMaskCache = buffer;
+        return buffer.AsSpan();
+    }
+
+    /// <inheritdoc />
+    ReadOnlySpan<T> IColumnStorage<T>.AsSpan()
+    {
+        return GetFlattenedSpan();
     }
 
     /// <inheritdoc />
@@ -205,8 +238,6 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        // For tensor storage, we need to be careful about mutations
-        // This creates a copy that can be written to
         var buffer = new T[data.FlattenedLength];
         data.FlattenTo(buffer);
         return buffer.AsSpan();
@@ -217,7 +248,8 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         if (!disposed)
         {
-            // Tensors don't require explicit disposal in System.Numerics.Tensors
+            _flattenedCache = null;
+            _nullMaskCache = null;
             disposed = true;
         }
     }

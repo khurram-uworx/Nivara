@@ -362,6 +362,29 @@ public sealed class NivaraSeries<T> : IDisposable
         return new NivaraSeries<T>(resultValues, index);
     }
 
+    // Tensor<T> Conversion
+
+    /// <summary>
+    /// Converts this series to a System.Numerics.Tensors.Tensor&lt;T&gt;.
+    /// Delegates to the underlying column conversion; drops the index.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">Thrown when the series contains null values</exception>
+    public Tensor<T> ToTensor()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return values.ToTensor();
+    }
+
+    /// <summary>
+    /// Converts this series to a Tensor&lt;T&gt;, replacing null values with the specified default.
+    /// </summary>
+    /// <param name="defaultValue">Value to use in place of nulls</param>
+    public Tensor<T> ToTensor(T defaultValue)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return values.ToTensor(defaultValue);
+    }
+
     // Aggregate Functions
 
     /// <summary>
@@ -597,6 +620,50 @@ public sealed class NivaraSeries<T> : IDisposable
         }
 
         return NivaraColumn<object>.CreateForReferenceType(indexValues);
+    }
+
+    /// <summary>
+    /// Returns positional indices sorted by the series values. Null values are always placed last.
+    /// </summary>
+    public int[] ArgSort(bool descending = false)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            return Array.Empty<int>();
+
+        var comparer = Comparer<T>.Default;
+        var indices = Enumerable.Range(0, Length).ToArray();
+        Array.Sort(indices, (leftIndex, rightIndex) =>
+        {
+            var leftIsNull = IsNull(leftIndex);
+            var rightIsNull = IsNull(rightIndex);
+
+            if (leftIsNull && rightIsNull)
+                return leftIndex.CompareTo(rightIndex);
+            if (leftIsNull)
+                return 1;
+            if (rightIsNull)
+                return -1;
+
+            var valueComparison = comparer.Compare(values[leftIndex], values[rightIndex]);
+            if (descending)
+                valueComparison = -valueComparison;
+
+            return valueComparison != 0
+                ? valueComparison
+                : leftIndex.CompareTo(rightIndex);
+        });
+
+        return indices;
+    }
+
+    /// <summary>
+    /// Returns positional indices sorted by the series values in descending order. Null values are always placed last.
+    /// </summary>
+    public int[] ArgSortDescending()
+    {
+        return ArgSort(descending: true);
     }
 
     /// <summary>
