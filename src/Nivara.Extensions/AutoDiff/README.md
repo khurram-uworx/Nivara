@@ -2,7 +2,7 @@
 
 `Nivara.Extensions.AutoDiff` is an experimental reverse-mode automatic
 differentiation layer over Nivara columns. It wraps `NivaraColumn<T>` values in
-`GradTensor<T>`, records differentiable operations in a computation graph, and
+`ReverseGradTensor<T>`, records differentiable operations in a computation graph, and
 computes gradients with `Backward()`.
 
 The implementation is intentionally small and explicit. It is useful for
@@ -21,7 +21,7 @@ other numeric types. Integral gradients are not supported.
 
 ## Core Concepts
 
-- `GradTensor<T>` wraps a `NivaraColumn<T>` and carries `RequiresGrad`, `Grad`,
+- `ReverseGradTensor<T>` wraps a `NivaraColumn<T>` and carries `RequiresGrad`, `Grad`,
   graph attachment, conversion helpers, `Detach()`, `ZeroGrad()`, and
   `Backward()`.
 - `Backward()` performs reverse-mode gradient computation. Without an explicit
@@ -40,15 +40,15 @@ using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Operations;
 
-var input = new GradTensor<float>(
+var input = new ReverseGradTensor<float>(
     NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f }),
     requiresGrad: false);
 
-var weight = new GradTensor<float>(
+var weight = new ReverseGradTensor<float>(
     NivaraColumn<float>.Create(new[] { 0.5f, 0.5f, 0.5f }),
     requiresGrad: true);
 
-var bias = new GradTensor<float>(
+var bias = new ReverseGradTensor<float>(
     NivaraColumn<float>.Create(new[] { -1.0f, 0.0f, 1.0f }),
     requiresGrad: true);
 
@@ -72,30 +72,49 @@ the same length as the output.
 `Nivara.Extensions.AutoDiff.Operations.GradOperations` exposes static methods:
 
 - Arithmetic: `Add`, `Subtract`, `Multiply`, `Divide`
+- Unary: `Negate`, `Abs`
 - Reductions: `Sum`, `Mean`
 - Activations: `Relu`, `Sigmoid`, `Tanh`
 - Matrix helpers: `MatMul`, `Transpose`
 
 `MatMul` and `Transpose` operate on flattened `GradTensor<T>` values and require
-explicit row and column arguments. `GradTensor<T>` does not currently carry shape
-metadata.
+explicit row and column arguments. `GradTensor<T>` also carries shape metadata
+via `Shape`, `Rank`, and `Reshape`, though `MatMul` and `Transpose` still require
+explicit dimension arguments.
 
 ## Nivara Integration
 
 `Nivara.Extensions.AutoDiff.Extensions.NivaraAutoGradExtensions` provides helpers
 for converting Nivara data structures:
 
-- `NivaraColumn<T>.ToGradTensor(requiresGrad)`
-- `NivaraSeries<T>.ToGradTensor(requiresGrad)`
-- `NivaraFrame.ToGradTensors<T>(columnNames, requiresGrad)`
-- `NivaraFrame.ToGradTensorsAuto(requiresGrad)`
-- `Dictionary<string, GradTensor<T>>.BatchBackward(loss)`
-- `Dictionary<string, GradTensor<T>>.BatchZeroGrad()`
-- `Dictionary<string, GradTensor<T>>.ToFrame()`
-- `Dictionary<string, GradTensor<T>>.ToGradientFrame()`
+- `NivaraColumn<T>.ToReverseGradTensor(requiresGrad)`
+- `NivaraSeries<T>.ToReverseGradTensor(requiresGrad)`
+- `NivaraFrame.ToReverseGradTensors<T>(columnNames, requiresGrad)`
+- `NivaraFrame.ToReverseGradTensorsAuto(requiresGrad)`
+- `Dictionary<string, ReverseGradTensor<T>>.BatchBackward(loss)`
+- `Dictionary<string, ReverseGradTensor<T>>.BatchZeroGrad()`
+- `Dictionary<string, ReverseGradTensor<T>>.ToFrame()`
+- `Dictionary<string, ReverseGradTensor<T>>.ToGradientFrame()`
 
-`GradTensor<T>` can also convert back to Nivara types with `ToColumn()` and
+`ReverseGradTensor<T>` can also convert back to Nivara types with `ToColumn()` and
 `ToSeries()`.
+
+## Optimizer
+
+`Nivara.Extensions.AutoDiff.Optimizer.SgdOptimizer` provides a minimal SGD update step:
+
+- `SgdUpdate<T>(parameter, learningRate)` — returns a new `ReverseGradTensor<T>` with values updated by `param - lr * grad`.
+  - Returns a new tensor (caller owns it, can dispose the old one).
+  - Skips positions where the gradient is null.
+  - The returned tensor has `requiresGrad: false`.
+
+```csharp
+using Nivara.Extensions.AutoDiff.Optimizer;
+
+var loss = GradOperations.Sum(weight);
+loss.Backward();
+var updated = SgdOptimizer.SgdUpdate(weight, 0.01f);
+```
 
 ## Utilities
 
@@ -123,7 +142,8 @@ tests alongside forward and backward tests.
   arguments.
 - `Backward()` defaults to a scalar-loss workflow. Non-scalar outputs require an
   explicit matching gradient.
-- There is no optimizer, layer, model, metric, dataloader, or training-loop API.
+- Optimizer: `Nivara.Extensions.AutoDiff.Optimizer.SgdOptimizer.SgdUpdate` provides a minimal SGD update with null-skip support.
+- There is no layer, model, metric, dataloader, or training-loop API.
 - The implementation favors correctness and integration with current Nivara
   types over being a performance-final tensor runtime.
 
@@ -148,6 +168,8 @@ AutoDiff/
 │   └── NivaraAutoGradExtensions.cs
 ├── Operations/
 │   └── GradOperations.cs
+├── Optimizer/
+│   └── SgdOptimizer.cs
 └── Utilities/
     ├── GradientUtils.cs
     ├── TypeConverter.cs

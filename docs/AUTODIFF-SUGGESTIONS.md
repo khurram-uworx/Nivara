@@ -25,8 +25,8 @@ pre-implementation sketch. The implementation now lives in
   `Multiply`, `Divide`, matrix `MatMul`, `Transpose`, reductions `Sum` and
   `Mean`, and activations `Relu`, `Sigmoid`, and `Tanh`.
 - Nivara integration exists through extension methods for columns, series, and
-  selected frame workflows: `ToGradTensor`, `ToGradTensors`,
-  `ToGradTensorsAuto`, `BatchBackward`, `BatchZeroGrad`, `ToFrame`, and
+  selected frame workflows: `ToReverseGradTensor`, `ToReverseGradTensors`,
+  `ToReverseGradTensorsAuto`, `BatchBackward`, `BatchZeroGrad`, `ToFrame`, and
   `ToGradientFrame`.
 - Utility support exists for constants, zeros, ones, full tensors, gradient
   clipping, gradient norms, graph summaries, and backward eligibility checks.

@@ -20,10 +20,13 @@ public static class TypeValidator
 
         if (!IsSupportedType(type))
         {
-            throw new AutoGradException(
+            throw new TypeValidationException(
                 $"Type {type.Name} is not supported for automatic differentiation. " +
                 $"Supported types are: float, double. " +
-                $"For other numeric types, consider converting to float or double first.");
+                $"For other numeric types, consider converting to float or double first.",
+                "GradTensor constructor",
+                typeof(float), // expected (representative)
+                type);         // actual
         }
     }
 

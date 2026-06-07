@@ -212,38 +212,59 @@ Current limitations to review:
 
 ## 7. Automatic Differentiation Over Nivara Columns
 
-Nivara.Extensions includes a current AutoDiff layer for reverse-mode gradients
-over `float` and `double` columns. The API is still explicit: users wrap
-columns in `GradTensor<T>`, call static `GradOperations`, reduce to a scalar
-loss, and then call `Backward()`.
+Nivara.Extensions includes an AutoDiff layer for reverse-mode gradients
+over `float` and `double` columns. Users wrap columns (or entire DataFrames)
+in `ReverseGradTensor<T>`, call static `GradOperations`, reduce to a scalar
+loss, call `Backward()`, and optionally apply `SgdOptimizer.SgdUpdate`.
+
+The full pipeline — from a NivaraFrame through gradient descent and back to
+columns — is a single linear workflow:
 
 ```csharp
 using Nivara;
 using Nivara.Extensions.AutoDiff;
 using Nivara.Extensions.AutoDiff.Operations;
+using Nivara.Extensions.AutoDiff.Optimizer;
 
-var input = new GradTensor<float>(
-    NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f }),
-    requiresGrad: false);
+// 1. Training data as a NivaraFrame
+var df = NivaraFrame.Create(
+    ("x", NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })),
+    ("y", NivaraColumn<float>.Create(new[] { 2.0f, 4.0f, 6.0f }))
+);
 
-var weight = new GradTensor<float>(
-    NivaraColumn<float>.Create(new[] { 0.5f, 0.5f, 0.5f }),
-    requiresGrad: true);
+// 2. Convert data columns to gradient tensors (no grads needed for input)
+var tensors = df.ToReverseGradTensors<float>(new[] { "x", "y" }, requiresGrad: false);
+var x = tensors["x"];
+var y = tensors["y"];
 
-var bias = new GradTensor<float>(
-    NivaraColumn<float>.Create(new[] { -1.0f, 0.0f, 1.0f }),
-    requiresGrad: true);
+// 3. Trainable parameters with gradient tracking
+var w = ReverseGradTensor<float>.FromArray(new[] { 0.5f, 0.5f, 0.5f }, requiresGrad: true);
+var b = ReverseGradTensor<float>.FromArray(new[] { 0.1f, 0.1f, 0.1f }, requiresGrad: true);
 
-var weighted = GradOperations.Multiply(input, weight);
-var shifted = GradOperations.Add(weighted, bias);
-var activated = GradOperations.Relu(shifted);
-var loss = GradOperations.Mean(activated);
+// 4. Forward pass: prediction = w * x + b
+var prediction = GradOperations.Add(GradOperations.Multiply(w, x), b);
 
+// 5. MSE loss: mean((prediction - y)²)
+var diff = GradOperations.Subtract(prediction, y);
+var loss = GradOperations.Mean(GradOperations.Multiply(diff, diff));
+
+// 6. Backward pass — computes gradients
 loss.Backward();
 
-Console.WriteLine(loss[0]);
-Console.WriteLine(weight.Grad![0]);
-Console.WriteLine(bias.Grad![0]);
+// 7. SGD update — creates new tensors with updated values
+var updatedW = SgdOptimizer.SgdUpdate(w, 0.01f);
+var updatedB = SgdOptimizer.SgdUpdate(b, 0.01f);
+
+// 8. Convert updated parameters back to Nivara columns
+var wCol = updatedW.ToColumn();
+var bCol = updatedB.ToColumn();
+
+Console.WriteLine($"Loss: {loss[0]:F4}");
+Console.WriteLine($"w.grad[0] = {w.Grad![0]:F4}, updated w[0] = {wCol[0]:F4}");
+
+// Clean up
+w.Dispose(); b.Dispose();
+updatedW.Dispose(); updatedB.Dispose();
 ```
 
 The longer sample app demonstrates reductions, activations, gradient clipping,
@@ -256,9 +277,10 @@ Current limitations to review:
 - `Backward()` can be called without an explicit gradient only on scalar
   tensors. Non-scalar outputs require a matching gradient argument.
 - Operations are static methods today; there are no fluent methods or operator
-  overloads for `GradTensor<T>` yet.
+  overloads for `ReverseGradTensor<T>` yet.
 - `MatMul` and `Transpose` use flattened tensors plus explicit dimensions.
-- There is no optimizer, layer, model, dataloader, or training-loop API yet.
+- The `SgdOptimizer.SgdUpdate` primitive is available for simple SGD weight updates.
+- There is no layer, model, dataloader, or training-loop API yet.
 - See [`docs/AUTODIFF-SUGGESTIONS.md`](docs/AUTODIFF-SUGGESTIONS.md) for the
   grounded follow-up list.
 

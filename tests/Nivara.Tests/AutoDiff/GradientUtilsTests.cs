@@ -19,7 +19,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Compute some gradients
         var result = GradOperations.Sum(a);
@@ -40,8 +40,8 @@ public class GradientUtilsTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var bData = NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Compute some gradients
         var result = GradOperations.Add(a, b);
@@ -64,7 +64,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
         var detached = GradientUtils.Detach(a);
@@ -83,9 +83,9 @@ public class GradientUtilsTests
         // Arrange
         var tensors = new[]
         {
-            new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true),
-            new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 2.0f }), requiresGrad: true),
-            new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f }), requiresGrad: true)
+            new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true),
+            new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 2.0f }), requiresGrad: true),
+            new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f }), requiresGrad: true)
         };
 
         // Act
@@ -105,7 +105,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Set gradient manually
         var gradData = NivaraColumn<float>.Create(new float[] { -5.0f, 2.0f, 10.0f });
@@ -126,7 +126,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act & Assert - should not throw
         Assert.DoesNotThrow(() => GradientUtils.ClipGradValue(a, 1.0f));
@@ -137,7 +137,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Set gradient with norm = sqrt(3^2 + 4^2) = 5
         var gradData = NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f });
@@ -157,7 +157,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Set gradient with norm = sqrt(1 + 1) = sqrt(2) ≈ 1.414
         var gradData = NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f });
@@ -176,8 +176,8 @@ public class GradientUtilsTests
     public void ClipGradNorm_MultipleTensors_ClipsGlobalNorm()
     {
         // Arrange
-        var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
-        var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
 
         // Set gradients: a.grad = [3], b.grad = [4]
         // Global norm = sqrt(9 + 16) = 5
@@ -280,7 +280,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
         var info = GradientUtils.GetGraphInfo(a);
@@ -295,8 +295,8 @@ public class GradientUtilsTests
     public void GetGraphInfo_ComplexGraph_ReturnsCorrectInfo()
     {
         // Arrange
-        var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
-        var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
 
         var add = GradOperations.Add(a, b);
         var mul = GradOperations.Multiply(add, a);
@@ -320,8 +320,8 @@ public class GradientUtilsTests
     public void PrintGraphSummary_ReturnsFormattedString()
     {
         // Arrange
-        var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
-        var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 2.0f }), requiresGrad: true);
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 2.0f }), requiresGrad: true);
         var result = GradOperations.Add(a, b);
 
         // Act
@@ -338,7 +338,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         var result = GradOperations.Sum(a);
         result.Backward();
@@ -352,7 +352,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act & Assert
         Assert.That(GradientUtils.HasGradient(a), Is.False);
@@ -363,7 +363,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Set gradient [3, 4] with norm = 5
         a.Grad = NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f });
@@ -380,7 +380,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
         var norm = GradientUtils.GetGradientNorm(a);
@@ -393,8 +393,8 @@ public class GradientUtilsTests
     public void GetGlobalGradientNorm_ComputesCorrectNorm()
     {
         // Arrange
-        var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
-        var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
 
         // Set gradients: a.grad = [3], b.grad = [4]
         // Global norm = sqrt(9 + 16) = 5
@@ -413,7 +413,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act & Assert
         Assert.That(GradientUtils.CanBackward(a), Is.True);
@@ -424,7 +424,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act & Assert
         Assert.That(GradientUtils.CanBackward(a), Is.False);
@@ -435,7 +435,7 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: false);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: false);
 
         // Act & Assert
         Assert.That(GradientUtils.CanBackward(a), Is.False);
@@ -446,13 +446,13 @@ public class GradientUtilsTests
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
         var description = GradientUtils.DescribeTensor(a);
 
         // Assert
-        Assert.That(description, Does.Contain("GradTensor<Single>"));
+        Assert.That(description, Does.Contain("ReverseGradTensor<Single>"));
         Assert.That(description, Does.Contain("Length: 3"));
         Assert.That(description, Does.Contain("Requires Grad: True"));
         Assert.That(description, Does.Contain("Is Leaf: True"));
@@ -466,7 +466,7 @@ public class GradientUtilsTests
     public void TrainingLoop_Simulation_WorksCorrectly()
     {
         // Arrange - simulate a simple training loop
-        var weights = new GradTensor<float>(
+        var weights = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f }),
             requiresGrad: true);
 
@@ -497,7 +497,7 @@ public class GradientUtilsTests
     public void GradientClipping_PreventsExplodingGradients()
     {
         // Arrange
-        var weights = new GradTensor<float>(
+        var weights = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f }),
             requiresGrad: true);
 

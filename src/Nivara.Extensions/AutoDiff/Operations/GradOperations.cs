@@ -1,29 +1,15 @@
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 
 namespace Nivara.Extensions.AutoDiff.Operations;
 
-/// <summary>
-/// Gradient-aware operations for automatic differentiation.
-/// Contains static methods for performing operations on GradTensors with automatic gradient computation.
-/// Wraps existing NivaraColumn operations while adding gradient tracking and computation.
-/// </summary>
 public static class GradOperations
 {
     #region Element-wise Operations
 
-    /// <summary>
-    /// Performs element-wise addition with gradient computation.
-    /// Wraps existing NivaraColumn addition (a.Data + b.Data) with gradient tracking.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The first operand</param>
-    /// <param name="b">The second operand</param>
-    /// <returns>A new GradTensor containing the element-wise sum with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
-    /// <exception cref="ArgumentException">Thrown when operands have incompatible shapes</exception>
-    public static GradTensor<T> Add<T>(GradTensor<T> a, GradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Add<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -33,21 +19,14 @@ public static class GradOperations
             throw new ArgumentException($"Cannot add tensors with different lengths: {a.Length} vs {b.Length}");
         }
 
-        // Use existing NivaraColumn addition (already vectorized and optimized)
         var result = a.Data + b.Data;
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad || b.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, PropagateShape(a, b));
 
-        // Add gradient computation if needed
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode("Add", new object[] { a, b }, gradOutput =>
+            var gradFn = new OpNode<T>("Add", new object[] { a, b }, typedGradOutput =>
             {
-                // Convert gradOutput back to typed column for gradient accumulation
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of addition: d/da (a + b) = 1, d/db (a + b) = 1
                 if (a.RequiresGrad)
                 {
                     AccumulateGradient(a, typedGradOutput);
@@ -64,17 +43,7 @@ public static class GradOperations
         return resultTensor;
     }
 
-    /// <summary>
-    /// Performs element-wise subtraction with gradient computation.
-    /// Implements subtraction using existing operations with gradient tracking.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The minuend</param>
-    /// <param name="b">The subtrahend</param>
-    /// <returns>A new GradTensor containing the element-wise difference with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
-    /// <exception cref="ArgumentException">Thrown when operands have incompatible shapes</exception>
-    public static GradTensor<T> Subtract<T>(GradTensor<T> a, GradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Subtract<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -84,27 +53,20 @@ public static class GradOperations
             throw new ArgumentException($"Cannot subtract tensors with different lengths: {a.Length} vs {b.Length}");
         }
 
-        // Implement subtraction using element-wise operations since NivaraColumn doesn't have Subtract
         var result = SubtractVectorized(a.Data, b.Data);
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad || b.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, PropagateShape(a, b));
 
-        // Add gradient computation if needed
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode("Subtract", new object[] { a, b }, gradOutput =>
+            var gradFn = new OpNode<T>("Subtract", new object[] { a, b }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of subtraction: d/da (a - b) = 1, d/db (a - b) = -1
                 if (a.RequiresGrad)
                 {
                     AccumulateGradient(a, typedGradOutput);
                 }
                 if (b.RequiresGrad)
                 {
-                    // Negate the gradient for subtraction
                     var negatedGrad = NegateVectorized(typedGradOutput);
                     AccumulateGradient(b, negatedGrad);
                 }
@@ -116,17 +78,7 @@ public static class GradOperations
         return resultTensor;
     }
 
-    /// <summary>
-    /// Performs element-wise multiplication with gradient computation.
-    /// Wraps existing NivaraColumn multiplication (a.Data * b.Data) with gradient tracking.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The first operand</param>
-    /// <param name="b">The second operand</param>
-    /// <returns>A new GradTensor containing the element-wise product with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
-    /// <exception cref="ArgumentException">Thrown when operands have incompatible shapes</exception>
-    public static GradTensor<T> Multiply<T>(GradTensor<T> a, GradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Multiply<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -136,20 +88,14 @@ public static class GradOperations
             throw new ArgumentException($"Cannot multiply tensors with different lengths: {a.Length} vs {b.Length}");
         }
 
-        // Use existing NivaraColumn multiplication (already vectorized and optimized)
         var result = a.Data * b.Data;
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad || b.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, PropagateShape(a, b));
 
-        // Add gradient computation if needed
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode("Multiply", new object[] { a, b }, gradOutput =>
+            var gradFn = new OpNode<T>("Multiply", new object[] { a, b }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of multiplication: d/da (a * b) = b, d/db (a * b) = a
                 if (a.RequiresGrad)
                 {
                     var aGrad = MultiplyVectorized(typedGradOutput, b.Data);
@@ -168,18 +114,7 @@ public static class GradOperations
         return resultTensor;
     }
 
-    /// <summary>
-    /// Performs element-wise division with gradient computation.
-    /// Implements division using existing operations with gradient tracking.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The dividend</param>
-    /// <param name="b">The divisor</param>
-    /// <returns>A new GradTensor containing the element-wise quotient with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
-    /// <exception cref="ArgumentException">Thrown when operands have incompatible shapes</exception>
-    /// <exception cref="DivideByZeroException">Thrown when divisor contains zero values</exception>
-    public static GradTensor<T> Divide<T>(GradTensor<T> a, GradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Divide<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -189,7 +124,6 @@ public static class GradOperations
             throw new ArgumentException($"Cannot divide tensors with different lengths: {a.Length} vs {b.Length}");
         }
 
-        // Check for division by zero
         for (int i = 0; i < b.Length; i++)
         {
             if (!b.IsNull(i) && b[i] == T.Zero)
@@ -198,20 +132,14 @@ public static class GradOperations
             }
         }
 
-        // Implement division using element-wise operations since NivaraColumn doesn't have Divide
         var result = DivideVectorized(a.Data, b.Data);
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad || b.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, PropagateShape(a, b));
 
-        // Add gradient computation if needed
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode("Divide", new object[] { a, b }, gradOutput =>
+            var gradFn = new OpNode<T>("Divide", new object[] { a, b }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of division: d/da (a / b) = 1/b, d/db (a / b) = -a/(b^2)
                 if (a.RequiresGrad)
                 {
                     var aGrad = DivideVectorized(typedGradOutput, b.Data);
@@ -219,7 +147,6 @@ public static class GradOperations
                 }
                 if (b.RequiresGrad)
                 {
-                    // -a / (b^2) = -(a / b) / b
                     var quotient = DivideVectorized(a.Data, b.Data);
                     var bGradPositive = DivideVectorized(quotient, b.Data);
                     var bGrad = NegateVectorized(bGradPositive);
@@ -238,26 +165,37 @@ public static class GradOperations
 
     #region Matrix Operations
 
-    /// <summary>
-    /// Performs matrix multiplication with gradient computation.
-    /// Uses Data.AsTensor() for tensor operations and converts results back to NivaraColumn&lt;T&gt;.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The left matrix (as a flattened GradTensor)</param>
-    /// <param name="b">The right matrix (as a flattened GradTensor)</param>
-    /// <param name="aRows">Number of rows in matrix a</param>
-    /// <param name="aCols">Number of columns in matrix a (must equal bRows)</param>
-    /// <param name="bCols">Number of columns in matrix b</param>
-    /// <returns>A new GradTensor containing the matrix multiplication result with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
-    /// <exception cref="ArgumentException">Thrown when matrix dimensions are incompatible</exception>
-    public static GradTensor<T> MatMul<T>(GradTensor<T> a, GradTensor<T> b, int aRows, int aCols, int bCols)
+    public static ReverseGradTensor<T> MatMul<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
 
-        var bRows = aCols; // For matrix multiplication, a.cols must equal b.rows
+        if (a.Rank != 2)
+            throw new ArgumentException($"Left operand must be a matrix (rank 2), got rank {a.Rank}", nameof(a));
+        if (b.Rank != 2)
+            throw new ArgumentException($"Right operand must be a matrix (rank 2), got rank {b.Rank}", nameof(b));
+
+        var aRows = a.shape[0];
+        var aCols = a.shape[1];
+        var bRows = b.shape[0];
+        var bCols = b.shape[1];
+
+        if (aCols != bRows)
+            throw new ArgumentException(
+                $"Matrix dimensions incompatible: a({aRows}x{aCols}) @ b({bRows}x{bCols}). " +
+                $"a's column count ({aCols}) must equal b's row count ({bRows}).");
+
+        return MatMul(a, b, aRows, aCols, bCols);
+    }
+
+    public static ReverseGradTensor<T> MatMul<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b, int aRows, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (b == null) throw new ArgumentNullException(nameof(b));
+
+        var bRows = aCols;
 
         if (a.Length != aRows * aCols)
         {
@@ -269,22 +207,15 @@ public static class GradOperations
             throw new ArgumentException($"Matrix b dimensions don't match: expected {bRows * bCols} elements, got {b.Length}");
         }
 
-        // Perform matrix multiplication using tensor operations
         var result = MatMulVectorized(a.Data, b.Data, aRows, aCols, bCols);
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad || b.RequiresGrad);
+        var resultShape = new[] { aRows, bCols };
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, resultShape);
 
-        // Add gradient computation if needed
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode("MatMul", new object[] { a, b }, gradOutput =>
+            var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of matrix multiplication:
-                // d/da (a @ b) = gradOutput @ b^T
-                // d/db (a @ b) = a^T @ gradOutput
                 if (a.RequiresGrad)
                 {
                     var bTransposed = TransposeVectorized(b.Data, bRows, bCols);
@@ -305,18 +236,16 @@ public static class GradOperations
         return resultTensor;
     }
 
-    /// <summary>
-    /// Performs matrix transpose with gradient computation.
-    /// Wraps existing tensor transpose operations with gradient tracking.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The matrix to transpose (as a flattened GradTensor)</param>
-    /// <param name="rows">Number of rows in the original matrix</param>
-    /// <param name="cols">Number of columns in the original matrix</param>
-    /// <returns>A new GradTensor containing the transposed matrix with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when operand is null</exception>
-    /// <exception cref="ArgumentException">Thrown when matrix dimensions don't match tensor length</exception>
-    public static GradTensor<T> Transpose<T>(GradTensor<T> a, int rows, int cols) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (a.Rank != 2)
+            throw new ArgumentException($"Transpose requires a matrix (rank 2), got rank {a.Rank}", nameof(a));
+
+        return Transpose(a, a.shape[0], a.shape[1]);
+    }
+
+    public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a, int rows, int cols) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -325,21 +254,15 @@ public static class GradOperations
             throw new ArgumentException($"Matrix dimensions don't match: expected {rows * cols} elements, got {a.Length}");
         }
 
-        // Perform transpose operation
         var result = TransposeVectorized(a.Data, rows, cols);
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad);
+        var resultShape = new[] { cols, rows };
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, resultShape);
 
-        // Add gradient computation if needed
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode("Transpose", new object[] { a }, gradOutput =>
+            var gradFn = new OpNode<T>("Transpose", new object[] { a }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of transpose: d/da (a^T) = (gradOutput)^T
-                // Transpose the gradient back to original shape
                 var aGrad = TransposeVectorized(typedGradOutput, cols, rows);
                 AccumulateGradient(a, aGrad);
             });
@@ -354,16 +277,7 @@ public static class GradOperations
 
     #region Reduction Operations
 
-    /// <summary>
-    /// Computes the sum of all elements in the tensor with gradient computation.
-    /// Uses existing NivaraSeries.Sum() method for the forward pass.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The tensor to sum</param>
-    /// <returns>A scalar GradTensor containing the sum with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when operand is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the tensor is empty</exception>
-    public static GradTensor<T> Sum<T>(GradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Sum<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -372,23 +286,16 @@ public static class GradOperations
             throw new InvalidOperationException("Cannot compute sum of empty tensor");
         }
 
-        // Use existing NivaraSeries.Sum() for forward pass
         var series = a.ToSeries();
         var sumValue = series.Sum();
 
-        // Create scalar result tensor
         var resultData = NivaraColumn<T>.Create(new T[] { sumValue });
-        var resultTensor = new GradTensor<T>(resultData, a.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(resultData, a.RequiresGrad, ScalarShape());
 
-        // Add gradient computation if needed
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode("Sum", new object[] { a }, gradOutput =>
+            var gradFn = new OpNode<T>("Sum", new object[] { a }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of sum: d/da (sum(a)) = ones_like(a) * gradOutput
-                // The gradient broadcasts back to the original tensor shape
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
                 AccumulateGradient(a, aGrad);
             });
@@ -399,16 +306,7 @@ public static class GradOperations
         return resultTensor;
     }
 
-    /// <summary>
-    /// Computes the mean (average) of all elements in the tensor with gradient computation.
-    /// Uses existing NivaraSeries.Average() method for the forward pass.
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The tensor to average</param>
-    /// <returns>A scalar GradTensor containing the mean with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when operand is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the tensor is empty or contains only null values</exception>
-    public static GradTensor<T> Mean<T>(GradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Mean<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -417,26 +315,17 @@ public static class GradOperations
             throw new InvalidOperationException("Cannot compute mean of empty tensor");
         }
 
-        // Use existing NivaraSeries.Average() for forward pass
         var series = a.ToSeries();
         var meanValue = series.Average();
 
-        // Create scalar result tensor
         var resultData = NivaraColumn<T>.Create(new T[] { meanValue });
-        var resultTensor = new GradTensor<T>(resultData, a.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(resultData, a.RequiresGrad, ScalarShape());
 
-        // Add gradient computation if needed
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode("Mean", new object[] { a }, gradOutput =>
+            var gradFn = new OpNode<T>("Mean", new object[] { a }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of mean: d/da (mean(a)) = (1/n) * ones_like(a) * gradOutput
-                // where n is the number of elements
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
-
-                // Divide by the number of elements
                 var scaledGrad = DivideByScalar(aGrad, a.Length);
                 AccumulateGradient(a, scaledGrad);
             });
@@ -451,32 +340,18 @@ public static class GradOperations
 
     #region Activation Functions
 
-    /// <summary>
-    /// Applies the ReLU (Rectified Linear Unit) activation function with gradient computation.
-    /// ReLU(x) = max(0, x)
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The input tensor</param>
-    /// <returns>A new GradTensor with ReLU applied element-wise with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when operand is null</exception>
-    public static GradTensor<T> Relu<T>(GradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Relu<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        // Apply ReLU: max(0, x)
         var result = ApplyRelu(a.Data);
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
 
-        // Add gradient computation if needed
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode("Relu", new object[] { a }, gradOutput =>
+            var gradFn = new OpNode<T>("Relu", new object[] { a }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of ReLU: d/dx ReLU(x) = 1 if x > 0, else 0
                 var aGrad = ApplyReluGradient(a.Data, typedGradOutput);
                 AccumulateGradient(a, aGrad);
             });
@@ -487,33 +362,18 @@ public static class GradOperations
         return resultTensor;
     }
 
-    /// <summary>
-    /// Applies the Sigmoid activation function with gradient computation.
-    /// Sigmoid(x) = 1 / (1 + exp(-x))
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The input tensor</param>
-    /// <returns>A new GradTensor with Sigmoid applied element-wise with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when operand is null</exception>
-    public static GradTensor<T> Sigmoid<T>(GradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Sigmoid<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        // Apply Sigmoid: 1 / (1 + exp(-x))
         var result = ApplySigmoid(a.Data);
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
 
-        // Add gradient computation if needed
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode("Sigmoid", new object[] { a }, gradOutput =>
+            var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of Sigmoid: d/dx sigmoid(x) = sigmoid(x) * (1 - sigmoid(x))
-                // We already have sigmoid(x) in result, so we can reuse it
                 var aGrad = ApplySigmoidGradient(result, typedGradOutput);
                 AccumulateGradient(a, aGrad);
             });
@@ -524,34 +384,61 @@ public static class GradOperations
         return resultTensor;
     }
 
-    /// <summary>
-    /// Applies the Tanh (Hyperbolic Tangent) activation function with gradient computation.
-    /// Tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x))
-    /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="a">The input tensor</param>
-    /// <returns>A new GradTensor with Tanh applied element-wise with gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when operand is null</exception>
-    public static GradTensor<T> Tanh<T>(GradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Tanh<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        // Apply Tanh
         var result = ApplyTanh(a.Data);
 
-        // Create result tensor
-        var resultTensor = new GradTensor<T>(result, a.RequiresGrad);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
 
-        // Add gradient computation if needed
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode("Tanh", new object[] { a }, gradOutput =>
+            var gradFn = new OpNode<T>("Tanh", new object[] { a }, typedGradOutput =>
             {
-                var typedGradOutput = ConvertGradOutput<T>(gradOutput);
-
-                // Gradient of Tanh: d/dx tanh(x) = 1 - tanh(x)^2
-                // We already have tanh(x) in result, so we can reuse it
                 var aGrad = ApplyTanhGradient(result, typedGradOutput);
+                AccumulateGradient(a, aGrad);
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    public static ReverseGradTensor<T> Negate<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var result = NegateVectorized(a.Data);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
+
+        if (a.RequiresGrad)
+        {
+            var gradFn = new OpNode<T>("Negate", new object[] { a }, typedGradOutput =>
+            {
+                var aGrad = NegateVectorized(typedGradOutput);
+                AccumulateGradient(a, aGrad);
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    public static ReverseGradTensor<T> Abs<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var result = ApplyAbs(a.Data);
+        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
+
+        if (a.RequiresGrad)
+        {
+            var gradFn = new OpNode<T>("Abs", new object[] { a }, typedGradOutput =>
+            {
+                var aGrad = ApplyAbsGradient(a.Data, typedGradOutput);
                 AccumulateGradient(a, aGrad);
             });
 
@@ -565,26 +452,7 @@ public static class GradOperations
 
     #region Helper Methods
 
-    /// <summary>
-    /// Converts object-typed gradient output back to typed NivaraColumn for gradient accumulation
-    /// </summary>
-    private static NivaraColumn<T> ConvertGradOutput<T>(NivaraColumn<object> gradOutput) where T : struct, INumber<T>
-    {
-        var typedData = new T[gradOutput.Length];
-        for (int i = 0; i < gradOutput.Length; i++)
-        {
-            if (!gradOutput.IsNull(i))
-            {
-                typedData[i] = (T)gradOutput[i];
-            }
-        }
-        return NivaraColumn<T>.Create(typedData);
-    }
-
-    /// <summary>
-    /// Accumulates gradient into a tensor's gradient field
-    /// </summary>
-    private static void AccumulateGradient<T>(GradTensor<T> tensor, NivaraColumn<T> gradient) where T : struct, INumber<T>
+    private static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient) where T : struct, INumber<T>
     {
         if (tensor.Grad == null)
         {
@@ -592,260 +460,258 @@ public static class GradOperations
         }
         else
         {
-            // Add to existing gradient
             tensor.Grad = tensor.Grad + gradient;
         }
     }
 
-    /// <summary>
-    /// Performs vectorized subtraction using TensorPrimitives when possible
-    /// </summary>
     private static NivaraColumn<T> SubtractVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b) where T : struct, INumber<T>
     {
-        var result = new T[a.Length];
-        var nullMask = new bool[a.Length];
+        int n = a.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        var aBuf = ArrayPool<T>.Shared.Rent(n);
+        var bBuf = ArrayPool<T>.Shared.Rent(n);
         bool hasNulls = false;
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
+        try
         {
-            var aSpan = MemoryMarshal.Cast<T, float>(GetDataSpan(a));
-            var bSpan = MemoryMarshal.Cast<T, float>(GetDataSpan(b));
-            var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
-
-            TensorPrimitives.Subtract(aSpan, bSpan, resultSpan);
-
-            // Propagate null mask
-            for (int i = 0; i < a.Length; i++)
+            for (int i = 0; i < n; i++)
             {
                 nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                if (nullMask[i]) { hasNulls = true; }
+                aBuf[i] = a[i];
+                bBuf[i] = b[i];
             }
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var aSpan = MemoryMarshal.Cast<T, double>(GetDataSpan(a));
-            var bSpan = MemoryMarshal.Cast<T, double>(GetDataSpan(b));
-            var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
-            TensorPrimitives.Subtract(aSpan, bSpan, resultSpan);
-
-            // Propagate null mask
-            for (int i = 0; i < a.Length; i++)
+            if (typeof(T) == typeof(float))
             {
-                nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                TensorPrimitives.Subtract(
+                    MemoryMarshal.Cast<T, float>(aBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, float>(bBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
             }
-        }
-        else
-        {
-            // Fallback to element-wise subtraction for other types
-            for (int i = 0; i < a.Length; i++)
+            else if (typeof(T) == typeof(double))
             {
-                nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i])
+                TensorPrimitives.Subtract(
+                    MemoryMarshal.Cast<T, double>(aBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, double>(bBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
                 {
-                    hasNulls = true;
-                }
-                else
-                {
-                    result[i] = a[i] - b[i];
+                    if (!nullMask[i])
+                        result[i] = aBuf[i] - bBuf[i];
                 }
             }
-        }
 
-        return CreateColumnWithNullMask(result, nullMask, hasNulls);
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(bBuf, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Performs vectorized division using TensorPrimitives when possible
-    /// </summary>
     private static NivaraColumn<T> DivideVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b) where T : struct, INumber<T>
     {
-        var result = new T[a.Length];
-        var nullMask = new bool[a.Length];
+        int n = a.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        var aBuf = ArrayPool<T>.Shared.Rent(n);
+        var bBuf = ArrayPool<T>.Shared.Rent(n);
         bool hasNulls = false;
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
+        try
         {
-            var aSpan = MemoryMarshal.Cast<T, float>(GetDataSpan(a));
-            var bSpan = MemoryMarshal.Cast<T, float>(GetDataSpan(b));
-            var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
-
-            TensorPrimitives.Divide(aSpan, bSpan, resultSpan);
-
-            // Propagate null mask
-            for (int i = 0; i < a.Length; i++)
+            for (int i = 0; i < n; i++)
             {
                 nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                if (nullMask[i]) { hasNulls = true; }
+                aBuf[i] = a[i];
+                bBuf[i] = b[i];
             }
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var aSpan = MemoryMarshal.Cast<T, double>(GetDataSpan(a));
-            var bSpan = MemoryMarshal.Cast<T, double>(GetDataSpan(b));
-            var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
-            TensorPrimitives.Divide(aSpan, bSpan, resultSpan);
-
-            // Propagate null mask
-            for (int i = 0; i < a.Length; i++)
+            if (typeof(T) == typeof(float))
             {
-                nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                TensorPrimitives.Divide(
+                    MemoryMarshal.Cast<T, float>(aBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, float>(bBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
             }
-        }
-        else
-        {
-            // Fallback to element-wise division for other types
-            for (int i = 0; i < a.Length; i++)
+            else if (typeof(T) == typeof(double))
             {
-                nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i])
+                TensorPrimitives.Divide(
+                    MemoryMarshal.Cast<T, double>(aBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, double>(bBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
                 {
-                    hasNulls = true;
-                }
-                else
-                {
-                    result[i] = a[i] / b[i];
+                    if (!nullMask[i])
+                        result[i] = aBuf[i] / bBuf[i];
                 }
             }
-        }
 
-        return CreateColumnWithNullMask(result, nullMask, hasNulls);
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(bBuf, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Performs vectorized negation using TensorPrimitives when possible
-    /// </summary>
     private static NivaraColumn<T> NegateVectorized<T>(NivaraColumn<T> a) where T : struct, INumber<T>
     {
-        var result = new T[a.Length];
-        var nullMask = new bool[a.Length];
+        int n = a.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        var aBuf = ArrayPool<T>.Shared.Rent(n);
         bool hasNulls = false;
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
+        try
         {
-            var aSpan = MemoryMarshal.Cast<T, float>(GetDataSpan(a));
-            var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
-
-            TensorPrimitives.Negate(aSpan, resultSpan);
-
-            // Propagate null mask
-            for (int i = 0; i < a.Length; i++)
+            for (int i = 0; i < n; i++)
             {
                 nullMask[i] = a.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                if (nullMask[i]) { hasNulls = true; }
+                aBuf[i] = a[i];
             }
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var aSpan = MemoryMarshal.Cast<T, double>(GetDataSpan(a));
-            var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
-            TensorPrimitives.Negate(aSpan, resultSpan);
-
-            // Propagate null mask
-            for (int i = 0; i < a.Length; i++)
+            if (typeof(T) == typeof(float))
             {
-                nullMask[i] = a.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                TensorPrimitives.Negate(
+                    MemoryMarshal.Cast<T, float>(aBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
             }
-        }
-        else
-        {
-            // Fallback to element-wise negation for other types
-            for (int i = 0; i < a.Length; i++)
+            else if (typeof(T) == typeof(double))
             {
-                nullMask[i] = a.IsNull(i);
-                if (nullMask[i])
+                TensorPrimitives.Negate(
+                    MemoryMarshal.Cast<T, double>(aBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
                 {
-                    hasNulls = true;
-                }
-                else
-                {
-                    result[i] = -a[i];
+                    if (!nullMask[i])
+                        result[i] = -aBuf[i];
                 }
             }
-        }
 
-        return CreateColumnWithNullMask(result, nullMask, hasNulls);
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Performs vectorized multiplication using existing NivaraColumn operations
-    /// </summary>
     private static NivaraColumn<T> MultiplyVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b) where T : struct, INumber<T>
     {
-        // Use existing NivaraColumn multiplication which is already vectorized
         return a * b;
     }
 
-    /// <summary>
-    /// Gets data span from NivaraColumn for vectorized operations
-    /// </summary>
-    private static Span<T> GetDataSpan<T>(NivaraColumn<T> column) where T : struct, INumber<T>
-    {
-        var data = new T[column.Length];
-        for (int i = 0; i < column.Length; i++)
-        {
-            data[i] = column[i];
-        }
-        return data.AsSpan();
-    }
-
-    /// <summary>
-    /// Performs vectorized matrix multiplication using tensor operations
-    /// </summary>
     private static NivaraColumn<T> MatMulVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b, int aRows, int aCols, int bCols)
         where T : struct, INumber<T>
     {
-        var result = new T[aRows * bCols];
+        int n = aRows * bCols;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        bool hasNulls = false;
 
-        // Manual matrix multiplication (could be optimized with BLAS in the future)
-        for (int i = 0; i < aRows; i++)
+        try
         {
-            for (int j = 0; j < bCols; j++)
+            for (int i = 0; i < aRows; i++)
             {
-                T sum = T.Zero;
-                for (int k = 0; k < aCols; k++)
+                for (int j = 0; j < bCols; j++)
                 {
-                    var aIndex = i * aCols + k;
-                    var bIndex = k * bCols + j;
-                    sum += a[aIndex] * b[bIndex];
-                }
-                result[i * bCols + j] = sum;
-            }
-        }
+                    T sum = T.Zero;
+                    bool positionNull = false;
+                    for (int k = 0; k < aCols; k++)
+                    {
+                        var aIndex = i * aCols + k;
+                        var bIndex = k * bCols + j;
 
-        return NivaraColumn<T>.Create(result);
+                        if (a.IsNull(aIndex) || b.IsNull(bIndex))
+                        {
+                            positionNull = true;
+                            hasNulls = true;
+                        }
+                        else
+                        {
+                            sum += a[aIndex] * b[bIndex];
+                        }
+                    }
+
+                    var resIndex = i * bCols + j;
+                    if (positionNull)
+                    {
+                        nullMask[resIndex] = true;
+                    }
+                    else
+                    {
+                        result[resIndex] = sum;
+                    }
+                }
+            }
+
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Performs vectorized matrix transpose
-    /// </summary>
     private static NivaraColumn<T> TransposeVectorized<T>(NivaraColumn<T> a, int rows, int cols) where T : struct, INumber<T>
     {
-        var result = new T[rows * cols];
+        int n = rows * cols;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        bool hasNulls = false;
 
-        // Transpose: result[j * rows + i] = a[i * cols + j]
-        for (int i = 0; i < rows; i++)
+        try
         {
-            for (int j = 0; j < cols; j++)
+            for (int i = 0; i < rows; i++)
             {
-                result[j * rows + i] = a[i * cols + j];
+                for (int j = 0; j < cols; j++)
+                {
+                    var srcIndex = i * cols + j;
+                    var dstIndex = j * rows + i;
+                    if (a.IsNull(srcIndex))
+                    {
+                        nullMask[dstIndex] = true;
+                        hasNulls = true;
+                    }
+                    else
+                    {
+                        result[dstIndex] = a[srcIndex];
+                    }
+                }
             }
-        }
 
-        return NivaraColumn<T>.Create(result);
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Broadcasts a scalar gradient to match the shape of the original tensor
-    /// </summary>
     private static NivaraColumn<T> BroadcastGradient<T>(NivaraColumn<T> scalarGrad, int targetLength) where T : struct, INumber<T>
     {
         if (scalarGrad.Length != 1)
@@ -854,39 +720,40 @@ public static class GradOperations
         }
 
         var gradValue = scalarGrad[0];
-        var result = new T[targetLength];
-        for (int i = 0; i < targetLength; i++)
+        var result = ArrayPool<T>.Shared.Rent(targetLength);
+        try
         {
-            result[i] = gradValue;
+            Array.Fill(result, gradValue, 0, targetLength);
+            return NivaraColumn<T>.Create(result.AsSpan(0, targetLength));
         }
-
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Divides all elements in a column by a scalar value
-    /// </summary>
     private static NivaraColumn<T> DivideByScalar<T>(NivaraColumn<T> column, int divisor) where T : struct, INumber<T>
     {
-        var result = new T[column.Length];
-
-        // Convert divisor to type T
-        T divisorT = ConvertToT<T>(divisor);
-
-        for (int i = 0; i < column.Length; i++)
+        int n = column.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            if (!column.IsNull(i))
+            T divisorT = ConvertToT<T>(divisor);
+            for (int i = 0; i < n; i++)
             {
-                result[i] = column[i] / divisorT;
+                if (!column.IsNull(i))
+                {
+                    result[i] = column[i] / divisorT;
+                }
             }
+            return NivaraColumn<T>.Create(result.AsSpan(0, n));
         }
-
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Converts an integer to type T for scalar operations
-    /// </summary>
     private static T ConvertToT<T>(int value) where T : struct, INumber<T>
     {
         var type = typeof(T);
@@ -909,260 +776,308 @@ public static class GradOperations
         }
         else
         {
-            // Fall back to dynamic conversion for other types
             return (T)(object)((dynamic)value)!;
         }
     }
 
-    /// <summary>
-    /// Applies ReLU activation function: max(0, x)
-    /// </summary>
     private static NivaraColumn<T> ApplyRelu<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
-        var result = new T[input.Length];
-        var nullMask = new bool[input.Length];
+        int n = input.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
         bool hasNulls = false;
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
+        try
         {
-            var inputSpan = GetDataSpan(input);
-            var floatSpan = MemoryMarshal.Cast<T, float>(inputSpan);
-            var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
-
-            // ReLU: max(0, x)
-            for (int i = 0; i < floatSpan.Length; i++)
+            for (int i = 0; i < n; i++)
             {
-                resultSpan[i] = Math.Max(0.0f, floatSpan[i]);
                 nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                if (nullMask[i]) { hasNulls = true; }
+                inputBuf[i] = input[i];
             }
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var inputSpan = GetDataSpan(input);
-            var doubleSpan = MemoryMarshal.Cast<T, double>(inputSpan);
-            var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
-            // ReLU: max(0, x)
-            for (int i = 0; i < doubleSpan.Length; i++)
+            if (typeof(T) == typeof(float))
             {
-                resultSpan[i] = Math.Max(0.0, doubleSpan[i]);
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                var floatSpan = MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n));
+                var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                    resultSpan[i] = Math.Max(0.0f, floatSpan[i]);
             }
-        }
-        else
-        {
-            // Fallback for other types
-            for (int i = 0; i < input.Length; i++)
+            else if (typeof(T) == typeof(double))
             {
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i])
+                var doubleSpan = MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n));
+                var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                    resultSpan[i] = Math.Max(0.0, doubleSpan[i]);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
                 {
-                    hasNulls = true;
-                }
-                else
-                {
-                    result[i] = input[i] > T.Zero ? input[i] : T.Zero;
+                    if (!nullMask[i])
+                        result[i] = inputBuf[i] > T.Zero ? inputBuf[i] : T.Zero;
                 }
             }
-        }
 
-        return CreateColumnWithNullMask(result, nullMask, hasNulls);
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Applies ReLU gradient: 1 if x > 0, else 0
-    /// </summary>
     private static NivaraColumn<T> ApplyReluGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
     {
-        var result = new T[input.Length];
-
-        for (int i = 0; i < input.Length; i++)
+        int n = input.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            if (!input.IsNull(i) && !gradOutput.IsNull(i))
+            for (int i = 0; i < n; i++)
             {
-                // Gradient is gradOutput if input > 0, else 0
-                result[i] = input[i] > T.Zero ? gradOutput[i] : T.Zero;
+                if (!input.IsNull(i) && !gradOutput.IsNull(i))
+                {
+                    result[i] = input[i] > T.Zero ? gradOutput[i] : T.Zero;
+                }
             }
+            return NivaraColumn<T>.Create(result.AsSpan(0, n));
         }
-
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Applies Sigmoid activation function: 1 / (1 + exp(-x))
-    /// </summary>
+    private static NivaraColumn<T> ApplyAbs<T>(NivaraColumn<T> input) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
+        bool hasNulls = false;
+
+        try
+        {
+            for (int i = 0; i < n; i++)
+            {
+                nullMask[i] = input.IsNull(i);
+                if (nullMask[i]) { hasNulls = true; }
+                inputBuf[i] = input[i];
+            }
+
+            if (typeof(T) == typeof(float))
+            {
+                TensorPrimitives.Abs(
+                    MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                TensorPrimitives.Abs(
+                    MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n)),
+                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    if (!nullMask[i])
+                        result[i] = T.Abs(inputBuf[i]);
+                }
+            }
+
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyAbsGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            for (int i = 0; i < n; i++)
+            {
+                if (!input.IsNull(i) && !gradOutput.IsNull(i))
+                {
+                    var sign = T.CreateChecked(T.Sign(input[i]));
+                    result[i] = sign * gradOutput[i];
+                }
+            }
+            return NivaraColumn<T>.Create(result.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+        }
+    }
+
     private static NivaraColumn<T> ApplySigmoid<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
-        var result = new T[input.Length];
-        var nullMask = new bool[input.Length];
+        int n = input.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
         bool hasNulls = false;
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
+        try
         {
-            var inputSpan = GetDataSpan(input);
-            var floatSpan = MemoryMarshal.Cast<T, float>(inputSpan);
-            var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
-
-            // Sigmoid: 1 / (1 + exp(-x))
-            for (int i = 0; i < floatSpan.Length; i++)
+            for (int i = 0; i < n; i++)
             {
-                resultSpan[i] = 1.0f / (1.0f + MathF.Exp(-floatSpan[i]));
                 nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                if (nullMask[i]) { hasNulls = true; }
+                inputBuf[i] = input[i];
             }
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var inputSpan = GetDataSpan(input);
-            var doubleSpan = MemoryMarshal.Cast<T, double>(inputSpan);
-            var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
-            // Sigmoid: 1 / (1 + exp(-x))
-            for (int i = 0; i < doubleSpan.Length; i++)
+            if (typeof(T) == typeof(float))
             {
-                resultSpan[i] = 1.0 / (1.0 + Math.Exp(-doubleSpan[i]));
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                var floatSpan = MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n));
+                var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                    resultSpan[i] = 1.0f / (1.0f + MathF.Exp(-floatSpan[i]));
             }
-        }
-        else
-        {
-            // Fallback for other types (using dynamic)
-            for (int i = 0; i < input.Length; i++)
+            else if (typeof(T) == typeof(double))
             {
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i])
+                var doubleSpan = MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n));
+                var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                    resultSpan[i] = 1.0 / (1.0 + Math.Exp(-doubleSpan[i]));
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
                 {
-                    hasNulls = true;
-                }
-                else
-                {
-                    dynamic x = input[i];
-                    result[i] = (T)(object)(1.0 / (1.0 + Math.Exp(-x)))!;
+                    if (!nullMask[i])
+                    {
+                        dynamic x = inputBuf[i];
+                        result[i] = (T)(object)(1.0 / (1.0 + Math.Exp(-x)))!;
+                    }
                 }
             }
-        }
 
-        return CreateColumnWithNullMask(result, nullMask, hasNulls);
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Applies Sigmoid gradient: sigmoid(x) * (1 - sigmoid(x)) * gradOutput
-    /// </summary>
     private static NivaraColumn<T> ApplySigmoidGradient<T>(NivaraColumn<T> sigmoidOutput, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
     {
-        var result = new T[sigmoidOutput.Length];
-
-        for (int i = 0; i < sigmoidOutput.Length; i++)
+        int n = sigmoidOutput.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            if (!sigmoidOutput.IsNull(i) && !gradOutput.IsNull(i))
+            for (int i = 0; i < n; i++)
             {
-                // Gradient: sigmoid(x) * (1 - sigmoid(x)) * gradOutput
-                var sig = sigmoidOutput[i];
-                var oneMinus = T.One - sig;
-                result[i] = sig * oneMinus * gradOutput[i];
+                if (!sigmoidOutput.IsNull(i) && !gradOutput.IsNull(i))
+                {
+                    var sig = sigmoidOutput[i];
+                    result[i] = sig * (T.One - sig) * gradOutput[i];
+                }
             }
+            return NivaraColumn<T>.Create(result.AsSpan(0, n));
         }
-
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Applies Tanh activation function
-    /// </summary>
     private static NivaraColumn<T> ApplyTanh<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
-        var result = new T[input.Length];
-        var nullMask = new bool[input.Length];
+        int n = input.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
         bool hasNulls = false;
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
+        try
         {
-            var inputSpan = GetDataSpan(input);
-            var floatSpan = MemoryMarshal.Cast<T, float>(inputSpan);
-            var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan());
-
-            // Tanh
-            for (int i = 0; i < floatSpan.Length; i++)
+            for (int i = 0; i < n; i++)
             {
-                resultSpan[i] = MathF.Tanh(floatSpan[i]);
                 nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                if (nullMask[i]) { hasNulls = true; }
+                inputBuf[i] = input[i];
             }
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var inputSpan = GetDataSpan(input);
-            var doubleSpan = MemoryMarshal.Cast<T, double>(inputSpan);
-            var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan());
 
-            // Tanh
-            for (int i = 0; i < doubleSpan.Length; i++)
+            if (typeof(T) == typeof(float))
             {
-                resultSpan[i] = Math.Tanh(doubleSpan[i]);
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) hasNulls = true;
+                var floatSpan = MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n));
+                var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                    resultSpan[i] = MathF.Tanh(floatSpan[i]);
             }
-        }
-        else
-        {
-            // Fallback for other types (using dynamic)
-            for (int i = 0; i < input.Length; i++)
+            else if (typeof(T) == typeof(double))
             {
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i])
+                var doubleSpan = MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n));
+                var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                    resultSpan[i] = Math.Tanh(doubleSpan[i]);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
                 {
-                    hasNulls = true;
-                }
-                else
-                {
-                    dynamic x = input[i];
-                    result[i] = (T)(object)Math.Tanh(x)!;
+                    if (!nullMask[i])
+                    {
+                        dynamic x = inputBuf[i];
+                        result[i] = (T)(object)Math.Tanh(x)!;
+                    }
                 }
             }
-        }
 
-        return CreateColumnWithNullMask(result, nullMask, hasNulls);
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Applies Tanh gradient: (1 - tanh(x)^2) * gradOutput
-    /// </summary>
     private static NivaraColumn<T> ApplyTanhGradient<T>(NivaraColumn<T> tanhOutput, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
     {
-        var result = new T[tanhOutput.Length];
-
-        for (int i = 0; i < tanhOutput.Length; i++)
+        int n = tanhOutput.Length;
+        var result = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            if (!tanhOutput.IsNull(i) && !gradOutput.IsNull(i))
+            for (int i = 0; i < n; i++)
             {
-                // Gradient: (1 - tanh(x)^2) * gradOutput
-                var tanh = tanhOutput[i];
-                var tanhSquared = tanh * tanh;
-                var oneMinus = T.One - tanhSquared;
-                result[i] = oneMinus * gradOutput[i];
+                if (!tanhOutput.IsNull(i) && !gradOutput.IsNull(i))
+                {
+                    var tanh = tanhOutput[i];
+                    result[i] = (T.One - tanh * tanh) * gradOutput[i];
+                }
             }
+            return NivaraColumn<T>.Create(result.AsSpan(0, n));
         }
-
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(result, clearArray: true);
+        }
     }
 
-    /// <summary>
-    /// Helper method to create a NivaraColumn with an explicit null mask
-    /// </summary>
-    private static NivaraColumn<T> CreateColumnWithNullMask<T>(T[] data, bool[] nullMask, bool hasNulls) where T : struct, INumber<T>
+    private static NivaraColumn<T> CreateColumnWithNullMask<T>(ReadOnlySpan<T> data, ReadOnlySpan<bool> nullMask, bool hasNulls) where T : struct, INumber<T>
     {
         if (!hasNulls)
         {
             return NivaraColumn<T>.Create(data);
         }
 
-        // Convert to nullable array for CreateFromNullable
         var nullableData = new T?[data.Length];
         for (int i = 0; i < data.Length; i++)
         {
@@ -1170,6 +1085,21 @@ public static class GradOperations
         }
 
         return NivaraColumn<T>.CreateFromNullable(nullableData);
+    }
+
+    private static int[] PropagateShape<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
+    {
+        return a.shape;
+    }
+
+    private static int[] PropagateShape<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    {
+        return a.shape;
+    }
+
+    private static int[] ScalarShape()
+    {
+        return new[] { 1 };
     }
 
     #endregion

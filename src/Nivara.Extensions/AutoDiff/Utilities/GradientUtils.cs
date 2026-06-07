@@ -1,12 +1,14 @@
 using Nivara;
+using System.Buffers;
 using System.Numerics;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Nivara.Extensions.AutoDiff.Utilities;
 
 /// <summary>
 /// Utility functions for gradient management, memory cleanup, and debugging.
-/// Provides helper methods for common gradient operations in automatic differentiation.
+/// Provides helper methods for common gradient operations in reverse-mode automatic differentiation.
 /// </summary>
 public static class GradientUtils
 {
@@ -14,12 +16,8 @@ public static class GradientUtils
 
     /// <summary>
     /// Clears all gradients in the computation graph reachable from the specified tensor.
-    /// This is useful for resetting gradients between training iterations.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor to start clearing from</param>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static void ZeroGrad<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -29,12 +27,8 @@ public static class GradientUtils
 
     /// <summary>
     /// Clears gradients for multiple tensors at once.
-    /// This is useful for clearing gradients of all parameters in a model.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensors">The collection of tensors to clear gradients for</param>
-    /// <exception cref="ArgumentNullException">Thrown when tensors collection is null</exception>
-    public static void ZeroGrad<T>(IEnumerable<GradTensor<T>> tensors) where T : struct, INumber<T>
+    public static void ZeroGrad<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -50,13 +44,8 @@ public static class GradientUtils
 
     /// <summary>
     /// Detaches a tensor from the computation graph, returning a new tensor without gradient tracking.
-    /// This is useful for preventing gradient flow through certain operations.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor to detach</param>
-    /// <returns>A new GradTensor with the same data but no gradient tracking</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static GradTensor<T> Detach<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Detach<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -67,11 +56,7 @@ public static class GradientUtils
     /// <summary>
     /// Detaches multiple tensors from the computation graph.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensors">The collection of tensors to detach</param>
-    /// <returns>A collection of detached tensors</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensors collection is null</exception>
-    public static IEnumerable<GradTensor<T>> Detach<T>(IEnumerable<GradTensor<T>> tensors) where T : struct, INumber<T>
+    public static IEnumerable<ReverseGradTensor<T>> Detach<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -87,12 +72,7 @@ public static class GradientUtils
     /// Clips gradient values to prevent exploding gradients.
     /// Values are clipped to the range [-maxValue, maxValue].
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor whose gradient to clip</param>
-    /// <param name="maxValue">The maximum absolute value for gradient elements</param>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    /// <exception cref="ArgumentException">Thrown when maxValue is not positive</exception>
-    public static void ClipGradValue<T>(GradTensor<T> tensor, T maxValue) where T : struct, INumber<T>
+    public static void ClipGradValue<T>(ReverseGradTensor<T> tensor, T maxValue) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -104,36 +84,67 @@ public static class GradientUtils
             return;
 
         var grad = tensor.Grad;
-        var clippedData = new T[grad.Length];
+        int n = grad.Length;
+        var clippedData = ArrayPool<T>.Shared.Rent(n);
         var minValue = -maxValue;
+        var span = grad.AsSpan();
 
-        for (int i = 0; i < grad.Length; i++)
+        try
         {
-            if (!grad.IsNull(i))
+            if (typeof(T) == typeof(float))
             {
-                var value = grad[i];
-                if (value > maxValue)
-                    clippedData[i] = maxValue;
-                else if (value < minValue)
-                    clippedData[i] = minValue;
-                else
-                    clippedData[i] = value;
+                var fSpan = MemoryMarshal.Cast<T, float>(span);
+                var fClipped = MemoryMarshal.Cast<T, float>(clippedData.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                {
+                    if (!grad.IsNull(i))
+                    {
+                        var v = fSpan[i];
+                        fClipped[i] = v > (float)(object)maxValue! ? (float)(object)maxValue!
+                            : v < (float)(object)minValue! ? (float)(object)minValue! : v;
+                    }
+                }
             }
-        }
+            else if (typeof(T) == typeof(double))
+            {
+                var dSpan = MemoryMarshal.Cast<T, double>(span);
+                var dClipped = MemoryMarshal.Cast<T, double>(clippedData.AsSpan(0, n));
+                for (int i = 0; i < n; i++)
+                {
+                    if (!grad.IsNull(i))
+                    {
+                        var v = dSpan[i];
+                        dClipped[i] = v > (double)(object)maxValue! ? (double)(object)maxValue!
+                            : v < (double)(object)minValue! ? (double)(object)minValue! : v;
+                    }
+                }
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    if (!grad.IsNull(i))
+                    {
+                        var value = grad[i];
+                        clippedData[i] = value > maxValue ? maxValue
+                            : value < minValue ? minValue : value;
+                    }
+                }
+            }
 
-        tensor.Grad = NivaraColumn<T>.Create(clippedData);
+            tensor.Grad = NivaraColumn<T>.Create(clippedData.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+        }
     }
 
     /// <summary>
     /// Clips gradient norm to prevent exploding gradients.
     /// If the gradient norm exceeds maxNorm, the gradient is scaled down proportionally.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor whose gradient to clip</param>
-    /// <param name="maxNorm">The maximum norm for the gradient</param>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    /// <exception cref="ArgumentException">Thrown when maxNorm is not positive</exception>
-    public static void ClipGradNorm<T>(GradTensor<T> tensor, double maxNorm) where T : struct, INumber<T>
+    public static void ClipGradNorm<T>(ReverseGradTensor<T> tensor, double maxNorm) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -145,77 +156,83 @@ public static class GradientUtils
             return;
 
         var grad = tensor.Grad;
+        int n = grad.Length;
+        var span = grad.AsSpan();
 
-        // Calculate gradient norm (L2 norm)
         double normSquared = 0.0;
-        for (int i = 0; i < grad.Length; i++)
+        if (typeof(T) == typeof(float))
         {
-            if (!grad.IsNull(i))
-            {
-                dynamic value = grad[i];
-                normSquared += (double)(value * value);
-            }
+            var fSpan = MemoryMarshal.Cast<T, float>(span);
+            for (int i = 0; i < n; i++)
+                if (!grad.IsNull(i))
+                    normSquared += fSpan[i] * fSpan[i];
+        }
+        else if (typeof(T) == typeof(double))
+        {
+            var dSpan = MemoryMarshal.Cast<T, double>(span);
+            for (int i = 0; i < n; i++)
+                if (!grad.IsNull(i))
+                    normSquared += dSpan[i] * dSpan[i];
+        }
+        else
+        {
+            for (int i = 0; i < n; i++)
+                if (!grad.IsNull(i))
+                {
+                    dynamic value = grad[i];
+                    normSquared += (double)(value * value);
+                }
         }
 
         var norm = Math.Sqrt(normSquared);
 
-        // Only clip if norm exceeds maxNorm
         if (norm > maxNorm)
         {
             var scale = maxNorm / norm;
-            var clippedData = new T[grad.Length];
+            var clippedData = ArrayPool<T>.Shared.Rent(n);
 
-            // Convert scale to the appropriate type
-            if (typeof(T) == typeof(float))
+            try
             {
-                var scaleFloat = (float)scale;
-                for (int i = 0; i < grad.Length; i++)
+                if (typeof(T) == typeof(float))
                 {
-                    if (!grad.IsNull(i))
+                    var scaleFloat = (float)scale;
+                    var fSpan = MemoryMarshal.Cast<T, float>(span);
+                    var fClipped = MemoryMarshal.Cast<T, float>(clippedData.AsSpan(0, n));
+                    for (int i = 0; i < n; i++)
+                        fClipped[i] = !grad.IsNull(i) ? fSpan[i] * scaleFloat : 0f;
+                }
+                else if (typeof(T) == typeof(double))
+                {
+                    var dSpan = MemoryMarshal.Cast<T, double>(span);
+                    var dClipped = MemoryMarshal.Cast<T, double>(clippedData.AsSpan(0, n));
+                    for (int i = 0; i < n; i++)
+                        dClipped[i] = !grad.IsNull(i) ? dSpan[i] * scale : 0.0;
+                }
+                else
+                {
+                    for (int i = 0; i < n; i++)
                     {
-                        var value = (float)(object)grad[i]!;
-                        clippedData[i] = (T)(object)(value * scaleFloat);
+                        if (!grad.IsNull(i))
+                        {
+                            dynamic value = grad[i];
+                            clippedData[i] = (T)(object)(value * scale)!;
+                        }
                     }
                 }
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                for (int i = 0; i < grad.Length; i++)
-                {
-                    if (!grad.IsNull(i))
-                    {
-                        var value = (double)(object)grad[i]!;
-                        clippedData[i] = (T)(object)(value * scale);
-                    }
-                }
-            }
-            else
-            {
-                // Fallback for other types
-                for (int i = 0; i < grad.Length; i++)
-                {
-                    if (!grad.IsNull(i))
-                    {
-                        dynamic value = grad[i];
-                        clippedData[i] = (T)(object)(value * scale)!;
-                    }
-                }
-            }
 
-            tensor.Grad = NivaraColumn<T>.Create(clippedData);
+                tensor.Grad = NivaraColumn<T>.Create(clippedData.AsSpan(0, n));
+            }
+            finally
+            {
+                ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+            }
         }
     }
 
     /// <summary>
     /// Clips gradients for multiple tensors by their global norm.
-    /// This is useful for clipping all parameters in a model together.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensors">The collection of tensors whose gradients to clip</param>
-    /// <param name="maxNorm">The maximum global norm for all gradients</param>
-    /// <exception cref="ArgumentNullException">Thrown when tensors collection is null</exception>
-    /// <exception cref="ArgumentException">Thrown when maxNorm is not positive</exception>
-    public static void ClipGradNorm<T>(IEnumerable<GradTensor<T>> tensors, double maxNorm) where T : struct, INumber<T>
+    public static void ClipGradNorm<T>(IEnumerable<ReverseGradTensor<T>> tensors, double maxNorm) where T : struct, INumber<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -227,72 +244,86 @@ public static class GradientUtils
         if (tensorList.Count == 0)
             return;
 
-        // Calculate global norm across all tensors
         double globalNormSquared = 0.0;
         foreach (var tensor in tensorList)
         {
             var grad = tensor.Grad!;
-            for (int i = 0; i < grad.Length; i++)
+            int n = grad.Length;
+            var span = grad.AsSpan();
+
+            if (typeof(T) == typeof(float))
             {
-                if (!grad.IsNull(i))
-                {
-                    dynamic value = grad[i];
-                    globalNormSquared += (double)(value * value);
-                }
+                var fSpan = MemoryMarshal.Cast<T, float>(span);
+                for (int i = 0; i < n; i++)
+                    if (!grad.IsNull(i))
+                        globalNormSquared += fSpan[i] * fSpan[i];
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var dSpan = MemoryMarshal.Cast<T, double>(span);
+                for (int i = 0; i < n; i++)
+                    if (!grad.IsNull(i))
+                        globalNormSquared += dSpan[i] * dSpan[i];
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                    if (!grad.IsNull(i))
+                    {
+                        dynamic value = grad[i];
+                        globalNormSquared += (double)(value * value);
+                    }
             }
         }
 
         var globalNorm = Math.Sqrt(globalNormSquared);
 
-        // Only clip if global norm exceeds maxNorm
         if (globalNorm > maxNorm)
         {
             var scale = maxNorm / globalNorm;
 
-            // Scale all gradients proportionally
             foreach (var tensor in tensorList)
             {
                 var grad = tensor.Grad!;
-                var clippedData = new T[grad.Length];
+                int n = grad.Length;
+                var span = grad.AsSpan();
+                var clippedData = ArrayPool<T>.Shared.Rent(n);
 
-                // Convert scale to the appropriate type
-                if (typeof(T) == typeof(float))
+                try
                 {
-                    var scaleFloat = (float)scale;
-                    for (int i = 0; i < grad.Length; i++)
+                    if (typeof(T) == typeof(float))
                     {
-                        if (!grad.IsNull(i))
+                        var scaleFloat = (float)scale;
+                        var fSpan = MemoryMarshal.Cast<T, float>(span);
+                        var fClipped = MemoryMarshal.Cast<T, float>(clippedData.AsSpan(0, n));
+                        for (int i = 0; i < n; i++)
+                            fClipped[i] = !grad.IsNull(i) ? fSpan[i] * scaleFloat : 0f;
+                    }
+                    else if (typeof(T) == typeof(double))
+                    {
+                        var dSpan = MemoryMarshal.Cast<T, double>(span);
+                        var dClipped = MemoryMarshal.Cast<T, double>(clippedData.AsSpan(0, n));
+                        for (int i = 0; i < n; i++)
+                            dClipped[i] = !grad.IsNull(i) ? dSpan[i] * scale : 0.0;
+                    }
+                    else
+                    {
+                        for (int i = 0; i < n; i++)
                         {
-                            var value = (float)(object)grad[i]!;
-                            clippedData[i] = (T)(object)(value * scaleFloat);
+                            if (!grad.IsNull(i))
+                            {
+                                dynamic value = grad[i];
+                                clippedData[i] = (T)(object)(value * scale)!;
+                            }
                         }
                     }
-                }
-                else if (typeof(T) == typeof(double))
-                {
-                    for (int i = 0; i < grad.Length; i++)
-                    {
-                        if (!grad.IsNull(i))
-                        {
-                            var value = (double)(object)grad[i]!;
-                            clippedData[i] = (T)(object)(value * scale);
-                        }
-                    }
-                }
-                else
-                {
-                    // Fallback for other types
-                    for (int i = 0; i < grad.Length; i++)
-                    {
-                        if (!grad.IsNull(i))
-                        {
-                            dynamic value = grad[i];
-                            clippedData[i] = (T)(object)(value * scale)!;
-                        }
-                    }
-                }
 
-                tensor.Grad = NivaraColumn<T>.Create(clippedData);
+                    tensor.Grad = NivaraColumn<T>.Create(clippedData.AsSpan(0, n));
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+                }
             }
         }
     }
@@ -303,85 +334,63 @@ public static class GradientUtils
 
     /// <summary>
     /// Creates a constant tensor that doesn't require gradients.
-    /// This is useful for creating tensors that should not participate in gradient computation.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="data">The data for the constant tensor</param>
-    /// <returns>A new GradTensor with requiresGrad=false</returns>
-    /// <exception cref="ArgumentNullException">Thrown when data is null</exception>
-    public static GradTensor<T> Constant<T>(T[] data) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Constant<T>(T[] data) where T : struct, INumber<T>
     {
         if (data == null)
             throw new ArgumentNullException(nameof(data));
 
-        return GradTensor<T>.FromArray(data, requiresGrad: false);
+        return ReverseGradTensor<T>.FromArray(data, requiresGrad: false);
     }
 
     /// <summary>
     /// Creates a constant tensor from a NivaraColumn that doesn't require gradients.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="column">The column data for the constant tensor</param>
-    /// <returns>A new GradTensor with requiresGrad=false</returns>
-    /// <exception cref="ArgumentNullException">Thrown when column is null</exception>
-    public static GradTensor<T> Constant<T>(NivaraColumn<T> column) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Constant<T>(NivaraColumn<T> column) where T : struct, INumber<T>
     {
         if (column == null)
             throw new ArgumentNullException(nameof(column));
 
-        return GradTensor<T>.FromColumn(column, requiresGrad: false);
+        return ReverseGradTensor<T>.FromColumn(column, requiresGrad: false);
     }
 
     /// <summary>
     /// Creates a constant tensor filled with zeros.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="length">The length of the tensor</param>
-    /// <returns>A new GradTensor filled with zeros and requiresGrad=false</returns>
-    /// <exception cref="ArgumentException">Thrown when length is not positive</exception>
-    public static GradTensor<T> Zeros<T>(int length) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Zeros<T>(int length) where T : struct, INumber<T>
     {
         if (length <= 0)
             throw new ArgumentException("Length must be positive", nameof(length));
 
         var data = new T[length];
         Array.Fill(data, T.Zero);
-        return GradTensor<T>.FromArray(data, requiresGrad: false);
+        return ReverseGradTensor<T>.FromArray(data, requiresGrad: false);
     }
 
     /// <summary>
     /// Creates a constant tensor filled with ones.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="length">The length of the tensor</param>
-    /// <returns>A new GradTensor filled with ones and requiresGrad=false</returns>
-    /// <exception cref="ArgumentException">Thrown when length is not positive</exception>
-    public static GradTensor<T> Ones<T>(int length) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Ones<T>(int length) where T : struct, INumber<T>
     {
         if (length <= 0)
             throw new ArgumentException("Length must be positive", nameof(length));
 
         var data = new T[length];
         Array.Fill(data, T.One);
-        return GradTensor<T>.FromArray(data, requiresGrad: false);
+        return ReverseGradTensor<T>.FromArray(data, requiresGrad: false);
     }
 
     /// <summary>
     /// Creates a constant tensor filled with a specific value.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="length">The length of the tensor</param>
-    /// <param name="value">The value to fill the tensor with</param>
-    /// <returns>A new GradTensor filled with the specified value and requiresGrad=false</returns>
-    /// <exception cref="ArgumentException">Thrown when length is not positive</exception>
-    public static GradTensor<T> Full<T>(int length, T value) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Full<T>(int length, T value) where T : struct, INumber<T>
     {
         if (length <= 0)
             throw new ArgumentException("Length must be positive", nameof(length));
 
         var data = new T[length];
         Array.Fill(data, value);
-        return GradTensor<T>.FromArray(data, requiresGrad: false);
+        return ReverseGradTensor<T>.FromArray(data, requiresGrad: false);
     }
 
     #endregion
@@ -391,11 +400,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets diagnostic information about the computation graph rooted at the specified tensor.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The root tensor to analyze</param>
-    /// <returns>A dictionary containing graph statistics</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static Dictionary<string, object> GetGraphInfo<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -406,11 +411,7 @@ public static class GradientUtils
     /// <summary>
     /// Prints a human-readable summary of the computation graph.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The root tensor to analyze</param>
-    /// <returns>A formatted string describing the computation graph</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static string PrintGraphSummary<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static string PrintGraphSummary<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -438,11 +439,7 @@ public static class GradientUtils
     /// <summary>
     /// Checks if a tensor has any gradients computed.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor to check</param>
-    /// <returns>True if the tensor has gradients, false otherwise</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static bool HasGradient<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static bool HasGradient<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -453,11 +450,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets the gradient norm (L2 norm) for a tensor.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor to compute gradient norm for</param>
-    /// <returns>The L2 norm of the gradient, or 0 if no gradient exists</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static double GetGradientNorm<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static double GetGradientNorm<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -466,15 +459,32 @@ public static class GradientUtils
             return 0.0;
 
         var grad = tensor.Grad;
+        int n = grad.Length;
+        var span = grad.AsSpan();
         double normSquared = 0.0;
 
-        for (int i = 0; i < grad.Length; i++)
+        if (typeof(T) == typeof(float))
         {
-            if (!grad.IsNull(i))
-            {
-                dynamic value = grad[i];
-                normSquared += (double)(value * value);
-            }
+            var fSpan = MemoryMarshal.Cast<T, float>(span);
+            for (int i = 0; i < n; i++)
+                if (!grad.IsNull(i))
+                    normSquared += fSpan[i] * fSpan[i];
+        }
+        else if (typeof(T) == typeof(double))
+        {
+            var dSpan = MemoryMarshal.Cast<T, double>(span);
+            for (int i = 0; i < n; i++)
+                if (!grad.IsNull(i))
+                    normSquared += dSpan[i] * dSpan[i];
+        }
+        else
+        {
+            for (int i = 0; i < n; i++)
+                if (!grad.IsNull(i))
+                {
+                    dynamic value = grad[i];
+                    normSquared += (double)(value * value);
+                }
         }
 
         return Math.Sqrt(normSquared);
@@ -483,11 +493,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets the global gradient norm across multiple tensors.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensors">The collection of tensors to compute global gradient norm for</param>
-    /// <returns>The global L2 norm of all gradients</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensors collection is null</exception>
-    public static double GetGlobalGradientNorm<T>(IEnumerable<GradTensor<T>> tensors) where T : struct, INumber<T>
+    public static double GetGlobalGradientNorm<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -497,13 +503,31 @@ public static class GradientUtils
         foreach (var tensor in tensors.Where(t => t != null && t.Grad != null))
         {
             var grad = tensor.Grad!;
-            for (int i = 0; i < grad.Length; i++)
+            int n = grad.Length;
+            var span = grad.AsSpan();
+
+            if (typeof(T) == typeof(float))
             {
-                if (!grad.IsNull(i))
-                {
-                    dynamic value = grad[i];
-                    globalNormSquared += (double)(value * value);
-                }
+                var fSpan = MemoryMarshal.Cast<T, float>(span);
+                for (int i = 0; i < n; i++)
+                    if (!grad.IsNull(i))
+                        globalNormSquared += fSpan[i] * fSpan[i];
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var dSpan = MemoryMarshal.Cast<T, double>(span);
+                for (int i = 0; i < n; i++)
+                    if (!grad.IsNull(i))
+                        globalNormSquared += dSpan[i] * dSpan[i];
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                    if (!grad.IsNull(i))
+                    {
+                        dynamic value = grad[i];
+                        globalNormSquared += (double)(value * value);
+                    }
             }
         }
 
@@ -513,11 +537,7 @@ public static class GradientUtils
     /// <summary>
     /// Validates that a tensor is ready for backward pass.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor to validate</param>
-    /// <returns>True if the tensor can be used for backward pass, false otherwise</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static bool CanBackward<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static bool CanBackward<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -528,17 +548,13 @@ public static class GradientUtils
     /// <summary>
     /// Gets a detailed description of a tensor for debugging purposes.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-    /// <param name="tensor">The tensor to describe</param>
-    /// <returns>A formatted string with tensor details</returns>
-    /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
-    public static string DescribeTensor<T>(GradTensor<T> tensor) where T : struct, INumber<T>
+    public static string DescribeTensor<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
 
         var sb = new StringBuilder();
-        sb.AppendLine($"GradTensor<{typeof(T).Name}>:");
+        sb.AppendLine($"ReverseGradTensor<{typeof(T).Name}>:");
         sb.AppendLine($"  Length: {tensor.Length}");
         sb.AppendLine($"  Requires Grad: {tensor.RequiresGrad}");
         sb.AppendLine($"  Has Gradient: {tensor.Grad != null}");

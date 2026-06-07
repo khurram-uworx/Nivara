@@ -950,7 +950,7 @@ Nivara provides experimental support for automatic differentiation (AutoDiff) on
 
 ### Converting to Gradient Tensors
 
-You can convert Columns, Series, or entire DataFrames into `GradTensor<T>` objects:
+You can convert Columns, Series, or entire DataFrames into `ReverseGradTensor<T>` objects:
 
 ```csharp
 using Nivara.Extensions.AutoDiff;
@@ -960,8 +960,8 @@ var df = NivaraFrame.Create(
     ("y", NivaraColumn<float>.Create(new[] { 2.0f, 4.0f, 6.0f }))
 );
 
-// Convert to dictionary of GradTensors, enabling gradient tracking
-var tensors = df.ToGradTensors<float>(new[] { "x", "y" }, requiresGrad: true);
+// Convert to dictionary of ReverseGradTensors, enabling gradient tracking
+var tensors = df.ToReverseGradTensors<float>(new[] { "x", "y" }, requiresGrad: true);
 
 var x = tensors["x"];
 var y = tensors["y"];
@@ -972,21 +972,22 @@ var y = tensors["y"];
 Perform operations on tensors and call `Backward()` to compute gradients:
 
 ```csharp
-// Simple linear model: z = x * w + b
-var w = GradTensor<float>.CreateScalar(0.5f, requiresGrad: true);
-var b = GradTensor<float>.CreateScalar(0.1f, requiresGrad: true);
+// Simple linear model: z = w * x + b using explicit GradOperations
+var w = ReverseGradTensor<float>.FromArray(new[] { 0.5f, 0.5f, 0.5f }, requiresGrad: true);
+var b = ReverseGradTensor<float>.FromArray(new[] { 0.1f, 0.1f, 0.1f }, requiresGrad: true);
 
-var z = x * w + b;
+var z = GradOperations.Add(GradOperations.Multiply(w, x), b);
 
-// Compute loss (e.g., Mean Squared Error vs target 'y')
-var diff = z - y;
-var loss = (diff * diff).Sum();
+// MSE loss: mean((z - y)^2)
+var diff = GradOperations.Subtract(z, y);
+var loss = GradOperations.Mean(GradOperations.Multiply(diff, diff));
 
-// Backpropagate
+// Backward pass — computes gradients for w and b
 loss.Backward();
 
-// Access gradients
-Console.WriteLine($"w gradient: {w.Grad.GetData()[0]}");
+// Access gradients directly on the tensor
+Console.WriteLine($"w gradient at index 0: {w.Grad![0]:F4}");
+Console.WriteLine($"b gradient at index 0: {b.Grad![0]:F4}");
 ```
 
 ### Retrieving Gradients

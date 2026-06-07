@@ -6,7 +6,7 @@ namespace Nivara.Tests.AutoDiff;
 
 /// <summary>
 /// Tests for null handling in automatic differentiation operations.
-/// Verifies that GradTensor operations preserve Nivara's explicit null semantics.
+/// Verifies that ReverseGradTensor operations preserve Nivara's explicit null semantics.
 /// Tests Requirements 5.5 and 9.4.
 /// </summary>
 [TestFixture]
@@ -24,8 +24,8 @@ public class NullHandlingTests
         var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
         var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
 
-        var a = new GradTensor<float>(aColumn, requiresGrad: true);
-        var b = new GradTensor<float>(bColumn, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act
         var result = GradOperations.Add(a, b);
@@ -52,8 +52,8 @@ public class NullHandlingTests
         var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
         var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
 
-        var a = new GradTensor<float>(aColumn, requiresGrad: true);
-        var b = new GradTensor<float>(bColumn, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act
         var result = GradOperations.Multiply(a, b);
@@ -77,8 +77,8 @@ public class NullHandlingTests
         var aColumn = NivaraColumn<double>.CreateFromNullable(aValues);
         var bColumn = NivaraColumn<double>.CreateFromNullable(bValues);
 
-        var a = new GradTensor<double>(aColumn, requiresGrad: true);
-        var b = new GradTensor<double>(bColumn, requiresGrad: true);
+        var a = new ReverseGradTensor<double>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<double>(bColumn, requiresGrad: true);
 
         // Act
         var result = GradOperations.Subtract(a, b);
@@ -101,8 +101,8 @@ public class NullHandlingTests
         var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
         var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
 
-        var a = new GradTensor<float>(aColumn, requiresGrad: true);
-        var b = new GradTensor<float>(bColumn, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act
         var result = GradOperations.Divide(a, b);
@@ -117,6 +117,123 @@ public class NullHandlingTests
 
     #endregion
 
+    #region Matrix Operations Null Handling
+
+    [Test]
+    public void MatMul_WithNullValues_PropagatesNullsCorrectly()
+    {
+        // Arrange: 2x2 matrix multiplication with nulls
+        // A = [[1, null], [3, 4]] (flattened: [1, null, 3, 4])
+        // B = [[5, 6], [null, 8]] (flattened: [5, 6, null, 8])
+        // Expected: result[i,j] is null if any contributing a[i,k] or b[k,j] is null
+        var aValues = new float?[] { 1.0f, null, 3.0f, 4.0f };
+        var bValues = new float?[] { 5.0f, 6.0f, null, 8.0f };
+
+        var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
+        var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
+
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
+
+        // Act
+        var result = GradOperations.MatMul(a, b, aRows: 2, aCols: 2, bCols: 2);
+
+        // Assert: result[0] = 1*5 + null*7 = null (k=1 has null in a)
+        Assert.That(result.IsNull(0), Is.True, "Position 0: a[1]=null -> result should be null");
+
+        // result[1] = 1*6 + null*8 = null (k=1 has null in a)
+        Assert.That(result.IsNull(1), Is.True, "Position 1: a[1]=null -> result should be null");
+
+        // result[2] = 3*5 + 4*null = null (k=1 has null in b)
+        Assert.That(result.IsNull(2), Is.True, "Position 2: b[2]=null -> result should be null");
+
+        // result[3] = 3*6 + 4*8 = 18 + 32 = 50 (both non-null)
+        Assert.That(result.IsNull(3), Is.False, "Position 3: all non-null -> result should not be null");
+        Assert.That(result[3], Is.EqualTo(50.0f), "Position 3: 3*6 + 4*8 = 50");
+    }
+
+    [Test]
+    public void MatMul_AllNullValues_ProducesAllNullResult()
+    {
+        // Arrange: Both matrices fully null
+        var aValues = new float?[] { null, null, null, null };
+        var bValues = new float?[] { null, null, null, null };
+
+        var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
+        var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
+
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
+
+        // Act
+        var result = GradOperations.MatMul(a, b, aRows: 2, aCols: 2, bCols: 2);
+
+        // Assert: All positions should be null
+        for (int i = 0; i < result.Length; i++)
+        {
+            Assert.That(result.IsNull(i), Is.True, $"Position {i} should be null (all inputs null)");
+        }
+    }
+
+    [Test]
+    public void Transpose_WithNullValues_PropagatesNullsCorrectly()
+    {
+        // Arrange: 2x3 matrix with nulls
+        // A = [[1, null, 3], [4, 5, null]] (flattened: [1, null, 3, 4, 5, null])
+        // Transpose -> [[1, 4], [null, 5], [3, null]] (flattened: [1, 4, null, 5, 3, null])
+        var values = new float?[] { 1.0f, null, 3.0f, 4.0f, 5.0f, null };
+        var column = NivaraColumn<float>.CreateFromNullable(values);
+        var a = new ReverseGradTensor<float>(column, requiresGrad: true);
+
+        // Act
+        var result = GradOperations.Transpose(a, rows: 2, cols: 3);
+
+        // Assert: result[j * rows + i] = a[i * cols + j]
+        Assert.That(result.IsNull(0), Is.False, "Position 0: from a[0]=1 should not be null");
+        Assert.That(result[0], Is.EqualTo(1.0f), "Position 0: transpose[0,0] = a[0,0] = 1");
+
+        Assert.That(result.IsNull(1), Is.False, "Position 1: from a[3]=4 should not be null");
+        Assert.That(result[1], Is.EqualTo(4.0f), "Position 1: transpose[0,1] = a[1,0] = 4");
+
+        Assert.That(result.IsNull(2), Is.True, "Position 2: from a[1]=null should be null");
+        Assert.That(result.IsNull(3), Is.False, "Position 3: from a[4]=5 should not be null");
+        Assert.That(result[3], Is.EqualTo(5.0f), "Position 3: transpose[1,1] = a[1,1] = 5");
+
+        Assert.That(result.IsNull(4), Is.False, "Position 4: from a[2]=3 should not be null");
+        Assert.That(result[4], Is.EqualTo(3.0f), "Position 4: transpose[2,0] = a[0,2] = 3");
+
+        Assert.That(result.IsNull(5), Is.True, "Position 5: from a[5]=null should be null");
+    }
+
+    [Test]
+    public void MatMul_WithNulls_BackwardComputesGradientsCorrectly()
+    {
+        // Arrange: 2x2 matrix multiplication with nulls
+        var aValues = new float?[] { 1.0f, null, 3.0f, 4.0f };
+        var bValues = new float?[] { 5.0f, 6.0f, 7.0f, 8.0f };
+
+        var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
+        var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
+
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
+
+        // Act
+        var result = GradOperations.MatMul(a, b, aRows: 2, aCols: 2, bCols: 2);
+
+        // Create gradient output (all ones)
+        var gradValues = new float?[] { 1.0f, 1.0f, 1.0f, 1.0f };
+        var gradColumn = NivaraColumn<float>.CreateFromNullable(gradValues);
+        var grad = new ReverseGradTensor<float>(gradColumn, requiresGrad: false);
+        result.Backward(grad);
+
+        // Assert: Gradients should exist
+        Assert.That(a.Grad, Is.Not.Null, "Gradient for a should exist");
+        Assert.That(b.Grad, Is.Not.Null, "Gradient for b should exist");
+    }
+
+    #endregion
+
     #region Activation Functions Null Handling
 
     [Test]
@@ -125,7 +242,7 @@ public class NullHandlingTests
         // Arrange
         var values = new float?[] { -2.0f, null, 0.0f, null, 2.0f };
         var column = NivaraColumn<float>.CreateFromNullable(values);
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
         var result = GradOperations.Relu(tensor);
@@ -151,7 +268,7 @@ public class NullHandlingTests
         // Arrange
         var values = new float?[] { 0.0f, null, 1.0f, null };
         var column = NivaraColumn<float>.CreateFromNullable(values);
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
         var result = GradOperations.Sigmoid(tensor);
@@ -174,7 +291,7 @@ public class NullHandlingTests
         // Arrange
         var values = new double?[] { 0.0, null, 1.0 };
         var column = NivaraColumn<double>.CreateFromNullable(values);
-        var tensor = new GradTensor<double>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<double>(column, requiresGrad: true);
 
         // Act
         var result = GradOperations.Tanh(tensor);
@@ -203,8 +320,8 @@ public class NullHandlingTests
         var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
         var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
 
-        var a = new GradTensor<float>(aColumn, requiresGrad: true);
-        var b = new GradTensor<float>(bColumn, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act: Forward pass
         var result = GradOperations.Add(a, b);
@@ -212,7 +329,7 @@ public class NullHandlingTests
         // Create gradient output (all ones for non-null positions)
         var gradValues = new float?[] { 1.0f, 1.0f, 1.0f };
         var gradColumn = NivaraColumn<float>.CreateFromNullable(gradValues);
-        var grad = new GradTensor<float>(gradColumn, requiresGrad: false);
+        var grad = new ReverseGradTensor<float>(gradColumn, requiresGrad: false);
 
         result.Backward(grad);
 
@@ -239,7 +356,7 @@ public class NullHandlingTests
         // Arrange
         var values = new float?[] { -1.0f, null, 1.0f, 2.0f };
         var column = NivaraColumn<float>.CreateFromNullable(values);
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act: Forward pass
         var result = GradOperations.Relu(tensor);
@@ -247,7 +364,7 @@ public class NullHandlingTests
         // Create gradient output (all ones)
         var gradValues = new float?[] { 1.0f, 1.0f, 1.0f, 1.0f };
         var gradColumn = NivaraColumn<float>.CreateFromNullable(gradValues);
-        var grad = new GradTensor<float>(gradColumn, requiresGrad: false);
+        var grad = new ReverseGradTensor<float>(gradColumn, requiresGrad: false);
 
         result.Backward(grad);
 
@@ -272,14 +389,14 @@ public class NullHandlingTests
     #region Null Mask Preservation
 
     [Test]
-    public void GradTensor_PreservesNullMaskFromNivaraColumn()
+    public void ReverseGradTensor_PreservesNullMaskFromNivaraColumn()
     {
         // Arrange
         var values = new float?[] { 1.0f, null, 3.0f, null, 5.0f };
         var column = NivaraColumn<float>.CreateFromNullable(values);
 
         // Act
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Assert: Verify null mask is preserved
         Assert.That(tensor.HasNulls, Is.True, "Tensor should indicate it has nulls");
@@ -303,8 +420,8 @@ public class NullHandlingTests
         var aColumn = NivaraColumn<float>.CreateFromNullable(aValues);
         var bColumn = NivaraColumn<float>.CreateFromNullable(bValues);
 
-        var a = new GradTensor<float>(aColumn, requiresGrad: true);
-        var b = new GradTensor<float>(bColumn, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act: Perform multiple operations
         var add = GradOperations.Add(a, b);
@@ -335,7 +452,7 @@ public class NullHandlingTests
         // Arrange: NivaraSeries.Sum() skips null values by default
         var values = new float?[] { 1.0f, null, 3.0f, null, 5.0f };
         var column = NivaraColumn<float>.CreateFromNullable(values);
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
         var result = GradOperations.Sum(tensor);
@@ -352,7 +469,7 @@ public class NullHandlingTests
         // Arrange: NivaraSeries.Average() skips null values by default
         var values = new float?[] { 2.0f, null, 4.0f, null, 6.0f };
         var column = NivaraColumn<float>.CreateFromNullable(values);
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
         var result = GradOperations.Mean(tensor);
@@ -377,8 +494,8 @@ public class NullHandlingTests
         var xColumn = NivaraColumn<float>.CreateFromNullable(xValues);
         var wColumn = NivaraColumn<float>.CreateFromNullable(wValues);
 
-        var x = new GradTensor<float>(xColumn, requiresGrad: false);
-        var w = new GradTensor<float>(wColumn, requiresGrad: true);
+        var x = new ReverseGradTensor<float>(xColumn, requiresGrad: false);
+        var w = new ReverseGradTensor<float>(wColumn, requiresGrad: true);
 
         // Act: Forward pass with nulls
         var mul = GradOperations.Multiply(x, w);  // [0.5, null, null]
@@ -408,7 +525,7 @@ public class NullHandlingTests
         // Arrange
         var values = new float?[] { 0.0f, null, float.NaN, null, -1.0f };
         var column = NivaraColumn<float>.CreateFromNullable(values);
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Assert: Verify explicit null tracking
         Assert.That(tensor.IsNull(0), Is.False, "Position 0: 0.0 should not be null");
