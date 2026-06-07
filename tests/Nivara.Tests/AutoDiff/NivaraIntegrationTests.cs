@@ -13,14 +13,14 @@ namespace Nivara.Tests.AutoDiff;
 public class NivaraIntegrationTests
 {
     [Test]
-    public void ToGradTensor_FromColumn_PreservesData()
+    public void ToReverseGradTensor_FromColumn_PreservesData()
     {
         // Arrange
         var data = new float[] { 1.0f, 2.0f, 3.0f, 4.0f };
         var column = NivaraColumn<float>.Create(data);
 
         // Act
-        var gradTensor = column.ToGradTensor(requiresGrad: true);
+        var gradTensor = column.ToReverseGradTensor(requiresGrad: true);
 
         // Assert
         Assert.That(gradTensor.Length, Is.EqualTo(4));
@@ -32,14 +32,14 @@ public class NivaraIntegrationTests
     }
 
     [Test]
-    public void ToGradTensor_FromSeries_PreservesData()
+    public void ToReverseGradTensor_FromSeries_PreservesData()
     {
         // Arrange
         var data = new double[] { 1.0, 2.0, 3.0 };
         var series = NivaraSeries<double>.Create(data);
 
         // Act
-        var gradTensor = series.ToGradTensor(requiresGrad: false);
+        var gradTensor = series.ToReverseGradTensor(requiresGrad: false);
 
         // Assert
         Assert.That(gradTensor.Length, Is.EqualTo(3));
@@ -50,23 +50,23 @@ public class NivaraIntegrationTests
     }
 
     [Test]
-    public void ToGradTensor_WithNullColumn_ThrowsArgumentNullException()
+    public void ToReverseGradTensor_WithNullColumn_ThrowsArgumentNullException()
     {
         // Arrange
         NivaraColumn<float>? column = null;
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => column!.ToGradTensor());
+        Assert.Throws<ArgumentNullException>(() => column!.ToReverseGradTensor());
     }
 
     [Test]
-    public void ToGradTensor_WithNullSeries_ThrowsArgumentNullException()
+    public void ToReverseGradTensor_WithNullSeries_ThrowsArgumentNullException()
     {
         // Arrange
         NivaraSeries<double>? series = null;
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => series!.ToGradTensor());
+        Assert.Throws<ArgumentNullException>(() => series!.ToReverseGradTensor());
     }
 
     [Test]
@@ -74,7 +74,7 @@ public class NivaraIntegrationTests
     {
         // Arrange
         var data = new float[] { 1.0f, 2.0f, 3.0f };
-        var gradTensor = GradTensor<float>.FromArray(data, requiresGrad: true);
+        var gradTensor = ReverseGradTensor<float>.FromArray(data, requiresGrad: true);
 
         // Act
         var column = gradTensor.ToColumn();
@@ -91,7 +91,7 @@ public class NivaraIntegrationTests
     {
         // Arrange
         var data = new double[] { 1.0, 2.0, 3.0 };
-        var gradTensor = GradTensor<double>.FromArray(data, requiresGrad: false);
+        var gradTensor = ReverseGradTensor<double>.FromArray(data, requiresGrad: false);
 
         // Act
         var series = gradTensor.ToSeries();
@@ -104,7 +104,7 @@ public class NivaraIntegrationTests
     }
 
     [Test]
-    public void ToGradTensors_FromFrame_ConvertsMultipleColumns()
+    public void ToReverseGradTensors_FromFrame_ConvertsMultipleColumns()
     {
         // Arrange
         var col1 = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
@@ -112,7 +112,7 @@ public class NivaraIntegrationTests
         var frame = NivaraFrame.Create(("A", col1), ("B", col2));
 
         // Act
-        var tensors = frame.ToGradTensors<float>(new[] { "A", "B" }, requiresGrad: true);
+        var tensors = frame.ToReverseGradTensors<float>(new[] { "A", "B" }, requiresGrad: true);
 
         // Assert
         Assert.That(tensors.Count, Is.EqualTo(2));
@@ -125,18 +125,18 @@ public class NivaraIntegrationTests
     }
 
     [Test]
-    public void ToGradTensors_WithNullFrame_ThrowsArgumentNullException()
+    public void ToReverseGradTensors_WithNullFrame_ThrowsArgumentNullException()
     {
         // Arrange
         NivaraFrame? frame = null;
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
-            frame!.ToGradTensors<float>(new[] { "A" }));
+            frame!.ToReverseGradTensors<float>(new[] { "A" }));
     }
 
     [Test]
-    public void ToGradTensors_WithNullColumnNames_ThrowsArgumentNullException()
+    public void ToReverseGradTensors_WithNullColumnNames_ThrowsArgumentNullException()
     {
         // Arrange
         var col = NivaraColumn<float>.Create(new float[] { 1.0f });
@@ -144,11 +144,11 @@ public class NivaraIntegrationTests
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() =>
-            frame.ToGradTensors<float>(null!));
+            frame.ToReverseGradTensors<float>(null!));
     }
 
     [Test]
-    public void ToGradTensors_WithEmptyColumnNames_ThrowsArgumentException()
+    public void ToReverseGradTensors_WithEmptyColumnNames_ThrowsArgumentException()
     {
         // Arrange
         var col = NivaraColumn<float>.Create(new float[] { 1.0f });
@@ -156,11 +156,11 @@ public class NivaraIntegrationTests
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() =>
-            frame.ToGradTensors<float>(Array.Empty<string>()));
+            frame.ToReverseGradTensors<float>(Array.Empty<string>()));
     }
 
     [Test]
-    public void ToGradTensorsAuto_ConvertsOnlySupportedTypes()
+    public void ToReverseGradTensorsAuto_ConvertsOnlySupportedTypes()
     {
         // Arrange
         var floatCol = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
@@ -172,7 +172,7 @@ public class NivaraIntegrationTests
             ("Int", intCol));
 
         // Act
-        var tensors = frame.ToGradTensorsAuto(requiresGrad: true);
+        var tensors = frame.ToReverseGradTensorsAuto(requiresGrad: true);
 
         // Assert
         Assert.That(tensors.Count, Is.EqualTo(2)); // Only float and double
@@ -185,14 +185,14 @@ public class NivaraIntegrationTests
     public void BatchZeroGrad_ClearsAllGradients()
     {
         // Arrange
-        var tensor1 = GradTensor<float>.FromArray(new float[] { 1.0f }, requiresGrad: true);
-        var tensor2 = GradTensor<float>.FromArray(new float[] { 2.0f }, requiresGrad: true);
+        var tensor1 = ReverseGradTensor<float>.FromArray(new float[] { 1.0f }, requiresGrad: true);
+        var tensor2 = ReverseGradTensor<float>.FromArray(new float[] { 2.0f }, requiresGrad: true);
 
         // Set some gradients
         tensor1.Grad = NivaraColumn<float>.Create(new float[] { 0.5f });
         tensor2.Grad = NivaraColumn<float>.Create(new float[] { 0.3f });
 
-        var tensors = new Dictionary<string, GradTensor<float>>
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>
         {
             { "T1", tensor1 },
             { "T2", tensor2 }
@@ -210,7 +210,7 @@ public class NivaraIntegrationTests
     public void BatchZeroGrad_WithNullDictionary_ThrowsArgumentNullException()
     {
         // Arrange
-        Dictionary<string, GradTensor<float>>? tensors = null;
+        Dictionary<string, ReverseGradTensor<float>>? tensors = null;
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => tensors!.BatchZeroGrad());
@@ -220,10 +220,10 @@ public class NivaraIntegrationTests
     public void ToFrame_ConvertsGradTensorsToFrame()
     {
         // Arrange
-        var tensor1 = GradTensor<float>.FromArray(new float[] { 1.0f, 2.0f }, requiresGrad: true);
-        var tensor2 = GradTensor<float>.FromArray(new float[] { 3.0f, 4.0f }, requiresGrad: true);
+        var tensor1 = ReverseGradTensor<float>.FromArray(new float[] { 1.0f, 2.0f }, requiresGrad: true);
+        var tensor2 = ReverseGradTensor<float>.FromArray(new float[] { 3.0f, 4.0f }, requiresGrad: true);
 
-        var tensors = new Dictionary<string, GradTensor<float>>
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>
         {
             { "A", tensor1 },
             { "B", tensor2 }
@@ -250,7 +250,7 @@ public class NivaraIntegrationTests
     public void ToFrame_WithNullDictionary_ThrowsArgumentNullException()
     {
         // Arrange
-        Dictionary<string, GradTensor<float>>? tensors = null;
+        Dictionary<string, ReverseGradTensor<float>>? tensors = null;
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => tensors!.ToFrame());
@@ -260,7 +260,7 @@ public class NivaraIntegrationTests
     public void ToFrame_WithEmptyDictionary_ThrowsArgumentException()
     {
         // Arrange
-        var tensors = new Dictionary<string, GradTensor<float>>();
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>();
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() => tensors.ToFrame());
@@ -270,14 +270,14 @@ public class NivaraIntegrationTests
     public void ToGradientFrame_ExtractsGradients()
     {
         // Arrange
-        var tensor1 = GradTensor<float>.FromArray(new float[] { 1.0f, 2.0f }, requiresGrad: true);
-        var tensor2 = GradTensor<float>.FromArray(new float[] { 3.0f, 4.0f }, requiresGrad: true);
+        var tensor1 = ReverseGradTensor<float>.FromArray(new float[] { 1.0f, 2.0f }, requiresGrad: true);
+        var tensor2 = ReverseGradTensor<float>.FromArray(new float[] { 3.0f, 4.0f }, requiresGrad: true);
 
         // Set gradients
         tensor1.Grad = NivaraColumn<float>.Create(new float[] { 0.1f, 0.2f });
         tensor2.Grad = NivaraColumn<float>.Create(new float[] { 0.3f, 0.4f });
 
-        var tensors = new Dictionary<string, GradTensor<float>>
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>
         {
             { "A", tensor1 },
             { "B", tensor2 }
@@ -303,10 +303,10 @@ public class NivaraIntegrationTests
     public void ToGradientFrame_WithNoGradients_ReturnsNull()
     {
         // Arrange
-        var tensor1 = GradTensor<float>.FromArray(new float[] { 1.0f }, requiresGrad: true);
-        var tensor2 = GradTensor<float>.FromArray(new float[] { 2.0f }, requiresGrad: true);
+        var tensor1 = ReverseGradTensor<float>.FromArray(new float[] { 1.0f }, requiresGrad: true);
+        var tensor2 = ReverseGradTensor<float>.FromArray(new float[] { 2.0f }, requiresGrad: true);
 
-        var tensors = new Dictionary<string, GradTensor<float>>
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>
         {
             { "A", tensor1 },
             { "B", tensor2 }
@@ -323,7 +323,7 @@ public class NivaraIntegrationTests
     public void ToGradientFrame_WithNullDictionary_ThrowsArgumentNullException()
     {
         // Arrange
-        Dictionary<string, GradTensor<float>>? tensors = null;
+        Dictionary<string, ReverseGradTensor<float>>? tensors = null;
 
         // Act & Assert
         Assert.Throws<ArgumentNullException>(() => tensors!.ToGradientFrame());
@@ -333,21 +333,21 @@ public class NivaraIntegrationTests
     public void ToGradientFrame_WithEmptyDictionary_ThrowsArgumentException()
     {
         // Arrange
-        var tensors = new Dictionary<string, GradTensor<float>>();
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>();
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() => tensors.ToGradientFrame());
     }
 
     [Test]
-    public void RoundTrip_ColumnToGradTensorToColumn_PreservesData()
+    public void RoundTrip_ColumnToReverseGradTensorToColumn_PreservesData()
     {
         // Arrange
         var originalData = new float[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f };
         var originalColumn = NivaraColumn<float>.Create(originalData);
 
         // Act
-        var gradTensor = originalColumn.ToGradTensor(requiresGrad: true);
+        var gradTensor = originalColumn.ToReverseGradTensor(requiresGrad: true);
         var resultColumn = gradTensor.ToColumn();
 
         // Assert
@@ -359,14 +359,14 @@ public class NivaraIntegrationTests
     }
 
     [Test]
-    public void RoundTrip_SeriesToGradTensorToSeries_PreservesData()
+    public void RoundTrip_SeriesToReverseGradTensorToSeries_PreservesData()
     {
         // Arrange
         var originalData = new double[] { 1.0, 2.0, 3.0 };
         var originalSeries = NivaraSeries<double>.Create(originalData);
 
         // Act
-        var gradTensor = originalSeries.ToGradTensor(requiresGrad: false);
+        var gradTensor = originalSeries.ToReverseGradTensor(requiresGrad: false);
         var resultSeries = gradTensor.ToSeries();
 
         // Assert
@@ -378,7 +378,7 @@ public class NivaraIntegrationTests
     }
 
     [Test]
-    public void RoundTrip_FrameToGradTensorsToFrame_PreservesData()
+    public void RoundTrip_FrameToReverseGradTensorsToFrame_PreservesData()
     {
         // Arrange
         var col1 = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
@@ -386,7 +386,7 @@ public class NivaraIntegrationTests
         var originalFrame = NivaraFrame.Create(("A", col1), ("B", col2));
 
         // Act
-        var tensors = originalFrame.ToGradTensors<float>(new[] { "A", "B" }, requiresGrad: true);
+        var tensors = originalFrame.ToReverseGradTensors<float>(new[] { "A", "B" }, requiresGrad: true);
         var resultFrame = tensors.ToFrame();
 
         // Assert
@@ -454,7 +454,7 @@ public class NivaraIntegrationTests
         var column = NivaraColumn<float>.CreateFromNullable(nullableData);
 
         // Act
-        var gradTensor = column.ToGradTensor(requiresGrad: true);
+        var gradTensor = column.ToReverseGradTensor(requiresGrad: true);
 
         // Assert
         Assert.That(gradTensor.HasNulls, Is.True);
@@ -473,7 +473,7 @@ public class NivaraIntegrationTests
         var originalColumn = NivaraColumn<double>.CreateFromNullable(nullableData);
 
         // Act
-        var gradTensor = originalColumn.ToGradTensor(requiresGrad: false);
+        var gradTensor = originalColumn.ToReverseGradTensor(requiresGrad: false);
         var resultColumn = gradTensor.ToColumn();
 
         // Assert

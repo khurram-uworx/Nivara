@@ -14,40 +14,68 @@ namespace Nivara.Tests.AutoDiff;
 public class TypeSafetyTests
 {
     [Test]
-    public void GradTensor_Float_IsSupported()
+    public void ReverseGradTensor_Float_IsSupported()
     {
         // Arrange
         var data = new float[] { 1.0f, 2.0f, 3.0f };
         var column = NivaraColumn<float>.Create(data);
 
         // Act & Assert - Should not throw
-        var tensor = new GradTensor<float>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
         Assert.That(tensor, Is.Not.Null);
         Assert.That(tensor.Length, Is.EqualTo(3));
     }
 
     [Test]
-    public void GradTensor_Double_IsSupported()
+    public void ReverseGradTensor_Double_IsSupported()
     {
         // Arrange
         var data = new double[] { 1.0, 2.0, 3.0 };
         var column = NivaraColumn<double>.Create(data);
 
         // Act & Assert - Should not throw
-        var tensor = new GradTensor<double>(column, requiresGrad: true);
+        var tensor = new ReverseGradTensor<double>(column, requiresGrad: true);
         Assert.That(tensor, Is.Not.Null);
         Assert.That(tensor.Length, Is.EqualTo(3));
     }
 
     [Test]
-    public void GradTensor_Int_ThrowsAutoGradException()
+    public void ReverseGradTensor_Int_ThrowsTypeValidationException()
     {
         // Arrange
         var data = new int[] { 1, 2, 3 };
         var column = NivaraColumn<int>.Create(data);
 
         // Act & Assert
-        var ex = Assert.Throws<AutoGradException>(() => new GradTensor<int>(column, requiresGrad: true));
+        var ex = Assert.Throws<TypeValidationException>(() => new ReverseGradTensor<int>(column, requiresGrad: true));
+        Assert.That(ex.Message, Does.Contain("not supported"));
+        Assert.That(ex.Message, Does.Contain("float, double"));
+        Assert.That(ex.ExpectedType, Is.Not.Null);
+        Assert.That(ex.ActualType, Is.EqualTo(typeof(int)));
+    }
+
+    [Test]
+    public void ReverseGradTensor_Long_ThrowsTypeValidationException()
+    {
+        // Arrange
+        var data = new long[] { 1L, 2L, 3L };
+        var column = NivaraColumn<long>.Create(data);
+
+        // Act & Assert
+        var ex = Assert.Throws<TypeValidationException>(() => new ReverseGradTensor<long>(column, requiresGrad: true));
+        Assert.That(ex.Message, Does.Contain("not supported"));
+        Assert.That(ex.Message, Does.Contain("float, double"));
+    }
+
+    [Test]
+    public void ReverseGradTensor_Decimal_ThrowsTypeValidationException()
+    {
+        // Arrange
+        var data = new decimal[] { 1.0m, 2.0m, 3.0m };
+        var column = NivaraColumn<decimal>.Create(data);
+
+        // Act & Assert
+        var ex = Assert.Throws<TypeValidationException>(() => new ReverseGradTensor<decimal>(column, requiresGrad: true));
         Assert.That(ex.Message, Does.Contain("not supported"));
         Assert.That(ex.Message, Does.Contain("float, double"));
     }
@@ -100,7 +128,7 @@ public class TypeSafetyTests
         // Arrange
         var data = new float[] { 1.5f, 2.5f, 3.5f };
         var column = NivaraColumn<float>.Create(data);
-        var floatTensor = new GradTensor<float>(column, requiresGrad: true);
+        var floatTensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
         var doubleTensor = TypeConverter.ToDouble(floatTensor);
@@ -120,7 +148,7 @@ public class TypeSafetyTests
         // Arrange
         var data = new double[] { 1.5, 2.5, 3.5 };
         var column = NivaraColumn<double>.Create(data);
-        var doubleTensor = new GradTensor<double>(column, requiresGrad: true);
+        var doubleTensor = new ReverseGradTensor<double>(column, requiresGrad: true);
 
         // Act
         var floatTensor = TypeConverter.ToFloat(doubleTensor);
@@ -140,7 +168,7 @@ public class TypeSafetyTests
         // Arrange
         var data = new float[] { 1.0f, 2.0f };
         var column = NivaraColumn<float>.Create(data);
-        var floatTensor = new GradTensor<float>(column, requiresGrad: false);
+        var floatTensor = new ReverseGradTensor<float>(column, requiresGrad: false);
 
         // Act
         var doubleTensor = TypeConverter.ToDouble(floatTensor);
@@ -155,7 +183,7 @@ public class TypeSafetyTests
         // Arrange
         var data = new float[] { 1.0f, 2.0f };
         var column = NivaraColumn<float>.Create(data);
-        var floatTensor = new GradTensor<float>(column, requiresGrad: false);
+        var floatTensor = new ReverseGradTensor<float>(column, requiresGrad: false);
 
         // Act
         var doubleTensor = TypeConverter.ToDouble(floatTensor, requiresGrad: true);
@@ -165,12 +193,28 @@ public class TypeSafetyTests
     }
 
     [Test]
-    public void GradTensor_ToFloat_ConvertsCorrectly()
+    public void TypeConverter_Convert_PreservesNullMaskAndShape()
+    {
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.5f, null, 3.5f, 4.5f });
+        var floatTensor = new ReverseGradTensor<float>(column, requiresGrad: true);
+        floatTensor.Reshape(2, 2);
+
+        var doubleTensor = TypeConverter.ToDouble(floatTensor);
+
+        Assert.That(doubleTensor.Shape, Is.EqualTo(new[] { 2, 2 }));
+        Assert.That(doubleTensor[0], Is.EqualTo(1.5).Within(0.0001));
+        Assert.That(doubleTensor.IsNull(1), Is.True);
+        Assert.That(doubleTensor[2], Is.EqualTo(3.5).Within(0.0001));
+        Assert.That(doubleTensor[3], Is.EqualTo(4.5).Within(0.0001));
+    }
+
+    [Test]
+    public void ReverseGradTensor_ToFloat_ConvertsCorrectly()
     {
         // Arrange
         var data = new double[] { 1.5, 2.5, 3.5 };
         var column = NivaraColumn<double>.Create(data);
-        var doubleTensor = new GradTensor<double>(column, requiresGrad: true);
+        var doubleTensor = new ReverseGradTensor<double>(column, requiresGrad: true);
 
         // Act
         var floatTensor = doubleTensor.ToFloat();
@@ -183,12 +227,12 @@ public class TypeSafetyTests
     }
 
     [Test]
-    public void GradTensor_ToDouble_ConvertsCorrectly()
+    public void ReverseGradTensor_ToDouble_ConvertsCorrectly()
     {
         // Arrange
         var data = new float[] { 1.5f, 2.5f, 3.5f };
         var column = NivaraColumn<float>.Create(data);
-        var floatTensor = new GradTensor<float>(column, requiresGrad: true);
+        var floatTensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
         var doubleTensor = floatTensor.ToDouble();
@@ -201,14 +245,14 @@ public class TypeSafetyTests
     }
 
     [Test]
-    public void NivaraColumn_ToGradTensor_Float_Works()
+    public void NivaraColumn_ToReverseGradTensor_Float_Works()
     {
         // Arrange
         var data = new float[] { 1.0f, 2.0f, 3.0f };
         var column = NivaraColumn<float>.Create(data);
 
         // Act
-        var tensor = column.ToGradTensor(requiresGrad: true);
+        var tensor = column.ToReverseGradTensor(requiresGrad: true);
 
         // Assert
         Assert.That(tensor, Is.Not.Null);
@@ -217,7 +261,7 @@ public class TypeSafetyTests
     }
 
     [Test]
-    public void NivaraSeries_ToGradTensor_Double_Works()
+    public void NivaraSeries_ToReverseGradTensor_Double_Works()
     {
         // Arrange
         var data = new double[] { 1.0, 2.0, 3.0 };
@@ -225,7 +269,7 @@ public class TypeSafetyTests
         var series = new NivaraSeries<double>(column);
 
         // Act
-        var tensor = series.ToGradTensor(requiresGrad: true);
+        var tensor = series.ToReverseGradTensor(requiresGrad: true);
 
         // Assert
         Assert.That(tensor, Is.Not.Null);

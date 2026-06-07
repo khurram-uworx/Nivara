@@ -18,8 +18,8 @@ public class BackwardPassTests
         // Expected: dy/da = 1.0, dy/db = 1.0
         var aData = NivaraColumn<float>.Create(new float[] { 2.0f });
         var bData = NivaraColumn<float>.Create(new float[] { 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
         var y = GradOperations.Add(a, b);
@@ -39,8 +39,8 @@ public class BackwardPassTests
         // Expected: dy/da = b = 3.0, dy/db = a = 2.0
         var aData = NivaraColumn<float>.Create(new float[] { 2.0f });
         var bData = NivaraColumn<float>.Create(new float[] { 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
         var y = GradOperations.Multiply(a, b);
@@ -61,9 +61,9 @@ public class BackwardPassTests
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f });
         var bData = NivaraColumn<float>.Create(new float[] { 2.0f });
         var cData = NivaraColumn<float>.Create(new float[] { 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
-        var c = new GradTensor<float>(cData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
+        var c = new ReverseGradTensor<float>(cData, requiresGrad: true);
 
         // Act
         var sum = GradOperations.Add(a, b);
@@ -85,7 +85,7 @@ public class BackwardPassTests
         // Arrange: y = a + a (tensor used twice)
         // Expected: dy/da = 2.0 (gradient accumulates)
         var aData = NivaraColumn<float>.Create(new float[] { 5.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
         var y = GradOperations.Add(a, a);
@@ -102,8 +102,8 @@ public class BackwardPassTests
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
         var bData = NivaraColumn<float>.Create(new float[] { 4.0f, 5.0f, 6.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
         var y = GradOperations.Add(a, b);
@@ -114,11 +114,33 @@ public class BackwardPassTests
     }
 
     [Test]
+    public void Backward_ExplicitGradientWithSameLengthDifferentShape_ThrowsException()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f, 4.0f }),
+            requiresGrad: true);
+        var b = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 5.0f, 6.0f, 7.0f, 8.0f }),
+            requiresGrad: true);
+        a.Reshape(2, 2);
+        b.Reshape(2, 2);
+        var y = GradOperations.MatMul(a, b);
+
+        var gradient = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f, 1.0f }),
+            requiresGrad: false);
+        gradient.Reshape(4);
+
+        var ex = Assert.Throws<ArgumentException>(() => y.Backward(gradient));
+        Assert.That(ex!.Message, Does.Contain("Gradient shape mismatch"));
+    }
+
+    [Test]
     public void Backward_TensorWithoutRequiresGrad_ThrowsException()
     {
         // Arrange
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: false);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: false);
 
         // Act & Assert
         var ex = Assert.Throws<InvalidOperationException>(() => a.Backward());
@@ -132,8 +154,8 @@ public class BackwardPassTests
         // Expected: dy/da = 1.0, dy/db = -1.0
         var aData = NivaraColumn<float>.Create(new float[] { 5.0f });
         var bData = NivaraColumn<float>.Create(new float[] { 3.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
         var y = GradOperations.Subtract(a, b);
@@ -153,8 +175,8 @@ public class BackwardPassTests
         // Expected: dy/da = 1/b = 0.5, dy/db = -a/(b^2) = -6/4 = -1.5
         var aData = NivaraColumn<float>.Create(new float[] { 6.0f });
         var bData = NivaraColumn<float>.Create(new float[] { 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
         var y = GradOperations.Divide(a, b);
@@ -177,10 +199,10 @@ public class BackwardPassTests
         var bData = NivaraColumn<float>.Create(new float[] { 3.0f });
         var cData = NivaraColumn<float>.Create(new float[] { 8.0f });
         var dData = NivaraColumn<float>.Create(new float[] { 2.0f });
-        var a = new GradTensor<float>(aData, requiresGrad: true);
-        var b = new GradTensor<float>(bData, requiresGrad: true);
-        var c = new GradTensor<float>(cData, requiresGrad: true);
-        var d = new GradTensor<float>(dData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
+        var c = new ReverseGradTensor<float>(cData, requiresGrad: true);
+        var d = new ReverseGradTensor<float>(dData, requiresGrad: true);
 
         // Act
         var product = GradOperations.Multiply(a, b);

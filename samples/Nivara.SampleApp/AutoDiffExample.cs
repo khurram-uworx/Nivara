@@ -37,7 +37,7 @@ public static class AutoDiffExample
         Console.WriteLine("--------------------------------------");
 
         var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f, 4.0f });
-        var x = new GradTensor<float>(data, requiresGrad: true);
+        var x = new ReverseGradTensor<float>(data, requiresGrad: true);
 
         // Sum operation
         var sum = GradOperations.Sum(x);
@@ -67,7 +67,7 @@ public static class AutoDiffExample
         Console.WriteLine("---------------------------------------------");
 
         var activationData = NivaraColumn<float>.Create(new float[] { -2.0f, -1.0f, 0.0f, 1.0f, 2.0f });
-        var a = new GradTensor<float>(activationData, requiresGrad: true);
+        var a = new ReverseGradTensor<float>(activationData, requiresGrad: true);
 
         Console.WriteLine($"Input: [-2, -1, 0, 1, 2]");
         Console.WriteLine();
@@ -99,9 +99,9 @@ public static class AutoDiffExample
         var weightData = NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f, 0.5f });
         var biasData = NivaraColumn<float>.Create(new float[] { -1.0f, 0.0f, 1.0f });
 
-        var input = new GradTensor<float>(inputData, requiresGrad: false);
-        var weight = new GradTensor<float>(weightData, requiresGrad: true);
-        var bias = new GradTensor<float>(biasData, requiresGrad: true);
+        var input = new ReverseGradTensor<float>(inputData, requiresGrad: false);
+        var weight = new ReverseGradTensor<float>(weightData, requiresGrad: true);
+        var bias = new ReverseGradTensor<float>(biasData, requiresGrad: true);
 
         Console.WriteLine("Computing: y = mean(relu(x * w + b))");
         Console.WriteLine($"Input (x): [1, 2, 3]");
@@ -141,10 +141,10 @@ public static class AutoDiffExample
         Console.WriteLine("--------------------------------------------");
 
         // Create parameters for a simple model
-        var weights = new GradTensor<float>(
+        var weights = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f, 0.5f }),
             requiresGrad: true);
-        var bias = new GradTensor<float>(
+        var bias = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0.1f }),
             requiresGrad: true);
 
@@ -193,8 +193,8 @@ public static class AutoDiffExample
 
         // Demonstrate graph inspection
         Console.WriteLine("Computation graph inspection:");
-        var a = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
-        var b = new GradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
         var result = GradOperations.Add(a, b);
         result = GradOperations.Multiply(result, a);
         result = GradOperations.Sum(result);

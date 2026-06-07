@@ -29,6 +29,9 @@ Where to look (implementation map)
 - Frame-level batch ops
   - `src/Nivara/NivaraFrame.cs` — `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` with null propagation and `OperationDiagnostics` recording.
 
+- AutoDiff optimizer
+  - `src/Nivara.Extensions/AutoDiff/Optimizer/SgdOptimizer.cs` — SGD update with null-skip semantics.
+
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
   - `src/Nivara/Tensors/TensorExtensions.cs` / `TensorInterop.cs` — tensor helpers used across codebase.
@@ -218,6 +221,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets.
 - **NivaraFrame TopKDescending**: added in Phase 3, returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
 - **NivaraFrame RowNorms/ColumnNorms**: added in Phase 3, null-propagating; batch TensorPrimitives kernel for RowNorms not yet implemented.
+- **Phase C complete**: `SgdOptimizer.SgdUpdate` added in `src/Nivara.Extensions/AutoDiff/Optimizer/`. `Negate` and `Abs` operations added to `GradOperations`. 1084 tests passing.
 
 ---
 
@@ -226,7 +230,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SgdOptimizer.SgdUpdate<T>()`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
