@@ -39,7 +39,7 @@ Today this is much better than the original manual loop. `CosineSimilarity` now 
 Current limitations to review:
 
 - Product embeddings are represented as columns, not rows. That is natural for Nivara's columnar model, but many ML engineers expect samples as rows and features as columns.
-- Null-containing vectors currently throw in batch similarity operations instead of producing null scores.
+- Null-containing vectors produce null-propagating results (mask-OR) in batch similarity operations — null inputs yield null outputs rather than throwing.
 - The result ranking is positional. The result series has column names as its index, but the common ergonomic path is still to map positions back to names.
 
 ## 2. Direct Tensor Conversion For BCL Interop
@@ -106,7 +106,7 @@ Current limitations to review:
 
 - Dot product operates across columns.
 - Input length must match the frame row count.
-- Nulls currently throw instead of producing a null score for affected candidates.
+- Nulls propagate via mask-OR (null input → null output) rather than throwing.
 
 ## 4. Existing One-Dimensional Tensor Helpers
 
@@ -127,7 +127,7 @@ Current limitations to review:
 
 - These methods are good for individual vectors.
 - Batch operations across a frame are newer and should be made consistent with these helpers.
-- Some methods throw on nulls instead of returning nullable results.
+- Null-throwing behavior varies across individual helpers; `Dot` and `CosineSimilarity` on `NivaraFrame` now propagate nulls, but legacy series-level helpers may still throw.
 
 ## 5. Frame-To-Tensor Shape Convention
 
@@ -164,7 +164,7 @@ Current limitations to review:
 
 This example is another common ML workflow: score a query embedding against a table of document embeddings.
 
-This is intentionally shown in the usual ML orientation: each row is a document, and each embedding dimension is a numeric feature column. Today, Nivara does not have row-wise batch cosine similarity, so this requires a manual row loop.
+This is intentionally shown in the usual ML orientation: each row is a document, and each embedding dimension is a numeric feature column. Today, Nivara does not have row-wise batch cosine similarity, so this requires a manual row loop. (Note: `NivaraFrame.TopKDescending` and `RowNorms`/`ColumnNorms` are available for null-propagating batch similarity — see section 3 for column-wise batch dot product.)
 
 ```csharp
 using Nivara;
@@ -231,4 +231,4 @@ When showing these examples to ML and AI engineers, useful feedback is:
 
 ## Current Roadmap Link
 
-See `docs/TENSORS-IMPROVEMENTS.md` for the current tensor-improvement roadmap and the issues we should fix before expanding the API surface.
+See `docs/TENSORS-GAPS.md` for the current tensor-improvement roadmap and the gaps we should address before expanding the API surface.

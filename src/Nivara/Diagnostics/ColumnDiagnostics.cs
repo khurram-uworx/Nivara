@@ -1,4 +1,5 @@
 using System.Numerics;
+using Nivara;
 
 namespace Nivara.Diagnostics;
 
@@ -102,23 +103,7 @@ public sealed class ColumnDiagnostics
     /// <summary>
     /// Gets the recommended kernel type for operations on this column
     /// </summary>
-    public KernelType RecommendedKernel
-    {
-        get
-        {
-            if (!IsVectorizable)
-                return KernelType.Scalar;
-
-            if (!IsHardwareAccelerated)
-                return KernelType.Scalar;
-
-            // For small arrays, scalar operations might be faster due to overhead
-            if (Length < VectorSize * 4)
-                return KernelType.Scalar;
-
-            return KernelType.Vectorized;
-        }
-    }
+    public KernelType RecommendedKernel => KernelSelector.DetermineKernelType(Length, IsVectorizable);
 
     /// <summary>
     /// Gets the estimated memory usage in bytes

@@ -165,7 +165,7 @@ public class TensorInteropTests
     {
         // Arrange
         var data = new float[] { 1.5f, 2.5f, 3.5f };
-        var tensorSpan = new TensorSpan<float>(data, new ReadOnlySpan<nint>(new nint[] { 3 }), default);
+        var tensorSpan = new ReadOnlyTensorSpan<float>(data, new ReadOnlySpan<nint>(new nint[] { 3 }), default);
 
         // Act
         using var series = TensorInterop.FromTensorSpan(tensorSpan);
@@ -185,7 +185,7 @@ public class TensorInteropTests
     {
         // Arrange
         var data = new double[] { 1.0, 2.0, 3.0, 4.0 };
-        var tensorSpan = new TensorSpan<double>(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }), default);
+        var tensorSpan = new ReadOnlyTensorSpan<double>(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }), default);
 
         // Act & Assert
         try
@@ -259,7 +259,7 @@ public class TensorInteropTests
         genericMethod.Invoke(this, null);
     }
 
-    private void RoundTripTest_Generic<T>() where T : struct, INumber<T>
+    private void RoundTripTest_Generic<T>() where T : unmanaged, INumber<T>
     {
         // Create test data based on type
         var testData = CreateTestData<T>();
@@ -277,7 +277,7 @@ public class TensorInteropTests
         }
     }
 
-    private T[] CreateTestData<T>() where T : struct, INumber<T>
+    private T[] CreateTestData<T>() where T : unmanaged, INumber<T>
     {
         if (typeof(T) == typeof(int))
             return (T[])(object)new int[] { 1, 2, 3, 4, 5 };
@@ -455,10 +455,10 @@ public class TensorInteropTests
     {
         // Arrange
         var data = new float[] { 1.0f, 2.0f, 3.0f, 4.0f };
-        var tensorSpan = new TensorSpan<float>(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }), default);
+        var tensorSpan = new ReadOnlyTensorSpan<float>(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }), default);
 
         // Act
-        using var series = TensorInterop.FlattenFromTensorSpan(tensorSpan);
+        using var series = TensorInterop.FlattenFromTensorSpan<float>(tensorSpan);
 
         // Assert
         Assert.That(series.Length, Is.EqualTo(4));
@@ -609,6 +609,219 @@ public class TensorInteropTests
 
         // Assert
         Assert.That(indices, Is.EqualTo(new[] { 2, 3, 0, 4, 1 }));
+    }
+
+    #endregion
+
+    #region Ranking Workflow
+
+    [Test]
+    public void TopKDescending_WithStringLabels_ReturnsTopKInOrder()
+    {
+        var data = new float[] { 0.5f, 0.9f, 0.1f, 0.7f };
+        var labels = new[] { "A", "B", "C", "D" };
+        using var series = NivaraSeries<float>.Create(data, labels);
+
+        var result = series.TopKDescending(2);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result[0].Label, Is.EqualTo("B"));
+        Assert.That(result[0].Score, Is.EqualTo(0.9f));
+        Assert.That(result[1].Label, Is.EqualTo("D"));
+        Assert.That(result[1].Score, Is.EqualTo(0.7f));
+    }
+
+    [Test]
+    public void TopKDescending_WithPositionalIndex_ReturnsNullLabels()
+    {
+        var data = new float[] { 0.5f, 0.9f, 0.1f, 0.7f };
+        using var series = NivaraSeries<float>.Create(data);
+
+        var result = series.TopKDescending(2);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result[0].Label, Is.Null);
+        Assert.That(result[1].Label, Is.Null);
+    }
+
+    [Test]
+    public void TopKDescending_WithCountZero_ReturnsEmpty()
+    {
+        using var series = NivaraSeries<float>.Create(new[] { 1.0f, 2.0f });
+
+        var result = series.TopKDescending(0);
+
+        Assert.That(result, Is.Empty);
+    }
+
+    [Test]
+    public void TopKDescending_WithNegativeCount_Throws()
+    {
+        using var series = NivaraSeries<float>.Create(new[] { 1.0f, 2.0f });
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => series.TopKDescending(-1));
+    }
+
+    [Test]
+    public void TopKDescending_WithCountLargerThanLength_ReturnsAll()
+    {
+        var data = new float[] { 0.5f, 0.9f };
+        using var series = NivaraSeries<float>.Create(data);
+
+        var result = series.TopKDescending(10);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void TopKDescending_WithEmptySeries_ReturnsEmpty()
+    {
+        using var series = new NivaraSeries<float>();
+
+        var result = series.TopKDescending(5);
+
+        Assert.That(result, Is.Empty);
+    }
+
+    [Test]
+    public void RankingWorkflow_CosineSimilarityThenArgSort_ReturnsCorrectOrder()
+    {
+        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
+        using var products = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
+            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
+        });
+
+        using var scores = products.CosineSimilarity(user);
+        var ranking = scores.ArgSortDescending();
+
+        Assert.That(ranking.Length, Is.EqualTo(3));
+        Assert.That(ranking[0], Is.EqualTo(0));
+        Assert.That(ranking[1], Is.EqualTo(2));
+        Assert.That(ranking[2], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void RankingWorkflow_CosineSimilarityThenTopK_ReturnsLabeledResults()
+    {
+        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
+        using var products = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
+            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
+        });
+
+        using var scores = products.CosineSimilarity(user);
+        var top2 = scores.TopKDescending(2);
+
+        Assert.That(top2.Length, Is.EqualTo(2));
+        Assert.That(top2[0].Label, Is.EqualTo("A"));
+        Assert.That(top2[1].Label, Is.EqualTo("C"));
+    }
+
+    [Test]
+    public void ColumnNorms_WithFloatColumns_MatchesTensorPrimitives()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 4.0f })),
+            ("Y", (IColumn)NivaraColumn<float>.Create(new[] { 0.0f, 1.0f })),
+        });
+
+        using var norms = frame.ColumnNorms<float>();
+
+        Assert.That(norms.Length, Is.EqualTo(2));
+        Assert.That(norms[0], Is.EqualTo(TensorPrimitives.Norm(new[] { 3.0f, 4.0f })).Within(1e-6f));
+        Assert.That(norms[1], Is.EqualTo(TensorPrimitives.Norm(new[] { 0.0f, 1.0f })).Within(1e-6f));
+        Assert.That(norms.IsNull(0), Is.False);
+        Assert.That(norms.IsNull(1), Is.False);
+    }
+
+    [Test]
+    public void ColumnNorms_WithNullColumn_ReturnsNullForThatColumn()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 4.0f })),
+            ("Y", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 1.0f })),
+        });
+
+        using var norms = frame.ColumnNorms<float>();
+
+        Assert.That(norms.Length, Is.EqualTo(2));
+        Assert.That(norms.IsNull(0), Is.False);
+        Assert.That(norms.IsNull(1), Is.True);
+    }
+
+    [Test]
+    public void RowNorms_WithFloatRows_MatchesTensorPrimitives()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 0.0f })),
+            ("Y", (IColumn)NivaraColumn<float>.Create(new[] { 4.0f, 1.0f })),
+        });
+
+        using var norms = frame.RowNorms<float>();
+
+        Assert.That(norms.Length, Is.EqualTo(2));
+        Assert.That(norms[0], Is.EqualTo(TensorPrimitives.Norm(new[] { 3.0f, 4.0f })).Within(1e-6f));
+        Assert.That(norms[1], Is.EqualTo(TensorPrimitives.Norm(new[] { 0.0f, 1.0f })).Within(1e-6f));
+        Assert.That(norms.IsNull(0), Is.False);
+        Assert.That(norms.IsNull(1), Is.False);
+    }
+
+    [Test]
+    public void RowNorms_WithNullInRow_ReturnsNullForThatRow()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 0.0f })),
+            ("Y", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 1.0f })),
+        });
+
+        using var norms = frame.RowNorms<float>();
+
+        Assert.That(norms.Length, Is.EqualTo(2));
+        Assert.That(norms.IsNull(0), Is.True);
+        Assert.That(norms.IsNull(1), Is.False);
+    }
+
+    [Test]
+    public void Dot_WithNullVector_ReturnsNullForAllColumns()
+    {
+        using var vector = new NivaraSeries<float>(NivaraColumn<float>.CreateFromNullable(new float?[] { null, 0.1f, 0.6f, 0.3f }));
+        using var products = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
+        });
+
+        using var scores = products.Dot(vector);
+
+        Assert.That(scores.Length, Is.EqualTo(2));
+        Assert.That(scores.IsNull(0), Is.True);
+        Assert.That(scores.IsNull(1), Is.True);
+    }
+
+    [Test]
+    public void CosineSimilarity_WithNullInOneColumn_ReturnsNullOnlyForThatColumn()
+    {
+        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
+        using var products = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
+            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { 0.1f, null, 0.2f, 0.7f })),
+        });
+
+        using var scores = products.CosineSimilarity(user);
+
+        Assert.That(scores.Length, Is.EqualTo(2));
+        Assert.That(scores.IsNull(0), Is.False);
+        Assert.That(scores.IsNull(1), Is.True);
     }
 
     #endregion

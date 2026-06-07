@@ -23,6 +23,12 @@ Where to look (implementation map)
 - Tensor helpers & interop
   - `src/Nivara/Tensors/TensorInterop.cs` — conversions `Series/Frame <-> Tensor`, `TensorSpan` utilities, reshape/flatten helpers.
 
+- Kernel selection & diagnostics
+  - `src/Nivara/KernelSelector.cs` — centralized `DetermineKernelType` heuristics (used by `NivaraColumn` and `ColumnDiagnostics`).
+
+- Frame-level batch ops
+  - `src/Nivara/NivaraFrame.cs` — `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` with null propagation and `OperationDiagnostics` recording.
+
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
   - `src/Nivara/Tensors/TensorExtensions.cs` / `TensorInterop.cs` — tensor helpers used across codebase.
@@ -37,7 +43,7 @@ Key rules for AI Agents to follow when generating tensor-aware code
    - When creating `TensorSpan` from an existing span, ensure there are no nulls; otherwise throw or fallback to copy.
 
 3. Kernel use
-   - Use `TensorPrimitives` for `float` and `double` arithmetic/comparisons.
+   - Use `TensorPrimitives` for `float` and `double` arithmetic/comparisons. Prefer generic `TensorPrimitives` overloads (e.g., `TensorPrimitives.CosineSimilarity<T>`) when available for type flexibility without branching.
    - Provide robust scalar fallbacks using `Span<T>` loops or `INumber<T>` where available.
 
 4. Null-mask semantics
@@ -46,7 +52,7 @@ Key rules for AI Agents to follow when generating tensor-aware code
 
 5. Minimize allocations
    - Avoid calling `Tensor.FlattenTo` repeatedly in hot loops.
-   - For temporary buffers larger than 1024 elements, rent arrays from a `BufferPool` (see `src/Nivara.Extensions/IO/BufferPool.cs`) and return promptly.
+   - For temporary buffers larger than 1024 elements, rent arrays from `ArrayPool<T>.Shared` (core) or `BufferPool` (Extensions) and return promptly.
    - Consider caching the flattened buffer inside `Nivara.Storage.TensorStorage` behind an `internal` API if multiple accesses are expected.
 
 6. Kernel selection heuristics
@@ -67,11 +73,11 @@ Key rules for AI Agents to follow when generating tensor-aware code
    - Use `ColumnDiagnostics`, `DiagnosticsTracker`, and `QueryDiagnostics` when changing kernel selection, query execution, or optimization behavior.
 
 Suggested small, safe improvements to implement (prioritized)
-- Cache flattened buffer in `Nivara.Storage.TensorStorage` (internal, lazy) to avoid repeated `FlattenTo` allocations for multi-read workloads.
-  - Provide `internal ReadOnlySpan<T> GetFlattenedSpan()` returning a span over a cached array; clear on `Dispose()`.
-- Add internal `AsTensorSpanIfNoNulls()` to `Nivara.Storage.TensorStorage` to get zero-copy `TensorSpan<T>` when `HasNulls == false`.
-- Add `BufferPool.Rent(int size)` usage in `NivaraColumn`'s heavy kernel pre-copy paths (threshold >= 1024).
-- Implement `DetermineKernelType(int length, bool isVectorizable)` central helper and use it in `NivaraColumn` for arithmetic/comparisons.
+- ✓ Cache flattened buffer in `Nivara.Storage.TensorStorage` (internal, lazy) — DONE via `GetFlattenedSpan()` in Phase 0.
+- ✓ Add internal `AsTensorSpanIfNoNulls()` to `Nivara.Storage.TensorStorage` — DONE (Phase 0).
+- ✓ Add `BufferPool.Rent(int size)` usage in `NivaraColumn` heavy paths — DONE (Phase 0).
+- ✓ Implement `DetermineKernelType` central helper — DONE as `KernelSelector.DetermineKernelType()` (Phase 1).
+- Add `RowNorms` batch kernel on `NivaraFrame` (not yet implemented).
 
 Common gotchas (use these as lint-like checks in generated code)
 - `ReadOnlyMemory<T>?` has `HasValue == true` for empty memory; always check `.Length > 0` to decide if mask exists.
@@ -210,6 +216,8 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Column creation dynamic dispatch**: improve coverage for less common CLR types.
 - **Internal Span access**: consider adding `internal AsSpan()` methods to `NivaraColumn` for zero-copy tensor interop.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets.
+- **NivaraFrame TopKDescending**: added in Phase 3, returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
+- **NivaraFrame RowNorms/ColumnNorms**: added in Phase 3, null-propagating; batch TensorPrimitives kernel for RowNorms not yet implemented.
 
 ---
 
@@ -218,7 +226,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
@@ -228,4 +236,6 @@ References (implementations to inspect)
 - `src/Nivara/Storage/TensorStorage.cs`
 - `src/Nivara/NivaraColumn.cs`
 - `src/Nivara/Tensors/TensorInterop.cs`
+- `src/Nivara/KernelSelector.cs`
+- `src/Nivara/NivaraFrame.cs`
 - `src/Nivara/Storage/MemoryStorage.cs`

@@ -12,7 +12,7 @@ public static class TensorExtensions
     /// <summary>
     /// Performs tensor-aware element-wise addition using TensorPrimitives for optimized operations.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
+    /// <typeparam name="T">The unmanaged numeric type</typeparam>
     /// <param name="left">The left operand series</param>
     /// <param name="right">The right operand series</param>
     /// <returns>A new NivaraSeries containing the element-wise sum</returns>
@@ -20,7 +20,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contain null values</exception>
     public static NivaraSeries<T> AddTensor<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
-        where T : struct, INumber<T>
+        where T : unmanaged
     {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
@@ -77,7 +77,7 @@ public static class TensorExtensions
     /// <summary>
     /// Performs tensor-aware element-wise multiplication using TensorPrimitives for optimized operations.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
+    /// <typeparam name="T">The unmanaged numeric type</typeparam>
     /// <param name="left">The left operand series</param>
     /// <param name="right">The right operand series</param>
     /// <returns>A new NivaraSeries containing the element-wise product</returns>
@@ -85,7 +85,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contain null values</exception>
     public static NivaraSeries<T> MultiplyTensor<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
-        where T : struct, INumber<T>
+        where T : unmanaged
     {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
@@ -148,7 +148,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentNullException">Thrown when series is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contains null values</exception>
     public static T SumTensor<T>(this NivaraSeries<T> series)
-        where T : struct, INumber<T>
+        where T : unmanaged, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(series);
 
@@ -202,7 +202,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contain null values</exception>
     public static T DotProduct<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
-        where T : struct, INumber<T>
+        where T : unmanaged, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
@@ -263,7 +263,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentNullException">Thrown when series is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contains null values</exception>
     public static T Norm<T>(this NivaraSeries<T> series)
-        where T : struct, INumber<T>
+        where T : unmanaged, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(series);
 
@@ -318,14 +318,14 @@ public static class TensorExtensions
     /// <summary>
     /// Applies a tensor-aware transformation function to each element using TensorPrimitives when possible.
     /// </summary>
-    /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
+    /// <typeparam name="T">The unmanaged numeric type</typeparam>
     /// <param name="series">The series to transform</param>
     /// <param name="function">The transformation function to apply</param>
     /// <returns>A new NivaraSeries with the transformed values</returns>
     /// <exception cref="ArgumentNullException">Thrown when series or function is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contains null values</exception>
     public static NivaraSeries<T> TransformTensor<T>(this NivaraSeries<T> series, Func<T, T> function)
-        where T : struct, INumber<T>
+        where T : unmanaged
     {
         ArgumentNullException.ThrowIfNull(series);
         ArgumentNullException.ThrowIfNull(function);
@@ -366,7 +366,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentException">Thrown when matrix dimensions are incompatible</exception>
     /// <exception cref="InvalidOperationException">Thrown when frames contain null values or non-numeric columns</exception>
     public static NivaraFrame MatrixMultiply<T>(this NivaraFrame left, NivaraFrame right)
-        where T : struct, INumber<T>
+        where T : unmanaged, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);

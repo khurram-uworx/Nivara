@@ -180,10 +180,10 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     }
 
     /// <summary>
-    /// Gets a tensor span over the underlying tensor data when no null mask is present.
+    /// Gets a read-only tensor span over the underlying tensor data when no null mask is present.
     /// </summary>
     /// <exception cref="InvalidOperationException">Thrown when the storage contains null values.</exception>
-    internal TensorSpan<T> AsTensorSpanIfNoNulls()
+    internal ReadOnlyTensorSpan<T> AsTensorSpanIfNoNulls()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 

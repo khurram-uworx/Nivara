@@ -16,3 +16,12 @@ approval_mode = "approve"
 
 [mcp_servers.code-memory.tools.get_edit_context]
 approval_mode = "approve"
+
+[mcp_servers.code-memory.tools.get_component_clusters]
+approval_mode = "approve"
+
+[mcp_servers.code-memory.tools.impact_analysis]
+approval_mode = "approve"
+
+[mcp_servers.code-memory.tools.rescan_repository]
+approval_mode = "approve"

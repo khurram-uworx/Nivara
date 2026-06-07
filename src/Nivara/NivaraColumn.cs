@@ -1,6 +1,7 @@
 using Nivara.Diagnostics;
 using Nivara.Helpers;
 using Nivara.Storage;
+using System.Buffers;
 using System.Numerics.Tensors;
 
 namespace Nivara;
@@ -473,29 +474,39 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage
         if (storage.StorageType == StorageType.Tensor)
         {
-            // Get data using the interface
-            var dataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledDataBuffer = null;
+            try
             {
-                dataBuffer[i] = storage[i];
+                var dataBuffer = Length >= 1024
+                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
+                {
+                    dataBuffer[i] = storage[i];
+                }
+                var result = new T[Length];
+
+                // Use our helper method for multiplication
+                MultiplyTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
+
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var nullMask = storage.NullMask;
+                if (!nullMask.IsEmpty)
+                {
+                    var nullMaskArray = nullMask.ToArray();
+                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+                }
+
+                // Create result storage using the factory, passing the null mask
+                var resultStorage = ColumnStorageFactory.Create(result.AsSpan(), resultNullMask);
+                return new NivaraColumn<T>(resultStorage);
             }
-            var result = new T[dataBuffer.Length];
-
-            // Use our helper method for multiplication
-            MultiplyTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = storage.NullMask;
-            if (!nullMask.IsEmpty)
+            finally
             {
-                var nullMaskArray = nullMask.ToArray();
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+                if (pooledDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
             }
-
-            // Create result storage using the factory
-            var resultStorage = ColumnStorageFactory.Create(result.AsSpan());
-            return new NivaraColumn<T>(resultStorage);
         }
         else if (storage is MemoryStorage<T> memoryStorage)
         {
@@ -544,44 +555,59 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage combinations
         if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
         {
-            // Both are tensor storage
-            var leftDataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledLeftDataBuffer = null;
+            T[]? pooledRightDataBuffer = null;
+            try
             {
-                leftDataBuffer[i] = storage[i];
-            }
-            var rightDataBuffer = new T[other.storage.Length];
-            for (int i = 0; i < other.storage.Length; i++)
-            {
-                rightDataBuffer[i] = other.storage[i];
-            }
-            var result = new T[leftDataBuffer.Length];
-
-            // Use our helper method for addition
-            AddTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var leftNullMask = storage.NullMask;
-            var rightNullMask = other.storage.NullMask;
-
-            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
-            {
-                var resultNullMaskArray = new bool[result.Length];
-
-                for (int i = 0; i < result.Length; i++)
+                var leftDataBuffer = Length >= 1024
+                    ? (pooledLeftDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
-                    resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                    leftDataBuffer[i] = storage[i];
+                }
+                var rightDataBuffer = Length >= 1024
+                    ? (pooledRightDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < other.storage.Length; i++)
+                {
+                    rightDataBuffer[i] = other.storage[i];
+                }
+                var result = new T[Length];
+
+                // Use our helper method for addition
+                AddTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
+
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var leftNullMask = storage.NullMask;
+                var rightNullMask = other.storage.NullMask;
+
+                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                {
+                    var resultNullMaskArray = new bool[result.Length];
+
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                    }
+
+                    resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
                 }
 
-                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+                // Create result storage using the factory, passing the null mask
+                var resultStorage = ColumnStorageFactory.Create(result.AsSpan(), resultNullMask);
+                return new NivaraColumn<T>(resultStorage);
             }
-
-            // Create result storage using the factory
-            var resultStorage = ColumnStorageFactory.Create(result.AsSpan());
-            return new NivaraColumn<T>(resultStorage);
+            finally
+            {
+                if (pooledLeftDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledLeftDataBuffer);
+                if (pooledRightDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledRightDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
@@ -628,44 +654,59 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage combinations
         if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
         {
-            // Both are tensor storage
-            var leftDataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledLeftDataBuffer = null;
+            T[]? pooledRightDataBuffer = null;
+            try
             {
-                leftDataBuffer[i] = storage[i];
-            }
-            var rightDataBuffer = new T[other.storage.Length];
-            for (int i = 0; i < other.storage.Length; i++)
-            {
-                rightDataBuffer[i] = other.storage[i];
-            }
-            var result = new T[leftDataBuffer.Length];
-
-            // Use our helper method for multiplication
-            MultiplyTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var leftNullMask = storage.NullMask;
-            var rightNullMask = other.storage.NullMask;
-
-            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
-            {
-                var resultNullMaskArray = new bool[result.Length];
-
-                for (int i = 0; i < result.Length; i++)
+                var leftDataBuffer = Length >= 1024
+                    ? (pooledLeftDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
-                    resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                    leftDataBuffer[i] = storage[i];
+                }
+                var rightDataBuffer = Length >= 1024
+                    ? (pooledRightDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < other.storage.Length; i++)
+                {
+                    rightDataBuffer[i] = other.storage[i];
+                }
+                var result = new T[Length];
+
+                // Use our helper method for multiplication
+                MultiplyTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
+
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var leftNullMask = storage.NullMask;
+                var rightNullMask = other.storage.NullMask;
+
+                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                {
+                    var resultNullMaskArray = new bool[result.Length];
+
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        resultNullMaskArray[i] = leftIsNull || rightIsNull;
+                    }
+
+                    resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
                 }
 
-                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+                // Create result storage using the factory, passing the null mask
+                var resultStorage = ColumnStorageFactory.Create(result.AsSpan(), resultNullMask);
+                return new NivaraColumn<T>(resultStorage);
             }
-
-            // Create result storage using the factory
-            var resultStorage = ColumnStorageFactory.Create(result.AsSpan());
-            return new NivaraColumn<T>(resultStorage);
+            finally
+            {
+                if (pooledLeftDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledLeftDataBuffer);
+                if (pooledRightDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledRightDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
@@ -1087,35 +1128,45 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage
         if (storage.StorageType == StorageType.Tensor)
         {
-            // Get data using the interface
-            var dataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledDataBuffer = null;
+            try
             {
-                dataBuffer[i] = storage[i];
-            }
-            var result = new bool[dataBuffer.Length];
-
-            // Use our helper method for equality comparison
-            EqualsTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = storage.NullMask;
-            if (!nullMask.IsEmpty)
-            {
-                var nullMaskArray = nullMask.ToArray();
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                // Set result to false where nulls exist (null comparisons yield null/false)
-                for (int i = 0; i < result.Length; i++)
+                var dataBuffer = Length >= 1024
+                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    if (nullMaskArray[i])
-                        result[i] = false;
+                    dataBuffer[i] = storage[i];
                 }
-            }
+                var result = new bool[Length];
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
+                // Use our helper method for equality comparison
+                EqualsTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
+
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var nullMask = storage.NullMask;
+                if (!nullMask.IsEmpty)
+                {
+                    var nullMaskArray = nullMask.ToArray();
+                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+                    // Set result to false where nulls exist (null comparisons yield null/false)
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        if (nullMaskArray[i])
+                            result[i] = false;
+                    }
+                }
+
+                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                return new NivaraColumn<bool>(resultStorage);
+            }
+            finally
+            {
+                if (pooledDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> memoryStorage)
         {
@@ -1159,49 +1210,64 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage combinations
         if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
         {
-            // Both are tensor storage
-            var leftDataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledLeftDataBuffer = null;
+            T[]? pooledRightDataBuffer = null;
+            try
             {
-                leftDataBuffer[i] = storage[i];
-            }
-            var rightDataBuffer = new T[other.storage.Length];
-            for (int i = 0; i < other.storage.Length; i++)
-            {
-                rightDataBuffer[i] = other.storage[i];
-            }
-            var result = new bool[leftDataBuffer.Length];
-
-            // Use our helper method for element-wise equality
-            EqualsTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var leftNullMask = storage.NullMask;
-            var rightNullMask = other.storage.NullMask;
-
-            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
-            {
-                var resultNullMaskArray = new bool[result.Length];
-
-                for (int i = 0; i < result.Length; i++)
+                var leftDataBuffer = Length >= 1024
+                    ? (pooledLeftDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
-                    bool hasNull = leftIsNull || rightIsNull;
+                    leftDataBuffer[i] = storage[i];
+                }
+                var rightDataBuffer = Length >= 1024
+                    ? (pooledRightDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < other.storage.Length; i++)
+                {
+                    rightDataBuffer[i] = other.storage[i];
+                }
+                var result = new bool[Length];
 
-                    resultNullMaskArray[i] = hasNull;
+                // Use our helper method for element-wise equality
+                EqualsTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                    // Set result to false where nulls exist (null comparisons yield null/false)
-                    if (hasNull)
-                        result[i] = false;
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var leftNullMask = storage.NullMask;
+                var rightNullMask = other.storage.NullMask;
+
+                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                {
+                    var resultNullMaskArray = new bool[result.Length];
+
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool hasNull = leftIsNull || rightIsNull;
+
+                        resultNullMaskArray[i] = hasNull;
+
+                        // Set result to false where nulls exist (null comparisons yield null/false)
+                        if (hasNull)
+                            result[i] = false;
+                    }
+
+                    resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
                 }
 
-                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                return new NivaraColumn<bool>(resultStorage);
             }
-
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
+            finally
+            {
+                if (pooledLeftDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledLeftDataBuffer);
+                if (pooledRightDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledRightDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
@@ -1359,35 +1425,45 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage
         if (storage.StorageType == StorageType.Tensor)
         {
-            // Get data using the interface
-            var dataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledDataBuffer = null;
+            try
             {
-                dataBuffer[i] = storage[i];
-            }
-            var result = new bool[dataBuffer.Length];
-
-            // Use our helper method for greater than comparison
-            GreaterThanTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = storage.NullMask;
-            if (!nullMask.IsEmpty)
-            {
-                var nullMaskArray = nullMask.ToArray();
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                // Set result to false where nulls exist
-                for (int i = 0; i < result.Length; i++)
+                var dataBuffer = Length >= 1024
+                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    if (nullMaskArray[i])
-                        result[i] = false;
+                    dataBuffer[i] = storage[i];
                 }
-            }
+                var result = new bool[Length];
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
+                // Use our helper method for greater than comparison
+                GreaterThanTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
+
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var nullMask = storage.NullMask;
+                if (!nullMask.IsEmpty)
+                {
+                    var nullMaskArray = nullMask.ToArray();
+                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+                    // Set result to false where nulls exist
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        if (nullMaskArray[i])
+                            result[i] = false;
+                    }
+                }
+
+                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                return new NivaraColumn<bool>(resultStorage);
+            }
+            finally
+            {
+                if (pooledDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> memoryStorage)
         {
@@ -1431,48 +1507,63 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage combinations
         if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
         {
-            // Both are tensor storage
-            var leftDataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledLeftDataBuffer = null;
+            T[]? pooledRightDataBuffer = null;
+            try
             {
-                leftDataBuffer[i] = storage[i];
-            }
-            var rightDataBuffer = new T[other.storage.Length];
-            for (int i = 0; i < other.storage.Length; i++)
-            {
-                rightDataBuffer[i] = other.storage[i];
-            }
-            var result = new bool[leftDataBuffer.Length];
-
-            // Use our helper method for element-wise greater than
-            GreaterThanTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var leftNullMask = storage.NullMask;
-            var rightNullMask = other.storage.NullMask;
-
-            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
-            {
-                var resultNullMaskArray = new bool[result.Length];
-
-                for (int i = 0; i < result.Length; i++)
+                var leftDataBuffer = Length >= 1024
+                    ? (pooledLeftDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
-                    bool hasNull = leftIsNull || rightIsNull;
+                    leftDataBuffer[i] = storage[i];
+                }
+                var rightDataBuffer = Length >= 1024
+                    ? (pooledRightDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < other.storage.Length; i++)
+                {
+                    rightDataBuffer[i] = other.storage[i];
+                }
+                var result = new bool[Length];
 
-                    resultNullMaskArray[i] = hasNull;
+                // Use our helper method for element-wise greater than
+                GreaterThanTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                    if (hasNull)
-                        result[i] = false;
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var leftNullMask = storage.NullMask;
+                var rightNullMask = other.storage.NullMask;
+
+                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                {
+                    var resultNullMaskArray = new bool[result.Length];
+
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool hasNull = leftIsNull || rightIsNull;
+
+                        resultNullMaskArray[i] = hasNull;
+
+                        if (hasNull)
+                            result[i] = false;
+                    }
+
+                    resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
                 }
 
-                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                return new NivaraColumn<bool>(resultStorage);
             }
-
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
+            finally
+            {
+                if (pooledLeftDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledLeftDataBuffer);
+                if (pooledRightDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledRightDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
@@ -1629,35 +1720,45 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage
         if (storage.StorageType == StorageType.Tensor)
         {
-            // Get data using the interface
-            var dataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledDataBuffer = null;
+            try
             {
-                dataBuffer[i] = storage[i];
-            }
-            var result = new bool[dataBuffer.Length];
-
-            // Use our helper method for less than comparison
-            LessThanTensorPrimitive(dataBuffer.AsSpan(), scalar, result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = storage.NullMask;
-            if (!nullMask.IsEmpty)
-            {
-                var nullMaskArray = nullMask.ToArray();
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                // Set result to false where nulls exist
-                for (int i = 0; i < result.Length; i++)
+                var dataBuffer = Length >= 1024
+                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    if (nullMaskArray[i])
-                        result[i] = false;
+                    dataBuffer[i] = storage[i];
                 }
-            }
+                var result = new bool[Length];
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
+                // Use our helper method for less than comparison
+                LessThanTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
+
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var nullMask = storage.NullMask;
+                if (!nullMask.IsEmpty)
+                {
+                    var nullMaskArray = nullMask.ToArray();
+                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+                    // Set result to false where nulls exist
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        if (nullMaskArray[i])
+                            result[i] = false;
+                    }
+                }
+
+                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                return new NivaraColumn<bool>(resultStorage);
+            }
+            finally
+            {
+                if (pooledDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> memoryStorage)
         {
@@ -1701,48 +1802,63 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         // Handle both TensorStorage and MemoryStorage combinations
         if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
         {
-            // Both are tensor storage
-            var leftDataBuffer = new T[storage.Length];
-            for (int i = 0; i < storage.Length; i++)
+            T[]? pooledLeftDataBuffer = null;
+            T[]? pooledRightDataBuffer = null;
+            try
             {
-                leftDataBuffer[i] = storage[i];
-            }
-            var rightDataBuffer = new T[other.storage.Length];
-            for (int i = 0; i < other.storage.Length; i++)
-            {
-                rightDataBuffer[i] = other.storage[i];
-            }
-            var result = new bool[leftDataBuffer.Length];
-
-            // Use our helper method for element-wise less than
-            LessThanTensorPrimitive(leftDataBuffer.AsSpan(), rightDataBuffer.AsSpan(), result.AsSpan());
-
-            // Handle null propagation for tensor storage
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var leftNullMask = storage.NullMask;
-            var rightNullMask = other.storage.NullMask;
-
-            if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
-            {
-                var resultNullMaskArray = new bool[result.Length];
-
-                for (int i = 0; i < result.Length; i++)
+                var leftDataBuffer = Length >= 1024
+                    ? (pooledLeftDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < storage.Length; i++)
                 {
-                    bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                    bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
-                    bool hasNull = leftIsNull || rightIsNull;
+                    leftDataBuffer[i] = storage[i];
+                }
+                var rightDataBuffer = Length >= 1024
+                    ? (pooledRightDataBuffer = ArrayPool<T>.Shared.Rent(Length))
+                    : new T[Length];
+                for (int i = 0; i < other.storage.Length; i++)
+                {
+                    rightDataBuffer[i] = other.storage[i];
+                }
+                var result = new bool[Length];
 
-                    resultNullMaskArray[i] = hasNull;
+                // Use our helper method for element-wise less than
+                LessThanTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                    if (hasNull)
-                        result[i] = false;
+                // Handle null propagation for tensor storage
+                ReadOnlyMemory<bool>? resultNullMask = null;
+                var leftNullMask = storage.NullMask;
+                var rightNullMask = other.storage.NullMask;
+
+                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                {
+                    var resultNullMaskArray = new bool[result.Length];
+
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
+                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool hasNull = leftIsNull || rightIsNull;
+
+                        resultNullMaskArray[i] = hasNull;
+
+                        if (hasNull)
+                            result[i] = false;
+                    }
+
+                    resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
                 }
 
-                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                return new NivaraColumn<bool>(resultStorage);
             }
-
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
+            finally
+            {
+                if (pooledLeftDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledLeftDataBuffer);
+                if (pooledRightDataBuffer != null)
+                    ArrayPool<T>.Shared.Return(pooledRightDataBuffer);
+            }
         }
         else if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
         {
@@ -2523,25 +2639,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         }
     }
 
-    /// <summary>
-    /// Determines which kernel type should be used for operations on this column
-    /// </summary>
-    /// <returns>The recommended kernel type</returns>
     private KernelType DetermineKernelType()
     {
-        // Use the same logic as ColumnDiagnostics.RecommendedKernel
-        if (!storage.IsVectorizable)
-            return KernelType.Scalar;
-
-        if (!System.Numerics.Vector.IsHardwareAccelerated)
-            return KernelType.Scalar;
-
-        // For small arrays, scalar operations might be faster due to overhead
-        var vectorSize = System.Numerics.Vector<byte>.Count;
-        if (Length < vectorSize * 4)
-            return KernelType.Scalar;
-
-        return KernelType.Vectorized;
+        return KernelSelector.DetermineKernelType(Length, storage.IsVectorizable);
     }
 
     /// <summary>
