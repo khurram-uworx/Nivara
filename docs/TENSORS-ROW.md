@@ -1,5 +1,10 @@
 # Row-Oriented Tensor Workflows
 
+> **⚠️ Pre-decision draft.** This document proposes row-wise tensor math APIs
+> (`RowDot`, `RowCosineSimilarity`) that the project has since decided *not* to
+> pursue. See [`TENSORS.md`](TENSORS.md) for the current direction — Nivara
+> focuses on tabular data and hands tensor math to the BCL.
+
 ## Purpose
 
 Nivara should remain a column-first library.

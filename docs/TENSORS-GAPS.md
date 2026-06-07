@@ -1,5 +1,10 @@
 # Tensor Gaps — What Remains
 
+> **⚠️ Pre-decision draft.** Many items here propose tensor math APIs and
+> optimizations that the project has since decided *not* to own. See
+> [`TENSORS.md`](TENSORS.md) for the current direction. This document needs a
+> full revision to remove items that conflict with the new scope.
+
 This document catalogs future tensor performance work, API follow-ups, testing
 gaps, and deferred design decisions. Items are grouped by severity and impact.
 
