@@ -3,6 +3,7 @@ using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
 using Nivara.Storage;
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
@@ -273,7 +274,7 @@ public sealed class NivaraFrame : IFrame
         }
 
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
-        var storage = ColumnStorageFactory.Create(scores.AsSpan(), nullMask);
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(scores, nullMask);
         var valuesColumn = new NivaraColumn<T>(storage);
         var labels = ColumnNames.ToArray();
         var objectIndex = labels.Cast<object>().ToArray();
@@ -297,6 +298,8 @@ public sealed class NivaraFrame : IFrame
 
         if (vector.Length != RowCount)
             throw new ArgumentException($"Vector length ({vector.Length}) must match frame row count ({RowCount})", nameof(vector));
+        if (RowCount == 0)
+            throw new ArgumentException("Cannot compute cosine similarity for empty vectors.", nameof(vector));
 
         var vectorHasNulls = vector.Values.HasNulls;
         var vectorSpan = vector.Values.AsSpan();
@@ -320,7 +323,7 @@ public sealed class NivaraFrame : IFrame
         }
 
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
-        var storage = ColumnStorageFactory.Create(scores.AsSpan(), nullMask);
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(scores, nullMask);
         var valuesColumn = new NivaraColumn<T>(storage);
         var labels = ColumnNames.ToArray();
         var objectIndex = labels.Cast<object>().ToArray();
@@ -372,7 +375,7 @@ public sealed class NivaraFrame : IFrame
         }
 
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
-        var storage = ColumnStorageFactory.Create(norms.AsSpan(), nullMask);
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(norms, nullMask);
         var valuesColumn = new NivaraColumn<T>(storage);
         var labels = ColumnNames.ToArray();
         var objectIndex = labels.Cast<object>().ToArray();
@@ -395,37 +398,48 @@ public sealed class NivaraFrame : IFrame
         var norms = new T[RowCount];
         var nullMaskArray = new bool[RowCount];
         var hasNulls = false;
-        var rowValues = new T[ColumnCount];
+        T[]? pooledRowValues = null;
+        var rowValues = ColumnCount >= 1024
+            ? (pooledRowValues = ArrayPool<T>.Shared.Rent(ColumnCount))
+            : new T[ColumnCount];
 
-        for (int row = 0; row < RowCount; row++)
+        try
         {
-            var rowHasNull = false;
-
-            for (int col = 0; col < ColumnCount; col++)
+            for (int row = 0; row < RowCount; row++)
             {
-                var column = GetColumn<T>(ColumnNames[col]);
-                if (column.IsNull(row))
+                var rowHasNull = false;
+
+                for (int col = 0; col < ColumnCount; col++)
                 {
-                    rowHasNull = true;
-                    break;
+                    var column = GetColumn<T>(ColumnNames[col]);
+                    if (column.IsNull(row))
+                    {
+                        rowHasNull = true;
+                        break;
+                    }
+                    rowValues[col] = column[row];
                 }
-                rowValues[col] = column[row];
-            }
 
-            if (rowHasNull)
-            {
-                nullMaskArray[row] = true;
-                hasNulls = true;
-                norms[row] = default;
+                if (rowHasNull)
+                {
+                    nullMaskArray[row] = true;
+                    hasNulls = true;
+                    norms[row] = default;
+                }
+                else
+                {
+                    norms[row] = NormSpan(rowValues.AsSpan(0, ColumnCount));
+                }
             }
-            else
-            {
-                norms[row] = NormSpan(rowValues.AsSpan(0, ColumnCount));
-            }
+        }
+        finally
+        {
+            if (pooledRowValues != null)
+                ArrayPool<T>.Shared.Return(pooledRowValues);
         }
 
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
-        var storage = ColumnStorageFactory.Create(norms.AsSpan(), nullMask);
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(norms, nullMask);
         var valuesColumn = new NivaraColumn<T>(storage);
 
         DiagnosticsTracker.RecordOperation(new OperationDiagnostics(

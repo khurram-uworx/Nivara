@@ -100,7 +100,7 @@ public class NivaraSeriesIsValidTests
     }
 
     [Test]
-    public void TensorExtensions_WithNullData_ThrowsInvalidOperationException()
+    public void TensorExtensions_WithNullData_ElementwiseHelpersPropagateNullsAndReducersThrow()
     {
         // Arrange
         var nullableData1 = new float?[] { 1.0f, null, 3.0f };
@@ -108,12 +108,28 @@ public class NivaraSeriesIsValidTests
         var series1 = new NivaraSeries<float>(column1);
         var series2 = NivaraSeries<float>.Create(new float[] { 4.0f, 5.0f, 6.0f });
 
-        // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => series1.AddTensor(series2));
-        Assert.Throws<InvalidOperationException>(() => series1.MultiplyTensor(series2));
-        Assert.Throws<InvalidOperationException>(() => series1.DotProduct(series2));
-        Assert.Throws<InvalidOperationException>(() => series1.Norm());
-        Assert.Throws<InvalidOperationException>(() => series1.SumTensor());
+        // Act
+        var sum = series1.AddTensor(series2);
+        var product = series1.MultiplyTensor(series2);
+
+        // Assert
+        Assert.That(sum.Length, Is.EqualTo(3));
+        Assert.That(sum[0], Is.EqualTo(5.0f).Within(0.001f));
+        Assert.That(sum.IsNull(1), Is.True);
+        Assert.That(sum[2], Is.EqualTo(9.0f).Within(0.001f));
+
+        Assert.That(product.Length, Is.EqualTo(3));
+        Assert.That(product[0], Is.EqualTo(4.0f).Within(0.001f));
+        Assert.That(product.IsNull(1), Is.True);
+        Assert.That(product[2], Is.EqualTo(18.0f).Within(0.001f));
+
+        var dotProductException = Assert.Throws<InvalidOperationException>(() => series1.DotProduct(series2));
+        var normException = Assert.Throws<InvalidOperationException>(() => series1.Norm());
+        var sumException = Assert.Throws<InvalidOperationException>(() => series1.SumTensor());
+
+        Assert.That(dotProductException!.Message, Does.Contain("null values").And.Contain("index 1"));
+        Assert.That(normException!.Message, Does.Contain("null values").And.Contain("index 1"));
+        Assert.That(sumException!.Message, Does.Contain("null values").And.Contain("index 1"));
     }
 
     [Test]

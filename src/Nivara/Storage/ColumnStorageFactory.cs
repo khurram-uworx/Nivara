@@ -138,6 +138,22 @@ internal static class ColumnStorageFactory
     }
 
     /// <summary>
+    /// Creates storage from an array owned by the caller. The caller must not mutate
+    /// the array after this call.
+    /// </summary>
+    internal static IColumnStorage<T> CreateFromOwnedArray<T>(T[] values, ReadOnlyMemory<bool>? nullMask = null)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        if (IsVectorizable<T>() && IsUnmanagedType<T>())
+        {
+            return CreateTensorStorageForOwnedArray<T>(values, nullMask);
+        }
+
+        return new MemoryStorage<T>(new ReadOnlyMemory<T>(values), nullMask);
+    }
+
+    /// <summary>
     /// Creates storage for nullable values, automatically selecting between tensor and memory storage
     /// </summary>
     /// <typeparam name="T">The type of elements to store</typeparam>
@@ -215,6 +231,16 @@ internal static class ColumnStorageFactory
 
         // Convert to array first since we can't cast spans to object
         var array = values.ToArray();
+
+        return CreateTensorStorageForOwnedArray<T>(array, nullMask);
+    }
+
+    /// <summary>
+    /// Creates TensorStorage for an owned array using runtime type checking with an optional null mask.
+    /// </summary>
+    private static IColumnStorage<T> CreateTensorStorageForOwnedArray<T>(T[] array, ReadOnlyMemory<bool>? nullMask = null)
+    {
+        var type = typeof(T);
 
         // Convert the null mask from ReadOnlyMemory<bool>? to Tensor<bool>?
         Tensor<bool>? nullTensor = null;

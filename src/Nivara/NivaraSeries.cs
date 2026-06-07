@@ -684,7 +684,13 @@ public sealed class NivaraSeries<T> : IDisposable
             return Array.Empty<(string? Label, T Score)>();
 
         var indices = ArgSortDescending();
-        var k = Math.Min(count, indices.Length);
+        var validCount = 0;
+        while (validCount < indices.Length && IsValid(indices[validCount]))
+        {
+            validCount++;
+        }
+
+        var k = Math.Min(count, validCount);
         var result = new (string? Label, T Score)[k];
 
         for (int i = 0; i < k; i++)

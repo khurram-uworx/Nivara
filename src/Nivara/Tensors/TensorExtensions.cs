@@ -18,7 +18,6 @@ public static class TensorExtensions
     /// <returns>A new NivaraSeries containing the element-wise sum</returns>
     /// <exception cref="ArgumentNullException">Thrown when either series is null</exception>
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
-    /// <exception cref="InvalidOperationException">Thrown when series contain null values</exception>
     public static NivaraSeries<T> AddTensor<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
         where T : unmanaged
     {
@@ -35,13 +34,11 @@ public static class TensorExtensions
             return new NivaraSeries<T>();
         }
 
-        // Check for null values in both series
-        for (int i = 0; i < left.Length; i++)
+        if (left.HasNulls || right.HasNulls)
         {
-            if (!left.IsValid(i) || !right.IsValid(i))
-            {
-                throw new InvalidOperationException($"Cannot perform tensor operations on series with null values. Found null at index {i}");
-            }
+            using var leftValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(left));
+            using var rightValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(right));
+            return new NivaraSeries<T>(leftValues.Add(rightValues), left.Index);
         }
 
         // Use TensorPrimitives for optimized operations when available
@@ -83,7 +80,6 @@ public static class TensorExtensions
     /// <returns>A new NivaraSeries containing the element-wise product</returns>
     /// <exception cref="ArgumentNullException">Thrown when either series is null</exception>
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
-    /// <exception cref="InvalidOperationException">Thrown when series contain null values</exception>
     public static NivaraSeries<T> MultiplyTensor<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
         where T : unmanaged
     {
@@ -100,13 +96,11 @@ public static class TensorExtensions
             return new NivaraSeries<T>();
         }
 
-        // Check for null values in both series
-        for (int i = 0; i < left.Length; i++)
+        if (left.HasNulls || right.HasNulls)
         {
-            if (!left.IsValid(i) || !right.IsValid(i))
-            {
-                throw new InvalidOperationException($"Cannot perform tensor operations on series with null values. Found null at index {i}");
-            }
+            using var leftValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(left));
+            using var rightValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(right));
+            return new NivaraSeries<T>(leftValues.Multiply(rightValues), left.Index);
         }
 
         // Use TensorPrimitives for optimized operations when available
@@ -406,5 +400,18 @@ public static class TensorExtensions
         // Convert result tensor back to NivaraFrame
         var columnNames = Enumerable.Range(0, right.ColumnCount).Select(i => $"Result_{i}").ToArray();
         return TensorInterop.FromTensor(resultTensor, columnNames);
+    }
+
+    private static T?[] ToNullableArray<T>(NivaraSeries<T> series)
+        where T : unmanaged
+    {
+        var values = new T?[series.Length];
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            values[i] = series.IsNull(i) ? null : series[i];
+        }
+
+        return values;
     }
 }

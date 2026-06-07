@@ -312,6 +312,24 @@ public class MemoryStorageTests
         }
     }
 
+    [Test]
+    public void MemoryStorage_ExplicitEmptyNullMask_TreatsAsNoNullMask()
+    {
+        var storage = new MemoryStorage<int>(
+            new ReadOnlyMemory<int>(new[] { 10, 20, 30 }),
+            ReadOnlyMemory<bool>.Empty);
+
+        Assert.That(storage.HasNulls, Is.False);
+        Assert.That(storage.NullMask.Length, Is.EqualTo(0));
+
+        var sliced = storage.Slice(1, 2);
+
+        Assert.That(sliced.HasNulls, Is.False);
+        Assert.That(sliced.NullMask.Length, Is.EqualTo(0));
+        Assert.That(sliced[0], Is.EqualTo(20));
+        Assert.That(sliced[1], Is.EqualTo(30));
+    }
+
     [TestCase(new string[] { "a", "b", "c" }, -1, 1)]
     [TestCase(new string[] { "a", "b", "c" }, 0, -1)]
     [TestCase(new string[] { "a", "b", "c" }, 2, 3)]

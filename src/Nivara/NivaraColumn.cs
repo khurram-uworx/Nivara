@@ -89,7 +89,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}");
 
         var nullMask = storage.NullMask;
-        return !nullMask.IsEmpty && nullMask[index];
+        return nullMask.Length > 0 && nullMask[index];
     }
 
     /// <summary>
@@ -341,7 +341,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         var result = new T[rawSpan.Length];
         rawSpan.CopyTo(result);
         var nullMask = storage.NullMask;
-        if (!nullMask.IsEmpty)
+        if (nullMask.Length > 0)
         {
             for (int i = 0; i < result.Length; i++)
             {
@@ -492,14 +492,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 // Handle null propagation for tensor storage
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var nullMask = storage.NullMask;
-                if (!nullMask.IsEmpty)
+                if (nullMask.Length > 0)
                 {
                     var nullMaskArray = nullMask.ToArray();
                     resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
                 }
 
                 // Create result storage using the factory, passing the null mask
-                var resultStorage = ColumnStorageFactory.Create(result.AsSpan(), resultNullMask);
+                var resultStorage = ColumnStorageFactory.CreateFromOwnedArray(result, resultNullMask);
                 return new NivaraColumn<T>(resultStorage);
             }
             finally
@@ -583,14 +583,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
 
-                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                if (leftNullMask.Length > 0 || rightNullMask.Length > 0)
                 {
                     var resultNullMaskArray = new bool[result.Length];
 
                     for (int i = 0; i < result.Length; i++)
                     {
-                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool leftIsNull = leftNullMask.Length > 0 && leftNullMask[i];
+                        bool rightIsNull = rightNullMask.Length > 0 && rightNullMask[i];
                         resultNullMaskArray[i] = leftIsNull || rightIsNull;
                     }
 
@@ -598,7 +598,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 }
 
                 // Create result storage using the factory, passing the null mask
-                var resultStorage = ColumnStorageFactory.Create(result.AsSpan(), resultNullMask);
+                var resultStorage = ColumnStorageFactory.CreateFromOwnedArray(result, resultNullMask);
                 return new NivaraColumn<T>(resultStorage);
             }
             finally
@@ -682,14 +682,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
 
-                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                if (leftNullMask.Length > 0 || rightNullMask.Length > 0)
                 {
                     var resultNullMaskArray = new bool[result.Length];
 
                     for (int i = 0; i < result.Length; i++)
                     {
-                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool leftIsNull = leftNullMask.Length > 0 && leftNullMask[i];
+                        bool rightIsNull = rightNullMask.Length > 0 && rightNullMask[i];
                         resultNullMaskArray[i] = leftIsNull || rightIsNull;
                     }
 
@@ -697,7 +697,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 }
 
                 // Create result storage using the factory, passing the null mask
-                var resultStorage = ColumnStorageFactory.Create(result.AsSpan(), resultNullMask);
+                var resultStorage = ColumnStorageFactory.CreateFromOwnedArray(result, resultNullMask);
                 return new NivaraColumn<T>(resultStorage);
             }
             finally
@@ -1146,7 +1146,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 // Handle null propagation for tensor storage
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var nullMask = storage.NullMask;
-                if (!nullMask.IsEmpty)
+                if (nullMask.Length > 0)
                 {
                     var nullMaskArray = nullMask.ToArray();
                     resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
@@ -1238,14 +1238,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
 
-                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                if (leftNullMask.Length > 0 || rightNullMask.Length > 0)
                 {
                     var resultNullMaskArray = new bool[result.Length];
 
                     for (int i = 0; i < result.Length; i++)
                     {
-                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool leftIsNull = leftNullMask.Length > 0 && leftNullMask[i];
+                        bool rightIsNull = rightNullMask.Length > 0 && rightNullMask[i];
                         bool hasNull = leftIsNull || rightIsNull;
 
                         resultNullMaskArray[i] = hasNull;
@@ -1443,7 +1443,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 // Handle null propagation for tensor storage
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var nullMask = storage.NullMask;
-                if (!nullMask.IsEmpty)
+                if (nullMask.Length > 0)
                 {
                     var nullMaskArray = nullMask.ToArray();
                     resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
@@ -1535,14 +1535,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
 
-                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                if (leftNullMask.Length > 0 || rightNullMask.Length > 0)
                 {
                     var resultNullMaskArray = new bool[result.Length];
 
                     for (int i = 0; i < result.Length; i++)
                     {
-                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool leftIsNull = leftNullMask.Length > 0 && leftNullMask[i];
+                        bool rightIsNull = rightNullMask.Length > 0 && rightNullMask[i];
                         bool hasNull = leftIsNull || rightIsNull;
 
                         resultNullMaskArray[i] = hasNull;
@@ -1738,7 +1738,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 // Handle null propagation for tensor storage
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var nullMask = storage.NullMask;
-                if (!nullMask.IsEmpty)
+                if (nullMask.Length > 0)
                 {
                     var nullMaskArray = nullMask.ToArray();
                     resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
@@ -1830,14 +1830,14 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
 
-                if (!leftNullMask.IsEmpty || !rightNullMask.IsEmpty)
+                if (leftNullMask.Length > 0 || rightNullMask.Length > 0)
                 {
                     var resultNullMaskArray = new bool[result.Length];
 
                     for (int i = 0; i < result.Length; i++)
                     {
-                        bool leftIsNull = !leftNullMask.IsEmpty && leftNullMask[i];
-                        bool rightIsNull = !rightNullMask.IsEmpty && rightNullMask[i];
+                        bool leftIsNull = leftNullMask.Length > 0 && leftNullMask[i];
+                        bool rightIsNull = rightNullMask.Length > 0 && rightNullMask[i];
                         bool hasNull = leftIsNull || rightIsNull;
 
                         resultNullMaskArray[i] = hasNull;

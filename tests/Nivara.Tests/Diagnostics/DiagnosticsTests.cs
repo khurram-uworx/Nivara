@@ -157,6 +157,98 @@ public class DiagnosticsTests
     }
 
     [Test]
+    public void DiagnosticsTracker_FrameDot_RecordsBatchOperationDetails()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            using var vector = new NivaraSeries<float>(
+                NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f }));
+            using var frame = CreateDiagnosticsFrameWithNulls();
+
+            using var result = frame.Dot(vector);
+
+            var operation = AssertSingleOperation("FrameDot");
+            AssertFrameBatchOperation(operation, "FrameDot", inputLength: 3, hadNulls: true);
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void DiagnosticsTracker_FrameCosineSimilarity_RecordsBatchOperationDetails()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            using var vector = new NivaraSeries<float>(
+                NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f }));
+            using var frame = CreateDiagnosticsFrameWithNulls();
+
+            using var result = frame.CosineSimilarity(vector);
+
+            var operation = AssertSingleOperation("FrameCosineSimilarity");
+            AssertFrameBatchOperation(operation, "FrameCosineSimilarity", inputLength: 3, hadNulls: true);
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void DiagnosticsTracker_FrameColumnNorms_RecordsBatchOperationDetails()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            using var frame = CreateDiagnosticsFrameWithNulls();
+
+            using var result = frame.ColumnNorms<float>();
+
+            var operation = AssertSingleOperation("FrameColumnNorms");
+            AssertFrameBatchOperation(operation, "FrameColumnNorms", inputLength: 2, hadNulls: true);
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void DiagnosticsTracker_FrameRowNorms_RecordsBatchOperationDetails()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            using var frame = CreateDiagnosticsFrameWithNulls();
+
+            using var result = frame.RowNorms<float>();
+
+            var operation = AssertSingleOperation("FrameRowNorms");
+            AssertFrameBatchOperation(operation, "FrameRowNorms", inputLength: 3, hadNulls: true);
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
     public void OperationDiagnostics_ToString_ReturnsFormattedString()
     {
         // Arrange
@@ -191,5 +283,37 @@ public class DiagnosticsTests
         Assert.That(result, Does.Contain("Int32"));
         Assert.That(result, Does.Contain("5"));
         Assert.That(result, Does.Contain("Memory"));
+    }
+
+    private static NivaraFrame CreateDiagnosticsFrameWithNulls()
+    {
+        return new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })),
+            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { 4.0f, null, 6.0f })),
+        });
+    }
+
+    private static OperationDiagnostics AssertSingleOperation(string operationType)
+    {
+        var operations = DiagnosticsTracker.GetRecordedOperations();
+
+        Assert.That(operations, Has.Length.EqualTo(1));
+        Assert.That(operations[0].OperationType, Is.EqualTo(operationType));
+
+        return operations[0];
+    }
+
+    private static void AssertFrameBatchOperation(
+        OperationDiagnostics operation,
+        string operationType,
+        int inputLength,
+        bool hadNulls)
+    {
+        Assert.That(operation.OperationType, Is.EqualTo(operationType));
+        Assert.That(operation.KernelUsed, Is.EqualTo(KernelSelector.DetermineBatchKernelType<float>()));
+        Assert.That(operation.InputLength, Is.EqualTo(inputLength));
+        Assert.That(operation.ElementType, Is.EqualTo(typeof(float)));
+        Assert.That(operation.HadNulls, Is.EqualTo(hadNulls));
     }
 }

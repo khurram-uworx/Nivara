@@ -674,6 +674,18 @@ public class TensorInteropTests
     }
 
     [Test]
+    public void TopKDescending_WithCountLargerThanNonNullCount_ExcludesNulls()
+    {
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 0.5f, null, 0.9f, null, 0.7f });
+        using var series = new NivaraSeries<float>(column);
+
+        var result = series.TopKDescending(10);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result.Select(item => item.Score), Is.EqualTo(new[] { 0.9f, 0.7f, 0.5f }));
+    }
+
+    [Test]
     public void TopKDescending_WithEmptySeries_ReturnsEmpty()
     {
         using var series = new NivaraSeries<float>();
@@ -788,6 +800,105 @@ public class TensorInteropTests
         Assert.That(norms.Length, Is.EqualTo(2));
         Assert.That(norms.IsNull(0), Is.True);
         Assert.That(norms.IsNull(1), Is.False);
+    }
+
+    [Test]
+    public void RowNorms_WithWideFrame_UsesPooledBufferAndPreservesNulls()
+    {
+        var columns = Enumerable.Range(0, 1024)
+            .Select(i => (
+                $"C{i}",
+                (IColumn)(i == 100
+                    ? NivaraColumn<float>.CreateFromNullable(new float?[] { null, 2.0f })
+                    : NivaraColumn<float>.Create(new[] { 1.0f, 2.0f }))))
+            .ToArray();
+        using var frame = new NivaraFrame(columns);
+
+        using var norms = frame.RowNorms<float>();
+
+        Assert.That(norms.Length, Is.EqualTo(2));
+        Assert.That(norms.IsNull(0), Is.True);
+        Assert.That(norms.IsNull(1), Is.False);
+        Assert.That(norms[1], Is.EqualTo(64.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void FrameDot_WithEmptyColumnsAndEmptyVector_ReturnsZeroScorePerColumn()
+    {
+        using var vector = NivaraSeries<float>.Create(Array.Empty<float>());
+        using var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+            ("B", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+        });
+
+        using var scores = frame.Dot(vector);
+
+        Assert.That(scores.Length, Is.EqualTo(2));
+        Assert.That(scores.GetLabel(0), Is.EqualTo("A"));
+        Assert.That(scores.GetLabel(1), Is.EqualTo("B"));
+        Assert.That(scores[0], Is.EqualTo(0.0f));
+        Assert.That(scores[1], Is.EqualTo(0.0f));
+        Assert.That(scores.IsNull(0), Is.False);
+        Assert.That(scores.IsNull(1), Is.False);
+    }
+
+    [Test]
+    public void ColumnNorms_WithEmptyColumns_ReturnsZeroNormPerColumn()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+            ("Y", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+        });
+
+        using var norms = frame.ColumnNorms<float>();
+
+        Assert.That(norms.Length, Is.EqualTo(2));
+        Assert.That(norms.GetLabel(0), Is.EqualTo("X"));
+        Assert.That(norms.GetLabel(1), Is.EqualTo("Y"));
+        Assert.That(norms[0], Is.EqualTo(0.0f));
+        Assert.That(norms[1], Is.EqualTo(0.0f));
+    }
+
+    [Test]
+    public void RowNorms_WithZeroRowFrame_ReturnsEmptySeries()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+            ("Y", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+        });
+
+        using var norms = frame.RowNorms<float>();
+
+        Assert.That(norms.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void CosineSimilarity_WithEmptyColumnsAndEmptyVector_ThrowsClearException()
+    {
+        using var vector = NivaraSeries<float>.Create(Array.Empty<float>());
+        using var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+            ("B", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+        });
+
+        var ex = Assert.Throws<ArgumentException>(() => frame.CosineSimilarity(vector));
+        Assert.That(ex!.Message, Does.Contain("Cannot compute cosine similarity for empty vectors"));
+    }
+
+    [Test]
+    public void CosineSimilarity_WithLengthMismatch_ThrowsArgumentException()
+    {
+        using var vector = NivaraSeries<float>.Create(new[] { 1.0f });
+        using var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1.0f, 2.0f })),
+        });
+
+        Assert.Throws<ArgumentException>(() => frame.CosineSimilarity(vector));
     }
 
     [Test]

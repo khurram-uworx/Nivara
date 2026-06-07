@@ -16,8 +16,6 @@ using Nivara.Tensors;
 
 var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
 
-var productNames = new[] { "ProductA", "ProductB", "ProductC" };
-
 using var products = new NivaraFrame(new[]
 {
     ("ProductA", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
@@ -26,21 +24,19 @@ using var products = new NivaraFrame(new[]
 });
 
 using var scores = products.CosineSimilarity(user);
-var ranking = scores.ArgSortDescending();
+var topProducts = scores.TopKDescending(3);
 
-foreach (var position in ranking)
-{
-    Console.WriteLine($"{productNames[position]}: {scores[position]:0.000}");
-}
+foreach (var item in topProducts)
+    Console.WriteLine($"{item.Label}: {item.Score:0.000}");
 ```
 
-Today this is much better than the original manual loop. `CosineSimilarity` now computes one score per product column, and `ArgSortDescending` returns ranking positions.
+Today this is much better than the original manual loop. `CosineSimilarity` now computes one score per product column, and `TopKDescending` returns label-aware ranking results.
 
 Current limitations to review:
 
 - Product embeddings are represented as columns, not rows. That is natural for Nivara's columnar model, but many ML engineers expect samples as rows and features as columns.
 - Null-containing vectors produce null-propagating results (mask-OR) in batch similarity operations — null inputs yield null outputs rather than throwing.
-- The result ranking is positional. The result series has column names as its index, but the common ergonomic path is still to map positions back to names.
+- `TopKDescending` currently returns `(string? Label, T Score)` tuples and excludes null scores. A richer ranking result type may still be useful if callers need positions or explicit null state.
 
 ## 2. Direct Tensor Conversion For BCL Interop
 
@@ -99,7 +95,7 @@ using var candidates = new NivaraFrame(new[]
 });
 
 using var scores = candidates.Dot(query);
-var ranking = scores.ArgSortDescending();
+var topCandidates = scores.TopKDescending(3);
 ```
 
 Current limitations to review:
@@ -107,6 +103,7 @@ Current limitations to review:
 - Dot product operates across columns.
 - Input length must match the frame row count.
 - Nulls propagate via mask-OR (null input → null output) rather than throwing.
+- `TopKDescending` provides labeled top-k results, but it currently uses a full sort rather than a threshold-based heap path.
 
 ## 4. Existing One-Dimensional Tensor Helpers
 
@@ -127,7 +124,7 @@ Current limitations to review:
 
 - These methods are good for individual vectors.
 - Batch operations across a frame are newer and should be made consistent with these helpers.
-- Null-throwing behavior varies across individual helpers; `Dot` and `CosineSimilarity` on `NivaraFrame` now propagate nulls, but legacy series-level helpers may still throw.
+- Scalar reducers such as `DotProduct` and `Norm` still throw on null-containing series; `Dot`, `CosineSimilarity`, `ColumnNorms`, and `RowNorms` on `NivaraFrame` propagate nulls in their result masks.
 
 ## 5. Frame-To-Tensor Shape Convention
 
@@ -164,7 +161,7 @@ Current limitations to review:
 
 This example is another common ML workflow: score a query embedding against a table of document embeddings.
 
-This is intentionally shown in the usual ML orientation: each row is a document, and each embedding dimension is a numeric feature column. Today, Nivara does not have row-wise batch cosine similarity, so this requires a manual row loop. (Note: `NivaraFrame.TopKDescending` and `RowNorms`/`ColumnNorms` are available for null-propagating batch similarity — see section 3 for column-wise batch dot product.)
+This is intentionally shown in the usual ML orientation: each row is a document, and each embedding dimension is a numeric feature column. Today, Nivara does not have row-wise batch cosine similarity, so this still requires a manual row loop. The final ranking is simpler now because scores can be wrapped in a labeled `NivaraSeries<T>` and ranked with `TopKDescending`.
 
 ```csharp
 using Nivara;
@@ -196,25 +193,22 @@ for (int row = 0; row < documents.RowCount; row++)
     scores[row] = TensorPrimitives.CosineSimilarity(documentVector, queryValues);
 }
 
-var ranking = scores
-    .Select((score, position) => (score, position))
-    .OrderByDescending(x => x.score)
-    .Take(2)
+var scoreLabels = Enumerable.Range(0, documents.RowCount)
+    .Select(row => documentIds[row])
     .ToArray();
+using var scoreSeries = NivaraSeries<float>.Create(scores, scoreLabels);
+var ranking = scoreSeries.TopKDescending(2);
 
 foreach (var item in ranking)
-{
-    Console.WriteLine($"{documentIds[item.position]}: {item.score:0.000}");
-}
+    Console.WriteLine($"{item.Label}: {item.Score:0.000}");
 ```
 
 Current limitations to review:
 
 - Row-wise embedding search requires manual extraction of each feature column.
 - Each row allocates a temporary `documentVector` in this simple version.
-- Ranking is still manual LINQ over a raw score array.
-- Metadata labels must be mapped back from positions.
-- Null behavior is not represented in the ranking result.
+- `TopKDescending` removes the manual LINQ ranking and label lookup, but it does not expose positions or explicit null state.
+- Null behavior in the row-wise loop is still manual because there is no row-wise cosine-similarity API yet.
 
 ## 7. What We Want Reviewers To React To
 
