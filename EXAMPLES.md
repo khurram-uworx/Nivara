@@ -210,7 +210,59 @@ Current limitations to review:
 - `TopKDescending` removes the manual LINQ ranking and label lookup, but it does not expose positions or explicit null state.
 - Null behavior in the row-wise loop is still manual because there is no row-wise cosine-similarity API yet.
 
-## 7. What We Want Reviewers To React To
+## 7. Automatic Differentiation Over Nivara Columns
+
+Nivara.Extensions includes a current AutoDiff layer for reverse-mode gradients
+over `float` and `double` columns. The API is still explicit: users wrap
+columns in `GradTensor<T>`, call static `GradOperations`, reduce to a scalar
+loss, and then call `Backward()`.
+
+```csharp
+using Nivara;
+using Nivara.Extensions.AutoDiff;
+using Nivara.Extensions.AutoDiff.Operations;
+
+var input = new GradTensor<float>(
+    NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f }),
+    requiresGrad: false);
+
+var weight = new GradTensor<float>(
+    NivaraColumn<float>.Create(new[] { 0.5f, 0.5f, 0.5f }),
+    requiresGrad: true);
+
+var bias = new GradTensor<float>(
+    NivaraColumn<float>.Create(new[] { -1.0f, 0.0f, 1.0f }),
+    requiresGrad: true);
+
+var weighted = GradOperations.Multiply(input, weight);
+var shifted = GradOperations.Add(weighted, bias);
+var activated = GradOperations.Relu(shifted);
+var loss = GradOperations.Mean(activated);
+
+loss.Backward();
+
+Console.WriteLine(loss[0]);
+Console.WriteLine(weight.Grad![0]);
+Console.WriteLine(bias.Grad![0]);
+```
+
+The longer sample app demonstrates reductions, activations, gradient clipping,
+and graph inspection in
+[`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/Nivara.SampleApp/AutoDiffExample.cs).
+
+Current limitations to review:
+
+- AutoDiff currently supports `float` and `double` only.
+- `Backward()` can be called without an explicit gradient only on scalar
+  tensors. Non-scalar outputs require a matching gradient argument.
+- Operations are static methods today; there are no fluent methods or operator
+  overloads for `GradTensor<T>` yet.
+- `MatMul` and `Transpose` use flattened tensors plus explicit dimensions.
+- There is no optimizer, layer, model, dataloader, or training-loop API yet.
+- See [`docs/AUTODIFF-SUGGESTIONS.md`](docs/AUTODIFF-SUGGESTIONS.md) for the
+  grounded follow-up list.
+
+## 8. What We Want Reviewers To React To
 
 When showing these examples to ML and AI engineers, useful feedback is:
 
@@ -222,7 +274,10 @@ When showing these examples to ML and AI engineers, useful feedback is:
 - Which missing operation blocks realistic usage first: row-wise similarity, batch norms, broadcasting, matrix multiply, or fluent arithmetic?
 - Are ranking APIs returning positions enough, or should there be a label-aware ranking result?
 - Does direct `Tensor<T>` conversion solve enough interop, or do users expect richer tensor-shaped Nivara APIs?
+- Is the current AutoDiff surface useful as a low-level gradient layer, or do reviewers need optimizer and shape-aware matrix helpers first?
 
 ## Current Roadmap Link
 
-See `docs/TENSORS-GAPS.md` for the current tensor-improvement roadmap and the gaps we should address before expanding the API surface.
+See [`docs/TENSORS-GAPS.md`](docs/TENSORS-GAPS.md) and
+[`docs/AUTODIFF-SUGGESTIONS.md`](docs/AUTODIFF-SUGGESTIONS.md) for the current
+Tensor and AutoDiff improvement roadmaps.

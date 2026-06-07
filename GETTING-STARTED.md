@@ -18,6 +18,7 @@ This guide provides comprehensive examples and tutorials for using Nivara's Data
 - [Advanced Features](#advanced-features)
 - [Automatic Differentiation](#automatic-differentiation)
 - [Extensions and I/O](#extensions-and-io)
+- [Real World Examples](EXAMPLES.md)
 
 ---
 

@@ -1,6 +1,6 @@
-using System.Numerics;
 using Nivara.Diagnostics;
 using Nivara.Storage;
+using System.Numerics;
 
 namespace Nivara;
 

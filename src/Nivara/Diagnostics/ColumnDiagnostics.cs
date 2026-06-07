@@ -1,5 +1,4 @@
 using System.Numerics;
-using Nivara;
 
 namespace Nivara.Diagnostics;
 

@@ -86,7 +86,7 @@ public class TensorInteropTests
         var tensor = Tensor.Create(data, new ReadOnlySpan<nint>(new nint[] { 4 }));
 
         // Act
-        using var series = TensorInterop.FromTensor(tensor);
+        using var series = TensorInteropExtensions.FromTensor(tensor);
 
         // Assert
         Assert.That(series.Length, Is.EqualTo(4));
@@ -105,7 +105,7 @@ public class TensorInteropTests
         var tensor = Tensor.Create<float>(Array.Empty<float>(), new ReadOnlySpan<nint>(new nint[] { 0 }));
 
         // Act
-        using var series = TensorInterop.FromTensor(tensor);
+        using var series = TensorInteropExtensions.FromTensor(tensor);
 
         // Assert
         Assert.That(series.Length, Is.EqualTo(0));
@@ -119,7 +119,7 @@ public class TensorInteropTests
         var tensor = Tensor.Create(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }));
 
         // Act & Assert
-        var ex = Assert.Throws<ArgumentException>(() => TensorInterop.FromTensor(tensor));
+        var ex = Assert.Throws<ArgumentException>(() => TensorInteropExtensions.FromTensor(tensor));
         Assert.That(ex.Message, Does.Contain("Only 1D tensors are supported"));
     }
 
@@ -168,7 +168,7 @@ public class TensorInteropTests
         var tensorSpan = new ReadOnlyTensorSpan<float>(data, new ReadOnlySpan<nint>(new nint[] { 3 }), default);
 
         // Act
-        using var series = TensorInterop.FromTensorSpan(tensorSpan);
+        using var series = TensorInteropExtensions.FromTensorSpan(tensorSpan);
 
         // Assert
         Assert.That(series.Length, Is.EqualTo(3));
@@ -190,7 +190,7 @@ public class TensorInteropTests
         // Act & Assert
         try
         {
-            TensorInterop.FromTensorSpan(tensorSpan);
+            TensorInteropExtensions.FromTensorSpan(tensorSpan);
             Assert.Fail("Expected ArgumentException was not thrown");
         }
         catch (ArgumentException ex)
@@ -212,7 +212,7 @@ public class TensorInteropTests
 
         // Act
         var tensor = originalSeries.ToTensor();
-        using var roundTripSeries = TensorInterop.FromTensor(tensor);
+        using var roundTripSeries = TensorInteropExtensions.FromTensor(tensor);
 
         // Assert
         Assert.That(roundTripSeries.Length, Is.EqualTo(originalSeries.Length));
@@ -233,7 +233,7 @@ public class TensorInteropTests
 
         // Act
         var tensorSpan = originalSeries.ToTensorSpan();
-        using var roundTripSeries = TensorInterop.FromTensorSpan(tensorSpan);
+        using var roundTripSeries = TensorInteropExtensions.FromTensorSpan(tensorSpan);
 
         // Assert
         Assert.That(roundTripSeries.Length, Is.EqualTo(originalSeries.Length));
@@ -267,7 +267,7 @@ public class TensorInteropTests
 
         // Test tensor round-trip
         var tensor = originalSeries.ToTensor();
-        using var roundTripSeries = TensorInterop.FromTensor(tensor);
+        using var roundTripSeries = TensorInteropExtensions.FromTensor(tensor);
 
         Assert.That(roundTripSeries.Length, Is.EqualTo(originalSeries.Length));
 
@@ -339,7 +339,7 @@ public class TensorInteropTests
         var columnNames = new[] { "A", "B", "C" };
 
         // Act
-        using var frame = TensorInterop.FromTensor(tensor, columnNames);
+        using var frame = TensorInteropExtensions.FromTensor(tensor, columnNames);
 
         // Assert
         Assert.That(frame.RowCount, Is.EqualTo(2));
@@ -367,7 +367,7 @@ public class TensorInteropTests
         var tensor = Tensor.Create(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }));
 
         // Act
-        using var frame = TensorInterop.FromTensor<float>(tensor, null);
+        using var frame = TensorInteropExtensions.FromTensor<float>(tensor, null);
 
         // Assert
         Assert.That(frame.ColumnCount, Is.EqualTo(2));
@@ -383,7 +383,7 @@ public class TensorInteropTests
         var wrongColumnNames = new[] { "A" }; // Should be 2 names, not 1
 
         // Act & Assert
-        var ex = Assert.Throws<ArgumentException>(() => TensorInterop.FromTensor(tensor, wrongColumnNames));
+        var ex = Assert.Throws<ArgumentException>(() => TensorInteropExtensions.FromTensor(tensor, wrongColumnNames));
         Assert.That(ex.Message, Does.Contain("Column names count"));
     }
 
@@ -439,7 +439,7 @@ public class TensorInteropTests
         var tensor = Tensor.Create(data, new ReadOnlySpan<nint>(new nint[] { 2, 3 }));
 
         // Act
-        using var series = TensorInterop.FlattenFromTensor(tensor);
+        using var series = TensorInteropExtensions.FlattenFromTensor(tensor);
 
         // Assert
         Assert.That(series.Length, Is.EqualTo(6));
@@ -458,7 +458,7 @@ public class TensorInteropTests
         var tensorSpan = new ReadOnlyTensorSpan<float>(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }), default);
 
         // Act
-        using var series = TensorInterop.FlattenFromTensorSpan<float>(tensorSpan);
+        using var series = TensorInteropExtensions.FlattenFromTensorSpan<float>(tensorSpan);
 
         // Assert
         Assert.That(series.Length, Is.EqualTo(4));
@@ -522,7 +522,7 @@ public class TensorInteropTests
         var tensors = new[] { tensor1, tensor2 };
 
         // Act
-        var seriesArray = TensorInterop.FromBatchTensors(tensors);
+        var seriesArray = TensorInteropExtensions.FromBatchTensors(tensors);
 
         try
         {
@@ -946,7 +946,7 @@ public class TensorInteropTests
         NivaraSeries<float> nullSeries = null!;
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => TensorInterop.ToTensor(nullSeries));
+        Assert.Throws<ArgumentNullException>(() => TensorInteropExtensions.ToTensor(nullSeries));
     }
 
     [Test]
@@ -956,7 +956,7 @@ public class TensorInteropTests
         Tensor<double> nullTensor = null!;
 
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => TensorInterop.FromTensor(nullTensor));
+        Assert.Throws<ArgumentNullException>(() => TensorInteropExtensions.FromTensor(nullTensor));
     }
 
     [Test]

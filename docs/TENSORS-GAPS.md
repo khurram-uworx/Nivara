@@ -1,4 +1,4 @@
-# Tensor Gaps — What Remains After Phase 4
+# Tensor Gaps — What Remains
 
 This document catalogs future tensor performance work, API follow-ups, testing
 gaps, and deferred design decisions. Items are grouped by severity and impact.

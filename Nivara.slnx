@@ -1,10 +1,14 @@
 <Solution>
+  <Folder Name="/.github/" />
+  <Folder Name="/.github/workflows/">
+    <File Path=".github/workflows/cd.yml" />
+    <File Path=".github/workflows/ci.yml" />
+  </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
-    <File Path=".github/workflows/ci.yml" />
     <File Path="AGENTS.md" />
     <File Path="ARCHITECTURE.md" />
     <File Path="CONTRIBUTING.md" />

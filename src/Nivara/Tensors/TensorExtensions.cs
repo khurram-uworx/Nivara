@@ -399,7 +399,7 @@ public static class TensorExtensions
 
         // Convert result tensor back to NivaraFrame
         var columnNames = Enumerable.Range(0, right.ColumnCount).Select(i => $"Result_{i}").ToArray();
-        return TensorInterop.FromTensor(resultTensor, columnNames);
+        return TensorInteropExtensions.FromTensor(resultTensor, columnNames);
     }
 
     private static T?[] ToNullableArray<T>(NivaraSeries<T> series)

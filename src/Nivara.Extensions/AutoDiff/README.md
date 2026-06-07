@@ -1,61 +1,159 @@
 # Nivara.Extensions.AutoDiff
 
-This directory contains the automatic differentiation (AD) implementation for Nivara.Extensions.
+`Nivara.Extensions.AutoDiff` is an experimental reverse-mode automatic
+differentiation layer over Nivara columns. It wraps `NivaraColumn<T>` values in
+`GradTensor<T>`, records differentiable operations in a computation graph, and
+computes gradients with `Backward()`.
+
+The implementation is intentionally small and explicit. It is useful for
+gradient-aware column workflows and ML experiments, but it is not a full
+training framework.
+
+## Supported Types
+
+AutoDiff currently supports:
+
+- `float`
+- `double`
+
+The public generic constraints use `INumber<T>`, but runtime validation rejects
+other numeric types. Integral gradients are not supported.
+
+## Core Concepts
+
+- `GradTensor<T>` wraps a `NivaraColumn<T>` and carries `RequiresGrad`, `Grad`,
+  graph attachment, conversion helpers, `Detach()`, `ZeroGrad()`, and
+  `Backward()`.
+- `Backward()` performs reverse-mode gradient computation. Without an explicit
+  gradient argument, it can only be called on scalar tensors, usually the result
+  of a reduction such as `Sum` or `Mean`.
+- `OpNode` stores operation metadata, input tensors, and the backward function
+  used during graph traversal.
+- `ComputationGraph` attaches operation nodes to result tensors, validates graph
+  traversal, runs the backward pass, clears gradients, and exposes graph
+  inspection metadata.
+
+## Basic Usage
+
+```csharp
+using Nivara;
+using Nivara.Extensions.AutoDiff;
+using Nivara.Extensions.AutoDiff.Operations;
+
+var input = new GradTensor<float>(
+    NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f }),
+    requiresGrad: false);
+
+var weight = new GradTensor<float>(
+    NivaraColumn<float>.Create(new[] { 0.5f, 0.5f, 0.5f }),
+    requiresGrad: true);
+
+var bias = new GradTensor<float>(
+    NivaraColumn<float>.Create(new[] { -1.0f, 0.0f, 1.0f }),
+    requiresGrad: true);
+
+var weighted = GradOperations.Multiply(input, weight);
+var shifted = GradOperations.Add(weighted, bias);
+var activated = GradOperations.Relu(shifted);
+var loss = GradOperations.Mean(activated);
+
+loss.Backward();
+
+Console.WriteLine(loss[0]);
+Console.WriteLine(weight.Grad![0]);
+Console.WriteLine(bias.Grad![0]);
+```
+
+For non-scalar outputs, pass an explicit gradient tensor to `Backward()` with
+the same length as the output.
+
+## Operations
+
+`Nivara.Extensions.AutoDiff.Operations.GradOperations` exposes static methods:
+
+- Arithmetic: `Add`, `Subtract`, `Multiply`, `Divide`
+- Reductions: `Sum`, `Mean`
+- Activations: `Relu`, `Sigmoid`, `Tanh`
+- Matrix helpers: `MatMul`, `Transpose`
+
+`MatMul` and `Transpose` operate on flattened `GradTensor<T>` values and require
+explicit row and column arguments. `GradTensor<T>` does not currently carry shape
+metadata.
+
+## Nivara Integration
+
+`Nivara.Extensions.AutoDiff.Extensions.NivaraAutoGradExtensions` provides helpers
+for converting Nivara data structures:
+
+- `NivaraColumn<T>.ToGradTensor(requiresGrad)`
+- `NivaraSeries<T>.ToGradTensor(requiresGrad)`
+- `NivaraFrame.ToGradTensors<T>(columnNames, requiresGrad)`
+- `NivaraFrame.ToGradTensorsAuto(requiresGrad)`
+- `Dictionary<string, GradTensor<T>>.BatchBackward(loss)`
+- `Dictionary<string, GradTensor<T>>.BatchZeroGrad()`
+- `Dictionary<string, GradTensor<T>>.ToFrame()`
+- `Dictionary<string, GradTensor<T>>.ToGradientFrame()`
+
+`GradTensor<T>` can also convert back to Nivara types with `ToColumn()` and
+`ToSeries()`.
+
+## Utilities
+
+`Nivara.Extensions.AutoDiff.Utilities.GradientUtils` contains support helpers:
+
+- Constants: `Constant`, `Zeros`, `Ones`, `Full`
+- Gradient management: `ZeroGrad`, `Detach`
+- Gradient clipping: `ClipGradValue`, `ClipGradNorm`
+- Gradient norms: `GetGradientNorm`, `GetGlobalGradientNorm`
+- Graph inspection: `GetGraphInfo`, `PrintGraphSummary`, `DescribeTensor`
+- Checks: `HasGradient`, `CanBackward`
+
+## Null Handling
+
+AutoDiff operations preserve Nivara's explicit null-mask behavior. Null masks
+flow through operation results, and gradient helpers skip null positions when
+computing norms or clipping values. When adding new operations, keep null-mask
+tests alongside forward and backward tests.
+
+## Current Limitations
+
+- Operations are static methods. There are no fluent `GradTensor<T>` methods or
+  operator overloads yet.
+- `MatMul` and `Transpose` use flattened matrix conventions with explicit shape
+  arguments.
+- `Backward()` defaults to a scalar-loss workflow. Non-scalar outputs require an
+  explicit matching gradient.
+- There is no optimizer, layer, model, metric, dataloader, or training-loop API.
+- The implementation favors correctness and integration with current Nivara
+  types over being a performance-final tensor runtime.
+
+See [`../../../docs/AUTODIFF-SUGGESTIONS.md`](../../../docs/AUTODIFF-SUGGESTIONS.md)
+for grounded follow-up work and [`../../../EXAMPLES.md`](../../../EXAMPLES.md)
+for a concise user-facing example.
 
 ## Directory Structure
 
-```
+```text
 AutoDiff/
-├── README.md                           # This file
-├── IGradOperation.cs                   # Interface for gradient-aware operations
-├── IAutoGradNumeric.cs                 # Interface for numeric types supporting AD
-├── GradTensor.cs                       # Main AD tensor wrapper (forward declaration)
-├── OpNode.cs                          # Computation graph node (forward declaration)
-├── ComputationGraph.cs                # Graph management (forward declaration)
+├── README.md
+├── GradTensor.cs
+├── OpNode.cs
+├── ComputationGraph.cs
+├── IGradOperation.cs
+├── IAutoGradNumeric.cs
+├── AutoGradNumericTypes.cs
 ├── Exceptions/
-│   └── AutoGradExceptions.cs          # AD exception hierarchy (forward declarations)
+│   └── AutoGradExceptions.cs
 ├── Extensions/
-│   └── NivaraAutoGradExtensions.cs    # Nivara integration extensions (forward declaration)
+│   └── NivaraAutoGradExtensions.cs
 ├── Operations/
-│   └── GradOperations.cs              # Gradient-aware operations (forward declaration)
+│   └── GradOperations.cs
 └── Utilities/
-    └── GradientUtils.cs               # Gradient utilities (forward declaration)
+    ├── GradientUtils.cs
+    ├── TypeConverter.cs
+    └── TypeValidator.cs
 ```
 
-## Implementation Status
-
-This is the initial project structure setup (Task 1). All files contain forward declarations and will be fully implemented in subsequent tasks:
-
-- **Task 2**: Core GradTensor infrastructure
-- **Task 3**: Gradient-aware operation wrappers  
-- **Task 4**: Backward pass and gradient computation
-- **Task 6**: Advanced operation wrappers
-- **Task 7**: Null handling and Nivara integration
-- **Task 8**: Gradient utilities and memory management
-- **Task 9**: Comprehensive error handling
-- **Task 10**: Type safety and generic constraints
-- **Task 11**: Nivara integration extensions
-
-## Core Interfaces
-
-### IGradOperation<T>
-Defines the contract for operations that can compute both forward values and gradients.
-
-### IAutoGradNumeric<T>
-Defines the requirements for numeric types that support automatic differentiation.
-
-## Integration with Nivara
-
-The AD system is designed to integrate seamlessly with existing Nivara types:
-- **NivaraColumn<T>**: Primary data storage for tensors
-- **NivaraSeries<T>**: Series integration for gradient computation
-- **NivaraFrame**: Batch operations on multiple columns
-- **Existing Storage Backends**: Leverages TensorStorage and MemoryStorage
-
-## Namespace Organization
-
-All automatic differentiation functionality is contained within the `Nivara.Extensions.AutoDiff` namespace and its sub-namespaces:
-- `Nivara.Extensions.AutoDiff.Operations`
-- `Nivara.Extensions.AutoDiff.Utilities`
-- `Nivara.Extensions.AutoDiff.Exceptions`
-- `Nivara.Extensions.AutoDiff.Extensions`
+All automatic differentiation functionality lives under the
+`Nivara.Extensions.AutoDiff` namespace and its `Operations`, `Utilities`,
+`Exceptions`, and `Extensions` sub-namespaces.

@@ -8,12 +8,13 @@ namespace Nivara.Storage;
 /// Uses System.Numerics.Tensors for high-performance vectorized operations.
 /// </summary>
 /// <typeparam name="T">The unmanaged type of elements to store</typeparam>
-internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
+sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
 {
     readonly Tensor<T> data;
     readonly Tensor<bool>? nullMask;
-    T[]? _flattenedCache;
-    bool[]? _nullMaskCache;
+
+    T[]? flattenedCache;
+    bool[]? nullMaskCache;
     bool disposed;
 
     /// <summary>
@@ -75,7 +76,7 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     /// </summary>
     /// <param name="data">The tensor containing the data</param>
     /// <param name="nullMask">The optional null mask tensor</param>
-    internal TensorStorage(Tensor<T> data, Tensor<bool>? nullMask = null)
+    public TensorStorage(Tensor<T> data, Tensor<bool>? nullMask = null)
     {
         this.data = data ?? throw new ArgumentNullException(nameof(data));
         this.nullMask = nullMask;
@@ -200,12 +201,12 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        if (_flattenedCache != null)
-            return _flattenedCache.AsSpan();
+        if (flattenedCache != null)
+            return flattenedCache.AsSpan();
 
         var buffer = new T[data.FlattenedLength];
         data.FlattenTo(buffer);
-        _flattenedCache = buffer;
+        flattenedCache = buffer;
         return buffer.AsSpan();
     }
 
@@ -218,12 +219,12 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
 
         if (nullMask == null) return [];
 
-        if (_nullMaskCache != null)
-            return _nullMaskCache.AsSpan();
+        if (nullMaskCache != null)
+            return nullMaskCache.AsSpan();
 
         var buffer = new bool[nullMask.FlattenedLength];
         nullMask.FlattenTo(buffer);
-        _nullMaskCache = buffer;
+        nullMaskCache = buffer;
         return buffer.AsSpan();
     }
 
@@ -248,8 +249,8 @@ internal sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     {
         if (!disposed)
         {
-            _flattenedCache = null;
-            _nullMaskCache = null;
+            flattenedCache = null;
+            nullMaskCache = null;
             disposed = true;
         }
     }

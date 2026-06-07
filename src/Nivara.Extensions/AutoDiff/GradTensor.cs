@@ -1,5 +1,4 @@
 using Nivara.Extensions.AutoDiff.Utilities;
-using Nivara.Tensors;
 using System.Numerics;
 using System.Numerics.Tensors;
 

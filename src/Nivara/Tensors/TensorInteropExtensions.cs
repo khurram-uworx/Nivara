@@ -1,6 +1,4 @@
-using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace Nivara.Tensors;
 
@@ -8,8 +6,27 @@ namespace Nivara.Tensors;
 /// Provides interoperability between Nivara DataFrames/Series and System.Numerics.Tensors.
 /// Leverages .NET 10's enhanced Tensor APIs for high-performance tensor operations.
 /// </summary>
-public static class TensorInterop
+public static class TensorInteropExtensions
 {
+    // Helper method to recursively flatten a tensor
+    static void flattenTensorRecursive<T>(ReadOnlyTensorSpan<T> tensorSpan, nint[] indices, int dimension, T[] data, ref int index)
+        where T : unmanaged
+    {
+        if (dimension == tensorSpan.Rank)
+        {
+            // Base case: copy the value
+            data[index++] = tensorSpan[indices];
+            return;
+        }
+
+        // Recursive case: iterate through this dimension
+        for (nint i = 0; i < tensorSpan.Lengths[dimension]; i++)
+        {
+            indices[dimension] = i;
+            flattenTensorRecursive(tensorSpan, indices, dimension + 1, data, ref index);
+        }
+    }
+
     /// <summary>
     /// Converts a NivaraSeries to a System.Numerics.Tensors.Tensor&lt;T&gt;.
     /// </summary>
@@ -392,24 +409,5 @@ public static class TensorInterop
         }
 
         return result;
-    }
-
-    // Helper method to recursively flatten a tensor
-    private static void flattenTensorRecursive<T>(ReadOnlyTensorSpan<T> tensorSpan, nint[] indices, int dimension, T[] data, ref int index)
-        where T : unmanaged
-    {
-        if (dimension == tensorSpan.Rank)
-        {
-            // Base case: copy the value
-            data[index++] = tensorSpan[indices];
-            return;
-        }
-
-        // Recursive case: iterate through this dimension
-        for (nint i = 0; i < tensorSpan.Lengths[dimension]; i++)
-        {
-            indices[dimension] = i;
-            flattenTensorRecursive(tensorSpan, indices, dimension + 1, data, ref index);
-        }
     }
 }
