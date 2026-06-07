@@ -122,6 +122,22 @@ public class GradientUtilsTests
     }
 
     [Test]
+    public void ClipGradValue_PreservesNullMask()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
+            requiresGrad: true);
+        a.Grad = NivaraColumn<float>.CreateFromNullable(new float?[] { -5.0f, null, 10.0f });
+
+        GradientUtils.ClipGradValue(a, 3.0f);
+
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(a.Grad![0], Is.EqualTo(-3.0f));
+        Assert.That(a.Grad.IsNull(1), Is.True);
+        Assert.That(a.Grad[2], Is.EqualTo(3.0f));
+    }
+
+    [Test]
     public void ClipGradValue_NoGradient_DoesNothing()
     {
         // Arrange
@@ -150,6 +166,22 @@ public class GradientUtilsTests
         Assert.That(a.Grad, Is.Not.Null);
         Assert.That(a.Grad![0], Is.EqualTo(1.5f).Within(0.001f)); // 3 * 0.5
         Assert.That(a.Grad[1], Is.EqualTo(2.0f).Within(0.001f));  // 4 * 0.5
+    }
+
+    [Test]
+    public void ClipGradNorm_SingleTensor_PreservesNullMask()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
+            requiresGrad: true);
+        a.Grad = NivaraColumn<float>.CreateFromNullable(new float?[] { 3.0f, null, 4.0f });
+
+        GradientUtils.ClipGradNorm(a, 2.5);
+
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(a.Grad![0], Is.EqualTo(1.5f).Within(0.001f));
+        Assert.That(a.Grad.IsNull(1), Is.True);
+        Assert.That(a.Grad[2], Is.EqualTo(2.0f).Within(0.001f));
     }
 
     [Test]
@@ -190,6 +222,22 @@ public class GradientUtilsTests
         // Assert
         Assert.That(a.Grad![0], Is.EqualTo(1.5f).Within(0.001f)); // 3 * 0.5
         Assert.That(b.Grad![0], Is.EqualTo(2.0f).Within(0.001f));  // 4 * 0.5
+    }
+
+    [Test]
+    public void ClipGradNorm_MultipleTensors_PreservesNullMasks()
+    {
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
+        a.Grad = NivaraColumn<float>.CreateFromNullable(new float?[] { 3.0f, null });
+        b.Grad = NivaraColumn<float>.CreateFromNullable(new float?[] { null, 4.0f });
+
+        GradientUtils.ClipGradNorm(new[] { a, b }, 2.5);
+
+        Assert.That(a.Grad![0], Is.EqualTo(1.5f).Within(0.001f));
+        Assert.That(a.Grad.IsNull(1), Is.True);
+        Assert.That(b.Grad!.IsNull(0), Is.True);
+        Assert.That(b.Grad[1], Is.EqualTo(2.0f).Within(0.001f));
     }
 
     #endregion

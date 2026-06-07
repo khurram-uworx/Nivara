@@ -44,18 +44,23 @@ public static class TypeConverter
             }
         }
 
-        var targetColumn = NivaraColumn<TTarget>.Create(targetData);
-
+        NivaraColumn<TTarget> targetColumn;
         if (sourceData.HasNulls)
         {
-            var nullMask = new bool[sourceData.Length];
+            var nullableData = new TTarget?[sourceData.Length];
             for (int i = 0; i < sourceData.Length; i++)
             {
-                nullMask[i] = sourceData.IsNull(i);
+                nullableData[i] = sourceData.IsNull(i) ? null : targetData[i];
             }
+
+            targetColumn = NivaraColumn<TTarget>.CreateFromNullable(nullableData);
+        }
+        else
+        {
+            targetColumn = NivaraColumn<TTarget>.Create(targetData);
         }
 
-        return new ReverseGradTensor<TTarget>(targetColumn, resultRequiresGrad);
+        return new ReverseGradTensor<TTarget>(targetColumn, resultRequiresGrad, source.shape);
     }
 
     /// <summary>

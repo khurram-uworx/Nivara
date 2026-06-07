@@ -77,10 +77,20 @@ the same length as the output.
 - Activations: `Relu`, `Sigmoid`, `Tanh`
 - Matrix helpers: `MatMul`, `Transpose`
 
-`MatMul` and `Transpose` operate on flattened `GradTensor<T>` values and require
-explicit row and column arguments. `GradTensor<T>` also carries shape metadata
-via `Shape`, `Rank`, and `Reshape`, though `MatMul` and `Transpose` still require
-explicit dimension arguments.
+`MatMul` and `Transpose` operate on row-major flattened tensor values with shape
+metadata. Use `Reshape(rows, cols)` before calling the shape-aware overloads:
+
+```csharp
+var a = ReverseGradTensor<float>.FromArray(new[] { 1f, 2f, 3f, 4f }, requiresGrad: true);
+var b = ReverseGradTensor<float>.FromArray(new[] { 5f, 6f, 7f, 8f }, requiresGrad: true);
+a.Reshape(2, 2);
+b.Reshape(2, 2);
+
+var product = GradOperations.MatMul(a, b);
+```
+
+Legacy explicit-dimension overloads still exist for compatibility, but new code
+should prefer shape metadata.
 
 ## Nivara Integration
 
@@ -138,8 +148,8 @@ tests alongside forward and backward tests.
 
 - Operations are static methods. There are no fluent `GradTensor<T>` methods or
   operator overloads yet.
-- `MatMul` and `Transpose` use flattened matrix conventions with explicit shape
-  arguments.
+- Matrix helpers use row-major flattened matrix conventions plus explicit shape
+  metadata. Legacy explicit-dimension overloads remain for compatibility.
 - `Backward()` defaults to a scalar-loss workflow. Non-scalar outputs require an
   explicit matching gradient.
 - Optimizer: `Nivara.Extensions.AutoDiff.Optimizer.SgdOptimizer.SgdUpdate` provides a minimal SGD update with null-skip support.
@@ -147,9 +157,9 @@ tests alongside forward and backward tests.
 - The implementation favors correctness and integration with current Nivara
   types over being a performance-final tensor runtime.
 
-See [`../../../docs/AUTODIFF-SUGGESTIONS.md`](../../../docs/AUTODIFF-SUGGESTIONS.md)
-for grounded follow-up work and [`../../../EXAMPLES.md`](../../../EXAMPLES.md)
-for a concise user-facing example.
+See [`../../../docs/AUTODIFF-GAPS.md`](../../../docs/AUTODIFF-GAPS.md) for
+deferred gaps and [`../../../EXAMPLES.md`](../../../EXAMPLES.md) for a concise
+user-facing example.
 
 ## Directory Structure
 

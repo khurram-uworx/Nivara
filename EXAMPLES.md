@@ -278,11 +278,12 @@ Current limitations to review:
   tensors. Non-scalar outputs require a matching gradient argument.
 - Operations are static methods today; there are no fluent methods or operator
   overloads for `ReverseGradTensor<T>` yet.
-- `MatMul` and `Transpose` use flattened tensors plus explicit dimensions.
+- `MatMul` and `Transpose` use row-major flattened tensors plus shape metadata
+  via `Reshape`.
 - The `SgdOptimizer.SgdUpdate` primitive is available for simple SGD weight updates.
 - There is no layer, model, dataloader, or training-loop API yet.
-- See [`docs/AUTODIFF-SUGGESTIONS.md`](docs/AUTODIFF-SUGGESTIONS.md) for the
-  grounded follow-up list.
+- See [`docs/AUTODIFF-GAPS.md`](docs/AUTODIFF-GAPS.md) for deferred AutoDiff
+  follow-up work.
 
 ## 8. What We Want Reviewers To React To
 
@@ -301,5 +302,5 @@ When showing these examples to ML and AI engineers, useful feedback is:
 ## Current Roadmap Link
 
 See [`docs/TENSORS-GAPS.md`](docs/TENSORS-GAPS.md) and
-[`docs/AUTODIFF-SUGGESTIONS.md`](docs/AUTODIFF-SUGGESTIONS.md) for the current
-Tensor and AutoDiff improvement roadmaps.
+[`docs/AUTODIFF-GAPS.md`](docs/AUTODIFF-GAPS.md) for the current Tensor and
+AutoDiff improvement roadmaps.

@@ -719,6 +719,12 @@ public static class GradOperations
             throw new ArgumentException($"Expected scalar gradient with length 1, got {scalarGrad.Length}");
         }
 
+        if (scalarGrad.IsNull(0))
+        {
+            var nullableData = new T?[targetLength];
+            return NivaraColumn<T>.CreateFromNullable(nullableData);
+        }
+
         var gradValue = scalarGrad[0];
         var result = ArrayPool<T>.Shared.Rent(targetLength);
         try
@@ -736,21 +742,29 @@ public static class GradOperations
     {
         int n = column.Length;
         var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        bool hasNulls = false;
         try
         {
             T divisorT = ConvertToT<T>(divisor);
             for (int i = 0; i < n; i++)
             {
-                if (!column.IsNull(i))
+                nullMask[i] = column.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     result[i] = column[i] / divisorT;
                 }
             }
-            return NivaraColumn<T>.Create(result.AsSpan(0, n));
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
         }
         finally
         {
             ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
@@ -834,20 +848,28 @@ public static class GradOperations
     {
         int n = input.Length;
         var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        bool hasNulls = false;
         try
         {
             for (int i = 0; i < n; i++)
             {
-                if (!input.IsNull(i) && !gradOutput.IsNull(i))
+                nullMask[i] = input.IsNull(i) || gradOutput.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     result[i] = input[i] > T.Zero ? gradOutput[i] : T.Zero;
                 }
             }
-            return NivaraColumn<T>.Create(result.AsSpan(0, n));
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
         }
         finally
         {
             ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
@@ -903,21 +925,29 @@ public static class GradOperations
     {
         int n = input.Length;
         var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        bool hasNulls = false;
         try
         {
             for (int i = 0; i < n; i++)
             {
-                if (!input.IsNull(i) && !gradOutput.IsNull(i))
+                nullMask[i] = input.IsNull(i) || gradOutput.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     var sign = T.CreateChecked(T.Sign(input[i]));
                     result[i] = sign * gradOutput[i];
                 }
             }
-            return NivaraColumn<T>.Create(result.AsSpan(0, n));
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
         }
         finally
         {
             ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
@@ -978,21 +1008,29 @@ public static class GradOperations
     {
         int n = sigmoidOutput.Length;
         var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        bool hasNulls = false;
         try
         {
             for (int i = 0; i < n; i++)
             {
-                if (!sigmoidOutput.IsNull(i) && !gradOutput.IsNull(i))
+                nullMask[i] = sigmoidOutput.IsNull(i) || gradOutput.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     var sig = sigmoidOutput[i];
                     result[i] = sig * (T.One - sig) * gradOutput[i];
                 }
             }
-            return NivaraColumn<T>.Create(result.AsSpan(0, n));
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
         }
         finally
         {
             ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
@@ -1053,21 +1091,29 @@ public static class GradOperations
     {
         int n = tanhOutput.Length;
         var result = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        bool hasNulls = false;
         try
         {
             for (int i = 0; i < n; i++)
             {
-                if (!tanhOutput.IsNull(i) && !gradOutput.IsNull(i))
+                nullMask[i] = tanhOutput.IsNull(i) || gradOutput.IsNull(i);
+                if (nullMask[i])
+                {
+                    hasNulls = true;
+                }
+                else
                 {
                     var tanh = tanhOutput[i];
                     result[i] = (T.One - tanh * tanh) * gradOutput[i];
                 }
             }
-            return NivaraColumn<T>.Create(result.AsSpan(0, n));
+            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
         }
         finally
         {
             ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 

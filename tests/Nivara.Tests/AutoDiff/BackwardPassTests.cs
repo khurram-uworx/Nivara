@@ -114,6 +114,28 @@ public class BackwardPassTests
     }
 
     [Test]
+    public void Backward_ExplicitGradientWithSameLengthDifferentShape_ThrowsException()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f, 4.0f }),
+            requiresGrad: true);
+        var b = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 5.0f, 6.0f, 7.0f, 8.0f }),
+            requiresGrad: true);
+        a.Reshape(2, 2);
+        b.Reshape(2, 2);
+        var y = GradOperations.MatMul(a, b);
+
+        var gradient = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f, 1.0f }),
+            requiresGrad: false);
+        gradient.Reshape(4);
+
+        var ex = Assert.Throws<ArgumentException>(() => y.Backward(gradient));
+        Assert.That(ex!.Message, Does.Contain("Gradient shape mismatch"));
+    }
+
+    [Test]
     public void Backward_TensorWithoutRequiresGrad_ThrowsException()
     {
         // Arrange

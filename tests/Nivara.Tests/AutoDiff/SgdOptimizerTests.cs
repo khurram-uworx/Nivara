@@ -73,6 +73,33 @@ public class SgdOptimizerTests
     }
 
     [Test]
+    public void SgdUpdate_NullParameter_PreservesNullMask()
+    {
+        var data = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
+        param.Grad = NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f, 0.5f });
+
+        var updated = SgdOptimizer.SgdUpdate(param, 0.1f);
+
+        Assert.That(updated[0], Is.EqualTo(0.95f).Within(1e-6f));
+        Assert.That(updated.IsNull(1), Is.True);
+        Assert.That(updated[2], Is.EqualTo(2.95f).Within(1e-6f));
+    }
+
+    [Test]
+    public void SgdUpdate_PreservesShape()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f, 4.0f });
+        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
+        param.Reshape(2, 2);
+        param.Grad = NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f, 1.0f });
+
+        var updated = SgdOptimizer.SgdUpdate(param, 0.1f);
+
+        Assert.That(updated.Shape, Is.EqualTo(new[] { 2, 2 }));
+    }
+
+    [Test]
     public void SgdUpdate_DoubleType_UpdatesCorrectly()
     {
         var data = NivaraColumn<double>.Create(new double[] { 5.0, 10.0 });

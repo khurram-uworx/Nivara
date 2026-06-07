@@ -133,6 +133,12 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
                 $"Gradient shape mismatch: expected length {Length}, got {gradient.Length}",
                 nameof(gradient));
         }
+        if (gradient != null && !ShapeEquals(gradient.shape, shape))
+        {
+            throw new ArgumentException(
+                $"Gradient shape mismatch: expected [{string.Join(", ", shape)}], got [{string.Join(", ", gradient.shape)}]",
+                nameof(gradient));
+        }
 
         NivaraColumn<T> gradientData;
         if (gradient != null)
@@ -174,7 +180,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     public ReverseGradTensor<T> Detach()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        return new ReverseGradTensor<T>(Data, requiresGrad: false);
+        return new ReverseGradTensor<T>(Data, requiresGrad: false, shape);
     }
 
     /// <summary>
@@ -232,5 +238,19 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
         var gradInfo = RequiresGrad ? (Grad != null ? "with grad" : "requires grad") : "no grad";
         var graphInfo = IsLeaf ? "leaf" : "non-leaf";
         return $"ReverseGradTensor<{typeof(T).Name}>[{shapeStr}] ({gradInfo}, {graphInfo})";
+    }
+
+    private static bool ShapeEquals(int[] left, int[] right)
+    {
+        if (left.Length != right.Length)
+            return false;
+
+        for (int i = 0; i < left.Length; i++)
+        {
+            if (left[i] != right[i])
+                return false;
+        }
+
+        return true;
     }
 }

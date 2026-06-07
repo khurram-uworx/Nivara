@@ -86,11 +86,20 @@ public static class GradientUtils
         var grad = tensor.Grad;
         int n = grad.Length;
         var clippedData = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
         var minValue = -maxValue;
         var span = grad.AsSpan();
+        bool hasNulls = false;
 
         try
         {
+            for (int i = 0; i < n; i++)
+            {
+                nullMask[i] = grad.IsNull(i);
+                if (nullMask[i])
+                    hasNulls = true;
+            }
+
             if (typeof(T) == typeof(float))
             {
                 var fSpan = MemoryMarshal.Cast<T, float>(span);
@@ -132,11 +141,12 @@ public static class GradientUtils
                 }
             }
 
-            tensor.Grad = NivaraColumn<T>.Create(clippedData.AsSpan(0, n));
+            tensor.Grad = CreateColumnWithNullMask(clippedData.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
         }
         finally
         {
             ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
@@ -190,9 +200,18 @@ public static class GradientUtils
         {
             var scale = maxNorm / norm;
             var clippedData = ArrayPool<T>.Shared.Rent(n);
+            var nullMask = ArrayPool<bool>.Shared.Rent(n);
+            bool hasNulls = false;
 
             try
             {
+                for (int i = 0; i < n; i++)
+                {
+                    nullMask[i] = grad.IsNull(i);
+                    if (nullMask[i])
+                        hasNulls = true;
+                }
+
                 if (typeof(T) == typeof(float))
                 {
                     var scaleFloat = (float)scale;
@@ -220,11 +239,12 @@ public static class GradientUtils
                     }
                 }
 
-                tensor.Grad = NivaraColumn<T>.Create(clippedData.AsSpan(0, n));
+                tensor.Grad = CreateColumnWithNullMask(clippedData.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
             }
             finally
             {
                 ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+                ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
             }
         }
     }
@@ -288,9 +308,18 @@ public static class GradientUtils
                 int n = grad.Length;
                 var span = grad.AsSpan();
                 var clippedData = ArrayPool<T>.Shared.Rent(n);
+                var nullMask = ArrayPool<bool>.Shared.Rent(n);
+                bool hasNulls = false;
 
                 try
                 {
+                    for (int i = 0; i < n; i++)
+                    {
+                        nullMask[i] = grad.IsNull(i);
+                        if (nullMask[i])
+                            hasNulls = true;
+                    }
+
                     if (typeof(T) == typeof(float))
                     {
                         var scaleFloat = (float)scale;
@@ -318,11 +347,12 @@ public static class GradientUtils
                         }
                     }
 
-                    tensor.Grad = NivaraColumn<T>.Create(clippedData.AsSpan(0, n));
+                    tensor.Grad = CreateColumnWithNullMask(clippedData.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
                 }
                 finally
                 {
                     ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+                    ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
                 }
             }
         }
@@ -572,6 +602,21 @@ public static class GradientUtils
         }
 
         return sb.ToString();
+    }
+
+    private static NivaraColumn<T> CreateColumnWithNullMask<T>(ReadOnlySpan<T> data, ReadOnlySpan<bool> nullMask, bool hasNulls)
+        where T : struct, INumber<T>
+    {
+        if (!hasNulls)
+            return NivaraColumn<T>.Create(data);
+
+        var nullableData = new T?[data.Length];
+        for (int i = 0; i < data.Length; i++)
+        {
+            nullableData[i] = nullMask[i] ? null : data[i];
+        }
+
+        return NivaraColumn<T>.CreateFromNullable(nullableData);
     }
 
     #endregion

@@ -102,9 +102,11 @@ public class GradOperationsTests
         var bData = NivaraColumn<float>.Create(new float[] { 5.0f, 6.0f, 7.0f, 8.0f });
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
+        a.Reshape(2, 2);
+        b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b, aRows: 2, aCols: 2, bCols: 2);
+        var result = GradOperations.MatMul(a, b);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(4));
@@ -123,9 +125,10 @@ public class GradOperationsTests
         // Expected result: [[1, 4], [2, 5], [3, 6]] (flattened: [1, 4, 2, 5, 3, 6])
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f });
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        a.Reshape(2, 3);
 
         // Act
-        var result = GradOperations.Transpose(a, rows: 2, cols: 3);
+        var result = GradOperations.Transpose(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(6));

@@ -18,11 +18,15 @@ public static class SgdOptimizer
         var grad = parameter.Grad;
         var data = parameter.Data;
         int n = data.Length;
-        var resultData = new T[n];
+        var resultData = new T?[n];
 
         for (int i = 0; i < n; i++)
         {
-            if (!grad.IsNull(i))
+            if (data.IsNull(i))
+            {
+                resultData[i] = null;
+            }
+            else if (!grad.IsNull(i))
             {
                 resultData[i] = data[i] - learningRate * grad[i];
             }
@@ -32,7 +36,7 @@ public static class SgdOptimizer
             }
         }
 
-        var resultColumn = NivaraColumn<T>.Create(resultData);
-        return new ReverseGradTensor<T>(resultColumn, requiresGrad: false);
+        var resultColumn = NivaraColumn<T>.CreateFromNullable(resultData);
+        return new ReverseGradTensor<T>(resultColumn, requiresGrad: false, parameter.shape);
     }
 }

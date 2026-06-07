@@ -225,6 +225,7 @@ public class NullHandlingTests
         var gradValues = new float?[] { 1.0f, 1.0f, 1.0f, 1.0f };
         var gradColumn = NivaraColumn<float>.CreateFromNullable(gradValues);
         var grad = new ReverseGradTensor<float>(gradColumn, requiresGrad: false);
+        grad.Reshape(2, 2);
         result.Backward(grad);
 
         // Assert: Gradients should exist
@@ -374,14 +375,53 @@ public class NullHandlingTests
         // Position 0: input -1 <= 0, gradient should be 0
         Assert.That(tensor.Grad![0], Is.EqualTo(0.0f), "Gradient for negative input should be 0");
 
-        // Position 1: input is null, gradient should be 0 (null handling)
-        Assert.That(tensor.Grad[1], Is.EqualTo(0.0f), "Gradient for null input should be 0");
+        // Position 1: input is null, gradient position should remain null
+        Assert.That(tensor.Grad.IsNull(1), Is.True, "Gradient for null input should be null");
 
         // Position 2: input 1 > 0, gradient should be 1
         Assert.That(tensor.Grad[2], Is.EqualTo(1.0f), "Gradient for positive input should be 1");
 
         // Position 3: input 2 > 0, gradient should be 1
         Assert.That(tensor.Grad[3], Is.EqualTo(1.0f), "Gradient for positive input should be 1");
+    }
+
+    [Test]
+    public void ActivationBackward_WithNullGradientOutput_PreservesNullMask()
+    {
+        var tensor = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { -1.0f, 0.0f, 1.0f }),
+            requiresGrad: true);
+        var result = GradOperations.Sigmoid(tensor);
+        var grad = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 1.0f }),
+            requiresGrad: false);
+
+        result.Backward(grad);
+
+        Assert.That(tensor.Grad, Is.Not.Null);
+        Assert.That(tensor.Grad!.IsNull(0), Is.False);
+        Assert.That(tensor.Grad.IsNull(1), Is.True);
+        Assert.That(tensor.Grad.IsNull(2), Is.False);
+    }
+
+    [Test]
+    public void SumBackward_WithNullGradientOutput_BroadcastsNullMask()
+    {
+        var tensor = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
+            requiresGrad: true);
+        var sum = GradOperations.Sum(tensor);
+        var grad = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(new float?[] { null }),
+            requiresGrad: false);
+
+        sum.Backward(grad);
+
+        Assert.That(tensor.Grad, Is.Not.Null);
+        for (int i = 0; i < tensor.Length; i++)
+        {
+            Assert.That(tensor.Grad!.IsNull(i), Is.True);
+        }
     }
 
     #endregion

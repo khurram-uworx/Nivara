@@ -193,6 +193,22 @@ public class TypeSafetyTests
     }
 
     [Test]
+    public void TypeConverter_Convert_PreservesNullMaskAndShape()
+    {
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.5f, null, 3.5f, 4.5f });
+        var floatTensor = new ReverseGradTensor<float>(column, requiresGrad: true);
+        floatTensor.Reshape(2, 2);
+
+        var doubleTensor = TypeConverter.ToDouble(floatTensor);
+
+        Assert.That(doubleTensor.Shape, Is.EqualTo(new[] { 2, 2 }));
+        Assert.That(doubleTensor[0], Is.EqualTo(1.5).Within(0.0001));
+        Assert.That(doubleTensor.IsNull(1), Is.True);
+        Assert.That(doubleTensor[2], Is.EqualTo(3.5).Within(0.0001));
+        Assert.That(doubleTensor[3], Is.EqualTo(4.5).Within(0.0001));
+    }
+
+    [Test]
     public void ReverseGradTensor_ToFloat_ConvertsCorrectly()
     {
         // Arrange
