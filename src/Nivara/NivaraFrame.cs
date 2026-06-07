@@ -1,6 +1,9 @@
+using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
+using Nivara.Storage;
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
@@ -238,6 +241,7 @@ public sealed class NivaraFrame : IFrame
 
     /// <summary>
     /// Computes one dot product per column against the supplied vector.
+    /// Nulls in the vector or any column cause that column's result to be null.
     /// </summary>
     public NivaraSeries<T> Dot<T>(NivaraSeries<T> vector)
         where T : unmanaged, INumber<T>
@@ -247,101 +251,210 @@ public sealed class NivaraFrame : IFrame
 
         if (vector.Length != RowCount)
             throw new ArgumentException($"Vector length ({vector.Length}) must match frame row count ({RowCount})", nameof(vector));
-        if (vector.Values.HasNulls)
-            throw new InvalidOperationException("Cannot compute dot product with a vector that contains null values.");
 
+        var vectorHasNulls = vector.Values.HasNulls;
         var vectorSpan = vector.Values.AsSpan();
         var scores = new T[ColumnCount];
+        var nullMaskArray = new bool[ColumnCount];
+        var hasNulls = false;
 
         for (int i = 0; i < ColumnCount; i++)
         {
             var column = GetColumn<T>(ColumnNames[i]);
-            if (column.HasNulls)
-                throw new InvalidOperationException($"Cannot compute dot product for column '{ColumnNames[i]}' because it contains null values.");
-
-            scores[i] = DotSpans(column.AsSpan(), vectorSpan);
+            if (vectorHasNulls || column.HasNulls)
+            {
+                nullMaskArray[i] = true;
+                hasNulls = true;
+                scores[i] = default;
+            }
+            else
+            {
+                scores[i] = DotSpans(column.AsSpan(), vectorSpan);
+            }
         }
 
-        return NivaraSeries<T>.Create(scores, ColumnNames.ToArray());
+        var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(scores, nullMask);
+        var valuesColumn = new NivaraColumn<T>(storage);
+        var labels = ColumnNames.ToArray();
+        var objectIndex = labels.Cast<object>().ToArray();
+        var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
+
+        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
+            "FrameDot", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+
+        return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
 
     /// <summary>
     /// Computes one cosine-similarity score per column against the supplied vector.
+    /// Nulls in the vector or any column cause that column's result to be null.
     /// </summary>
     public NivaraSeries<T> CosineSimilarity<T>(NivaraSeries<T> vector)
-        where T : unmanaged, INumber<T>
+        where T : unmanaged, IRootFunctions<T>
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         ArgumentNullException.ThrowIfNull(vector);
 
         if (vector.Length != RowCount)
             throw new ArgumentException($"Vector length ({vector.Length}) must match frame row count ({RowCount})", nameof(vector));
-        if (vector.Values.HasNulls)
-            throw new InvalidOperationException("Cannot compute cosine similarity with a vector that contains null values.");
+        if (RowCount == 0)
+            throw new ArgumentException("Cannot compute cosine similarity for empty vectors.", nameof(vector));
 
+        var vectorHasNulls = vector.Values.HasNulls;
         var vectorSpan = vector.Values.AsSpan();
         var scores = new T[ColumnCount];
+        var nullMaskArray = new bool[ColumnCount];
+        var hasNulls = false;
 
         for (int i = 0; i < ColumnCount; i++)
         {
             var column = GetColumn<T>(ColumnNames[i]);
-            if (column.HasNulls)
-                throw new InvalidOperationException($"Cannot compute cosine similarity for column '{ColumnNames[i]}' because it contains null values.");
-
-            scores[i] = CosineSimilaritySpans(column.AsSpan(), vectorSpan);
+            if (vectorHasNulls || column.HasNulls)
+            {
+                nullMaskArray[i] = true;
+                hasNulls = true;
+                scores[i] = default;
+            }
+            else
+            {
+                scores[i] = CosineSimilaritySpans(column.AsSpan(), vectorSpan);
+            }
         }
 
-        return NivaraSeries<T>.Create(scores, ColumnNames.ToArray());
+        var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(scores, nullMask);
+        var valuesColumn = new NivaraColumn<T>(storage);
+        var labels = ColumnNames.ToArray();
+        var objectIndex = labels.Cast<object>().ToArray();
+        var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
+
+        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
+            "FrameCosineSimilarity", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+
+        return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
 
     private static T DotSpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
         where T : unmanaged, INumber<T>
     {
-        if (typeof(T) == typeof(float))
-        {
-            var result = TensorPrimitives.Dot(
-                MemoryMarshal.Cast<T, float>(left),
-                MemoryMarshal.Cast<T, float>(right));
-            return (T)(object)result;
-        }
-
-        if (typeof(T) == typeof(double))
-        {
-            var result = TensorPrimitives.Dot(
-                MemoryMarshal.Cast<T, double>(left),
-                MemoryMarshal.Cast<T, double>(right));
-            return (T)(object)result;
-        }
-
-        var sum = T.Zero;
-        for (int i = 0; i < left.Length; i++)
-        {
-            sum += left[i] * right[i];
-        }
-
-        return sum;
+        return TensorPrimitives.Dot(left, right);
     }
 
     private static T CosineSimilaritySpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
-        where T : unmanaged, INumber<T>
+        where T : unmanaged, IRootFunctions<T>
     {
-        if (typeof(T) == typeof(float))
+        return TensorPrimitives.CosineSimilarity(left, right);
+    }
+
+    /// <summary>
+    /// Computes the Euclidean norm (L2 norm) for each column.
+    /// </summary>
+    public NivaraSeries<T> ColumnNorms<T>()
+        where T : unmanaged, IRootFunctions<T>
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var norms = new T[ColumnCount];
+        var nullMaskArray = new bool[ColumnCount];
+        var hasNulls = false;
+
+        for (int i = 0; i < ColumnCount; i++)
         {
-            var result = TensorPrimitives.CosineSimilarity(
-                MemoryMarshal.Cast<T, float>(left),
-                MemoryMarshal.Cast<T, float>(right));
-            return (T)(object)result;
+            var column = GetColumn<T>(ColumnNames[i]);
+            if (column.HasNulls)
+            {
+                nullMaskArray[i] = true;
+                hasNulls = true;
+                norms[i] = default;
+            }
+            else
+            {
+                norms[i] = NormSpan(column.AsSpan());
+            }
         }
 
-        if (typeof(T) == typeof(double))
+        var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(norms, nullMask);
+        var valuesColumn = new NivaraColumn<T>(storage);
+        var labels = ColumnNames.ToArray();
+        var objectIndex = labels.Cast<object>().ToArray();
+        var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
+
+        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
+            "FrameColumnNorms", KernelSelector.DetermineBatchKernelType<T>(), ColumnCount, typeof(T), hasNulls));
+
+        return new NivaraSeries<T>(valuesColumn, indexColumn);
+    }
+
+    /// <summary>
+    /// Computes the Euclidean norm (L2 norm) for each row.
+    /// </summary>
+    public NivaraSeries<T> RowNorms<T>()
+        where T : unmanaged, IRootFunctions<T>
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var norms = new T[RowCount];
+        var nullMaskArray = new bool[RowCount];
+        var hasNulls = false;
+        T[]? pooledRowValues = null;
+        var rowValues = ColumnCount >= 1024
+            ? (pooledRowValues = ArrayPool<T>.Shared.Rent(ColumnCount))
+            : new T[ColumnCount];
+
+        try
         {
-            var result = TensorPrimitives.CosineSimilarity(
-                MemoryMarshal.Cast<T, double>(left),
-                MemoryMarshal.Cast<T, double>(right));
-            return (T)(object)result;
+            for (int row = 0; row < RowCount; row++)
+            {
+                var rowHasNull = false;
+
+                for (int col = 0; col < ColumnCount; col++)
+                {
+                    var column = GetColumn<T>(ColumnNames[col]);
+                    if (column.IsNull(row))
+                    {
+                        rowHasNull = true;
+                        break;
+                    }
+                    rowValues[col] = column[row];
+                }
+
+                if (rowHasNull)
+                {
+                    nullMaskArray[row] = true;
+                    hasNulls = true;
+                    norms[row] = default;
+                }
+                else
+                {
+                    norms[row] = NormSpan(rowValues.AsSpan(0, ColumnCount));
+                }
+            }
+        }
+        finally
+        {
+            if (pooledRowValues != null)
+                ArrayPool<T>.Shared.Return(pooledRowValues);
         }
 
-        throw new NotSupportedException($"Cosine similarity is currently supported only for float and double columns. Type {typeof(T).Name} is not supported.");
+        var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(norms, nullMask);
+        var valuesColumn = new NivaraColumn<T>(storage);
+
+        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
+            "FrameRowNorms", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+
+        return new NivaraSeries<T>(valuesColumn);
+    }
+
+    private static T NormSpan<T>(ReadOnlySpan<T> values)
+        where T : unmanaged, IRootFunctions<T>
+    {
+        if (values.IsEmpty)
+            return default;
+
+        return TensorPrimitives.Norm(values);
     }
 
     /// <summary>

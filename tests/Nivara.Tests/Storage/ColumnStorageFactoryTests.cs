@@ -1,3 +1,4 @@
+using Nivara.Diagnostics;
 using Nivara.Storage;
 using NUnit.Framework;
 
@@ -269,6 +270,66 @@ public class ColumnStorageFactoryTests
             Assert.That(storage.HasNulls, Is.EqualTo(expectedHasNulls),
                 $"Storage should {(expectedHasNulls ? "" : "not ")}indicate presence of nulls");
         }
+    }
+
+    #endregion
+
+    #region Explicit Null Mask Tests
+
+    [Test]
+    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMaskForTensorStorage()
+    {
+        var values = new[] { 1, 2, 3 };
+
+        var storage = ColumnStorageFactory.Create<int>(values, ReadOnlyMemory<bool>.Empty);
+
+        Assert.That(storage.HasNulls, Is.False);
+        Assert.That(storage.NullMask.Length, Is.EqualTo(0));
+        Assert.That(storage.Length, Is.EqualTo(values.Length));
+    }
+
+    [Test]
+    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMaskForMemoryStorage()
+    {
+        var values = new[] { "a", "b", "c" };
+
+        var storage = ColumnStorageFactory.Create<string>(values, ReadOnlyMemory<bool>.Empty);
+
+        Assert.That(storage.HasNulls, Is.False);
+        Assert.That(storage.NullMask.Length, Is.EqualTo(0));
+        Assert.That(storage.Length, Is.EqualTo(values.Length));
+    }
+
+    [Test]
+    public void ColumnStorageFactory_CreateFromOwnedArray_TensorStorage_UsesOwnedArrayAndPreservesNullMask()
+    {
+        var values = new[] { 1, 2, 3 };
+        var nullMask = new ReadOnlyMemory<bool>(new[] { false, true, false });
+
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(values, nullMask);
+        values[0] = 10;
+
+        Assert.That(storage.StorageType, Is.EqualTo(StorageType.Tensor));
+        Assert.That(storage[0], Is.EqualTo(10));
+        Assert.That(storage.HasNulls, Is.True);
+        Assert.That(storage.NullMask.Length, Is.EqualTo(3));
+        Assert.That(storage.NullMask[1], Is.True);
+    }
+
+    [Test]
+    public void ColumnStorageFactory_CreateFromOwnedArray_MemoryStorage_UsesOwnedArrayAndPreservesNullMask()
+    {
+        var values = new[] { "a", "b", "c" };
+        var nullMask = new ReadOnlyMemory<bool>(new[] { false, true, false });
+
+        var storage = ColumnStorageFactory.CreateFromOwnedArray(values, nullMask);
+        values[0] = "changed";
+
+        Assert.That(storage.StorageType, Is.EqualTo(StorageType.Memory));
+        Assert.That(storage[0], Is.EqualTo("changed"));
+        Assert.That(storage.HasNulls, Is.True);
+        Assert.That(storage.NullMask.Length, Is.EqualTo(3));
+        Assert.That(storage.NullMask[1], Is.True);
     }
 
     #endregion

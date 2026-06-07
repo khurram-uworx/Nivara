@@ -667,6 +667,46 @@ public sealed class NivaraSeries<T> : IDisposable
     }
 
     /// <summary>
+    /// Returns the top K values in descending order with their labels.
+    /// Null values are always placed last and excluded from top results.
+    /// </summary>
+    /// <param name="count">The number of top elements to return</param>
+    /// <returns>An array of tuples containing the label and score of the top K elements</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when count is negative</exception>
+    public (string? Label, T Score)[] TopKDescending(int count)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (count < 0)
+            throw new ArgumentOutOfRangeException(nameof(count), "Count cannot be negative");
+
+        if (count == 0 || Length == 0)
+            return Array.Empty<(string? Label, T Score)>();
+
+        var indices = ArgSortDescending();
+        var validCount = 0;
+        while (validCount < indices.Length && IsValid(indices[validCount]))
+        {
+            validCount++;
+        }
+
+        var k = Math.Min(count, validCount);
+        var result = new (string? Label, T Score)[k];
+
+        for (int i = 0; i < k; i++)
+        {
+            var idx = indices[i];
+            var label = GetLabel(idx);
+            result[i] = (
+                label is string s ? s : null,
+                this[idx]
+            );
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Performs vectorized sum computation using TensorPrimitives when possible
     /// </summary>
     private T SumVectorized()

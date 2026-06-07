@@ -118,6 +118,42 @@ internal static class ColumnStorageFactory
     }
 
     /// <summary>
+    /// Creates storage for the given values with an explicit null mask, automatically selecting between tensor and memory storage.
+    /// Used by vectorized arithmetic paths in NivaraColumn to preserve null masks when the result is stored as TensorStorage.
+    /// </summary>
+    /// <typeparam name="T">The type of elements to store</typeparam>
+    /// <param name="values">The values to store</param>
+    /// <param name="nullMask">Optional null mask indicating which positions are null</param>
+    /// <returns>An appropriate storage implementation with the given null mask</returns>
+    public static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values, ReadOnlyMemory<bool>? nullMask)
+    {
+        // Use TensorStorage for vectorizable types that support the unmanaged constraint
+        if (IsVectorizable<T>() && IsUnmanagedType<T>())
+        {
+            return CreateTensorStorageForType<T>(values, nullMask);
+        }
+
+        // Use MemoryStorage for non-vectorizable types or reference types
+        return new MemoryStorage<T>(values.ToArray().AsMemory(), nullMask);
+    }
+
+    /// <summary>
+    /// Creates storage from an array owned by the caller. The caller must not mutate
+    /// the array after this call.
+    /// </summary>
+    internal static IColumnStorage<T> CreateFromOwnedArray<T>(T[] values, ReadOnlyMemory<bool>? nullMask = null)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+
+        if (IsVectorizable<T>() && IsUnmanagedType<T>())
+        {
+            return CreateTensorStorageForOwnedArray<T>(values, nullMask);
+        }
+
+        return new MemoryStorage<T>(new ReadOnlyMemory<T>(values), nullMask);
+    }
+
+    /// <summary>
     /// Creates storage for nullable values, automatically selecting between tensor and memory storage
     /// </summary>
     /// <typeparam name="T">The type of elements to store</typeparam>
@@ -182,32 +218,52 @@ internal static class ColumnStorageFactory
     }
 
     /// <summary>
-    /// Creates TensorStorage for a specific type using runtime type checking
+    /// Creates TensorStorage for a specific type using runtime type checking with an optional null mask.
+    /// Uses the internal TensorStorage(Tensor&lt;T&gt;, Tensor&lt;bool&gt;?) constructor for proper null-mask propagation.
     /// </summary>
     /// <typeparam name="T">The type of elements to store</typeparam>
     /// <param name="values">The values to store</param>
+    /// <param name="nullMask">Optional null mask to attach to the storage</param>
     /// <returns>A TensorStorage instance cast to IColumnStorage</returns>
-    private static IColumnStorage<T> CreateTensorStorageForType<T>(ReadOnlySpan<T> values)
+    private static IColumnStorage<T> CreateTensorStorageForType<T>(ReadOnlySpan<T> values, ReadOnlyMemory<bool>? nullMask = null)
     {
         var type = typeof(T);
 
         // Convert to array first since we can't cast spans to object
         var array = values.ToArray();
 
-        // Use type switching to create the appropriate TensorStorage
+        return CreateTensorStorageForOwnedArray<T>(array, nullMask);
+    }
+
+    /// <summary>
+    /// Creates TensorStorage for an owned array using runtime type checking with an optional null mask.
+    /// </summary>
+    private static IColumnStorage<T> CreateTensorStorageForOwnedArray<T>(T[] array, ReadOnlyMemory<bool>? nullMask = null)
+    {
+        var type = typeof(T);
+
+        // Convert the null mask from ReadOnlyMemory<bool>? to Tensor<bool>?
+        Tensor<bool>? nullTensor = null;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullArray = nullMask.Value.ToArray();
+            nullTensor = Tensor.Create(nullArray, new nint[] { nullArray.Length });
+        }
+
+        // Use type switching to create the appropriate TensorStorage with its internal constructor
         return type switch
         {
-            Type t when t == typeof(int) => (IColumnStorage<T>)(object)new TensorStorage<int>((int[])(object)array),
-            Type t when t == typeof(float) => (IColumnStorage<T>)(object)new TensorStorage<float>((float[])(object)array),
-            Type t when t == typeof(double) => (IColumnStorage<T>)(object)new TensorStorage<double>((double[])(object)array),
-            Type t when t == typeof(long) => (IColumnStorage<T>)(object)new TensorStorage<long>((long[])(object)array),
-            Type t when t == typeof(short) => (IColumnStorage<T>)(object)new TensorStorage<short>((short[])(object)array),
-            Type t when t == typeof(byte) => (IColumnStorage<T>)(object)new TensorStorage<byte>((byte[])(object)array),
-            Type t when t == typeof(uint) => (IColumnStorage<T>)(object)new TensorStorage<uint>((uint[])(object)array),
-            Type t when t == typeof(ulong) => (IColumnStorage<T>)(object)new TensorStorage<ulong>((ulong[])(object)array),
-            Type t when t == typeof(ushort) => (IColumnStorage<T>)(object)new TensorStorage<ushort>((ushort[])(object)array),
-            Type t when t == typeof(sbyte) => (IColumnStorage<T>)(object)new TensorStorage<sbyte>((sbyte[])(object)array),
-            Type t when t == typeof(bool) => (IColumnStorage<T>)(object)new TensorStorage<bool>((bool[])(object)array),
+            Type t when t == typeof(int) => (IColumnStorage<T>)(object)new TensorStorage<int>(Tensor.Create((int[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(float) => (IColumnStorage<T>)(object)new TensorStorage<float>(Tensor.Create((float[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(double) => (IColumnStorage<T>)(object)new TensorStorage<double>(Tensor.Create((double[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(long) => (IColumnStorage<T>)(object)new TensorStorage<long>(Tensor.Create((long[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(short) => (IColumnStorage<T>)(object)new TensorStorage<short>(Tensor.Create((short[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(byte) => (IColumnStorage<T>)(object)new TensorStorage<byte>(Tensor.Create((byte[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(uint) => (IColumnStorage<T>)(object)new TensorStorage<uint>(Tensor.Create((uint[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(ulong) => (IColumnStorage<T>)(object)new TensorStorage<ulong>(Tensor.Create((ulong[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(ushort) => (IColumnStorage<T>)(object)new TensorStorage<ushort>(Tensor.Create((ushort[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(sbyte) => (IColumnStorage<T>)(object)new TensorStorage<sbyte>(Tensor.Create((sbyte[])(object)array, new nint[] { array.Length }), nullTensor),
+            Type t when t == typeof(bool) => (IColumnStorage<T>)(object)new TensorStorage<bool>(Tensor.Create((bool[])(object)array, new nint[] { array.Length }), nullTensor),
             _ => throw new InvalidOperationException($"Type {type.Name} is not supported for TensorStorage")
         };
     }

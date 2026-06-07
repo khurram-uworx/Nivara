@@ -1,3 +1,4 @@
+using Nivara.Storage;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -1427,6 +1428,20 @@ public class NivaraColumnTests
         Assert.That(sliced.IsNull(1), Is.False, "Second element should not be detected as null");
         Assert.That(sliced.IsNull(2), Is.True, "Third element should be detected as null");
         Assert.That(sliced.HasNulls, Is.True, "Sliced column should report having nulls");
+    }
+
+    [Test]
+    public void IsNull_WithExplicitEmptyNullMask_TreatsAllPositionsAsNonNull()
+    {
+        var storage = new MemoryStorage<int>(
+            new ReadOnlyMemory<int>(new[] { 1, 2, 3 }),
+            ReadOnlyMemory<bool>.Empty);
+        var column = new NivaraColumn<int>(storage);
+
+        Assert.That(column.HasNulls, Is.False);
+        Assert.That(column.IsNull(0), Is.False);
+        Assert.That(column.IsNull(1), Is.False);
+        Assert.That(column.IsNull(2), Is.False);
     }
 
     /// <summary>
