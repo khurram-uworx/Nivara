@@ -235,6 +235,21 @@ sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     }
 
     /// <inheritdoc />
+    bool IColumnStorage<T>.TryGetSpan(out ReadOnlySpan<T> span)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (HasNulls)
+        {
+            span = default;
+            return false;
+        }
+
+        span = GetFlattenedSpan();
+        return true;
+    }
+
+    /// <inheritdoc />
     Span<T> IColumnStorage<T>.AsWritableSpan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);

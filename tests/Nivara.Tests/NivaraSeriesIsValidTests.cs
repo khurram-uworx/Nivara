@@ -1,3 +1,5 @@
+#pragma warning disable CS0618 // Tests exercise deprecated APIs during migration
+
 using Nivara.Tensors;
 using NUnit.Framework;
 
@@ -194,7 +196,7 @@ public class NivaraSeriesIsValidTests
     }
 
     [Test]
-    public void TensorExtensions_WithIntegerType_UsesFallback()
+    public void TensorExtensions_WithIntegerType_WorksCorrectly()
     {
         // Arrange
         var series1 = NivaraSeries<int>.Create(new int[] { 1, 2, 3 });
@@ -204,7 +206,6 @@ public class NivaraSeriesIsValidTests
         var sum = series1.AddTensor(series2);
         var product = series1.MultiplyTensor(series2);
         var dotProduct = series1.DotProduct(series2);
-        var norm = series1.Norm(); // For integers, this returns sum of squares
         var tensorSum = series1.SumTensor();
 
         // Assert
@@ -216,8 +217,7 @@ public class NivaraSeriesIsValidTests
         Assert.That(product[1], Is.EqualTo(10));
         Assert.That(product[2], Is.EqualTo(18));
 
-        Assert.That(dotProduct, Is.EqualTo(32)); // 1*4 + 2*5 + 3*6 = 32
-        Assert.That(norm, Is.EqualTo(14)); // For integers: 1^2 + 2^2 + 3^2 = 14 (sum of squares)
+        Assert.That(dotProduct, Is.EqualTo(32)); // 1*4 + 2*5 + 3*6 = 4 + 10 + 18 = 32
         Assert.That(tensorSum, Is.EqualTo(6)); // 1 + 2 + 3 = 6
     }
 

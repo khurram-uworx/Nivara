@@ -1,6 +1,5 @@
 using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace Nivara.Tensors;
 
@@ -18,8 +17,9 @@ public static class TensorExtensions
     /// <returns>A new NivaraSeries containing the element-wise sum</returns>
     /// <exception cref="ArgumentNullException">Thrown when either series is null</exception>
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
+    [Obsolete("Use TensorPrimitives.Add on spans obtained via TryGetSpan", false)]
     public static NivaraSeries<T> AddTensor<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
-        where T : unmanaged
+        where T : unmanaged, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
@@ -41,34 +41,13 @@ public static class TensorExtensions
             return new NivaraSeries<T>(leftValues.Add(rightValues), left.Index);
         }
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
-        {
-            var leftSpan = MemoryMarshal.Cast<T, float>(left.Values.AsSpan());
-            var rightSpan = MemoryMarshal.Cast<T, float>(right.Values.AsSpan());
-            var result = new float[left.Length];
+        var leftSpan = left.Values.AsSpan();
+        var rightSpan = right.Values.AsSpan();
+        var result = new T[left.Length];
 
-            TensorPrimitives.Add(leftSpan, rightSpan, result);
+        TensorPrimitives.Add(leftSpan, rightSpan, result);
 
-            var resultT = MemoryMarshal.Cast<float, T>(result.AsSpan()).ToArray();
-            return NivaraSeries<T>.Create(resultT);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var leftSpan = MemoryMarshal.Cast<T, double>(left.Values.AsSpan());
-            var rightSpan = MemoryMarshal.Cast<T, double>(right.Values.AsSpan());
-            var result = new double[left.Length];
-
-            TensorPrimitives.Add(leftSpan, rightSpan, result);
-
-            var resultT = MemoryMarshal.Cast<double, T>(result.AsSpan()).ToArray();
-            return NivaraSeries<T>.Create(resultT);
-        }
-        else
-        {
-            // Fallback to regular SIMD operations for other types
-            return left.Add(right);
-        }
+        return NivaraSeries<T>.Create(result);
     }
 
     /// <summary>
@@ -80,8 +59,9 @@ public static class TensorExtensions
     /// <returns>A new NivaraSeries containing the element-wise product</returns>
     /// <exception cref="ArgumentNullException">Thrown when either series is null</exception>
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
+    [Obsolete("Use TensorPrimitives.Multiply on spans obtained via TryGetSpan", false)]
     public static NivaraSeries<T> MultiplyTensor<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
-        where T : unmanaged
+        where T : unmanaged, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
@@ -103,34 +83,13 @@ public static class TensorExtensions
             return new NivaraSeries<T>(leftValues.Multiply(rightValues), left.Index);
         }
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
-        {
-            var leftSpan = MemoryMarshal.Cast<T, float>(left.Values.AsSpan());
-            var rightSpan = MemoryMarshal.Cast<T, float>(right.Values.AsSpan());
-            var result = new float[left.Length];
+        var leftSpan = left.Values.AsSpan();
+        var rightSpan = right.Values.AsSpan();
+        var result = new T[left.Length];
 
-            TensorPrimitives.Multiply(leftSpan, rightSpan, result);
+        TensorPrimitives.Multiply(leftSpan, rightSpan, result);
 
-            var resultT = MemoryMarshal.Cast<float, T>(result.AsSpan()).ToArray();
-            return NivaraSeries<T>.Create(resultT);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var leftSpan = MemoryMarshal.Cast<T, double>(left.Values.AsSpan());
-            var rightSpan = MemoryMarshal.Cast<T, double>(right.Values.AsSpan());
-            var result = new double[left.Length];
-
-            TensorPrimitives.Multiply(leftSpan, rightSpan, result);
-
-            var resultT = MemoryMarshal.Cast<double, T>(result.AsSpan()).ToArray();
-            return NivaraSeries<T>.Create(resultT);
-        }
-        else
-        {
-            // Fallback to regular SIMD operations for other types
-            return left.Multiply(right);
-        }
+        return NivaraSeries<T>.Create(result);
     }
 
     /// <summary>
@@ -141,6 +100,7 @@ public static class TensorExtensions
     /// <returns>The sum of all valid elements</returns>
     /// <exception cref="ArgumentNullException">Thrown when series is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contains null values</exception>
+    [Obsolete("Use TensorPrimitives.Sum on a span obtained via TryGetSpan", false)]
     public static T SumTensor<T>(this NivaraSeries<T> series)
         where T : unmanaged, INumber<T>
     {
@@ -160,29 +120,7 @@ public static class TensorExtensions
             }
         }
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
-        {
-            var span = MemoryMarshal.Cast<T, float>(series.Values.AsSpan());
-            var result = TensorPrimitives.Sum(span);
-            return (T)(object)result;
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var span = MemoryMarshal.Cast<T, double>(series.Values.AsSpan());
-            var result = TensorPrimitives.Sum(span);
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fallback to manual sum for other types
-            T result = default(T);
-            for (int i = 0; i < series.Length; i++)
-            {
-                result += series[i];
-            }
-            return result;
-        }
+        return TensorPrimitives.Sum(series.Values.AsSpan());
     }
 
     /// <summary>
@@ -195,6 +133,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentNullException">Thrown when either series is null</exception>
     /// <exception cref="ArgumentException">Thrown when series have different lengths</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contain null values</exception>
+    [Obsolete("Use TensorPrimitives.Dot on spans obtained via TryGetSpan", false)]
     public static T DotProduct<T>(this NivaraSeries<T> left, NivaraSeries<T> right)
         where T : unmanaged, INumber<T>
     {
@@ -220,32 +159,7 @@ public static class TensorExtensions
             }
         }
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
-        {
-            var leftSpan = MemoryMarshal.Cast<T, float>(left.Values.AsSpan());
-            var rightSpan = MemoryMarshal.Cast<T, float>(right.Values.AsSpan());
-            var result = TensorPrimitives.Dot(leftSpan, rightSpan);
-            return (T)(object)result;
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var leftSpan = MemoryMarshal.Cast<T, double>(left.Values.AsSpan());
-            var rightSpan = MemoryMarshal.Cast<T, double>(right.Values.AsSpan());
-            var result = TensorPrimitives.Dot(leftSpan, rightSpan);
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fallback to manual dot product calculation for other types
-            T result = default(T);
-            for (int i = 0; i < left.Length; i++)
-            {
-                var product = left[i] * right[i];
-                result += product;
-            }
-            return result;
-        }
+        return TensorPrimitives.Dot(left.Values.AsSpan(), right.Values.AsSpan());
     }
 
     /// <summary>
@@ -256,8 +170,9 @@ public static class TensorExtensions
     /// <returns>The Euclidean norm of the series</returns>
     /// <exception cref="ArgumentNullException">Thrown when series is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contains null values</exception>
+    [Obsolete("Use TensorPrimitives.Norm on a span obtained via TryGetSpan", false)]
     public static T Norm<T>(this NivaraSeries<T> series)
-        where T : unmanaged, INumber<T>
+        where T : unmanaged, IRootFunctions<T>
     {
         ArgumentNullException.ThrowIfNull(series);
 
@@ -275,42 +190,11 @@ public static class TensorExtensions
             }
         }
 
-        // Use TensorPrimitives for optimized operations when available
-        if (typeof(T) == typeof(float))
-        {
-            var span = MemoryMarshal.Cast<T, float>(series.Values.AsSpan());
-            var result = TensorPrimitives.Norm(span);
-            return (T)(object)result;
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var span = MemoryMarshal.Cast<T, double>(series.Values.AsSpan());
-            var result = TensorPrimitives.Norm(span);
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fallback to manual norm calculation for other types
-            T sumOfSquares = default(T);
-            for (int i = 0; i < series.Length; i++)
-            {
-                var value = series[i];
-                sumOfSquares += value * value;
-            }
-
-            // For integer types, we can't take square root, so return sum of squares
-            if (typeof(T) == typeof(int) || typeof(T) == typeof(long))
-            {
-                return sumOfSquares;
-            }
-
-            // For floating point types, take square root
-            return T.CreateChecked(Math.Sqrt(double.CreateChecked(sumOfSquares)));
-        }
+        return TensorPrimitives.Norm(series.Values.AsSpan());
     }
 
     /// <summary>
-    /// Applies a tensor-aware transformation function to each element using TensorPrimitives when possible.
+    /// Transforms elements of the series using a provided function (tensor-style mapping).
     /// </summary>
     /// <typeparam name="T">The unmanaged numeric type</typeparam>
     /// <param name="series">The series to transform</param>
@@ -318,6 +202,7 @@ public static class TensorExtensions
     /// <returns>A new NivaraSeries with the transformed values</returns>
     /// <exception cref="ArgumentNullException">Thrown when series or function is null</exception>
     /// <exception cref="InvalidOperationException">Thrown when series contains null values</exception>
+    [Obsolete("Use LINQ Select on spans obtained via TryGetSpan", false)]
     public static NivaraSeries<T> TransformTensor<T>(this NivaraSeries<T> series, Func<T, T> function)
         where T : unmanaged
     {
@@ -359,6 +244,7 @@ public static class TensorExtensions
     /// <exception cref="ArgumentNullException">Thrown when either frame is null</exception>
     /// <exception cref="ArgumentException">Thrown when matrix dimensions are incompatible</exception>
     /// <exception cref="InvalidOperationException">Thrown when frames contain null values or non-numeric columns</exception>
+    [Obsolete("Use System.Numerics.Tensors tensor multiply on data obtained via ToTensor", false)]
     public static NivaraFrame MatrixMultiply<T>(this NivaraFrame left, NivaraFrame right)
         where T : unmanaged, INumber<T>
     {

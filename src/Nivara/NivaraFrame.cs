@@ -242,6 +242,7 @@ public sealed class NivaraFrame : IFrame
     /// Computes one dot product per column against the supplied vector.
     /// Nulls in the vector or any column cause that column's result to be null.
     /// </summary>
+    [Obsolete("Use TensorPrimitives.Dot on column spans obtained via TryGetSpan", false)]
     public NivaraSeries<T> Dot<T>(NivaraSeries<T> vector)
         where T : unmanaged, INumber<T>
     {
@@ -289,6 +290,7 @@ public sealed class NivaraFrame : IFrame
     /// Computes one cosine-similarity score per column against the supplied vector.
     /// Nulls in the vector or any column cause that column's result to be null.
     /// </summary>
+    [Obsolete("Use TensorPrimitives.CosineSimilarity on column spans obtained via TryGetSpan", false)]
     public NivaraSeries<T> CosineSimilarity<T>(NivaraSeries<T> vector)
         where T : unmanaged, IRootFunctions<T>
     {
@@ -349,6 +351,7 @@ public sealed class NivaraFrame : IFrame
     /// <summary>
     /// Computes the Euclidean norm (L2 norm) for each column.
     /// </summary>
+    [Obsolete("Use TensorPrimitives.Norm on column spans obtained via TryGetSpan", false)]
     public NivaraSeries<T> ColumnNorms<T>()
         where T : unmanaged, IRootFunctions<T>
     {
@@ -389,6 +392,7 @@ public sealed class NivaraFrame : IFrame
     /// <summary>
     /// Computes the Euclidean norm (L2 norm) for each row.
     /// </summary>
+    [Obsolete("Use TensorPrimitives.Norm on row spans assembled via CopyToRowMajor", false)]
     public NivaraSeries<T> RowNorms<T>()
         where T : unmanaged, IRootFunctions<T>
     {
@@ -454,6 +458,98 @@ public sealed class NivaraFrame : IFrame
             return default;
 
         return TensorPrimitives.Norm(values);
+    }
+
+    /// <summary>
+    /// Attempts to get a zero-copy row-major span over the frame data.
+    /// Returns true only when the frame has a single column with no nulls (the only case
+    /// where row-major data is structurally contiguous in memory). For multi-column frames,
+    /// callers should use <see cref="CopyToRowMajor{T}"/> instead.
+    /// </summary>
+    /// <typeparam name="T">The unmanaged numeric type</typeparam>
+    /// <param name="span">The read-only span over the row-major data, if zero-copy is available</param>
+    /// <returns>true if a zero-copy row-major span was obtained; false otherwise</returns>
+    public bool TryGetRowMajorSpan<T>(out ReadOnlySpan<T> span)
+        where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (ColumnCount == 0 || RowCount == 0)
+        {
+            span = default;
+            return false;
+        }
+
+        // Zero-copy row-major is only structurally possible for single-column frames
+        // where the column's flattened data IS the row-major layout.
+        if (ColumnCount == 1)
+        {
+            var col = GetColumn<T>(ColumnNames[0]);
+            if (col.TryGetSpan(out span))
+                return true;
+
+            span = default;
+            return false;
+        }
+
+        // Multi-column frames require interleaving separate column tensors,
+        // which cannot be zero-copy. Use CopyToRowMajor instead.
+        span = default;
+        return false;
+    }
+
+    /// <summary>
+    /// Copies all columns of type T into a row-major destination span, filling nulls with <paramref name="fillValue"/>.
+    /// Uses span-level copy for null-free columns and bulk-fill for nullable columns to avoid per-element virtual dispatch.
+    /// </summary>
+    /// <typeparam name="T">The unmanaged numeric type</typeparam>
+    /// <param name="destination">The destination span. Must have length >= RowCount * ColumnCount.</param>
+    /// <param name="fillValue">The value to write in place of nulls.</param>
+    /// <exception cref="ArgumentException">Thrown when destination is too short.</exception>
+    public void CopyToRowMajor<T>(Span<T> destination, T fillValue = default)
+        where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var needed = RowCount * ColumnCount;
+        if (destination.Length < needed)
+            throw new ArgumentException($"Destination span length ({destination.Length}) must be at least {needed}", nameof(destination));
+
+        T[]? pooledTemp = null;
+        Span<T> temp = default;
+        var rowStride = ColumnCount;
+
+        try
+        {
+            for (int col = 0; col < ColumnCount; col++)
+            {
+                var colData = GetColumn<T>(ColumnNames[col]);
+
+                if (colData.TryGetSpan(out var span))
+                {
+                    for (int row = 0; row < RowCount; row++)
+                        destination[row * rowStride + col] = span[row];
+                }
+                else
+                {
+                    if (temp.IsEmpty)
+                    {
+                        temp = RowCount >= 1024
+                            ? (pooledTemp = ArrayPool<T>.Shared.Rent(RowCount))
+                            : new T[RowCount];
+                    }
+
+                    colData.CopyTo(temp, fillValue);
+                    for (int row = 0; row < RowCount; row++)
+                        destination[row * rowStride + col] = temp[row];
+                }
+            }
+        }
+        finally
+        {
+            if (pooledTemp != null)
+                ArrayPool<T>.Shared.Return(pooledTemp);
+        }
     }
 
     /// <summary>

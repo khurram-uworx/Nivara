@@ -171,6 +171,21 @@ internal sealed class MemoryStorage<T> : IColumnStorage<T>
     }
 
     /// <inheritdoc />
+    bool IColumnStorage<T>.TryGetSpan(out ReadOnlySpan<T> span)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (HasNulls)
+        {
+            span = default;
+            return false;
+        }
+
+        span = data.Span;
+        return true;
+    }
+
+    /// <inheritdoc />
     Span<T> IColumnStorage<T>.AsWritableSpan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);

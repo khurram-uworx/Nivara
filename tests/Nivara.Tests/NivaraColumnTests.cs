@@ -1770,4 +1770,163 @@ public class NivaraColumnTests
     }
 
     #endregion
+
+    #region Span and Copy Operations (new APIs)
+
+    [Test]
+    public void TryGetSpan_WithoutNulls_ReturnsTrueAndSpan()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 10, 20, 30 });
+
+        var result = column.TryGetSpan(out var span);
+
+        Assert.That(result, Is.True);
+        Assert.That(span.Length, Is.EqualTo(3));
+        Assert.That(span[0], Is.EqualTo(10));
+        Assert.That(span[1], Is.EqualTo(20));
+        Assert.That(span[2], Is.EqualTo(30));
+    }
+
+    [Test]
+    public void TryGetSpan_WithNulls_ReturnsFalse()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+
+        var result = column.TryGetSpan(out var span);
+
+        Assert.That(result, Is.False);
+        Assert.That(span.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void TryGetSpan_WithEmptyColumn_ReturnsTrue()
+    {
+        var column = NivaraColumn<int>.Create(Array.Empty<int>());
+
+        var result = column.TryGetSpan(out var span);
+
+        Assert.That(result, Is.True);
+        Assert.That(span.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void TryGetSpan_DisposedColumn_ThrowsObjectDisposedException()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        column.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => column.TryGetSpan(out _));
+    }
+
+    [Test]
+    public void CopyTo_FillValue_ReplacesNullsCorrectly()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var dest = new int[5];
+
+        column.CopyTo(dest.AsSpan(), -1);
+
+        Assert.That(dest, Is.EqualTo(new[] { 1, -1, 3, -1, 5 }));
+    }
+
+    [Test]
+    public void CopyTo_FillValue_WithoutNulls_CopiesAll()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 10, 20, 30 });
+        var dest = new int[3];
+
+        column.CopyTo(dest.AsSpan(), -1);
+
+        Assert.That(dest, Is.EqualTo(new[] { 10, 20, 30 }));
+    }
+
+    [Test]
+    public void CopyTo_FillValue_ThrowsOnShortDestination()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var dest = new int[2];
+
+        var ex = Assert.Throws<ArgumentException>(() => column.CopyTo(dest.AsSpan(), -1));
+        Assert.That(ex.Message, Does.Contain("must be at least"));
+    }
+
+    [Test]
+    public void CopyTo_WithMask_OutputsCorrectMaskAndFillValues()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 30, null });
+        var dest = new int[4];
+        var mask = new bool[4];
+
+        column.CopyTo(dest.AsSpan(), -1, mask.AsSpan());
+
+        Assert.That(dest, Is.EqualTo(new[] { 10, -1, 30, -1 }));
+        Assert.That(mask, Is.EqualTo(new[] { false, true, false, true }));
+    }
+
+    [Test]
+    public void CopyTo_WithMask_ThrowsOnShortMask()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var dest = new int[3];
+        var mask = new bool[2];
+
+        var ex = Assert.Throws<ArgumentException>(() => column.CopyTo(dest.AsSpan(), -1, mask.AsSpan()));
+        Assert.That(ex.Message, Does.Contain("maskDestination"));
+    }
+
+    [Test]
+    public void CopyTo_WithMask_WithoutNulls_ClearsMask()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var dest = new int[3];
+        var mask = new bool[3] { true, true, true };
+
+        column.CopyTo(dest.AsSpan(), -1, mask.AsSpan());
+
+        Assert.That(dest, Is.EqualTo(new[] { 1, 2, 3 }));
+        Assert.That(mask, Is.EqualTo(new[] { false, false, false }));
+    }
+
+    [Test]
+    public void CopyTo_DisposedColumn_ThrowsObjectDisposedException()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        column.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => column.CopyTo(new Span<int>(new int[3]), -1));
+    }
+
+    [Test]
+    public void TryGetNullMask_WithNulls_ReturnsTrueAndMask()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+
+        var result = column.TryGetNullMask(out var mask);
+
+        Assert.That(result, Is.True);
+        Assert.That(mask.Length, Is.EqualTo(5));
+        Assert.That(mask.ToArray(), Is.EqualTo(new[] { false, true, false, true, false }));
+    }
+
+    [Test]
+    public void TryGetNullMask_WithoutNulls_ReturnsFalse()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+
+        var result = column.TryGetNullMask(out var mask);
+
+        Assert.That(result, Is.False);
+        Assert.That(mask.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void TryGetNullMask_DisposedColumn_ThrowsObjectDisposedException()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        column.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => column.TryGetNullMask(out _));
+    }
+
+    #endregion
 }

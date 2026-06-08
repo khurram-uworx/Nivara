@@ -315,6 +315,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     /// Converts this column to a System.Numerics.Tensors.Tensor&lt;T&gt;.
     /// The returned tensor owns a copy so column immutability is preserved.
     /// </summary>
+    /// <remarks>
+    /// Prefer <see cref="TryGetSpan"/> for zero-copy access when the column is null-free.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when the column contains null values</exception>
     public Tensor<T> ToTensor()
     {
@@ -349,6 +352,101 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
             }
         }
         return Tensor.Create(result, new nint[] { result.Length });
+    }
+
+    /// <summary>
+    /// Attempts to get a zero-copy read-only span over the column data.
+    /// Returns true when the column has no null values; false otherwise.
+    /// When false, use <see cref="CopyTo"/> with a fill value instead.
+    /// </summary>
+    /// <remarks>
+    /// Returns <see cref="ReadOnlySpan{T}"/> (not <see cref="Span{T}"/>) to preserve
+    /// column immutability. This diverges from BCL's <c>Tensor&lt;T&gt;.TryGetSpan</c>
+    /// which returns a mutable <see cref="Span{T}"/>.
+    /// </remarks>
+    /// <param name="span">When this method returns, contains the read-only span if successful</param>
+    /// <returns>true if a span was obtained (no nulls); false if nulls are present</returns>
+    public bool TryGetSpan(out ReadOnlySpan<T> span)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return storage.TryGetSpan(out span);
+    }
+
+    /// <summary>
+    /// Copies column data into the destination span, replacing nulls with <paramref name="fillValue"/>.
+    /// </summary>
+    /// <param name="destination">The destination span. Must have length >= <see cref="Length"/>.</param>
+    /// <param name="fillValue">The value to write in place of nulls.</param>
+    /// <exception cref="ArgumentException">Thrown when destination is shorter than column length.</exception>
+    public void CopyTo(Span<T> destination, T fillValue)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (destination.Length < Length)
+            throw new ArgumentException($"Destination span length ({destination.Length}) must be at least column length ({Length})", nameof(destination));
+
+        var rawSpan = storage.AsSpan();
+        rawSpan.CopyTo(destination);
+
+        var nullMask = storage.NullMask;
+        if (nullMask.Length > 0)
+        {
+            for (int i = 0; i < nullMask.Length; i++)
+            {
+                if (nullMask[i])
+                    destination[i] = fillValue;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Copies column data into the destination span, replacing nulls with <paramref name="fillValue"/>,
+    /// and writes the null mask into <paramref name="maskDestination"/>.
+    /// </summary>
+    /// <param name="destination">The destination span. Must have length >= <see cref="Length"/>.</param>
+    /// <param name="fillValue">The value to write in place of nulls.</param>
+    /// <param name="maskDestination">Span to receive the null mask. True = null position.</param>
+    /// <exception cref="ArgumentException">Thrown when destination or maskDestination is shorter than column length.</exception>
+    public void CopyTo(Span<T> destination, T fillValue, Span<bool> maskDestination)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (destination.Length < Length)
+            throw new ArgumentException($"Destination span length ({destination.Length}) must be at least column length ({Length})", nameof(destination));
+
+        if (maskDestination.Length < Length)
+            throw new ArgumentException($"Mask destination length ({maskDestination.Length}) must be at least column length ({Length})", nameof(maskDestination));
+
+        var rawSpan = storage.AsSpan();
+        rawSpan.CopyTo(destination);
+
+        var nullMask = storage.NullMask;
+        if (nullMask.Length > 0)
+        {
+            for (int i = 0; i < nullMask.Length; i++)
+            {
+                if (nullMask[i])
+                    destination[i] = fillValue;
+            }
+
+            nullMask.CopyTo(maskDestination);
+        }
+        else
+        {
+            maskDestination.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Attempts to get the null mask as a read-only span.
+    /// </summary>
+    /// <param name="mask">When this method returns, contains the null mask span if successful</param>
+    /// <returns>true if a non-empty null mask is available; false if the column has no nulls</returns>
+    public bool TryGetNullMask(out ReadOnlySpan<bool> mask)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        mask = storage.NullMask;
+        return mask.Length > 0;
     }
 
     // Arithmetic Operations

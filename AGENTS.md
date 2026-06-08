@@ -95,6 +95,7 @@ Common gotchas (use these as lint-like checks in generated code)
 - Method overload resolution: disambiguate 1D vs 2D tensor methods with explicit parameters (e.g., `FromTensor<T>(tensor, null)` for 2D).
 - Expression Equals/GetHashCode: always override when adding custom equality operators to expression types.
 - `Memory<T>` disposal: implement `IDisposable` consistently for frames, columns, and data sources.
+- `NivaraColumn.TryGetSpan` returns `ReadOnlySpan<T>` (immutable guarantee), diverging from BCL's `Tensor<T>.TryGetSpan` which returns `Span<T>` (mutable). This is deliberate — Nivara columns are immutable. Use `CopyTo(Span<T>, T)` for the explicit-fill path when nulls are present or mutation is needed.
 
 Example patterns (pseudocode for AI Agent to reuse)
 
