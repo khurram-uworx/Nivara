@@ -8,6 +8,17 @@ namespace Nivara.Tensors;
 /// </summary>
 public static class TensorExtensions
 {
+    static T?[] toNullableArray<T>(NivaraSeries<T> series)
+        where T : unmanaged
+    {
+        var values = new T?[series.Length];
+
+        for (int i = 0; i < values.Length; i++)
+            values[i] = series.IsNull(i) ? null : series[i];
+
+        return values;
+    }
+
     /// <summary>
     /// Performs tensor-aware element-wise addition using TensorPrimitives for optimized operations.
     /// </summary>
@@ -25,19 +36,15 @@ public static class TensorExtensions
         ArgumentNullException.ThrowIfNull(right);
 
         if (left.Length != right.Length)
-        {
             throw new ArgumentException("Series must have the same length for tensor addition");
-        }
 
         if (left.Length == 0)
-        {
             return new NivaraSeries<T>();
-        }
 
         if (left.HasNulls || right.HasNulls)
         {
-            using var leftValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(left));
-            using var rightValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(right));
+            using var leftValues = NivaraColumn<T>.CreateFromNullable(toNullableArray(left));
+            using var rightValues = NivaraColumn<T>.CreateFromNullable(toNullableArray(right));
             return new NivaraSeries<T>(leftValues.Add(rightValues), left.Index);
         }
 
@@ -67,19 +74,15 @@ public static class TensorExtensions
         ArgumentNullException.ThrowIfNull(right);
 
         if (left.Length != right.Length)
-        {
             throw new ArgumentException("Series must have the same length for tensor multiplication");
-        }
 
         if (left.Length == 0)
-        {
             return new NivaraSeries<T>();
-        }
 
         if (left.HasNulls || right.HasNulls)
         {
-            using var leftValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(left));
-            using var rightValues = NivaraColumn<T>.CreateFromNullable(ToNullableArray(right));
+            using var leftValues = NivaraColumn<T>.CreateFromNullable(toNullableArray(left));
+            using var rightValues = NivaraColumn<T>.CreateFromNullable(toNullableArray(right));
             return new NivaraSeries<T>(leftValues.Multiply(rightValues), left.Index);
         }
 
@@ -107,18 +110,12 @@ public static class TensorExtensions
         ArgumentNullException.ThrowIfNull(series);
 
         if (series.Length == 0)
-        {
             return default(T);
-        }
 
         // Check for null values
         for (int i = 0; i < series.Length; i++)
-        {
             if (!series.IsValid(i))
-            {
                 throw new InvalidOperationException($"Cannot perform tensor operations on series with null values. Found null at index {i}");
-            }
-        }
 
         return TensorPrimitives.Sum(series.Values.AsSpan());
     }
@@ -141,23 +138,15 @@ public static class TensorExtensions
         ArgumentNullException.ThrowIfNull(right);
 
         if (left.Length != right.Length)
-        {
             throw new ArgumentException("Series must have the same length for dot product");
-        }
 
         if (left.Length == 0)
-        {
             return default(T);
-        }
 
         // Check for null values in both series
         for (int i = 0; i < left.Length; i++)
-        {
             if (!left.IsValid(i) || !right.IsValid(i))
-            {
                 throw new InvalidOperationException($"Cannot perform tensor operations on series with null values. Found null at index {i}");
-            }
-        }
 
         return TensorPrimitives.Dot(left.Values.AsSpan(), right.Values.AsSpan());
     }
@@ -177,18 +166,12 @@ public static class TensorExtensions
         ArgumentNullException.ThrowIfNull(series);
 
         if (series.Length == 0)
-        {
             return default(T);
-        }
 
         // Check for null values
         for (int i = 0; i < series.Length; i++)
-        {
             if (!series.IsValid(i))
-            {
                 throw new InvalidOperationException($"Cannot perform tensor operations on series with null values. Found null at index {i}");
-            }
-        }
 
         return TensorPrimitives.Norm(series.Values.AsSpan());
     }
@@ -210,26 +193,18 @@ public static class TensorExtensions
         ArgumentNullException.ThrowIfNull(function);
 
         if (series.Length == 0)
-        {
             return new NivaraSeries<T>();
-        }
 
         // Check for null values
         for (int i = 0; i < series.Length; i++)
-        {
             if (!series.IsValid(i))
-            {
                 throw new InvalidOperationException($"Cannot perform tensor operations on series with null values. Found null at index {i}");
-            }
-        }
 
         var result = new T[series.Length];
 
         // Apply transformation function to each element
         for (int i = 0; i < series.Length; i++)
-        {
             result[i] = function(series[i]);
-        }
 
         return NivaraSeries<T>.Create(result);
     }
@@ -252,9 +227,7 @@ public static class TensorExtensions
         ArgumentNullException.ThrowIfNull(right);
 
         if (left.ColumnCount != right.RowCount)
-        {
             throw new ArgumentException($"Matrix dimensions incompatible: left columns ({left.ColumnCount}) must equal right rows ({right.RowCount})");
-        }
 
         // Convert frames to tensors
         var leftTensor = left.ToTensor<T>();
@@ -274,9 +247,7 @@ public static class TensorExtensions
             {
                 T sum = default(T);
                 for (int k = 0; k < left.ColumnCount; k++)
-                {
                     sum += leftSpan[i, k] * rightSpan[k, j];
-                }
                 resultData[i * right.ColumnCount + j] = sum;
             }
         }
@@ -286,18 +257,5 @@ public static class TensorExtensions
         // Convert result tensor back to NivaraFrame
         var columnNames = Enumerable.Range(0, right.ColumnCount).Select(i => $"Result_{i}").ToArray();
         return TensorInteropExtensions.FromTensor(resultTensor, columnNames);
-    }
-
-    private static T?[] ToNullableArray<T>(NivaraSeries<T> series)
-        where T : unmanaged
-    {
-        var values = new T?[series.Length];
-
-        for (int i = 0; i < values.Length; i++)
-        {
-            values[i] = series.IsNull(i) ? null : series[i];
-        }
-
-        return values;
     }
 }

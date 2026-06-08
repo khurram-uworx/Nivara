@@ -15,6 +15,324 @@ namespace Nivara;
 /// </summary>
 public sealed class NivaraFrame : IFrame
 {
+    private static T dotSpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
+        where T : unmanaged, INumber<T>
+
+        => TensorPrimitives.Dot(left, right);
+
+    private static T cosineSimilaritySpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
+        where T : unmanaged, IRootFunctions<T>
+
+        => TensorPrimitives.CosineSimilarity(left, right);
+
+    static T normSpan<T>(ReadOnlySpan<T> values)
+        where T : unmanaged, IRootFunctions<T>
+    {
+        if (values.IsEmpty)
+            return default;
+
+        return TensorPrimitives.Norm(values);
+    }
+
+    /// <summary>
+    /// Estimates the memory usage of a column (rough approximation)
+    /// </summary>
+    /// <param name="column">The column to estimate</param>
+    /// <returns>Estimated memory usage in bytes</returns>
+    static long estimateColumnMemoryUsage(IColumn column)
+    {
+        if (column == null) return 0;
+
+        var elementType = column.ElementType;
+        var elementSize = getTypeSize(elementType);
+        var baseMemory = column.Length * elementSize;
+
+        // Add overhead for null mask if present
+        if (column.HasNulls)
+        {
+            baseMemory += column.Length; // 1 byte per boolean in null mask
+        }
+
+        // Add some overhead for object structure
+        return baseMemory + 64; // 64 bytes overhead estimate
+    }
+
+    /// <summary>
+    /// Creates a new column containing only the values at the specified indices
+    /// </summary>
+    /// <param name="column">The source column</param>
+    /// <param name="indices">The indices of values to include</param>
+    /// <returns>A new column with filtered values</returns>
+    static IColumn createFilteredColumn(IColumn column, List<int> indices)
+    {
+        var elementType = column.ElementType;
+
+        // Use dynamic dispatch to create the appropriate column type
+        return elementType switch
+        {
+            Type t when t == typeof(int) => createFilteredColumnTyped<int>(column, indices),
+            Type t when t == typeof(double) => createFilteredColumnTyped<double>(column, indices),
+            Type t when t == typeof(float) => createFilteredColumnTyped<float>(column, indices),
+            Type t when t == typeof(long) => createFilteredColumnTyped<long>(column, indices),
+            Type t when t == typeof(string) => createFilteredColumnTyped<string>(column, indices),
+            Type t when t == typeof(bool) => createFilteredColumnTyped<bool>(column, indices),
+            Type t when t == typeof(decimal) => createFilteredColumnTyped<decimal>(column, indices),
+            Type t when t == typeof(byte) => createFilteredColumnTyped<byte>(column, indices),
+            Type t when t == typeof(short) => createFilteredColumnTyped<short>(column, indices),
+            Type t when t == typeof(DateTime) => createFilteredColumnTyped<DateTime>(column, indices),
+            _ => createFilteredColumnGeneric(column, indices)
+        };
+    }
+
+    /// <summary>
+    /// Creates a filtered column for a specific type
+    /// </summary>
+    static IColumn createFilteredColumnTyped<T>(IColumn column, List<int> indices)
+    {
+        // Check if T is a value type to determine which creation method to use
+        if (typeof(T).IsValueType)
+        {
+            // For value types, create nullable array and use CreateFromNullable
+            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
+            var filteredArray = System.Array.CreateInstance(nullableType, indices.Count);
+
+            for (int i = 0; i < indices.Count; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                if (value != null)
+                {
+                    var nullableInstance = Activator.CreateInstance(nullableType, value);
+                    filteredArray.SetValue(nullableInstance, i);
+                }
+                // null values remain null in the array
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
+                .Invoke(null, new object[] { filteredArray })!;
+        }
+        else
+        {
+            // For reference types, create regular array and use CreateForReferenceType
+            var filteredArray = new T[indices.Count];
+
+            for (int i = 0; i < indices.Count; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                filteredArray[i] = (T)value!; // Reference types can be null
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
+                .Invoke(null, new object[] { filteredArray })!;
+        }
+    }
+
+    /// <summary>
+    /// Creates a filtered column for unknown types using object column
+    /// </summary>
+    static IColumn createFilteredColumnGeneric(IColumn column, List<int> indices)
+    {
+        var filteredArray = new object[indices.Count];
+
+        for (int i = 0; i < indices.Count; i++)
+        {
+            filteredArray[i] = column.GetValue(indices[i])!;
+        }
+
+        return NivaraColumn<object>.Create(filteredArray);
+    }
+
+    /// <summary>
+    /// Creates an empty column of the specified type
+    /// </summary>
+    /// <param name="elementType">The type of elements in the column</param>
+    /// <returns>An empty column of the specified type</returns>
+    static IColumn createEmptyColumn(Type elementType)
+    {
+        return elementType switch
+        {
+            Type t when t == typeof(int) => NivaraColumn<int>.Create(Array.Empty<int>()),
+            Type t when t == typeof(double) => NivaraColumn<double>.Create(Array.Empty<double>()),
+            Type t when t == typeof(float) => NivaraColumn<float>.Create(Array.Empty<float>()),
+            Type t when t == typeof(long) => NivaraColumn<long>.Create(Array.Empty<long>()),
+            Type t when t == typeof(string) => NivaraColumn<string>.CreateForReferenceType(Array.Empty<string>()),
+            Type t when t == typeof(bool) => NivaraColumn<bool>.Create(Array.Empty<bool>()),
+            Type t when t == typeof(decimal) => NivaraColumn<decimal>.Create(Array.Empty<decimal>()),
+            Type t when t == typeof(byte) => NivaraColumn<byte>.Create(Array.Empty<byte>()),
+            Type t when t == typeof(short) => NivaraColumn<short>.Create(Array.Empty<short>()),
+            Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.Create(Array.Empty<DateTime>()),
+            _ => NivaraColumn<object>.Create(Array.Empty<object>())
+        };
+    }
+
+    /// <summary>
+    /// Slices a column using the column's built-in Slice method
+    /// </summary>
+    /// <param name="column">The column to slice</param>
+    /// <param name="start">The starting index</param>
+    /// <param name="length">The number of elements to include</param>
+    /// <returns>A sliced column</returns>
+    static IColumn sliceColumn(IColumn column, int start, int length)
+    {
+        // Use reflection to call the Slice method on the typed column
+        var columnType = column.GetType();
+        var sliceMethod = columnType.GetMethod("Slice", new[] { typeof(int), typeof(int) });
+
+        if (sliceMethod != null)
+        {
+            return (IColumn)sliceMethod.Invoke(column, new object[] { start, length })!;
+        }
+
+        // Fallback: create filtered column using indices
+        var indices = Enumerable.Range(start, length).ToList();
+        return createFilteredColumn(column, indices);
+    }
+
+    /// <summary>
+    /// Reorders a column using the specified indices
+    /// </summary>
+    /// <param name="column">The column to reorder</param>
+    /// <param name="indices">The indices specifying the new order</param>
+    /// <returns>A reordered column</returns>
+    static IColumn reorderColumn(IColumn column, int[] indices)
+    {
+        var elementType = column.ElementType;
+
+        // Use dynamic dispatch to create the appropriate column type
+        return elementType switch
+        {
+            Type t when t == typeof(int) => reorderColumnTyped<int>(column, indices),
+            Type t when t == typeof(double) => reorderColumnTyped<double>(column, indices),
+            Type t when t == typeof(float) => reorderColumnTyped<float>(column, indices),
+            Type t when t == typeof(long) => reorderColumnTyped<long>(column, indices),
+            Type t when t == typeof(string) => reorderColumnTyped<string>(column, indices),
+            Type t when t == typeof(bool) => reorderColumnTyped<bool>(column, indices),
+            Type t when t == typeof(decimal) => reorderColumnTyped<decimal>(column, indices),
+            Type t when t == typeof(byte) => reorderColumnTyped<byte>(column, indices),
+            Type t when t == typeof(short) => reorderColumnTyped<short>(column, indices),
+            Type t when t == typeof(DateTime) => reorderColumnTyped<DateTime>(column, indices),
+            _ => reorderColumnGeneric(column, indices)
+        };
+    }
+
+    /// <summary>
+    /// Reorders a column for a specific type
+    /// </summary>
+    static IColumn reorderColumnTyped<T>(IColumn column, int[] indices)
+    {
+        // Check if T is a value type to determine which creation method to use
+        if (typeof(T).IsValueType)
+        {
+            // For value types, create nullable array and use CreateFromNullable
+            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
+            var reorderedArray = System.Array.CreateInstance(nullableType, indices.Length);
+
+            for (int i = 0; i < indices.Length; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                if (value != null)
+                {
+                    var nullableInstance = Activator.CreateInstance(nullableType, value);
+                    reorderedArray.SetValue(nullableInstance, i);
+                }
+                // null values remain null in the array
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
+                .Invoke(null, new object[] { reorderedArray })!;
+        }
+        else
+        {
+            // For reference types, create regular array and use CreateForReferenceType
+            var reorderedArray = new T[indices.Length];
+
+            for (int i = 0; i < indices.Length; i++)
+            {
+                var value = column.GetValue(indices[i]);
+                reorderedArray[i] = (T)value!; // Reference types can be null
+            }
+
+            return (IColumn)typeof(NivaraColumn<>)
+                .MakeGenericType(typeof(T))
+                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
+                .Invoke(null, new object[] { reorderedArray })!;
+        }
+    }
+
+    /// <summary>
+    /// Reorders a column for unknown types using object column
+    /// </summary>
+    static IColumn reorderColumnGeneric(IColumn column, int[] indices)
+    {
+        var reorderedArray = new object[indices.Length];
+
+        for (int i = 0; i < indices.Length; i++)
+        {
+            reorderedArray[i] = column.GetValue(indices[i])!;
+        }
+
+        return NivaraColumn<object>.Create(reorderedArray);
+    }
+
+    /// <summary>
+    /// Gets the approximate size of a type in bytes
+    /// </summary>
+    /// <param name="type">The type to get size for</param>
+    /// <returns>Size in bytes</returns>
+    static int getTypeSize(Type type)
+    {
+        if (type == typeof(bool)) return 1;
+        if (type == typeof(byte) || type == typeof(sbyte)) return 1;
+        if (type == typeof(short) || type == typeof(ushort)) return 2;
+        if (type == typeof(int) || type == typeof(uint)) return 4;
+        if (type == typeof(long) || type == typeof(ulong)) return 8;
+        if (type == typeof(float)) return 4;
+        if (type == typeof(double)) return 8;
+        if (type == typeof(decimal)) return 16;
+        if (type == typeof(DateTime)) return 8;
+        if (type == typeof(Guid)) return 16;
+
+        // For reference types, estimate pointer size + average string length
+        if (!type.IsValueType)
+        {
+            if (type == typeof(string)) return 50; // Average string estimate
+            return 8; // Pointer size on 64-bit systems
+        }
+
+        return 8; // Default estimate for unknown types
+    }
+
+    /// <summary>
+    /// Creates a new NivaraFrame from a collection of named NivaraColumn instances
+    /// </summary>
+    /// <param name="namedColumns">The named columns to include in the frame</param>
+    /// <returns>A new NivaraFrame instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when namedColumns is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths or invalid names</exception>
+    public static NivaraFrame Create(params (string Name, IColumn Column)[] namedColumns)
+        => new NivaraFrame(namedColumns);
+
+    /// <summary>
+    /// Creates a new NivaraFrame from a dictionary of named columns
+    /// </summary>
+    /// <param name="columnDictionary">Dictionary mapping column names to columns</param>
+    /// <returns>A new NivaraFrame instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when columnDictionary is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths or invalid names</exception>
+    public static NivaraFrame Create(IReadOnlyDictionary<string, IColumn> columnDictionary)
+    {
+        if (columnDictionary == null)
+            throw new ArgumentNullException(nameof(columnDictionary));
+
+        var namedColumns = columnDictionary.Select(kvp => (kvp.Key, kvp.Value));
+        return new NivaraFrame(namedColumns);
+    }
+
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly Schema schema;
     bool disposed;
@@ -76,7 +394,7 @@ public sealed class NivaraFrame : IFrame
             schemaColumns.Add((name, column.ElementType));
 
             // Estimate memory usage (rough approximation)
-            estimatedMemoryUsage += EstimateColumnMemoryUsage(column);
+            estimatedMemoryUsage += estimateColumnMemoryUsage(column);
         }
 
         columns = columnDict;
@@ -87,31 +405,39 @@ public sealed class NivaraFrame : IFrame
     }
 
     /// <summary>
-    /// Creates a new NivaraFrame from a collection of named NivaraColumn instances
+    /// Validates that a column type is compatible for addition to this frame
     /// </summary>
-    /// <param name="namedColumns">The named columns to include in the frame</param>
-    /// <returns>A new NivaraFrame instance</returns>
-    /// <exception cref="ArgumentNullException">Thrown when namedColumns is null</exception>
-    /// <exception cref="ArgumentException">Thrown when columns have different lengths or invalid names</exception>
-    public static NivaraFrame Create(params (string Name, IColumn Column)[] namedColumns)
+    /// <param name="columnName">The name of the column being added</param>
+    /// <param name="columnType">The type of the column being added</param>
+    void validateColumnTypeForAddition(string columnName, Type columnType)
     {
-        return new NivaraFrame(namedColumns);
+        // Basic type validation - ensure it's a supported type
+        var supportedTypes = TypeCompatibilityValidator.GetNumericTypes()
+            .Concat(new[] { typeof(string), typeof(bool), typeof(DateTime), typeof(object) })
+            .ToList();
+
+        if (!supportedTypes.Contains(columnType) && !columnType.IsEnum)
+        {
+            var supportedTypeNames = string.Join(", ", supportedTypes.Select(t => t.Name));
+            throw new ColumnTypeMismatchException(
+                columnName,
+                typeof(object), // Expected type (generic)
+                columnType);
+        }
     }
 
     /// <summary>
-    /// Creates a new NivaraFrame from a dictionary of named columns
+    /// Estimates the total memory usage of this frame
     /// </summary>
-    /// <param name="columnDictionary">Dictionary mapping column names to columns</param>
-    /// <returns>A new NivaraFrame instance</returns>
-    /// <exception cref="ArgumentNullException">Thrown when columnDictionary is null</exception>
-    /// <exception cref="ArgumentException">Thrown when columns have different lengths or invalid names</exception>
-    public static NivaraFrame Create(IReadOnlyDictionary<string, IColumn> columnDictionary)
+    /// <returns>Estimated memory usage in bytes</returns>
+    long estimateFrameMemoryUsage()
     {
-        if (columnDictionary == null)
-            throw new ArgumentNullException(nameof(columnDictionary));
-
-        var namedColumns = columnDictionary.Select(kvp => (kvp.Key, kvp.Value));
-        return new NivaraFrame(namedColumns);
+        long totalSize = 0;
+        foreach (var column in columns.Values)
+        {
+            totalSize += estimateColumnMemoryUsage(column);
+        }
+        return totalSize;
     }
 
     /// <summary>
@@ -269,7 +595,7 @@ public sealed class NivaraFrame : IFrame
             }
             else
             {
-                scores[i] = DotSpans(column.AsSpan(), vectorSpan);
+                scores[i] = dotSpans(column.AsSpan(), vectorSpan);
             }
         }
 
@@ -319,7 +645,7 @@ public sealed class NivaraFrame : IFrame
             }
             else
             {
-                scores[i] = CosineSimilaritySpans(column.AsSpan(), vectorSpan);
+                scores[i] = cosineSimilaritySpans(column.AsSpan(), vectorSpan);
             }
         }
 
@@ -334,18 +660,6 @@ public sealed class NivaraFrame : IFrame
             "FrameCosineSimilarity", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);
-    }
-
-    private static T DotSpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
-        where T : unmanaged, INumber<T>
-    {
-        return TensorPrimitives.Dot(left, right);
-    }
-
-    private static T CosineSimilaritySpans<T>(ReadOnlySpan<T> left, ReadOnlySpan<T> right)
-        where T : unmanaged, IRootFunctions<T>
-    {
-        return TensorPrimitives.CosineSimilarity(left, right);
     }
 
     /// <summary>
@@ -372,7 +686,7 @@ public sealed class NivaraFrame : IFrame
             }
             else
             {
-                norms[i] = NormSpan(column.AsSpan());
+                norms[i] = normSpan(column.AsSpan());
             }
         }
 
@@ -431,7 +745,7 @@ public sealed class NivaraFrame : IFrame
                 }
                 else
                 {
-                    norms[row] = NormSpan(rowValues.AsSpan(0, ColumnCount));
+                    norms[row] = normSpan(rowValues.AsSpan(0, ColumnCount));
                 }
             }
         }
@@ -449,15 +763,6 @@ public sealed class NivaraFrame : IFrame
             "FrameRowNorms", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
 
         return new NivaraSeries<T>(valuesColumn);
-    }
-
-    private static T NormSpan<T>(ReadOnlySpan<T> values)
-        where T : unmanaged, IRootFunctions<T>
-    {
-        if (values.IsEmpty)
-            return default;
-
-        return TensorPrimitives.Norm(values);
     }
 
     /// <summary>
@@ -579,7 +884,7 @@ public sealed class NivaraFrame : IFrame
                 nameof(column));
 
         // Validate column type compatibility if needed for operations
-        ValidateColumnTypeForAddition(name, column.ElementType);
+        validateColumnTypeForAddition(name, column.ElementType);
 
         var newColumns = columns.Concat(new[] { new KeyValuePair<string, IColumn>(name, column) });
         var namedColumns = newColumns.Select(kvp => (kvp.Key, kvp.Value));
@@ -693,7 +998,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -703,7 +1008,7 @@ public sealed class NivaraFrame : IFrame
         var filteredColumns = new List<(string Name, IColumn Column)>();
         foreach (var kvp in columns)
         {
-            var filteredColumn = CreateFilteredColumn(kvp.Value, filteredIndices);
+            var filteredColumn = createFilteredColumn(kvp.Value, filteredIndices);
             filteredColumns.Add((kvp.Key, filteredColumn));
         }
 
@@ -730,7 +1035,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -743,7 +1048,7 @@ public sealed class NivaraFrame : IFrame
         var slicedColumns = new List<(string Name, IColumn Column)>();
         foreach (var kvp in columns)
         {
-            var slicedColumn = SliceColumn(kvp.Value, 0, actualCount);
+            var slicedColumn = sliceColumn(kvp.Value, 0, actualCount);
             slicedColumns.Add((kvp.Key, slicedColumn));
         }
 
@@ -770,7 +1075,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -788,7 +1093,7 @@ public sealed class NivaraFrame : IFrame
         var slicedColumns = new List<(string Name, IColumn Column)>();
         foreach (var kvp in columns)
         {
-            var slicedColumn = SliceColumn(kvp.Value, count, remainingCount);
+            var slicedColumn = sliceColumn(kvp.Value, count, remainingCount);
             slicedColumns.Add((kvp.Key, slicedColumn));
         }
 
@@ -821,7 +1126,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = CreateEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -831,7 +1136,7 @@ public sealed class NivaraFrame : IFrame
         var slicedColumns = new List<(string Name, IColumn Column)>();
         foreach (var kvp in columns)
         {
-            var slicedColumn = SliceColumn(kvp.Value, start, length);
+            var slicedColumn = sliceColumn(kvp.Value, start, length);
             slicedColumns.Add((kvp.Key, slicedColumn));
         }
 
@@ -879,11 +1184,64 @@ public sealed class NivaraFrame : IFrame
         var reorderedColumns = new List<(string Name, IColumn Column)>();
         foreach (var kvp in columns)
         {
-            var reorderedColumn = ReorderColumn(kvp.Value, indices);
+            var reorderedColumn = reorderColumn(kvp.Value, indices);
             reorderedColumns.Add((kvp.Key, reorderedColumn));
         }
 
         return new NivaraFrame(reorderedColumns);
+    }
+
+    /// <summary>
+    /// Validates schema compatibility between two frames for operations like joins
+    /// </summary>
+    /// <param name="other">The other frame to validate compatibility with</param>
+    /// <param name="operationName">The name of the operation for error messages</param>
+    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible</exception>
+    public void ValidateSchemaCompatibility(NivaraFrame other, string operationName)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (!Schema.IsCompatibleWith(other.Schema, requireExactMatch: false))
+        {
+            throw new SchemaValidationException(
+                $"Schema incompatibility detected for operation '{operationName}'. " +
+                $"This frame has schema: {Schema}. Other frame has schema: {other.Schema}.",
+                Schema,
+                other.Schema);
+        }
+    }
+
+    /// <summary>
+    /// Gets memory management recommendations for operations on this frame
+    /// </summary>
+    /// <param name="operationType">The type of operation being performed</param>
+    /// <returns>Memory management recommendations</returns>
+    public MemoryRecommendations GetMemoryRecommendations(string operationType = "general")
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var estimatedSize = estimateFrameMemoryUsage();
+        return NivaraResourceManager.GetMemoryRecommendations(estimatedSize, operationType);
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (!disposed)
+        {
+            // Untrack from resource manager
+            NivaraResourceManager.UntrackResource(this);
+
+            // Dispose all columns
+            foreach (var column in columns.Values)
+            {
+                column?.Dispose();
+            }
+            disposed = true;
+        }
     }
 
     /// <summary>
@@ -915,367 +1273,5 @@ public sealed class NivaraFrame : IFrame
     public override int GetHashCode()
     {
         return base.GetHashCode();
-    }
-
-    /// <summary>
-    /// Validates that a column type is compatible for addition to this frame
-    /// </summary>
-    /// <param name="columnName">The name of the column being added</param>
-    /// <param name="columnType">The type of the column being added</param>
-    private void ValidateColumnTypeForAddition(string columnName, Type columnType)
-    {
-        // Basic type validation - ensure it's a supported type
-        var supportedTypes = TypeCompatibilityValidator.GetNumericTypes()
-            .Concat(new[] { typeof(string), typeof(bool), typeof(DateTime), typeof(object) })
-            .ToList();
-
-        if (!supportedTypes.Contains(columnType) && !columnType.IsEnum)
-        {
-            var supportedTypeNames = string.Join(", ", supportedTypes.Select(t => t.Name));
-            throw new ColumnTypeMismatchException(
-                columnName,
-                typeof(object), // Expected type (generic)
-                columnType);
-        }
-    }
-
-    /// <summary>
-    /// Validates schema compatibility between two frames for operations like joins
-    /// </summary>
-    /// <param name="other">The other frame to validate compatibility with</param>
-    /// <param name="operationName">The name of the operation for error messages</param>
-    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible</exception>
-    public void ValidateSchemaCompatibility(NivaraFrame other, string operationName)
-    {
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        if (other == null)
-            throw new ArgumentNullException(nameof(other));
-
-        if (!Schema.IsCompatibleWith(other.Schema, requireExactMatch: false))
-        {
-            throw new SchemaValidationException(
-                $"Schema incompatibility detected for operation '{operationName}'. " +
-                $"This frame has schema: {Schema}. Other frame has schema: {other.Schema}.",
-                Schema,
-                other.Schema);
-        }
-    }
-
-    /// <inheritdoc />
-    public void Dispose()
-    {
-        if (!disposed)
-        {
-            // Untrack from resource manager
-            NivaraResourceManager.UntrackResource(this);
-
-            // Dispose all columns
-            foreach (var column in columns.Values)
-            {
-                column?.Dispose();
-            }
-            disposed = true;
-        }
-    }
-
-    /// <summary>
-    /// Estimates the memory usage of a column (rough approximation)
-    /// </summary>
-    /// <param name="column">The column to estimate</param>
-    /// <returns>Estimated memory usage in bytes</returns>
-    private static long EstimateColumnMemoryUsage(IColumn column)
-    {
-        if (column == null) return 0;
-
-        var elementType = column.ElementType;
-        var elementSize = GetTypeSize(elementType);
-        var baseMemory = column.Length * elementSize;
-
-        // Add overhead for null mask if present
-        if (column.HasNulls)
-        {
-            baseMemory += column.Length; // 1 byte per boolean in null mask
-        }
-
-        // Add some overhead for object structure
-        return baseMemory + 64; // 64 bytes overhead estimate
-    }
-
-    /// <summary>
-    /// Gets memory management recommendations for operations on this frame
-    /// </summary>
-    /// <param name="operationType">The type of operation being performed</param>
-    /// <returns>Memory management recommendations</returns>
-    public MemoryRecommendations GetMemoryRecommendations(string operationType = "general")
-    {
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        var estimatedSize = EstimateFrameMemoryUsage();
-        return NivaraResourceManager.GetMemoryRecommendations(estimatedSize, operationType);
-    }
-
-    /// <summary>
-    /// Estimates the total memory usage of this frame
-    /// </summary>
-    /// <returns>Estimated memory usage in bytes</returns>
-    private long EstimateFrameMemoryUsage()
-    {
-        long totalSize = 0;
-        foreach (var column in columns.Values)
-        {
-            totalSize += EstimateColumnMemoryUsage(column);
-        }
-        return totalSize;
-    }
-
-    /// <summary>
-    /// Creates a new column containing only the values at the specified indices
-    /// </summary>
-    /// <param name="column">The source column</param>
-    /// <param name="indices">The indices of values to include</param>
-    /// <returns>A new column with filtered values</returns>
-    static IColumn CreateFilteredColumn(IColumn column, List<int> indices)
-    {
-        var elementType = column.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => CreateFilteredColumnTyped<int>(column, indices),
-            Type t when t == typeof(double) => CreateFilteredColumnTyped<double>(column, indices),
-            Type t when t == typeof(float) => CreateFilteredColumnTyped<float>(column, indices),
-            Type t when t == typeof(long) => CreateFilteredColumnTyped<long>(column, indices),
-            Type t when t == typeof(string) => CreateFilteredColumnTyped<string>(column, indices),
-            Type t when t == typeof(bool) => CreateFilteredColumnTyped<bool>(column, indices),
-            Type t when t == typeof(decimal) => CreateFilteredColumnTyped<decimal>(column, indices),
-            Type t when t == typeof(byte) => CreateFilteredColumnTyped<byte>(column, indices),
-            Type t when t == typeof(short) => CreateFilteredColumnTyped<short>(column, indices),
-            Type t when t == typeof(DateTime) => CreateFilteredColumnTyped<DateTime>(column, indices),
-            _ => CreateFilteredColumnGeneric(column, indices)
-        };
-    }
-
-    /// <summary>
-    /// Creates a filtered column for a specific type
-    /// </summary>
-    static IColumn CreateFilteredColumnTyped<T>(IColumn column, List<int> indices)
-    {
-        // Check if T is a value type to determine which creation method to use
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array and use CreateFromNullable
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var filteredArray = System.Array.CreateInstance(nullableType, indices.Count);
-
-            for (int i = 0; i < indices.Count; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                if (value != null)
-                {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    filteredArray.SetValue(nullableInstance, i);
-                }
-                // null values remain null in the array
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { filteredArray })!;
-        }
-        else
-        {
-            // For reference types, create regular array and use CreateForReferenceType
-            var filteredArray = new T[indices.Count];
-
-            for (int i = 0; i < indices.Count; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                filteredArray[i] = (T)value!; // Reference types can be null
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { filteredArray })!;
-        }
-    }
-
-    /// <summary>
-    /// Creates a filtered column for unknown types using object column
-    /// </summary>
-    static IColumn CreateFilteredColumnGeneric(IColumn column, List<int> indices)
-    {
-        var filteredArray = new object[indices.Count];
-
-        for (int i = 0; i < indices.Count; i++)
-        {
-            filteredArray[i] = column.GetValue(indices[i])!;
-        }
-
-        return NivaraColumn<object>.Create(filteredArray);
-    }
-
-    /// <summary>
-    /// Creates an empty column of the specified type
-    /// </summary>
-    /// <param name="elementType">The type of elements in the column</param>
-    /// <returns>An empty column of the specified type</returns>
-    static IColumn CreateEmptyColumn(Type elementType)
-    {
-        return elementType switch
-        {
-            Type t when t == typeof(int) => NivaraColumn<int>.Create(Array.Empty<int>()),
-            Type t when t == typeof(double) => NivaraColumn<double>.Create(Array.Empty<double>()),
-            Type t when t == typeof(float) => NivaraColumn<float>.Create(Array.Empty<float>()),
-            Type t when t == typeof(long) => NivaraColumn<long>.Create(Array.Empty<long>()),
-            Type t when t == typeof(string) => NivaraColumn<string>.CreateForReferenceType(Array.Empty<string>()),
-            Type t when t == typeof(bool) => NivaraColumn<bool>.Create(Array.Empty<bool>()),
-            Type t when t == typeof(decimal) => NivaraColumn<decimal>.Create(Array.Empty<decimal>()),
-            Type t when t == typeof(byte) => NivaraColumn<byte>.Create(Array.Empty<byte>()),
-            Type t when t == typeof(short) => NivaraColumn<short>.Create(Array.Empty<short>()),
-            Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.Create(Array.Empty<DateTime>()),
-            _ => NivaraColumn<object>.Create(Array.Empty<object>())
-        };
-    }
-
-    /// <summary>
-    /// Slices a column using the column's built-in Slice method
-    /// </summary>
-    /// <param name="column">The column to slice</param>
-    /// <param name="start">The starting index</param>
-    /// <param name="length">The number of elements to include</param>
-    /// <returns>A sliced column</returns>
-    static IColumn SliceColumn(IColumn column, int start, int length)
-    {
-        // Use reflection to call the Slice method on the typed column
-        var columnType = column.GetType();
-        var sliceMethod = columnType.GetMethod("Slice", new[] { typeof(int), typeof(int) });
-
-        if (sliceMethod != null)
-        {
-            return (IColumn)sliceMethod.Invoke(column, new object[] { start, length })!;
-        }
-
-        // Fallback: create filtered column using indices
-        var indices = Enumerable.Range(start, length).ToList();
-        return CreateFilteredColumn(column, indices);
-    }
-
-    /// <summary>
-    /// Reorders a column using the specified indices
-    /// </summary>
-    /// <param name="column">The column to reorder</param>
-    /// <param name="indices">The indices specifying the new order</param>
-    /// <returns>A reordered column</returns>
-    static IColumn ReorderColumn(IColumn column, int[] indices)
-    {
-        var elementType = column.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => ReorderColumnTyped<int>(column, indices),
-            Type t when t == typeof(double) => ReorderColumnTyped<double>(column, indices),
-            Type t when t == typeof(float) => ReorderColumnTyped<float>(column, indices),
-            Type t when t == typeof(long) => ReorderColumnTyped<long>(column, indices),
-            Type t when t == typeof(string) => ReorderColumnTyped<string>(column, indices),
-            Type t when t == typeof(bool) => ReorderColumnTyped<bool>(column, indices),
-            Type t when t == typeof(decimal) => ReorderColumnTyped<decimal>(column, indices),
-            Type t when t == typeof(byte) => ReorderColumnTyped<byte>(column, indices),
-            Type t when t == typeof(short) => ReorderColumnTyped<short>(column, indices),
-            Type t when t == typeof(DateTime) => ReorderColumnTyped<DateTime>(column, indices),
-            _ => ReorderColumnGeneric(column, indices)
-        };
-    }
-
-    /// <summary>
-    /// Reorders a column for a specific type
-    /// </summary>
-    static IColumn ReorderColumnTyped<T>(IColumn column, int[] indices)
-    {
-        // Check if T is a value type to determine which creation method to use
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array and use CreateFromNullable
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var reorderedArray = System.Array.CreateInstance(nullableType, indices.Length);
-
-            for (int i = 0; i < indices.Length; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                if (value != null)
-                {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    reorderedArray.SetValue(nullableInstance, i);
-                }
-                // null values remain null in the array
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { reorderedArray })!;
-        }
-        else
-        {
-            // For reference types, create regular array and use CreateForReferenceType
-            var reorderedArray = new T[indices.Length];
-
-            for (int i = 0; i < indices.Length; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                reorderedArray[i] = (T)value!; // Reference types can be null
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { reorderedArray })!;
-        }
-    }
-
-    /// <summary>
-    /// Reorders a column for unknown types using object column
-    /// </summary>
-    static IColumn ReorderColumnGeneric(IColumn column, int[] indices)
-    {
-        var reorderedArray = new object[indices.Length];
-
-        for (int i = 0; i < indices.Length; i++)
-        {
-            reorderedArray[i] = column.GetValue(indices[i])!;
-        }
-
-        return NivaraColumn<object>.Create(reorderedArray);
-    }
-
-    /// <summary>
-    /// Gets the approximate size of a type in bytes
-    /// </summary>
-    /// <param name="type">The type to get size for</param>
-    /// <returns>Size in bytes</returns>
-    private static int GetTypeSize(Type type)
-    {
-        if (type == typeof(bool)) return 1;
-        if (type == typeof(byte) || type == typeof(sbyte)) return 1;
-        if (type == typeof(short) || type == typeof(ushort)) return 2;
-        if (type == typeof(int) || type == typeof(uint)) return 4;
-        if (type == typeof(long) || type == typeof(ulong)) return 8;
-        if (type == typeof(float)) return 4;
-        if (type == typeof(double)) return 8;
-        if (type == typeof(decimal)) return 16;
-        if (type == typeof(DateTime)) return 8;
-        if (type == typeof(Guid)) return 16;
-
-        // For reference types, estimate pointer size + average string length
-        if (!type.IsValueType)
-        {
-            if (type == typeof(string)) return 50; // Average string estimate
-            return 8; // Pointer size on 64-bit systems
-        }
-
-        return 8; // Default estimate for unknown types
     }
 }

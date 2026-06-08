@@ -13,8 +13,7 @@ public abstract class DataFrameException : Exception
     /// </summary>
     /// <param name="message">The error message</param>
     protected DataFrameException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of DataFrameException with an inner exception
@@ -22,8 +21,7 @@ public abstract class DataFrameException : Exception
     /// <param name="message">The error message</param>
     /// <param name="innerException">The inner exception</param>
     protected DataFrameException(string message, Exception innerException) : base(message, innerException)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of DataFrameException with query context
@@ -71,9 +69,7 @@ public abstract class DataFrameException : Exception
         context.AppendLine($"Message: {Message}");
 
         if (FailedOperation != null)
-        {
             context.AppendLine($"Failed Operation: {FailedOperation.OperationType}");
-        }
 
         if (FailedPlan != null)
         {
@@ -83,9 +79,7 @@ public abstract class DataFrameException : Exception
         }
 
         if (InnerException != null)
-        {
             context.AppendLine($"Inner Exception: {InnerException.GetType().Name}: {InnerException.Message}");
-        }
 
         return context.ToString();
     }
@@ -101,8 +95,7 @@ public sealed class DataFrameSchemaValidationException : DataFrameException
     /// </summary>
     /// <param name="message">The error message</param>
     public DataFrameSchemaValidationException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of DataFrameSchemaValidationException with schema details
@@ -156,31 +149,23 @@ public sealed class DataFrameSchemaValidationException : DataFrameException
 
             // Check for missing columns
             foreach (var expectedColumn in ExpectedSchema.ColumnNames)
-            {
                 if (!ActualSchema.ColumnNames.Contains(expectedColumn))
-                {
                     mismatches.Add(new SchemaMismatch(
                         SchemaMismatchType.MissingColumn,
                         expectedColumn,
                         null,
                         null,
                         $"Column '{expectedColumn}' is missing from actual schema"));
-                }
-            }
 
             // Check for extra columns
             foreach (var actualColumn in ActualSchema.ColumnNames)
-            {
                 if (!ExpectedSchema.ColumnNames.Contains(actualColumn))
-                {
                     mismatches.Add(new SchemaMismatch(
                         SchemaMismatchType.ExtraColumn,
                         actualColumn,
                         null,
                         ActualSchema.GetColumnType(actualColumn),
                         $"Column '{actualColumn}' is not expected in schema"));
-                }
-            }
 
             // Check for type mismatches
             foreach (var columnName in ExpectedSchema.ColumnNames.Intersect(ActualSchema.ColumnNames))
@@ -189,14 +174,12 @@ public sealed class DataFrameSchemaValidationException : DataFrameException
                 var actualType = ActualSchema.GetColumnType(columnName);
 
                 if (expectedType != actualType)
-                {
                     mismatches.Add(new SchemaMismatch(
                         SchemaMismatchType.TypeMismatch,
                         columnName,
                         expectedType,
                         actualType,
                         $"Column '{columnName}' has type {actualType?.Name} but expected {expectedType?.Name}"));
-                }
             }
 
             return mismatches;
@@ -212,23 +195,17 @@ public sealed class DataFrameSchemaValidationException : DataFrameException
         context.AppendLine(base.GetDetailedContext());
 
         if (ExpectedSchema != null)
-        {
             context.AppendLine($"Expected Schema: {string.Join(", ", ExpectedSchema.ColumnNames.Select(name => $"{name}:{ExpectedSchema.GetColumnType(name)?.Name}"))}");
-        }
 
         if (ActualSchema != null)
-        {
             context.AppendLine($"Actual Schema: {string.Join(", ", ActualSchema.ColumnNames.Select(name => $"{name}:{ActualSchema.GetColumnType(name)?.Name}"))}");
-        }
 
         var mismatches = Mismatches;
         if (mismatches.Count > 0)
         {
             context.AppendLine("Schema Mismatches:");
             foreach (var mismatch in mismatches)
-            {
                 context.AppendLine($"  • {mismatch}");
-            }
         }
 
         return context.ToString();
@@ -245,8 +222,7 @@ public sealed class JoinException : DataFrameException
     /// </summary>
     /// <param name="message">The error message</param>
     public JoinException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of JoinException with join details
@@ -317,9 +293,7 @@ public sealed class JoinException : DataFrameException
         context.AppendLine($"Right Keys: {string.Join(", ", RightKeys)}");
 
         if (!string.IsNullOrEmpty(ConflictReason))
-        {
             context.AppendLine($"Conflict Reason: {ConflictReason}");
-        }
 
         return context.ToString();
     }
@@ -377,9 +351,7 @@ public sealed class SchemaMismatch
     /// </summary>
     /// <returns>A formatted string describing the mismatch</returns>
     public override string ToString()
-    {
-        return Description;
-    }
+        => Description;
 }
 
 /// <summary>

@@ -138,9 +138,7 @@ public sealed class ExecutionDiagnostics
     {
         var currentMemory = GC.GetTotalMemory(false);
         if (currentMemory > peakMemoryUsage)
-        {
             peakMemoryUsage = currentMemory;
-        }
     }
 
     /// <summary>
@@ -189,9 +187,7 @@ public sealed class ExecutionDiagnostics
             {
                 report.AppendLine($"  • {optimization.OptimizationName}: {optimization.Description}");
                 if (optimization.EstimatedImprovement.HasValue)
-                {
                     report.AppendLine($"    Estimated improvement: {optimization.EstimatedImprovement.Value:F1}%");
-                }
             }
             report.AppendLine();
         }
@@ -205,9 +201,7 @@ public sealed class ExecutionDiagnostics
             {
                 report.AppendLine($"  {warning.Severity}: {warning.Message}");
                 if (!string.IsNullOrEmpty(warning.Suggestion))
-                {
                     report.AppendLine($"    Suggestion: {warning.Suggestion}");
-                }
             }
             report.AppendLine();
         }
@@ -218,19 +212,13 @@ public sealed class ExecutionDiagnostics
 
         // Analyze execution efficiency
         if (TotalExecutionTime.TotalMilliseconds > 1000)
-        {
             report.AppendLine("  • Long execution time detected - consider optimization opportunities");
-        }
 
         if (MemoryAllocated > 100 * 1024 * 1024) // 100MB
-        {
             report.AppendLine("  • High memory usage detected - consider streaming or chunked processing");
-        }
 
         if (ParallelismDegree == 1 && operationTimings.Any(t => t.RowsProcessed > 10000))
-        {
             report.AppendLine("  • Large dataset processed sequentially - consider parallel execution");
-        }
 
         // Suggest optimizations based on operation patterns
         var filterOperations = operationTimings.Where(t => t.OperationType.Contains("Filter")).ToList();
@@ -243,9 +231,7 @@ public sealed class ExecutionDiagnostics
 
             if (lastFilter != null && firstSort != null &&
                 operationTimings.IndexOf(firstSort) < operationTimings.IndexOf(lastFilter))
-            {
                 report.AppendLine("  • Consider moving filter operations before sort operations for better performance");
-            }
         }
 
         return report.ToString();

@@ -2,9 +2,9 @@
 
 ## Purpose
 
-This document describes the path from `0.9.0` (the first public NuGet release) to a credible `v1.0.0` release.
+This document describes the path from `0.9.x` (the first public NuGet release) to a credible `v1.0.0` release.
 
-## What 0.9.0 Achieved
+## What 0.9.x Achieved
 
 - Published both `Nivara` and `Nivara.Extensions` to NuGet
 - Package metadata cleaned up (SourceLink, symbols, deterministic build, repository metadata)
@@ -42,7 +42,7 @@ Nivara is ready for `v1.0.0` when:
 - The core API surface is intentionally frozen enough to support semver expectations
 - The package metadata and release workflow are production-quality
 - The README and package descriptions are accurate and non-promotional
-- The release notes history clearly explains what changed between `0.9.0` and `v1.0.0`
+- The release notes history clearly explains what changed between `` and `v1.0.0`
 - The extensions package has an explicit support stance
 - The team is comfortable treating breaking changes as true major-version events
 
@@ -62,7 +62,7 @@ The core package should settle on:
 
 The current target is `net10.0`.
 
-That may be fine for `0.9.0`, but v1 should make that choice explicit and deliberate.
+That may be fine for `0.9.x`, but v1 should make that choice explicit and deliberate.
 
 If broader adoption matters, the compatibility story should be decided before v1 rather than after it.
 
@@ -78,7 +78,7 @@ That decision should be explicit before the major version.
 
 ## Recommended v1 Path
 
-1. ~~Publish `0.9.0` as the first public NuGet release~~ (done)
+1. ~~Publish `0.9.x` as the first public NuGet release~~ (done)
 2. ~~Stabilize packaging, metadata, and release workflow~~ (done)
 3. Tighten the public API contract and release policy
 4. Decide the compatibility scope for the long-term supported line
@@ -102,7 +102,7 @@ v1 should require:
 
 ## Summary
 
-`0.9.0` is the public release step.
+`0.9.x` is the public release step.
 
 `v1.0.0` is the stability promise step.
 

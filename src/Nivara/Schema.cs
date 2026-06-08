@@ -8,8 +8,57 @@ namespace Nivara;
 /// </summary>
 public sealed class Schema
 {
-    private readonly IReadOnlyDictionary<string, Type> columnTypes;
-    private readonly IReadOnlyDictionary<string, ColumnMetadata> metadata;
+    /// <summary>
+    /// Checks if two types are compatible for operations
+    /// </summary>
+    /// <param name="type1">The first type</param>
+    /// <param name="type2">The second type</param>
+    /// <returns>True if the types are compatible, false otherwise</returns>
+    static bool areTypesCompatible(Type type1, Type type2)
+    {
+        if (type1 == type2)
+            return true;
+
+        // Numeric type compatibility
+        var numericTypes = new[]
+        {
+            typeof(byte), typeof(sbyte), typeof(short), typeof(ushort),
+            typeof(int), typeof(uint), typeof(long), typeof(ulong),
+            typeof(float), typeof(double), typeof(decimal)
+        };
+
+        return numericTypes.Contains(type1) && numericTypes.Contains(type2);
+    }
+
+    readonly IReadOnlyDictionary<string, Type> columnTypes;
+    readonly IReadOnlyDictionary<string, ColumnMetadata> metadata;
+
+    /// <summary>
+    /// Initializes a new instance of Schema with columns and metadata
+    /// </summary>
+    /// <param name="columns">The column definitions</param>
+    /// <param name="columnMetadata">The metadata for each column</param>
+    internal Schema(
+        IEnumerable<(string Name, Type Type)> columns,
+        IReadOnlyDictionary<string, ColumnMetadata> columnMetadata)
+    {
+        if (columns == null)
+            throw new ArgumentNullException(nameof(columns));
+
+        var columnList = columns.ToList();
+        var names = new List<string>();
+        var typeDict = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var (name, type) in columnList)
+        {
+            names.Add(name);
+            typeDict[name] = type;
+        }
+
+        ColumnNames = names;
+        columnTypes = typeDict;
+        metadata = columnMetadata ?? new Dictionary<string, ColumnMetadata>();
+    }
 
     /// <summary>
     /// Initializes a new instance of Schema with the specified columns
@@ -47,33 +96,6 @@ public sealed class Schema
         ColumnNames = names.ToList();
         columnTypes = typeDict;
         metadata = metadataDict;
-    }
-
-    /// <summary>
-    /// Initializes a new instance of Schema with columns and metadata
-    /// </summary>
-    /// <param name="columns">The column definitions</param>
-    /// <param name="columnMetadata">The metadata for each column</param>
-    internal Schema(
-        IEnumerable<(string Name, Type Type)> columns,
-        IReadOnlyDictionary<string, ColumnMetadata> columnMetadata)
-    {
-        if (columns == null)
-            throw new ArgumentNullException(nameof(columns));
-
-        var columnList = columns.ToList();
-        var names = new List<string>();
-        var typeDict = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (name, type) in columnList)
-        {
-            names.Add(name);
-            typeDict[name] = type;
-        }
-
-        ColumnNames = names;
-        columnTypes = typeDict;
-        metadata = columnMetadata ?? new Dictionary<string, ColumnMetadata>();
     }
 
     /// <summary>
@@ -233,34 +255,12 @@ public sealed class Schema
             else
             {
                 // Allow compatible types (e.g., int and long)
-                if (!AreTypesCompatible(thisType, otherType))
+                if (!areTypesCompatible(thisType, otherType))
                     return false;
             }
         }
 
         return true;
-    }
-
-    /// <summary>
-    /// Checks if two types are compatible for operations
-    /// </summary>
-    /// <param name="type1">The first type</param>
-    /// <param name="type2">The second type</param>
-    /// <returns>True if the types are compatible, false otherwise</returns>
-    private static bool AreTypesCompatible(Type type1, Type type2)
-    {
-        if (type1 == type2)
-            return true;
-
-        // Numeric type compatibility
-        var numericTypes = new[]
-        {
-            typeof(byte), typeof(sbyte), typeof(short), typeof(ushort),
-            typeof(int), typeof(uint), typeof(long), typeof(ulong),
-            typeof(float), typeof(double), typeof(decimal)
-        };
-
-        return numericTypes.Contains(type1) && numericTypes.Contains(type2);
     }
 
     /// <summary>

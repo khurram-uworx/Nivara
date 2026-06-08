@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace Nivara;
 
-internal static class KernelSelector
+static class KernelSelector
 {
     public static KernelType DetermineKernelType(int length, bool isVectorizable)
     {
