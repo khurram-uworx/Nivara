@@ -34,33 +34,40 @@ public static class TypeConverter
         bool resultRequiresGrad = requiresGrad ?? source.RequiresGrad;
 
         var sourceData = source.Data;
-        var targetData = new TTarget[sourceData.Length];
+        int n = sourceData.Length;
 
-        for (int i = 0; i < sourceData.Length; i++)
+        if (!sourceData.HasNulls)
         {
-            if (!sourceData.IsNull(i))
+            sourceData.TryGetSpan(out var span);
+            var targetData = new TTarget[n];
+            for (int i = 0; i < n; i++)
+                targetData[i] = TTarget.CreateChecked(span[i]);
+            return new ReverseGradTensor<TTarget>(NivaraColumn<TTarget>.Create(targetData), resultRequiresGrad, source.shape);
+        }
+
+        var buf = System.Buffers.ArrayPool<TSource>.Shared.Rent(n);
+        var nullMask = new bool[n]; // allocated fresh, already zeroed
+        try
+        {
+            sourceData.CopyTo(buf.AsSpan(0, n), default);
+            sourceData.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask);
+
+            var targetData = new TTarget[n];
+            for (int i = 0; i < n; i++)
             {
-                targetData[i] = ConvertValue<TSource, TTarget>(sourceData[i]);
-            }
-        }
-
-        NivaraColumn<TTarget> targetColumn;
-        if (sourceData.HasNulls)
-        {
-            var nullableData = new TTarget?[sourceData.Length];
-            for (int i = 0; i < sourceData.Length; i++)
-            {
-                nullableData[i] = sourceData.IsNull(i) ? null : targetData[i];
+                if (!nullMask[i])
+                    targetData[i] = TTarget.CreateChecked(buf[i]);
             }
 
-            targetColumn = NivaraColumn<TTarget>.CreateFromNullable(nullableData);
+            return new ReverseGradTensor<TTarget>(
+                NivaraColumn<TTarget>.CreateFromSpans(targetData, nullMask),
+                resultRequiresGrad, source.shape);
         }
-        else
+        finally
         {
-            targetColumn = NivaraColumn<TTarget>.Create(targetData);
+            System.Buffers.ArrayPool<TSource>.Shared.Return(buf, clearArray: true);
         }
-
-        return new ReverseGradTensor<TTarget>(targetColumn, resultRequiresGrad, source.shape);
     }
 
     /// <summary>

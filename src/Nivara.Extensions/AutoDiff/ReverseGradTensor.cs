@@ -103,6 +103,33 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     }
 
     /// <summary>
+    /// Creates a ReverseGradTensor from row-major matrix data with explicit dimensions.
+    /// The tensor's shape is set to [rows, cols] so callers can use shape-aware MatMul/Transpose
+    /// without manually calling Reshape.
+    /// </summary>
+    /// <param name="rowMajorData">Flat array containing matrix data in row-major order</param>
+    /// <param name="rows">Number of rows</param>
+    /// <param name="cols">Number of columns</param>
+    /// <param name="requiresGrad">Whether the tensor should track gradients</param>
+    /// <returns>A new ReverseGradTensor instance with shape [rows, cols]</returns>
+    /// <exception cref="ArgumentNullException">Thrown when rowMajorData is null</exception>
+    /// <exception cref="ArgumentException">Thrown when data length doesn't match rows * cols</exception>
+    public static ReverseGradTensor<T> FromMatrix(T[] rowMajorData, int rows, int cols, bool requiresGrad = false)
+    {
+        if (rowMajorData == null)
+            throw new ArgumentNullException(nameof(rowMajorData));
+
+        if (rowMajorData.Length != rows * cols)
+            throw new ArgumentException(
+                $"Data length ({rowMajorData.Length}) must equal rows * cols ({rows} * {cols} = {rows * cols})");
+
+        var column = NivaraColumn<T>.Create(rowMajorData);
+        var tensor = new ReverseGradTensor<T>(column, requiresGrad);
+        tensor.Reshape(rows, cols);
+        return tensor;
+    }
+
+    /// <summary>
     /// Initiates backward pass computation from this tensor
     /// </summary>
     /// <param name="gradient">Optional gradient to use as starting point. If null, uses ones for scalar tensors</param>

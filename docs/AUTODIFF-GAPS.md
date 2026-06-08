@@ -8,34 +8,6 @@ in `KNOWN-ISSUES.md`.
 
 ## API & Ergonomics Gaps
 
-### E1. Matrix values still use row-major flattened storage
-
-**Where:** `GradTensor<T>.Reshape`, `GradOperations.MatMul`, `GradOperations.Transpose`.
-
-**Status:** Shape metadata is now available and shape-aware matrix overloads
-exist, but callers still create flat arrays and then call `Reshape`.
-
-**Recommendation:** Add named factory helpers such as
-`ReverseGradTensor<T>.FromMatrix(T[] rowMajorData, int rows, int cols,
-bool requiresGrad = false)` if matrix examples become common enough to justify
-a clearer creation path.
-
----
-
-### E2. Legacy explicit-dimension matrix overloads remain public
-
-**Where:** `GradOperations.MatMul(a, b, aRows, aCols, bCols)` and
-`GradOperations.Transpose(a, rows, cols)`.
-
-**Status:** Shape-aware overloads are preferred, but explicit overloads remain
-for existing callers and tests that need direct flattened conventions.
-
-**Recommendation:** Keep the overloads for now. If the API is still pre-1.0
-when matrix shape helpers stabilize, consider marking explicit overloads as
-legacy or internalizing them.
-
----
-
 ### E3. No forward-mode or mixed-mode AutoDiff flavor yet
 
 **Where:** `GradTensor<T>` / `ReverseGradTensor<T>` type hierarchy.
@@ -78,19 +50,6 @@ requires stateful optimizer semantics.
 ---
 
 ## Performance Gaps
-
-### P1. AutoDiff operations still allocate for null-mask reconstruction
-
-**Where:** `GradOperations`, `GradientUtils`, `TypeConverter`, `SgdOptimizer`.
-
-**Status:** Correctness currently takes priority. Null-preserving helpers often
-materialize nullable arrays to rebuild `NivaraColumn<T>` masks.
-
-**Recommendation:** Add internal column creation APIs that accept value spans
-and null-mask spans directly, then replace nullable-array reconstruction where
-it is hot.
-
----
 
 ### P2. Matrix multiplication is scalar-loop based
 
@@ -151,7 +110,7 @@ optimizer state, and AutoGrid integration are designed.
 
 | Area | Important | Deferred |
 |------|-----------|----------|
-| API/Ergonomics | E1, E2, E5 | E3, E4 |
-| Performance | P1, P2 | |
+| API/Ergonomics | E5 | E3, E4 |
+| Performance | P2 | |
 | Testing | T1, T2 | |
 | Design | | D1, D2, D3 |

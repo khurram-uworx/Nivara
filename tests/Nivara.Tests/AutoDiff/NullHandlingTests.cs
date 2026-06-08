@@ -134,9 +134,11 @@ public class NullHandlingTests
 
         var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
+        a.Reshape(2, 2);
+        b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b, aRows: 2, aCols: 2, bCols: 2);
+        var result = GradOperations.MatMul(a, b);
 
         // Assert: result[0] = 1*5 + null*7 = null (k=1 has null in a)
         Assert.That(result.IsNull(0), Is.True, "Position 0: a[1]=null -> result should be null");
@@ -164,9 +166,11 @@ public class NullHandlingTests
 
         var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
+        a.Reshape(2, 2);
+        b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b, aRows: 2, aCols: 2, bCols: 2);
+        var result = GradOperations.MatMul(a, b);
 
         // Assert: All positions should be null
         for (int i = 0; i < result.Length; i++)
@@ -184,9 +188,10 @@ public class NullHandlingTests
         var values = new float?[] { 1.0f, null, 3.0f, 4.0f, 5.0f, null };
         var column = NivaraColumn<float>.CreateFromNullable(values);
         var a = new ReverseGradTensor<float>(column, requiresGrad: true);
+        a.Reshape(2, 3);
 
         // Act
-        var result = GradOperations.Transpose(a, rows: 2, cols: 3);
+        var result = GradOperations.Transpose(a);
 
         // Assert: result[j * rows + i] = a[i * cols + j]
         Assert.That(result.IsNull(0), Is.False, "Position 0: from a[0]=1 should not be null");
@@ -217,9 +222,11 @@ public class NullHandlingTests
 
         var a = new ReverseGradTensor<float>(aColumn, requiresGrad: true);
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
+        a.Reshape(2, 2);
+        b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b, aRows: 2, aCols: 2, bCols: 2);
+        var result = GradOperations.MatMul(a, b);
 
         // Create gradient output (all ones)
         var gradValues = new float?[] { 1.0f, 1.0f, 1.0f, 1.0f };
