@@ -62,6 +62,14 @@ internal interface IColumnStorage<T> : IDisposable
     internal ReadOnlySpan<T> AsSpan();
 
     /// <summary>
+    /// Attempts to get a read-only span view of the underlying data when no nulls are present.
+    /// Zero-copy when the column is null-free; returns false when nulls exist.
+    /// </summary>
+    /// <param name="span">When this method returns, contains the read-only span if successful</param>
+    /// <returns>true if a span was obtained (no nulls present), false otherwise</returns>
+    internal bool TryGetSpan(out ReadOnlySpan<T> span);
+
+    /// <summary>
     /// Gets a writable span view of the underlying data.
     /// Provides zero-copy access for scenarios requiring data mutation.
     /// </summary>

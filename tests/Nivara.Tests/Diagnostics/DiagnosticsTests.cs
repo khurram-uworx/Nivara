@@ -1,3 +1,5 @@
+#pragma warning disable CS0618 // Tests exercise deprecated APIs during migration
+
 using Nivara.Diagnostics;
 using NUnit.Framework;
 

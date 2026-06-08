@@ -522,4 +522,165 @@ public class NivaraFrameTests
         Assert.That(frame.GetColumn<string>("Strings")[0], Is.EqualTo("item_1"));
         Assert.That(frame.GetColumn<string>("Strings")[size - 1], Is.EqualTo($"item_{size}"));
     }
+
+    #region Row-Major Operations (new APIs)
+
+    [Test]
+    public void TryGetRowMajorSpan_MultiColumn_ReturnsFalse()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1, 4 })),
+            ("B", (IColumn)NivaraColumn<int>.Create(new[] { 2, 5 })),
+            ("C", (IColumn)NivaraColumn<int>.Create(new[] { 3, 6 })),
+        });
+
+        var result = frame.TryGetRowMajorSpan<int>(out var span);
+
+        Assert.That(result, Is.False);
+        Assert.That(span.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void TryGetRowMajorSpan_WithNulls_ReturnsFalse()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1, 4 })),
+            ("B", (IColumn)NivaraColumn<int>.CreateFromNullable(new int?[] { 2, null })),
+        });
+
+        var result = frame.TryGetRowMajorSpan<int>(out var span);
+
+        Assert.That(result, Is.False);
+        Assert.That(span.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void TryGetRowMajorSpan_EmptyFrame_ReturnsFalse()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(Array.Empty<int>())),
+        });
+
+        var result = frame.TryGetRowMajorSpan<int>(out var span);
+
+        Assert.That(result, Is.False);
+    }
+
+    [Test]
+    public void TryGetRowMajorSpan_SingleRowMultiColumn_ReturnsFalse()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<int>.Create(new[] { 42 })),
+            ("Y", (IColumn)NivaraColumn<int>.Create(new[] { 99 })),
+        });
+
+        var result = frame.TryGetRowMajorSpan<int>(out var span);
+
+        Assert.That(result, Is.False);
+        Assert.That(span.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void TryGetRowMajorSpan_SingleColumn_ReturnsCorrectLayout()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<int>.Create(new[] { 10, 20, 30 })),
+        });
+
+        var result = frame.TryGetRowMajorSpan<int>(out var span);
+
+        Assert.That(result, Is.True);
+        Assert.That(span.Length, Is.EqualTo(3));
+        Assert.That(span.ToArray(), Is.EqualTo(new[] { 10, 20, 30 }));
+    }
+
+    [Test]
+    public void TryGetRowMajorSpan_DisposedFrame_ThrowsObjectDisposedException()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1 })),
+        });
+        frame.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => frame.TryGetRowMajorSpan<int>(out _));
+    }
+
+    [Test]
+    public void CopyToRowMajor_WithoutNulls_CopiesCorrectRowMajorLayout()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1, 4 })),
+            ("B", (IColumn)NivaraColumn<int>.Create(new[] { 2, 5 })),
+            ("C", (IColumn)NivaraColumn<int>.Create(new[] { 3, 6 })),
+        });
+        var dest = new int[6];
+
+        frame.CopyToRowMajor<int>(dest.AsSpan());
+
+        Assert.That(dest, Is.EqualTo(new[] { 1, 2, 3, 4, 5, 6 }));
+    }
+
+    [Test]
+    public void CopyToRowMajor_WithNulls_FillsDefault()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 10, 40 })),
+            ("B", (IColumn)NivaraColumn<int>.CreateFromNullable(new int?[] { null, 50 })),
+        });
+        var dest = new int[4];
+
+        frame.CopyToRowMajor<int>(dest.AsSpan());
+
+        Assert.That(dest, Is.EqualTo(new[] { 10, 0, 40, 50 }));
+    }
+
+    [Test]
+    public void CopyToRowMajor_WithNullsAndCustomFill_ReplacesNulls()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 10, 40 })),
+            ("B", (IColumn)NivaraColumn<int>.CreateFromNullable(new int?[] { null, 50 })),
+        });
+        var dest = new int[4];
+
+        frame.CopyToRowMajor<int>(dest.AsSpan(), -1);
+
+        Assert.That(dest, Is.EqualTo(new[] { 10, -1, 40, 50 }));
+    }
+
+    [Test]
+    public void CopyToRowMajor_ThrowsOnShortDestination()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1, 2 })),
+        });
+        var dest = new int[1];
+
+        var ex = Assert.Throws<ArgumentException>(() => frame.CopyToRowMajor<int>(dest.AsSpan()));
+        Assert.That(ex.Message, Does.Contain("must be at least"));
+    }
+
+    [Test]
+    public void CopyToRowMajor_DisposedFrame_ThrowsObjectDisposedException()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1 })),
+        });
+        frame.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => frame.CopyToRowMajor<int>(new Span<int>(new int[1])));
+    }
+
+    #endregion
 }
