@@ -244,6 +244,39 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
+    /// Creates a new column from separate value and null-mask spans.
+    /// Provided for interop and internal use, especially from AutoDiff and tensor-aware paths.
+    /// When the null mask contains no true values, delegates to <see cref="Create(ReadOnlySpan{T})"/>.
+    /// </summary>
+    /// <param name="values">The data values (null positions must still contain a value; it will be ignored via the mask)</param>
+    /// <param name="nullMask">Span of booleans where true = null at that position. Must have same length as values.</param>
+    /// <returns>A new NivaraColumn instance</returns>
+    /// <exception cref="ArgumentException">Thrown when spans have different lengths</exception>
+    public static NivaraColumn<T> CreateFromSpans(ReadOnlySpan<T> values, ReadOnlySpan<bool> nullMask)
+    {
+        if (values.Length != nullMask.Length)
+            throw new ArgumentException($"Value span length ({values.Length}) must match null mask span length ({nullMask.Length})");
+
+        bool hasNulls = false;
+        foreach (var b in nullMask)
+        {
+            if (b)
+            {
+                hasNulls = true;
+                break;
+            }
+        }
+
+        if (!hasNulls)
+            return Create(values);
+
+        var dataArray = values.ToArray();
+        var maskArray = nullMask.ToArray();
+        var storage = new MemoryStorage<T>(new ReadOnlyMemory<T>(dataArray), new ReadOnlyMemory<bool>(maskArray));
+        return new NivaraColumn<T>(storage);
+    }
+
+    /// <summary>
     /// Creates appropriate storage for the given values based on type characteristics
     /// </summary>
     /// <param name="values">The values to store</param>

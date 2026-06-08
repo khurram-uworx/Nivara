@@ -141,6 +141,58 @@ public class GradOperationsTests
         Assert.That(result.RequiresGrad, Is.True);
     }
 
+    [Test]
+    public void FromMatrix_CreatesCorrectShape()
+    {
+        var data = new float[] { 1f, 2f, 3f, 4f, 5f, 6f };
+        var tensor = ReverseGradTensor<float>.FromMatrix(data, 2, 3);
+
+        Assert.That(tensor.Rank, Is.EqualTo(2));
+        Assert.That(tensor.Shape, Is.EqualTo(new[] { 2, 3 }));
+        Assert.That(tensor.Length, Is.EqualTo(6));
+    }
+
+    [Test]
+    public void FromMatrix_WithRequiresGrad_SetsGradFlag()
+    {
+        var data = new float[] { 1f, 2f, 3f, 4f };
+        var tensor = ReverseGradTensor<float>.FromMatrix(data, 2, 2, requiresGrad: true);
+
+        Assert.That(tensor.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void FromMatrix_DataLengthMismatch_Throws()
+    {
+        var data = new float[] { 1f, 2f, 3f };
+        Assert.That(() => ReverseGradTensor<float>.FromMatrix(data, 2, 2),
+            Throws.ArgumentException);
+    }
+
+    [Test]
+    public void FromMatrix_NullData_Throws()
+    {
+        Assert.That(() => ReverseGradTensor<float>.FromMatrix(null!, 2, 2),
+            Throws.ArgumentNullException);
+    }
+
+    [Test]
+    public void FromMatrix_WithMatMul_ComputesCorrectResult()
+    {
+        // Using FromMatrix + shape-aware MatMul instead of manual Reshape + explicit-dim overload
+        var a = ReverseGradTensor<float>.FromMatrix(
+            [1f, 2f, 3f, 4f], 2, 2, requiresGrad: true);
+        var b = ReverseGradTensor<float>.FromMatrix(
+            [5f, 6f, 7f, 8f], 2, 2, requiresGrad: true);
+
+        var result = GradOperations.MatMul(a, b);
+
+        Assert.That(result[0], Is.EqualTo(19.0f));
+        Assert.That(result[1], Is.EqualTo(22.0f));
+        Assert.That(result[2], Is.EqualTo(43.0f));
+        Assert.That(result[3], Is.EqualTo(50.0f));
+    }
+
     #region Shape-aware Overloads Tests
 
     [Test]

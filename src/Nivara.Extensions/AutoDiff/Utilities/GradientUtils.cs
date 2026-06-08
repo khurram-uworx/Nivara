@@ -1,7 +1,6 @@
 using Nivara;
 using System.Buffers;
 using System.Numerics;
-using System.Runtime.InteropServices;
 using System.Text;
 
 namespace Nivara.Extensions.AutoDiff.Utilities;
@@ -85,67 +84,36 @@ public static class GradientUtils
 
         var grad = tensor.Grad;
         int n = grad.Length;
-        var clippedData = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
         var minValue = -maxValue;
-        var span = grad.AsSpan();
-        bool hasNulls = false;
+
+        if (!grad.HasNulls)
+        {
+            grad.TryGetSpan(out var span);
+            var clipped = new T[n];
+            for (int i = 0; i < n; i++)
+                clipped[i] = span[i] > maxValue ? maxValue : span[i] < minValue ? minValue : span[i];
+            tensor.Grad = NivaraColumn<T>.Create(clipped);
+            return;
+        }
+
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
+            grad.CopyTo(buf.AsSpan(0, n), T.Zero);
+            grad.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+
             for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = grad.IsNull(i);
-                if (nullMask[i])
-                    hasNulls = true;
-            }
+                if (!nullMask[i])
+                    buf[i] = buf[i] > maxValue ? maxValue : buf[i] < minValue ? minValue : buf[i];
 
-            if (typeof(T) == typeof(float))
-            {
-                var fSpan = MemoryMarshal.Cast<T, float>(span);
-                var fClipped = MemoryMarshal.Cast<T, float>(clippedData.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                {
-                    if (!grad.IsNull(i))
-                    {
-                        var v = fSpan[i];
-                        fClipped[i] = v > (float)(object)maxValue! ? (float)(object)maxValue!
-                            : v < (float)(object)minValue! ? (float)(object)minValue! : v;
-                    }
-                }
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var dSpan = MemoryMarshal.Cast<T, double>(span);
-                var dClipped = MemoryMarshal.Cast<T, double>(clippedData.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                {
-                    if (!grad.IsNull(i))
-                    {
-                        var v = dSpan[i];
-                        dClipped[i] = v > (double)(object)maxValue! ? (double)(object)maxValue!
-                            : v < (double)(object)minValue! ? (double)(object)minValue! : v;
-                    }
-                }
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!grad.IsNull(i))
-                    {
-                        var value = grad[i];
-                        clippedData[i] = value > maxValue ? maxValue
-                            : value < minValue ? minValue : value;
-                    }
-                }
-            }
-
-            tensor.Grad = CreateColumnWithNullMask(clippedData.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            tensor.Grad = NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -167,31 +135,39 @@ public static class GradientUtils
 
         var grad = tensor.Grad;
         int n = grad.Length;
-        var span = grad.AsSpan();
 
-        double normSquared = 0.0;
-        if (typeof(T) == typeof(float))
+        double normSquared;
+        if (!grad.HasNulls)
         {
-            var fSpan = MemoryMarshal.Cast<T, float>(span);
+            grad.TryGetSpan(out var span);
+            normSquared = 0.0;
             for (int i = 0; i < n; i++)
-                if (!grad.IsNull(i))
-                    normSquared += fSpan[i] * fSpan[i];
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var dSpan = MemoryMarshal.Cast<T, double>(span);
-            for (int i = 0; i < n; i++)
-                if (!grad.IsNull(i))
-                    normSquared += dSpan[i] * dSpan[i];
+            {
+                var v = double.CreateChecked(span[i]);
+                normSquared += v * v;
+            }
         }
         else
         {
-            for (int i = 0; i < n; i++)
-                if (!grad.IsNull(i))
+            var buf = ArrayPool<T>.Shared.Rent(n);
+            try
+            {
+                grad.CopyTo(buf.AsSpan(0, n), T.Zero);
+                grad.TryGetNullMask(out var mask);
+                normSquared = 0.0;
+                for (int i = 0; i < n; i++)
                 {
-                    dynamic value = grad[i];
-                    normSquared += (double)(value * value);
+                    if (!mask[i])
+                    {
+                        var v = double.CreateChecked(buf[i]);
+                        normSquared += v * v;
+                    }
                 }
+            }
+            finally
+            {
+                ArrayPool<T>.Shared.Return(buf, clearArray: true);
+            }
         }
 
         var norm = Math.Sqrt(normSquared);
@@ -199,51 +175,35 @@ public static class GradientUtils
         if (norm > maxNorm)
         {
             var scale = maxNorm / norm;
-            var clippedData = ArrayPool<T>.Shared.Rent(n);
+
+            if (!grad.HasNulls)
+            {
+                grad.TryGetSpan(out var span);
+                var clipped = new T[n];
+                for (int i = 0; i < n; i++)
+                    clipped[i] = T.CreateChecked(double.CreateChecked(span[i]) * scale);
+                tensor.Grad = NivaraColumn<T>.Create(clipped);
+                return;
+            }
+
+            var buf = ArrayPool<T>.Shared.Rent(n);
             var nullMask = ArrayPool<bool>.Shared.Rent(n);
-            bool hasNulls = false;
 
             try
             {
+                grad.CopyTo(buf.AsSpan(0, n), T.Zero);
+                grad.TryGetNullMask(out var mask);
+                mask.CopyTo(nullMask.AsSpan(0, n));
+
                 for (int i = 0; i < n; i++)
-                {
-                    nullMask[i] = grad.IsNull(i);
-                    if (nullMask[i])
-                        hasNulls = true;
-                }
+                    if (!nullMask[i])
+                        buf[i] = T.CreateChecked(double.CreateChecked(buf[i]) * scale);
 
-                if (typeof(T) == typeof(float))
-                {
-                    var scaleFloat = (float)scale;
-                    var fSpan = MemoryMarshal.Cast<T, float>(span);
-                    var fClipped = MemoryMarshal.Cast<T, float>(clippedData.AsSpan(0, n));
-                    for (int i = 0; i < n; i++)
-                        fClipped[i] = !grad.IsNull(i) ? fSpan[i] * scaleFloat : 0f;
-                }
-                else if (typeof(T) == typeof(double))
-                {
-                    var dSpan = MemoryMarshal.Cast<T, double>(span);
-                    var dClipped = MemoryMarshal.Cast<T, double>(clippedData.AsSpan(0, n));
-                    for (int i = 0; i < n; i++)
-                        dClipped[i] = !grad.IsNull(i) ? dSpan[i] * scale : 0.0;
-                }
-                else
-                {
-                    for (int i = 0; i < n; i++)
-                    {
-                        if (!grad.IsNull(i))
-                        {
-                            dynamic value = grad[i];
-                            clippedData[i] = (T)(object)(value * scale)!;
-                        }
-                    }
-                }
-
-                tensor.Grad = CreateColumnWithNullMask(clippedData.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+                tensor.Grad = NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
             }
             finally
             {
-                ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
+                ArrayPool<T>.Shared.Return(buf, clearArray: true);
                 ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
             }
         }
@@ -269,30 +229,33 @@ public static class GradientUtils
         {
             var grad = tensor.Grad!;
             int n = grad.Length;
-            var span = grad.AsSpan();
-
-            if (typeof(T) == typeof(float))
+            var buf = ArrayPool<T>.Shared.Rent(n);
+            try
             {
-                var fSpan = MemoryMarshal.Cast<T, float>(span);
-                for (int i = 0; i < n; i++)
-                    if (!grad.IsNull(i))
-                        globalNormSquared += fSpan[i] * fSpan[i];
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var dSpan = MemoryMarshal.Cast<T, double>(span);
-                for (int i = 0; i < n; i++)
-                    if (!grad.IsNull(i))
-                        globalNormSquared += dSpan[i] * dSpan[i];
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                    if (!grad.IsNull(i))
+                if (!grad.HasNulls)
+                {
+                    grad.TryGetSpan(out var span);
+                    for (int i = 0; i < n; i++)
                     {
-                        dynamic value = grad[i];
-                        globalNormSquared += (double)(value * value);
+                        var v = double.CreateChecked(span[i]);
+                        globalNormSquared += v * v;
                     }
+                }
+                else
+                {
+                    grad.CopyTo(buf.AsSpan(0, n), T.Zero);
+                    grad.TryGetNullMask(out var mask);
+                    for (int i = 0; i < n; i++)
+                        if (!mask[i])
+                        {
+                            var v = double.CreateChecked(buf[i]);
+                            globalNormSquared += v * v;
+                        }
+                }
+            }
+            finally
+            {
+                ArrayPool<T>.Shared.Return(buf, clearArray: true);
             }
         }
 
@@ -306,53 +269,37 @@ public static class GradientUtils
             {
                 var grad = tensor.Grad!;
                 int n = grad.Length;
-                var span = grad.AsSpan();
-                var clippedData = ArrayPool<T>.Shared.Rent(n);
-                var nullMask = ArrayPool<bool>.Shared.Rent(n);
-                bool hasNulls = false;
 
-                try
+                if (!grad.HasNulls)
                 {
+                    grad.TryGetSpan(out var span);
+                    var clipped = new T[n];
                     for (int i = 0; i < n; i++)
-                    {
-                        nullMask[i] = grad.IsNull(i);
-                        if (nullMask[i])
-                            hasNulls = true;
-                    }
-
-                    if (typeof(T) == typeof(float))
-                    {
-                        var scaleFloat = (float)scale;
-                        var fSpan = MemoryMarshal.Cast<T, float>(span);
-                        var fClipped = MemoryMarshal.Cast<T, float>(clippedData.AsSpan(0, n));
-                        for (int i = 0; i < n; i++)
-                            fClipped[i] = !grad.IsNull(i) ? fSpan[i] * scaleFloat : 0f;
-                    }
-                    else if (typeof(T) == typeof(double))
-                    {
-                        var dSpan = MemoryMarshal.Cast<T, double>(span);
-                        var dClipped = MemoryMarshal.Cast<T, double>(clippedData.AsSpan(0, n));
-                        for (int i = 0; i < n; i++)
-                            dClipped[i] = !grad.IsNull(i) ? dSpan[i] * scale : 0.0;
-                    }
-                    else
-                    {
-                        for (int i = 0; i < n; i++)
-                        {
-                            if (!grad.IsNull(i))
-                            {
-                                dynamic value = grad[i];
-                                clippedData[i] = (T)(object)(value * scale)!;
-                            }
-                        }
-                    }
-
-                    tensor.Grad = CreateColumnWithNullMask(clippedData.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+                        clipped[i] = T.CreateChecked(double.CreateChecked(span[i]) * scale);
+                    tensor.Grad = NivaraColumn<T>.Create(clipped);
                 }
-                finally
+                else
                 {
-                    ArrayPool<T>.Shared.Return(clippedData, clearArray: true);
-                    ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+                    var buf = ArrayPool<T>.Shared.Rent(n);
+                    var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+                    try
+                    {
+                        grad.CopyTo(buf.AsSpan(0, n), T.Zero);
+                        grad.TryGetNullMask(out var mask);
+                        mask.CopyTo(nullMask.AsSpan(0, n));
+
+                        for (int i = 0; i < n; i++)
+                            if (!nullMask[i])
+                                buf[i] = T.CreateChecked(double.CreateChecked(buf[i]) * scale);
+
+                        tensor.Grad = NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
+                    }
+                    finally
+                    {
+                        ArrayPool<T>.Shared.Return(buf, clearArray: true);
+                        ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+                    }
                 }
             }
         }
@@ -490,31 +437,35 @@ public static class GradientUtils
 
         var grad = tensor.Grad;
         int n = grad.Length;
-        var span = grad.AsSpan();
         double normSquared = 0.0;
 
-        if (typeof(T) == typeof(float))
+        if (!grad.HasNulls)
         {
-            var fSpan = MemoryMarshal.Cast<T, float>(span);
+            grad.TryGetSpan(out var span);
             for (int i = 0; i < n; i++)
-                if (!grad.IsNull(i))
-                    normSquared += fSpan[i] * fSpan[i];
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var dSpan = MemoryMarshal.Cast<T, double>(span);
-            for (int i = 0; i < n; i++)
-                if (!grad.IsNull(i))
-                    normSquared += dSpan[i] * dSpan[i];
+            {
+                var v = double.CreateChecked(span[i]);
+                normSquared += v * v;
+            }
         }
         else
         {
-            for (int i = 0; i < n; i++)
-                if (!grad.IsNull(i))
-                {
-                    dynamic value = grad[i];
-                    normSquared += (double)(value * value);
-                }
+            var buf = ArrayPool<T>.Shared.Rent(n);
+            try
+            {
+                grad.CopyTo(buf.AsSpan(0, n), T.Zero);
+                grad.TryGetNullMask(out var mask);
+                for (int i = 0; i < n; i++)
+                    if (!mask[i])
+                    {
+                        var v = double.CreateChecked(buf[i]);
+                        normSquared += v * v;
+                    }
+            }
+            finally
+            {
+                ArrayPool<T>.Shared.Return(buf, clearArray: true);
+            }
         }
 
         return Math.Sqrt(normSquared);
@@ -534,30 +485,34 @@ public static class GradientUtils
         {
             var grad = tensor.Grad!;
             int n = grad.Length;
-            var span = grad.AsSpan();
 
-            if (typeof(T) == typeof(float))
+            if (!grad.HasNulls)
             {
-                var fSpan = MemoryMarshal.Cast<T, float>(span);
+                grad.TryGetSpan(out var span);
                 for (int i = 0; i < n; i++)
-                    if (!grad.IsNull(i))
-                        globalNormSquared += fSpan[i] * fSpan[i];
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var dSpan = MemoryMarshal.Cast<T, double>(span);
-                for (int i = 0; i < n; i++)
-                    if (!grad.IsNull(i))
-                        globalNormSquared += dSpan[i] * dSpan[i];
+                {
+                    var v = double.CreateChecked(span[i]);
+                    globalNormSquared += v * v;
+                }
             }
             else
             {
-                for (int i = 0; i < n; i++)
-                    if (!grad.IsNull(i))
-                    {
-                        dynamic value = grad[i];
-                        globalNormSquared += (double)(value * value);
-                    }
+                var buf = ArrayPool<T>.Shared.Rent(n);
+                try
+                {
+                    grad.CopyTo(buf.AsSpan(0, n), T.Zero);
+                    grad.TryGetNullMask(out var mask);
+                    for (int i = 0; i < n; i++)
+                        if (!mask[i])
+                        {
+                            var v = double.CreateChecked(buf[i]);
+                            globalNormSquared += v * v;
+                        }
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(buf, clearArray: true);
+                }
             }
         }
 
@@ -602,21 +557,6 @@ public static class GradientUtils
         }
 
         return sb.ToString();
-    }
-
-    private static NivaraColumn<T> CreateColumnWithNullMask<T>(ReadOnlySpan<T> data, ReadOnlySpan<bool> nullMask, bool hasNulls)
-        where T : struct, INumber<T>
-    {
-        if (!hasNulls)
-            return NivaraColumn<T>.Create(data);
-
-        var nullableData = new T?[data.Length];
-        for (int i = 0; i < data.Length; i++)
-        {
-            nullableData[i] = nullMask[i] ? null : data[i];
-        }
-
-        return NivaraColumn<T>.CreateFromNullable(nullableData);
     }
 
     #endregion

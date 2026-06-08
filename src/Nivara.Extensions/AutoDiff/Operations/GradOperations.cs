@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace Nivara.Extensions.AutoDiff.Operations;
 
@@ -186,9 +185,12 @@ public static class GradOperations
                 $"Matrix dimensions incompatible: a({aRows}x{aCols}) @ b({bRows}x{bCols}). " +
                 $"a's column count ({aCols}) must equal b's row count ({bRows}).");
 
+#pragma warning disable CS0618 // internal call to legacy overload
         return MatMul(a, b, aRows, aCols, bCols);
+#pragma warning restore CS0618
     }
 
+    [Obsolete("Use the shape-aware MatMul overload instead — reshape your tensors before calling MatMul(a, b)")]
     public static ReverseGradTensor<T> MatMul<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b, int aRows, int aCols, int bCols)
         where T : struct, INumber<T>
     {
@@ -242,9 +244,12 @@ public static class GradOperations
         if (a.Rank != 2)
             throw new ArgumentException($"Transpose requires a matrix (rank 2), got rank {a.Rank}", nameof(a));
 
+#pragma warning disable CS0618 // internal call to legacy overload
         return Transpose(a, a.shape[0], a.shape[1]);
+#pragma warning restore CS0618
     }
 
+    [Obsolete("Use the shape-aware Transpose overload instead — reshape your tensor before calling Transpose(a)")]
     public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a, int rows, int cols) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -467,154 +472,102 @@ public static class GradOperations
     private static NivaraColumn<T> SubtractVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b) where T : struct, INumber<T>
     {
         int n = a.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        if (!a.HasNulls && !b.HasNulls)
+        {
+            a.TryGetSpan(out var aSpan);
+            b.TryGetSpan(out var bSpan);
+            var result = new T[n];
+            TensorPrimitives.Subtract(aSpan, bSpan, result);
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var aBuf = ArrayPool<T>.Shared.Rent(n);
         var bBuf = ArrayPool<T>.Shared.Rent(n);
-        bool hasNulls = false;
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
-            for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i]) { hasNulls = true; }
-                aBuf[i] = a[i];
-                bBuf[i] = b[i];
-            }
-
-            if (typeof(T) == typeof(float))
-            {
-                TensorPrimitives.Subtract(
-                    MemoryMarshal.Cast<T, float>(aBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, float>(bBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                TensorPrimitives.Subtract(
-                    MemoryMarshal.Cast<T, double>(aBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, double>(bBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                        result[i] = aBuf[i] - bBuf[i];
-                }
-            }
-
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            a.CopyTo(aBuf.AsSpan(0, n), T.Zero);
+            b.CopyTo(bBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(a, b, nullMask.AsSpan(0, n));
+            TensorPrimitives.Subtract(aBuf.AsSpan(0, n), bBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(bBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
     private static NivaraColumn<T> DivideVectorized<T>(NivaraColumn<T> a, NivaraColumn<T> b) where T : struct, INumber<T>
     {
         int n = a.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        if (!a.HasNulls && !b.HasNulls)
+        {
+            a.TryGetSpan(out var aSpan);
+            b.TryGetSpan(out var bSpan);
+            var result = new T[n];
+            TensorPrimitives.Divide(aSpan, bSpan, result);
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var aBuf = ArrayPool<T>.Shared.Rent(n);
         var bBuf = ArrayPool<T>.Shared.Rent(n);
-        bool hasNulls = false;
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
-            for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = a.IsNull(i) || b.IsNull(i);
-                if (nullMask[i]) { hasNulls = true; }
-                aBuf[i] = a[i];
-                bBuf[i] = b[i];
-            }
-
-            if (typeof(T) == typeof(float))
-            {
-                TensorPrimitives.Divide(
-                    MemoryMarshal.Cast<T, float>(aBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, float>(bBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                TensorPrimitives.Divide(
-                    MemoryMarshal.Cast<T, double>(aBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, double>(bBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                        result[i] = aBuf[i] / bBuf[i];
-                }
-            }
-
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            a.CopyTo(aBuf.AsSpan(0, n), T.Zero);
+            b.CopyTo(bBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(a, b, nullMask.AsSpan(0, n));
+            TensorPrimitives.Divide(aBuf.AsSpan(0, n), bBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(bBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
     private static NivaraColumn<T> NegateVectorized<T>(NivaraColumn<T> a) where T : struct, INumber<T>
     {
         int n = a.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        if (!a.HasNulls)
+        {
+            a.TryGetSpan(out var aSpan);
+            var result = new T[n];
+            TensorPrimitives.Negate(aSpan, result);
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var aBuf = ArrayPool<T>.Shared.Rent(n);
-        bool hasNulls = false;
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
-            for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = a.IsNull(i);
-                if (nullMask[i]) { hasNulls = true; }
-                aBuf[i] = a[i];
-            }
-
-            if (typeof(T) == typeof(float))
-            {
-                TensorPrimitives.Negate(
-                    MemoryMarshal.Cast<T, float>(aBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                TensorPrimitives.Negate(
-                    MemoryMarshal.Cast<T, double>(aBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                        result[i] = -aBuf[i];
-                }
-            }
-
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            a.CopyTo(aBuf.AsSpan(0, n), T.Zero);
+            a.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+            TensorPrimitives.Negate(aBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
@@ -627,12 +580,35 @@ public static class GradOperations
         where T : struct, INumber<T>
     {
         int n = aRows * bCols;
-        var result = ArrayPool<T>.Shared.Rent(n);
+
+        if (!a.HasNulls && !b.HasNulls)
+        {
+            a.TryGetSpan(out var aSpan);
+            b.TryGetSpan(out var bSpan);
+            var result = new T[n];
+            for (int i = 0; i < aRows; i++)
+                for (int j = 0; j < bCols; j++)
+                {
+                    T sum = T.Zero;
+                    for (int k = 0; k < aCols; k++)
+                        sum += aSpan[i * aCols + k] * bSpan[k * bCols + j];
+                    result[i * bCols + j] = sum;
+                }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var aBuf = ArrayPool<T>.Shared.Rent(a.Length);
+        var bBuf = ArrayPool<T>.Shared.Rent(b.Length);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        bool hasNulls = false;
 
         try
         {
+            a.CopyTo(aBuf.AsSpan(0, a.Length), T.Zero);
+            b.CopyTo(bBuf.AsSpan(0, b.Length), T.Zero);
+            var aHasNulls = a.TryGetNullMask(out var aMask);
+            var bHasNulls = b.TryGetNullMask(out var bMask);
+
             for (int i = 0; i < aRows; i++)
             {
                 for (int j = 0; j < bCols; j++)
@@ -641,37 +617,36 @@ public static class GradOperations
                     bool positionNull = false;
                     for (int k = 0; k < aCols; k++)
                     {
-                        var aIndex = i * aCols + k;
-                        var bIndex = k * bCols + j;
+                        var aIdx = i * aCols + k;
+                        var bIdx = k * bCols + j;
 
-                        if (a.IsNull(aIndex) || b.IsNull(bIndex))
+                        var aNull = aHasNulls && aMask[aIdx];
+                        var bNull = bHasNulls && bMask[bIdx];
+                        if (aNull || bNull)
                         {
                             positionNull = true;
-                            hasNulls = true;
                         }
                         else
                         {
-                            sum += a[aIndex] * b[bIndex];
+                            sum += aBuf[aIdx] * bBuf[bIdx];
                         }
                     }
 
-                    var resIndex = i * bCols + j;
+                    var resIdx = i * bCols + j;
                     if (positionNull)
-                    {
-                        nullMask[resIndex] = true;
-                    }
+                        nullMask[resIdx] = true;
                     else
-                    {
-                        result[resIndex] = sum;
-                    }
+                        resultBuf[resIdx] = sum;
                 }
             }
 
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(bBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -679,35 +654,43 @@ public static class GradOperations
     private static NivaraColumn<T> TransposeVectorized<T>(NivaraColumn<T> a, int rows, int cols) where T : struct, INumber<T>
     {
         int n = rows * cols;
-        var result = ArrayPool<T>.Shared.Rent(n);
+
+        if (!a.HasNulls)
+        {
+            a.TryGetSpan(out var aSpan);
+            var result = new T[n];
+            for (int i = 0; i < rows; i++)
+                for (int j = 0; j < cols; j++)
+                    result[j * rows + i] = aSpan[i * cols + j];
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var aBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        bool hasNulls = false;
 
         try
         {
+            a.CopyTo(aBuf.AsSpan(0, n), T.Zero);
+            a.TryGetNullMask(out var mask);
+
             for (int i = 0; i < rows; i++)
-            {
                 for (int j = 0; j < cols; j++)
                 {
-                    var srcIndex = i * cols + j;
-                    var dstIndex = j * rows + i;
-                    if (a.IsNull(srcIndex))
-                    {
-                        nullMask[dstIndex] = true;
-                        hasNulls = true;
-                    }
+                    var srcIdx = i * cols + j;
+                    var dstIdx = j * rows + i;
+                    if (mask[srcIdx])
+                        nullMask[dstIdx] = true;
                     else
-                    {
-                        result[dstIndex] = a[srcIndex];
-                    }
+                        resultBuf[dstIdx] = aBuf[srcIdx];
                 }
-            }
 
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(aBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -715,55 +698,61 @@ public static class GradOperations
     private static NivaraColumn<T> BroadcastGradient<T>(NivaraColumn<T> scalarGrad, int targetLength) where T : struct, INumber<T>
     {
         if (scalarGrad.Length != 1)
-        {
             throw new ArgumentException($"Expected scalar gradient with length 1, got {scalarGrad.Length}");
+
+        if (scalarGrad.HasNulls)
+        {
+            var mask = new bool[targetLength];
+            Array.Fill(mask, true);
+            return NivaraColumn<T>.CreateFromSpans(new T[targetLength], mask);
         }
 
-        if (scalarGrad.IsNull(0))
+        if (scalarGrad.TryGetSpan(out var span))
         {
-            var nullableData = new T?[targetLength];
-            return NivaraColumn<T>.CreateFromNullable(nullableData);
+            var filled = new T[targetLength];
+            Array.Fill(filled, span[0]);
+            return NivaraColumn<T>.Create(filled);
         }
 
         var gradValue = scalarGrad[0];
-        var result = ArrayPool<T>.Shared.Rent(targetLength);
+        var rented = ArrayPool<T>.Shared.Rent(targetLength);
         try
         {
-            Array.Fill(result, gradValue, 0, targetLength);
-            return NivaraColumn<T>.Create(result.AsSpan(0, targetLength));
+            Array.Fill(rented, gradValue, 0, targetLength);
+            return NivaraColumn<T>.Create(rented.AsSpan(0, targetLength));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(rented, clearArray: true);
         }
     }
 
     private static NivaraColumn<T> DivideByScalar<T>(NivaraColumn<T> column, int divisor) where T : struct, INumber<T>
     {
         int n = column.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
+        T divisorT = ConvertToT<T>(divisor);
+
+        if (!column.HasNulls)
+        {
+            column.TryGetSpan(out var span);
+            var result = new T[n];
+            TensorPrimitives.Divide(span, divisorT, result);
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        bool hasNulls = false;
         try
         {
-            T divisorT = ConvertToT<T>(divisor);
-            for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = column.IsNull(i);
-                if (nullMask[i])
-                {
-                    hasNulls = true;
-                }
-                else
-                {
-                    result[i] = column[i] / divisorT;
-                }
-            }
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            column.CopyTo(resultBuf.AsSpan(0, n), T.Zero);
+            column.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+            TensorPrimitives.Divide(resultBuf.AsSpan(0, n), divisorT, resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -797,78 +786,68 @@ public static class GradOperations
     private static NivaraColumn<T> ApplyRelu<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         int n = input.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        if (!input.HasNulls)
+        {
+            input.TryGetSpan(out var span);
+            var result = new T[n];
+            TensorPrimitives.Max(span, T.Zero, result);
+            return NivaraColumn<T>.Create(result);
+        }
+
         var inputBuf = ArrayPool<T>.Shared.Rent(n);
-        bool hasNulls = false;
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
-            for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) { hasNulls = true; }
-                inputBuf[i] = input[i];
-            }
-
-            if (typeof(T) == typeof(float))
-            {
-                var floatSpan = MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n));
-                var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                    resultSpan[i] = Math.Max(0.0f, floatSpan[i]);
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var doubleSpan = MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n));
-                var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                    resultSpan[i] = Math.Max(0.0, doubleSpan[i]);
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                        result[i] = inputBuf[i] > T.Zero ? inputBuf[i] : T.Zero;
-                }
-            }
-
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            input.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+            TensorPrimitives.Max(inputBuf.AsSpan(0, n), T.Zero, resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
             ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
     private static NivaraColumn<T> ApplyReluGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
     {
         int n = input.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
+
+        if (!input.HasNulls && !gradOutput.HasNulls)
+        {
+            input.TryGetSpan(out var inSpan);
+            gradOutput.TryGetSpan(out var gradSpan);
+            var result = new T[n];
+            for (int i = 0; i < n; i++)
+                result[i] = inSpan[i] > T.Zero ? gradSpan[i] : T.Zero;
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        bool hasNulls = false;
+
         try
         {
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
             for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = input.IsNull(i) || gradOutput.IsNull(i);
-                if (nullMask[i])
-                {
-                    hasNulls = true;
-                }
-                else
-                {
-                    result[i] = input[i] > T.Zero ? gradOutput[i] : T.Zero;
-                }
-            }
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+                resultBuf[i] = inputBuf[i] > T.Zero ? gradBuf[i] : T.Zero;
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -876,77 +855,68 @@ public static class GradOperations
     private static NivaraColumn<T> ApplyAbs<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         int n = input.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        if (!input.HasNulls)
+        {
+            input.TryGetSpan(out var span);
+            var result = new T[n];
+            TensorPrimitives.Abs(span, result);
+            return NivaraColumn<T>.Create(result);
+        }
+
         var inputBuf = ArrayPool<T>.Shared.Rent(n);
-        bool hasNulls = false;
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
-            for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) { hasNulls = true; }
-                inputBuf[i] = input[i];
-            }
-
-            if (typeof(T) == typeof(float))
-            {
-                TensorPrimitives.Abs(
-                    MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, float>(result.AsSpan(0, n)));
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                TensorPrimitives.Abs(
-                    MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n)),
-                    MemoryMarshal.Cast<T, double>(result.AsSpan(0, n)));
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                        result[i] = T.Abs(inputBuf[i]);
-                }
-            }
-
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            input.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+            TensorPrimitives.Abs(inputBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
             ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
     private static NivaraColumn<T> ApplyAbsGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
     {
         int n = input.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
+
+        if (!input.HasNulls && !gradOutput.HasNulls)
+        {
+            input.TryGetSpan(out var inSpan);
+            gradOutput.TryGetSpan(out var gradSpan);
+            var result = new T[n];
+            for (int i = 0; i < n; i++)
+                result[i] = T.CreateChecked(T.Sign(inSpan[i])) * gradSpan[i];
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
         var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        bool hasNulls = false;
+
         try
         {
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
             for (int i = 0; i < n; i++)
-            {
-                nullMask[i] = input.IsNull(i) || gradOutput.IsNull(i);
-                if (nullMask[i])
-                {
-                    hasNulls = true;
-                }
-                else
-                {
-                    var sign = T.CreateChecked(T.Sign(input[i]));
-                    result[i] = sign * gradOutput[i];
-                }
-            }
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+                resultBuf[i] = T.CreateChecked(T.Sign(inputBuf[i])) * gradBuf[i];
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -954,82 +924,82 @@ public static class GradOperations
     private static NivaraColumn<T> ApplySigmoid<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         int n = input.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        if (!input.HasNulls)
+        {
+            input.TryGetSpan(out var span);
+            var result = new T[n];
+            for (int i = 0; i < n; i++)
+            {
+                var x = double.CreateChecked(span[i]);
+                result[i] = T.CreateChecked(1.0 / (1.0 + Math.Exp(-x)));
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
         var inputBuf = ArrayPool<T>.Shared.Rent(n);
-        bool hasNulls = false;
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            input.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
             for (int i = 0; i < n; i++)
             {
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) { hasNulls = true; }
-                inputBuf[i] = input[i];
+                var x = double.CreateChecked(inputBuf[i]);
+                resultBuf[i] = T.CreateChecked(1.0 / (1.0 + Math.Exp(-x)));
             }
-
-            if (typeof(T) == typeof(float))
-            {
-                var floatSpan = MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n));
-                var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                    resultSpan[i] = 1.0f / (1.0f + MathF.Exp(-floatSpan[i]));
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var doubleSpan = MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n));
-                var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                    resultSpan[i] = 1.0 / (1.0 + Math.Exp(-doubleSpan[i]));
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                    {
-                        dynamic x = inputBuf[i];
-                        result[i] = (T)(object)(1.0 / (1.0 + Math.Exp(-x)))!;
-                    }
-                }
-            }
-
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
             ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
     private static NivaraColumn<T> ApplySigmoidGradient<T>(NivaraColumn<T> sigmoidOutput, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
     {
         int n = sigmoidOutput.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        bool hasNulls = false;
-        try
+
+        if (!sigmoidOutput.HasNulls && !gradOutput.HasNulls)
         {
+            sigmoidOutput.TryGetSpan(out var sigSpan);
+            gradOutput.TryGetSpan(out var gradSpan);
+            var result = new T[n];
             for (int i = 0; i < n; i++)
             {
-                nullMask[i] = sigmoidOutput.IsNull(i) || gradOutput.IsNull(i);
-                if (nullMask[i])
-                {
-                    hasNulls = true;
-                }
-                else
-                {
-                    var sig = sigmoidOutput[i];
-                    result[i] = sig * (T.One - sig) * gradOutput[i];
-                }
+                var sig = sigSpan[i];
+                result[i] = sig * (T.One - sig) * gradSpan[i];
             }
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var sigBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        try
+        {
+            sigmoidOutput.CopyTo(sigBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(sigmoidOutput, gradOutput, nullMask.AsSpan(0, n));
+            for (int i = 0; i < n; i++)
+            {
+                var sig = sigBuf[i];
+                resultBuf[i] = sig * (T.One - sig) * gradBuf[i];
+            }
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(sigBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -1037,100 +1007,106 @@ public static class GradOperations
     private static NivaraColumn<T> ApplyTanh<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         int n = input.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        if (!input.HasNulls)
+        {
+            input.TryGetSpan(out var span);
+            var result = new T[n];
+            for (int i = 0; i < n; i++)
+            {
+                var x = double.CreateChecked(span[i]);
+                result[i] = T.CreateChecked(Math.Tanh(x));
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
         var inputBuf = ArrayPool<T>.Shared.Rent(n);
-        bool hasNulls = false;
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
         {
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            input.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
             for (int i = 0; i < n; i++)
             {
-                nullMask[i] = input.IsNull(i);
-                if (nullMask[i]) { hasNulls = true; }
-                inputBuf[i] = input[i];
+                var x = double.CreateChecked(inputBuf[i]);
+                resultBuf[i] = T.CreateChecked(Math.Tanh(x));
             }
-
-            if (typeof(T) == typeof(float))
-            {
-                var floatSpan = MemoryMarshal.Cast<T, float>(inputBuf.AsSpan(0, n));
-                var resultSpan = MemoryMarshal.Cast<T, float>(result.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                    resultSpan[i] = MathF.Tanh(floatSpan[i]);
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var doubleSpan = MemoryMarshal.Cast<T, double>(inputBuf.AsSpan(0, n));
-                var resultSpan = MemoryMarshal.Cast<T, double>(result.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                    resultSpan[i] = Math.Tanh(doubleSpan[i]);
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                    {
-                        dynamic x = inputBuf[i];
-                        result[i] = (T)(object)Math.Tanh(x)!;
-                    }
-                }
-            }
-
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
             ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
     private static NivaraColumn<T> ApplyTanhGradient<T>(NivaraColumn<T> tanhOutput, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
     {
         int n = tanhOutput.Length;
-        var result = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        bool hasNulls = false;
-        try
+
+        if (!tanhOutput.HasNulls && !gradOutput.HasNulls)
         {
+            tanhOutput.TryGetSpan(out var tanhSpan);
+            gradOutput.TryGetSpan(out var gradSpan);
+            var result = new T[n];
             for (int i = 0; i < n; i++)
             {
-                nullMask[i] = tanhOutput.IsNull(i) || gradOutput.IsNull(i);
-                if (nullMask[i])
-                {
-                    hasNulls = true;
-                }
-                else
-                {
-                    var tanh = tanhOutput[i];
-                    result[i] = (T.One - tanh * tanh) * gradOutput[i];
-                }
+                var tanh = tanhSpan[i];
+                result[i] = (T.One - tanh * tanh) * gradSpan[i];
             }
-            return CreateColumnWithNullMask(result.AsSpan(0, n), nullMask.AsSpan(0, n), hasNulls);
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var tanhBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        try
+        {
+            tanhOutput.CopyTo(tanhBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(tanhOutput, gradOutput, nullMask.AsSpan(0, n));
+            for (int i = 0; i < n; i++)
+            {
+                var tanh = tanhBuf[i];
+                resultBuf[i] = (T.One - tanh * tanh) * gradBuf[i];
+            }
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
         finally
         {
-            ArrayPool<T>.Shared.Return(result, clearArray: true);
+            ArrayPool<T>.Shared.Return(tanhBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
 
-    private static NivaraColumn<T> CreateColumnWithNullMask<T>(ReadOnlySpan<T> data, ReadOnlySpan<bool> nullMask, bool hasNulls) where T : struct, INumber<T>
+    private static bool MergeNullMasks<T>(NivaraColumn<T> a, NivaraColumn<T> b, Span<bool> destination) where T : struct, INumber<T>
     {
-        if (!hasNulls)
+        var aHasNulls = a.TryGetNullMask(out var aMask);
+        var bHasNulls = b.TryGetNullMask(out var bMask);
+
+        if (aHasNulls && bHasNulls)
         {
-            return NivaraColumn<T>.Create(data);
+            for (int i = 0; i < destination.Length; i++)
+                destination[i] = aMask[i] || bMask[i];
+        }
+        else if (aHasNulls)
+        {
+            aMask.CopyTo(destination);
+        }
+        else if (bHasNulls)
+        {
+            bMask.CopyTo(destination);
         }
 
-        var nullableData = new T?[data.Length];
-        for (int i = 0; i < data.Length; i++)
-        {
-            nullableData[i] = nullMask[i] ? null : data[i];
-        }
-
-        return NivaraColumn<T>.CreateFromNullable(nullableData);
+        return aHasNulls || bHasNulls;
     }
 
     private static int[] PropagateShape<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
