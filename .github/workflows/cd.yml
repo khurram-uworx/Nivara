@@ -1,9 +1,16 @@
-name: Release
+name: CD
 
 on:
   push:
     tags: [ 'v*' ]
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'NuGet package version (e.g., 0.9.1)'
+        required: true
+
+permissions:
+  contents: write
 
 jobs:
   publish:
@@ -17,27 +24,35 @@ jobs:
       with:
         dotnet-version: '10.0.x'
 
+    - name: Set version
+      run: |
+        if [[ -n "${{ github.event.inputs.version }}" ]]; then
+          echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+        else
+          echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
+        fi
+
     - name: Restore dependencies
       run: dotnet restore
 
     - name: Build
-      run: dotnet build --no-restore --configuration Release
+      run: dotnet build --no-restore --configuration Release -p:GeneratePackageOnBuild=false
 
     - name: Test
       run: dotnet test --no-build --configuration Release --verbosity normal
 
     - name: Pack Nivara
-      run: dotnet pack src/Nivara/Nivara.csproj --no-build --configuration Release
+      run: dotnet pack src/Nivara/Nivara.csproj --no-build --configuration Release -p:PackageVersion=${{ env.VERSION }}
 
     - name: Pack Nivara.Extensions
-      run: dotnet pack src/Nivara.Extensions/Nivara.Extensions.csproj --no-build --configuration Release
+      run: dotnet pack src/Nivara.Extensions/Nivara.Extensions.csproj --no-build --configuration Release -p:PackageVersion=${{ env.VERSION }}
 
     - name: Push Nivara to NuGet
       run: |
-        dotnet nuget push src/Nivara/bin/Release/Nivara.0.9.0.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
-        dotnet nuget push src/Nivara/bin/Release/Nivara.0.9.0.snupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara/bin/Release/Nivara.${{ env.VERSION }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara/bin/Release/Nivara.${{ env.VERSION }}.snupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
 
     - name: Push Nivara.Extensions to NuGet
       run: |
-        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.0.9.0.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
-        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.0.9.0.snupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.${{ env.VERSION }}.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+        dotnet nuget push src/Nivara.Extensions/bin/Release/Nivara.Extensions.${{ env.VERSION }}.snupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
