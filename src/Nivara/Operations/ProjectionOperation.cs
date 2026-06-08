@@ -6,7 +6,7 @@ namespace Nivara.Operations;
 /// <summary>
 /// Represents a projection operation that selects and optionally renames columns
 /// </summary>
-internal sealed class ProjectionOperation : IQueryOperation
+sealed class ProjectionOperation : IQueryOperation
 {
     readonly Dictionary<string, string?> columnMappings;
 
@@ -51,8 +51,7 @@ internal sealed class ProjectionOperation : IQueryOperation
     {
     }
 
-    /// <inheritdoc />
-    public string OperationType => "Projection";
+    public string OperationType => Query.OperationType.Projection;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

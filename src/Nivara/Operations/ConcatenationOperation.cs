@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Execution;
 using Nivara.Query;
 
 namespace Nivara;
@@ -38,11 +39,15 @@ public enum ConcatenationDirection
 /// <summary>
 /// Represents a concatenation operation that combines multiple DataFrames
 /// </summary>
-internal sealed class ConcatenationOperation : IQueryOperation
+sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOperation
 {
     readonly IReadOnlyList<IReadOnlyDictionary<string, IColumn>> sources;
     readonly ConcatenationDirection direction;
     readonly ConcatenationMismatchHandling mismatchHandling;
+
+    public IReadOnlyList<IReadOnlyDictionary<string, IColumn>> Sources => sources;
+    public ConcatenationDirection Direction => direction;
+    public ConcatenationMismatchHandling MismatchHandling => mismatchHandling;
 
     /// <summary>
     /// Initializes a new instance of ConcatenationOperation for vertical concatenation
@@ -65,8 +70,7 @@ internal sealed class ConcatenationOperation : IQueryOperation
             throw new ArgumentException("Must provide at least one source for concatenation", nameof(sources));
     }
 
-    /// <inheritdoc />
-    public string OperationType => $"Concatenate{direction}";
+    public string OperationType => $"{Query.OperationType.ConcatenationPrefix}{direction}";
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)
@@ -128,23 +132,18 @@ internal sealed class ConcatenationOperation : IQueryOperation
             // All schemas must match exactly
             var firstSchema = schemas[0];
             for (int i = 1; i < schemas.Count; i++)
-            {
                 if (!firstSchema.IsCompatibleWith(schemas[i], requireExactMatch: true))
-                {
                     throw new SchemaValidationException(
                         $"Schema mismatch in vertical concatenation at source {i}. " +
                         $"Expected: {firstSchema}, Actual: {schemas[i]}",
                         firstSchema,
                         schemas[i]);
-                }
-            }
+
             return firstSchema;
         }
         else
-        {
             // Create union schema with all columns from all sources
             return CreateUnionSchema(schemas);
-        }
     }
 
     /// <summary>
@@ -158,21 +157,18 @@ internal sealed class ConcatenationOperation : IQueryOperation
         var seenColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var schema in schemas)
-        {
             foreach (var columnName in schema.ColumnNames)
             {
                 var columnType = schema.ColumnTypes[columnName];
                 if (seenColumns.Contains(columnName))
-                {
                     throw new SchemaValidationException(
                         $"Column name conflict in horizontal concatenation: '{columnName}' appears in multiple sources",
                         schemas[0],
                         schema);
-                }
+
                 seenColumns.Add(columnName);
                 allColumns.Add((columnName, columnType));
             }
-        }
 
         return new Schema(allColumns);
     }
@@ -185,27 +181,19 @@ internal sealed class ConcatenationOperation : IQueryOperation
         var allColumns = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var schema in schemas)
-        {
             foreach (var columnName in schema.ColumnNames)
             {
                 var columnType = schema.ColumnTypes[columnName];
                 if (allColumns.TryGetValue(columnName, out var existingType))
-                {
                     // Validate type compatibility
                     if (existingType != columnType)
-                    {
                         throw new SchemaValidationException(
                             $"Type mismatch for column '{columnName}': {existingType.Name} vs {columnType.Name}",
                             schemas[0],
                             schema);
-                    }
-                }
-                else
-                {
-                    allColumns[columnName] = columnType;
-                }
+                    else
+                        allColumns[columnName] = columnType;
             }
-        }
 
         var schemaColumns = allColumns.Select(kvp => (kvp.Key, kvp.Value)).ToList();
         return new Schema(schemaColumns);
@@ -222,23 +210,15 @@ internal sealed class ConcatenationOperation : IQueryOperation
         // Handle empty DataFrames
         var nonEmptySources = allSources.Where(s => s.Values.FirstOrDefault()?.Length > 0).ToList();
         if (nonEmptySources.Count == 0)
-        {
             return allSources[0]; // Return first (empty) source
-        }
         if (nonEmptySources.Count == 1)
-        {
             return nonEmptySources[0]; // Return the only non-empty source
-        }
 
         // Get union of all column names
         var allColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var source in allSources)
-        {
             foreach (var columnName in source.Keys)
-            {
                 allColumnNames.Add(columnName);
-            }
-        }
 
         var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
 
@@ -249,9 +229,7 @@ internal sealed class ConcatenationOperation : IQueryOperation
             foreach (var source in allSources)
             {
                 if (source.TryGetValue(columnName, out var column))
-                {
                     columnsToConcat.Add(column);
-                }
                 else if (mismatchHandling == ConcatenationMismatchHandling.FillWithNulls)
                 {
                     // Create null column with same length as source
@@ -265,16 +243,12 @@ internal sealed class ConcatenationOperation : IQueryOperation
                     }
                 }
                 else
-                {
                     throw new SchemaValidationException(
                         $"Column '{columnName}' is missing from one of the sources and MismatchHandling is set to Error");
-                }
             }
 
             if (columnsToConcat.Count > 0)
-            {
                 result[columnName] = ConcatenateColumns(columnsToConcat);
-            }
         }
 
         return result;
@@ -294,27 +268,21 @@ internal sealed class ConcatenationOperation : IQueryOperation
         {
             var actualRowCount = allSources[i].Values.FirstOrDefault()?.Length ?? 0;
             if (actualRowCount != expectedRowCount)
-            {
                 throw new ArgumentException(
                     $"Row count mismatch in horizontal concatenation: source 0 has {expectedRowCount} rows, " +
                     $"but source {i} has {actualRowCount} rows");
-            }
         }
 
         var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var source in allSources)
-        {
             foreach (var kvp in source)
             {
                 if (result.ContainsKey(kvp.Key))
-                {
                     throw new ArgumentException(
                         $"Column name conflict in horizontal concatenation: '{kvp.Key}' appears in multiple sources");
-                }
                 result[kvp.Key] = kvp.Value;
             }
-        }
 
         return result;
     }
@@ -325,19 +293,16 @@ internal sealed class ConcatenationOperation : IQueryOperation
     IColumn GetReferenceColumnForType(List<IReadOnlyDictionary<string, IColumn>> allSources, string columnName)
     {
         foreach (var source in allSources)
-        {
             if (source.TryGetValue(columnName, out var column))
-            {
                 return column;
-            }
-        }
+
         throw new InvalidOperationException($"No reference column found for '{columnName}'");
     }
 
     /// <summary>
     /// Creates a column filled with null values of the specified type
     /// </summary>
-    IColumn CreateNullColumn(Type elementType, int length)
+    public IColumn CreateNullColumn(Type elementType, int length)
     {
         return elementType switch
         {
@@ -388,7 +353,7 @@ internal sealed class ConcatenationOperation : IQueryOperation
     /// <summary>
     /// Concatenates multiple columns of the same type
     /// </summary>
-    IColumn ConcatenateColumns(List<IColumn> columns)
+    public static IColumn ConcatenateColumns(List<IColumn> columns)
     {
         if (columns.Count == 1)
             return columns[0];
@@ -397,13 +362,9 @@ internal sealed class ConcatenationOperation : IQueryOperation
 
         // Validate all columns have the same type
         foreach (var column in columns)
-        {
             if (column.ElementType != elementType)
-            {
                 throw new ArgumentException(
                     $"Cannot concatenate columns of different types: {elementType.Name} vs {column.ElementType.Name}");
-            }
-        }
 
         return elementType switch
         {
@@ -424,7 +385,7 @@ internal sealed class ConcatenationOperation : IQueryOperation
     /// <summary>
     /// Concatenates columns of a specific type
     /// </summary>
-    static IColumn ConcatenateColumnsTyped<T>(List<IColumn> columns)
+    public static IColumn ConcatenateColumnsTyped<T>(List<IColumn> columns)
     {
         var totalLength = columns.Sum(c => c.Length);
 
@@ -436,7 +397,6 @@ internal sealed class ConcatenationOperation : IQueryOperation
 
             int currentIndex = 0;
             foreach (var column in columns)
-            {
                 for (int i = 0; i < column.Length; i++)
                 {
                     var value = column.GetValue(i);
@@ -447,7 +407,6 @@ internal sealed class ConcatenationOperation : IQueryOperation
                     }
                     currentIndex++;
                 }
-            }
 
             return (IColumn)typeof(NivaraColumn<>)
                 .MakeGenericType(typeof(T))
@@ -461,14 +420,12 @@ internal sealed class ConcatenationOperation : IQueryOperation
 
             int currentIndex = 0;
             foreach (var column in columns)
-            {
                 for (int i = 0; i < column.Length; i++)
                 {
                     var value = column.GetValue(i);
                     concatenatedArray[currentIndex] = (T)value!;
                     currentIndex++;
                 }
-            }
 
             return (IColumn)typeof(NivaraColumn<>)
                 .MakeGenericType(typeof(T))
@@ -487,13 +444,11 @@ internal sealed class ConcatenationOperation : IQueryOperation
 
         int currentIndex = 0;
         foreach (var column in columns)
-        {
             for (int i = 0; i < column.Length; i++)
             {
                 concatenatedArray[currentIndex] = column.GetValue(i)!;
                 currentIndex++;
             }
-        }
 
         return NivaraColumn<object>.Create(concatenatedArray);
     }
@@ -512,7 +467,5 @@ internal sealed class ConcatenationOperation : IQueryOperation
     /// </summary>
     /// <returns>A string representation</returns>
     public override string ToString()
-    {
-        return $"Concatenate{direction}({sources.Count} sources, {mismatchHandling})";
-    }
+        => $"Concatenate{direction}({sources.Count} sources, {mismatchHandling})";
 }

@@ -9,9 +9,309 @@ namespace Nivara;
 /// <typeparam name="T">The type of values in the series</typeparam>
 public sealed class NivaraSeries<T> : IDisposable
 {
-    private readonly NivaraColumn<T> values;
-    private readonly NivaraColumn<object> index;
-    private bool disposed;
+    /// <summary>
+    /// Creates a default integer index for the specified length
+    /// </summary>
+    /// <param name="length">The length of the index to create</param>
+    /// <returns>A column containing integer indices from 0 to length-1</returns>
+    static NivaraColumn<object> createDefaultIndex(int length)
+    {
+        var indexValues = new object[length];
+        for (int i = 0; i < length; i++)
+        {
+            indexValues[i] = i;
+        }
+
+        return NivaraColumn<object>.CreateForReferenceType(indexValues);
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized sum using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    static T sumTensorPrimitive(ReadOnlySpan<T> values)
+    {
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            var floatValues = new float[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                floatValues[i] = (float)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Sum(floatValues.AsSpan());
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleValues = new double[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                doubleValues[i] = (double)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Sum(doubleValues.AsSpan());
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to scalar sum for other types
+            T result = default(T)!;
+            for (int i = 0; i < values.Length; i++)
+            {
+                result = (T)(object)((dynamic)result! + (dynamic)values[i]!)!;
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized min using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    static T minTensorPrimitive(ReadOnlySpan<T> values)
+    {
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            var floatValues = new float[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                floatValues[i] = (float)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Min(floatValues.AsSpan());
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleValues = new double[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                doubleValues[i] = (double)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Min(doubleValues.AsSpan());
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to scalar min for other types
+            T result = values[0];
+            var comparer = Comparer<T>.Default;
+            for (int i = 1; i < values.Length; i++)
+            {
+                if (comparer.Compare(values[i], result) < 0)
+                    result = values[i];
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized max using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    static T maxTensorPrimitive(ReadOnlySpan<T> values)
+    {
+        var type = typeof(T);
+
+        // Use TensorPrimitives for supported types, fall back to scalar for others
+        if (type == typeof(float))
+        {
+            var floatValues = new float[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                floatValues[i] = (float)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Max(floatValues.AsSpan());
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleValues = new double[values.Length];
+            for (int i = 0; i < values.Length; i++)
+            {
+                doubleValues[i] = (double)(object)values[i]!;
+            }
+            var result = TensorPrimitives.Max(doubleValues.AsSpan());
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to scalar max for other types
+            T result = values[0];
+            var comparer = Comparer<T>.Default;
+            for (int i = 1; i < values.Length; i++)
+            {
+                if (comparer.Compare(values[i], result) > 0)
+                    result = values[i];
+            }
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to divide a sum by count for average calculation
+    /// </summary>
+    static T divideByCount(T sum, int count)
+    {
+        var type = typeof(T);
+
+        if (type == typeof(float))
+        {
+            var floatSum = (float)(object)sum!;
+            var result = floatSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(double))
+        {
+            var doubleSum = (double)(object)sum!;
+            var result = doubleSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(int))
+        {
+            var intSum = (int)(object)sum!;
+            var result = intSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(long))
+        {
+            var longSum = (long)(object)sum!;
+            var result = longSum / count;
+            return (T)(object)result;
+        }
+        else
+        {
+            // Fall back to dynamic division for other types
+            return (T)(object)((dynamic)sum! / count)!;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to check if a type is numeric and supports arithmetic operations
+    /// </summary>
+    static bool isNumericType(Type type)
+    {
+        return type == typeof(int) ||
+               type == typeof(float) ||
+               type == typeof(double) ||
+               type == typeof(long) ||
+               type == typeof(short) ||
+               type == typeof(byte) ||
+               type == typeof(sbyte) ||
+               type == typeof(uint) ||
+               type == typeof(ulong) ||
+               type == typeof(ushort) ||
+               type == typeof(decimal);
+    }
+
+    /// <summary>
+    /// Helper method to check if a type supports comparison operations
+    /// </summary>
+    static bool isComparableType(Type type)
+    {
+        // All numeric types support comparison
+        if (isNumericType(type))
+            return true;
+
+        // String supports comparison
+        if (type == typeof(string))
+            return true;
+
+        // DateTime and other common comparable types
+        if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan))
+            return true;
+
+        // Guid supports comparison
+        if (type == typeof(Guid))
+            return true;
+
+        // Check if type implements IComparable<T> or IComparable
+        return typeof(IComparable<>).MakeGenericType(type).IsAssignableFrom(type) ||
+               typeof(IComparable).IsAssignableFrom(type);
+    }
+
+    /// <summary>
+    /// Creates an empty series with no values
+    /// </summary>
+    /// <returns>An empty NivaraSeries instance</returns>
+    internal static NivaraSeries<T> Empty()
+    {
+        var emptyValues = NivaraColumn<T>.Create(ReadOnlySpan<T>.Empty);
+        return new NivaraSeries<T>(emptyValues);
+    }
+
+    /// <summary>
+    /// Creates a new series from the specified values with optional index labels
+    /// </summary>
+    /// <param name="values">The values for the series</param>
+    /// <param name="index">Optional index labels. If null, integer positions will be used</param>
+    /// <returns>A new NivaraSeries instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when values is null</exception>
+    /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
+    public static NivaraSeries<T> Create(T[] values, object[]? index = null)
+    {
+        if (values == null)
+            throw new ArgumentNullException(nameof(values));
+
+        return Create(values.AsSpan(), index);
+    }
+
+    /// <summary>
+    /// Creates a new series from the specified values with optional index labels
+    /// </summary>
+    /// <param name="values">The values for the series</param>
+    /// <param name="index">Optional index labels. If null, integer positions will be used</param>
+    /// <returns>A new NivaraSeries instance</returns>
+    /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
+    public static NivaraSeries<T> Create(ReadOnlySpan<T> values, object[]? index = null)
+    {
+        var valuesColumn = NivaraColumn<T>.Create(values);
+
+        NivaraColumn<object>? indexColumn = null;
+        if (index != null)
+        {
+            if (index.Length != values.Length)
+                throw new ArgumentException($"Index length ({index.Length}) must match values length ({values.Length})", nameof(index));
+
+            indexColumn = NivaraColumn<object>.CreateForReferenceType(index);
+        }
+
+        return new NivaraSeries<T>(valuesColumn, indexColumn);
+    }
+
+    /// <summary>
+    /// Creates a new series from the specified values with string index labels
+    /// </summary>
+    /// <param name="values">The values for the series</param>
+    /// <param name="index">String index labels</param>
+    /// <returns>A new NivaraSeries instance</returns>
+    /// <exception cref="ArgumentNullException">Thrown when values or index is null</exception>
+    /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
+    public static NivaraSeries<T> Create(T[] values, string[] index)
+    {
+        if (values == null)
+            throw new ArgumentNullException(nameof(values));
+        if (index == null)
+            throw new ArgumentNullException(nameof(index));
+
+        // Convert string array to object array
+        var objectIndex = index.Cast<object>().ToArray();
+        return Create(values, objectIndex);
+    }
+
+    readonly NivaraColumn<T> values;
+    readonly NivaraColumn<object> index;
+    bool disposed;
+
+    /// <summary>
+    /// Initializes an empty series
+    /// </summary>
+    internal NivaraSeries()
+    {
+        this.values = NivaraColumn<T>.Create(ReadOnlySpan<T>.Empty);
+        this.index = createDefaultIndex(0);
+    }
 
     /// <summary>
     /// Initializes a new instance of NivaraSeries with the specified values and optional index
@@ -33,8 +333,167 @@ public sealed class NivaraSeries<T> : IDisposable
         }
         else
         {
-            this.index = NivaraSeries<T>.CreateDefaultIndex(values.Length);
+            this.index = NivaraSeries<T>.createDefaultIndex(values.Length);
         }
+    }
+
+    /// <summary>
+    /// Finds the position of the specified label in the index
+    /// </summary>
+    /// <param name="label">The label to find</param>
+    /// <returns>The position of the label, or -1 if not found</returns>
+    int findLabelPosition(object label)
+    {
+        var comparer = EqualityComparer<object>.Default;
+
+        for (int i = 0; i < index.Length; i++)
+        {
+            if (!index.IsNull(i) && comparer.Equals(index[i], label))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>
+    /// Gets pairs of positions where both series have matching index labels
+    /// </summary>
+    /// <param name="other">The other series to align with</param>
+    /// <returns>A list of tuples containing (thisPosition, otherPosition) for matching indices</returns>
+    List<(int ThisPos, int OtherPos)> getAlignedPairs(NivaraSeries<T> other)
+    {
+        var alignedPairs = new List<(int, int)>();
+        var comparer = EqualityComparer<object>.Default;
+
+        // For each index in this series, find matching index in other series
+        for (int thisPos = 0; thisPos < index.Length; thisPos++)
+        {
+            if (index.IsNull(thisPos))
+                continue;
+
+            var thisLabel = index[thisPos];
+
+            // Find matching label in other series
+            for (int otherPos = 0; otherPos < other.index.Length; otherPos++)
+            {
+                if (other.index.IsNull(otherPos))
+                    continue;
+
+                var otherLabel = other.index[otherPos];
+
+                if (comparer.Equals(thisLabel, otherLabel))
+                {
+                    alignedPairs.Add((thisPos, otherPos));
+                    break; // Found match, move to next index in this series
+                }
+            }
+        }
+
+        return alignedPairs;
+    }
+
+    /// <summary>
+    /// Performs vectorized sum computation using TensorPrimitives when possible
+    /// </summary>
+    T sumVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute sum: all values are null. Series must contain at least one valid value.");
+
+            return sumTensorPrimitive(validValues.ToArray().AsSpan());
+        }
+
+        // All values are valid, use direct span access
+        return sumTensorPrimitive(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs vectorized average computation using TensorPrimitives when possible
+    /// </summary>
+    T averageVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute average: all values are null. Series must contain at least one valid value.");
+
+            var sum = sumTensorPrimitive(validValues.ToArray().AsSpan());
+            return divideByCount(sum, validValues.Count);
+        }
+
+        // All values are valid, use direct span access
+        var totalSum = sumTensorPrimitive(values.AsSpan());
+        return divideByCount(totalSum, Length);
+    }
+
+    /// <summary>
+    /// Performs vectorized min computation using TensorPrimitives when possible
+    /// </summary>
+    T minVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute minimum: all values are null. Series must contain at least one valid value.");
+
+            return minTensorPrimitive(validValues.ToArray().AsSpan());
+        }
+
+        // All values are valid, use direct span access
+        return minTensorPrimitive(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs vectorized max computation using TensorPrimitives when possible
+    /// </summary>
+    T maxVectorized()
+    {
+        // Handle null values by filtering to valid values only
+        if (HasNulls)
+        {
+            var validValues = new List<T>();
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsValid(i))
+                    validValues.Add(values[i]);
+            }
+
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute maximum: all values are null. Series must contain at least one valid value.");
+
+            return maxTensorPrimitive(validValues.ToArray().AsSpan());
+        }
+
+        // All values are valid, use direct span access
+        return maxTensorPrimitive(values.AsSpan());
     }
 
     /// <summary>
@@ -149,7 +608,7 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        var position = FindLabelPosition(label);
+        var position = findLabelPosition(label);
         if (position == -1)
         {
             throw new KeyNotFoundException($"Label '{label}' not found in series index");
@@ -168,7 +627,7 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        var position = FindLabelPosition(label);
+        var position = findLabelPosition(label);
         if (position != -1)
         {
             value = values[position];
@@ -187,7 +646,7 @@ public sealed class NivaraSeries<T> : IDisposable
     public bool ContainsLabel(object label)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        return FindLabelPosition(label) != -1;
+        return findLabelPosition(label) != -1;
     }
 
     /// <summary>
@@ -233,7 +692,7 @@ public sealed class NivaraSeries<T> : IDisposable
         if (other == null)
             throw new ArgumentNullException(nameof(other));
 
-        var alignedPairs = GetAlignedPairs(other);
+        var alignedPairs = getAlignedPairs(other);
 
         if (alignedPairs.Count == 0)
         {
@@ -268,7 +727,7 @@ public sealed class NivaraSeries<T> : IDisposable
         if (other == null)
             throw new ArgumentNullException(nameof(other));
 
-        var alignedPairs = GetAlignedPairs(other);
+        var alignedPairs = getAlignedPairs(other);
 
         if (alignedPairs.Count == 0)
         {
@@ -402,10 +861,10 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute sum of empty series. Series must contain at least one element.");
 
         // Check if T is a supported numeric type
-        if (!IsNumericType(typeof(T)))
+        if (!isNumericType(typeof(T)))
             throw new InvalidOperationException($"Sum operation is not supported for type {typeof(T).Name}. Only numeric types support sum operations.");
 
-        return SumVectorized();
+        return sumVectorized();
     }
 
     /// <summary>
@@ -423,10 +882,10 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute average of empty series. Series must contain at least one element.");
 
         // Check if T is a supported numeric type
-        if (!IsNumericType(typeof(T)))
+        if (!isNumericType(typeof(T)))
             throw new InvalidOperationException($"Average operation is not supported for type {typeof(T).Name}. Only numeric types support average operations.");
 
-        return AverageVectorized();
+        return averageVectorized();
     }
 
     /// <summary>
@@ -444,10 +903,10 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute minimum of empty series. Series must contain at least one element.");
 
         // Check if T is a supported comparable type
-        if (!IsComparableType(typeof(T)))
+        if (!isComparableType(typeof(T)))
             throw new InvalidOperationException($"Min operation is not supported for type {typeof(T).Name}. Only comparable types support min operations.");
 
-        return MinVectorized();
+        return minVectorized();
     }
 
     /// <summary>
@@ -465,161 +924,10 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute maximum of empty series. Series must contain at least one element.");
 
         // Check if T is a supported comparable type
-        if (!IsComparableType(typeof(T)))
+        if (!isComparableType(typeof(T)))
             throw new InvalidOperationException($"Max operation is not supported for type {typeof(T).Name}. Only comparable types support max operations.");
 
-        return MaxVectorized();
-    }
-
-    /// <summary>
-    /// Creates a new series from the specified values with optional index labels
-    /// </summary>
-    /// <param name="values">The values for the series</param>
-    /// <param name="index">Optional index labels. If null, integer positions will be used</param>
-    /// <returns>A new NivaraSeries instance</returns>
-    /// <exception cref="ArgumentNullException">Thrown when values is null</exception>
-    /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
-    public static NivaraSeries<T> Create(T[] values, object[]? index = null)
-    {
-        if (values == null)
-            throw new ArgumentNullException(nameof(values));
-
-        return Create(values.AsSpan(), index);
-    }
-
-    /// <summary>
-    /// Creates a new series from the specified values with optional index labels
-    /// </summary>
-    /// <param name="values">The values for the series</param>
-    /// <param name="index">Optional index labels. If null, integer positions will be used</param>
-    /// <returns>A new NivaraSeries instance</returns>
-    /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
-    public static NivaraSeries<T> Create(ReadOnlySpan<T> values, object[]? index = null)
-    {
-        var valuesColumn = NivaraColumn<T>.Create(values);
-
-        NivaraColumn<object>? indexColumn = null;
-        if (index != null)
-        {
-            if (index.Length != values.Length)
-                throw new ArgumentException($"Index length ({index.Length}) must match values length ({values.Length})", nameof(index));
-
-            indexColumn = NivaraColumn<object>.CreateForReferenceType(index);
-        }
-
-        return new NivaraSeries<T>(valuesColumn, indexColumn);
-    }
-
-    /// <summary>
-    /// Creates a new series from the specified values with string index labels
-    /// </summary>
-    /// <param name="values">The values for the series</param>
-    /// <param name="index">String index labels</param>
-    /// <returns>A new NivaraSeries instance</returns>
-    /// <exception cref="ArgumentNullException">Thrown when values or index is null</exception>
-    /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
-    public static NivaraSeries<T> Create(T[] values, string[] index)
-    {
-        if (values == null)
-            throw new ArgumentNullException(nameof(values));
-        if (index == null)
-            throw new ArgumentNullException(nameof(index));
-
-        // Convert string array to object array
-        var objectIndex = index.Cast<object>().ToArray();
-        return Create(values, objectIndex);
-    }
-
-    /// <summary>
-    /// Creates an empty series with no values
-    /// </summary>
-    /// <returns>An empty NivaraSeries instance</returns>
-    internal static NivaraSeries<T> Empty()
-    {
-        var emptyValues = NivaraColumn<T>.Create(ReadOnlySpan<T>.Empty);
-        return new NivaraSeries<T>(emptyValues);
-    }
-
-    /// <summary>
-    /// Initializes an empty series
-    /// </summary>
-    internal NivaraSeries()
-    {
-        this.values = NivaraColumn<T>.Create(ReadOnlySpan<T>.Empty);
-        this.index = CreateDefaultIndex(0);
-    }
-
-    /// <summary>
-    /// Finds the position of the specified label in the index
-    /// </summary>
-    /// <param name="label">The label to find</param>
-    /// <returns>The position of the label, or -1 if not found</returns>
-    private int FindLabelPosition(object label)
-    {
-        var comparer = EqualityComparer<object>.Default;
-
-        for (int i = 0; i < index.Length; i++)
-        {
-            if (!index.IsNull(i) && comparer.Equals(index[i], label))
-            {
-                return i;
-            }
-        }
-
-        return -1;
-    }
-
-    /// <summary>
-    /// Gets pairs of positions where both series have matching index labels
-    /// </summary>
-    /// <param name="other">The other series to align with</param>
-    /// <returns>A list of tuples containing (thisPosition, otherPosition) for matching indices</returns>
-    private List<(int ThisPos, int OtherPos)> GetAlignedPairs(NivaraSeries<T> other)
-    {
-        var alignedPairs = new List<(int, int)>();
-        var comparer = EqualityComparer<object>.Default;
-
-        // For each index in this series, find matching index in other series
-        for (int thisPos = 0; thisPos < index.Length; thisPos++)
-        {
-            if (index.IsNull(thisPos))
-                continue;
-
-            var thisLabel = index[thisPos];
-
-            // Find matching label in other series
-            for (int otherPos = 0; otherPos < other.index.Length; otherPos++)
-            {
-                if (other.index.IsNull(otherPos))
-                    continue;
-
-                var otherLabel = other.index[otherPos];
-
-                if (comparer.Equals(thisLabel, otherLabel))
-                {
-                    alignedPairs.Add((thisPos, otherPos));
-                    break; // Found match, move to next index in this series
-                }
-            }
-        }
-
-        return alignedPairs;
-    }
-
-    /// <summary>
-    /// Creates a default integer index for the specified length
-    /// </summary>
-    /// <param name="length">The length of the index to create</param>
-    /// <returns>A column containing integer indices from 0 to length-1</returns>
-    private static NivaraColumn<object> CreateDefaultIndex(int length)
-    {
-        var indexValues = new object[length];
-        for (int i = 0; i < length; i++)
-        {
-            indexValues[i] = i;
-        }
-
-        return NivaraColumn<object>.CreateForReferenceType(indexValues);
+        return maxVectorized();
     }
 
     /// <summary>
@@ -704,314 +1012,6 @@ public sealed class NivaraSeries<T> : IDisposable
         }
 
         return result;
-    }
-
-    /// <summary>
-    /// Performs vectorized sum computation using TensorPrimitives when possible
-    /// </summary>
-    private T SumVectorized()
-    {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
-
-            if (validValues.Count == 0)
-                throw new InvalidOperationException("Cannot compute sum: all values are null. Series must contain at least one valid value.");
-
-            return SumTensorPrimitive(validValues.ToArray().AsSpan());
-        }
-
-        // All values are valid, use direct span access
-        return SumTensorPrimitive(values.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs vectorized average computation using TensorPrimitives when possible
-    /// </summary>
-    private T AverageVectorized()
-    {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
-
-            if (validValues.Count == 0)
-                throw new InvalidOperationException("Cannot compute average: all values are null. Series must contain at least one valid value.");
-
-            var sum = SumTensorPrimitive(validValues.ToArray().AsSpan());
-            return DivideByCount(sum, validValues.Count);
-        }
-
-        // All values are valid, use direct span access
-        var totalSum = SumTensorPrimitive(values.AsSpan());
-        return DivideByCount(totalSum, Length);
-    }
-
-    /// <summary>
-    /// Performs vectorized min computation using TensorPrimitives when possible
-    /// </summary>
-    private T MinVectorized()
-    {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
-
-            if (validValues.Count == 0)
-                throw new InvalidOperationException("Cannot compute minimum: all values are null. Series must contain at least one valid value.");
-
-            return MinTensorPrimitive(validValues.ToArray().AsSpan());
-        }
-
-        // All values are valid, use direct span access
-        return MinTensorPrimitive(values.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs vectorized max computation using TensorPrimitives when possible
-    /// </summary>
-    private T MaxVectorized()
-    {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
-
-            if (validValues.Count == 0)
-                throw new InvalidOperationException("Cannot compute maximum: all values are null. Series must contain at least one valid value.");
-
-            return MaxTensorPrimitive(validValues.ToArray().AsSpan());
-        }
-
-        // All values are valid, use direct span access
-        return MaxTensorPrimitive(values.AsSpan());
-    }
-
-    /// <summary>
-    /// Helper method to perform vectorized sum using TensorPrimitives with runtime type dispatch
-    /// </summary>
-    private static T SumTensorPrimitive(ReadOnlySpan<T> values)
-    {
-        var type = typeof(T);
-
-        // Use TensorPrimitives for supported types, fall back to scalar for others
-        if (type == typeof(float))
-        {
-            var floatValues = new float[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                floatValues[i] = (float)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Sum(floatValues.AsSpan());
-            return (T)(object)result;
-        }
-        else if (type == typeof(double))
-        {
-            var doubleValues = new double[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                doubleValues[i] = (double)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Sum(doubleValues.AsSpan());
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fall back to scalar sum for other types
-            T result = default(T)!;
-            for (int i = 0; i < values.Length; i++)
-            {
-                result = (T)(object)((dynamic)result! + (dynamic)values[i]!)!;
-            }
-            return result;
-        }
-    }
-
-    /// <summary>
-    /// Helper method to perform vectorized min using TensorPrimitives with runtime type dispatch
-    /// </summary>
-    private static T MinTensorPrimitive(ReadOnlySpan<T> values)
-    {
-        var type = typeof(T);
-
-        // Use TensorPrimitives for supported types, fall back to scalar for others
-        if (type == typeof(float))
-        {
-            var floatValues = new float[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                floatValues[i] = (float)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Min(floatValues.AsSpan());
-            return (T)(object)result;
-        }
-        else if (type == typeof(double))
-        {
-            var doubleValues = new double[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                doubleValues[i] = (double)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Min(doubleValues.AsSpan());
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fall back to scalar min for other types
-            T result = values[0];
-            var comparer = Comparer<T>.Default;
-            for (int i = 1; i < values.Length; i++)
-            {
-                if (comparer.Compare(values[i], result) < 0)
-                    result = values[i];
-            }
-            return result;
-        }
-    }
-
-    /// <summary>
-    /// Helper method to perform vectorized max using TensorPrimitives with runtime type dispatch
-    /// </summary>
-    private static T MaxTensorPrimitive(ReadOnlySpan<T> values)
-    {
-        var type = typeof(T);
-
-        // Use TensorPrimitives for supported types, fall back to scalar for others
-        if (type == typeof(float))
-        {
-            var floatValues = new float[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                floatValues[i] = (float)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Max(floatValues.AsSpan());
-            return (T)(object)result;
-        }
-        else if (type == typeof(double))
-        {
-            var doubleValues = new double[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                doubleValues[i] = (double)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Max(doubleValues.AsSpan());
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fall back to scalar max for other types
-            T result = values[0];
-            var comparer = Comparer<T>.Default;
-            for (int i = 1; i < values.Length; i++)
-            {
-                if (comparer.Compare(values[i], result) > 0)
-                    result = values[i];
-            }
-            return result;
-        }
-    }
-
-    /// <summary>
-    /// Helper method to divide a sum by count for average calculation
-    /// </summary>
-    private static T DivideByCount(T sum, int count)
-    {
-        var type = typeof(T);
-
-        if (type == typeof(float))
-        {
-            var floatSum = (float)(object)sum!;
-            var result = floatSum / count;
-            return (T)(object)result;
-        }
-        else if (type == typeof(double))
-        {
-            var doubleSum = (double)(object)sum!;
-            var result = doubleSum / count;
-            return (T)(object)result;
-        }
-        else if (type == typeof(int))
-        {
-            var intSum = (int)(object)sum!;
-            var result = intSum / count;
-            return (T)(object)result;
-        }
-        else if (type == typeof(long))
-        {
-            var longSum = (long)(object)sum!;
-            var result = longSum / count;
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fall back to dynamic division for other types
-            return (T)(object)((dynamic)sum! / count)!;
-        }
-    }
-
-    /// <summary>
-    /// Helper method to check if a type is numeric and supports arithmetic operations
-    /// </summary>
-    private static bool IsNumericType(Type type)
-    {
-        return type == typeof(int) ||
-               type == typeof(float) ||
-               type == typeof(double) ||
-               type == typeof(long) ||
-               type == typeof(short) ||
-               type == typeof(byte) ||
-               type == typeof(sbyte) ||
-               type == typeof(uint) ||
-               type == typeof(ulong) ||
-               type == typeof(ushort) ||
-               type == typeof(decimal);
-    }
-
-    /// <summary>
-    /// Helper method to check if a type supports comparison operations
-    /// </summary>
-    private static bool IsComparableType(Type type)
-    {
-        // All numeric types support comparison
-        if (IsNumericType(type))
-            return true;
-
-        // String supports comparison
-        if (type == typeof(string))
-            return true;
-
-        // DateTime and other common comparable types
-        if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan))
-            return true;
-
-        // Guid supports comparison
-        if (type == typeof(Guid))
-            return true;
-
-        // Check if type implements IComparable<T> or IComparable
-        return typeof(IComparable<>).MakeGenericType(type).IsAssignableFrom(type) ||
-               typeof(IComparable).IsAssignableFrom(type);
     }
 
     /// <inheritdoc />

@@ -83,8 +83,7 @@ public sealed class DataSourceException : Exception
     /// </summary>
     /// <param name="message">The error message</param>
     public DataSourceException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of DataSourceException with an inner exception
@@ -92,8 +91,7 @@ public sealed class DataSourceException : Exception
     /// <param name="message">The error message</param>
     /// <param name="innerException">The inner exception</param>
     public DataSourceException(string message, Exception innerException) : base(message, innerException)
-    {
-    }
+    { }
 }
 
 /// <summary>
@@ -106,8 +104,7 @@ public sealed class SchemaValidationException : Exception
     /// </summary>
     /// <param name="message">The error message</param>
     public SchemaValidationException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of SchemaValidationException with schema details
@@ -142,8 +139,7 @@ public sealed class QueryExecutionException : Exception
     /// </summary>
     /// <param name="message">The error message</param>
     public QueryExecutionException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of QueryExecutionException with an inner exception
@@ -151,8 +147,7 @@ public sealed class QueryExecutionException : Exception
     /// <param name="message">The error message</param>
     /// <param name="innerException">The inner exception</param>
     public QueryExecutionException(string message, Exception innerException) : base(message, innerException)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of QueryExecutionException with operation context

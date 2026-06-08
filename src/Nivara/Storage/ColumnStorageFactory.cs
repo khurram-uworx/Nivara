@@ -5,7 +5,7 @@ namespace Nivara.Storage;
 /// <summary>
 /// Factory for creating appropriate storage implementations based on type characteristics
 /// </summary>
-internal static class ColumnStorageFactory
+static class ColumnStorageFactory
 {
     /// <summary>
     /// Helper method for creating storage with nullable value types

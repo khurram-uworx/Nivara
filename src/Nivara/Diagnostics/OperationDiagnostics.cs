@@ -71,23 +71,15 @@ public sealed class OperationDiagnostics
             if (KernelUsed == KernelType.Scalar)
             {
                 if (!ColumnStorageFactory.IsVectorizable<object>()) // We can't use generic T here
-                {
                     return $"Type {ElementType.Name} is not vectorizable";
-                }
                 if (!System.Numerics.Vector.IsHardwareAccelerated)
-                {
                     return "Hardware acceleration not available";
-                }
                 if (InputLength < System.Numerics.Vector<byte>.Count * 4)
-                {
                     return $"Input length {InputLength} too small for vectorization overhead";
-                }
                 return "Scalar kernel selected for unknown reason";
             }
             else
-            {
                 return $"Vectorized kernel selected for {ElementType.Name} with length {InputLength}";
-            }
         }
     }
 
@@ -96,16 +88,14 @@ public sealed class OperationDiagnostics
     /// </summary>
     /// <returns>A formatted string with operation details</returns>
     public override string ToString()
-    {
-        return $"OperationDiagnostics {{ " +
-               $"Operation: {OperationType}, " +
-               $"Kernel: {KernelUsed}, " +
-               $"Type: {ElementType.Name}, " +
-               $"Length: {InputLength:N0}, " +
-               $"HadNulls: {HadNulls}, " +
-               $"Reason: {KernelSelectionReason} " +
-               $"}}";
-    }
+        => $"OperationDiagnostics {{ " +
+        $"Operation: {OperationType}, " +
+        $"Kernel: {KernelUsed}, " +
+        $"Type: {ElementType.Name}, " +
+        $"Length: {InputLength:N0}, " +
+        $"HadNulls: {HadNulls}, " +
+        $"Reason: {KernelSelectionReason} " +
+        $"}}";
 }
 
 /// <summary>
@@ -151,9 +141,7 @@ public static class DiagnosticsTracker
         lock (lockObject)
         {
             if (isEnabled)
-            {
                 operations.Add(diagnostic);
-            }
         }
     }
 
@@ -189,9 +177,7 @@ public static class DiagnosticsTracker
         lock (lockObject)
         {
             if (operations.Count == 0)
-            {
                 return new OperationSummary(0, 0, 0, 0, new Dictionary<string, int>(), new Dictionary<KernelType, int>());
-            }
 
             var totalOperations = operations.Count;
             var vectorizedOperations = operations.Count(op => op.KernelUsed == KernelType.Vectorized);
@@ -281,12 +267,10 @@ public sealed class OperationSummary
     /// </summary>
     /// <returns>A formatted string with summary statistics</returns>
     public override string ToString()
-    {
-        return $"OperationSummary {{ " +
-               $"Total: {TotalOperations:N0}, " +
-               $"Vectorized: {VectorizedOperations:N0} ({VectorizationRate:F1}%), " +
-               $"Scalar: {ScalarOperations:N0}, " +
-               $"WithNulls: {OperationsWithNulls:N0} " +
-               $"}}";
-    }
+        => $"OperationSummary {{ " +
+        $"Total: {TotalOperations:N0}, " +
+        $"Vectorized: {VectorizedOperations:N0} ({VectorizationRate:F1}%), " +
+        $"Scalar: {ScalarOperations:N0}, " +
+        $"WithNulls: {OperationsWithNulls:N0} " +
+        $"}}";
 }

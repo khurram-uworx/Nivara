@@ -6,7 +6,7 @@ namespace Nivara.IO;
 /// <summary>
 /// Provides type mapping between CLR types, Apache Arrow types, and Parquet types
 /// </summary>
-internal static class TypeMapper
+static class TypeMapper
 {
     // CLR to Arrow type mapping
     private static readonly Dictionary<Type, IArrowType> ClrToArrowMap = new()

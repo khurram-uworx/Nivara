@@ -6,7 +6,7 @@ namespace Nivara.Helpers;
 /// Manages resources and cleanup for abandoned lazy queries and large dataset operations.
 /// Provides memory management guidance and automatic cleanup of orphaned resources.
 /// </summary>
-internal static class NivaraResourceManager
+static class NivaraResourceManager
 {
     private static readonly ConcurrentDictionary<WeakReference, ResourceInfo> _trackedResources = new();
     private static readonly Timer _cleanupTimer;

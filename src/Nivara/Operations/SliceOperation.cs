@@ -6,7 +6,7 @@ namespace Nivara.Operations;
 /// <summary>
 /// Represents a slice operation that takes a subset of rows from a DataFrame
 /// </summary>
-internal sealed class SliceOperation : IQueryOperation
+sealed class SliceOperation : IQueryOperation
 {
     /// <summary>
     /// Initializes a new instance of SliceOperation
@@ -35,8 +35,7 @@ internal sealed class SliceOperation : IQueryOperation
     /// </summary>
     public int? Take { get; }
 
-    /// <inheritdoc />
-    public string OperationType => "Slice";
+    public string OperationType => Query.OperationType.Slice;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

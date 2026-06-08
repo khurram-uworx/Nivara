@@ -187,8 +187,8 @@ public static class QueryDiagnostics
     private static void AnalyzePerformanceIssues(QueryPlan queryPlan, List<string> recommendations)
     {
         // Check for expensive operations without filtering
-        var hasGroupBy = queryPlan.Operations.Any(op => op.OperationType == "GroupBy");
-        var hasFilter = queryPlan.Operations.Any(op => op.OperationType == "Filter");
+        var hasGroupBy = queryPlan.Operations.Any(op => op.OperationType == OperationType.GroupBy);
+        var hasFilter = queryPlan.Operations.Any(op => op.OperationType == OperationType.Filter);
 
         if (hasGroupBy && !hasFilter)
         {
@@ -196,7 +196,7 @@ public static class QueryDiagnostics
         }
 
         // Check for multiple select operations
-        var selectCount = queryPlan.Operations.Count(op => op.OperationType == "Select");
+        var selectCount = queryPlan.Operations.Count(op => op.OperationType == OperationType.Select);
         if (selectCount > 1)
         {
             recommendations.Add($"Multiple Select operations ({selectCount}) detected - consider combining into single projection");
@@ -206,7 +206,7 @@ public static class QueryDiagnostics
         var operationTypes = queryPlan.Operations.Select(op => op.OperationType).ToList();
         for (int i = 0; i < operationTypes.Count - 1; i++)
         {
-            if (operationTypes[i] == "Select" && operationTypes[i + 1] == "Filter")
+            if (operationTypes[i] == OperationType.Select && operationTypes[i + 1] == OperationType.Filter)
             {
                 recommendations.Add("Filter operation after Select - consider reordering for better performance");
             }

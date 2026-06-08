@@ -57,24 +57,18 @@ public static class TensorInteropExtensions
         ArgumentNullException.ThrowIfNull(tensor);
 
         if (tensor.Rank != 1)
-        {
             throw new ArgumentException($"Only 1D tensors are supported. Tensor has {tensor.Rank} dimensions. Use FlattenFromTensor for multi-dimensional tensors.");
-        }
 
         var length = (int)tensor.Lengths[0];
         if (length == 0)
-        {
             return new NivaraSeries<T>();
-        }
 
         var data = new T[length];
 
         // Copy data from tensor
         var tensorSpan = tensor.AsTensorSpan();
         for (int i = 0; i < length; i++)
-        {
             data[i] = tensorSpan[i];
-        }
 
         return NivaraSeries<T>.Create(data);
     }
@@ -95,18 +89,12 @@ public static class TensorInteropExtensions
         ArgumentNullException.ThrowIfNull(series);
 
         if (series.Length == 0)
-        {
             return default;
-        }
 
         // Check if all values are valid for zero-copy operation
         for (int i = 0; i < series.Length; i++)
-        {
             if (series.IsNull(i))
-            {
                 throw new InvalidOperationException("Cannot create TensorSpan from series with null values. Use ToTensor() instead.");
-            }
-        }
 
         // Create a copy of the data to avoid exposing mutable tensor spans over immutable column data.
         // This is a safe copy path — the previous implementation used MemoryMarshal.CreateSpan
@@ -129,23 +117,17 @@ public static class TensorInteropExtensions
         where T : unmanaged
     {
         if (tensorSpan.Rank != 1)
-        {
             throw new ArgumentException($"Only 1D tensor spans are supported. TensorSpan has {tensorSpan.Rank} dimensions. Use FlattenFromTensorSpan for multi-dimensional spans.");
-        }
 
         var length = (int)tensorSpan.Lengths[0];
         if (length == 0)
-        {
             return new NivaraSeries<T>();
-        }
 
         var data = new T[length];
 
         // Copy data from tensor span
         for (int i = 0; i < length; i++)
-        {
             data[i] = tensorSpan[i];
-        }
 
         return NivaraSeries<T>.Create(data);
     }
@@ -166,23 +148,15 @@ public static class TensorInteropExtensions
         ArgumentNullException.ThrowIfNull(frame);
 
         if (frame.ColumnCount == 0)
-        {
             throw new ArgumentException("Frame must have at least one column");
-        }
 
         // Verify all columns are of type T
         foreach (var columnType in frame.Schema.ColumnTypes.Values)
-        {
             if (columnType != typeof(T))
-            {
                 throw new ArgumentException($"All columns must be of type {typeof(T).Name}. Found column of type {columnType.Name}");
-            }
-        }
 
         if (frame.RowCount == 0)
-        {
             return Tensor.Create<T>(new T[0], new ReadOnlySpan<nint>(new nint[] { 0, frame.ColumnCount }));
-        }
 
         // Create 2D tensor [rows, columns]
         var dimensions = new ReadOnlySpan<nint>(new nint[] { frame.RowCount, frame.ColumnCount });
@@ -190,7 +164,6 @@ public static class TensorInteropExtensions
 
         // Copy data from frame to tensor in row-major order
         for (int row = 0; row < frame.RowCount; row++)
-        {
             for (int col = 0; col < frame.ColumnCount; col++)
             {
                 var columnName = frame.ColumnNames[col];
@@ -198,14 +171,11 @@ public static class TensorInteropExtensions
 
                 // Check for null values
                 if (series.IsNull(row))
-                {
                     throw new InvalidOperationException($"Cannot create tensor from frame with null values. Found null at row {row}, column '{columnName}'");
-                }
 
                 // Copy value in row-major order
                 data[row * frame.ColumnCount + col] = series[row];
             }
-        }
 
         return Tensor.Create<T>(data, dimensions);
     }
@@ -225,9 +195,7 @@ public static class TensorInteropExtensions
         ArgumentNullException.ThrowIfNull(tensor);
 
         if (tensor.Rank != 2)
-        {
             throw new ArgumentException($"Only 2D tensors are supported for NivaraFrame conversion. Tensor has {tensor.Rank} dimensions.");
-        }
 
         var rows = (int)tensor.Lengths[0];
         var cols = (int)tensor.Lengths[1];
@@ -236,9 +204,7 @@ public static class TensorInteropExtensions
         columnNames ??= Enumerable.Range(0, cols).Select(i => $"Col_{i}").ToArray();
 
         if (columnNames.Length != cols)
-        {
             throw new ArgumentException($"Column names count ({columnNames.Length}) must match tensor columns ({cols})");
-        }
 
         if (rows == 0 || cols == 0)
         {
@@ -257,9 +223,7 @@ public static class TensorInteropExtensions
             var columnData = new T[rows];
 
             for (int row = 0; row < rows; row++)
-            {
                 columnData[row] = tensorSpan[row, col];
-            }
 
             var series = NivaraSeries<T>.Create(columnData);
             columns[columnNames[col]] = series.Values;
@@ -282,9 +246,7 @@ public static class TensorInteropExtensions
 
         var totalElements = (int)tensor.FlattenedLength;
         if (totalElements == 0)
-        {
             return new NivaraSeries<T>();
-        }
 
         var data = new T[totalElements];
 
@@ -309,9 +271,7 @@ public static class TensorInteropExtensions
     {
         var totalElements = (int)tensorSpan.FlattenedLength;
         if (totalElements == 0)
-        {
             return new NivaraSeries<T>();
-        }
 
         var data = new T[totalElements];
 
@@ -339,29 +299,19 @@ public static class TensorInteropExtensions
         ArgumentNullException.ThrowIfNull(dimensions);
 
         if (dimensions.Length == 0)
-        {
             throw new ArgumentException("At least one dimension must be specified", nameof(dimensions));
-        }
 
         var totalElements = dimensions.Aggregate(1, (a, b) => a * b);
         if (totalElements != series.Length)
-        {
             throw new ArgumentException($"Total elements in dimensions ({totalElements}) must match series length ({series.Length})");
-        }
 
         // Check for null values
         for (int i = 0; i < series.Length; i++)
-        {
             if (series.IsNull(i))
-            {
                 throw new InvalidOperationException($"Cannot reshape series with null values. Found null at index {i}");
-            }
-        }
 
         if (totalElements == 0)
-        {
             return Tensor.Create<T>(new T[0], new ReadOnlySpan<nint>(dimensions.Select(d => (nint)d).ToArray()));
-        }
 
         // Create tensor with specified dimensions
         var data = new T[totalElements];
@@ -404,9 +354,7 @@ public static class TensorInteropExtensions
         var result = new NivaraSeries<T>[tensors.Length];
 
         for (int i = 0; i < tensors.Length; i++)
-        {
             result[i] = FromTensor(tensors[i]);
-        }
 
         return result;
     }

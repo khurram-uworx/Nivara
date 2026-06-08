@@ -159,10 +159,8 @@ public sealed class CountAggregation : AggregationFunction
 
         long count = 0;
         foreach (var index in groupIndices)
-        {
             if (column.GetValue(index) != null)
                 count++;
-        }
 
         return count;
     }
@@ -260,9 +258,7 @@ public sealed class SumAggregation : AggregationFunction
 
         var floatValues = new float[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-        {
             floatValues[i] = (float)validValues[i];
-        }
 
         var result = TensorPrimitives.Sum(floatValues.AsSpan());
         return (double)result; // Return as double for consistency
@@ -277,9 +273,7 @@ public sealed class SumAggregation : AggregationFunction
 
         var doubleValues = new double[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-        {
             doubleValues[i] = (double)validValues[i];
-        }
 
         return TensorPrimitives.Sum(doubleValues.AsSpan());
     }
@@ -294,12 +288,9 @@ public sealed class SumAggregation : AggregationFunction
     {
         var sum = identity;
         foreach (var value in validValues)
-        {
             if (value is TInput typedValue)
-            {
                 sum = addFunc(sum, typedValue);
-            }
-        }
+
         return sum;
     }
 
@@ -365,9 +356,7 @@ public sealed class MinAggregation : AggregationFunction
     {
         var floatValues = new float[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-        {
             floatValues[i] = (float)validValues[i];
-        }
 
         return TensorPrimitives.Min(floatValues.AsSpan());
     }
@@ -379,9 +368,7 @@ public sealed class MinAggregation : AggregationFunction
     {
         var doubleValues = new double[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-        {
             doubleValues[i] = (double)validValues[i];
-        }
 
         return TensorPrimitives.Min(doubleValues.AsSpan());
     }
@@ -395,12 +382,8 @@ public sealed class MinAggregation : AggregationFunction
         var comparer = Comparer<object>.Default;
 
         for (int i = 1; i < validValues.Count; i++)
-        {
             if (comparer.Compare(validValues[i], min) < 0)
-            {
                 min = validValues[i];
-            }
-        }
 
         return min;
     }
@@ -453,9 +436,7 @@ public sealed class MaxAggregation : AggregationFunction
     {
         var floatValues = new float[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-        {
             floatValues[i] = (float)validValues[i];
-        }
 
         return TensorPrimitives.Max(floatValues.AsSpan());
     }
@@ -467,9 +448,7 @@ public sealed class MaxAggregation : AggregationFunction
     {
         var doubleValues = new double[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-        {
             doubleValues[i] = (double)validValues[i];
-        }
 
         return TensorPrimitives.Max(doubleValues.AsSpan());
     }
@@ -483,12 +462,8 @@ public sealed class MaxAggregation : AggregationFunction
         var comparer = Comparer<object>.Default;
 
         for (int i = 1; i < validValues.Count; i++)
-        {
             if (comparer.Compare(validValues[i], max) > 0)
-            {
                 max = validValues[i];
-            }
-        }
 
         return max;
     }
