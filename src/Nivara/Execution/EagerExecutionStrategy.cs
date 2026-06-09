@@ -66,9 +66,7 @@ internal sealed class EagerExecutionStrategy : IExecutionStrategy
 
             // Create the final frame from the result columns
             if (currentColumns.Count == 0)
-            {
                 throw new QueryExecutionException("Eager execution resulted in no columns");
-            }
 
             var namedColumns = currentColumns.Select(kvp => (kvp.Key, kvp.Value));
             return new NivaraFrame(namedColumns);
@@ -133,9 +131,7 @@ internal sealed class EagerExecutionStrategy : IExecutionStrategy
 
             // Create the final frame from the result columns
             if (currentColumns.Count == 0)
-            {
                 throw new QueryExecutionException("Async eager execution resulted in no columns");
-            }
 
             var namedColumns = currentColumns.Select(kvp => (kvp.Key, kvp.Value));
             return new NivaraFrame(namedColumns);

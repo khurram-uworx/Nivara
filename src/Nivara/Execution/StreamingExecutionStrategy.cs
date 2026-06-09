@@ -9,6 +9,76 @@ namespace Nivara.Execution;
 /// </summary>
 internal sealed class StreamingExecutionStrategy : IExecutionStrategy
 {
+    /// <summary>
+    /// Determines if a query plan is suitable for streaming execution
+    /// </summary>
+    /// <param name="plan">The query plan to analyze</param>
+    /// <returns>True if the plan can be executed with streaming, false otherwise</returns>
+    static bool isSuitableForStreaming(QueryPlan plan)
+    {
+        // Operations that work well with streaming
+        var streamableOperations = new HashSet<string>
+        {
+            "Filter",
+            "Select",
+            "Concatenation"
+        };
+
+        // Operations that require all data and are not suitable for streaming
+        var nonStreamableOperations = new HashSet<string>
+        {
+            "Sort",
+            "GroupBy",
+            "Join"
+        };
+
+        // Check if any operations are explicitly non-streamable
+        foreach (var operation in plan.Operations)
+        {
+            if (nonStreamableOperations.Contains(operation.OperationType))
+            {
+                return false;
+            }
+        }
+
+        // If all operations are streamable or unknown (which we assume can be streamed), return true
+        return true;
+    }
+
+    /// <summary>
+    /// Calculates the appropriate chunk size based on memory budget
+    /// </summary>
+    /// <param name="memoryBudget">The available memory budget in bytes</param>
+    /// <returns>The number of rows to process per chunk</returns>
+    static int calculateChunkSize(long memoryBudget)
+    {
+        // Estimate memory per row (this is a rough estimate)
+        const long estimatedBytesPerRow = 100; // Assume 100 bytes per row on average
+
+        // Use 10% of memory budget for chunk processing
+        var chunkMemory = memoryBudget / 10;
+        var calculatedChunkSize = (int)(chunkMemory / estimatedBytesPerRow);
+
+        // Ensure chunk size is within reasonable bounds
+        return Math.Max(1000, Math.Min(calculatedChunkSize, 100000));
+    }
+
+    /// <summary>
+    /// Reports progress for the execution
+    /// </summary>
+    /// <param name="context">The execution context</param>
+    /// <param name="operationName">The name of the current operation</param>
+    /// <param name="completedWork">The amount of work completed</param>
+    /// <param name="totalWork">The total amount of work</param>
+    static void reportProgress(NivaraExecutionContext context, string operationName, long completedWork, long totalWork)
+    {
+        if (context.Progress != null)
+        {
+            var progress = new ExecutionProgress(operationName, completedWork, totalWork);
+            context.Progress.Report(progress);
+        }
+    }
+
     readonly QueryExecutor executor;
     const int DefaultChunkSize = 10000; // Default number of rows per chunk
 
@@ -38,12 +108,12 @@ internal sealed class StreamingExecutionStrategy : IExecutionStrategy
             // based on the memory budget and estimated data size
 
             // Calculate chunk size based on memory budget
-            var chunkSize = CalculateChunkSize(context.MemoryBudget);
+            var chunkSize = calculateChunkSize(context.MemoryBudget);
 
-            ReportProgress(context, "Starting streaming execution", 0, 1);
+            reportProgress(context, "Starting streaming execution", 0, 1);
 
             // Check if the plan is suitable for streaming
-            if (!IsSuitableForStreaming(plan))
+            if (!isSuitableForStreaming(plan))
             {
                 // Fall back to lazy execution for plans that can't be streamed
                 var lazyStrategy = new LazyExecutionStrategy();
@@ -54,7 +124,7 @@ internal sealed class StreamingExecutionStrategy : IExecutionStrategy
             // For now, we use the existing executor with progress reporting
             var result = executor.Execute(plan);
 
-            ReportProgress(context, "Streaming execution completed", 1, 1);
+            reportProgress(context, "Streaming execution completed", 1, 1);
             return result;
         }
         catch (OperationCanceledException)
@@ -81,12 +151,12 @@ internal sealed class StreamingExecutionStrategy : IExecutionStrategy
             context.CancellationToken.ThrowIfCancellationRequested();
 
             // Calculate chunk size based on memory budget
-            var chunkSize = CalculateChunkSize(context.MemoryBudget);
+            var chunkSize = calculateChunkSize(context.MemoryBudget);
 
-            ReportProgress(context, "Starting async streaming execution", 0, 1);
+            reportProgress(context, "Starting async streaming execution", 0, 1);
 
             // Check if the plan is suitable for streaming
-            if (!IsSuitableForStreaming(plan))
+            if (!isSuitableForStreaming(plan))
             {
                 // Fall back to lazy execution for plans that can't be streamed
                 var lazyStrategy = new LazyExecutionStrategy();
@@ -96,7 +166,7 @@ internal sealed class StreamingExecutionStrategy : IExecutionStrategy
             // Execute with streaming semantics on a background thread
             var result = await Task.Run(() => Execute(plan, context), context.CancellationToken);
 
-            ReportProgress(context, "Async streaming execution completed", 1, 1);
+            reportProgress(context, "Async streaming execution completed", 1, 1);
             return result;
         }
         catch (OperationCanceledException)
@@ -127,7 +197,7 @@ internal sealed class StreamingExecutionStrategy : IExecutionStrategy
                 return false;
 
             // Check if operations are streamable (for future implementation)
-            return IsSuitableForStreaming(plan);
+            return isSuitableForStreaming(plan);
         }
         catch
         {
@@ -165,7 +235,7 @@ internal sealed class StreamingExecutionStrategy : IExecutionStrategy
             }
 
             // Apply streaming benefits for suitable operations
-            if (IsSuitableForStreaming(plan))
+            if (isSuitableForStreaming(plan))
             {
                 var streamingDiscount = Math.Min(cost * 0.15, 800);
                 cost -= (long)streamingDiscount;
@@ -181,76 +251,6 @@ internal sealed class StreamingExecutionStrategy : IExecutionStrategy
         catch
         {
             return long.MaxValue;
-        }
-    }
-
-    /// <summary>
-    /// Determines if a query plan is suitable for streaming execution
-    /// </summary>
-    /// <param name="plan">The query plan to analyze</param>
-    /// <returns>True if the plan can be executed with streaming, false otherwise</returns>
-    private static bool IsSuitableForStreaming(QueryPlan plan)
-    {
-        // Operations that work well with streaming
-        var streamableOperations = new HashSet<string>
-        {
-            "Filter",
-            "Select",
-            "Concatenation"
-        };
-
-        // Operations that require all data and are not suitable for streaming
-        var nonStreamableOperations = new HashSet<string>
-        {
-            "Sort",
-            "GroupBy",
-            "Join"
-        };
-
-        // Check if any operations are explicitly non-streamable
-        foreach (var operation in plan.Operations)
-        {
-            if (nonStreamableOperations.Contains(operation.OperationType))
-            {
-                return false;
-            }
-        }
-
-        // If all operations are streamable or unknown (which we assume can be streamed), return true
-        return true;
-    }
-
-    /// <summary>
-    /// Calculates the appropriate chunk size based on memory budget
-    /// </summary>
-    /// <param name="memoryBudget">The available memory budget in bytes</param>
-    /// <returns>The number of rows to process per chunk</returns>
-    private static int CalculateChunkSize(long memoryBudget)
-    {
-        // Estimate memory per row (this is a rough estimate)
-        const long estimatedBytesPerRow = 100; // Assume 100 bytes per row on average
-
-        // Use 10% of memory budget for chunk processing
-        var chunkMemory = memoryBudget / 10;
-        var calculatedChunkSize = (int)(chunkMemory / estimatedBytesPerRow);
-
-        // Ensure chunk size is within reasonable bounds
-        return Math.Max(1000, Math.Min(calculatedChunkSize, 100000));
-    }
-
-    /// <summary>
-    /// Reports progress for the execution
-    /// </summary>
-    /// <param name="context">The execution context</param>
-    /// <param name="operationName">The name of the current operation</param>
-    /// <param name="completedWork">The amount of work completed</param>
-    /// <param name="totalWork">The total amount of work</param>
-    private static void ReportProgress(NivaraExecutionContext context, string operationName, long completedWork, long totalWork)
-    {
-        if (context.Progress != null)
-        {
-            var progress = new ExecutionProgress(operationName, completedWork, totalWork);
-            context.Progress.Report(progress);
         }
     }
 }

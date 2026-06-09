@@ -9,7 +9,7 @@ namespace Nivara.IO;
 /// This class manages reusable buffers for large dataset processing, helping to maintain bounded memory usage
 /// and improve performance by reducing allocations during Arrow/Parquet I/O operations.
 /// </remarks>
-internal static class BufferPool
+static class BufferPool
 {
     /// <summary>
     /// Default buffer size for I/O operations (64KB)

@@ -55,8 +55,7 @@ public sealed class NivaraExecutionContext
     /// </summary>
     /// <returns>A new ExecutionContext with the same settings</returns>
     public NivaraExecutionContext Clone()
-    {
-        return new NivaraExecutionContext
+        => new NivaraExecutionContext
         {
             Strategy = Strategy,
             MaxDegreeOfParallelism = MaxDegreeOfParallelism,
@@ -64,7 +63,6 @@ public sealed class NivaraExecutionContext
             CancellationToken = CancellationToken,
             Progress = Progress
         };
-    }
 
     /// <summary>
     /// Creates an execution context with the specified strategy
@@ -72,9 +70,7 @@ public sealed class NivaraExecutionContext
     /// <param name="strategy">The execution strategy</param>
     /// <returns>A new ExecutionContext with the specified strategy</returns>
     public static NivaraExecutionContext WithStrategy(ExecutionStrategy strategy)
-    {
-        return new NivaraExecutionContext(strategy);
-    }
+        => new NivaraExecutionContext(strategy);
 
     /// <summary>
     /// Creates an execution context for parallel execution with specified degree of parallelism
@@ -82,12 +78,10 @@ public sealed class NivaraExecutionContext
     /// <param name="maxDegreeOfParallelism">The maximum degree of parallelism</param>
     /// <returns>A new ExecutionContext configured for parallel execution</returns>
     public static NivaraExecutionContext WithParallelism(int maxDegreeOfParallelism)
-    {
-        return new NivaraExecutionContext(ExecutionStrategy.Parallel)
+        => new NivaraExecutionContext(ExecutionStrategy.Parallel)
         {
             MaxDegreeOfParallelism = maxDegreeOfParallelism
         };
-    }
 
     /// <summary>
     /// Creates an execution context with the specified memory budget
@@ -95,12 +89,10 @@ public sealed class NivaraExecutionContext
     /// <param name="memoryBudgetBytes">The memory budget in bytes</param>
     /// <returns>A new ExecutionContext with the specified memory budget</returns>
     public static NivaraExecutionContext WithMemoryBudget(long memoryBudgetBytes)
-    {
-        return new NivaraExecutionContext
+        => new NivaraExecutionContext
         {
             MemoryBudget = memoryBudgetBytes
         };
-    }
 
     /// <summary>
     /// Creates an execution context with the specified cancellation token
@@ -108,21 +100,17 @@ public sealed class NivaraExecutionContext
     /// <param name="cancellationToken">The cancellation token</param>
     /// <returns>A new ExecutionContext with the specified cancellation token</returns>
     public static NivaraExecutionContext WithCancellation(CancellationToken cancellationToken)
-    {
-        return new NivaraExecutionContext
+        => new NivaraExecutionContext
         {
             CancellationToken = cancellationToken
         };
-    }
 
     /// <summary>
     /// Returns a string representation of the execution context
     /// </summary>
     /// <returns>A formatted string describing the execution context</returns>
     public override string ToString()
-    {
-        return $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes }}";
-    }
+        => $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes }}";
 }
 
 /// <summary>

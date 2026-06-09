@@ -5,6 +5,70 @@ using System.Collections.Concurrent;
 namespace Nivara.Execution;
 
 /// <summary>
+/// Defines the execution strategy for query operations
+/// </summary>
+public enum ExecutionStrategy
+{
+    /// <summary>
+    /// Build query plan, execute on Collect() - default strategy
+    /// </summary>
+    Lazy,
+
+    /// <summary>
+    /// Execute operations immediately without building query plans
+    /// </summary>
+    Eager,
+
+    /// <summary>
+    /// Process data in chunks for large datasets to manage memory usage
+    /// </summary>
+    Streaming,
+
+    /// <summary>
+    /// Use multiple threads for parallelizable operations
+    /// </summary>
+    Parallel
+}
+
+/// <summary>
+/// Defines the interface for execution strategies
+/// </summary>
+public interface IExecutionStrategy
+{
+    /// <summary>
+    /// Executes a query plan synchronously
+    /// </summary>
+    /// <param name="plan">The query plan to execute</param>
+    /// <param name="context">The execution context</param>
+    /// <returns>The materialized result</returns>
+    NivaraFrame Execute(QueryPlan plan, NivaraExecutionContext context);
+
+    /// <summary>
+    /// Executes a query plan asynchronously
+    /// </summary>
+    /// <param name="plan">The query plan to execute</param>
+    /// <param name="context">The execution context</param>
+    /// <returns>A task representing the asynchronous execution</returns>
+    Task<NivaraFrame> ExecuteAsync(QueryPlan plan, NivaraExecutionContext context);
+
+    /// <summary>
+    /// Validates that a query plan can be executed with this strategy
+    /// </summary>
+    /// <param name="plan">The query plan to validate</param>
+    /// <param name="context">The execution context</param>
+    /// <returns>True if the plan is valid, false otherwise</returns>
+    bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context);
+
+    /// <summary>
+    /// Estimates the execution cost for this strategy
+    /// </summary>
+    /// <param name="plan">The query plan to analyze</param>
+    /// <param name="context">The execution context</param>
+    /// <returns>An estimated execution cost</returns>
+    long EstimateExecutionCost(QueryPlan plan, NivaraExecutionContext context);
+}
+
+/// <summary>
 /// Executes query plans using different execution strategies.
 /// Provides strategy pattern for lazy, eager, streaming, and parallel execution modes.
 /// </summary>
@@ -26,6 +90,15 @@ public sealed class ExecutionEngine
         RegisterStrategy(ExecutionStrategy.Eager, new EagerExecutionStrategy());
         RegisterStrategy(ExecutionStrategy.Streaming, new StreamingExecutionStrategy());
         RegisterStrategy(ExecutionStrategy.Parallel, new ParallelExecutionStrategy());
+    }
+
+    /// <summary>
+    /// Sets the query optimizer for this execution engine (internal use only)
+    /// </summary>
+    /// <param name="queryOptimizer">The query optimizer to use</param>
+    internal void SetOptimizer(QueryOptimizer? queryOptimizer)
+    {
+        optimizer = queryOptimizer;
     }
 
     /// <summary>
@@ -121,15 +194,6 @@ public sealed class ExecutionEngine
     }
 
     /// <summary>
-    /// Sets the query optimizer for this execution engine (internal use only)
-    /// </summary>
-    /// <param name="queryOptimizer">The query optimizer to use</param>
-    internal void SetOptimizer(QueryOptimizer? queryOptimizer)
-    {
-        optimizer = queryOptimizer;
-    }
-
-    /// <summary>
     /// Validates that a query plan can be executed without actually executing it
     /// </summary>
     /// <param name="plan">The query plan to validate</param>
@@ -210,42 +274,4 @@ public sealed class ExecutionEngine
         var hasOptimizer = optimizer != null;
         return $"ExecutionEngine {{ Strategies: {strategyCount}, Optimizer: {hasOptimizer} }}";
     }
-}
-
-/// <summary>
-/// Defines the interface for execution strategies
-/// </summary>
-public interface IExecutionStrategy
-{
-    /// <summary>
-    /// Executes a query plan synchronously
-    /// </summary>
-    /// <param name="plan">The query plan to execute</param>
-    /// <param name="context">The execution context</param>
-    /// <returns>The materialized result</returns>
-    NivaraFrame Execute(QueryPlan plan, NivaraExecutionContext context);
-
-    /// <summary>
-    /// Executes a query plan asynchronously
-    /// </summary>
-    /// <param name="plan">The query plan to execute</param>
-    /// <param name="context">The execution context</param>
-    /// <returns>A task representing the asynchronous execution</returns>
-    Task<NivaraFrame> ExecuteAsync(QueryPlan plan, NivaraExecutionContext context);
-
-    /// <summary>
-    /// Validates that a query plan can be executed with this strategy
-    /// </summary>
-    /// <param name="plan">The query plan to validate</param>
-    /// <param name="context">The execution context</param>
-    /// <returns>True if the plan is valid, false otherwise</returns>
-    bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context);
-
-    /// <summary>
-    /// Estimates the execution cost for this strategy
-    /// </summary>
-    /// <param name="plan">The query plan to analyze</param>
-    /// <param name="context">The execution context</param>
-    /// <returns>An estimated execution cost</returns>
-    long EstimateExecutionCost(QueryPlan plan, NivaraExecutionContext context);
 }

@@ -4,6 +4,32 @@ using Nivara.Helpers;
 namespace Nivara.Expressions;
 
 /// <summary>
+/// Binary operators for expressions
+/// </summary>
+public enum BinaryOperator
+{
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+    And,
+    Or
+}
+
+/// <summary>
+/// Comparison operators for expressions
+/// </summary>
+public enum ComparisonOperator
+{
+    Equal,
+    NotEqual,
+    GreaterThan,
+    LessThan,
+    GreaterThanOrEqual,
+    LessThanOrEqual
+}
+
+/// <summary>
 /// Base class for column expressions used in query operations.
 /// Provides the foundation for building composable query expressions.
 /// </summary>
@@ -371,32 +397,6 @@ public sealed class LiteralExpression : ColumnExpression
     {
         return Value?.ToString() ?? "null";
     }
-}
-
-/// <summary>
-/// Binary operators for expressions
-/// </summary>
-public enum BinaryOperator
-{
-    Add,
-    Subtract,
-    Multiply,
-    Divide,
-    And,
-    Or
-}
-
-/// <summary>
-/// Comparison operators for expressions
-/// </summary>
-public enum ComparisonOperator
-{
-    Equal,
-    NotEqual,
-    GreaterThan,
-    LessThan,
-    GreaterThanOrEqual,
-    LessThanOrEqual
 }
 
 /// <summary>

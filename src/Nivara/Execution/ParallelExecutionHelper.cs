@@ -6,7 +6,7 @@ namespace Nivara.Execution;
 /// <summary>
 /// Provides helper methods for parallel execution of DataFrame operations
 /// </summary>
-internal static class ParallelExecutionHelper
+static class ParallelExecutionHelper
 {
     /// <summary>
     /// Executes a function in parallel across multiple chunks of data
@@ -222,7 +222,7 @@ internal static class ParallelExecutionHelper
 /// <summary>
 /// Provides extension methods for parallel processing
 /// </summary>
-internal static class ParallelExtensions
+static class ParallelExtensions
 {
     /// <summary>
     /// Splits an enumerable into chunks of the specified size
