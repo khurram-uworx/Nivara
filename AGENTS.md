@@ -13,7 +13,7 @@ Principles (high level)
 
 Where to look (implementation map)
 - Storage and selection
-  - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime selection: `IsVectorizable<T()` and `Create<T>(ReadOnlySpan<T>)`.
+  - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime selection: `IsVectorizable<T>()` and `Create<T>(ReadOnlySpan<T>)`.
   - `src/Nivara/Storage/TensorStorage.cs` — tensor-backed storage implementation.
   - `src/Nivara/Storage/MemoryStorage.cs` — memory-backed storage and null-mask representation.
 
@@ -21,10 +21,26 @@ Where to look (implementation map)
   - `src/Nivara/NivaraColumn.cs` — arithmetic, comparison, mask propagation, and use of `TensorPrimitives` for `float`/`double`.
 
 - Tensor helpers & interop
-  - `src/Nivara/Tensors/TensorInterop.cs` — conversions `Series/Frame <-> Tensor`, `TensorSpan` utilities, reshape/flatten helpers.
+  - `src/Nivara/Tensors/TensorInteropExtensions.cs` — conversions `Series/Frame <-> Tensor`, `TensorSpan` utilities, reshape/flatten helpers.
 
 - Kernel selection & diagnostics
   - `src/Nivara/KernelSelector.cs` — centralized `DetermineKernelType` heuristics (used by `NivaraColumn` and `ColumnDiagnostics`).
+
+- Execution engine
+  - `src/Nivara/Execution/ExecutionEngine.cs` — `ExecutionStrategy` enum, `IExecutionStrategy` interface, strategy routing, `LastDiagnostics`.
+  - `src/Nivara/Execution/ExecutionStrategyBase.cs` — shared base class eliminating boilerplate across all four strategies.
+  - `src/Nivara/Execution/LazyExecutionStrategy.cs` — deferred plan execution with optimization.
+  - `src/Nivara/Execution/EagerExecutionStrategy.cs` — immediate execution.
+  - `src/Nivara/Execution/StreamingExecutionStrategy.cs` — chunk-based streaming with memory budget.
+  - `src/Nivara/Execution/ParallelExecutionStrategy.cs` — multi-threaded dispatch with parallel operation interfaces.
+  - `src/Nivara/Execution/ParallelExecutionHelper.cs` — chunking, parallel processing, aggregation utilities.
+
+- Interfaces & query contracts
+  - `src/Nivara/Interfaces.cs` — consolidated `IColumn`, `IColumn<T>`, `IColumnStorage<T>`, `IFrame`.
+  - `src/Nivara/Query/IQueryInterfaces.cs` — consolidated `IQueryOperation<T>`, `IQueryOperation`, `IQuerySource`.
+
+- Operation type constants
+  - `src/Nivara/Query/OperationType.cs` — `OperationType.Filter`, `.Select`, `.Sort`, `.GroupBy`, `.Join`, etc.
 
 - Frame-level batch ops
   - `src/Nivara/NivaraFrame.cs` — `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` with null propagation and `OperationDiagnostics` recording.
@@ -34,7 +50,7 @@ Where to look (implementation map)
 
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
-  - `src/Nivara/Tensors/TensorExtensions.cs` / `TensorInterop.cs` — tensor helpers used across codebase.
+  - `src/Nivara/Tensors/TensorExtensions.cs` / `TensorInteropExtensions.cs` — tensor helpers used across codebase.
 
 Key rules for AI Agents to follow when generating tensor-aware code
 1. Storage selection
@@ -80,7 +96,8 @@ Suggested small, safe improvements to implement (prioritized)
 - ✓ Add internal `AsTensorSpanIfNoNulls()` to `Nivara.Storage.TensorStorage` — DONE (Phase 0).
 - ✓ Add `BufferPool.Rent(int size)` usage in `NivaraColumn` heavy paths — DONE (Phase 0).
 - ✓ Implement `DetermineKernelType` central helper — DONE as `KernelSelector.DetermineKernelType()` (Phase 1).
-- Add `RowNorms` batch kernel on `NivaraFrame` (not yet implemented).
+- ✓ Add `RowNorms`/`ColumnNorms`/`TopKDescending` on `NivaraFrame` — DONE via per-row loop (Phase 3).
+- Add batch `TensorPrimitives` kernel for `RowNorms` (not yet implemented — currently uses per-row `ArrayPool` loop).
 
 Common gotchas (use these as lint-like checks in generated code)
 - `ReadOnlyMemory<T>?` has `HasValue == true` for empty memory; always check `.Length > 0` to decide if mask exists.
@@ -96,6 +113,7 @@ Common gotchas (use these as lint-like checks in generated code)
 - Expression Equals/GetHashCode: always override when adding custom equality operators to expression types.
 - `Memory<T>` disposal: implement `IDisposable` consistently for frames, columns, and data sources.
 - `NivaraColumn.TryGetSpan` returns `ReadOnlySpan<T>` (immutable guarantee), diverging from BCL's `Tensor<T>.TryGetSpan` which returns `Span<T>` (mutable). This is deliberate — Nivara columns are immutable. Use `CopyTo(Span<T>, T)` for the explicit-fill path when nulls are present or mutation is needed.
+- `DataFrameOperation` no longer has strategy-switch dispatch or `Strategy` property — it was simplified to a single `Execute()` abstract method. Strategy dispatch is the `ExecutionEngine`'s responsibility via `IExecutionStrategy`.
 
 Example patterns (pseudocode for AI Agent to reuse)
 
@@ -221,14 +239,14 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Internal Span access**: consider adding `internal AsSpan()` methods to `NivaraColumn` for zero-copy tensor interop.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets.
 - **NivaraFrame TopKDescending**: added in Phase 3, returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
-- **NivaraFrame RowNorms/ColumnNorms**: added in Phase 3, null-propagating; batch TensorPrimitives kernel for RowNorms not yet implemented.
-- **Phase C complete**: `SgdOptimizer.SgdUpdate` added in `src/Nivara.Extensions/AutoDiff/Optimizer/`. `Negate` and `Abs` operations added to `GradOperations`. 1084 tests passing.
+- **NivaraFrame RowNorms/ColumnNorms**: added in Phase 3, null-propagating; currently uses per-row `ArrayPool` loop — batch `TensorPrimitives` kernel not yet implemented.
+- **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1216 tests passing.
 
 ---
 
 ## Quick Reference
 
-- **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `bool` (requires unmanaged constraint)
+- **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
 - **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SgdOptimizer.SgdUpdate<T>()`
@@ -240,7 +258,12 @@ References (implementations to inspect)
 - `src/Nivara/Storage/ColumnStorageFactory.cs`
 - `src/Nivara/Storage/TensorStorage.cs`
 - `src/Nivara/NivaraColumn.cs`
-- `src/Nivara/Tensors/TensorInterop.cs`
+- `src/Nivara/Tensors/TensorInteropExtensions.cs`
 - `src/Nivara/KernelSelector.cs`
 - `src/Nivara/NivaraFrame.cs`
 - `src/Nivara/Storage/MemoryStorage.cs`
+- `src/Nivara/Interfaces.cs`
+- `src/Nivara/Query/IQueryInterfaces.cs`
+- `src/Nivara/Execution/ExecutionEngine.cs`
+- `src/Nivara/Execution/ExecutionStrategyBase.cs`
+- `src/Nivara/Execution/ParallelExecutionHelper.cs`

@@ -56,6 +56,27 @@ All .NET examples assume `using System.Numerics.Tensors;` for BCL tensor APIs an
 
 Basic vector operations (dot product, norm).
 
+We use a **norm** when we need a single number representing the size of a vector/matrix/tensor.
+
+Examples:
+
+* Magnitude of an embedding vector.
+* Error between model predictions and actual values.
+* Regularization in machine learning (L1/L2 norms).
+
+We use a **dot product** when we want to compare vectors or combine information along matching dimensions.
+
+Examples:
+
+* Similarity search (embeddings).
+* Neural network layers.
+* Graphics and physics calculations.
+
+Interpretation: higher value generally means the vectors point in a similar direction.
+
+* **Norm** = "How large is this vector/tensor?"
+* **Dot product** = "How much do these vectors/tensors agree?"
+
 **Python**
 
 ```python
@@ -69,7 +90,7 @@ print(dot)
 print(norm)
 ```
 
-**.NET (BCL)**
+**.NET**
 
 ```csharp
 float[] left = [1.0f, 2.0f, 3.0f];
@@ -81,8 +102,6 @@ float norm = TensorPrimitives.Norm(left);
 Console.WriteLine(dot);
 Console.WriteLine(norm);
 ```
-
-The BCL already covers this — `TensorPrimitives.Dot` and `TensorPrimitives.Norm` are the intended APIs for basic vector math. No tabular data to manage here.
 
 #### 1b. Product Ranking With Embedding Similarity
 
@@ -111,7 +130,7 @@ for label, score in top:
     print(f"{label}: {score:.3f}")
 ```
 
-**.NET (BCL)**
+**.NET**
 
 ```csharp
 float[] user = [0.8f, 0.1f, 0.6f, 0.3f];
@@ -136,8 +155,6 @@ foreach (var item in topProducts)
     Console.WriteLine($"{item.Label}: {item.Score:0.000}");
 ```
 
-The BCL is sufficient here — `TensorPrimitives.CosineSimilarity` handles the math directly. No schemas, nulls, or I/O involved.
-
 #### 1c. Batch Column Dot Products
 
 Score candidates by dot product (common when embeddings are pre-normalized).
@@ -160,7 +177,7 @@ for label, score in top:
     print(f"{label}: {score:.3f}")
 ```
 
-**.NET (BCL)**
+**.NET**
 
 ```csharp
 float[] query = [0.8f, 0.1f, 0.6f, 0.3f];
@@ -181,8 +198,6 @@ var topCandidates = candidates
     .OrderByDescending(x => x.Score)
     .Take(3);
 ```
-
-BCL's `TensorPrimitives.Dot` handles this. No tabular features needed — just a dictionary and a LINQ projection.
 
 ### Act 2: Nulls are where BCL gets awkward — enter NivaraColumn
 
@@ -210,7 +225,7 @@ result = df["A"] + df["B"]
 # [NaN, NaN, 6.0, NaN]
 ```
 
-**.NET (BCL)**
+**.NET**
 
 ```csharp
 float?[] a = [1.0f, null, 3.0f, null];
@@ -224,7 +239,7 @@ for (int i = 0; i < a.Length; i++)
 // [null, null, 6.0, null]
 ```
 
-**.NET (Nivara)** — null propagation is automatic:
+**Nivara** — null propagation is automatic:
 
 ```csharp
 var colA = NivaraColumn<float>.CreateFromNullable(
@@ -237,7 +252,7 @@ var result = colA.Add(colB);
 // result[2] → 6.0f, result.IsNull(3) → true
 ```
 
-We're using Nivara here because `NivaraColumn.Add` (and all arithmetic operators) automatically apply mask-OR semantics — the result null mask is `a.IsNull OR b.IsNull`. Nivara expresses this as a single `Add()` call instead of an element-wise loop with manual `HasValue` checks.
+You can use Nivara here because `NivaraColumn.Add` (and all arithmetic operators) automatically apply mask-OR semantics — the result null mask is `a.IsNull OR b.IsNull`. Nivara expresses this as a single `Add()` call instead of an element-wise loop with manual `HasValue` checks.
 
 #### 2b. Derived column with cross-column nulls
 
@@ -258,7 +273,7 @@ df["total"] = df["price"] * df["qty"]
 # [10.0, NaN, NaN, 80.0]
 ```
 
-**.NET (BCL)**
+**.NET**
 
 ```csharp
 float?[] price = [10.0f, 20.0f, null, 40.0f];
@@ -272,7 +287,7 @@ for (int i = 0; i < price.Length; i++)
 // [10.0, null, null, 80.0]
 ```
 
-**.NET (Nivara)** — cross-column operations with automatic null propagation:
+**Nivara** — cross-column operations with automatic null propagation:
 
 ```csharp
 var price = NivaraColumn<float>.CreateFromNullable(
@@ -284,7 +299,7 @@ var total = price.Multiply(qty);
 // [10.0, null, null, 80.0]
 ```
 
-We're using Nivara here because columnar data means each typed column carries its own null mask independently, and cross-column operations propagate nulls automatically via mask-OR semantics. Nivara operations compose naturally — `price.Multiply(qty)` is one expression with automatic null propagation.
+You can use Nivara here because columnar data means each typed column carries its own null mask independently, and cross-column operations propagate nulls automatically via mask-OR semantics. Nivara operations compose naturally — `price.Multiply(qty)` is one expression with automatic null propagation.
 
 ### Act 3: Tabular data with typed schema — NivaraFrame
 
@@ -322,7 +337,7 @@ in_stock["PriceWithTax"] = in_stock["Price"] * 1.08
 result = in_stock[["SKU", "PriceWithTax", "Category", "Rating"]]
 ```
 
-**.NET (BCL)**
+**.NET**
 
 ```csharp
 // Parallel arrays — one per column, manual index alignment
@@ -341,7 +356,7 @@ for (int i = 0; i < stock.Length; i++)
 }
 ```
 
-**.NET (Nivara)** — typed schema with named columns:
+**Nivara** — typed schema with named columns:
 
 ```csharp
 var products = NivaraFrame.Create(
@@ -375,7 +390,7 @@ var result = withTax.SelectColumns(
     "SKU", "PriceWithTax", "Category", "Rating");
 ```
 
-We're using Nivara here because a NivaraFrame provides a unified typed schema
+You can use Nivara here because a NivaraFrame provides a unified typed schema
 — each column is named and strongly typed, accessible by name (`"Price"`)
 not array index (`arrays[1]`). Filtering, derived columns, and projection
 compose without manual index alignment across parallel arrays. The schema is
@@ -423,7 +438,7 @@ var top = customers
     .Take(2);
 ```
 
-**.NET (Nivara, column-wise)** — columns are first-class values:
+**Nivara, column-wise** — columns are first-class values:
 
 ```csharp
 var customers = NivaraFrame.Create(
@@ -447,7 +462,7 @@ var top = customers
     .SelectColumns("Name", "LoyaltyScore");
 ```
 
-We're using Nivara here because columns are first-class values —
+You can use Nivara here because columns are first-class values —
 `spendCol.Multiply(freqCol)` operates on the entire column in a single
 vectorized pass, not row-by-row. LINQ over `IEnumerable<T>` or `DbSet<T>`
 projects every row individually — 100K rows means 100K anonymous object
@@ -494,7 +509,7 @@ for label, score in ranking:
     print(f"{label}: {score:.3f}")
 ```
 
-**.NET (BCL)**
+**.NET**
 
 ```csharp
 float[] query = [0.8f, 0.1f, 0.6f, 0.3f];
@@ -522,7 +537,7 @@ var ranking = docIds
     .Take(2);
 ```
 
-**.NET (Nivara)** — the frame handles schema and row-major layout:
+**Nivara** — the frame handles schema and row-major layout:
 
 ```csharp
 var query = new[] { 0.8f, 0.1f, 0.6f, 0.3f };
@@ -558,7 +573,7 @@ var ranking = documents.GetColumn<string>("DocumentId")
     .Take(2);
 ```
 
-We're using Nivara here because the frame auto-discovers numeric columns,
+You can use Nivara here because the frame auto-discovers numeric columns,
 selects them by name, and lays them out row-major as a 2D `Tensor<float>`
 — replacing manual flat-array construction with stride calculations. The
 schema keeps DocumentId aligned with embedding rows end-to-end. The math
@@ -602,7 +617,7 @@ print(f"w.grad[0] = {w.grad[0].item():.4f}, updated w[0] = {updated_w[0].item():
 
 The BCL covers forward inference — `TensorPrimitives` (Dot, Norm, SumOfSquares) can express the math. But there is no BCL autograd, so backpropagation requires manual gradient derivation and loops.
 
-**.NET (BCL)** — no autograd framework; explicit gradient computation required:
+**.NET** — no autograd framework; explicit gradient computation required:
 
 ```csharp
 float[] x = [1.0f, 2.0f, 3.0f];
@@ -639,9 +654,9 @@ Console.WriteLine($"Loss: {loss:F4}");
 Console.WriteLine($"gradW[0] = {gradW[0]:F4}, updatedW[0] = {updatedW[0]:F4}");
 ```
 
-We're using Nivara.Extensions here because it provides the only reverse-mode AutoDiff for Nivara column data — automatically building a computation graph, computing gradients via `Backward()`, and providing `SgdOptimizer.SgdUpdate` — instead of manual gradient derivation.
+You can use Nivara.Extensions here because it provides the reverse-mode AutoDiff for Nivara column data — automatically building a computation graph, computing gradients via `Backward()`, and providing `SgdOptimizer.SgdUpdate` — instead of manual gradient derivation.
 
-**.NET (Nivara.Extensions)** — reverse-mode AutoDiff with gradient tracking:
+**Nivara.Extensions** — reverse-mode AutoDiff with gradient tracking:
 
 ```csharp
 using Nivara.Extensions.AutoDiff;
@@ -677,6 +692,333 @@ See the longer sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples
 
 > **Note:** This API is experimental. It supports `float` and `double` only, uses static `GradOperations` methods (no operator overloads yet), and has no layer/dataloader/training-loop abstractions.
 
+### Act 6: Querying with LINQ — The QueryFrame
+
+> ML engineers design their workflow around **deferred execution and plan inspection**:
+> build a computation graph in notebook cells, inspect with `df.explain()` or Spark's
+> `EXPLAIN`, then trigger materialization. The columnar mindset — operating on entire
+> columns, not row-by-row — is second nature. For .NET developers, this is a new muscle.
+> LINQ is lazy too (`IEnumerable<T>`), but few inspect *how* the query will execute,
+> let alone optimize the plan before running it. Nivara's `QueryFrame` bridges this gap:
+> familiar `Where().OrderBy().Select()` syntax with **plan-time visibility**.
+
+#### 6a. Employee Directory: A Familiar Scenario, Column-Wise
+
+Filter active Engineering employees, sort by salary ascending, and project name + salary.
+
+**Python**
+
+```python
+import pandas as pd
+
+employees = pd.DataFrame({
+    "Name": ["Alice", "Bob", "Charlie", "Diana"],
+    "Department": ["Engineering", "Sales", "Engineering", "Engineering"],
+    "Salary": [120000, 90000, 150000, 110000],
+    "IsActive": [True, True, False, True],
+})
+
+result = employees[
+    (employees["Department"] == "Engineering") &
+    (employees["IsActive"])
+].sort_values("Salary")[["Name", "Salary"]]
+```
+
+**.NET (LINQ-to-Objects)** — row-wise, per-row allocation:
+
+```csharp
+record Employee(string Name, string Department, int Salary, bool IsActive);
+
+var employees = new[]
+{
+    new Employee("Alice", "Engineering", 120000, true),
+    new Employee("Bob", "Sales", 90000, true),
+    new Employee("Charlie", "Engineering", 150000, false),
+    new Employee("Diana", "Engineering", 110000, true),
+};
+
+var result = employees
+    .Where(e => e.Department == "Engineering" && e.IsActive)
+    .OrderBy(e => e.Salary)
+    .Select(e => new { e.Name, e.Salary })
+    .ToList();
+```
+
+**Nivara** — column-wise, lazy plan, plan-time validation:
+
+```csharp
+var employees = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(
+        ["Alice", "Bob", "Charlie", "Diana"])),
+    ("Department", NivaraColumn<string>.CreateForReferenceType(
+        ["Engineering", "Sales", "Engineering", "Engineering"])),
+    ("Salary", NivaraColumn<int>.Create([120000, 90000, 150000, 110000])),
+    ("IsActive", NivaraColumn<bool>.Create([true, true, false, true]))
+);
+
+var query = employees.AsQueryFrame()
+    .Where(x => x["Department"] == "Engineering" && x["IsActive"])
+    .OrderBy(x => x["Salary"])
+    .Select(x => x["Name"], x => x["Salary"]);
+
+// Inspect the optimized plan — no data touched yet
+Console.WriteLine(query.ExplainPlan());
+
+var result = query.ToNivaraFrame();
+```
+
+Sample `ExplainPlan()` output:
+
+```
+Query Execution Plan:
+├─ Source: MemoryQuerySource
+│  └─ Schema: Name (String), Department (String), Salary (Int32), IsActive (Boolean)
+│  └─ Lazy: False
+├─ Operations:
+│  ├─ 1. Filter
+│  │  └─ Schema: Name (String), Department (String), Salary (Int32), IsActive (Boolean)
+│  ├─ 2. Sort
+│  │  └─ Schema: Name (String), Department (String), Salary (Int32), IsActive (Boolean)
+│  └─ 3. Select
+│     └─ Schema: Name (String), Salary (Int32)
+└─ Result Schema: Name (String), Salary (Int32)
+```
+
+You can use Nivara here because the `QueryFrame` exposes the same fluent `Where().OrderBy().Select()` pattern .NET developers already know — but operates column-wise, not row-by-row. The entire pipeline is a **lazy plan** that can be inspected before any data is touched, just like ML engineers do with `df.explain()` in notebooks. Schema errors (typo'd column names, wrong types) surface at `ExplainPlan()` time, not at runtime.
+
+#### 6b. ExplainPlan() — The Inspection Superpower
+
+A simple typo — `Deprtment` instead of `Department` — shows why plan-time validation matters.
+
+**.NET (LINQ-to-Objects)** — compile-time error when using a POCO:
+
+```csharp
+// Compile-time: CS0117 — 'Employee' does not contain a definition for 'Deprtment'
+var result = employees.Where(e => e.Deprtment == "Engineering");
+```
+
+With loosely-typed data (e.g., `Dictionary<string, object?>` rows), the same error becomes a runtime `KeyNotFoundException` — discovered only when the enumeration reaches the filter.
+
+**Nivara** — caught at plan construction time, before any data is read:
+
+```csharp
+var query = employees.AsQueryFrame()
+    .Where(x => x["Deprtment"] == "Engineering");
+
+// ExplainPlan() constructs a QueryPlan, which validates every
+// operation against the source schema before planning execution.
+Console.WriteLine(query.ExplainPlan());
+```
+
+Output:
+
+```
+Unhandled Exception: Nivara.Exceptions.SchemaValidationException:
+Operation 'Filter' failed to transform schema: Column 'Deprtment' not found.
+   Available columns: Name, Department, Salary, IsActive
+```
+
+The error surfaces during `ExplainPlan()` — not when the result is iterated. The `QueryPlan` constructor calls `ComputeResultSchema()`, which runs each operation's `TransformSchema()` against the source schema in sequence, detecting mismatches immediately.
+
+You can use Nivara here because `ExplainPlan()` validates the entire operation pipeline at construction time — catching schema errors before touching any data. This is the same pattern Spark and SQL engines use with `EXPLAIN ANALYZE`: **validate before you execute**. For .NET developers accustomed to runtime errors from LINQ over dynamic data, this is a workflow-level improvement.
+
+---
+
+### Act 7: Scale — Query Engine and Execution Strategies
+
+> Once your ML pipeline works on small data, you need to run it on real-world volumes.
+> Nivara's `QueryFrame` provides a LINQ-like chain for building queries, and the
+> `ExecutionEngine` lets you swap execution strategies (Lazy, Parallel, Streaming)
+> without changing the query — choosing between throughput, memory, and debuggability.
+
+The earlier acts showed what Nivara can do on individual columns, frames, and
+tensor workflows. This act shows how to **compose** those operations into a
+query pipeline and **control** how it runs at scale.
+
+#### 7a. LINQ-Style Query on a Risk Scoring Pipeline
+
+Score customers against a risk embedding, filter out VIPs, rank by risk, and
+select the top accounts for review — all in a single lazy query chain.
+
+**Python**
+
+```python
+import pandas as pd
+import numpy as np
+
+customers = pd.read_csv("customers.csv")
+risk_pattern = np.array([0.8, 0.1, 0.6, 0.3], dtype=np.float32)
+
+# Filter out VIPs, compute similarity, rank
+active = customers[customers["Segment"] != "vip"]
+embeddings = active[["e0","e1","e2","e3"]].to_numpy(dtype=np.float32)
+scores = embeddings @ risk_pattern / (
+    np.linalg.norm(embeddings, axis=1) * np.linalg.norm(risk_pattern))
+active["RiskScore"] = scores
+top = active.nlargest(100, "RiskScore")[["CustomerId", "RiskScore"]]
+```
+
+**.NET** — flat arrays, stride math, manual alignment:
+
+```csharp
+string[] ids = /* loaded */;
+string[] segments = /* loaded */;
+float[] e0, e1, e2, e3 = /* loaded */;
+float[] riskPattern = [0.8f, 0.1f, 0.6f, 0.3f];
+
+var activeIds = new List<string>();
+var activeScores = new List<float>();
+
+for (int i = 0; i < segments.Length; i++)
+{
+    if (segments[i] != "vip")
+    {
+        float[] emb = [e0[i], e1[i], e2[i], e3[i]];
+        float score = TensorPrimitives.CosineSimilarity(emb, riskPattern);
+        activeIds.Add(ids[i]);
+        activeScores.Add(score);
+    }
+}
+
+// Manual rank + project — no schema, no plan, no optimization
+var top = activeIds
+    .Select((id, i) => (Id: id, Score: activeScores[i]))
+    .OrderByDescending(x => x.Score)
+    .Take(100);
+```
+
+**Nivara** — build the query once, inspect the plan, then materialize:
+
+```csharp
+using Nivara.Execution;
+using Nivara.Diagnostics;
+
+// Build a frame with pre-computed embeddings (or load from CSV)
+var customers = NivaraFrame.Create(
+    ("CustomerId", NivaraColumn<string>.CreateForReferenceType(
+        ["C001", "C002", "C003", /* ... ])),
+    ("Segment", NivaraColumn<string>.CreateForReferenceType(
+        ["standard", "vip", "standard", /* ... ])),
+    ("e0", NivaraColumn<float>.Create([0.9f, 0.1f, 0.7f, /* ... ])),
+    ("e1", NivaraColumn<float>.Create([0.2f, 0.9f, 0.1f, /* ... ])),
+    ("e2", NivaraColumn<float>.Create([0.5f, 0.2f, 0.8f, /* ... ])),
+    ("e3", NivaraColumn<float>.Create([0.4f, 0.7f, 0.2f, /* ... ]))
+);
+
+// Step 1: Compute risk scores via tensor interop (Act 4 pattern)
+var embeddings = customers
+    .SelectColumns("e0", "e1", "e2", "e3")
+    .ToTensor<float>();
+
+float[] riskPattern = [0.8f, 0.1f, 0.6f, 0.3f];
+var riskScores = new float[customers.RowCount];
+for (int i = 0; i < customers.RowCount; i++)
+{
+    var row = embeddings.AsSpan().Slice(i * 4, 4);
+    riskScores[i] = TensorPrimitives.CosineSimilarity(row, riskPattern);
+}
+
+var withScores = customers.WithColumn(
+    "RiskScore", NivaraColumn<float>.Create(riskScores));
+
+// Step 2: LINQ-style query — lazy, no data processed yet
+var query = withScores.AsQueryFrame()
+    .Where(x => x["Segment"] != "vip")
+    .OrderByDescending(x => x["RiskScore"])
+    .Select(x => x["CustomerId"], x => x["RiskScore"]);
+
+// Step 3: Inspect the optimized plan before execution
+Console.WriteLine(query.ExplainPlan());
+
+// Step 4: Materialize (default Lazy strategy)
+var topAtRisk = query.ToNivaraFrame();
+```
+
+Sample `ExplainPlan()` output:
+```
+Query Execution Plan:
+├─ Source: MemoryQuerySource
+│  ├─ Schema: CustomerId (String), Segment (String), e0..e3 (Single), RiskScore (Single)
+│  └─ Lazy: False
+├─ Operations:
+│  ├─ 1. Filter
+│  │  └─ Schema: ... (RiskScore removed, not needed after filter)
+│  ├─ 2. Sort
+│  │  └─ Schema: CustomerId (String), RiskScore (Single)
+│  └─ 3. Select
+│     └─ Schema: CustomerId (String), RiskScore (Single)
+└─ Result Schema: CustomerId (String), RiskScore (Single)
+```
+
+You can use Nivara here because the `QueryFrame` separates query construction
+from execution — the chain builds a logical plan (`ToQueryPlan()`) that can be
+inspected, optimized, and run through different execution strategies without
+changing the query itself.
+
+#### 7b. Strategy Switching for Throughput
+
+The same query plan can be executed with different strategies to balance
+throughput and memory. This matters when your customer dataset is hundreds of
+thousands of rows and the scoring pipeline is CPU-bound.
+
+**Python** — pandas is single-threaded; parallel would require Dask or Ray:
+
+```python
+# Sequential only — no built-in strategy switching
+top = active.nlargest(100, "RiskScore")[["CustomerId", "RiskScore"]]
+```
+
+**.NET** — PLINQ adds parallelism but requires manual chunking and diagnostic plumbing:
+
+```csharp
+// PLINQ gives parallelism but no plan inspection or strategy swap
+var top = activeIds.AsParallel()
+    .Select((id, i) => (Id: id, Score: activeScores[i]))
+    .OrderByDescending(x => x.Score)
+    .Take(100)
+    .ToList();
+```
+
+**Nivara** — swap execution strategies via `ExecutionEngine` with integrated diagnostics:
+
+```csharp
+var plan = query.ToQueryPlan();
+var engine = new ExecutionEngine();
+
+// Run with Lazy strategy (default, single-threaded)
+var lazyResult = engine.Execute(plan);
+
+// Run with Parallel strategy (multi-threaded)
+var parallelCtx = new NivaraExecutionContext(ExecutionStrategy.Parallel)
+{
+    MaxDegreeOfParallelism = Environment.ProcessorCount,
+    ExecutionDiagnostics = new ExecutionDiagnostics()
+};
+var parallelResult = engine.Execute(plan, parallelCtx);
+
+// Compare diagnostics
+var report = engine.LastDiagnostics?.GenerateReport();
+Console.WriteLine(report);
+```
+
+Example diagnostics output:
+```
+Execution Diagnostics Report
+============================
+Strategy: Parallel
+Elapsed: 142ms
+Operations: Filter, Sort, Select
+Parallelism: 8 threads
+```
+
+You can use Nivara here because the `ExecutionEngine` decouples *what* to
+compute (the `QueryPlan`) from *how* to execute it (the strategy). Each strategy
+implements the same `IExecutionStrategy` interface — you don't rewrite the query
+to change parallelism or memory behavior. Diagnostics are captured automatically
+via `ExecutionDiagnostics` and exposed through `engine.LastDiagnostics`.
+
+---
+
 ## What We Want Reviewers To React To
 
 - Is the Python → .NET mapping clear enough for engineers coming from a Python/NumPy/pandas background?
@@ -684,9 +1026,12 @@ See the longer sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples
 - Does backing off from tensor math and positioning Nivara as a tabular data layer feel like the right call?
 - Which tabular features add the most value: typed columns, null semantics, schemas, labeled ranking, or file I/O?
 - Is the experimental AutoDiff layer worth keeping as a gradient bridge for Nivara column data?
+- Does Act 6's introduction of plan-time thinking help .NET developers bridge to columnar, deferred-execution workflows?
+- Does Act 7's focus on execution strategies feel like a natural progression from Act 6's QueryFrame basics?
 - What interop scenarios are missing (Microsoft.Extensions.AI, VectorData, Arrow zero-copy, etc.)?
 
 ## Related docs
 
 - [`docs/TENSORS.md`](docs/TENSORS.md) — full positioning discussion
-- [`docs/AUTODIFF-GAPS.md`](docs/AUTODIFF-GAPS.md) — AutoDiff roadmap and gaps
+- [`docs/AUTODIFF-PLAN.md`](docs/AUTODIFF-PLAN.md) — AutoDiff roadmap
+- [`docs/AUTODIFF-GAPS.md`](docs/AUTODIFF-GAPS.md) — AutoDiff known gaps on the roadmap

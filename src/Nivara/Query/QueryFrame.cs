@@ -370,6 +370,16 @@ public sealed class QueryFrame : IDisposable
         return base.GetHashCode();
     }
 
+    /// <summary>
+    /// Extracts the query plan for inspection or custom execution via <see cref="Execution.ExecutionEngine"/>.
+    /// </summary>
+    /// <returns>A QueryPlan representing this query's source and operations</returns>
+    public QueryPlan ToQueryPlan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return new QueryPlan(source, operations);
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

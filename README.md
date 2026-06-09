@@ -76,7 +76,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 ### Query Engine
 - Lazy query construction with true LINQ-like syntax (Where, Select, OrderBy)
 - Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
-- Multiple execution strategies (lazy, eager, streaming, parallel)
+- Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with integrated performance diagnostics
 
 ### Performance
 - Vectorized operations using `System.Numerics.Tensors` for numeric types
@@ -121,7 +121,7 @@ Nivara currently supports:
 - **Null Handling**: Explicit null handling with fill and drop operations, comprehensive null mask tracking
 - **Performance**: Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
 - **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
-- **Query Engine**: Schema-aware lazy query construction with automatic optimization, diagnostics and plan inspection
+- **Query Engine**: Schema-aware lazy query construction with automatic optimization, `OperationType` constants, diagnostics and plan inspection
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
 - **Row Operations**: Filtering with boolean masks, slicing with Take/Skip operations, and arbitrary row range selection
 - **Sorting Operations**: Multi-column sorting with configurable direction, null ordering, and stable sort semantics
@@ -134,7 +134,7 @@ Nivara currently supports:
 - **Parquet I/O**: Full read/write support with compression, streaming, and batch operations (via `Nivara.Extensions`)
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
-- **Performance Optimization**: Buffer pooling, memory management, query optimization engine, and async I/O operations
+- **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics via `ExecutionEngine.LastDiagnostics`
 - **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns, enabling custom loss functions and gradient-based optimization directly on DataFrames (via `Nivara.Extensions`)
 
 ---

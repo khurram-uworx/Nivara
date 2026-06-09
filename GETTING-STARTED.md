@@ -904,6 +904,21 @@ var asyncContext = new ExecutionContext
 };
 
 var asyncResult = await engine.ExecuteAsync(plan, asyncContext);
+
+// Diagnostics integration — wire ExecutionDiagnostics into the context
+var diagnostics = new ExecutionDiagnostics();
+var diagContext = new ExecutionContext
+{
+    Strategy = ExecutionStrategy.Parallel,
+    ExecutionDiagnostics = diagnostics
+};
+
+var diagResult = engine.Execute(plan, diagContext);
+
+// Inspect results after execution
+Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
+// Or use the diagnostics instance directly:
+Console.WriteLine(diagnostics.KernelOperations.Count); // per-operation timings
 ```
 
 ### Error Handling and Diagnostics

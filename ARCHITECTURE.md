@@ -270,7 +270,7 @@ Expressions are **pure** and side-effect free.
 
 ### Execution Strategies
 
-Nivara supports multiple execution strategies via the `Nivara.Execution.ExecutionStrategy` enum:
+Nivara supports multiple execution strategies via the `Nivara.Execution.ExecutionStrategy` enum. All strategies share a common `ExecutionStrategyBase` class that eliminates boilerplate (null checks, cancellation, error wrapping). All four strategies are fully implemented — Parallel and Streaming are no longer placeholders.
 
 #### 1. Lazy (Default)
 - Builds complete query plan before execution
@@ -285,14 +285,15 @@ Nivara supports multiple execution strategies via the `Nivara.Execution.Executio
 - No optimization overhead
 
 #### 3. Streaming
-- Processes data in configurable chunks
+- Processes data in configurable chunks using memory budget
 - Controlled memory usage for large datasets
 - Automatic chunk size calculation
 - Suitable for datasets larger than available memory
+- Falls back to lazy for operations requiring full data (Sort, GroupBy, Join)
 
 #### 4. Parallel
 - Uses multiple threads for CPU-intensive operations
-- Automatic detection of parallelizable operations
+- Automatic detection of parallelizable operations via `IParallelSortOperation`, `IParallelGroupByOperation`, `IParallelJoinOperation`, `IParallelConcatenationOperation`
 - Configurable degree of parallelism
 - Best for compute-heavy workloads on multi-core systems
 
@@ -386,14 +387,14 @@ foreach (var stat in stats)
 
 ### Operation Implementation Pattern
 
-All DataFrame operations implement the `Nivara.Query.IQueryOperation` interface:
+All DataFrame operations implement the `Nivara.Query.IQueryOperation` interface. Operation types are referenced via `OperationType` constants (`OperationType.Filter`, `OperationType.Select`, etc.) instead of magic strings:
 
 ```csharp
 public interface IQueryOperation
 {
     string OperationType { get; }
     Schema TransformSchema(Schema inputSchema);
-    NivaraFrame Execute(NivaraFrame input);
+    IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input);
 }
 ```
 
@@ -677,8 +678,14 @@ var context = new Nivara.Execution.ExecutionContext
     MaxDegreeOfParallelism = Environment.ProcessorCount,
     MemoryBudget = 1024 * 1024 * 1024, // 1GB
     CancellationToken = cancellationToken,
-    Progress = progressReporter
+    Progress = progressReporter,
+    ExecutionDiagnostics = new ExecutionDiagnostics()
 };
+
+// After execution, inspect diagnostics
+var engine = new ExecutionEngine();
+var result = engine.Execute(plan, context);
+Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
 ```
 
 ---
@@ -899,10 +906,15 @@ This appendix summarizes key architecture decisions in concise form. See the rel
 
 ### Execution & Error Handling
 
-- **Execution strategies**: Pluggable strategy pattern (lazy, eager, streaming, parallel).
+- **Execution strategies**: Pluggable strategy pattern (lazy, eager, streaming, parallel) via `IExecutionStrategy` + `ExecutionStrategyBase` base class eliminating boilerplate.
+  - All four strategies are fully implemented (Parallel and Streaming are no longer no-ops).
+  - Parallel execution uses dedicated interfaces (`IParallelSortOperation`, `IParallelGroupByOperation`, `IParallelJoinOperation`, `IParallelConcatenationOperation`) for type-safe dispatch.
+  - Streaming execution processes data in chunks using memory budget, falling back to lazy for full-data operations (Sort, GroupBy, Join).
   - Cost estimation with operation-specific weights.
   - Async-first design with sync wrappers.
   - Intelligent parallel execution heuristics.
+- **Diagnostics integration**: `ExecutionDiagnostics` is wired into the execution pipeline. `NivaraExecutionContext.ExecutionDiagnostics` enables per-execution tracking. `ExecutionEngine.LastDiagnostics` provides post-execution access.
+- **Operation types**: Use `OperationType` constants class instead of magic strings across all operations.
 - **Error handling**: Structured exception hierarchy with query context.
   - Include failed plan and operation references in exceptions.
   - Specific exception types for common failure modes.
