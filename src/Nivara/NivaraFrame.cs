@@ -1192,10 +1192,43 @@ public sealed class NivaraFrame : IFrame
     }
 
     /// <summary>
-    /// Validates schema compatibility between two frames for operations like joins
+    /// Vertically concatenates this frame with another frame with identical schema.
     /// </summary>
-    /// <param name="other">The other frame to validate compatibility with</param>
+    /// <param name="other">The frame to append</param>
+    /// <param name="mismatchHandling">How to handle schema mismatches (default Error)</param>
+    /// <returns>A new frame containing rows from both frames</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    public NivaraFrame Concat(NivaraFrame other, ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.Error)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(other);
+
+        return this.ConcatenateVertical(other, mismatchHandling);
+    }
+
+    /// <summary>
+    /// Vertically concatenates a sequence of frames with identical schema.
+    /// </summary>
+    /// <param name="frames">The frames to concatenate</param>
+    /// <param name="mismatchHandling">How to handle schema mismatches (default Error)</param>
+    /// <returns>A new frame containing rows from all input frames</returns>
+    /// <exception cref="ArgumentNullException">Thrown when frames is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no frames are provided</exception>
+    /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible and mismatchHandling is Error</exception>
+    public static NivaraFrame Concat(IEnumerable<NivaraFrame> frames, ConcatenationMismatchHandling mismatchHandling = ConcatenationMismatchHandling.Error)
+    {
+        ArgumentNullException.ThrowIfNull(frames);
+
+        return NivaraFrameExtensions.ConcatenateVertical(frames, mismatchHandling);
+    }
+
+    /// <summary>
+    /// Validates schema compatibility between this frame and another frame
+    /// </summary>
+    /// <param name="other">The other frame to validate against</param>
     /// <param name="operationName">The name of the operation for error messages</param>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
     /// <exception cref="SchemaValidationException">Thrown when schemas are incompatible</exception>
     public void ValidateSchemaCompatibility(NivaraFrame other, string operationName)
     {

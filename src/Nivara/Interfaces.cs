@@ -38,6 +38,15 @@ public interface IColumn : IDisposable
     /// <returns>true if the element at the specified index is null; otherwise, false</returns>
     /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
     bool IsNull(int index);
+
+    /// <summary>
+    /// Creates a slice of this column containing elements from the specified range
+    /// </summary>
+    /// <param name="start">The starting index of the slice</param>
+    /// <param name="length">The number of elements in the slice</param>
+    /// <returns>A new column representing the slice</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
+    IColumn Slice(int start, int length);
 }
 
 /// <summary>

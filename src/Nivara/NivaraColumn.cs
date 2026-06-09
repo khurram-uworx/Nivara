@@ -2190,6 +2190,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         return new NivaraColumn<T>(slicedStorage);
     }
 
+    IColumn IColumn.Slice(int start, int length) => Slice(start, length);
+
     // Tensor<T> Conversion
 
     /// <summary>

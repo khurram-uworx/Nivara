@@ -44,9 +44,9 @@ static class ParallelExecutionHelper
         await Parallel.ForEachAsync(chunks, parallelOptions, async (chunk, ct) =>
         {
             ct.ThrowIfCancellationRequested();
-            var result = await Task.Run(() => processor(chunk), ct);
+            var result = await Task.Run(() => processor(chunk), ct).ConfigureAwait(false);
             results.Add(result);
-        });
+        }).ConfigureAwait(false);
 
         return results;
     }
@@ -81,9 +81,9 @@ static class ParallelExecutionHelper
         await Parallel.ForEachAsync(columns, parallelOptions, async (kvp, ct) =>
         {
             ct.ThrowIfCancellationRequested();
-            var processedColumn = await Task.Run(() => operation(kvp.Value), ct);
+            var processedColumn = await Task.Run(() => operation(kvp.Value), ct).ConfigureAwait(false);
             results.TryAdd(kvp.Key, processedColumn);
-        });
+        }).ConfigureAwait(false);
 
         return results;
     }
@@ -176,9 +176,9 @@ static class ParallelExecutionHelper
         await Parallel.ForEachAsync(chunks, parallelOptions, async (chunk, ct) =>
         {
             ct.ThrowIfCancellationRequested();
-            var partialResult = await Task.Run(() => aggregator(chunk), ct);
+            var partialResult = await Task.Run(() => aggregator(chunk), ct).ConfigureAwait(false);
             partialResults.Add(partialResult);
-        });
+        }).ConfigureAwait(false);
 
         // Combine all partial results
         return partialResults.Aggregate(combiner);
@@ -233,16 +233,10 @@ static class ParallelExecutionHelper
     }
 
     /// <summary>
-    /// Slices a single column via reflection to call the typed Slice method
+    /// Slices a single column by delegating to <see cref="IColumn.Slice"/>
     /// </summary>
     public static IColumn SliceColumn(IColumn column, int start, int length)
-    {
-        var sliceMethod = column.GetType().GetMethod("Slice", new[] { typeof(int), typeof(int) });
-        if (sliceMethod != null)
-            return (IColumn)sliceMethod.Invoke(column, new object[] { start, length })!;
-
-        throw new NotSupportedException($"Column type {column.GetType().Name} does not support Slice");
-    }
+        => column.Slice(start, length);
 
     /// <summary>
     /// Creates a list of chunk ranges for splitting work across parallel workers

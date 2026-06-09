@@ -50,7 +50,7 @@ public class ParallelExecutionStrategyTests
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Parallel);
 
         var ex = Assert.Throws<QueryExecutionException>(() => strategy.Execute(plan, context));
-        Assert.That(ex!.Message, Does.Contain("no columns"));
+        Assert.That(ex!.Message, Does.Contain("Frame must contain at least one column"));
     }
 
     [Test]

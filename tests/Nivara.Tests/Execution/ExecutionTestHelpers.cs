@@ -102,16 +102,18 @@ sealed class ParallelTrackingOperation : IQueryOperation
 sealed class StubChunkedQuerySource : IQuerySource
 {
     readonly int totalRowCount;
+    readonly int? estimatedRowCount;
 
-    public StubChunkedQuerySource(int totalRowCount = 2000)
+    public StubChunkedQuerySource(int totalRowCount = 2000, int? estimatedRowCount = null)
     {
         this.totalRowCount = totalRowCount;
+        this.estimatedRowCount = estimatedRowCount;
     }
 
     public Schema Schema => new(new[] { ("A", typeof(int)) });
     public bool IsLazy => false;
     public bool CanReadInChunks => true;
-    public int? EstimatedRowCount => totalRowCount;
+    public int? EstimatedRowCount => estimatedRowCount ?? totalRowCount;
 
     public ConcurrentBag<int> ChunksRead { get; } = new();
 
@@ -127,7 +129,10 @@ sealed class StubChunkedQuerySource : IQuerySource
     {
         cancellationToken.ThrowIfCancellationRequested();
         ChunksRead.Add(chunkIndex);
+        await Task.Yield();
         var start = chunkIndex * chunkSize;
+        if (start >= totalRowCount)
+            return new Dictionary<string, IColumn>(0);
         var length = Math.Min(chunkSize, totalRowCount - start);
         var data = new int[length];
         for (int i = 0; i < length; i++) data[i] = start + i;
@@ -184,5 +189,20 @@ static class ExecutionTestHelpers
             ["X"] = NivaraColumn<int>.Create(new[] { 1, 2 }),
             ["Y"] = NivaraColumn<double>.Create(new[] { 1.5, 2.5 }),
         };
+    }
+
+    public static StubChunkedQuerySource CreateLargeChunkedSource(int rowCount, int? estimatedRowCount = null)
+    {
+        return new StubChunkedQuerySource(rowCount, estimatedRowCount);
+    }
+
+    public static QueryPlan CreateChunkedTestPlan(
+        int sourceRowCount = 2000,
+        IEnumerable<IQueryOperation>? operations = null,
+        int? estimatedRowCount = null)
+    {
+        var source = CreateLargeChunkedSource(sourceRowCount, estimatedRowCount);
+        operations ??= new[] { new StubQueryOperation("Filter") };
+        return new QueryPlan(source, operations);
     }
 }

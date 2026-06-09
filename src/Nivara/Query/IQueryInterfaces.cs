@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+
 namespace Nivara.Query;
 
 public interface IQueryOperation<T>
@@ -28,4 +30,25 @@ public interface IQuerySource : IDisposable
     ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
         int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("This source does not support chunked reading.");
+
+    async IAsyncEnumerable<IReadOnlyDictionary<string, IColumn>> ToAsyncEnumerable(
+        int chunkSize, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (!CanReadInChunks)
+            throw new NotSupportedException("This source does not support chunked reading.");
+
+        var estimated = EstimatedRowCount;
+        int maxChunks = estimated.HasValue
+            ? (int)((estimated.Value + chunkSize - 1) / chunkSize)
+            : int.MaxValue;
+
+        for (int chunkIndex = 0; chunkIndex < maxChunks; chunkIndex++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var chunk = await ReadChunkAsync(chunkIndex, chunkSize, cancellationToken).ConfigureAwait(false);
+            if (chunk == null || chunk.Count == 0 || chunk.Values.All(c => c.Length == 0))
+                yield break;
+            yield return chunk;
+        }
+    }
 }

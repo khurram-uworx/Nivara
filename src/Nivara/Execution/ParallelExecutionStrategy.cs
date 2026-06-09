@@ -1,7 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Operations;
 using Nivara.Query;
-using System.Collections.Concurrent;
 
 namespace Nivara.Execution;
 
@@ -182,21 +181,21 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             .Select(expr => GetColumnName(expr, input))
             .ToArray();
 
-        var partialMaps = new ConcurrentBag<Dictionary<GroupKey, List<int>>>();
+        var partialMaps = new Dictionary<GroupKey, List<int>>[ranges.Count];
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxDop,
             CancellationToken = cancellationToken
         };
 
-        Parallel.ForEach(ranges, parallelOptions, range =>
+        Parallel.ForEach(ranges, parallelOptions, (range, _, index) =>
         {
             var subset = ParallelExecutionHelper.CreateRowSubset(input, range.Start, range.Length);
             var groupedData = GroupByOperation.CreateGroupsInternal(subset, keyColumnNames, range.Start);
-            partialMaps.Add(groupedData.Groups);
+            partialMaps[(int)index] = groupedData.Groups;
         });
 
-        var mergedMap = ParallelExecutionHelper.MergeGroupByDictionaries(partialMaps.ToArray());
+        var mergedMap = ParallelExecutionHelper.MergeGroupByDictionaries(partialMaps);
         var mergedGroupedData = new GroupedData(mergedMap, keyColumnNames, input);
 
         var resultColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
@@ -225,14 +224,13 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         if (ranges.Count <= 1)
             return operation.Execute(new Dictionary<string, IColumn>());
 
-        var partialMaps = new ConcurrentBag<Dictionary<CompositeKey, List<int>>>();
+        var results = new Dictionary<CompositeKey, List<int>>[ranges.Count];
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxDop,
             CancellationToken = cancellationToken
         };
 
-        var results = new Dictionary<CompositeKey, List<int>>[ranges.Count];
         Parallel.ForEach(ranges, parallelOptions, (range, _, index) =>
         {
             var subset = ParallelExecutionHelper.CreateRowSubset(rightColumns, range.Start, range.Length);
@@ -261,7 +259,6 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
                 foreach (var key in source.Keys)
                     allColumnNames.Add(key);
 
-            var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
             var columnList = allColumnNames.ToList();
 
             var parallelOptions = new ParallelOptions
@@ -270,9 +267,9 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
                 CancellationToken = cancellationToken
             };
 
-            var columnResults = new ConcurrentBag<(string Name, IColumn Column)>();
+            var columnResults = new (string Name, IColumn Column)[columnList.Count];
 
-            Parallel.ForEach(columnList, parallelOptions, columnName =>
+            Parallel.ForEach(columnList, parallelOptions, (columnName, _, index) =>
             {
                 var columnsToConcat = new List<IColumn>();
                 foreach (var source in allSources)
@@ -297,12 +294,14 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
                 if (columnsToConcat.Count > 0)
                 {
                     var concatenated = ConcatenationOperation.ConcatenateColumns(columnsToConcat);
-                    columnResults.Add((columnName, concatenated));
+                    columnResults[(int)index] = (columnName, concatenated);
                 }
             });
 
+            var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
             foreach (var (name, column) in columnResults)
-                result[name] = column;
+                if (column != null)
+                    result[name] = column;
 
             return result;
         }
@@ -335,7 +334,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         NivaraExecutionContext context)
     {
         if (!isParallelizable(operation.OperationType) || !shouldUseParallelism(input, context))
-            return await Task.Run(() => operation.Execute(input), context.CancellationToken);
+            return await Task.Run(() => operation.Execute(input), context.CancellationToken).ConfigureAwait(false);
 
         var totalRows = input.Values.FirstOrDefault()?.Length ?? 0;
         var maxDop = ParallelExecutionHelper.GetRecommendedParallelism(context.MaxDegreeOfParallelism);
@@ -343,46 +342,44 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         var ranges = ParallelExecutionHelper.CreateChunkRanges(totalRows, chunkSize);
 
         if (ranges.Count <= 1)
-            return await Task.Run(() => operation.Execute(input), context.CancellationToken);
+            return await Task.Run(() => operation.Execute(input), context.CancellationToken).ConfigureAwait(false);
 
         var opType = operation.OperationType;
         if (opType == "Filter")
-            return await executeFilterParallelAsync(operation, input, ranges, maxDop, context.CancellationToken);
+            return executeFilterParallelAsync(operation, input, ranges, maxDop, context.CancellationToken);
         if (opType == "Sort")
-            return await Task.Run(() => executeSortParallelSync((SortOperation)operation, input, ranges, maxDop, context.CancellationToken), context.CancellationToken);
+            return await Task.Run(() => executeSortParallelSync((SortOperation)operation, input, ranges, maxDop, context.CancellationToken), context.CancellationToken).ConfigureAwait(false);
         if (opType == "GroupBy")
-            return await executeGroupByParallelAsync((GroupByOperation)operation, input, ranges, maxDop, context.CancellationToken);
+            return executeGroupByParallelAsync((GroupByOperation)operation, input, ranges, maxDop, context.CancellationToken);
         if (opType == "Join")
-            return await executeJoinParallelAsync((JoinOperation)operation, maxDop, context.CancellationToken);
+            return executeJoinParallelAsync((JoinOperation)operation, maxDop, context.CancellationToken);
         if (opType.StartsWith("Concatenate", StringComparison.Ordinal))
-            return await executeConcatenationParallelAsync((ConcatenationOperation)operation, input, maxDop, context.CancellationToken);
+            return executeConcatenationParallelAsync((ConcatenationOperation)operation, input, maxDop, context.CancellationToken);
 
-        return await Task.Run(() => operation.Execute(input), context.CancellationToken);
+        return await Task.Run(() => operation.Execute(input), context.CancellationToken).ConfigureAwait(false);
     }
 
-    async Task<IReadOnlyDictionary<string, IColumn>> executeFilterParallelAsync(
+    IReadOnlyDictionary<string, IColumn> executeFilterParallelAsync(
         IQueryOperation operation, IReadOnlyDictionary<string, IColumn> input,
         List<(int Start, int Length)> ranges, int maxDop, CancellationToken cancellationToken)
     {
         var kernel = createSliceExecuteKernel(operation);
         var results = new IReadOnlyDictionary<string, IColumn>[ranges.Count];
-        var indexedRanges = ranges.Select((r, i) => (r.Start, r.Length, Index: i)).ToList();
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxDop,
             CancellationToken = cancellationToken
         };
 
-        await Parallel.ForEachAsync(indexedRanges, parallelOptions, (item, ct) =>
+        Parallel.ForEach(ranges, parallelOptions, (range, _, index) =>
         {
-            results[item.Index] = kernel(item.Start, item.Length, input);
-            return ValueTask.CompletedTask;
+            results[(int)index] = kernel(range.Start, range.Length, input);
         });
 
         return ParallelExecutionHelper.ConcatenateColumnDictionaries(results);
     }
 
-    async Task<IReadOnlyDictionary<string, IColumn>> executeGroupByParallelAsync(
+    IReadOnlyDictionary<string, IColumn> executeGroupByParallelAsync(
         GroupByOperation operation, IReadOnlyDictionary<string, IColumn> input,
         List<(int Start, int Length)> ranges, int maxDop, CancellationToken cancellationToken)
     {
@@ -390,22 +387,21 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             .Select(expr => GetColumnName(expr, input))
             .ToArray();
 
-        var partialMaps = new ConcurrentBag<Dictionary<GroupKey, List<int>>>();
+        var results = new Dictionary<GroupKey, List<int>>[ranges.Count];
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxDop,
             CancellationToken = cancellationToken
         };
 
-        await Parallel.ForEachAsync(ranges, parallelOptions, (range, ct) =>
+        Parallel.ForEach(ranges, parallelOptions, (range, _, index) =>
         {
             var subset = ParallelExecutionHelper.CreateRowSubset(input, range.Start, range.Length);
-            var groupedData = GroupByOperation.CreateGroupsInternal(subset, keyColumnNames);
-            partialMaps.Add(groupedData.Groups);
-            return ValueTask.CompletedTask;
+            var groupedData = GroupByOperation.CreateGroupsInternal(subset, keyColumnNames, range.Start);
+            results[(int)index] = groupedData.Groups;
         });
 
-        var mergedMap = ParallelExecutionHelper.MergeGroupByDictionaries(partialMaps.ToArray());
+        var mergedMap = ParallelExecutionHelper.MergeGroupByDictionaries(results);
         var mergedGroupedData = new GroupedData(mergedMap, keyColumnNames, input);
 
         var resultColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
@@ -418,7 +414,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         return resultColumns;
     }
 
-    async Task<IReadOnlyDictionary<string, IColumn>> executeJoinParallelAsync(
+    IReadOnlyDictionary<string, IColumn> executeJoinParallelAsync(
         JoinOperation operation, int maxDop, CancellationToken cancellationToken)
     {
         var rightColumns = operation.RightColumns;
@@ -426,97 +422,92 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         var rightKeyColumns = operation.JoinKeys.Select(jk => jk.RightColumn).ToArray();
 
         if (rightRowCount <= 1)
-            return await Task.Run(() => operation.Execute(new Dictionary<string, IColumn>()), cancellationToken);
+            return operation.Execute(new Dictionary<string, IColumn>());
 
         var chunkSize = ParallelExecutionHelper.CalculateOptimalChunkSize(rightRowCount, maxDop);
         var ranges = ParallelExecutionHelper.CreateChunkRanges(rightRowCount, chunkSize);
 
         if (ranges.Count <= 1)
-            return await Task.Run(() => operation.Execute(new Dictionary<string, IColumn>()), cancellationToken);
+            return operation.Execute(new Dictionary<string, IColumn>());
 
-        var partialMaps = new ConcurrentBag<Dictionary<CompositeKey, List<int>>>();
+        var results = new Dictionary<CompositeKey, List<int>>[ranges.Count];
         var parallelOptions = new ParallelOptions
         {
             MaxDegreeOfParallelism = maxDop,
             CancellationToken = cancellationToken
         };
 
-        var indexedRanges = ranges.Select((r, i) => (r.Start, r.Length, Index: i)).ToList();
-        await Parallel.ForEachAsync(indexedRanges, parallelOptions, (item, ct) =>
+        Parallel.ForEach(ranges, parallelOptions, (range, _, index) =>
         {
-            var subset = ParallelExecutionHelper.CreateRowSubset(rightColumns, item.Start, item.Length);
+            var subset = ParallelExecutionHelper.CreateRowSubset(rightColumns, range.Start, range.Length);
             var subRowCount = subset.Values.FirstOrDefault()?.Length ?? 0;
-            var partialMap = JoinOperation.BuildHashMap(subset, rightKeyColumns, subRowCount, item.Start);
-            partialMaps.Add(partialMap);
-            return ValueTask.CompletedTask;
+            results[(int)index] = JoinOperation.BuildHashMap(subset, rightKeyColumns, subRowCount, range.Start);
         });
 
-        var mergedMap = ParallelExecutionHelper.MergeJoinHashMaps(partialMaps.ToArray());
+        var mergedMap = ParallelExecutionHelper.MergeJoinHashMaps(results);
 
         var joinIndices = operation.ComputeJoinIndicesWithHashMap(mergedMap);
         return operation.MaterializeResult(joinIndices);
     }
 
-    async Task<IReadOnlyDictionary<string, IColumn>> executeConcatenationParallelAsync(
+    IReadOnlyDictionary<string, IColumn> executeConcatenationParallelAsync(
         ConcatenationOperation operation, IReadOnlyDictionary<string, IColumn> input,
         int maxDop, CancellationToken cancellationToken)
     {
         var allSources = new List<IReadOnlyDictionary<string, IColumn>> { input };
         allSources.AddRange(operation.Sources);
 
-        if (operation.Direction == ConcatenationDirection.Vertical)
+        if (operation.Direction != ConcatenationDirection.Vertical)
+            return operation.Execute(input);
+
+        var allColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in allSources)
+            foreach (var key in source.Keys)
+                allColumnNames.Add(key);
+
+        var columnList = allColumnNames.ToList();
+        var columnResults = new (string Name, IColumn Column)[columnList.Count];
+
+        var parallelOptions = new ParallelOptions
         {
-            var allColumnNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            MaxDegreeOfParallelism = maxDop,
+            CancellationToken = cancellationToken
+        };
+
+        Parallel.ForEach(columnList, parallelOptions, (columnName, _, index) =>
+        {
+            var columnsToConcat = new List<IColumn>();
             foreach (var source in allSources)
-                foreach (var key in source.Keys)
-                    allColumnNames.Add(key);
-
-            var columnList = allColumnNames.ToList();
-            var columnResults = new ConcurrentBag<(string Name, IColumn Column)>();
-
-            var parallelOptions = new ParallelOptions
             {
-                MaxDegreeOfParallelism = maxDop,
-                CancellationToken = cancellationToken
-            };
-
-            await Parallel.ForEachAsync(columnList, parallelOptions, (columnName, ct) =>
-            {
-                var columnsToConcat = new List<IColumn>();
-                foreach (var source in allSources)
+                if (source.TryGetValue(columnName, out var col))
+                    columnsToConcat.Add(col);
+                else if (operation.MismatchHandling == ConcatenationMismatchHandling.FillWithNulls)
                 {
-                    if (source.TryGetValue(columnName, out var col))
-                        columnsToConcat.Add(col);
-                    else if (operation.MismatchHandling == ConcatenationMismatchHandling.FillWithNulls)
+                    var sourceLength = source.Values.FirstOrDefault()?.Length ?? 0;
+                    if (sourceLength > 0)
                     {
-                        var sourceLength = source.Values.FirstOrDefault()?.Length ?? 0;
-                        if (sourceLength > 0)
+                        var referenceColumn = GetReferenceColumn(allSources, columnName);
+                        if (referenceColumn != null)
                         {
-                            var referenceColumn = GetReferenceColumn(allSources, columnName);
-                            if (referenceColumn != null)
-                            {
-                                var nullCol = operation.CreateNullColumn(referenceColumn.ElementType, sourceLength);
-                                columnsToConcat.Add(nullCol);
-                            }
+                            var nullCol = operation.CreateNullColumn(referenceColumn.ElementType, sourceLength);
+                            columnsToConcat.Add(nullCol);
                         }
                     }
                 }
+            }
 
-                if (columnsToConcat.Count > 0)
-                {
-                    var concatenated = ConcatenationOperation.ConcatenateColumns(columnsToConcat);
-                    columnResults.Add((columnName, concatenated));
-                }
-                return ValueTask.CompletedTask;
-            });
+            if (columnsToConcat.Count > 0)
+            {
+                var concatenated = ConcatenationOperation.ConcatenateColumns(columnsToConcat);
+                columnResults[(int)index] = (columnName, concatenated);
+            }
+        });
 
-            var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-            foreach (var (name, column) in columnResults)
+        var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (name, column) in columnResults)
+            if (column != null)
                 result[name] = column;
-            return result;
-        }
-
-        return await Task.Run(() => operation.Execute(input), cancellationToken);
+        return result;
     }
 
     // ── Chunked source reading ──
@@ -525,20 +516,20 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         IQuerySource source, NivaraExecutionContext context)
     {
         if (!source.CanReadInChunks)
-            return await source.ExecuteAsync(context.CancellationToken);
+            return await source.ExecuteAsync(context.CancellationToken).ConfigureAwait(false);
 
         var estimatedCount = source.EstimatedRowCount;
         if (estimatedCount == null || estimatedCount.Value <= 0)
-            return await source.ExecuteAsync(context.CancellationToken);
+            return await source.ExecuteAsync(context.CancellationToken).ConfigureAwait(false);
 
         var maxDop = ParallelExecutionHelper.GetRecommendedParallelism(context.MaxDegreeOfParallelism);
         var chunkSize = ParallelExecutionHelper.CalculateOptimalChunkSize(estimatedCount.Value, maxDop);
         var totalChunks = (estimatedCount.Value + chunkSize - 1) / chunkSize;
 
         if (totalChunks <= 1)
-            return await source.ExecuteAsync(context.CancellationToken);
+            return await source.ExecuteAsync(context.CancellationToken).ConfigureAwait(false);
 
-        var chunkResults = new ConcurrentBag<(int Index, IReadOnlyDictionary<string, IColumn> Data)>();
+        var chunkResults = new IReadOnlyDictionary<string, IColumn>[totalChunks];
 
         await Parallel.ForEachAsync(
             Enumerable.Range(0, totalChunks),
@@ -549,12 +540,11 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             },
             async (chunkIndex, ct) =>
             {
-                var chunkData = await source.ReadChunkAsync(chunkIndex, chunkSize, ct);
-                chunkResults.Add((chunkIndex, chunkData));
-            });
+                var chunkData = await source.ReadChunkAsync(chunkIndex, chunkSize, ct).ConfigureAwait(false);
+                chunkResults[chunkIndex] = chunkData;
+            }).ConfigureAwait(false);
 
-        var ordered = chunkResults.OrderBy(c => c.Index).Select(c => c.Data).ToList();
-        return ParallelExecutionHelper.ConcatenateColumnDictionaries(ordered);
+        return ParallelExecutionHelper.ConcatenateColumnDictionaries(chunkResults);
     }
 
     // ── Overrides ──
@@ -562,48 +552,20 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
     protected override string StrategyName => "Parallel";
 
     protected override NivaraFrame ExecuteCore(QueryPlan plan, NivaraExecutionContext context)
-    {
-        context.CancellationToken.ThrowIfCancellationRequested();
-        validateParallelismConfiguration(context);
-
-        ReportProgress(context, "Starting sync parallel execution", 0, plan.Operations.Count + 1);
-
-        var currentColumns = plan.Source.Execute();
-        ReportProgress(context, "Data source executed", 1, plan.Operations.Count + 1);
-
-        for (int i = 0; i < plan.Operations.Count; i++)
-        {
-            var operation = plan.Operations[i];
-            context.CancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                currentColumns = executeOperationParallelSync(operation, currentColumns, context);
-                ReportProgress(context, $"Operation {operation.OperationType} completed", i + 2, plan.Operations.Count + 1);
-            }
-            catch (Exception ex) when (ex is not QueryExecutionException)
-            {
-                throw new QueryExecutionException(
-                    $"Sync parallel execution failed at operation '{operation.OperationType}' (position {i + 1}): {ex.Message}",
-                    operation.OperationType,
-                    ex);
-            }
-        }
-
-        if (currentColumns.Count == 0)
-            throw new QueryExecutionException("Sync parallel execution resulted in no columns");
-
-        var namedColumns = currentColumns.Select(kvp => (kvp.Key, kvp.Value));
-        return new NivaraFrame(namedColumns);
-    }
+        => Task.Run(() => executeCoreInternalAsync(plan, context, "Sync parallel execution", "Starting sync parallel execution"), context.CancellationToken).GetAwaiter().GetResult();
 
     protected override async Task<NivaraFrame> ExecuteCoreAsync(QueryPlan plan, NivaraExecutionContext context)
+        => await executeCoreInternalAsync(plan, context, "Async parallel execution", "Starting async parallel execution").ConfigureAwait(false);
+
+    async Task<NivaraFrame> executeCoreInternalAsync(
+        QueryPlan plan, NivaraExecutionContext context, string errorPrefix, string startMessage)
     {
         context.CancellationToken.ThrowIfCancellationRequested();
         validateParallelismConfiguration(context);
 
-        ReportProgress(context, "Starting async parallel execution", 0, plan.Operations.Count + 1);
+        ReportProgress(context, startMessage, 0, plan.Operations.Count + 1);
 
-        var currentColumns = await readSourceAsync(plan.Source, context);
+        var currentColumns = await readSourceAsync(plan.Source, context).ConfigureAwait(false);
         ReportProgress(context, "Data source executed", 1, plan.Operations.Count + 1);
 
         for (int i = 0; i < plan.Operations.Count; i++)
@@ -612,20 +574,17 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             context.CancellationToken.ThrowIfCancellationRequested();
             try
             {
-                currentColumns = await executeOperationParallelAsync(operation, currentColumns, context);
+                currentColumns = await executeOperationParallelAsync(operation, currentColumns, context).ConfigureAwait(false);
                 ReportProgress(context, $"Operation {operation.OperationType} completed", i + 2, plan.Operations.Count + 1);
             }
             catch (Exception ex) when (ex is not QueryExecutionException)
             {
                 throw new QueryExecutionException(
-                    $"Async parallel execution failed at operation '{operation.OperationType}' (position {i + 1}): {ex.Message}",
+                    $"{errorPrefix} at operation '{operation.OperationType}' (position {i + 1}): {ex.Message}",
                     operation.OperationType,
                     ex);
             }
         }
-
-        if (currentColumns.Count == 0)
-            throw new QueryExecutionException("Async parallel execution resulted in no columns");
 
         var namedColumns = currentColumns.Select(kvp => (kvp.Key, kvp.Value));
         return new NivaraFrame(namedColumns);
