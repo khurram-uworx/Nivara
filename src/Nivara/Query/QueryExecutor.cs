@@ -5,8 +5,19 @@ namespace Nivara.Query;
 /// <summary>
 /// Executes query plans by applying operations to data sources
 /// </summary>
-internal sealed class QueryExecutor
+sealed class QueryExecutor
 {
+    /// <summary>
+    /// Creates a schema from a collection of columns
+    /// </summary>
+    /// <param name="columns">The columns to create schema from</param>
+    /// <returns>A schema representing the columns</returns>
+    private static Schema createSchemaFromColumns(IReadOnlyDictionary<string, IColumn> columns)
+    {
+        var schemaColumns = columns.Select(kvp => (kvp.Key, kvp.Value.ElementType));
+        return new Schema(schemaColumns);
+    }
+
     /// <summary>
     /// Executes a query plan and returns the materialized result
     /// </summary>
@@ -54,7 +65,7 @@ internal sealed class QueryExecutor
                 try
                 {
                     // Validate operation against current schema
-                    var currentSchema = CreateSchemaFromColumns(currentColumns);
+                    var currentSchema = createSchemaFromColumns(currentColumns);
                     var transformedSchema = operation.TransformSchema(currentSchema);
 
                     currentColumns = operation.Execute(currentColumns);
@@ -66,7 +77,7 @@ internal sealed class QueryExecutor
                     }
 
                     // Validate that the operation produced the expected schema
-                    var actualSchema = CreateSchemaFromColumns(currentColumns);
+                    var actualSchema = createSchemaFromColumns(currentColumns);
                     if (!actualSchema.IsCompatibleWith(transformedSchema, requireExactMatch: false))
                     {
                         throw new QueryExecutionException(
@@ -194,16 +205,5 @@ internal sealed class QueryExecutor
         {
             return int.MaxValue; // Return maximum cost if estimation fails
         }
-    }
-
-    /// <summary>
-    /// Creates a schema from a collection of columns
-    /// </summary>
-    /// <param name="columns">The columns to create schema from</param>
-    /// <returns>A schema representing the columns</returns>
-    private static Schema CreateSchemaFromColumns(IReadOnlyDictionary<string, IColumn> columns)
-    {
-        var schemaColumns = columns.Select(kvp => (kvp.Key, kvp.Value.ElementType));
-        return new Schema(schemaColumns);
     }
 }

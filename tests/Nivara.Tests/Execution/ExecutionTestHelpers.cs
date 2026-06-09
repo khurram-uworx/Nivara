@@ -1,5 +1,4 @@
 using Nivara.Execution;
-using Nivara.Exceptions;
 using Nivara.Query;
 
 namespace Nivara.Tests.Execution;

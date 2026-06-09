@@ -1,6 +1,4 @@
-using Nivara.Exceptions;
 using Nivara.Execution;
-using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Execution;

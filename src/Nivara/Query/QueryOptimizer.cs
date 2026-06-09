@@ -5,16 +5,16 @@ namespace Nivara.Query;
 /// <summary>
 /// Optimizes query plans by applying various optimization techniques
 /// </summary>
-internal sealed class QueryOptimizer
+sealed class QueryOptimizer
 {
-    private readonly OptimizationEngine _engine;
+    readonly OptimizationEngine engine;
 
     /// <summary>
     /// Initializes a new instance of QueryOptimizer with default optimization rules
     /// </summary>
     public QueryOptimizer()
     {
-        _engine = OptimizationEngine.CreateDefault();
+        engine = OptimizationEngine.CreateDefault();
     }
 
     /// <summary>
@@ -23,13 +23,13 @@ internal sealed class QueryOptimizer
     /// <param name="engine">The optimization engine to use</param>
     public QueryOptimizer(OptimizationEngine engine)
     {
-        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        this.engine = engine ?? throw new ArgumentNullException(nameof(engine));
     }
 
     /// <summary>
     /// Gets the optimization engine used by this optimizer
     /// </summary>
-    public OptimizationEngine Engine => _engine;
+    public OptimizationEngine Engine => engine;
 
     /// <summary>
     /// Optimizes a query plan by applying optimization rules
@@ -44,7 +44,7 @@ internal sealed class QueryOptimizer
 
         try
         {
-            var result = _engine.Optimize(plan);
+            var result = engine.Optimize(plan);
             return result.OptimizedPlan;
         }
         catch (Exception)
@@ -68,7 +68,7 @@ internal sealed class QueryOptimizer
 
         try
         {
-            return _engine.Optimize(plan);
+            return engine.Optimize(plan);
         }
         catch (Exception)
         {
