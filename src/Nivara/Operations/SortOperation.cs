@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Execution;
 using Nivara.Query;
 
 namespace Nivara.Operations;
@@ -87,7 +88,7 @@ public sealed class SortKey
 /// <summary>
 /// Represents a sort operation that orders rows by one or more columns
 /// </summary>
-sealed class SortOperation : IQueryOperation
+sealed class SortOperation : IQueryOperation, IParallelSortOperation
 {
     readonly List<SortKey> sortKeys;
     readonly bool stable;
@@ -358,7 +359,7 @@ sealed class SortOperation : IQueryOperation
 /// <summary>
 /// Comparer that handles multiple sort keys with proper null handling
 /// </summary>
-sealed class MultiColumnComparer : IComparer<int>
+public sealed class MultiColumnComparer : IComparer<int>
 {
     /// <summary>
     /// Compares two values from a column at the specified indices
@@ -396,9 +397,9 @@ sealed class MultiColumnComparer : IComparer<int>
     }
 
     readonly IReadOnlyDictionary<string, IColumn> columns;
-    readonly List<SortKey> sortKeys;
+    readonly IReadOnlyList<SortKey> sortKeys;
 
-    public MultiColumnComparer(IReadOnlyDictionary<string, IColumn> columns, List<SortKey> sortKeys)
+    public MultiColumnComparer(IReadOnlyDictionary<string, IColumn> columns, IReadOnlyList<SortKey> sortKeys)
     {
         this.columns = columns;
         this.sortKeys = sortKeys;

@@ -4,17 +4,39 @@ using System.Diagnostics;
 namespace Nivara.Diagnostics;
 
 /// <summary>
+/// Defines the severity levels for performance warnings
+/// </summary>
+public enum PerformanceWarningSeverity
+{
+    /// <summary>
+    /// Informational message about performance characteristics
+    /// </summary>
+    Info,
+
+    /// <summary>
+    /// Warning about potential performance issues
+    /// </summary>
+    Warning,
+
+    /// <summary>
+    /// Critical performance issue that should be addressed
+    /// </summary>
+    Critical
+}
+
+/// <summary>
 /// Provides comprehensive diagnostic information about query execution,
 /// including timing, memory usage, and performance analysis.
 /// </summary>
 public sealed class ExecutionDiagnostics
 {
-    private readonly List<OperationTiming> operationTimings = new();
-    private readonly List<PerformanceWarning> warnings = new();
-    private readonly List<OptimizationApplied> optimizationsApplied = new();
-    private readonly Stopwatch totalTimer = new();
-    private long initialMemory;
-    private long peakMemoryUsage;
+    readonly List<OperationTiming> operationTimings = new();
+    readonly List<PerformanceWarning> warnings = new();
+    readonly List<OptimizationApplied> optimizationsApplied = new();
+    readonly List<OperationDiagnostics> kernelOperations = new();
+    readonly Stopwatch totalTimer = new();
+    long initialMemory;
+    long peakMemoryUsage;
 
     /// <summary>
     /// Initializes a new instance of ExecutionDiagnostics
@@ -27,6 +49,66 @@ public sealed class ExecutionDiagnostics
     }
 
     /// <summary>
+    /// Updates the peak memory usage tracking
+    /// </summary>
+    void updateMemoryUsage()
+    {
+        var currentMemory = GC.GetTotalMemory(false);
+        if (currentMemory > peakMemoryUsage)
+            peakMemoryUsage = currentMemory;
+    }
+
+    /// <summary>
+    /// Starts execution timing
+    /// </summary>
+    internal void StartExecution()
+    {
+        totalTimer.Start();
+        updateMemoryUsage();
+    }
+
+    /// <summary>
+    /// Ends execution timing
+    /// </summary>
+    internal void EndExecution()
+    {
+        totalTimer.Stop();
+        EndTime = DateTime.UtcNow;
+        updateMemoryUsage();
+    }
+
+    /// <summary>
+    /// Records timing for a specific operation
+    /// </summary>
+    /// <param name="operationType">The type of operation</param>
+    /// <param name="duration">The duration of the operation</param>
+    /// <param name="rowsProcessed">The number of rows processed</param>
+    /// <param name="memoryUsed">The memory used by the operation</param>
+    internal void RecordOperationTiming(string operationType, TimeSpan duration, long rowsProcessed, long memoryUsed)
+    {
+        operationTimings.Add(new OperationTiming(operationType, duration, rowsProcessed, memoryUsed));
+        updateMemoryUsage();
+    }
+
+    /// <summary>
+    /// Records a performance warning
+    /// </summary>
+    /// <param name="warning">The performance warning to record</param>
+    internal void RecordWarning(PerformanceWarning warning)
+    {
+        warnings.Add(warning);
+    }
+
+    /// <summary>
+    /// Records an applied optimization
+    /// </summary>
+    /// <param name="optimization">The optimization that was applied</param>
+    internal void RecordOptimization(OptimizationApplied optimization)
+    {
+        optimizationsApplied.Add(optimization);
+    }
+
+    /// <summary>
     /// Gets the start time of execution
     /// </summary>
     public DateTime StartTime { get; }
@@ -34,7 +116,7 @@ public sealed class ExecutionDiagnostics
     /// <summary>
     /// Gets the end time of execution, if completed
     /// </summary>
-    public DateTime? EndTime { get; private set; }
+    public DateTime? EndTime { get; set; }
 
     /// <summary>
     /// Gets the total execution time
@@ -77,68 +159,27 @@ public sealed class ExecutionDiagnostics
     public IReadOnlyList<OptimizationApplied> OptimizationsApplied => optimizationsApplied;
 
     /// <summary>
+    /// Gets the kernel-level operation diagnostics recorded during execution
+    /// </summary>
+    public IReadOnlyList<OperationDiagnostics> KernelOperations => kernelOperations;
+
+    /// <summary>
     /// Gets a value indicating whether execution is currently in progress
     /// </summary>
     public bool IsExecuting => totalTimer.IsRunning;
 
     /// <summary>
-    /// Starts execution timing
+    /// Imports kernel-level diagnostics from the static DiagnosticsTracker
+    /// and clears the tracker to avoid double-counting across executions
     /// </summary>
-    internal void StartExecution()
+    public void ImportFromDiagnosticsTracker()
     {
-        totalTimer.Start();
-        UpdateMemoryUsage();
-    }
-
-    /// <summary>
-    /// Ends execution timing
-    /// </summary>
-    internal void EndExecution()
-    {
-        totalTimer.Stop();
-        EndTime = DateTime.UtcNow;
-        UpdateMemoryUsage();
-    }
-
-    /// <summary>
-    /// Records timing for a specific operation
-    /// </summary>
-    /// <param name="operationType">The type of operation</param>
-    /// <param name="duration">The duration of the operation</param>
-    /// <param name="rowsProcessed">The number of rows processed</param>
-    /// <param name="memoryUsed">The memory used by the operation</param>
-    internal void RecordOperationTiming(string operationType, TimeSpan duration, long rowsProcessed, long memoryUsed)
-    {
-        operationTimings.Add(new OperationTiming(operationType, duration, rowsProcessed, memoryUsed));
-        UpdateMemoryUsage();
-    }
-
-    /// <summary>
-    /// Records a performance warning
-    /// </summary>
-    /// <param name="warning">The performance warning to record</param>
-    internal void RecordWarning(PerformanceWarning warning)
-    {
-        warnings.Add(warning);
-    }
-
-    /// <summary>
-    /// Records an applied optimization
-    /// </summary>
-    /// <param name="optimization">The optimization that was applied</param>
-    internal void RecordOptimization(OptimizationApplied optimization)
-    {
-        optimizationsApplied.Add(optimization);
-    }
-
-    /// <summary>
-    /// Updates the peak memory usage tracking
-    /// </summary>
-    private void UpdateMemoryUsage()
-    {
-        var currentMemory = GC.GetTotalMemory(false);
-        if (currentMemory > peakMemoryUsage)
-            peakMemoryUsage = currentMemory;
+        var recorded = DiagnosticsTracker.GetRecordedOperations();
+        if (recorded.Length > 0)
+        {
+            kernelOperations.AddRange(recorded);
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
     }
 
     /// <summary>
@@ -188,6 +229,26 @@ public sealed class ExecutionDiagnostics
                 report.AppendLine($"  • {optimization.OptimizationName}: {optimization.Description}");
                 if (optimization.EstimatedImprovement.HasValue)
                     report.AppendLine($"    Estimated improvement: {optimization.EstimatedImprovement.Value:F1}%");
+            }
+            report.AppendLine();
+        }
+
+        // Kernel Operations
+        if (kernelOperations.Count > 0)
+        {
+            report.AppendLine("Kernel Operations:");
+            report.AppendLine("-----------------");
+            var vectorized = kernelOperations.Count(k => k.KernelUsed == KernelType.Vectorized);
+            var scalar = kernelOperations.Count(k => k.KernelUsed == KernelType.Scalar);
+            var withNulls = kernelOperations.Count(k => k.HadNulls);
+            report.AppendLine($"  Total kernel operations: {kernelOperations.Count}");
+            report.AppendLine($"  Vectorized: {vectorized}");
+            report.AppendLine($"  Scalar: {scalar}");
+            report.AppendLine($"  With nulls: {withNulls}");
+
+            foreach (var kernelOp in kernelOperations)
+            {
+                report.AppendLine($"  • {kernelOp.OperationType}: {kernelOp.KernelUsed} kernel, {kernelOp.InputLength} elements, {(kernelOp.HadNulls ? "had nulls" : "no nulls")}");
             }
             report.AppendLine();
         }
@@ -350,27 +411,6 @@ public sealed class PerformanceWarning
     /// Gets the timestamp when the warning was generated
     /// </summary>
     public DateTime Timestamp { get; }
-}
-
-/// <summary>
-/// Defines the severity levels for performance warnings
-/// </summary>
-public enum PerformanceWarningSeverity
-{
-    /// <summary>
-    /// Informational message about performance characteristics
-    /// </summary>
-    Info,
-
-    /// <summary>
-    /// Warning about potential performance issues
-    /// </summary>
-    Warning,
-
-    /// <summary>
-    /// Critical performance issue that should be addressed
-    /// </summary>
-    Critical
 }
 
 /// <summary>

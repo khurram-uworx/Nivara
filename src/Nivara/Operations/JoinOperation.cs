@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Execution;
 using Nivara.Query;
 
 namespace Nivara.Operations;
@@ -103,7 +104,7 @@ public sealed class JoinKey
 /// <summary>
 /// Represents the result of computing join indices
 /// </summary>
-sealed class JoinIndices
+public sealed class JoinIndices
 {
     /// <summary>
     /// Initializes a new instance of JoinIndices
@@ -138,7 +139,7 @@ sealed class JoinIndices
 /// <summary>
 /// Represents a join operation between two DataFrames
 /// </summary>
-sealed class JoinOperation : IQueryOperation
+sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 {
     readonly IReadOnlyDictionary<string, IColumn> leftColumns;
     readonly IReadOnlyDictionary<string, IColumn> rightColumns;
@@ -149,9 +150,9 @@ sealed class JoinOperation : IQueryOperation
     readonly string rightPrefix;
 
     internal IReadOnlyDictionary<string, IColumn> LeftColumns => leftColumns;
-    internal IReadOnlyDictionary<string, IColumn> RightColumns => rightColumns;
+    public IReadOnlyDictionary<string, IColumn> RightColumns => rightColumns;
     internal JoinType JoinTypeValue => joinType;
-    internal JoinKey[] JoinKeys => joinKeys;
+    public JoinKey[] JoinKeys => joinKeys;
     internal ColumnDisambiguationStrategy DisambiguationStrategy => disambiguationStrategy;
     internal string LeftPrefix => leftPrefix;
     internal string RightPrefix => rightPrefix;
@@ -306,7 +307,7 @@ sealed class JoinOperation : IQueryOperation
     /// <summary>
     /// Computes join indices using a pre-built right-side hash map (used by parallel execution)
     /// </summary>
-    internal JoinIndices ComputeJoinIndicesWithHashMap(Dictionary<CompositeKey, List<int>> rightHashMap)
+    public JoinIndices ComputeJoinIndicesWithHashMap(Dictionary<CompositeKey, List<int>> rightHashMap)
     {
         var leftRowCount = leftColumns.Values.FirstOrDefault()?.Length ?? 0;
         var rightRowCount = rightColumns.Values.FirstOrDefault()?.Length ?? 0;
@@ -324,7 +325,7 @@ sealed class JoinOperation : IQueryOperation
     /// <summary>
     /// Materializes the join result using the computed indices
     /// </summary>
-    internal IReadOnlyDictionary<string, IColumn> MaterializeResult(JoinIndices joinIndices)
+    public IReadOnlyDictionary<string, IColumn> MaterializeResult(JoinIndices joinIndices)
         => MaterializeJoinResult(joinIndices);
 
     /// <summary>
@@ -941,7 +942,7 @@ sealed class JoinOperation : IQueryOperation
 /// <summary>
 /// Represents a composite key for join operations with proper equality and hashing
 /// </summary>
-sealed class CompositeKey : IEquatable<CompositeKey>
+public sealed class CompositeKey : IEquatable<CompositeKey>
 {
     readonly object?[] values;
     readonly int hashCode;

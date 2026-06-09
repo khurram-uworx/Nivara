@@ -124,12 +124,9 @@ sealed class StubChunkedQuerySource : IQuerySource
         return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
     }
 
-    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
-        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
     {
-        cancellationToken.ThrowIfCancellationRequested();
         ChunksRead.Add(chunkIndex);
-        await Task.Yield();
         var start = chunkIndex * chunkSize;
         if (start >= totalRowCount)
             return new Dictionary<string, IColumn>(0);
@@ -137,6 +134,14 @@ sealed class StubChunkedQuerySource : IQuerySource
         var data = new int[length];
         for (int i = 0; i < length; i++) data[i] = start + i;
         return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
+    }
+
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.Yield();
+        return ReadChunk(chunkIndex, chunkSize);
     }
 
     public void Dispose() { }

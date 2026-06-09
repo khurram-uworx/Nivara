@@ -1,3 +1,5 @@
+using Nivara.Diagnostics;
+
 namespace Nivara.Execution;
 
 /// <summary>
@@ -51,6 +53,11 @@ public sealed class NivaraExecutionContext
     public IProgress<ExecutionProgress>? Progress { get; set; }
 
     /// <summary>
+    /// Gets or sets the execution diagnostics instance for tracking performance metrics
+    /// </summary>
+    public ExecutionDiagnostics? ExecutionDiagnostics { get; set; }
+
+    /// <summary>
     /// Creates a copy of this execution context
     /// </summary>
     /// <returns>A new ExecutionContext with the same settings</returns>
@@ -61,7 +68,8 @@ public sealed class NivaraExecutionContext
             MaxDegreeOfParallelism = MaxDegreeOfParallelism,
             MemoryBudget = MemoryBudget,
             CancellationToken = CancellationToken,
-            Progress = Progress
+            Progress = Progress,
+            ExecutionDiagnostics = ExecutionDiagnostics
         };
 
     /// <summary>
@@ -110,7 +118,7 @@ public sealed class NivaraExecutionContext
     /// </summary>
     /// <returns>A formatted string describing the execution context</returns>
     public override string ToString()
-        => $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes }}";
+        => $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes, Diagnostics: {(ExecutionDiagnostics != null ? "Set" : "None")} }}";
 }
 
 /// <summary>

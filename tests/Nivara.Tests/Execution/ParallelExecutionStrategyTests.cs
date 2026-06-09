@@ -1,5 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Execution;
+using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
 using NUnit.Framework;
@@ -593,5 +594,91 @@ public class ParallelExecutionStrategyTests
 
         using var result = strategy.Execute(plan, context);
         Assert.That(result.RowCount, Is.EqualTo(100));
+    }
+
+    // ── LSP / custom operation tests (Gap 2) ──
+
+    [Test]
+    public void CustomSortOpImplementingInterface_DoesNotThrowInvalidCast()
+    {
+        var strategy = new ParallelExecutionStrategy();
+        var source = new StubQuerySource();
+        source.ExecuteFn = () => ExecutionTestHelpers.CreateLargeIntColumn(2000);
+
+        var customOp = new CustomSortOperation("A");
+        var plan = ExecutionTestHelpers.CreateTestPlan(
+            source: source,
+            operations: new IQueryOperation[] { customOp });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Parallel);
+        context.MaxDegreeOfParallelism = Environment.ProcessorCount;
+
+        Assert.DoesNotThrow(() => strategy.Execute(plan, context));
+    }
+
+    [Test]
+    public void Execute_DiagnosticsRecordsParallelismDegree()
+    {
+        var strategy = new ParallelExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var plan = ExecutionTestHelpers.CreateTestPlan();
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Parallel);
+        context.MaxDegreeOfParallelism = 4;
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.OperationTimings.Count, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void Execute_DiagnosticsPerOperationTimingCount_MatchOperationCount()
+    {
+        var strategy = new ParallelExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var plan = ExecutionTestHelpers.CreateTestPlan(
+            operations: new IQueryOperation[]
+            {
+                new StubQueryOperation("Filter"),
+                new StubQueryOperation("Sort"),
+            });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Parallel);
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.OperationTimings.Count, Is.EqualTo(4)); // ParallelExecution scope + SourceExecute + Filter + Sort
+    }
+}
+
+sealed class CustomSortOperation : IQueryOperation, IParallelSortOperation
+{
+    readonly string columnName;
+
+    public CustomSortOperation(string columnName) => this.columnName = columnName;
+
+    public string OperationType => "Sort";
+    public IReadOnlyList<SortKey> SortKeys => new[] { new SortKey(columnName) };
+    public bool IsStable => true;
+
+    public Schema TransformSchema(Schema inputSchema) => inputSchema;
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+    {
+        if (input.Count == 0) return input;
+        var col = input[columnName];
+        var indices = Enumerable.Range(0, col.Length).ToArray();
+        Array.Sort(indices, (a, b) =>
+        {
+            var va = col.GetValue(a) as IComparable;
+            var vb = col.GetValue(b) as IComparable;
+            if (va == null && vb == null) return 0;
+            if (va == null) return 1;
+            if (vb == null) return -1;
+            return va.CompareTo(vb);
+        });
+        var sortedColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in input)
+            sortedColumns[kvp.Key] = SortOperation.ReorderColumn(kvp.Value, indices);
+        return sortedColumns;
     }
 }

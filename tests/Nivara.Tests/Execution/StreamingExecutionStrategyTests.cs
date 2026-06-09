@@ -537,4 +537,36 @@ public class StreamingExecutionStrategyTests
         Assert.That(result, Is.Not.Null);
         Assert.That(result.RowCount, Is.GreaterThan(0));
     }
+
+    [Test]
+    public void Execute_DiagnosticsRecordsChunkCount()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2500);
+        var plan = new QueryPlan(source, new[] { new StubQueryOperation("Filter") });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.OperationTimings.Count, Is.GreaterThanOrEqualTo(1));
+    }
+
+    [Test]
+    public void Execute_DiagnosticsRecording_NonStreamableFallback()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var plan = ExecutionTestHelpers.CreateTestPlan(
+            operations: new IQueryOperation[] { new StubQueryOperation("Sort") });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        // Falls back to Lazy which records diagnostic timings
+        Assert.That(result, Is.Not.Null);
+    }
 }

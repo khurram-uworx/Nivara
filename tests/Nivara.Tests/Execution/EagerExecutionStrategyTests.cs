@@ -59,6 +59,29 @@ public class EagerExecutionStrategyTests
     }
 
     [Test]
+    public void Execute_DiagnosticsRecordsPerOperationTiming()
+    {
+        var strategy = new EagerExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var plan = ExecutionTestHelpers.CreateTestPlan(
+            operations: new IQueryOperation[]
+            {
+                new StubQueryOperation("Filter"),
+                new StubQueryOperation("Sort"),
+            });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Eager);
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.OperationTimings.Count, Is.EqualTo(4)); // SourceExecute + Filter + Sort + EagerExecution scope
+        Assert.That(diagnostics.OperationTimings[0].OperationType, Is.EqualTo("SourceExecute"));
+        Assert.That(diagnostics.OperationTimings[1].OperationType, Is.EqualTo("Filter"));
+        Assert.That(diagnostics.OperationTimings[2].OperationType, Is.EqualTo("Sort"));
+        Assert.That(diagnostics.OperationTimings[3].OperationType, Is.EqualTo("EagerExecution"));
+    }
+
+    [Test]
     public void Execute_NullPlan_ThrowsArgumentNullException()
     {
         var strategy = new EagerExecutionStrategy();

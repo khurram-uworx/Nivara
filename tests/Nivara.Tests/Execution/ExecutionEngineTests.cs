@@ -211,4 +211,61 @@ public class ExecutionEngineTests
 
         Assert.Throws<QueryExecutionException>(() => engine.Execute(plan, context));
     }
+
+    [Test]
+    public void Execute_WithDiagnostics_PopulatesOperationTimings()
+    {
+        var engine = new ExecutionEngine();
+        var plan = ExecutionTestHelpers.CreateTestPlan();
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Eager);
+
+        using var result = engine.Execute(plan, context);
+
+        Assert.That(engine.LastDiagnostics, Is.Not.Null);
+        Assert.That(engine.LastDiagnostics!.ExecutionStrategy, Is.EqualTo(ExecutionStrategy.Eager));
+        Assert.That(engine.LastDiagnostics.ParallelismDegree, Is.EqualTo(context.MaxDegreeOfParallelism));
+        Assert.That(engine.LastDiagnostics.TotalExecutionTime, Is.GreaterThan(TimeSpan.Zero));
+        Assert.That(engine.LastDiagnostics.OperationTimings.Count, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_WithDiagnostics_PopulatesOperationTimings()
+    {
+        var engine = new ExecutionEngine();
+        var plan = ExecutionTestHelpers.CreateTestPlan();
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Lazy);
+
+        using var result = await engine.ExecuteAsync(plan, context);
+
+        Assert.That(engine.LastDiagnostics, Is.Not.Null);
+        Assert.That(engine.LastDiagnostics!.TotalExecutionTime, Is.GreaterThan(TimeSpan.Zero));
+    }
+
+    [Test]
+    public void Execute_DiagnosticsUsesExistingContextDiagnostics()
+    {
+        var engine = new ExecutionEngine();
+        var plan = ExecutionTestHelpers.CreateTestPlan();
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Eager);
+        var preCreatedDiagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        context.ExecutionDiagnostics = preCreatedDiagnostics;
+
+        using var result = engine.Execute(plan, context);
+
+        Assert.That(engine.LastDiagnostics, Is.SameAs(preCreatedDiagnostics));
+        Assert.That(engine.LastDiagnostics!.TotalExecutionTime, Is.GreaterThan(TimeSpan.Zero));
+    }
+
+    [Test]
+    public void LastDiagnostics_IsPopulatedAfterExecute()
+    {
+        var engine = new ExecutionEngine();
+
+        Assert.That(engine.LastDiagnostics, Is.Null);
+
+        var plan = ExecutionTestHelpers.CreateTestPlan();
+        using var result = engine.Execute(plan);
+
+        Assert.That(engine.LastDiagnostics, Is.Not.Null);
+    }
 }

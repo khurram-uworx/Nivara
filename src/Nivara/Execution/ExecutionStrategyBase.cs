@@ -28,7 +28,10 @@ abstract class ExecutionStrategyBase : IExecutionStrategy
     {
         ValidateArgs(plan, context);
         context.CancellationToken.ThrowIfCancellationRequested();
-        try { return await ExecuteCoreAsync(plan, context); }
+        try
+        {
+            return await ExecuteCoreAsync(plan, context).ConfigureAwait(false);
+        }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
@@ -51,14 +54,5 @@ abstract class ExecutionStrategyBase : IExecutionStrategy
     {
         if (plan == null) throw new ArgumentNullException(nameof(plan));
         if (context == null) throw new ArgumentNullException(nameof(context));
-    }
-
-    protected static void ReportProgress(NivaraExecutionContext context, string operationName, long completedWork, long totalWork)
-    {
-        if (context.Progress != null)
-        {
-            var progress = new ExecutionProgress(operationName, completedWork, totalWork);
-            context.Progress.Report(progress);
-        }
     }
 }

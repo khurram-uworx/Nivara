@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Execution;
 using Nivara.Query;
 
 namespace Nivara;
@@ -38,7 +39,7 @@ public enum ConcatenationDirection
 /// <summary>
 /// Represents a concatenation operation that combines multiple DataFrames
 /// </summary>
-sealed class ConcatenationOperation : IQueryOperation
+sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOperation
 {
     readonly IReadOnlyList<IReadOnlyDictionary<string, IColumn>> sources;
     readonly ConcatenationDirection direction;
@@ -302,7 +303,7 @@ sealed class ConcatenationOperation : IQueryOperation
     /// <summary>
     /// Creates a column filled with null values of the specified type
     /// </summary>
-    internal IColumn CreateNullColumn(Type elementType, int length)
+    public IColumn CreateNullColumn(Type elementType, int length)
     {
         return elementType switch
         {

@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.Query;
 
@@ -139,7 +140,7 @@ public sealed class GroupKey : IEquatable<GroupKey>
 /// <summary>
 /// Represents a group by operation that groups rows by specified columns with hash-based grouping
 /// </summary>
-public sealed class GroupByOperation : IQueryOperation
+public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperation
 {
     readonly ColumnExpression[] groupByColumns;
 

@@ -27,6 +27,10 @@ public interface IQuerySource : IDisposable
 
     int? EstimatedRowCount => null;
 
+    IReadOnlyDictionary<string, IColumn> ReadChunk(
+        int chunkIndex, int chunkSize)
+        => throw new NotSupportedException("This source does not support chunked reading.");
+
     ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
         int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("This source does not support chunked reading.");

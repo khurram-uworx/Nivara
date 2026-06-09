@@ -306,6 +306,56 @@ static class ParallelExecutionHelper
     }
 
     /// <summary>
+    /// Performs a k-way merge of sorted chunk indices into global sort order
+    /// </summary>
+    public static int[] MergeSortedChunks(
+        IReadOnlyDictionary<string, IColumn> input,
+        int[][] sortedLocalIndices,
+        int[] chunkStarts,
+        List<(int Start, int Length)> ranges,
+        IReadOnlyList<SortKey> sortKeys)
+    {
+        var totalRows = input.Values.FirstOrDefault()?.Length ?? 0;
+        var globalIndices = new int[totalRows];
+        var currentPtrs = new int[ranges.Count];
+        var mergeComparer = new MultiColumnComparer(input, sortKeys);
+
+        for (int outputPos = 0; outputPos < totalRows; outputPos++)
+        {
+            int bestChunk = -1;
+            int bestOriginalRow = -1;
+
+            for (int c = 0; c < ranges.Count; c++)
+            {
+                if (currentPtrs[c] >= ranges[c].Length)
+                    continue;
+
+                var originalRow = chunkStarts[c] + sortedLocalIndices[c][currentPtrs[c]];
+
+                if (bestChunk == -1)
+                {
+                    bestChunk = c;
+                    bestOriginalRow = originalRow;
+                }
+                else
+                {
+                    var cmp = mergeComparer.Compare(originalRow, bestOriginalRow);
+                    if (cmp < 0 || (cmp == 0 && c < bestChunk))
+                    {
+                        bestChunk = c;
+                        bestOriginalRow = originalRow;
+                    }
+                }
+            }
+
+            globalIndices[outputPos] = bestOriginalRow;
+            currentPtrs[bestChunk]++;
+        }
+
+        return globalIndices;
+    }
+
+    /// <summary>
     /// Merges partial Join hash maps: for matching CompositeKey, concatenates index lists
     /// </summary>
     public static Dictionary<CompositeKey, List<int>> MergeJoinHashMaps(

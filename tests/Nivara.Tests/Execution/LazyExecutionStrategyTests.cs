@@ -61,6 +61,21 @@ public class LazyExecutionStrategyTests
     }
 
     [Test]
+    public void Execute_DiagnosticsRecordsTiming()
+    {
+        var strategy = new LazyExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var plan = ExecutionTestHelpers.CreateTestPlan();
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Lazy);
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.OperationTimings.Count, Is.EqualTo(1));
+        Assert.That(diagnostics.OperationTimings[0].OperationType, Is.EqualTo("LazyExecution"));
+    }
+
+    [Test]
     public void Execute_NullPlan_ThrowsArgumentNullException()
     {
         var strategy = new LazyExecutionStrategy();

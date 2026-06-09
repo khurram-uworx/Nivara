@@ -14,79 +14,6 @@ distinct from `*-GAPS.md` files that catalog forward-looking work.
 
 ---
 
-## Gap 2: Concrete Type Casting in ParallelExecutionStrategy Breaks LSP
-
-### Priority
-
-High
-
-### Files involved
-
-- `src/Nivara/Execution/ParallelExecutionStrategy.cs`
-
-### Issue
-
-`ParallelExecutionStrategy.executeOperationParallelSync` (line 50) and
-`executeOperationParallelAsync` (line 332) cast `IQueryOperation` to concrete
-types:
-
-```csharp
-if (opType == "Filter")                        // no cast for Filter
-    return executeFilterParallelSync(operation, ...);
-if (opType == "Sort")
-    return executeSortParallelSync((SortOperation)operation, ...);
-if (opType == "GroupBy")
-    return executeGroupByParallelSync((GroupByOperation)operation, ...);
-if (opType == "Join")
-    return executeJoinParallelSync((JoinOperation)operation, ...);
-if (opType.StartsWith("Concatenate", ...))
-    return executeConcatenationParallelSync((ConcatenationOperation)operation, ...);
-```
-
-This couples the strategy to concrete operation implementations. The strategy
-pattern was designed to work with any `IQueryOperation`. Any custom or
-third-party operation will throw `InvalidCastException` even if it is logically
-"parallelizable".
-
-### Phase 2 update
-
-Phase 2 **expanded** the concrete type cast pattern:
-- Added separate sync dispatch (`executeOperationParallelSync`) with identical casts
-- Added `executeSortParallelSync`, `executeGroupByParallelSync`,
-  `executeJoinParallelSync`, `executeConcatenationParallelSync` — each written
-  per-type (with corresponding async counterparts)
-- **Only `Filter`** uses the generic approach suggested in the original fix
-  (row-chunk via `createSliceExecuteKernel` + `operation.Execute(subset)`).
-  Sort, GroupBy, Join, and Concatenation all access operation-specific internals
-  (e.g., `operation.SortKeys`, `operation.GroupByColumns`, `operation.RightColumns`,
-  `operation.Sources`, `ConcatenationDirection`).
-- `executeSortParallelAsync` (line 352) wraps `executeSortParallelSync` in
-  `Task.Run`, re-introducing the async-over-sync anti-pattern that Phase 2 Task 1
-  was supposed to eliminate (see also Gap 4).
-
-### Impact
-
-- Violates Liskov Substitution Principle — the strategy cannot handle arbitrary
-  `IQueryOperation` implementations
-- Breaks extensibility: custom operations implementing `IQueryOperation` with
-  `OperationType == "Filter"` or "Sort" will throw at runtime
-- The generic approach works for `Filter` (proving the pattern is viable) but
-  the other 4 operations remain tightly coupled
-
-### Suggested fix
-
-Extend the generic chunk-and-merge pattern used for `Filter` to all operations:
-```csharp
-var subset = ParallelExecutionHelper.CreateRowSubset(input, start, length);
-var partial = operation.Execute(subset);
-// merge partial results
-```
-Sort, GroupBy, and Join would need the generic merge helpers extracted from the
-per-type specializations. The per-type sort-merge algorithm could be lifted to a
-generic `MergeSortedChunks` helper. See also Gap 10 (dead helpers).
-
----
-
 ## Gap 4: Redundant Task.Run Overhead in EagerExecutionStrategy and StreamingExecutionStrategy
 
 ### Priority
@@ -205,75 +132,6 @@ well-known constants for all operation types (see EXECUTION-PLAN Phase 5).
 ## Phase 2 Gaps (reviewed against `EXECUTION-PHASE2.md`)
 
 ---
-
-## Gap 9: ExecuteCore/ExecuteCoreAsync Boilerplate Duplication
-
-### Priority
-
-Medium
-
-### Files involved
-
-- `src/Nivara/Execution/ParallelExecutionStrategy.cs`
-- `src/Nivara/Execution/StreamingExecutionStrategy.cs`
-
-### Issue
-
-**ParallelExecutionStrategy**: `ExecuteCore` (sync, line 564) and
-`ExecuteCoreAsync` (async, line 599) share ~35 lines of identical boilerplate:
-
-```
-Cancellation check
-validateParallelismConfiguration
-ReportProgress("Starting...")
-Plan.Source execution  (sync: Execute(), async: readSourceAsync)
-ReportProgress("Data source executed")
-for-loop over plan.Operations:
-    Cancellation check
-    try:
-        dispatch operation (sync: executeOperationParallelSync, async: executeOperationParallelAsync)
-        ReportProgress("Operation completed")
-    catch:
-        throw QueryExecutionException("xxx parallel execution failed...")
-Guard: if (currentColumns.Count == 0) throw
-return new NivaraFrame(namedColumns)
-```
-
-The only differences are:
-1. Sync calls `plan.Source.Execute()`, async calls `await readSourceAsync(...)`
-2. Sync calls `executeOperationParallelSync`, async calls `await executeOperationParallelAsync`
-3. Different string prefix in exception messages ("Sync" vs "Async")
-
-### Impact
-
-- Any bug fix or change to the execution loop must be applied in two places
-- The duplication obscures the actual differences between sync and async paths
-
-### Suggested fix
-
-Extract the common loop body into a shared private method, passing delegates
-for the varying parts:
-```csharp
-NivaraFrame executeCoreInternal(
-    QueryPlan plan, NivaraExecutionContext context,
-    Func<IReadOnlyDictionary<string, IColumn>, IQueryOperation, IReadOnlyDictionary<string, IColumn>> dispatchOp,
-    string errorPrefix)
-```
-
-### Phase 3 update
-
-Phase 3 **added the same duplication** in `StreamingExecutionStrategy`:
-- `ExecuteCore` (sync, lines 67–85) and `ExecuteCoreAsync` (async, lines 127–142)
-  share ~19 lines of identical chunk-pipeline boilerplate
-- The only real differences: sync uses `while(true)` + `.GetAwaiter().GetResult()`,
-  async uses `await foreach`
-- The surrounding progress-reporting and fallback/merge logic (lines 43–101 vs
-  106–159) repeats the same structure, with ~55 overlapping lines total
-- Any bug fix to the chunk pipeline (e.g., cancellation, empty-chunk detection)
-  must be applied in two places
-
----
-
 ## Gap 10: Unused ParallelExecutionHelper Methods
 
 ### Priority
@@ -326,68 +184,6 @@ Either:
 - Retrofit them to be the actual dispatch mechanism (implementing the
   shared-kernel architecture from the Phase 2 plan), or
 - Mark them `[Obsolete]` with a message directing to the direct `Parallel.ForEach` pattern
-
----
-
-## Gap 11: Missing ConfigureAwait(false) on All Awaits
-
-### Priority
-
-Medium
-
-### Files involved
-
-- `src/Nivara/Execution/ParallelExecutionStrategy.cs`
-- `src/Nivara/Execution/ParallelExecutionHelper.cs`
-- `src/Nivara/Execution/StreamingExecutionStrategy.cs`
-- `src/Nivara/Query/IQueryInterfaces.cs`
-
-### Issue
-
-All `await` expressions across the execution layer lack `ConfigureAwait(false)`:
-
-**ParallelExecutionStrategy and ParallelExecutionHelper** (Phase 2):
-```csharp
-await Parallel.ForEachAsync(...)
-await Task.Run(...)
-await source.ExecuteAsync(...)
-await source.ReadChunkAsync(...)
-```
-
-**StreamingExecutionStrategy** (Phase 3, lines 111, 116, 130, 147):
-```csharp
-await lazyStrategy.ExecuteAsync(plan, context)
-await Task.Run(() => executor.Execute(plan), context.CancellationToken)
-await foreach (var chunkData in plan.Source.ToAsyncEnumerable(...))
-await Task.Run(() => executor.Execute(plan), context.CancellationToken)
-```
-
-**IQueryInterfaces.ToAsyncEnumerable** (Phase 3, line 48):
-```csharp
-await ReadChunkAsync(chunkIndex, chunkSize, cancellationToken)
-```
-
-Per Microsoft documentation ([CA2007](https://learn.microsoft.com/dotnet/fundamentals/code-analysis/quality-rules/ca2007)),
-library code should use `ConfigureAwait(false)` on all awaits to avoid
-unnecessarily capturing and restoring `SynchronizationContext`. While
-`Task.Run` and `Parallel.ForEachAsync` typically run on the thread pool and
-won't have a `SynchronizationContext`, the missing `ConfigureAwait(false)`
-means the continuation will attempt to marshal back to the original context
-if one is present (e.g., in ASP.NET or WPF hosting scenarios).
-
-### Impact
-
-- Potential deadlocks if any execution strategy is called from a
-  synchronization-context-present environment (e.g., via `ExecuteAsync` on a
-  UI thread or ASP.NET request context)
-- Problem now spans 4 files across 2 phases — risk growing with more code
-- Minor performance overhead from context capture/restore
-
-### Suggested fix
-
-Add `.ConfigureAwait(false)` to every `await` expression in the execution
-and query layers. This includes `await foreach` on `IAsyncEnumerable`
-iterators — they also capture context.
 
 ---
 
@@ -450,75 +246,6 @@ var chunks = source.Chunk(chunkSize);  // BCL built-in
 ---
 
 ## Phase 3 Gaps (reviewed against `EXECUTION-PHASE3.md`)
-
----
-
-## Gap 15: Sync-Over-Async Anti-Pattern in StreamingExecutionStrategy.ExecuteCore
-
-### Priority
-
-Medium
-
-### Files involved
-
-- `src/Nivara/Execution/StreamingExecutionStrategy.cs`
-- `src/Nivara/Query/IQueryInterfaces.cs`
-
-### Issue
-
-`StreamingExecutionStrategy.ExecuteCore` (sync path, lines 71–72) calls
-`ReadChunkAsync` — an async method — and blocks synchronously:
-
-```csharp
-var chunkData = plan.Source.ReadChunkAsync(chunkIndex, chunkSize, context.CancellationToken)
-    .GetAwaiter().GetResult();
-```
-
-Per Microsoft's [Synchronous wrappers for async methods](https://learn.microsoft.com/dotnet/standard/asynchronous-programming-patterns/synchronous-wrappers-for-asynchronous-methods)
-and [Common async/await bugs](https://learn.microsoft.com/dotnet/standard/asynchronous-programming-patterns/common-async-bugs) guidance:
-
-- **Deadlock risk**: If `ReadChunkAsync` ever awaits an incomplete operation
-  (e.g., actual I/O from a future `ParquetQuerySource` or `ArrowQuerySource`),
-  the continuation will try to marshal back to the captured
-  `SynchronizationContext`. If the calling thread is blocked (as it is here),
-  deadlock occurs.
-- **Exception wrapping**: `GetAwaiter().GetResult()` preserves the original
-  exception type (unlike `.Result`), but the blocking itself is still the
-  primary risk.
-- **Thread waste**: The calling thread is blocked doing no work while waiting
-  for the async operation.
-
-The StubChunkedQuerySource test helper happens to be synchronous under the
-hood (see Gap 17), so this doesn't manifest in tests. But any real async data
-source implementation would trigger the deadlock risk.
-
-Additionally, the `IQuerySource.ToAsyncEnumerable` default method (Phase 3,
-`IQueryInterfaces.cs`) also uses `await ReadChunkAsync(...)` without
-`ConfigureAwait(false)` — see Gap 11.
-
-### Impact
-
-- Deadlock risk with any truly async data source (e.g., network-based I/O
-  sources added in future phases)
-- Thread-pool starvation under load if multiple sync-over-async calls contend
-  for thread-pool threads to complete the async operation
-- The sync-over-async pattern is a well-documented .NET anti-pattern
-
-### Suggested fix
-
-Option A (preferred): Make `ExecuteCore` truly async by having the base class
-accept an async pipeline, or have `ExecutionStrategyBase` provide a
-`ExecuteCoreAsync`-only path and let the sync wrapper be `Task.Run(() => ...)`.
-
-Option B (minimal): Replace `.GetAwaiter().GetResult()` with
-`Task.Run(() => source.ReadChunkAsync(...).AsTask()).GetAwaiter().GetResult()`
-to offload to the thread pool, per Microsoft's mitigation strategy for
-unavoidable sync-over-async. But note this still blocks a thread.
-
-Option C: Remove the sync `ExecuteCore` and route all callers through
-`ExecuteCoreAsync`, using `Task.Run(async () => ...)` as the final sync
-wrapper. This aligns with the base class pattern already used by
-`EagerExecutionStrategy`.
 
 ---
 
@@ -622,6 +349,99 @@ public ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
 
 Consider adding a version with `await Task.Delay(1)` or `await Task.Yield()`
 for truly testing async code paths (reveals the Gap 15 deadlock in tests).
+
+---
+
+## Phase 4 Gaps (reviewed against `EXECUTION-PHASE4.md`)
+
+---
+
+## Gap 18: Missing ExecutionEngine Tests for Optimizer Change Recording and Failure Warnings
+
+### Priority
+
+Medium
+
+### Files involved
+
+- `tests/Nivara.Tests/Execution/ExecutionEngineTests.cs`
+
+### Issue
+
+`EXECUTION-PHASE4.md` Task 5 specifies two tests that were listed in the acceptance criteria but **not implemented**:
+
+| Test name (from plan) | Purpose | Status |
+|-----------------------|---------|--------|
+| `Execute_DiagnosticsRecordOptimization_WhenOptimizerChangesPlan` | Verify optimizer changes are recorded as `OptimizationApplied` entries | ❌ Missing |
+| `Execute_DiagnosticsRecordWarning_OnFailure` | Verify warnings recorded on exception | ❌ Missing |
+
+The `RecordOptimization` code path in `ExecutionEngine.Execute`:
+```csharp
+if (!ReferenceEquals(plan, optimizedPlan) && optimizer != null)
+    diagnostics.RecordOptimization(...)
+```
+is only triggered when the optimizer modifies the plan. Without a test that sets up a custom `QueryOptimizer`, this path is never exercised by any existing test.
+
+The warning-on-failure path (catch block recording `PerformanceWarningSeverity.Critical`) is indirectly exercised by the existing `Execute_ThrowsQueryExecutionException_WhenUnknownStrategy` test, but there is no assertion verifying the warning was actually recorded.
+
+### Impact
+
+- The `RecordOptimization` code path in `ExecutionEngine` is blind to regressions — a future refactor could break it without detection
+- The failure-warning recording path lacks explicit verification; only the exception-wrapping behavior is tested
+- `EXECUTION-PHASE4.md` acceptance criteria are not fully met (12+ tests required; 17 were added but 2 from the plan are missing)
+
+### Suggested fix
+
+Add two tests to `ExecutionEngineTests.cs`:
+
+1. **`Execute_DiagnosticsRecordOptimization_WhenOptimizerChangesPlan`**: Create an `ExecutionEngine`, register a custom `QueryOptimizer` that modifies the plan (e.g., reorders operations or returns a different plan instance), execute a query, and verify `LastDiagnostics.OptimizationsApplied` contains at least one entry with `OptimizationName == "QueryOptimization"`.
+
+2. **`Execute_DiagnosticsRecordWarning_OnFailure`**: Execute with an invalid context (e.g., unknown strategy) via the `Execute(plan, context)` overload, catch the `QueryExecutionException`, and verify `LastDiagnostics.Warnings.Count > 0` after the exception. Note the warning is recorded in the try-catch before re-throw, so `LastDiagnostics` will be available after the exception.
+
+---
+
+## Gap 19: Public Setter on ExecutionDiagnostics.EndTime
+
+### Priority
+
+Low
+
+### Files involved
+
+- `src/Nivara/Diagnostics/ExecutionDiagnostics.cs`
+
+### Issue
+
+The `EndTime` property has a public setter:
+
+```csharp
+// Current implementation (line 119):
+public DateTime? EndTime { get; set; }
+```
+
+The `EXECUTION-PHASE4.md` suggested implementation specified `private set`:
+```csharp
+// EXECUTION-PHASE4.md suggested:
+public DateTime? EndTime { get; private set; }
+```
+
+Before Phase 4, the property already had `private set`. Phase 4 changed it to public. Only `EndExecution()` (an `internal` method) should set this value. The public setter allows any caller to mutate `EndTime`, which could produce incorrect diagnostic reports. There is no guard or validation on the setter.
+
+### Impact
+
+- Consumers can inadvertently overwrite `EndTime`, making `GenerateReport()` or `GetSummary()` return misleading results
+- The public setter makes the API's contract unclear — other immutable-like properties (`StartTime`, `TotalExecutionTime`) are readonly or computed
+- Minor API-surface regression from the pre-Phase 4 design
+
+### Suggested fix
+
+Change the setter back to `private set`:
+
+```csharp
+public DateTime? EndTime { get; private set; }
+```
+
+This restores the pre-Phase 4 encapsulation. `EndExecution()` is `internal` and already sets the property — no callers need the public setter.
 
 ---
 

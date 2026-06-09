@@ -1,3 +1,4 @@
+using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Query;
 
@@ -9,10 +10,14 @@ sealed class EagerExecutionStrategy : ExecutionStrategyBase
 
     protected override NivaraFrame ExecuteCore(QueryPlan plan, NivaraExecutionContext context)
     {
-        ReportProgress(context, "Starting eager execution", 0, plan.Operations.Count + 1);
+        var diag = context.ExecutionDiagnostics;
+        using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "EagerExecution") : null;
+        context.Progress?.Report(new ExecutionProgress("Starting eager execution", 0, plan.Operations.Count + 1));
 
-        var currentColumns = plan.Source.Execute();
-        ReportProgress(context, "Data source executed", 1, plan.Operations.Count + 1);
+        var currentColumns = diag != null
+            ? DiagnosticHelper.ExecuteWithDiagnostics(diag, "SourceExecute", () => plan.Source.Execute())
+            : plan.Source.Execute();
+        context.Progress?.Report(new ExecutionProgress("Data source executed", 1, plan.Operations.Count + 1));
 
         for (int i = 0; i < plan.Operations.Count; i++)
         {
@@ -20,8 +25,11 @@ sealed class EagerExecutionStrategy : ExecutionStrategyBase
             context.CancellationToken.ThrowIfCancellationRequested();
             try
             {
-                currentColumns = operation.Execute(currentColumns);
-                ReportProgress(context, $"Operation {operation.OperationType} completed", i + 2, plan.Operations.Count + 1);
+                var capturedOp = operation;
+                currentColumns = diag != null
+                    ? DiagnosticHelper.ExecuteWithDiagnostics(diag, operation.OperationType, () => capturedOp.Execute(currentColumns))
+                    : capturedOp.Execute(currentColumns);
+                context.Progress?.Report(new ExecutionProgress($"Operation {operation.OperationType} completed", i + 2, plan.Operations.Count + 1));
             }
             catch (Exception ex) when (ex is not QueryExecutionException)
             {
@@ -41,10 +49,14 @@ sealed class EagerExecutionStrategy : ExecutionStrategyBase
 
     protected override async Task<NivaraFrame> ExecuteCoreAsync(QueryPlan plan, NivaraExecutionContext context)
     {
-        ReportProgress(context, "Starting async eager execution", 0, plan.Operations.Count + 1);
+        var diag = context.ExecutionDiagnostics;
+        using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "EagerExecutionAsync") : null;
+        context.Progress?.Report(new ExecutionProgress("Starting async eager execution", 0, plan.Operations.Count + 1));
 
-        var currentColumns = await plan.Source.ExecuteAsync(context.CancellationToken);
-        ReportProgress(context, "Data source executed", 1, plan.Operations.Count + 1);
+        var currentColumns = diag != null
+            ? await DiagnosticHelper.ExecuteWithDiagnosticsAsync(diag, "SourceExecute", () => plan.Source.ExecuteAsync(context.CancellationToken)).ConfigureAwait(false)
+            : await plan.Source.ExecuteAsync(context.CancellationToken).ConfigureAwait(false);
+        context.Progress?.Report(new ExecutionProgress("Data source executed", 1, plan.Operations.Count + 1));
 
         for (int i = 0; i < plan.Operations.Count; i++)
         {
@@ -52,8 +64,12 @@ sealed class EagerExecutionStrategy : ExecutionStrategyBase
             context.CancellationToken.ThrowIfCancellationRequested();
             try
             {
-                currentColumns = await Task.Run(() => operation.Execute(currentColumns), context.CancellationToken);
-                ReportProgress(context, $"Operation {operation.OperationType} completed", i + 2, plan.Operations.Count + 1);
+                var capturedOp = operation;
+                currentColumns = diag != null
+                    ? await DiagnosticHelper.ExecuteWithDiagnosticsAsync(diag, operation.OperationType,
+                        () => Task.Run(() => capturedOp.Execute(currentColumns), context.CancellationToken)).ConfigureAwait(false)
+                    : await Task.Run(() => capturedOp.Execute(currentColumns), context.CancellationToken).ConfigureAwait(false);
+                context.Progress?.Report(new ExecutionProgress($"Operation {operation.OperationType} completed", i + 2, plan.Operations.Count + 1));
             }
             catch (Exception ex) when (ex is not QueryExecutionException)
             {

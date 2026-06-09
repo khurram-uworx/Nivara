@@ -1,3 +1,4 @@
+using Nivara.Diagnostics;
 using Nivara.Query;
 
 namespace Nivara.Execution;
@@ -8,9 +9,12 @@ sealed class LazyExecutionStrategy : ExecutionStrategyBase
 
     protected override NivaraFrame ExecuteCore(QueryPlan plan, NivaraExecutionContext context)
     {
-        ReportProgress(context, "Starting lazy execution", 0, 1);
-        var result = executor.Execute(plan);
-        ReportProgress(context, "Lazy execution completed", 1, 1);
+        var diag = context.ExecutionDiagnostics;
+        context.Progress?.Report(new ExecutionProgress("Starting lazy execution", 0, 1));
+        var result = diag != null
+            ? DiagnosticHelper.ExecuteWithDiagnostics(diag, "LazyExecution", () => executor.Execute(plan))
+            : executor.Execute(plan);
+        context.Progress?.Report(new ExecutionProgress("Lazy execution completed", 1, 1));
         return result;
     }
 

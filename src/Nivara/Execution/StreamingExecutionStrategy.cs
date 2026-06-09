@@ -1,3 +1,4 @@
+using Nivara.Diagnostics;
 using Nivara.Query;
 
 namespace Nivara.Execution;
@@ -39,26 +40,86 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     protected override string StrategyName => "Streaming";
 
     protected override NivaraFrame ExecuteCore(QueryPlan plan, NivaraExecutionContext context)
-        => Task.Run(() => executeCoreInternalAsync(plan, context), context.CancellationToken).GetAwaiter().GetResult();
+    {
+        var diag = context.ExecutionDiagnostics;
+        using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "StreamingExecution") : null;
+        context.Progress?.Report(new ExecutionProgress("Starting streaming execution", 0, 1));
+
+        if (!isSuitableForStreaming(plan))
+            return new LazyExecutionStrategy().Execute(plan, context);
+
+        if (!plan.Source.CanReadInChunks)
+        {
+            var result = executor.Execute(plan);
+            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+            return result;
+        }
+
+        var chunkSize = calculateChunkSize(context.MemoryBudget);
+        var estimatedRows = plan.Source.EstimatedRowCount;
+        var totalChunks = estimatedRows.HasValue
+            ? (int)((estimatedRows.Value + chunkSize - 1) / chunkSize)
+            : -1;
+
+        var chunkFrames = new List<NivaraFrame>();
+        int chunkIndex = 0;
+
+        while (true)
+        {
+            context.CancellationToken.ThrowIfCancellationRequested();
+
+            using var chunkScope = diag != null ? DiagnosticHelper.CreateScope(diag, $"Chunk_{chunkIndex}") : null;
+
+            var chunkData = plan.Source.ReadChunk(chunkIndex, chunkSize);
+            if (chunkData == null || chunkData.Count == 0 || chunkData.Values.All(c => c.Length == 0))
+                break;
+
+            var processedData = executeOperationsOnData(chunkData, plan.Operations);
+            if (chunkScope != null)
+                chunkScope.SetRowCount(processedData.Values.FirstOrDefault()?.Length ?? 0);
+            var chunkFrame = NivaraFrame.Create(processedData);
+            chunkFrames.Add(chunkFrame);
+
+            chunkIndex++;
+            var completedWork = chunkIndex;
+            var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
+            context.Progress?.Report(new ExecutionProgress($"Processing chunk {chunkIndex}", completedWork, totalWork));
+        }
+
+        if (chunkFrames.Count == 0)
+        {
+            context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
+            return executor.Execute(plan);
+        }
+
+        if (chunkFrames.Count == 1)
+        {
+            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+            return chunkFrames[0];
+        }
+
+        var mergedResult = NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
+        context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+        return mergedResult;
+    }
 
     protected override async Task<NivaraFrame> ExecuteCoreAsync(QueryPlan plan, NivaraExecutionContext context)
         => await executeCoreInternalAsync(plan, context).ConfigureAwait(false);
 
     async Task<NivaraFrame> executeCoreInternalAsync(QueryPlan plan, NivaraExecutionContext context)
     {
-        ReportProgress(context, "Starting streaming execution", 0, 1);
+        var diag = context.ExecutionDiagnostics;
+        using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "StreamingExecutionAsync") : null;
+        context.Progress?.Report(new ExecutionProgress("Starting streaming execution", 0, 1));
 
         if (!isSuitableForStreaming(plan))
-        {
-            var lazyStrategy = new LazyExecutionStrategy();
-            return await lazyStrategy.ExecuteAsync(plan, context).ConfigureAwait(false);
-        }
+            return await new LazyExecutionStrategy().ExecuteAsync(plan, context).ConfigureAwait(false);
 
         if (!plan.Source.CanReadInChunks)
         {
-            var fallbackResult = await Task.Run(() => executor.Execute(plan), context.CancellationToken).ConfigureAwait(false);
-            ReportProgress(context, "Streaming execution completed", 1, 1);
-            return fallbackResult;
+            var result = executor.Execute(plan);
+            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+            return result;
         }
 
         var chunkSize = calculateChunkSize(context.MemoryBudget);
@@ -74,30 +135,34 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         {
             context.CancellationToken.ThrowIfCancellationRequested();
 
+            using var chunkScope = diag != null ? DiagnosticHelper.CreateScope(diag, $"Chunk_{chunkIndex}") : null;
+
             var processedData = executeOperationsOnData(chunkData, plan.Operations);
+            if (chunkScope != null)
+                chunkScope.SetRowCount(processedData.Values.FirstOrDefault()?.Length ?? 0);
             var chunkFrame = NivaraFrame.Create(processedData);
             chunkFrames.Add(chunkFrame);
 
             chunkIndex++;
             var completedWork = chunkIndex;
             var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
-            ReportProgress(context, $"Processing chunk {chunkIndex}", completedWork, totalWork);
+            context.Progress?.Report(new ExecutionProgress($"Processing chunk {chunkIndex}", completedWork, totalWork));
         }
 
         if (chunkFrames.Count == 0)
         {
-            ReportProgress(context, "No data from chunks, falling back to full execution", 0, 1);
-            return await Task.Run(() => executor.Execute(plan), context.CancellationToken).ConfigureAwait(false);
+            context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
+            return executor.Execute(plan);
         }
 
         if (chunkFrames.Count == 1)
         {
-            ReportProgress(context, "Streaming execution completed", 1, 1);
+            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
             return chunkFrames[0];
         }
 
         var mergedResult = NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
-        ReportProgress(context, "Streaming execution completed", 1, 1);
+        context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
         return mergedResult;
     }
 

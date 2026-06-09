@@ -1,3 +1,4 @@
+using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Query;
 using System.Collections.Concurrent;
@@ -75,6 +76,7 @@ public interface IExecutionStrategy
 public sealed class ExecutionEngine
 {
     QueryOptimizer? optimizer;
+    ExecutionDiagnostics? lastDiagnostics;
     readonly ConcurrentDictionary<ExecutionStrategy, IExecutionStrategy> strategies;
 
     /// <summary>
@@ -102,6 +104,11 @@ public sealed class ExecutionEngine
     }
 
     /// <summary>
+    /// Gets the diagnostics from the most recent execution
+    /// </summary>
+    public ExecutionDiagnostics? LastDiagnostics => lastDiagnostics;
+
+    /// <summary>
     /// Executes a query plan using the specified execution context
     /// </summary>
     /// <param name="plan">The query plan to execute</param>
@@ -115,24 +122,48 @@ public sealed class ExecutionEngine
         if (context == null)
             throw new ArgumentNullException(nameof(context));
 
+        // Create or use existing diagnostics
+        var diagnostics = context.ExecutionDiagnostics ?? new ExecutionDiagnostics();
+        context.ExecutionDiagnostics = diagnostics;
+        diagnostics.ExecutionStrategy = context.Strategy;
+        diagnostics.ParallelismDegree = context.MaxDegreeOfParallelism;
+        diagnostics.StartExecution();
+        lastDiagnostics = diagnostics;
+
         try
         {
             // Apply optimization if optimizer is available
             var optimizedPlan = optimizer?.Optimize(plan) ?? plan;
 
+            // Record optimization if plan was changed
+            if (!ReferenceEquals(plan, optimizedPlan) && optimizer != null)
+                diagnostics.RecordOptimization(new OptimizationApplied(
+                    "QueryOptimization",
+                    "Query optimizer modified the execution plan",
+                    estimatedImprovement: null));
+
             // Get the execution strategy
             if (!strategies.TryGetValue(context.Strategy, out var strategy))
-            {
                 throw new QueryExecutionException($"Unknown execution strategy: {context.Strategy}");
-            }
 
             // Execute using the selected strategy
-            return strategy.Execute(optimizedPlan, context);
+            var result = strategy.Execute(optimizedPlan, context);
+
+            return result;
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
+            diagnostics.RecordWarning(new PerformanceWarning(
+                PerformanceWarningSeverity.Critical,
+                $"Query execution failed: {ex.Message}",
+                "Check query plan and input data"));
             var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan, ex);
             throw new QueryExecutionException($"Query execution failed: {ex.Message}. {diagnosticInfo}", ex);
+        }
+        finally
+        {
+            diagnostics.EndExecution();
+            diagnostics.ImportFromDiagnosticsTracker();
         }
     }
 
@@ -159,24 +190,46 @@ public sealed class ExecutionEngine
         if (context == null)
             throw new ArgumentNullException(nameof(context));
 
+        // Create or use existing diagnostics
+        var diagnostics = context.ExecutionDiagnostics ?? new ExecutionDiagnostics();
+        context.ExecutionDiagnostics = diagnostics;
+        diagnostics.ExecutionStrategy = context.Strategy;
+        diagnostics.ParallelismDegree = context.MaxDegreeOfParallelism;
+        diagnostics.StartExecution();
+        lastDiagnostics = diagnostics;
+
         try
         {
             // Apply optimization if optimizer is available
             var optimizedPlan = optimizer?.Optimize(plan) ?? plan;
 
+            // Record optimization if plan was changed
+            if (!ReferenceEquals(plan, optimizedPlan) && optimizer != null)
+                diagnostics.RecordOptimization(new OptimizationApplied(
+                    "QueryOptimization",
+                    "Query optimizer modified the execution plan",
+                    estimatedImprovement: null));
+
             // Get the execution strategy
             if (!strategies.TryGetValue(context.Strategy, out var strategy))
-            {
                 throw new QueryExecutionException($"Unknown execution strategy: {context.Strategy}");
-            }
 
             // Execute using the selected strategy
             return await strategy.ExecuteAsync(optimizedPlan, context);
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
+            diagnostics.RecordWarning(new PerformanceWarning(
+                PerformanceWarningSeverity.Critical,
+                $"Async query execution failed: {ex.Message}",
+                "Check query plan and input data"));
             var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan, ex);
             throw new QueryExecutionException($"Async query execution failed: {ex.Message}. {diagnosticInfo}", ex);
+        }
+        finally
+        {
+            diagnostics.EndExecution();
+            diagnostics.ImportFromDiagnosticsTracker();
         }
     }
 
@@ -211,9 +264,7 @@ public sealed class ExecutionEngine
 
             // Get the execution strategy
             if (!strategies.TryGetValue(context.Strategy, out var strategy))
-            {
                 return false;
-            }
 
             // Validate using the selected strategy
             return strategy.ValidatePlan(optimizedPlan, context);
@@ -242,9 +293,7 @@ public sealed class ExecutionEngine
 
             // Get the execution strategy
             if (!strategies.TryGetValue(context.Strategy, out var strategy))
-            {
                 return long.MaxValue;
-            }
 
             // Estimate cost using the selected strategy
             return strategy.EstimateExecutionCost(optimizedPlan, context);
@@ -260,9 +309,7 @@ public sealed class ExecutionEngine
     /// </summary>
     /// <returns>A collection of available execution strategy types</returns>
     public IReadOnlyCollection<ExecutionStrategy> GetAvailableStrategies()
-    {
-        return strategies.Keys.ToList();
-    }
+        => strategies.Keys.ToList();
 
     /// <summary>
     /// Returns a string representation of the execution engine

@@ -250,4 +250,83 @@ public class ExecutionDiagnosticsTests
         Assert.That(optimization.EstimatedImprovement, Is.EqualTo(improvement));
         Assert.That(optimization.Timestamp, Is.LessThanOrEqualTo(DateTime.UtcNow));
     }
+
+    [Test]
+    public void ImportFromDiagnosticsTracker_ImportsAndClears()
+    {
+        // Arrange
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            var values1 = new[] { 1, 2, 3 };
+            var values2 = new[] { 2, 3, 4 };
+            var column1 = NivaraColumn<int>.Create(values1);
+            var column2 = NivaraColumn<int>.Create(values2);
+            column1.Add(column2); // This triggers DiagnosticsTracker recording
+
+            var diagnostics = new ExecutionDiagnostics();
+
+            // Act
+            diagnostics.ImportFromDiagnosticsTracker();
+
+            // Assert
+            Assert.That(diagnostics.KernelOperations.Count, Is.GreaterThan(0));
+            Assert.That(DiagnosticsTracker.GetRecordedOperations().Length, Is.EqualTo(0));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void ImportFromDiagnosticsTracker_WhenDisabled_ImportsNothing()
+    {
+        // Arrange
+        DiagnosticsTracker.IsEnabled = false;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        var diagnostics = new ExecutionDiagnostics();
+
+        // Act
+        diagnostics.ImportFromDiagnosticsTracker();
+
+        // Assert
+        Assert.That(diagnostics.KernelOperations.Count, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void GenerateReport_IncludesKernelOperations_WhenPresent()
+    {
+        // Arrange
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            var values1 = new[] { 1, 2, 3 };
+            var values2 = new[] { 2, 3, 4 };
+            var column1 = NivaraColumn<int>.Create(values1);
+            var column2 = NivaraColumn<int>.Create(values2);
+            column1.Add(column2);
+
+            var diagnostics = new ExecutionDiagnostics();
+            diagnostics.ImportFromDiagnosticsTracker();
+
+            // Act
+            var report = diagnostics.GenerateReport();
+
+            // Assert
+            Assert.That(report, Does.Contain("Kernel Operations:"));
+            Assert.That(report, Does.Contain("ElementwiseAddition"));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
 }
