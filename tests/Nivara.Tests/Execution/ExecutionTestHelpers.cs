@@ -1,5 +1,6 @@
 using Nivara.Execution;
 using Nivara.Query;
+using NUnit.Framework;
 using System.Collections.Concurrent;
 
 namespace Nivara.Tests.Execution;
@@ -8,23 +9,21 @@ sealed class StubQuerySource : IQuerySource
 {
     public Schema Schema { get; }
     public bool IsLazy { get; }
+    public int? EstimatedRowCount { get; set; }
     public Func<IReadOnlyDictionary<string, IColumn>>? ExecuteFn { get; set; }
 
     public StubQuerySource(Schema? schema = null, bool isLazy = false)
     {
         Schema = schema ?? new Schema(new[] { ("A", typeof(int)), ("B", typeof(string)) });
         IsLazy = isLazy;
+        EstimatedRowCount = null;
         ExecuteFn = null;
     }
 
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         if (ExecuteFn != null) return ExecuteFn();
-        return new Dictionary<string, IColumn>
-        {
-            ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }),
-            ["B"] = NivaraColumn<string>.Create(new[] { "x", "y", "z" }),
-        };
+        throw new InvalidOperationException("StubQuerySource requires ExecuteFn to be set. Use ExecutionTestHelpers.DefaultExecuteFn for 3-row data.");
     }
 
     public void Dispose() { }
@@ -36,7 +35,7 @@ sealed class StubQueryOperation : IQueryOperation
     public Func<Schema, Schema>? TransformSchemaFn { get; set; }
     public Func<IReadOnlyDictionary<string, IColumn>, IReadOnlyDictionary<string, IColumn>>? ExecuteFn { get; set; }
 
-    public StubQueryOperation(string operationType = Query.OperationType.Filter)
+    public StubQueryOperation(string operationType = global::Nivara.Query.OperationType.Filter)
     {
         OperationType = operationType;
     }
@@ -72,7 +71,7 @@ sealed class ThrowingQuerySource : IQuerySource
 
 sealed class ThrowingQueryOperation : IQueryOperation
 {
-    public string OperationType => Query.OperationType.Filter;
+    public string OperationType => global::Nivara.Query.OperationType.Filter;
     public Schema TransformSchema(Schema input) => input;
     public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
         => throw new InvalidOperationException("Op failed");
@@ -84,7 +83,7 @@ sealed class ParallelTrackingOperation : IQueryOperation
     public ConcurrentBag<int> ThreadIds { get; } = new();
     public Func<IReadOnlyDictionary<string, IColumn>, IReadOnlyDictionary<string, IColumn>>? ExecuteFn { get; set; }
 
-    public ParallelTrackingOperation(string operationType = Query.OperationType.Filter)
+    public ParallelTrackingOperation(string operationType = global::Nivara.Query.OperationType.Filter)
     {
         OperationType = operationType;
     }
@@ -159,12 +158,19 @@ static class ExecutionTestHelpers
         };
     }
 
+    public static IReadOnlyDictionary<string, IColumn> DefaultExecuteFn() =>
+        new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }),
+            ["B"] = NivaraColumn<string>.Create(new[] { "x", "y", "z" }),
+        };
+
     public static QueryPlan CreateTestPlan(
         IQuerySource? source = null,
         IEnumerable<IQueryOperation>? operations = null)
     {
-        source ??= new StubQuerySource();
-        operations ??= new[] { new StubQueryOperation(Query.OperationType.Filter) };
+        source ??= new StubQuerySource { ExecuteFn = DefaultExecuteFn };
+        operations ??= new[] { new StubQueryOperation(global::Nivara.Query.OperationType.Filter) };
         return new QueryPlan(source, operations);
     }
 
@@ -207,7 +213,49 @@ static class ExecutionTestHelpers
         int? estimatedRowCount = null)
     {
         var source = CreateLargeChunkedSource(sourceRowCount, estimatedRowCount);
-        operations ??= new[] { new StubQueryOperation(Query.OperationType.Filter) };
+        operations ??= new[] { new StubQueryOperation(global::Nivara.Query.OperationType.Filter) };
         return new QueryPlan(source, operations);
     }
+
+    public static void AssertFramesEqual(NivaraFrame expected, NivaraFrame actual)
+    {
+        Assert.That(actual, Is.Not.Null);
+        Assert.That(actual.RowCount, Is.EqualTo(expected.RowCount));
+        Assert.That(actual.ColumnCount, Is.EqualTo(expected.ColumnCount));
+        Assert.That(actual.ColumnNames, Is.EquivalentTo(expected.ColumnNames));
+
+        foreach (var colName in expected.ColumnNames)
+        {
+            var expectedCol = expected.GetColumn<object>(colName);
+            var actualCol = actual.GetColumn<object>(colName);
+            for (int i = 0; i < expected.RowCount; i++)
+                Assert.That(actualCol[i], Is.EqualTo(expectedCol[i]),
+                    $"Row {i} column '{colName}' mismatch");
+        }
+    }
+
+    public static NivaraFrame CreateTestFrame(int rowCount = 10)
+    {
+        var intData = new int[rowCount];
+        var strData = new string[rowCount];
+        for (int i = 0; i < rowCount; i++)
+        {
+            intData[i] = i * 10;
+            strData[i] = $"val{i}";
+        }
+        return new NivaraFrame(new[]
+        {
+            ("X", (IColumn)NivaraColumn<int>.Create(intData)),
+            ("Y", (IColumn)NivaraColumn<string>.Create(strData)),
+        });
+    }
+}
+
+sealed class FailingTransformSchemaOperation : IQueryOperation
+{
+    public string OperationType => global::Nivara.Query.OperationType.Filter;
+    public Schema TransformSchema(Schema input)
+        => throw new InvalidOperationException("TransformSchema failed");
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+        => throw new InvalidOperationException("TransformSchema failed");
 }

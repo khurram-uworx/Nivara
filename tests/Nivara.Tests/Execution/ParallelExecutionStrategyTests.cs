@@ -1,6 +1,5 @@
 using Nivara.Exceptions;
 using Nivara.Execution;
-using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
 using NUnit.Framework;
@@ -232,7 +231,7 @@ public class ParallelExecutionStrategyTests
     public void ExecuteFilterParallel_SmallDataset_FallsBackToSequential()
     {
         var strategy = new ParallelExecutionStrategy();
-        var source = new StubQuerySource(); // default 3 rows
+        var source = new StubQuerySource { ExecuteFn = ExecutionTestHelpers.DefaultExecuteFn };
 
         var trackingOp = new ParallelTrackingOperation("Filter");
         trackingOp.ExecuteFn = input => input;
@@ -656,7 +655,7 @@ sealed class CustomSortOperation : IQueryOperation, IParallelSortOperation
 
     public CustomSortOperation(string columnName) => this.columnName = columnName;
 
-    public string OperationType => Query.OperationType.Sort;
+    public string OperationType => global::Nivara.Query.OperationType.Sort;
     public IReadOnlyList<SortKey> SortKeys => new[] { new SortKey(columnName) };
     public bool IsStable => true;
 

@@ -116,7 +116,7 @@ public sealed class ExecutionDiagnostics
     /// <summary>
     /// Gets the end time of execution, if completed
     /// </summary>
-    public DateTime? EndTime { get; set; }
+    public DateTime? EndTime { get; private set; }
 
     /// <summary>
     /// Gets the total execution time

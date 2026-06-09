@@ -121,7 +121,10 @@ public class StreamingExecutionStrategyTests
     public void isSuitableForStreaming_StreamableOps_ReturnsTrue()
     {
         var strategy = new StreamingExecutionStrategy();
-        var streamableOps = new[] { Query.OperationType.Filter, Query.OperationType.Select, $"{Query.OperationType.ConcatenationPrefix}Vertical", $"{Query.OperationType.ConcatenationPrefix}Horizontal" };
+        var filter = Nivara.Query.OperationType.Filter;
+        var select = Nivara.Query.OperationType.Select;
+        var concatPrefix = Nivara.Query.OperationType.ConcatenationPrefix;
+        var streamableOps = new[] { filter, select, $"{concatPrefix}Vertical", $"{concatPrefix}Horizontal" };
         foreach (var opType in streamableOps)
         {
             var plan = ExecutionTestHelpers.CreateTestPlan(

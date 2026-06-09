@@ -47,46 +47,6 @@ sealed class EagerExecutionStrategy : ExecutionStrategyBase
         return new NivaraFrame(namedColumns);
     }
 
-    protected override async Task<NivaraFrame> ExecuteCoreAsync(QueryPlan plan, NivaraExecutionContext context)
-    {
-        var diag = context.ExecutionDiagnostics;
-        using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "EagerExecutionAsync") : null;
-        context.Progress?.Report(new ExecutionProgress("Starting async eager execution", 0, plan.Operations.Count + 1));
-
-        var currentColumns = diag != null
-            ? await DiagnosticHelper.ExecuteWithDiagnosticsAsync(diag, "SourceExecute", () => plan.Source.ExecuteAsync(context.CancellationToken)).ConfigureAwait(false)
-            : await plan.Source.ExecuteAsync(context.CancellationToken).ConfigureAwait(false);
-        context.Progress?.Report(new ExecutionProgress("Data source executed", 1, plan.Operations.Count + 1));
-
-        for (int i = 0; i < plan.Operations.Count; i++)
-        {
-            var operation = plan.Operations[i];
-            context.CancellationToken.ThrowIfCancellationRequested();
-            try
-            {
-                var capturedOp = operation;
-                currentColumns = diag != null
-                    ? await DiagnosticHelper.ExecuteWithDiagnosticsAsync(diag, operation.OperationType,
-                        () => Task.Run(() => capturedOp.Execute(currentColumns), context.CancellationToken)).ConfigureAwait(false)
-                    : await Task.Run(() => capturedOp.Execute(currentColumns), context.CancellationToken).ConfigureAwait(false);
-                context.Progress?.Report(new ExecutionProgress($"Operation {operation.OperationType} completed", i + 2, plan.Operations.Count + 1));
-            }
-            catch (Exception ex) when (ex is not QueryExecutionException)
-            {
-                throw new QueryExecutionException(
-                    $"Async eager execution failed at operation '{operation.OperationType}' (position {i + 1}): {ex.Message}",
-                    operation.OperationType,
-                    ex);
-            }
-        }
-
-        if (currentColumns.Count == 0)
-            throw new QueryExecutionException("Async eager execution resulted in no columns");
-
-        var namedColumns = currentColumns.Select(kvp => (kvp.Key, kvp.Value));
-        return new NivaraFrame(namedColumns);
-    }
-
     public override bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)
