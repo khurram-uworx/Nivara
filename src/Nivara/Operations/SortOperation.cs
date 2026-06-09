@@ -87,7 +87,7 @@ public sealed class SortKey
 /// <summary>
 /// Represents a sort operation that orders rows by one or more columns
 /// </summary>
-internal sealed class SortOperation : IQueryOperation
+sealed class SortOperation : IQueryOperation
 {
     readonly List<SortKey> sortKeys;
     readonly bool stable;
@@ -358,7 +358,7 @@ internal sealed class SortOperation : IQueryOperation
 /// <summary>
 /// Comparer that handles multiple sort keys with proper null handling
 /// </summary>
-internal sealed class MultiColumnComparer : IComparer<int>
+sealed class MultiColumnComparer : IComparer<int>
 {
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly List<SortKey> sortKeys;

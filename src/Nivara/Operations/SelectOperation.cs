@@ -8,7 +8,7 @@ namespace Nivara;
 /// <summary>
 /// Represents a select (projection) operation that selects specific columns or expressions
 /// </summary>
-internal sealed class SelectOperation : IQueryOperation
+sealed class SelectOperation : IQueryOperation
 {
     /// <summary>
     /// Initializes a new instance of SelectOperation

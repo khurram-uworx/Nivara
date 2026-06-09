@@ -7,7 +7,7 @@ namespace Nivara.Storage;
 /// Uses Memory&lt;T&gt; for efficient memory management without vectorization.
 /// </summary>
 /// <typeparam name="T">The type of elements to store</typeparam>
-internal sealed class MemoryStorage<T> : IColumnStorage<T>
+sealed class MemoryStorage<T> : IColumnStorage<T>
 {
     readonly ReadOnlyMemory<T> data;
     readonly ReadOnlyMemory<bool>? nullMask;

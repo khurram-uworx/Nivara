@@ -5,7 +5,7 @@ namespace Nivara.Helpers;
 /// <summary>
 /// A query source that wraps in-memory column data
 /// </summary>
-internal sealed class MemoryQuerySource : IQuerySource
+sealed class MemoryQuerySource : IQuerySource
 {
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly Schema schema;

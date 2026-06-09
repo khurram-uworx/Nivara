@@ -9,7 +9,7 @@ namespace Nivara.IO;
 /// This class provides memory-efficient streaming capabilities for Arrow/Parquet I/O operations,
 /// ensuring that memory usage remains bounded regardless of dataset size.
 /// </remarks>
-internal sealed class StreamingBufferManager : IDisposable
+sealed class StreamingBufferManager : IDisposable
 {
     /// <summary>
     /// Default chunk size for streaming operations (1MB)
@@ -209,7 +209,7 @@ internal sealed class StreamingBufferManager : IDisposable
 /// <summary>
 /// Provides streaming write capabilities with automatic buffer management.
 /// </summary>
-internal sealed class StreamingWriter : IDisposable
+sealed class StreamingWriter : IDisposable
 {
     private readonly Stream stream;
     private readonly StreamingBufferManager bufferManager;

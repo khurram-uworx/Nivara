@@ -38,7 +38,7 @@ public enum ConcatenationDirection
 /// <summary>
 /// Represents a concatenation operation that combines multiple DataFrames
 /// </summary>
-internal sealed class ConcatenationOperation : IQueryOperation
+sealed class ConcatenationOperation : IQueryOperation
 {
     readonly IReadOnlyList<IReadOnlyDictionary<string, IColumn>> sources;
     readonly ConcatenationDirection direction;

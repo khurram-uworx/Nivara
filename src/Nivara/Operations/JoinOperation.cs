@@ -104,7 +104,7 @@ public enum ColumnDisambiguationStrategy
 /// <summary>
 /// Represents the result of computing join indices
 /// </summary>
-internal sealed class JoinIndices
+sealed class JoinIndices
 {
     /// <summary>
     /// Initializes a new instance of JoinIndices
@@ -139,7 +139,7 @@ internal sealed class JoinIndices
 /// <summary>
 /// Represents a join operation between two DataFrames
 /// </summary>
-internal sealed class JoinOperation : IQueryOperation
+sealed class JoinOperation : IQueryOperation
 {
     readonly IReadOnlyDictionary<string, IColumn> leftColumns;
     readonly IReadOnlyDictionary<string, IColumn> rightColumns;
@@ -910,7 +910,7 @@ internal sealed class JoinOperation : IQueryOperation
 /// <summary>
 /// Represents a composite key for join operations with proper equality and hashing
 /// </summary>
-internal sealed class CompositeKey : IEquatable<CompositeKey>
+sealed class CompositeKey : IEquatable<CompositeKey>
 {
     readonly object?[] values;
     readonly int hashCode;

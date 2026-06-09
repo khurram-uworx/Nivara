@@ -6,7 +6,7 @@ namespace Nivara.Helpers;
 /// <summary>
 /// Evaluates column expressions against input data to produce result columns
 /// </summary>
-internal sealed class ExpressionEvaluator
+sealed class ExpressionEvaluator
 {
     /// <summary>
     /// Evaluates a column expression and returns the result column

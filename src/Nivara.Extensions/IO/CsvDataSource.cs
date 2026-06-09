@@ -68,7 +68,7 @@ public sealed class CsvOptions
 /// <summary>
 /// Lazy CSV data source that defers reading until execution
 /// </summary>
-internal sealed class CsvLazySource : IQuerySource
+sealed class CsvLazySource : IQuerySource
 {
     private readonly string filePath;
     private readonly CsvOptions options;
@@ -532,7 +532,7 @@ internal sealed class CsvLazySource : IQuerySource
 /// <summary>
 /// Eager CSV data source that reads immediately
 /// </summary>
-internal sealed class CsvEagerSource : IQuerySource
+sealed class CsvEagerSource : IQuerySource
 {
     private readonly CsvLazySource lazySource;
     private readonly Lazy<IReadOnlyDictionary<string, IColumn>> lazyColumns;

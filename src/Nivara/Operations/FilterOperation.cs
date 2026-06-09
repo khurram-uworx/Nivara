@@ -8,7 +8,7 @@ namespace Nivara;
 /// <summary>
 /// Represents a filter operation that applies a condition to filter rows
 /// </summary>
-internal sealed class FilterOperation : IQueryOperation
+sealed class FilterOperation : IQueryOperation
 {
     /// <summary>
     /// Initializes a new instance of FilterOperation

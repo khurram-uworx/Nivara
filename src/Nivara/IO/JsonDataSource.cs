@@ -39,7 +39,7 @@ public sealed class JsonOptions
 /// <summary>
 /// Lazy JSON data source that defers reading until execution
 /// </summary>
-internal sealed class JsonLazySource : IQuerySource
+sealed class JsonLazySource : IQuerySource
 {
     private readonly string filePath;
     private readonly JsonOptions options;
@@ -521,7 +521,7 @@ internal sealed class JsonLazySource : IQuerySource
 /// <summary>
 /// Eager JSON data source that reads immediately
 /// </summary>
-internal sealed class JsonEagerSource : IQuerySource
+sealed class JsonEagerSource : IQuerySource
 {
     private readonly JsonLazySource lazySource;
     private readonly Lazy<IReadOnlyDictionary<string, IColumn>> lazyColumns;
