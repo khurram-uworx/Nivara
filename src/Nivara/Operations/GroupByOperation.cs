@@ -64,6 +64,11 @@ public sealed class GroupedData
     /// Gets the source columns
     /// </summary>
     public IReadOnlyDictionary<string, IColumn> SourceColumns => sourceColumns;
+
+    /// <summary>
+    /// Gets the internal groups dictionary (for parallel execution merge)
+    /// </summary>
+    internal Dictionary<GroupKey, List<int>> Groups => groups;
 }
 
 /// <summary>
@@ -97,10 +102,8 @@ public sealed class GroupKey : IEquatable<GroupKey>
         if (values.Length != other.values.Length) return false;
 
         for (int i = 0; i < values.Length; i++)
-        {
             if (!Equals(values[i], other.values[i]))
                 return false;
-        }
 
         return true;
     }
@@ -120,9 +123,8 @@ public sealed class GroupKey : IEquatable<GroupKey>
     {
         var hash = new HashCode();
         foreach (var value in values)
-        {
             hash.Add(value);
-        }
+
         return hash.ToHashCode();
     }
 
@@ -235,7 +237,7 @@ public sealed class GroupByOperation : IQueryOperation
     /// <param name="input">The input columns</param>
     /// <param name="keyColumns">The key column names</param>
     /// <returns>The grouped data</returns>
-    static GroupedData CreateGroupsInternal(IReadOnlyDictionary<string, IColumn> input, string[] keyColumns)
+    internal static GroupedData CreateGroupsInternal(IReadOnlyDictionary<string, IColumn> input, string[] keyColumns, int offset = 0)
     {
         var firstColumn = input.Values.First();
         var rowCount = firstColumn.Length;
@@ -250,9 +252,7 @@ public sealed class GroupByOperation : IQueryOperation
             // Create composite key for this row
             var keyValues = new object?[keyColumns.Length];
             for (int keyIndex = 0; keyIndex < keyColumns.Length; keyIndex++)
-            {
                 keyValues[keyIndex] = keyColumnData[keyIndex].GetValue(rowIndex);
-            }
 
             var groupKey = new GroupKey(keyValues);
 
@@ -263,7 +263,7 @@ public sealed class GroupByOperation : IQueryOperation
                 groups[groupKey] = rowIndices;
             }
 
-            rowIndices.Add(rowIndex);
+            rowIndices.Add(rowIndex + offset);
         }
 
         return new GroupedData(groups, keyColumns, input);
@@ -276,7 +276,7 @@ public sealed class GroupByOperation : IQueryOperation
     /// <param name="columnName">The column name</param>
     /// <param name="sourceColumn">The source column</param>
     /// <returns>A column with distinct key values</returns>
-    static IColumn ExtractDistinctKeyValues(GroupedData groupedData, string columnName, IColumn sourceColumn)
+    internal static IColumn ExtractDistinctKeyValues(GroupedData groupedData, string columnName, IColumn sourceColumn)
     {
         var keyColumnIndex = Array.IndexOf(groupedData.KeyColumnNames.ToArray(), columnName);
         if (keyColumnIndex == -1)
@@ -295,7 +295,7 @@ public sealed class GroupByOperation : IQueryOperation
     /// <param name="elementType">The element type</param>
     /// <param name="values">The values</param>
     /// <returns>A new column</returns>
-    static IColumn CreateColumnFromValues(Type elementType, object?[] values)
+    internal static IColumn CreateColumnFromValues(Type elementType, object?[] values)
     {
         return elementType switch
         {
@@ -323,9 +323,7 @@ public sealed class GroupByOperation : IQueryOperation
     {
         // For simple column references, use the original column name
         if (expression is ColumnReference columnRef)
-        {
             return columnRef.ColumnName;
-        }
 
         // For complex expressions, use the expression's display name
         return expression.Name;
@@ -341,9 +339,7 @@ public sealed class GroupByOperation : IQueryOperation
     {
         // For simple column references, use the original column name
         if (expression is ColumnReference columnRef)
-        {
             return columnRef.ColumnName;
-        }
 
         // For complex expressions, use the expression's display name
         return expression.Name;
@@ -359,9 +355,7 @@ public sealed class GroupByOperation : IQueryOperation
     {
         // For simple column references, get the type from the schema
         if (expression is ColumnReference columnRef)
-        {
             return inputSchema.GetColumnType(columnRef.ColumnName);
-        }
 
         // For other expressions, use the expression's result type
         return expression.ResultType;

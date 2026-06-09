@@ -1,5 +1,6 @@
 using Nivara.Execution;
 using Nivara.Query;
+using System.Collections.Concurrent;
 
 namespace Nivara.Tests.Execution;
 
@@ -77,8 +78,77 @@ sealed class ThrowingQueryOperation : IQueryOperation
         => throw new InvalidOperationException("Op failed");
 }
 
+sealed class ParallelTrackingOperation : IQueryOperation
+{
+    public string OperationType { get; }
+    public ConcurrentBag<int> ThreadIds { get; } = new();
+    public Func<IReadOnlyDictionary<string, IColumn>, IReadOnlyDictionary<string, IColumn>>? ExecuteFn { get; set; }
+
+    public ParallelTrackingOperation(string operationType = "Filter")
+    {
+        OperationType = operationType;
+    }
+
+    public Schema TransformSchema(Schema input) => input;
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+    {
+        ThreadIds.Add(Environment.CurrentManagedThreadId);
+        if (ExecuteFn != null) return ExecuteFn(input);
+        return input;
+    }
+}
+
+sealed class StubChunkedQuerySource : IQuerySource
+{
+    readonly int totalRowCount;
+
+    public StubChunkedQuerySource(int totalRowCount = 2000)
+    {
+        this.totalRowCount = totalRowCount;
+    }
+
+    public Schema Schema => new(new[] { ("A", typeof(int)) });
+    public bool IsLazy => false;
+    public bool CanReadInChunks => true;
+    public int? EstimatedRowCount => totalRowCount;
+
+    public ConcurrentBag<int> ChunksRead { get; } = new();
+
+    public IReadOnlyDictionary<string, IColumn> Execute()
+    {
+        var data = new int[totalRowCount];
+        for (int i = 0; i < totalRowCount; i++) data[i] = i;
+        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
+    }
+
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ChunksRead.Add(chunkIndex);
+        var start = chunkIndex * chunkSize;
+        var length = Math.Min(chunkSize, totalRowCount - start);
+        var data = new int[length];
+        for (int i = 0; i < length; i++) data[i] = start + i;
+        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
+    }
+
+    public void Dispose() { }
+}
+
 static class ExecutionTestHelpers
 {
+    public static IReadOnlyDictionary<string, IColumn> CreateLargeIntColumn(int rowCount = 2000)
+    {
+        var data = new int[rowCount];
+        for (int i = 0; i < rowCount; i++) data[i] = i;
+        return new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<int>.Create(data),
+        };
+    }
+
     public static QueryPlan CreateTestPlan(
         IQuerySource? source = null,
         IEnumerable<IQueryOperation>? operations = null)

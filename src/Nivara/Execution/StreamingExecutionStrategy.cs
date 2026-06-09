@@ -2,7 +2,7 @@ using Nivara.Query;
 
 namespace Nivara.Execution;
 
-internal sealed class StreamingExecutionStrategy : ExecutionStrategyBase
+sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 {
     static bool isSuitableForStreaming(QueryPlan plan)
     {

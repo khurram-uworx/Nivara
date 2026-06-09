@@ -240,7 +240,7 @@ sealed class SortOperation : IQueryOperation
     /// <param name="column">The column to reorder</param>
     /// <param name="indices">The indices specifying the new order</param>
     /// <returns>A reordered column</returns>
-    private static IColumn ReorderColumn(IColumn column, int[] indices)
+    public static IColumn ReorderColumn(IColumn column, int[] indices)
     {
         var elementType = column.ElementType;
 
@@ -264,7 +264,7 @@ sealed class SortOperation : IQueryOperation
     /// <summary>
     /// Reorders a column for a specific type
     /// </summary>
-    static IColumn ReorderColumnTyped<T>(IColumn column, int[] indices)
+    public static IColumn ReorderColumnTyped<T>(IColumn column, int[] indices)
     {
         // Check if T is a value type to determine which creation method to use
         if (typeof(T).IsValueType)
@@ -310,7 +310,7 @@ sealed class SortOperation : IQueryOperation
     /// <summary>
     /// Reorders a column for unknown types using object column
     /// </summary>
-    static IColumn ReorderColumnGeneric(IColumn column, int[] indices)
+    public static IColumn ReorderColumnGeneric(IColumn column, int[] indices)
     {
         var reorderedArray = new object[indices.Length];
 
@@ -360,6 +360,41 @@ sealed class SortOperation : IQueryOperation
 /// </summary>
 sealed class MultiColumnComparer : IComparer<int>
 {
+    /// <summary>
+    /// Compares two values from a column at the specified indices
+    /// </summary>
+    /// <param name="column">The column containing the values</param>
+    /// <param name="indexX">The index of the first value</param>
+    /// <param name="indexY">The index of the second value</param>
+    /// <param name="sortKey">The sort key defining how to compare</param>
+    /// <returns>A comparison result</returns>
+    static int compareValues(IColumn column, int indexX, int indexY, SortKey sortKey)
+    {
+        var valueX = column.GetValue(indexX);
+        var valueY = column.GetValue(indexY);
+
+        // Handle null values according to null ordering
+        if (valueX == null && valueY == null)
+            return 0;
+
+        if (valueX == null)
+            return sortKey.NullOrdering == NullOrdering.NullsFirst ? -1 : 1;
+
+        if (valueY == null)
+            return sortKey.NullOrdering == NullOrdering.NullsFirst ? 1 : -1;
+
+        // Both values are non-null, compare them
+        int comparison;
+        if (valueX is IComparable comparableX)
+            comparison = comparableX.CompareTo(valueY);
+        else
+            // Fallback to string comparison
+            comparison = string.Compare(valueX.ToString(), valueY.ToString(), StringComparison.Ordinal);
+
+        // Apply sort direction
+        return sortKey.Direction == SortDirection.Ascending ? comparison : -comparison;
+    }
+
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly List<SortKey> sortKeys;
 
@@ -375,7 +410,7 @@ sealed class MultiColumnComparer : IComparer<int>
         foreach (var sortKey in sortKeys)
         {
             var column = columns[sortKey.ColumnName];
-            var result = CompareValues(column, x, y, sortKey);
+            var result = compareValues(column, x, y, sortKey);
 
             if (result != 0)
             {
@@ -385,48 +420,5 @@ sealed class MultiColumnComparer : IComparer<int>
 
         // All sort keys are equal
         return 0;
-    }
-
-    /// <summary>
-    /// Compares two values from a column at the specified indices
-    /// </summary>
-    /// <param name="column">The column containing the values</param>
-    /// <param name="indexX">The index of the first value</param>
-    /// <param name="indexY">The index of the second value</param>
-    /// <param name="sortKey">The sort key defining how to compare</param>
-    /// <returns>A comparison result</returns>
-    private static int CompareValues(IColumn column, int indexX, int indexY, SortKey sortKey)
-    {
-        var valueX = column.GetValue(indexX);
-        var valueY = column.GetValue(indexY);
-
-        // Handle null values according to null ordering
-        if (valueX == null && valueY == null)
-            return 0;
-
-        if (valueX == null)
-        {
-            return sortKey.NullOrdering == NullOrdering.NullsFirst ? -1 : 1;
-        }
-
-        if (valueY == null)
-        {
-            return sortKey.NullOrdering == NullOrdering.NullsFirst ? 1 : -1;
-        }
-
-        // Both values are non-null, compare them
-        int comparison;
-        if (valueX is IComparable comparableX)
-        {
-            comparison = comparableX.CompareTo(valueY);
-        }
-        else
-        {
-            // Fallback to string comparison
-            comparison = string.Compare(valueX.ToString(), valueY.ToString(), StringComparison.Ordinal);
-        }
-
-        // Apply sort direction
-        return sortKey.Direction == SortDirection.Ascending ? comparison : -comparison;
     }
 }

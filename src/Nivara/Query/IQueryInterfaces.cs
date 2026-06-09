@@ -20,4 +20,12 @@ public interface IQuerySource : IDisposable
 
     Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default)
         => Task.Run(() => Execute(), cancellationToken);
+
+    bool CanReadInChunks => false;
+
+    int? EstimatedRowCount => null;
+
+    ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("This source does not support chunked reading.");
 }

@@ -30,6 +30,27 @@ public enum JoinType
 }
 
 /// <summary>
+/// Represents a strategy for handling column name conflicts during joins
+/// </summary>
+public enum ColumnDisambiguationStrategy
+{
+    /// <summary>
+    /// Add prefixes to conflicting columns (left_column, right_column)
+    /// </summary>
+    Prefix,
+
+    /// <summary>
+    /// Add suffixes to conflicting columns (column_left, column_right)
+    /// </summary>
+    Suffix,
+
+    /// <summary>
+    /// Throw an exception when column name conflicts occur
+    /// </summary>
+    Error
+}
+
+/// <summary>
 /// Represents a join key mapping between columns in two DataFrames
 /// </summary>
 public sealed class JoinKey
@@ -57,8 +78,7 @@ public sealed class JoinKey
     /// <param name="columnName">The column name to use for both left and right DataFrames</param>
     /// <exception cref="ArgumentException">Thrown when column name is null or whitespace</exception>
     public JoinKey(string columnName) : this(columnName, columnName)
-    {
-    }
+    { }
 
     /// <summary>
     /// Gets the column name in the left DataFrame
@@ -78,27 +98,6 @@ public sealed class JoinKey
     {
         return LeftColumn == RightColumn ? LeftColumn : $"{LeftColumn}={RightColumn}";
     }
-}
-
-/// <summary>
-/// Represents a strategy for handling column name conflicts during joins
-/// </summary>
-public enum ColumnDisambiguationStrategy
-{
-    /// <summary>
-    /// Add prefixes to conflicting columns (left_column, right_column)
-    /// </summary>
-    Prefix,
-
-    /// <summary>
-    /// Add suffixes to conflicting columns (column_left, column_right)
-    /// </summary>
-    Suffix,
-
-    /// <summary>
-    /// Throw an exception when column name conflicts occur
-    /// </summary>
-    Error
 }
 
 /// <summary>
@@ -148,6 +147,14 @@ sealed class JoinOperation : IQueryOperation
     readonly ColumnDisambiguationStrategy disambiguationStrategy;
     readonly string leftPrefix;
     readonly string rightPrefix;
+
+    internal IReadOnlyDictionary<string, IColumn> LeftColumns => leftColumns;
+    internal IReadOnlyDictionary<string, IColumn> RightColumns => rightColumns;
+    internal JoinType JoinTypeValue => joinType;
+    internal JoinKey[] JoinKeys => joinKeys;
+    internal ColumnDisambiguationStrategy DisambiguationStrategy => disambiguationStrategy;
+    internal string LeftPrefix => leftPrefix;
+    internal string RightPrefix => rightPrefix;
 
     /// <summary>
     /// Initializes a new instance of JoinOperation
@@ -297,9 +304,32 @@ sealed class JoinOperation : IQueryOperation
     }
 
     /// <summary>
+    /// Computes join indices using a pre-built right-side hash map (used by parallel execution)
+    /// </summary>
+    internal JoinIndices ComputeJoinIndicesWithHashMap(Dictionary<CompositeKey, List<int>> rightHashMap)
+    {
+        var leftRowCount = leftColumns.Values.FirstOrDefault()?.Length ?? 0;
+        var rightRowCount = rightColumns.Values.FirstOrDefault()?.Length ?? 0;
+
+        return joinType switch
+        {
+            JoinType.Inner => ComputeInnerJoinIndices(leftRowCount, rightHashMap),
+            JoinType.Left => ComputeLeftJoinIndices(leftRowCount, rightHashMap),
+            JoinType.Right => ComputeRightJoinIndices(leftRowCount, rightRowCount, rightHashMap),
+            JoinType.FullOuter => ComputeFullOuterJoinIndices(leftRowCount, rightRowCount, rightHashMap),
+            _ => throw new ArgumentException($"Unsupported join type: {joinType}")
+        };
+    }
+
+    /// <summary>
+    /// Materializes the join result using the computed indices
+    /// </summary>
+    internal IReadOnlyDictionary<string, IColumn> MaterializeResult(JoinIndices joinIndices)
+        => MaterializeJoinResult(joinIndices);
+
+    /// <summary>
     /// Computes the join indices based on the join type and keys
     /// </summary>
-    /// <returns>The computed join indices</returns>
     private JoinIndices ComputeJoinIndices()
     {
         // Get row counts
@@ -392,10 +422,11 @@ sealed class JoinOperation : IQueryOperation
     /// <summary>
     /// Builds a hash map for efficient join key lookup
     /// </summary>
-    private Dictionary<CompositeKey, List<int>> BuildHashMap(
+    internal static Dictionary<CompositeKey, List<int>> BuildHashMap(
         IReadOnlyDictionary<string, IColumn> columns,
         string[] keyColumns,
-        int rowCount)
+        int rowCount,
+        int offset = 0)
     {
         var hashMap = new Dictionary<CompositeKey, List<int>>();
 
@@ -415,7 +446,7 @@ sealed class JoinOperation : IQueryOperation
                 hashMap[compositeKey] = indices;
             }
 
-            indices.Add(i);
+            indices.Add(i + offset);
         }
 
         return hashMap;

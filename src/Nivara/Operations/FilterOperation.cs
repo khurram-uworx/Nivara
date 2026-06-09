@@ -94,12 +94,8 @@ sealed class FilterOperation : IQueryOperation
         var filteredIndices = new List<int>();
 
         for (int i = 0; i < mask.Length; i++)
-        {
             if (mask[i] == true) // Only include rows where mask is true
-            {
                 filteredIndices.Add(i);
-            }
-        }
 
         // Create a new column with only the filtered values
         return CreateFilteredColumn(column, filteredIndices);
@@ -186,9 +182,7 @@ sealed class FilterOperation : IQueryOperation
         var filteredArray = new object[indices.Count];
 
         for (int i = 0; i < indices.Count; i++)
-        {
             filteredArray[i] = column.GetValue(indices[i])!;
-        }
 
         return NivaraColumn<object>.Create(filteredArray);
     }
@@ -198,7 +192,5 @@ sealed class FilterOperation : IQueryOperation
     /// </summary>
     /// <returns>A string representation</returns>
     public override string ToString()
-    {
-        return $"Filter({Condition})";
-    }
+        => $"Filter({Condition})";
 }
