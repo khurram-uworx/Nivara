@@ -116,12 +116,12 @@ sealed class EagerExecutionStrategy : ExecutionStrategyBase
             {
                 cost += operation.OperationType switch
                 {
-                    "Filter" => 300,
-                    "Select" => 150,
-                    "Sort" => 1200,
-                    "GroupBy" => 1800,
-                    "Join" => 2500,
-                    "Concatenation" => 400,
+                    Query.OperationType.Filter => 300,
+                    Query.OperationType.Select => 150,
+                    Query.OperationType.Sort => 1200,
+                    Query.OperationType.GroupBy => 1800,
+                    Query.OperationType.Join => 2500,
+                    _ when operation.OperationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => 400,
                     _ => 600
                 };
             }

@@ -8,17 +8,6 @@ namespace Nivara.Query;
 sealed class QueryExecutor
 {
     /// <summary>
-    /// Creates a schema from a collection of columns
-    /// </summary>
-    /// <param name="columns">The columns to create schema from</param>
-    /// <returns>A schema representing the columns</returns>
-    private static Schema createSchemaFromColumns(IReadOnlyDictionary<string, IColumn> columns)
-    {
-        var schemaColumns = columns.Select(kvp => (kvp.Key, kvp.Value.ElementType));
-        return new Schema(schemaColumns);
-    }
-
-    /// <summary>
     /// Executes a query plan and returns the materialized result
     /// </summary>
     /// <param name="plan">The query plan to execute</param>
@@ -64,25 +53,12 @@ sealed class QueryExecutor
 
                 try
                 {
-                    // Validate operation against current schema
-                    var currentSchema = createSchemaFromColumns(currentColumns);
-                    var transformedSchema = operation.TransformSchema(currentSchema);
-
                     currentColumns = operation.Execute(currentColumns);
 
                     if (currentColumns == null)
                     {
                         var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
                         throw new QueryExecutionException($"Operation '{operation.OperationType}' at position {i + 1} returned null columns. {diagnosticInfo}");
-                    }
-
-                    // Validate that the operation produced the expected schema
-                    var actualSchema = createSchemaFromColumns(currentColumns);
-                    if (!actualSchema.IsCompatibleWith(transformedSchema, requireExactMatch: false))
-                    {
-                        throw new QueryExecutionException(
-                            $"Operation '{operation.OperationType}' at position {i + 1} produced unexpected schema. " +
-                            $"Expected: {transformedSchema}, Actual: {actualSchema}");
                     }
                 }
                 catch (Exception ex) when (ex is not QueryExecutionException)
@@ -175,27 +151,25 @@ sealed class QueryExecutor
     /// </summary>
     /// <param name="plan">The query plan to analyze</param>
     /// <returns>An estimated execution cost (higher values indicate more expensive operations)</returns>
-    public int EstimateExecutionCost(QueryPlan plan)
+    public long EstimateExecutionCost(QueryPlan plan)
     {
         if (plan == null)
-            return int.MaxValue;
+            return long.MaxValue;
 
         try
         {
-            int cost = 0;
+            long cost = 0;
 
-            // Base cost for data source
-            cost += plan.Source.IsLazy ? 10 : 5; // Lazy sources have higher initial cost
+            cost += plan.Source.IsLazy ? 10 : 5;
 
-            // Add cost for each operation
             foreach (var operation in plan.Operations)
             {
                 cost += operation.OperationType switch
                 {
-                    "Filter" => 5,    // Relatively cheap
-                    "Select" => 3,    // Very cheap
-                    "GroupBy" => 20,  // Expensive due to sorting/grouping
-                    _ => 10           // Default cost for unknown operations
+                    OperationType.Filter => 5,
+                    OperationType.Select => 3,
+                    OperationType.GroupBy => 20,
+                    _ => 10
                 };
             }
 
@@ -203,7 +177,7 @@ sealed class QueryExecutor
         }
         catch
         {
-            return int.MaxValue; // Return maximum cost if estimation fails
+            return long.MaxValue;
         }
     }
 }

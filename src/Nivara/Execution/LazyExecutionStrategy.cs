@@ -47,12 +47,12 @@ sealed class LazyExecutionStrategy : ExecutionStrategyBase
             {
                 cost += operation.OperationType switch
                 {
-                    "Filter" => 200,
-                    "Select" => 100,
-                    "Sort" => 1000,
-                    "GroupBy" => 1500,
-                    "Join" => 2000,
-                    "Concatenation" => 300,
+                    Query.OperationType.Filter => 200,
+                    Query.OperationType.Select => 100,
+                    Query.OperationType.Sort => 1000,
+                    Query.OperationType.GroupBy => 1500,
+                    Query.OperationType.Join => 2000,
+                    _ when operation.OperationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => 300,
                     _ => 500
                 };
             }

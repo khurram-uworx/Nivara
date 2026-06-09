@@ -11,12 +11,12 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
     {
         return operationType switch
         {
-            "Filter" => true,
-            "Select" => false,
-            "Sort" => true,
-            "GroupBy" => true,
-            "Join" => true,
-            _ when operationType.StartsWith("Concatenate", StringComparison.Ordinal) => true,
+            Query.OperationType.Filter => true,
+            Query.OperationType.Select => false,
+            Query.OperationType.Sort => true,
+            Query.OperationType.GroupBy => true,
+            Query.OperationType.Join => true,
+            _ when operationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => true,
             _ => false
         };
     }
@@ -632,12 +632,12 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             {
                 var baseCost = operation.OperationType switch
                 {
-                    "Filter" => 300,
-                    "Select" => 150,
-                    "Sort" => 800,
-                    "GroupBy" => 1000,
-                    "Join" => 1500,
-                    _ when operation.OperationType.StartsWith("Concatenate", StringComparison.Ordinal) => 250,
+                    Query.OperationType.Filter => 300,
+                    Query.OperationType.Select => 150,
+                    Query.OperationType.Sort => 800,
+                    Query.OperationType.GroupBy => 1000,
+                    Query.OperationType.Join => 1500,
+                    _ when operation.OperationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => 250,
                     _ => 500
                 };
 

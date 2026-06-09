@@ -32,8 +32,7 @@ sealed class SelectOperation : IQueryOperation
     /// </summary>
     public IReadOnlyList<ColumnExpression> Columns { get; }
 
-    /// <inheritdoc />
-    public string OperationType => "Select";
+    public string OperationType => Query.OperationType.Select;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

@@ -129,9 +129,9 @@ public sealed class ExecutionDiagnostics
     public long PeakMemoryUsage => peakMemoryUsage;
 
     /// <summary>
-    /// Gets the memory allocated during execution
+    /// Gets the memory allocated during execution (never negative)
     /// </summary>
-    public long MemoryAllocated => PeakMemoryUsage - initialMemory;
+    public long MemoryAllocated => Math.Max(0, PeakMemoryUsage - initialMemory);
 
     /// <summary>
     /// Gets the degree of parallelism used during execution
@@ -282,8 +282,8 @@ public sealed class ExecutionDiagnostics
             report.AppendLine("  • Large dataset processed sequentially - consider parallel execution");
 
         // Suggest optimizations based on operation patterns
-        var filterOperations = operationTimings.Where(t => t.OperationType.Contains("Filter")).ToList();
-        var sortOperations = operationTimings.Where(t => t.OperationType.Contains("Sort")).ToList();
+        var filterOperations = operationTimings.Where(t => t.OperationType.Contains(Query.OperationType.Filter)).ToList();
+        var sortOperations = operationTimings.Where(t => t.OperationType.Contains(Query.OperationType.Sort)).ToList();
 
         if (sortOperations.Count > 0 && filterOperations.Count > 0)
         {

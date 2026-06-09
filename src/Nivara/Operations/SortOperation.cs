@@ -136,8 +136,7 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
     /// </summary>
     public bool IsStable => stable;
 
-    /// <inheritdoc />
-    public string OperationType => "Sort";
+    public string OperationType => Query.OperationType.Sort;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

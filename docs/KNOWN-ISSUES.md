@@ -356,50 +356,6 @@ for truly testing async code paths (reveals the Gap 15 deadlock in tests).
 
 ---
 
-## Gap 18: Missing ExecutionEngine Tests for Optimizer Change Recording and Failure Warnings
-
-### Priority
-
-Medium
-
-### Files involved
-
-- `tests/Nivara.Tests/Execution/ExecutionEngineTests.cs`
-
-### Issue
-
-`EXECUTION-PHASE4.md` Task 5 specifies two tests that were listed in the acceptance criteria but **not implemented**:
-
-| Test name (from plan) | Purpose | Status |
-|-----------------------|---------|--------|
-| `Execute_DiagnosticsRecordOptimization_WhenOptimizerChangesPlan` | Verify optimizer changes are recorded as `OptimizationApplied` entries | ❌ Missing |
-| `Execute_DiagnosticsRecordWarning_OnFailure` | Verify warnings recorded on exception | ❌ Missing |
-
-The `RecordOptimization` code path in `ExecutionEngine.Execute`:
-```csharp
-if (!ReferenceEquals(plan, optimizedPlan) && optimizer != null)
-    diagnostics.RecordOptimization(...)
-```
-is only triggered when the optimizer modifies the plan. Without a test that sets up a custom `QueryOptimizer`, this path is never exercised by any existing test.
-
-The warning-on-failure path (catch block recording `PerformanceWarningSeverity.Critical`) is indirectly exercised by the existing `Execute_ThrowsQueryExecutionException_WhenUnknownStrategy` test, but there is no assertion verifying the warning was actually recorded.
-
-### Impact
-
-- The `RecordOptimization` code path in `ExecutionEngine` is blind to regressions — a future refactor could break it without detection
-- The failure-warning recording path lacks explicit verification; only the exception-wrapping behavior is tested
-- `EXECUTION-PHASE4.md` acceptance criteria are not fully met (12+ tests required; 17 were added but 2 from the plan are missing)
-
-### Suggested fix
-
-Add two tests to `ExecutionEngineTests.cs`:
-
-1. **`Execute_DiagnosticsRecordOptimization_WhenOptimizerChangesPlan`**: Create an `ExecutionEngine`, register a custom `QueryOptimizer` that modifies the plan (e.g., reorders operations or returns a different plan instance), execute a query, and verify `LastDiagnostics.OptimizationsApplied` contains at least one entry with `OptimizationName == "QueryOptimization"`.
-
-2. **`Execute_DiagnosticsRecordWarning_OnFailure`**: Execute with an invalid context (e.g., unknown strategy) via the `Execute(plan, context)` overload, catch the `QueryExecutionException`, and verify `LastDiagnostics.Warnings.Count > 0` after the exception. Note the warning is recorded in the try-catch before re-throw, so `LastDiagnostics` will be available after the exception.
-
----
-
 ## Gap 19: Public Setter on ExecutionDiagnostics.EndTime
 
 ### Priority

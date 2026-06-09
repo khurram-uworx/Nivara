@@ -84,10 +84,9 @@ public sealed class ExecutionEngine
     /// </summary>
     public ExecutionEngine()
     {
-        this.optimizer = null; // Will be set via internal method
+        this.optimizer = null;
         this.strategies = new ConcurrentDictionary<ExecutionStrategy, IExecutionStrategy>();
 
-        // Register default execution strategies
         RegisterStrategy(ExecutionStrategy.Lazy, new LazyExecutionStrategy());
         RegisterStrategy(ExecutionStrategy.Eager, new EagerExecutionStrategy());
         RegisterStrategy(ExecutionStrategy.Streaming, new StreamingExecutionStrategy());
@@ -95,10 +94,10 @@ public sealed class ExecutionEngine
     }
 
     /// <summary>
-    /// Sets the query optimizer for this execution engine (internal use only)
+    /// Initializes a new instance of ExecutionEngine with an optional query optimizer
     /// </summary>
-    /// <param name="queryOptimizer">The query optimizer to use</param>
-    internal void SetOptimizer(QueryOptimizer? queryOptimizer)
+    /// <param name="queryOptimizer">The query optimizer to use (optional)</param>
+    public ExecutionEngine(QueryOptimizer? queryOptimizer) : this()
     {
         optimizer = queryOptimizer;
     }

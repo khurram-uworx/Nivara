@@ -35,8 +35,7 @@ sealed class SliceOperation : IQueryOperation
     /// </summary>
     public int? Take { get; }
 
-    /// <inheritdoc />
-    public string OperationType => "Slice";
+    public string OperationType => Query.OperationType.Slice;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

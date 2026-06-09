@@ -656,7 +656,7 @@ sealed class CustomSortOperation : IQueryOperation, IParallelSortOperation
 
     public CustomSortOperation(string columnName) => this.columnName = columnName;
 
-    public string OperationType => "Sort";
+    public string OperationType => Query.OperationType.Sort;
     public IReadOnlyList<SortKey> SortKeys => new[] { new SortKey(columnName) };
     public bool IsStable => true;
 

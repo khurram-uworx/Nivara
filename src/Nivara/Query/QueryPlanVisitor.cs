@@ -66,25 +66,25 @@ public abstract class QueryPlanVisitorBase : IQueryPlanVisitor
 
         switch (operation.OperationType)
         {
-            case "Filter":
+            case OperationType.Filter:
                 VisitFilter(operation);
                 break;
-            case "Select":
+            case OperationType.Select:
                 VisitSelect(operation);
                 break;
-            case "GroupBy":
+            case OperationType.GroupBy:
                 VisitGroupBy(operation);
                 break;
-            case "Sort":
+            case OperationType.Sort:
                 VisitSort(operation);
                 break;
-            case "Join":
+            case OperationType.Join:
                 VisitJoin(operation);
                 break;
-            case "Projection":
+            case OperationType.Projection:
                 VisitProjection(operation);
                 break;
-            case "Concatenation":
+            case var type when type.StartsWith(OperationType.ConcatenationPrefix, StringComparison.Ordinal):
                 VisitConcatenation(operation);
                 break;
             default:
@@ -210,13 +210,13 @@ public abstract class QueryPlanTransformerBase<T> : IQueryPlanVisitor<T>
 
         return operation.OperationType switch
         {
-            "Filter" => VisitFilter(operation),
-            "Select" => VisitSelect(operation),
-            "GroupBy" => VisitGroupBy(operation),
-            "Sort" => VisitSort(operation),
-            "Join" => VisitJoin(operation),
-            "Projection" => VisitProjection(operation),
-            "Concatenation" => VisitConcatenation(operation),
+            OperationType.Filter => VisitFilter(operation),
+            OperationType.Select => VisitSelect(operation),
+            OperationType.GroupBy => VisitGroupBy(operation),
+            OperationType.Sort => VisitSort(operation),
+            OperationType.Join => VisitJoin(operation),
+            OperationType.Projection => VisitProjection(operation),
+            _ when operation.OperationType.StartsWith(OperationType.ConcatenationPrefix, StringComparison.Ordinal) => VisitConcatenation(operation),
             _ => VisitUnknownOperation(operation)
         };
     }

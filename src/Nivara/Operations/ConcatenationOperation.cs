@@ -70,8 +70,7 @@ sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOpe
             throw new ArgumentException("Must provide at least one source for concatenation", nameof(sources));
     }
 
-    /// <inheritdoc />
-    public string OperationType => $"Concatenate{direction}";
+    public string OperationType => $"{Query.OperationType.ConcatenationPrefix}{direction}";
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

@@ -25,8 +25,7 @@ sealed class FilterOperation : IQueryOperation
     /// </summary>
     public ColumnExpression Condition { get; }
 
-    /// <inheritdoc />
-    public string OperationType => "Filter";
+    public string OperationType => Query.OperationType.Filter;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

@@ -163,8 +163,7 @@ public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperatio
     /// </summary>
     public IReadOnlyList<ColumnExpression> GroupByColumns => groupByColumns;
 
-    /// <inheritdoc />
-    public string OperationType => "GroupBy";
+    public string OperationType => Query.OperationType.GroupBy;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

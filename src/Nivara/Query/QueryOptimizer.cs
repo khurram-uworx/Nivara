@@ -5,7 +5,7 @@ namespace Nivara.Query;
 /// <summary>
 /// Optimizes query plans by applying various optimization techniques
 /// </summary>
-sealed class QueryOptimizer
+public sealed class QueryOptimizer
 {
     readonly OptimizationEngine engine;
 
@@ -96,14 +96,14 @@ sealed class QueryOptimizer
         var suggestions = new List<string>();
 
         // Check for multiple filter operations
-        var filterCount = plan.Operations.Count(op => op.OperationType == "Filter");
+        var filterCount = plan.Operations.Count(op => op.OperationType == OperationType.Filter);
         if (filterCount > 1)
         {
             suggestions.Add($"Found {filterCount} filter operations - consider combining them for better performance");
         }
 
         // Check for multiple select operations
-        var selectCount = plan.Operations.Count(op => op.OperationType == "Select");
+        var selectCount = plan.Operations.Count(op => op.OperationType == OperationType.Select);
         if (selectCount > 1)
         {
             suggestions.Add($"Found {selectCount} select operations - consider combining projections");

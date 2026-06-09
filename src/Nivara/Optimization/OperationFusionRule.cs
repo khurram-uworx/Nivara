@@ -91,17 +91,10 @@ public sealed class OperationFusionRule : OptimizationRule
     {
         return (first.OperationType, second.OperationType) switch
         {
-            // Multiple filter operations can be fused
-            ("Filter", "Filter") => true,
-
-            // Multiple select operations can be fused under certain conditions
-            ("Select", "Select") => true, // We'll validate this in FuseOperations
-
-            // Filter followed by select can sometimes be fused
-            ("Filter", "Select") => true,
-
-            // Multiple sort operations can be fused
-            ("Sort", "Sort") => true,
+            (OperationType.Filter, OperationType.Filter) => true,
+            (OperationType.Select, OperationType.Select) => true,
+            (OperationType.Filter, OperationType.Select) => true,
+            (OperationType.Sort, OperationType.Sort) => true,
 
             _ => false
         };

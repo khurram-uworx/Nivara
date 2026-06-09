@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using System.Text.Json;
 
 namespace Nivara.Query;
 
@@ -98,6 +99,61 @@ public sealed class QueryPlan
 
         return $"QueryPlan {{ Source: {Source.GetType().Name}, Pipeline: {pipeline}, ResultSchema: {ResultSchema} }}";
     }
+
+    /// <summary>
+    /// Serializes the query plan to a JSON string for diagnostics and debugging
+    /// </summary>
+    /// <returns>A JSON string representation of the query plan</returns>
+    public string Serialize()
+    {
+        var data = new
+        {
+            Source = Source.GetType().Name,
+            SourceIsLazy = Source.IsLazy,
+            SourceSchema = Source.Schema.ColumnNames.Select(c => new { Name = c, Type = Source.Schema.GetColumnType(c).Name }).ToList(),
+            Operations = Operations.Select((op, i) => new
+            {
+                Index = i + 1,
+                Type = op.OperationType,
+                InputSchema = ComputeOperationInputSchema(i)?.ColumnNames.Select(c => new { Name = c, Type = (ComputeOperationInputSchema(i)?.GetColumnType(c).Name) }).ToList()
+            }).ToList(),
+            ResultSchema = ResultSchema.ColumnNames.Select(c => new { Name = c, Type = ResultSchema.GetColumnType(c).Name }).ToList()
+        };
+        return JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    /// <summary>
+    /// Returns a debug-friendly string with source schema, operation types, and result schema
+    /// </summary>
+    /// <returns>A structured debug string</returns>
+    public string ToDebugString()
+    {
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Source: {Source.GetType().Name} ({Source.Schema})");
+        sb.AppendLine($"Source IsLazy: {Source.IsLazy}");
+        sb.AppendLine("Operations:");
+        foreach (var op in Operations)
+            sb.AppendLine($"  [{op.OperationType}]");
+        sb.AppendLine($"Result: {ResultSchema}");
+        return sb.ToString();
+    }
+
+    Schema? ComputeOperationInputSchema(int index)
+    {
+        if (index < 0 || index >= Operations.Count)
+            return null;
+        try
+        {
+            var schema = Source.Schema;
+            for (int i = 0; i < index; i++)
+                schema = Operations[i].TransformSchema(schema);
+            return schema;
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
 
 /// <summary>
@@ -171,7 +227,7 @@ public static class QueryPlanAnalyzer
         // Check for filter operations that could be pushed down
         var filterOperations = plan.Operations
             .Select((op, index) => new { Operation = op, Index = index })
-            .Where(x => x.Operation.OperationType == "Filter")
+            .Where(x => x.Operation.OperationType == OperationType.Filter)
             .ToList();
 
         if (filterOperations.Count > 1)
@@ -181,7 +237,7 @@ public static class QueryPlanAnalyzer
 
         // Check for select operations
         var selectOperations = plan.Operations
-            .Where(op => op.OperationType == "Select")
+            .Where(op => op.OperationType == OperationType.Select)
             .ToList();
 
         if (selectOperations.Count > 1)

@@ -188,8 +188,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
             throw new ArgumentException("Must specify at least one join key", nameof(joinKeys));
     }
 
-    /// <inheritdoc />
-    public string OperationType => "Join";
+    public string OperationType => Query.OperationType.Join;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

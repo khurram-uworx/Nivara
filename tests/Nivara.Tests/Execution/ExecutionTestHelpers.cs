@@ -36,7 +36,7 @@ sealed class StubQueryOperation : IQueryOperation
     public Func<Schema, Schema>? TransformSchemaFn { get; set; }
     public Func<IReadOnlyDictionary<string, IColumn>, IReadOnlyDictionary<string, IColumn>>? ExecuteFn { get; set; }
 
-    public StubQueryOperation(string operationType = "Filter")
+    public StubQueryOperation(string operationType = Query.OperationType.Filter)
     {
         OperationType = operationType;
     }
@@ -72,7 +72,7 @@ sealed class ThrowingQuerySource : IQuerySource
 
 sealed class ThrowingQueryOperation : IQueryOperation
 {
-    public string OperationType => "Filter";
+    public string OperationType => Query.OperationType.Filter;
     public Schema TransformSchema(Schema input) => input;
     public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
         => throw new InvalidOperationException("Op failed");
@@ -84,7 +84,7 @@ sealed class ParallelTrackingOperation : IQueryOperation
     public ConcurrentBag<int> ThreadIds { get; } = new();
     public Func<IReadOnlyDictionary<string, IColumn>, IReadOnlyDictionary<string, IColumn>>? ExecuteFn { get; set; }
 
-    public ParallelTrackingOperation(string operationType = "Filter")
+    public ParallelTrackingOperation(string operationType = Query.OperationType.Filter)
     {
         OperationType = operationType;
     }
@@ -164,7 +164,7 @@ static class ExecutionTestHelpers
         IEnumerable<IQueryOperation>? operations = null)
     {
         source ??= new StubQuerySource();
-        operations ??= new[] { new StubQueryOperation("Filter") };
+        operations ??= new[] { new StubQueryOperation(Query.OperationType.Filter) };
         return new QueryPlan(source, operations);
     }
 
@@ -207,7 +207,7 @@ static class ExecutionTestHelpers
         int? estimatedRowCount = null)
     {
         var source = CreateLargeChunkedSource(sourceRowCount, estimatedRowCount);
-        operations ??= new[] { new StubQueryOperation("Filter") };
+        operations ??= new[] { new StubQueryOperation(Query.OperationType.Filter) };
         return new QueryPlan(source, operations);
     }
 }

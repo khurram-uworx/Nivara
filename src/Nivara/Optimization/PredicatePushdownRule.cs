@@ -156,21 +156,16 @@ public sealed class PredicatePushdownRule : OptimizationRule
 
         switch (operation.OperationType)
         {
-            case "Select":
-                // Filter can be pushed before select if all referenced columns are selected
-                // Since we can't access internal properties, we'll be conservative
+            case OperationType.Select:
                 return false;
 
-            case "GroupBy":
-                // Filter can be pushed before group by if all referenced columns exist in source
+            case OperationType.GroupBy:
                 return filterColumns.All(col => sourceSchema.HasColumn(col));
 
-            case "Sort":
-                // Filter can be pushed before sort if all referenced columns exist in source
+            case OperationType.Sort:
                 return filterColumns.All(col => sourceSchema.HasColumn(col));
 
-            case "Join":
-                // Be conservative with joins - don't push filters across join boundaries
+            case OperationType.Join:
                 return false;
 
             default:

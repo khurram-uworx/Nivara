@@ -1,5 +1,7 @@
+using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Execution;
+using Nivara.Optimization;
 using Nivara.Query;
 using NUnit.Framework;
 
@@ -56,9 +58,8 @@ public class ExecutionEngineTests
     [Test]
     public void Execute_AppliesOptimizerIfAvailable()
     {
-        var engine = new ExecutionEngine();
         var optimizer = new QueryOptimizer();
-        engine.SetOptimizer(optimizer);
+        var engine = new ExecutionEngine(optimizer);
         var plan = ExecutionTestHelpers.CreateTestPlan();
 
         using var result = engine.Execute(plan,
@@ -268,4 +269,48 @@ public class ExecutionEngineTests
 
         Assert.That(engine.LastDiagnostics, Is.Not.Null);
     }
+
+    [Test]
+    public void Execute_DiagnosticsRecordOptimization_WhenOptimizerChangesPlan()
+    {
+        var rule = new PlanModifyingOptimizationRule();
+        var optEngine = new OptimizationEngine(new[] { rule });
+        var optimizer = new QueryOptimizer(optEngine);
+        var engine = new ExecutionEngine(optimizer);
+        var plan = ExecutionTestHelpers.CreateTestPlan();
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Lazy);
+
+        using var result = engine.Execute(plan, context);
+
+        Assert.That(engine.LastDiagnostics, Is.Not.Null);
+        Assert.That(engine.LastDiagnostics!.OptimizationsApplied.Count, Is.GreaterThan(0));
+        Assert.That(engine.LastDiagnostics.OptimizationsApplied[0].OptimizationName, Is.EqualTo("QueryOptimization"));
+    }
+
+    [Test]
+    public void Execute_DiagnosticsRecordWarning_OnFailure()
+    {
+        var engine = new ExecutionEngine();
+        var source = new ThrowingQuerySource();
+        var plan = ExecutionTestHelpers.CreateTestPlan(source: source);
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Eager);
+
+        Assert.Throws<QueryExecutionException>(() => engine.Execute(plan, context));
+
+        Assert.That(engine.LastDiagnostics, Is.Not.Null);
+        Assert.That(engine.LastDiagnostics!.Warnings.Count, Is.GreaterThan(0));
+        Assert.That(engine.LastDiagnostics.Warnings[0].Severity, Is.EqualTo(PerformanceWarningSeverity.Critical));
+        Assert.That(engine.LastDiagnostics.Warnings[0].Message, Does.Contain("failed"));
+    }
+}
+
+sealed class PlanModifyingOptimizationRule : OptimizationRule
+{
+    public override string Name => "PlanModifyingRule";
+    public override string Description => "Always creates a new plan instance for testing";
+
+    public override bool CanApply(QueryPlan plan) => true;
+
+    public override QueryPlan Apply(QueryPlan plan)
+        => new QueryPlan(plan.Source, plan.Operations.ToList());
 }

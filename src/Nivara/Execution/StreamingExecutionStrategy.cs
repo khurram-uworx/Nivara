@@ -5,8 +5,8 @@ namespace Nivara.Execution;
 
 sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 {
-    static readonly HashSet<string> NonStreamableOperations = new() { "Sort", "GroupBy", "Join" };
-    static readonly HashSet<string> StreamableOperationTypes = new() { "Filter", "Select", "Concatenation" };
+    static readonly HashSet<string> NonStreamableOperations = new() { Query.OperationType.Sort, Query.OperationType.GroupBy, Query.OperationType.Join };
+    static readonly HashSet<string> StreamableOperationTypes = new() { Query.OperationType.Filter, Query.OperationType.Select, Query.OperationType.ConcatenationPrefix };
 
     static bool isSuitableForStreaming(QueryPlan plan)
     {
@@ -201,12 +201,12 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             {
                 cost += operation.OperationType switch
                 {
-                    "Filter" => 250,
-                    "Select" => 120,
-                    "Sort" => 2000,
-                    "GroupBy" => 2500,
-                    "Join" => 3000,
-                    "Concatenation" => 200,
+                    Query.OperationType.Filter => 250,
+                    Query.OperationType.Select => 120,
+                    Query.OperationType.Sort => 2000,
+                    Query.OperationType.GroupBy => 2500,
+                    Query.OperationType.Join => 3000,
+                    _ when operation.OperationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => 200,
                     _ => 400
                 };
             }

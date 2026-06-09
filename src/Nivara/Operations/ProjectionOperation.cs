@@ -51,8 +51,7 @@ sealed class ProjectionOperation : IQueryOperation
     {
     }
 
-    /// <inheritdoc />
-    public string OperationType => "Projection";
+    public string OperationType => Query.OperationType.Projection;
 
     /// <inheritdoc />
     public Schema TransformSchema(Schema inputSchema)

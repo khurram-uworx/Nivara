@@ -89,32 +89,14 @@ public sealed class ProjectionPushdownRule : OptimizationRule
         {
             switch (operation.OperationType)
             {
-                case "Filter":
-                    // We can't access filter conditions, so skip
+                case Query.OperationType.Filter:
                     break;
 
-                case "Select":
-                    // We can't access select columns, so assume all source columns are used
-                    usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
-                    break;
-
-                case "GroupBy":
-                    // We can't access group by columns, so assume all source columns are used
-                    usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
-                    break;
-
-                case "Sort":
-                    // We can't access sort keys, so assume all source columns are used
-                    usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
-                    break;
-
-                case "Join":
-                    // We can't access join keys, so assume all source columns are used
-                    usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
-                    break;
-
-                case "Projection":
-                    // We can't access projection mappings, so assume all source columns are used
+                case Query.OperationType.Select:
+                case Query.OperationType.GroupBy:
+                case Query.OperationType.Sort:
+                case Query.OperationType.Join:
+                case Query.OperationType.Projection:
                     usedColumns.UnionWith(plan.Source.Schema.ColumnNames);
                     break;
             }
