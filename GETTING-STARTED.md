@@ -968,7 +968,7 @@ Nivara provides experimental support for automatic differentiation (AutoDiff) on
 You can convert Columns, Series, or entire DataFrames into `ReverseGradTensor<T>` objects:
 
 ```csharp
-using Nivara.Extensions.AutoDiff;
+using Nivara.AutoDiff;
 
 var df = NivaraFrame.Create(
     ("x", NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })),

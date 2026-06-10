@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace Nivara.Extensions.AutoDiff;
+namespace Nivara.AutoDiff;
 
 /// <summary>
 /// Interface for gradient-aware operations in reverse-mode automatic differentiation.

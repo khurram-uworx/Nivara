@@ -1,6 +1,6 @@
 using System.Numerics;
 
-namespace Nivara.Extensions.AutoDiff;
+namespace Nivara.AutoDiff;
 
 public sealed class ComputationGraph
 {

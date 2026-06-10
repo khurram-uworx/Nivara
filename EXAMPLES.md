@@ -654,14 +654,14 @@ Console.WriteLine($"Loss: {loss:F4}");
 Console.WriteLine($"gradW[0] = {gradW[0]:F4}, updatedW[0] = {updatedW[0]:F4}");
 ```
 
-You can use Nivara.Extensions here because it provides the reverse-mode AutoDiff for Nivara column data — automatically building a computation graph, computing gradients via `Backward()`, and providing `SgdOptimizer.SgdUpdate` — instead of manual gradient derivation.
+You can use Nivara here because it provides the reverse-mode AutoDiff for Nivara column data — automatically building a computation graph, computing gradients via `Backward()`, and providing `SgdOptimizer.SgdUpdate` — instead of manual gradient derivation.
 
-**Nivara.Extensions** — reverse-mode AutoDiff with gradient tracking:
+**Nivara** — reverse-mode AutoDiff with gradient tracking:
 
 ```csharp
-using Nivara.Extensions.AutoDiff;
-using Nivara.Extensions.AutoDiff.Operations;
-using Nivara.Extensions.AutoDiff.Optimizer;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Optimizer;
 
 var df = NivaraFrame.Create(
     ("x", NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })),

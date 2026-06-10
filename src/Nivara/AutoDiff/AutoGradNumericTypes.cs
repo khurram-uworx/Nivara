@@ -1,4 +1,4 @@
-namespace Nivara.Extensions.AutoDiff;
+namespace Nivara.AutoDiff;
 
 /// <summary>
 /// Concrete implementation of IAutoGradNumeric for float (single-precision floating point).

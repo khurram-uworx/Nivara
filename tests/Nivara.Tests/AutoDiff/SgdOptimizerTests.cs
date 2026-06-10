@@ -1,6 +1,6 @@
-using Nivara.Extensions.AutoDiff;
-using Nivara.Extensions.AutoDiff.Operations;
-using Nivara.Extensions.AutoDiff.Optimizer;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Optimizer;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;

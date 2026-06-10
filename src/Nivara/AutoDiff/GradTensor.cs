@@ -1,8 +1,8 @@
-using Nivara.Extensions.AutoDiff.Utilities;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 using System.Numerics.Tensors;
 
-namespace Nivara.Extensions.AutoDiff;
+namespace Nivara.AutoDiff;
 
 /// <summary>
 /// Base tensor wrapper that holds data and shape metadata.

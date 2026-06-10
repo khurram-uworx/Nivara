@@ -1,5 +1,5 @@
-using Nivara.Extensions.AutoDiff;
-using Nivara.Extensions.AutoDiff.Extensions;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Extensions;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;

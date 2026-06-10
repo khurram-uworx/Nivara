@@ -1,8 +1,8 @@
 using Nivara;
-using Nivara.Extensions.AutoDiff.Utilities;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
-namespace Nivara.Extensions.AutoDiff.Extensions;
+namespace Nivara.AutoDiff.Extensions;
 
 /// <summary>
 /// Extension methods that provide seamless integration 

@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 
-namespace Nivara.Extensions.AutoDiff.Operations;
+namespace Nivara.AutoDiff.Operations;
 
 public static class GradOperations
 {
