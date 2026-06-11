@@ -2,11 +2,15 @@
 
 Nivara provides a PyTorch-inspired reverse-mode automatic differentiation engine built on top of its columnar DataFrame types. Tensors wrap `NivaraColumn<T>` and the computation graph is a DAG of operation nodes built implicitly during forward operations.
 
+Beyond the core autograd engine, Nivara delivers a full training stack: module system, loss functions, stateful optimizers, data loading, training loops, serialization, and data-parallel training — all implemented in ~50 files under `src/Nivara/AutoDiff/`.
+
 ---
 
 ## Architecture
 
 ```
+Core Engine
+───────────
 GradTensor<T>                         ← Base: Data, Shape, Reshape, ToColumn/ToSeries/AsTensor
 └── ReverseGradTensor<T>              ← Adds: Grad, RequiresGrad, GradFn, Backward(), Detach()
 
@@ -26,23 +30,60 @@ ComputationGraph                      ← Graph traversal engine
 └── GetGraphInfo(root)                ← Returns diagnostic summary
 
 GradOperations                        ← All forward+backward ops (static methods)
-├── Element-wise: Add, Subtract, Multiply, Divide
-├── Matrix: MatMul, Transpose
+├── Element-wise: Add, Subtract, Multiply, Divide, Clip
+├── Matrix: MatMul, Transpose         ← MatMul uses SIMD MatMulHelper with TensorPrimitives.Dot
 ├── Reductions: Sum, Mean
-├── Activations: Relu, Sigmoid, Tanh
-├── Unary: Negate, Abs
+├── Activations: Relu, LeakyRelu, Sigmoid, Tanh
+├── Unary: Negate, Abs, Exp, Log
+├── Probability: Softmax, LogSoftmax
 └── ...vectorized via TensorPrimitives where available
 
-SgdOptimizer                          ← SGD update with null-skip semantics
+MatMulHelper                          ← Central SIMD MatMul (TensorPrimitives.Dot + Parallel.For)
+src/Nivara/Tensors/MatMulHelper.cs
 
-GradientUtils                         ← Utility functions
-├── ZeroGrad, Detach (single + batch)
-├── ClipGradValue, ClipGradNorm (single + global)
-├── Constant/Zeros/Ones/Full creators
-├── GetGraphInfo, PrintGraphSummary, DescribeTensor
-├── HasGradient, GetGradientNorm, GetGlobalGradientNorm
-└── CanBackward
+Module System (Nn)
+──────────────────
+Parameter<T>                          ← Named ReverseGradTensor<T> with requiresGrad=true
+Module<T>                             ← Abstract base: Forward(), Parameters(), Train()/Eval()
+├── Linear<T>                         ← y = x @ Wᵀ + b (Kaiming-uniform init, bias optional)
+├── Sequential<T>                     ← Ordered module chain
+├── Activation<T>                     ← ReLU, Sigmoid, Tanh, LeakyReLU wrappers
+├── Dropout<T>                        ← Inverted dropout with train/eval toggle
+└── Initializers/                     ← Kaiming, Xavier, Uniform, Normal
 
+Loss Functions (Nn.Functional)
+───────────────────────────────
+MSELoss<T>                            ← Σ(pred - target)²
+L1Loss<T>                             ← Σ|pred - target|
+BCELoss<T>                            ← -(y·log(p) + (1-y)·log(1-p))
+BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable)
+CrossEntropyLoss<T>                   ← Fused log-softmax + NLL
+Softmax<T> / LogSoftmax<T>            ← Dim-aware softmax wrappers
+
+Optimizers
+──────────
+Optimizer<T> (abstract)              ← Step(), ZeroGrad(), AddParameterGroup()
+├── SGD<T>                           ← Momentum + weight decay + TensorPrimitives fast path
+├── Adam<T>                          ← Bias-corrected, β₁/β₂ defaults 0.9/0.999
+├── AdamW<T>                         ← Decoupled weight decay (Loshchilov & Hutter 2019)
+└── SgdOptimizer (static)            ← Single-parameter SgdUpdate helper
+
+Training
+────────
+TensorDataset<T>                      ← Wraps NivaraFrame, exposes feature/label tensor slices
+DataLoader<T>                         ← Batch iteration with shuffle
+Batch<T>                              ← { Features, Labels }
+TrainingLoop<T>                       ← ForEach-epoch/batch: forward → backward → step → zero_grad
+DataParallelTrainer<T>                ← Parallel.For over chunks + gradient sum + optimizer step
+
+Serialization
+─────────────
+ModelSerializer                       ← Save/Load model state dicts (JSON + base64 binary)
+Checkpoint<T>                         ← Epoch + loss + optimizer state + model params
+
+Utilities
+─────────
+GradientUtils                         ← ZeroGrad, Detach, ClipGradValue/Norm, creators, diagnostics
 TypeValidator                         ← Runtime type checking (only float/double)
 TypeConverter                         ← Cross-type tensor conversion (float ↔ double)
 
@@ -58,7 +99,7 @@ NivaraAutoGradExtensions              ← NivaraColumn/NivaraSeries/NivaraFrame 
 - **Computation graph is built implicitly** — every `GradOperations` call checks if any input `requiresGrad` and attaches an `OpNode` to the result.
 - **Gradient accumulation** — `AccumulateGradient()` either sets or adds to `Grad` (supports fan-in from multiple paths).
 - **Explicit null-mask propagation** — Nivara's nullable semantics flow through gradients. Nulls propagate via mask OR; null positions in gradients are skipped during accumulation.
-- **IDisposable** — `GradTensor<T>` implements `IDisposable` to release underlying column data.
+- **IDisposable** — `GradTensor<T>`, `Module<T>`, `Optimizer<T>`, and `TrainingLoop<T>` all implement `IDisposable`.
 
 ---
 
@@ -179,6 +220,7 @@ Static graph traversal engine:
 | `Subtract(a, b)` | `a - b` | `∂/∂a = grad`, `∂/∂b = -grad` | mask OR |
 | `Multiply(a, b)` | `a * b` | `∂/∂a = grad * b`, `∂/∂b = grad * a` | mask OR |
 | `Divide(a, b)` | `a / b` | `∂/∂a = grad / b`, `∂/∂b = -(a/b²) * grad` | mask OR; throws on zero division |
+| `Clip(a, min, max)` | `clamp(a, min, max)` | 1 if in-range, 0 outside | mask OR |
 
 ### Matrix
 
@@ -187,7 +229,7 @@ Static graph traversal engine:
 | `MatMul(a, b)` | `a @ b` | `∂/∂a = grad @ bᵀ`, `∂/∂b = aᵀ @ grad` | Both tensors rank 2; `a.Cols == b.Rows` |
 | `Transpose(a)` | `aᵀ` | `∂/∂a = gradᵀ` | Rank 2 |
 
-MatMul uses a triple-loop kernel (not `TensorPrimitives`). Both tensor shape and explicit-parameter overloads are available (the explicit overload is marked `[Obsolete]`).
+MatMul uses `MatMulHelper` (`src/Nivara/Tensors/MatMulHelper.cs`) with `TensorPrimitives.Dot` + `Parallel.For` for SIMD-accelerated forward and backward passes. When `Tensor.MatrixMultiply` ships in a future .NET version, only `MatMulHelper` changes.
 
 ### Reductions
 
@@ -196,17 +238,25 @@ MatMul uses a triple-loop kernel (not `TensorPrimitives`). Both tensor shape and
 | `Sum(a)` | `∑a` | `broadcast(grad, n)` — fills gradient value to all positions | Expects scalar output |
 | `Mean(a)` | `(∑a)/n` | `broadcast(grad/n, n)` — fills gradient/n to all positions | Expects scalar output |
 
-Reductions use `NivaraSeries<T>.Sum()` / `.Average()` for the forward pass.
-
 ### Activations
 
 | Op | Forward | Backward Rule | Vectorization |
 |----|---------|---------------|---------------|
 | `Relu(a)` | `max(a, 0)` | `grad * (1 if a > 0 else 0)` | `TensorPrimitives.Max` for forward; manual loop for grad |
+| `LeakyRelu(a, slope)` | `max(a, 0) + slope * min(a, 0)` | `grad * (1 if a > 0 else slope)` | Manual loop |
 | `Sigmoid(a)` | `σ(a) = 1/(1+e⁻ᵃ)` | `σ(a) * (1-σ(a)) * grad` | Manual loop via `Math.Exp` |
 | `Tanh(a)` | `tanh(a)` | `(1 - tanh²(a)) * grad` | Manual loop via `Math.Tanh` |
 | `Negate(a)` | `-a` | `-grad` | `TensorPrimitives.Negate` |
 | `Abs(a)` | `\|a\|` | `sign(a) * grad` | `TensorPrimitives.Abs` for forward; manual loop for grad |
+| `Exp(a)` | `eᵃ` | `eᵃ * grad` | Manual loop via `Math.Exp` |
+| `Log(a)` | `ln(a)` | `grad / a` | Manual loop; throws on non-positive |
+
+### Probability
+
+| Op | Forward | Backward Rule | Notes |
+|----|---------|---------------|-------|
+| `Softmax(a)` | `e^(a - max) / Σe^(a - max)` | Full Jacobian via `diag(s) - s·sᵀ` | Numerically stable subtract-max |
+| `LogSoftmax(a)` | `log(softmax(a))` | `grad - Σgrad · softmax(a)` | Fused for CrossEntropy efficiency |
 
 ### Vectorization Strategy
 
@@ -215,7 +265,7 @@ All operations follow a two-path approach:
 1. **No-null fast path**: Extract `ReadOnlySpan<T>` via `TryGetSpan()`, call `TensorPrimitives` kernel, return `NivaraColumn<T>.Create(result)`.
 2. **Null-aware fallback**: Rent buffers from `ArrayPool<T>.Shared`, call `CopyTo()` to fill buffers with `T.Zero` for null positions, run `TensorPrimitives` kernel, merge null masks via OR, return `NivaraColumn<T>.CreateFromSpans(result, nullMask)`.
 
-Operations that lack `TensorPrimitives` support (e.g., Sigmoid, Tanh, MatMul) use manual loops in both paths.
+Operations that lack `TensorPrimitives` support (e.g., Sigmoid, Tanh, Exp, Log) use manual loops in both paths. MatMul uses `MatMulHelper.Multiply` with `TensorPrimitives.Dot` + `Parallel.For`.
 
 ---
 
@@ -227,8 +277,332 @@ Nivara's explicit null-mask semantics flow through all gradient operations:
 - **Null in gradient** → `AccumulateGradient` skips the position entirely (no zeroing)
 - **Null in SGD** → if parameter is null → stays null; if gradient is null → no update at that position (parameter unchanged)
 - **Null in MatMul** → position-level null: if any contributing element is null, the corresponding output position is null
+- **Null in Adam/AdamW** → null positions skip momentum buffer accumulation; buffers are zeroed for that position
 
 The `MergeNullMasks(a, b, destination)` helper performs the OR operation, handling cases where one or both inputs lack null masks.
+
+---
+
+## Module System (Nn)
+
+### Parameter\<T\>
+
+```csharp
+public sealed class Parameter<T> where T : struct, INumber<T>
+```
+
+Wraps a `ReverseGradTensor<T>` with a name. Constructors accept array, size, or an existing tensor. `requiresGrad` defaults to `true`.
+
+### Module\<T\>
+
+```csharp
+public abstract class Module<T> : IDisposable where T : struct, INumber<T>
+```
+
+| Member | Description |
+|--------|-------------|
+| `IsTraining` | Current train/eval state |
+| `Forward(input)` | Abstract — define model logic |
+| `Forward(input, input2)` | Virtual — multi-input forward (throws by default) |
+| `Train()` | Sets training mode (recursive) |
+| `Eval()` | Sets evaluation mode (recursive) |
+| `RegisterModules(...)` | Register child modules for parameter discovery |
+| `RegisterParameters(...)` | Register standalone parameters |
+| `Parameters()` | Returns flat `Dictionary<string, ReverseGradTensor<T>>` |
+| `GetParameters()` | Returns `Dictionary<string, Parameter<T>>` with metadata |
+| `NamedModules()` | Returns registered child modules |
+
+### Linear\<T\>
+
+```csharp
+public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
+```
+
+`y = x @ Wᵀ + b` with shape `[batch, inFeatures] → [batch, outFeatures]`.
+
+- Registers weight (shape `[outFeatures, inFeatures]`) and optional bias (shape `[1, outFeatures]`) as parameters
+- Initializes weights with Kaiming-Uniform: `U(-√(6/fanIn), √(6/fanIn))`
+- Forward transposes weight, applies MatMul, then broadcasts bias via `ones @ bias`
+
+### Sequential\<T\>
+
+```csharp
+public sealed class Sequential<T> : Module<T>
+```
+
+Pipes forward pass through an ordered list of modules. Supports `Append()` for dynamic construction.
+
+### Activation\<T\>
+
+Wraps a single activation function as a module: `Relu`, `Sigmoid`, `Tanh`, `LeakyRelu`.
+
+### Dropout\<T\>
+
+Inverted dropout — scales by `1/(1-p)` during training, identity during eval.
+
+### Initializers
+
+| Class | Formula | Use |
+|-------|---------|-----|
+| `KaimingUniform` | `U(-√(6/fanIn), √(6/fanIn))` | ReLU layers |
+| `KaimingNormal` | `N(0, √(2/fanIn))` | ReLU layers |
+| `XavierUniform` | `U(-√(6/(fanIn+fanOut)), √(6/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
+| `XavierNormal` | `N(0, √(2/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
+| `Uniform(bound)` | `U(-bound, bound)` | Generic |
+| `Normal(mean, std)` | `N(mean, std)` | Generic |
+
+Call `KaimingUniform.Init(model.Parameters())` or individual parameter init after construction.
+
+### Example
+
+```csharp
+class MLP : Module<float>
+{
+    Linear<float> L1, L2, L3;
+
+    public MLP()
+    {
+        L1 = new Linear<float>(784, 256);
+        L2 = new Linear<float>(256, 64);
+        L3 = new Linear<float>(64, 10);
+        RegisterModules(L1, L2, L3);
+    }
+
+    public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
+    {
+        var h = GradOperations.Relu(L1.Forward(x));
+        h = GradOperations.Relu(L2.Forward(h));
+        return L3.Forward(h);
+    }
+}
+```
+
+---
+
+## Loss Functions
+
+All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Each has a `Forward(predictions, targets)` method returning a scalar loss tensor.
+
+| Loss | Forward Formula | Notes |
+|------|----------------|-------|
+| `MSELoss<T>` | `Σ(pred - target)²` | Mean Squared Error (sum reduction) |
+| `L1Loss<T>` | `Σ\|pred - target\|` | Mean Absolute Error (sum reduction) |
+| `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability |
+| `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed |
+| `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + one-hot targets |
+| `Softmax<T>` | dim-aware softmax | Wrapper around `GradOperations.Softmax` |
+| `LogSoftmax<T>` | dim-aware log-softmax | Wrapper around `GradOperations.LogSoftmax` |
+
+---
+
+## Optimizers
+
+### Optimizer\<T\> (abstract base)
+
+```csharp
+public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
+```
+
+**Parameter groups** — optimizers can manage multiple groups with different learning rates and weight decays:
+
+```csharp
+optimizer.AddParameterGroup(parameter, learningRate, weightDecay);
+optimizer.AddParameterGroup(model.Parameters(), lr, weightDecay);
+optimizer.AddParameterGroup(tensorDictionary, lr, weightDecay);
+```
+
+| Member | Description |
+|--------|-------------|
+| `Step()` | Abstract — applies updates to all parameters |
+| `ZeroGrad()` | Zeros gradients on all managed parameters |
+| `AddParameterGroup(...)` | Three overloads for flexibility |
+| `Dispose()` | Releases rented state buffers |
+
+### SGD\<T\>
+
+```csharp
+public sealed class SGD<T> : Optimizer<T>
+// new SGD<T>(learningRate, momentum: 0.0)
+```
+
+- Optional momentum (`[0, 1)`)
+- Optional weight decay per parameter group
+- No-null fast path uses `TensorPrimitives.Multiply`/`Subtract/Add`
+- Static `SgdUpdate(tensor, lr, wd)` helper for single-parameter updates
+
+### Adam\<T\>
+
+```csharp
+public sealed class Adam<T> : Optimizer<T>
+// new Adam<T>(beta1: 0.9, beta2: 0.999, eps: 1e-8)
+```
+
+- Bias-corrected first/second moment estimates
+- State buffers rented from `ArrayPool<T>.Shared`
+- Null-skip: null positions zero momentum buffers (no update)
+- Decoupled weight decay via per-group `weightDecay`
+
+### AdamW\<T\>
+
+```csharp
+public sealed class AdamW<T> : Optimizer<T>
+// new AdamW<T>(beta1: 0.9, beta2: 0.999, eps: 1e-8)
+```
+
+- Identical to Adam except weight decay is applied directly to weights (not through gradients) — Loshchilov & Hutter 2019 formulation
+- Same null-skip semantics and `ArrayPool` buffer management
+
+### SgdOptimizer (static helper)
+
+The original `SgdOptimizer.SgdUpdate` helper remains available for single-tensor updates outside the module system.
+
+---
+
+## Training
+
+### TensorDataset\<T\>
+
+```csharp
+public sealed class TensorDataset<T> where T : struct, INumber<T>
+```
+
+Wraps a `NivaraFrame` with named feature and label columns. `GetBatch(indices)` returns a `Batch<T>` with shaped tensors (flat data reshaped to `[batchSize, numCols]`). Uses `ArrayPool<T>.Shared` for batch construction.
+
+### DataLoader\<T\>
+
+```csharp
+public sealed class DataLoader<T> : IEnumerable<Batch<T>>
+// new DataLoader<T>(dataset, batchSize, shuffle: true, seed: null)
+```
+
+Fisher-Yates shuffle (optionally seeded), yields batches of the requested size (final batch may be smaller).
+
+### Batch\<T\>
+
+```csharp
+public sealed class Batch<T>
+// { Features: ReverseGradTensor<T>, Labels: ReverseGradTensor<T>, Size: int }
+```
+
+### TrainingLoop\<T\>
+
+```csharp
+public class TrainingLoop<T> : IDisposable where T : struct, INumber<T>
+```
+
+Standard epoch-per-batch training loop:
+
+```csharp
+var loop = new TrainingLoop<float>(
+    model, loader,
+    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    new SGD<float>(lr: 0.01f),
+    epochs: 20);
+
+var result = loop.Run();
+result.PrintSummary();
+```
+
+| Feature | Description |
+|---------|-------------|
+| Virtual callbacks | `OnEpochStart(epoch)`, `OnBatchEnd(epoch, batch, loss)`, `OnEpochEnd(epoch, result)` |
+| Checkpointing | `SaveCheckpoint(path, epoch, result)` — writes JSON checkpoint |
+| Results | `TrainingResult<T>` with `PrintSummary()`, epoch-level loss/timing/batches |
+
+### DataParallelTrainer\<T\>
+
+```csharp
+public class DataParallelTrainer<T> : IDisposable where T : struct, INumber<T>
+```
+
+Multi-core training via `Parallel.For` over data chunks:
+
+```
+Split rows into chunks (batchSize per chunk)
+  ↓
+Parallel.ForEach(chunks):
+  ├── GetBatch → Forward → loss → Backward
+  └── CloneGradients() → snapshot of per-chunk gradients
+  ↓
+SumAndApplyGradients(allGradients)     ← TensorPrimitives.Add across chunks
+  ↓
+Optimizer.Step() + ZeroGrad()
+```
+
+| Feature | Description |
+|---------|-------------|
+| Chunk sizing | Uses `ParallelExecutionHelper` for optimal chunk count |
+| Gradient merge | `SumAndApplyGradients` sums per-chunk gradients via `TensorPrimitives.Add` |
+| Results | `DataParallelTrainingResult<T>` with `PrintSummary()` |
+| Virtual callbacks | `OnEpochStart(epoch)`, `OnEpochEnd(epoch, result)` |
+
+```csharp
+var trainer = new DataParallelTrainer<float>(
+    model, loader,
+    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    new Adam<float>(model.Parameters(), lr: 0.001f),
+    epochs: 10);
+
+var result = trainer.Run();
+result.PrintSummary();
+// Epoch   1 | Loss:   0.542100 | Workers:  8 | Chunks:   32 | Grad Norm:   1.234500 | Time: 0.42s
+```
+
+---
+
+## Serialization
+
+### ModelSerializer
+
+Static class for saving/loading model parameter state dicts:
+
+```csharp
+// Save
+ModelSerializer.Save(model, "model.json");
+
+// Load (mutates model parameters in-place)
+ModelSerializer.Load(model, "model.json");
+
+// Checkpoint
+ModelSerializer.SaveCheckpoint(model, epochResult, "checkpoint.json");
+var checkpoint = ModelSerializer.LoadCheckpoint<float>("checkpoint.json");
+```
+
+**Format:** JSON with format marker `"nivara-ss-v1"` / `"nivara-ckpt-v1"`, version field, type name, and parameter entries. Each parameter entry stores:
+- `Shape` — `int[]` dimension sizes
+- `Values` — base64-encoded binary (via `MemoryMarshal.AsBytes`), length-validated on load
+- `HasNulls` / `NullMask` — optional null mask as base64 bool array
+
+**Validation on load:** shape rank, element count, and parameter name matching with descriptive error messages.
+
+### Checkpoint\<T\>
+
+```csharp
+public sealed class Checkpoint<T> where T : struct, INumber<T>
+{
+    public int Epoch { get; init; }
+    public double Loss { get; init; }
+    public IReadOnlyDictionary<string, ParameterData<T>> Parameters { get; init; }
+}
+```
+
+### Example
+
+```csharp
+// Train
+var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 10);
+var result = loop.Run();
+result.PrintSummary();
+
+// Save model
+ModelSerializer.Save(model, "trained_model.json");
+
+// Load into fresh model for inference
+var loaded = new MLP(784, 256, 10);
+ModelSerializer.Load(loaded, "trained_model.json");
+loaded.Eval();
+var prediction = loaded.Forward(testInput);
+```
 
 ---
 
@@ -247,8 +621,8 @@ The `MergeNullMasks(a, b, destination)` helper performs the OR operation, handli
 
 | Method | Description |
 |--------|-------------|
-| `ClipGradValue(tensor, maxValue)` | Clips each gradient element to `[-maxValue, maxValue]` |
-| `ClipGradNorm(tensor, maxNorm)` | Scales gradient if L2 norm exceeds `maxNorm` |
+| `ClipGradValue(tensor, maxValue)` | Clips each gradient element to `[-maxValue, maxValue]` (uses `TensorPrimitives.Clamp`) |
+| `ClipGradNorm(tensor, maxNorm)` | Scales gradient if L2 norm exceeds `maxNorm` (uses `TensorPrimitives.SumOfSquares`) |
 | `ClipGradNorm(tensors, maxNorm)` | Global norm clipping across multiple tensors |
 
 All clipping preserves null positions (nulls are skipped).
@@ -270,28 +644,9 @@ All clipping preserves null positions (nulls are skipped).
 | `PrintGraphSummary(tensor)` | Human-readable graph summary string |
 | `DescribeTensor(tensor)` | Detailed tensor debug info (length, grad norm, operation, etc.) |
 | `HasGradient(tensor)` | Whether `Grad != null` |
-| `GetGradientNorm(tensor)` | L2 norm of gradient |
+| `GetGradientNorm(tensor)` | L2 norm of gradient (uses `TensorPrimitives.SumOfSquares`) |
 | `GetGlobalGradientNorm(tensors)` | Combined L2 norm across tensors |
 | `CanBackward(tensor)` | Whether `Backward()` can be called (scalar + requiresGrad) |
-
----
-
-## SGD Optimizer
-
-```csharp
-public static class SgdOptimizer
-{
-    public static ReverseGradTensor<T> SgdUpdate<T>(ReverseGradTensor<T> parameter, T learningRate)
-        where T : struct, INumber<T>
-}
-```
-
-**Behavior:**
-- `parameter = parameter - learningRate * gradient`
-- Returns a new `ReverseGradTensor` with `requiresGrad = false` (the update step is not differentiable)
-- If parameter is null at a position → stays null
-- If gradient is null at a position → parameter unchanged at that position
-- Throws if `Grad` is null (call `Backward()` first) or learning rate is non-positive
 
 ---
 
@@ -316,36 +671,11 @@ Only **float** and **double** are supported for autograd. This is enforced at tw
 
 Conversion preserves null masks and optionally overrides `requiresGrad`.
 
-### IAutoGradNumeric\<T\>
-
-Marker interface with static abstract members:
-
-| Member | Description |
-|--------|-------------|
-| `Zero` | Zero value for the type |
-| `One` | One value for the type |
-| `FromDouble(double)` | Creates from double |
-| `ToDouble(T)` | Converts to double |
-
-Concrete implementations: `Float32` (`IAutoGradNumeric<float>`) and `Float64` (`IAutoGradNumeric<double>`).
-
-### IGradOperation\<T\>
-
-Interface for implementing custom operations:
-
-| Member | Description |
-|--------|-------------|
-| `Name` | Operation name for debugging |
-| `Forward(inputs)` | Forward pass returning result tensor |
-| `Backward(gradOutput, inputs, output)` | Backward pass computing gradients |
-
-The built-in `GradOperations` use internal helpers rather than this interface, but it's available for custom operation plugins.
-
 ---
 
 ## Nivara Frame Integration
 
-The `NivaraAutoGradExtensions` class (in `Nivara.Extensions.AutoDiff.Extensions`) provides conversion between Nivara types and autograd tensors:
+The `NivaraAutoGradExtensions` class (in `Nivara.AutoDiff.Extensions`) provides conversion between Nivara types and autograd tensors:
 
 ### Column/Series → Tensor
 
@@ -494,7 +824,7 @@ var updated = SgdOptimizer.SgdUpdate(param, 0.1f);
 ### 6. Nivara Frame integration
 
 ```csharp
-using Nivara.Extensions.AutoDiff.Extensions;
+using Nivara.AutoDiff.Extensions;
 
 var frame = NivaraFrame.Create(
     ("Age", NivaraColumn<float>.Create(new float[] { 25, 30, 35 })),
@@ -523,7 +853,53 @@ var updatedFrame = tensors.ToFrame();
 tensors.BatchZeroGrad();
 ```
 
-### 7. Graph diagnostics
+### 7. Module-based training with TrainingLoop
+
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Training;
+
+// Define model
+class LinearModel : Module<float>
+{
+    Linear<float> L1;
+    public LinearModel()
+    {
+        L1 = new Linear<float>(3, 1);
+        RegisterModules(L1);
+    }
+    public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
+        => L1.Forward(x);
+}
+
+// Data
+var frame = NivaraFrame.Create(
+    ("x0", NivaraColumn<float>.Create([1.0f, 2.0f, 3.0f, 4.0f])),
+    ("x1", NivaraColumn<float>.Create([2.0f, 3.0f, 4.0f, 5.0f])),
+    ("x2", NivaraColumn<float>.Create([3.0f, 4.0f, 5.0f, 6.0f])),
+    ("y", NivaraColumn<float>.Create([6.0f, 9.0f, 12.0f, 15.0f]))
+));
+
+var loader = new DataLoader<float>(
+    new TensorDataset<float>(frame, ["x0", "x1", "x2"], "y"),
+    batchSize: 2, shuffle: false);
+
+// Train
+var loop = new TrainingLoop<float>(
+    new LinearModel(), loader,
+    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    new SGD<float>(lr: 0.01f),
+    epochs: 5);
+
+var result = loop.Run();       // TrainingResult<float>
+result.PrintSummary();
+// Epoch   1 | Loss:  ... | Batches:  2 | Time: 0.02s
+// Epoch   2 | Loss:  ... | Batches:  2 | Time: 0.02s
+```
+
+### 8. Graph diagnostics
 
 ```csharp
 var loss = ...; // from a computation graph
@@ -553,7 +929,7 @@ var description = GradientUtils.DescribeTensor(loss);
 //   Operation: Mean
 ```
 
-### 8. Gradient clipping
+### 9. Gradient clipping
 
 ```csharp
 // Per-value clipping
@@ -569,7 +945,7 @@ GradientUtils.ClipGradNorm(new[] { w, b }, maxNorm: 5.0);
 // Combines all gradients into one global norm, scales proportionally
 ```
 
-### 9. Type conversion
+### 10. Type conversion
 
 ```csharp
 var floatTensor = new ReverseGradTensor<float>(
@@ -582,7 +958,7 @@ var backToFloat = doubleTensor.ToFloat(requiresGrad: false);
 // ReverseGradTensor<float> with values [1.5, 2.5], requiresGrad: false
 ```
 
-### 10. Null propagation in gradients
+### 11. Null propagation in gradients
 
 ```csharp
 var a = new ReverseGradTensor<float>(
@@ -601,24 +977,58 @@ Console.WriteLine(a.Grad[1]);  // null (output at position 1 is null, no gradien
 Console.WriteLine(a.Grad[2]);  // 1.0  (but output is null, so this may be masked)
 ```
 
+### 12. Model serialization
+
+```csharp
+// Train
+var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 10);
+var result = loop.Run();
+
+// Save model
+ModelSerializer.Save(model, "model.json");
+
+// Load and run inference
+var loaded = new LinearModel();
+ModelSerializer.Load(loaded, "model.json");
+loaded.Eval();
+var prediction = loaded.Forward(testInput);
+```
+
 ---
 
 ## Implementation Map
 
 | Component | File |
 |-----------|------|
-| `GradTensor<T>` base class | `src/Nivara.Extensions/AutoDiff/GradTensor.cs` |
-| `ReverseGradTensor<T>` | `src/Nivara.Extensions/AutoDiff/ReverseGradTensor.cs` |
-| `OpNode<T>` | `src/Nivara.Extensions/AutoDiff/OpNode.cs` |
-| `ComputationGraph` | `src/Nivara.Extensions/AutoDiff/ComputationGraph.cs` |
-| `GradOperations` (all ops) | `src/Nivara.Extensions/AutoDiff/Operations/GradOperations.cs` |
-| `IGradOperation<T>` interface | `src/Nivara.Extensions/AutoDiff/IGradOperation.cs` |
-| `IAutoGradNumeric<T>` interface | `src/Nivara.Extensions/AutoDiff/IAutoGradNumeric.cs` |
-| `Float32` / `Float64` structs | `src/Nivara.Extensions/AutoDiff/AutoGradNumericTypes.cs` |
-| `SgdOptimizer` | `src/Nivara.Extensions/AutoDiff/Optimizer/SgdOptimizer.cs` |
-| `GradientUtils` | `src/Nivara.Extensions/AutoDiff/Utilities/GradientUtils.cs` |
-| `TypeValidator` | `src/Nivara.Extensions/AutoDiff/Utilities/TypeValidator.cs` |
-| `TypeConverter` | `src/Nivara.Extensions/AutoDiff/Utilities/TypeConverter.cs` |
-| `NivaraAutoGradExtensions` | `src/Nivara.Extensions/AutoDiff/Extensions/NivaraAutoGradExtensions.cs` |
-| Exception types | `src/Nivara.Extensions/AutoDiff/Exceptions/AutoGradExceptions.cs` |
-| Tests | `tests/Nivara.Tests/AutoDiff/*.cs` (8 files) |
+| `GradTensor<T>` base class | `src/Nivara/AutoDiff/GradTensor.cs` |
+| `ReverseGradTensor<T>` | `src/Nivara/AutoDiff/ReverseGradTensor.cs` |
+| `OpNode<T>` | `src/Nivara/AutoDiff/OpNode.cs` |
+| `ComputationGraph` | `src/Nivara/AutoDiff/ComputationGraph.cs` |
+| `GradOperations` (all ops) | `src/Nivara/AutoDiff/Operations/GradOperations.cs` |
+| `MatMulHelper` (SIMD MatMul) | `src/Nivara/Tensors/MatMulHelper.cs` |
+| `SgdOptimizer` | `src/Nivara/AutoDiff/Optimizer/SgdOptimizer.cs` |
+| `GradientUtils` | `src/Nivara/AutoDiff/Utilities/GradientUtils.cs` |
+| `TypeValidator` | `src/Nivara/AutoDiff/Utilities/TypeValidator.cs` |
+| `TypeConverter` | `src/Nivara/AutoDiff/Utilities/TypeConverter.cs` |
+| `NivaraAutoGradExtensions` | `src/Nivara/AutoDiff/Extensions/NivaraAutoGradExtensions.cs` |
+| Exception types | `src/Nivara/AutoDiff/Exceptions/AutoGradExceptions.cs` |
+| `Parameter<T>` | `src/Nivara/AutoDiff/Nn/Parameter.cs` |
+| `Module<T>` | `src/Nivara/AutoDiff/Nn/Module.cs` |
+| `Linear<T>` | `src/Nivara/AutoDiff/Nn/Linear.cs` |
+| `Sequential<T>` | `src/Nivara/AutoDiff/Nn/Sequential.cs` |
+| `Activation<T>` / `Dropout<T>` | `src/Nivara/AutoDiff/Nn/Activation.cs` / `Dropout.cs` |
+| Initializers (6) | `src/Nivara/AutoDiff/Nn/Initializers/*.cs` |
+| Loss functions (7) | `src/Nivara/AutoDiff/Nn/Functional/*.cs` |
+| `Optimizer<T>` base | `src/Nivara/AutoDiff/Optimizer/Optimizer.cs` |
+| `SGD<T>` | `src/Nivara/AutoDiff/Optimizer/SGD.cs` |
+| `Adam<T>` | `src/Nivara/AutoDiff/Optimizer/Adam.cs` |
+| `AdamW<T>` | `src/Nivara/AutoDiff/Optimizer/AdamW.cs` |
+| `TensorDataset<T>` | `src/Nivara/AutoDiff/Training/TensorDataset.cs` |
+| `DataLoader<T>` | `src/Nivara/AutoDiff/Training/DataLoader.cs` |
+| `Batch<T>` | `src/Nivara/AutoDiff/Training/Batch.cs` |
+| `TrainingLoop<T>` | `src/Nivara/AutoDiff/Training/TrainingLoop.cs` |
+| `DataParallelTrainer<T>` | `src/Nivara/AutoDiff/Training/DataParallelTrainer.cs` |
+| `DataParallelTrainingResult<T>` | `src/Nivara/AutoDiff/Training/DataParallelResult.cs` |
+| `ModelSerializer` | `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs` |
+| `Checkpoint<T>` | `src/Nivara/AutoDiff/Serialization/Checkpoint.cs` |
+| Tests | `tests/Nivara.Tests/AutoDiff/*.cs` (13+ files) |

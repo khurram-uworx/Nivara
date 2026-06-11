@@ -36,30 +36,20 @@ new values, and how null positions flow through grid search or optimization.
 
 ---
 
-### E5. No optimizer abstraction beyond SGD helper
-
-**Where:** `SgdOptimizer`.
-
-**Status:** `SgdUpdate` is a minimal return-new-tensor primitive. There are no
-parameter groups, schedules, Adam/RMSProp variants, or stateful optimizer
-objects.
-
-**Recommendation:** Keep this gap open until a real training-loop workflow
-requires stateful optimizer semantics.
-
----
-
 ## Performance Gaps
 
-### P2. Matrix multiplication is scalar-loop based
+### P2. Null-mask propagation in matrix multiplication uses boolean loops
 
-**Where:** `GradOperations.MatMulVectorized`.
+**Where:** `MatMulHelper.Multiply<T>` (null-aware) / `MatMulHelper.MultiplyCore<T>` (dense).
 
-**Status:** Null-aware matrix multiplication uses nested loops. This preserves
-mask semantics but is not a BLAS-level or batched tensor kernel.
+**Status:** The dense (non-null) path now uses `TensorPrimitives.Dot` + `Parallel.For` with
+a transposed B buffer — efficient and near BLAS-level. The null-aware path fills nulls with
+`T.Zero`, runs the dense kernel, then propagates the result mask via triple-nested boolean
+loops. That mask propagation loop is the remaining bottleneck.
 
-**Recommendation:** Benchmark first. For non-null `float`/`double` matrices,
-consider a `TensorPrimitives.Dot` row/column path or another optimized kernel.
+**Recommendation:** Profile the null-aware path to see whether the boolean mask
+propagation dominates. For large matrices with sparse nulls, consider a column-scan or
+bitmask-based propagation. The dense path needs no further work.
 
 ---
 
@@ -99,10 +89,6 @@ Operators such as `+`, `-`, `*`, and `/` would improve ergonomics but need a
 stable policy for shape compatibility, null propagation, and future AutoDiff
 flavors.
 
-### D3. Layer/model/training-loop APIs
-
-AutoDiff should remain a low-level gradient layer until parameter ownership,
-optimizer state, and AutoGrid integration are designed.
 
 ---
 
@@ -110,7 +96,7 @@ optimizer state, and AutoGrid integration are designed.
 
 | Area | Important | Deferred |
 |------|-----------|----------|
-| API/Ergonomics | E5 | E3, E4 |
+| API/Ergonomics | | E3, E4 |
 | Performance | P2 | |
 | Testing | T1, T2 | |
-| Design | | D1, D2, D3 |
+| Design | | D1, D2 |

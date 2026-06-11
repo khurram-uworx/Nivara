@@ -338,9 +338,9 @@ Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
 
 ---
 
-### Act 7: AutoDiff over columns
+### Act 7a: AutoDiff — low-level gradient operations
 
-> Gradient-based optimization with reverse-mode AutoDiff that works directly with Nivara column data. Build a computation graph, compute gradients via `Backward()`, apply updates via `SgdOptimizer.SgdUpdate`.
+> Reverse-mode AutoDiff that works directly with Nivara column data. Build a computation graph, compute gradients via `Backward()`, apply updates via `SgdOptimizer.SgdUpdate`.
 
 #### Linear model with gradient descent
 
@@ -387,11 +387,176 @@ using var updatedW = SgdOptimizer.SgdUpdate(w, 0.01f);
 using var updatedB = SgdOptimizer.SgdUpdate(b, 0.01f);
 ```
 
-See the full sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/Nivara.SampleApp/AutoDiffExample.cs) and the current roadmap in [`docs/AUTODIFF-PLAN.md`](docs/AUTODIFF-PLAN.md).
+See the full sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/Nivara.SampleApp/AutoDiffExample.cs).
+
+---
+
+### Act 7b: AutoDiff — module-based model with TrainingLoop
+
+> Build models using `Module<T>` / `Linear<T>`, train with `TrainingLoop<T>` — no manual graph construction or gradient management needed.
+
+**Python**
+```python
+# Not shown — the pattern is the same as Act 7a, but using nn.Module
+```
+
+**Nivara** — declare model architecture as a class and train with `TrainingLoop`:
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Training;
+
+class LinearModel : Module<float>
+{
+    Linear<float> L1;
+
+    public LinearModel()
+    {
+        L1 = new Linear<float>(3, 1);
+        RegisterModules(L1);
+    }
+
+    public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
+        => L1.Forward(x);
+}
+
+var frame = NivaraFrame.Create(
+    ("x0", NivaraColumn<float>.Create([1.0f, 2.0f, 3.0f, 4.0f])),
+    ("x1", NivaraColumn<float>.Create([2.0f, 3.0f, 4.0f, 5.0f])),
+    ("x2", NivaraColumn<float>.Create([3.0f, 4.0f, 5.0f, 6.0f])),
+    ("y", NivaraColumn<float>.Create([6.0f, 9.0f, 12.0f, 15.0f]))
+);
+
+var loader = new DataLoader<float>(
+    new TensorDataset<float>(frame, ["x0", "x1", "x2"], "y"),
+    batchSize: 2, shuffle: false);
+
+var loop = new TrainingLoop<float>(
+    new LinearModel(), loader,
+    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    new SGD<float>(lr: 0.01f),
+    epochs: 5);
+
+var result = loop.Run();
+result.PrintSummary();
+// Epoch   1 | Loss:     --- | Batches:  2 | Time: 0.02s
+// Epoch   5 | Loss:     --- | Batches:  2 | Time: 0.02s
+```
+
+**What changed from Act 7a:**
+- No raw tensor creation — `Linear<T>` registers weight/bias as parameters automatically
+- No manual forward pass with `GradOperations.Add/Multiply/Subtract` — just `L1.Forward(x)`
+- No manual `Backward()` + `SgdUpdate` — `TrainingLoop` handles forward/backward/step/zero-grad
+- No `using` statements per tensor — `Module<T>` implements `IDisposable` and disposes child modules
+
+---
+
+### Act 8: Production-style training pipeline
+
+> Load real data, train with data-parallel multi-core execution, save the model, and run inference.
+
+#### Fraud detection classifier
+
+**Nivara**
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Training;
+using Nivara.AutoDiff.Serialization;
+using Nivara.AutoDiff.Optimizer;
+
+// 1. Define model
+class FraudNet : Module<float>
+{
+    Linear<float> L1, L2, L3;
+
+    public FraudNet()
+    {
+        L1 = new Linear<float>(8, 64);
+        L2 = new Linear<float>(64, 32);
+        L3 = new Linear<float>(32, 1);
+        RegisterModules(L1, L2, L3);
+    }
+
+    public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
+    {
+        var h = GradOperations.Relu(L1.Forward(x));
+        h = GradOperations.Relu(L2.Forward(h));
+        return L3.Forward(h);
+    }
+}
+
+// 2. Load data (from CSV or in-memory)
+var frame = NivaraFrame.Create(
+    ("amount", NivaraColumn<float>.Create([100.0f, 5000.0f, 50.0f, 20000.0f, 75.0f])),
+    ("hour", NivaraColumn<float>.Create([14, 2, 10, 3, 18])),
+    ("distance", NivaraColumn<float>.Create([5.0f, 300.0f, 2.0f, 500.0f, 1.0f])),
+    ("prev_attempts", NivaraColumn<float>.Create([0, 3, 0, 5, 1])),
+    ("country_change", NivaraColumn<float>.Create([0, 1, 0, 1, 0])),
+    ("device_new", NivaraColumn<float>.Create([0, 1, 0, 1, 0])),
+    ("amount_ratio", NivaraColumn<float>.Create([1.0f, 10.0f, 0.5f, 20.0f, 0.8f])),
+    ("velocity", NivaraColumn<float>.Create([0.0f, 4.0f, 0.0f, 6.0f, 0.0f])),
+    ("is_fraud", NivaraColumn<float>.Create([0.0f, 1.0f, 0.0f, 1.0f, 0.0f]))
+);
+
+var featureCols = new[] { "amount", "hour", "distance", "prev_attempts",
+                          "country_change", "device_new", "amount_ratio", "velocity" };
+var loader = new DataLoader<float>(
+    new TensorDataset<float>(frame, featureCols, "is_fraud"),
+    batchSize: 2, shuffle: true);
+
+// 3. Train with data parallelism (uses all cores)
+var model = new FraudNet();
+var optimizer = new Adam<float>(beta1: 0.9, beta2: 0.999);
+
+// Add all model parameters to the optimizer
+optimizer.AddParameterGroup(model.Parameters(), learningRate: 0.001f);
+
+var trainer = new DataParallelTrainer<float>(
+    model, loader,
+    (pred, target) => new BCEWithLogitsLoss<float>().Forward(pred, target),
+    optimizer,
+    epochs: 10);
+
+var result = trainer.Run();
+result.PrintSummary();
+// Epoch   1 | Loss:   0.693100 | Workers:  8 | Chunks:    3 | Grad Norm:   0.542100 | Time: 0.15s
+// Epoch  10 | Loss:   0.082300 | Workers:  8 | Chunks:    3 | Grad Norm:   0.012100 | Time: 0.12s
+
+// 4. Save trained model
+ModelSerializer.Save(model, "fraud_model.json");
+
+// 5. Inference on new data
+var loaded = new FraudNet();
+ModelSerializer.Load(loaded, "fraud_model.json");
+loaded.Eval();
+
+var newTx = ReverseGradTensor<float>.FromMatrix(
+    new float[] { 250.0f, 22, 10.0f, 0, 0, 0, 1.2f, 0.0f },
+    rows: 1, cols: 8, requiresGrad: false);
+
+var score = loaded.Forward(newTx);
+// score[0] ≈ logit; apply sigmoid for probability:
+var prob = 1.0f / (1.0f + MathF.Exp(-score[0]));
+Console.WriteLine($"Fraud probability: {prob:P2}");
+```
+
+**What the pipeline does:**
+| Step | Component |
+|------|-----------|
+| Model declaration | `FraudNet : Module<float>` with 3 `Linear` layers |
+| Data packaging | `TensorDataset` → `DataLoader` with shuffle |
+| Multi-core training | `DataParallelTrainer` splits rows across cores via `Parallel.For` |
+| Loss function | `BCEWithLogitsLoss` — numerically stable binary classification |
+| Optimizer | `Adam` with bias-corrected adaptive learning rates |
+| Model persistence | `ModelSerializer.Save` / `ModelSerializer.Load` (JSON + base64 binary) |
+| Inference | `Eval()` mode, no gradient tracking |
 
 ---
 
 ## Related docs
 
 - [`docs/TENSORS.md`](docs/TENSORS.md) — full positioning discussion
-- [`docs/AUTODIFF-PLAN.md`](docs/AUTODIFF-PLAN.md) — AutoDiff roadmap
+- [`docs/AUTODIFF-GAPS.md`](docs/AUTODIFF-GAPS.md) — AutoDiff gaps

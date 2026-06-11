@@ -49,8 +49,14 @@ Where to look (implementation map)
 - Frame-level batch ops
   - `src/Nivara/NivaraFrame.cs` — `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` with null propagation and `OperationDiagnostics` recording.
 
-- AutoDiff optimizer
-  - `src/Nivara.Extensions/AutoDiff/Optimizer/SgdOptimizer.cs` — SGD update with null-skip semantics.
+- AutoDiff subsystem
+  - `src/Nivara/AutoDiff/` — core reverse-mode autograd engine (ReverseGradTensor, GradNode, IGradOperation)
+  - `src/Nivara/AutoDiff/Optimizer/SgdOptimizer.cs` — SGD update with null-skip semantics
+  - `src/Nivara/AutoDiff/Optimizer/AdamOptimizer.cs` — Adam optimizer with bias correction and null-skip
+  - `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs` — AdamW optimizer with decoupled weight decay
+  - `src/Nivara/AutoDiff/Nn/` — module system (Linear, Sequential, Parameter, activations)
+  - `src/Nivara/AutoDiff/Training/` — TrainingLoop, DataParallelTrainer, batch management
+  - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load
 
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
@@ -245,6 +251,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **NivaraFrame TopKDescending**: added in Phase 3, returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
 - **NivaraFrame RowNorms/ColumnNorms**: added in Phase 3, null-propagating; currently uses per-row `ArrayPool` loop — batch `TensorPrimitives` kernel not yet implemented.
 - **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1216 tests passing.
+- ✓ **AutoDiff P0–P6 complete**: reverse-mode autograd, NN module system, full optimizer family (SGD, Adam, AdamW), training loops, data-parallel training, model serialization — all implemented in core `src/Nivara/AutoDiff/`
 
 ---
 
@@ -253,7 +260,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SgdOptimizer.SgdUpdate<T>()`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SgdOptimizer.SgdUpdate<T>()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
@@ -271,3 +278,11 @@ References (implementations to inspect)
 - `src/Nivara/Execution/ExecutionEngine.cs`
 - `src/Nivara/Execution/ExecutionStrategyBase.cs`
 - `src/Nivara/Execution/ParallelExecutionHelper.cs`
+- `src/Nivara/AutoDiff/ReverseGradTensor.cs`
+- `src/Nivara/AutoDiff/GradOperations.cs`
+- `src/Nivara/AutoDiff/Optimizer/SgdOptimizer.cs`
+- `src/Nivara/AutoDiff/Optimizer/AdamOptimizer.cs`
+- `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs`
+- `src/Nivara/AutoDiff/Nn/Linear.cs`
+- `src/Nivara/AutoDiff/Training/TrainingLoop.cs`
+- `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`

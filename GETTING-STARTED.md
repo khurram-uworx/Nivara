@@ -961,7 +961,7 @@ Console.WriteLine($"Throughput: {summary.AverageThroughput:F0} rows/sec");
 
 ## Automatic Differentiation
 
-Nivara provides experimental support for automatic differentiation (AutoDiff) on DataFrames, enabling gradient-based optimization and machine learning workflows directly on your data.
+Nivara provides automatic differentiation (AutoDiff) on DataFrames, enabling gradient-based optimization and machine learning workflows directly on your data.
 
 ### Converting to Gradient Tensors
 
@@ -1021,6 +1021,8 @@ When training in a loop, zero out gradients before the next pass:
 ```csharp
 tensors.BatchZeroGrad();
 ```
+
+> For module-based models (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, model serialization, and data-parallel training, see [AUTODIFF.md](docs/AUTODIFF.md) and the Act 7b / Act 8 examples in [EXAMPLES.md](docs/EXAMPLES.md).
 
 ---
 

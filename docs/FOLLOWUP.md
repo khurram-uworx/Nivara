@@ -1,7 +1,7 @@
 # Follow-up: .NET 11+ API Tracking for AutoDiff
 
 Tracks `System.Numerics.Tensors` APIs that don't exist in .NET 10 but might ship later.
-When upgrading the target framework, check these items and update `AUTODIFF-PLAN.md`.
+When upgrading the target framework, check these items and update `src/Nivara/Tensors/MatMulHelper.cs`.
 
 ## Confirmed Gaps (not in .NET 10 or .NET 11 preview)
 

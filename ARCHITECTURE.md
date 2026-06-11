@@ -822,6 +822,64 @@ public class ResourceManager : IDisposable
 
 ---
 
+## Automatic Differentiation Engine
+
+Nivara provides a full reverse-mode automatic differentiation (AutoDiff) subsystem as a core component. Moved from Extensions to core in P0–P6, it powers gradient-based optimization and machine learning workloads directly on DataFrame-backed data.
+
+### Architecture Overview
+
+```
+DataFrame → ReverseGradTensor<T> → Computation Graph (GradNode DAG)
+                                        ↓
+                                 Backward() pass
+                                        ↓
+                              Gradients on Parameters
+                                        ↓
+                           Optimizer.Step() (SGD/Adam/AdamW)
+                                        ↓
+                                 Updated Parameters
+```
+
+### Core Components
+
+#### ReverseGradTensor\<T\>
+The fundamental autograd tensor. Wraps `Tensor<T>` for the forward value and maintains a `GradNode` DAG for the backward pass. Supports `float` and `double`. Gradients are stored in a nullable `Tensor<T>?` field, with null-mask propagation matching Nivara's column semantics.
+
+#### GradOperations
+Static factory of all differentiable operations — arithmetic (`Add`, `Multiply`, `Subtract`, `Divide`), reductions (`Sum`, `Mean`), activations (`ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `Exp`, `Log`, `Softmax`, `LogSoftmax`), and utilities (`Clip`, `Reshape`, `Transpose`). Each operation creates a `GradNode` in the DAG.
+
+#### Module System (`Nn/`)
+- **`Parameter<T>`**: Trainable tensor with gradient tracking and null-mask propagation
+- **`Linear<T>`**: Fully connected layer with optional bias, null-aware weight updates
+- **`Sequential<T>`**: Layer composition with forward pass chaining
+- Activations available as standalone operations in `GradOperations`
+
+#### Optimizers (`Optimizer/`)
+Common base providing `Step()` and `ZeroGrad()`. Implementations:
+- **`SGD<T>`**: Momentum and Nesterov support, weight decay, null-skip update
+- **`Adam<T>`**: Bias-corrected momentum, RMS scaling, configurable betas/eps
+- **`AdamW<T>`**: Decoupled weight decay separate from adaptive gradient scaling
+
+#### Training (`Training/`)
+- **`TrainingLoop<T>`**: Epoch loop with loss tracking, batch iteration, gradient zeroing, and optional validation
+- **`DataParallelTrainer<T>`**: Distributes batches across independent model copies, aggregates gradients
+
+#### Serialization (`Serialization/`)
+- **`ModelSerializer<T>`**: Save/load models as JSON (parameter tensors serialized as arrays), with type metadata and structure validation
+
+### Null Handling in Gradients
+
+Gradients inherit Nivara's explicit null-mask semantics:
+- Null positions in forward data produce zero gradient values during backward
+- The null mask is propagated through the computation graph
+- Optimizers skip null positions during update (null-skip), leaving those weights unchanged
+
+### DataFrame Integration
+
+The `ToReverseGradTensors<T>()` extension on `NivaraFrame` converts DataFrame columns to tracked tensors. After a backward pass, `ToGradientFrame()` extracts gradients back into a DataFrame for inspection, and `BatchZeroGrad()` resets all gradients for the next iteration.
+
+---
+
 ## Testing Strategy
 
 **Decision**: Rely heavily on **property-based testing** for core logic.
