@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Numerics;
+using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Optimizer;
 
@@ -25,8 +26,8 @@ public static class SgdOptimizer
             data.TryGetSpan(out var dataSpan);
             grad.TryGetSpan(out var gradSpan);
             var result = new T[n];
-            for (int i = 0; i < n; i++)
-                result[i] = dataSpan[i] - learningRate * gradSpan[i];
+            TensorPrimitives.Multiply(gradSpan, learningRate, result);
+            TensorPrimitives.Subtract(dataSpan, result, result);
             return new ReverseGradTensor<T>(NivaraColumn<T>.Create(result), requiresGrad: false, parameter.shape);
         }
 
@@ -39,20 +40,14 @@ public static class SgdOptimizer
             data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
             grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
             var dataHasNulls = data.TryGetNullMask(out var dataMask);
-            var gradHasNulls = grad.TryGetNullMask(out var gradMask);
 
+            TensorPrimitives.Multiply(gradBuf.AsSpan(0, n), learningRate, gradBuf.AsSpan(0, n));
+            TensorPrimitives.Subtract(dataBuf.AsSpan(0, n), gradBuf.AsSpan(0, n), dataBuf.AsSpan(0, n));
+
+            nullMask.AsSpan(0, n).Clear();
             for (int i = 0; i < n; i++)
-            {
-                var dNull = dataHasNulls && dataMask[i];
-                var gNull = gradHasNulls && gradMask[i];
-
-                if (dNull)
+                if (dataHasNulls && dataMask[i])
                     nullMask[i] = true;
-                else if (gNull)
-                    dataBuf[i] = dataBuf[i]; // keep original, no gradient update
-                else
-                    dataBuf[i] = dataBuf[i] - learningRate * gradBuf[i];
-            }
 
             var resultColumn = NivaraColumn<T>.CreateFromSpans(dataBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
             return new ReverseGradTensor<T>(resultColumn, requiresGrad: false, parameter.shape);

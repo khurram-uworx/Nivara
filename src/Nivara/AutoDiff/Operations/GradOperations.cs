@@ -1,6 +1,7 @@
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
+using Nivara.Tensors;
 
 namespace Nivara.AutoDiff.Operations;
 
@@ -586,14 +587,7 @@ public static class GradOperations
             a.TryGetSpan(out var aSpan);
             b.TryGetSpan(out var bSpan);
             var result = new T[n];
-            for (int i = 0; i < aRows; i++)
-                for (int j = 0; j < bCols; j++)
-                {
-                    T sum = T.Zero;
-                    for (int k = 0; k < aCols; k++)
-                        sum += aSpan[i * aCols + k] * bSpan[k * bCols + j];
-                    result[i * bCols + j] = sum;
-                }
+            MatMulHelper.MultiplyCore(aSpan, bSpan, result, aRows, aCols, bCols);
             return NivaraColumn<T>.Create(result);
         }
 
@@ -606,39 +600,14 @@ public static class GradOperations
         {
             a.CopyTo(aBuf.AsSpan(0, a.Length), T.Zero);
             b.CopyTo(bBuf.AsSpan(0, b.Length), T.Zero);
-            var aHasNulls = a.TryGetNullMask(out var aMask);
-            var bHasNulls = b.TryGetNullMask(out var bMask);
+            a.TryGetNullMask(out var aMask);
+            b.TryGetNullMask(out var bMask);
 
-            for (int i = 0; i < aRows; i++)
-            {
-                for (int j = 0; j < bCols; j++)
-                {
-                    T sum = T.Zero;
-                    bool positionNull = false;
-                    for (int k = 0; k < aCols; k++)
-                    {
-                        var aIdx = i * aCols + k;
-                        var bIdx = k * bCols + j;
-
-                        var aNull = aHasNulls && aMask[aIdx];
-                        var bNull = bHasNulls && bMask[bIdx];
-                        if (aNull || bNull)
-                        {
-                            positionNull = true;
-                        }
-                        else
-                        {
-                            sum += aBuf[aIdx] * bBuf[bIdx];
-                        }
-                    }
-
-                    var resIdx = i * bCols + j;
-                    if (positionNull)
-                        nullMask[resIdx] = true;
-                    else
-                        resultBuf[resIdx] = sum;
-                }
-            }
+            MatMulHelper.Multiply(
+                aBuf.AsSpan(0, a.Length), aMask,
+                bBuf.AsSpan(0, b.Length), bMask,
+                resultBuf, nullMask.AsSpan(0, n),
+                aRows, aCols, bCols);
 
             return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
