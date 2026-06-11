@@ -1,7 +1,7 @@
-using Nivara.Extensions.AutoDiff.Exceptions;
+using Nivara.AutoDiff.Exceptions;
 using System.Numerics;
 
-namespace Nivara.Extensions.AutoDiff.Utilities;
+namespace Nivara.AutoDiff.Utilities;
 
 /// <summary>
 /// Provides type conversion utilities for reverse-mode automatic differentiation operations.

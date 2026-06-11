@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.Numerics;
 
-namespace Nivara.Extensions.AutoDiff.Optimizer;
+namespace Nivara.AutoDiff.Optimizer;
 
 public static class SgdOptimizer
 {

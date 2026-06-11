@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Nivara.Extensions.AutoDiff.Exceptions;
+namespace Nivara.AutoDiff.Exceptions;
 
 /// <summary>
 /// Base exception for all automatic differentiation errors.

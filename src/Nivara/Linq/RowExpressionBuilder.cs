@@ -8,14 +8,14 @@ namespace Nivara.Linq;
 /// </summary>
 public sealed class RowExpressionBuilder
 {
-    private static readonly RowExpressionBuilder _instance = new();
+    static readonly RowExpressionBuilder instance = new();
 
     /// <summary>
     /// gets a singleton instance of the builder
     /// </summary>
-    public static RowExpressionBuilder Instance => _instance;
+    public static RowExpressionBuilder Instance => instance;
 
-    private RowExpressionBuilder() { }
+    RowExpressionBuilder() { }
 
     /// <summary>
     /// Creates a column reference for the specified column name

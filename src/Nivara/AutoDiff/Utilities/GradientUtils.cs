@@ -3,7 +3,7 @@ using System.Buffers;
 using System.Numerics;
 using System.Text;
 
-namespace Nivara.Extensions.AutoDiff.Utilities;
+namespace Nivara.AutoDiff.Utilities;
 
 /// <summary>
 /// Utility functions for gradient management, memory cleanup, and debugging.

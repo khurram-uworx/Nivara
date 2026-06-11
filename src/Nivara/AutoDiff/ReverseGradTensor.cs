@@ -1,7 +1,7 @@
-using Nivara.Extensions.AutoDiff.Utilities;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
-namespace Nivara.Extensions.AutoDiff;
+namespace Nivara.AutoDiff;
 
 /// <summary>
 /// Reverse-mode gradient-enabled tensor that tracks gradients and computation history.

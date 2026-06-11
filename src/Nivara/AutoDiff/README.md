@@ -1,6 +1,6 @@
-# Nivara.Extensions.AutoDiff
+# Nivara.AutoDiff
 
-`Nivara.Extensions.AutoDiff` is an experimental reverse-mode automatic
+`Nivara.AutoDiff` is an experimental reverse-mode automatic
 differentiation layer over Nivara columns. It wraps `NivaraColumn<T>` values in
 `ReverseGradTensor<T>`, records differentiable operations in a computation graph, and
 computes gradients with `Backward()`.
@@ -37,8 +37,8 @@ other numeric types. Integral gradients are not supported.
 
 ```csharp
 using Nivara;
-using Nivara.Extensions.AutoDiff;
-using Nivara.Extensions.AutoDiff.Operations;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Operations;
 
 var input = new ReverseGradTensor<float>(
     NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f }),
@@ -69,7 +69,7 @@ the same length as the output.
 
 ## Operations
 
-`Nivara.Extensions.AutoDiff.Operations.GradOperations` exposes static methods:
+`Nivara.AutoDiff.Operations.GradOperations` exposes static methods:
 
 - Arithmetic: `Add`, `Subtract`, `Multiply`, `Divide`
 - Unary: `Negate`, `Abs`
@@ -94,7 +94,7 @@ should prefer shape metadata.
 
 ## Nivara Integration
 
-`Nivara.Extensions.AutoDiff.Extensions.NivaraAutoGradExtensions` provides helpers
+`Nivara.AutoDiff.Extensions.NivaraAutoGradExtensions` provides helpers
 for converting Nivara data structures:
 
 - `NivaraColumn<T>.ToReverseGradTensor(requiresGrad)`
@@ -111,7 +111,7 @@ for converting Nivara data structures:
 
 ## Optimizer
 
-`Nivara.Extensions.AutoDiff.Optimizer.SgdOptimizer` provides a minimal SGD update step:
+`Nivara.AutoDiff.Optimizer.SgdOptimizer` provides a minimal SGD update step:
 
 - `SgdUpdate<T>(parameter, learningRate)` — returns a new `ReverseGradTensor<T>` with values updated by `param - lr * grad`.
   - Returns a new tensor (caller owns it, can dispose the old one).
@@ -119,7 +119,7 @@ for converting Nivara data structures:
   - The returned tensor has `requiresGrad: false`.
 
 ```csharp
-using Nivara.Extensions.AutoDiff.Optimizer;
+using Nivara.AutoDiff.Optimizer;
 
 var loss = GradOperations.Sum(weight);
 loss.Backward();
@@ -128,7 +128,7 @@ var updated = SgdOptimizer.SgdUpdate(weight, 0.01f);
 
 ## Utilities
 
-`Nivara.Extensions.AutoDiff.Utilities.GradientUtils` contains support helpers:
+`Nivara.AutoDiff.Utilities.GradientUtils` contains support helpers:
 
 - Constants: `Constant`, `Zeros`, `Ones`, `Full`
 - Gradient management: `ZeroGrad`, `Detach`
@@ -152,7 +152,7 @@ tests alongside forward and backward tests.
   metadata. Legacy explicit-dimension overloads remain for compatibility.
 - `Backward()` defaults to a scalar-loss workflow. Non-scalar outputs require an
   explicit matching gradient.
-- Optimizer: `Nivara.Extensions.AutoDiff.Optimizer.SgdOptimizer.SgdUpdate` provides a minimal SGD update with null-skip support.
+- Optimizer: `Nivara.AutoDiff.Optimizer.SgdOptimizer.SgdUpdate` provides a minimal SGD update with null-skip support.
 - There is no layer, model, metric, dataloader, or training-loop API.
 - The implementation favors correctness and integration with current Nivara
   types over being a performance-final tensor runtime.
@@ -187,5 +187,5 @@ AutoDiff/
 ```
 
 All automatic differentiation functionality lives under the
-`Nivara.Extensions.AutoDiff` namespace and its `Operations`, `Utilities`,
+`Nivara.AutoDiff` namespace and its `Operations`, `Utilities`,
 `Exceptions`, and `Extensions` sub-namespaces.

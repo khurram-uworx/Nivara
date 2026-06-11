@@ -10,8 +10,7 @@ public class NivaraIOException : Exception
     /// </summary>
     /// <param name="message">The error message</param>
     public NivaraIOException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of NivaraIOException with an inner exception
@@ -19,8 +18,7 @@ public class NivaraIOException : Exception
     /// <param name="message">The error message</param>
     /// <param name="innerException">The inner exception</param>
     public NivaraIOException(string message, Exception innerException) : base(message, innerException)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of NivaraIOException with file path and operation context
@@ -106,8 +104,7 @@ public sealed class SchemaValidationException : NivaraIOException
     /// </summary>
     /// <param name="message">The error message</param>
     public SchemaValidationException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of SchemaValidationException with type mismatches and schema details
@@ -150,8 +147,7 @@ public sealed class DataCorruptionException : NivaraIOException
     /// </summary>
     /// <param name="message">The error message</param>
     public DataCorruptionException(string message) : base(message)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of DataCorruptionException with inner exception
@@ -159,8 +155,7 @@ public sealed class DataCorruptionException : NivaraIOException
     /// <param name="message">The error message</param>
     /// <param name="innerException">The inner exception</param>
     public DataCorruptionException(string message, Exception innerException) : base(message, innerException)
-    {
-    }
+    { }
 
     /// <summary>
     /// Initializes a new instance of DataCorruptionException with affected columns and row range

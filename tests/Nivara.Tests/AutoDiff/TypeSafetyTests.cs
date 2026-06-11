@@ -1,7 +1,7 @@
-using Nivara.Extensions.AutoDiff;
-using Nivara.Extensions.AutoDiff.Exceptions;
-using Nivara.Extensions.AutoDiff.Extensions;
-using Nivara.Extensions.AutoDiff.Utilities;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Exceptions;
+using Nivara.AutoDiff.Extensions;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
