@@ -12,12 +12,16 @@
     <PackageReference Include="Parquet.Net" Version="6.0.3" />
     <PackageReference Include="Apache.Arrow" Version="23.0.0" />
     <PackageReference Include="Microsoft.ML" Version="5.0.0" />
-    <PackageReference Include="System.Numerics.Tensors" Version="10.0.8" />
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.9" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
     <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.300" />
   </ItemGroup>
 
 </Project>

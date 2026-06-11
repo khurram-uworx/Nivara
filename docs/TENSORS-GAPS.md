@@ -207,10 +207,14 @@ semantics are stable and benchmarked.
 
 ### D3. BLAS-level matrix multiplication
 
-The current `MatrixMultiply` uses a triple-nested loop. A production-quality
-implementation would use `TensorPrimitives.Dot` per row×column pair, batched
-BLAS calls, or hardware-accelerated paths. This belongs in `Nivara.Extensions`
-if added.
+The current `MatrixMultiply` uses a triple-nested loop. P0a of the AutoDiff
+plan creates `MatMulHelper` in `src/Nivara/Tensors/MatMulHelper.cs`, which
+uses `TensorPrimitives.Dot` per row×column pair + `Parallel.For` over output
+rows. This is the .NET 10 solution.
+
+When `Tensor.MatrixMultiply` (or a full GEMM primitive) ships in a future
+.NET version, only the body of `MatMulHelper.Multiply<T>(Tensor<T>, ...)`
+changes — no callers are modified. Tracked in `docs/FOLLOWUP.md`.
 
 ### D4. NaN-as-null semantics
 

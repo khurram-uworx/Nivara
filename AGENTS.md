@@ -1,5 +1,9 @@
 # Guidance for AI-assisted coding
 
+## Shell environment (Windows with GNU coreutils)
+
+This environment has GNU coreutils at `C:\Program Files\coreutils\bin\` on PATH. Most Linux commands work directly (`grep`, `find`, `touch`, `sort`, `head`, `tail`, `wc`, `cat`, `ls`, `rm`, `mv`, `cp`). PowerShell aliases map `rm`/`mv`/`cp`/`cat`/`ls` to their PowerShell cmdlet equivalents, which behave similarly for basic file operations. Use normal command syntax — avoid verbose PowerShell idioms like `Remove-Item -LiteralPath`.
+
 Purpose
 - Concise, machine-friendly rules and locations to guide automated code generation and human edits that use System.Numerics.Tensors opportunistically.
 - Designed to be consumed by AI assistants when producing or refactoring tensor-aware code.
