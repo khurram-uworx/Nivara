@@ -331,3 +331,5 @@ FodyWeavers.xsd
 # CodeMemory index databases — add .codememory/ to exclude from version control
 .codememory/
 .codememory.json
+
+.mimocode

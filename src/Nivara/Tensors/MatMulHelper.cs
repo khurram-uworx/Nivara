@@ -13,7 +13,7 @@ namespace Nivara.Tensors;
 /// </summary>
 static class MatMulHelper
 {
-    private static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
+    public static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
     {
         for (int i = 0; i < rows; i++)
             for (int j = 0; j < cols; j++)
@@ -66,7 +66,7 @@ static class MatMulHelper
     /// (ref structs can't be captured in Parallel.For lambdas), then runs
     /// transpose + TensorPrimitives.Dot + Parallel.For.
     /// </summary>
-    private static void MultiplyCore<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
+    public static void MultiplyCore<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
         int aRows, int aCols, int bCols)
         where T : struct, INumber<T>
     {
