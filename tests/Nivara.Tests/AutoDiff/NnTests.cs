@@ -74,7 +74,7 @@ public class NnTests
         Assert.That(linear.OutFeatures, Is.EqualTo(2));
 
         Assert.That(linear.Bias, Is.Not.Null);
-        Assert.That(linear.Bias!.Shape, Is.EqualTo(new[] { 2 }));
+        Assert.That(linear.Bias!.Shape, Is.EqualTo(new[] { 1, 2 }));
     }
 
     [Test]
@@ -157,7 +157,7 @@ public class NnTests
         KaimingUniform.Init(parameters);
 
         Assert.That(parameters["Weight"].Shape, Is.EqualTo(new[] { 3, 4 }));
-        Assert.That(parameters["Bias"].Shape, Is.EqualTo(new[] { 3 }));
+        Assert.That(parameters["Bias"].Shape, Is.EqualTo(new[] { 1, 3 }));
 
         for (int i = 0; i < parameters["Weight"].Length; i++)
             Assert.That(float.IsNaN(parameters["Weight"][i]) || float.IsInfinity(parameters["Weight"][i]), Is.False);

@@ -34,7 +34,8 @@ public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
         if (bias)
         {
             var biasData = new T[outFeatures];
-            this.bias = new Parameter<T>("Bias", biasData, requiresGrad: true);
+            var biasTensor = ReverseGradTensor<T>.FromMatrix(biasData, 1, outFeatures, requiresGrad: true);
+            this.bias = new Parameter<T>("Bias", biasTensor);
             RegisterParameters(this.bias);
         }
 
@@ -73,6 +74,7 @@ public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
         {
             var biasTensor = bias.Tensor;
             var ones = GradientUtils.Ones<T>(input.shape[0]);
+            ones.Reshape(ones.Length, 1);
             var biasBroadcast = GradOperations.MatMul(ones, biasTensor);
             output = GradOperations.Add(output, biasBroadcast);
         }
