@@ -13,6 +13,7 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, INum
     public TensorDataset<T> Dataset => _dataset;
     public int BatchSize => _batchSize;
     public bool Shuffle => _shuffle;
+    public int? Seed => _seed;
 
     public DataLoader(TensorDataset<T> dataset, int batchSize, bool shuffle = true, int? seed = null)
     {
