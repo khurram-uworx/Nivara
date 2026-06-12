@@ -5,7 +5,7 @@ namespace Nivara.AutoDiff.Nn;
 public sealed class Parameter<T> where T : struct, INumber<T>
 {
     public string Name { get; }
-    public ReverseGradTensor<T> Tensor { get; internal set; }
+    public ReverseGradTensor<T> Tensor { get; set; }
 
     public Parameter(string name, int size, bool requiresGrad = true)
         : this(name, new T[size], requiresGrad)

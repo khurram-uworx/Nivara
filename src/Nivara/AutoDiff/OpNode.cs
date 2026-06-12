@@ -6,14 +6,14 @@ sealed class OpNode<T> where T : struct, INumber<T>
 {
     public string OperationName { get; }
     public IReadOnlyList<object> Inputs { get; }
-    public Action<NivaraColumn<T>> BackwardFunction { get; }
+    public Action<NivaraColumn<T>, bool> BackwardFunction { get; }
     public bool ShouldSaveForBackward { get; }
     public Dictionary<string, object>? SavedValues { get; }
 
     public OpNode(
         string operationName,
         IReadOnlyList<object> inputs,
-        Action<NivaraColumn<T>> backwardFunction,
+        Action<NivaraColumn<T>, bool> backwardFunction,
         bool shouldSaveForBackward = false,
         Dictionary<string, object>? savedValues = null)
     {
@@ -27,14 +27,14 @@ sealed class OpNode<T> where T : struct, INumber<T>
         SavedValues = savedValues;
     }
 
-    public void Apply(NivaraColumn<T> gradOutput)
+    public void Apply(NivaraColumn<T> gradOutput, bool stripGradientNulls)
     {
         if (gradOutput == null)
             throw new ArgumentNullException(nameof(gradOutput));
 
         try
         {
-            BackwardFunction(gradOutput);
+            BackwardFunction(gradOutput, stripGradientNulls);
         }
         catch (Exception ex)
         {

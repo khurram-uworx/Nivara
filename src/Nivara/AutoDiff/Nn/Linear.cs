@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
@@ -17,7 +18,9 @@ public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
     public ReverseGradTensor<T> Weight => weight.Tensor;
     public ReverseGradTensor<T>? Bias => bias?.Tensor;
 
-    public Linear(int inFeatures, int outFeatures, bool bias = true)
+    public Linear(int inFeatures, int outFeatures, bool bias = true,
+        IInitializer<T>? weightInitializer = null,
+        IInitializer<T>? biasInitializer = null)
     {
         if (inFeatures <= 0) throw new ArgumentOutOfRangeException(nameof(inFeatures));
         if (outFeatures <= 0) throw new ArgumentOutOfRangeException(nameof(outFeatures));
@@ -39,27 +42,10 @@ public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
             RegisterParameters(this.bias);
         }
 
-        initializeWeights();
-    }
+        (weightInitializer ?? KaimingUniformInitializer<T>.Instance).Initialize(weight);
 
-    void initializeWeights()
-    {
-        var fanIn = T.CreateChecked(inFeatures);
-        var bound = T.CreateChecked(Math.Sqrt(6.0 / inFeatures));
-        var random = Random.Shared;
-        var n = weight.Tensor.Length;
-        var data = new T[n];
-
-        for (int i = 0; i < n; i++)
-        {
-            var sample = T.CreateChecked(random.NextDouble() * 2.0 - 1.0);
-            data[i] = bound * sample;
-        }
-
-        var column = NivaraColumn<T>.Create(data);
-        var shape = weight.Tensor.Shape;
-        var newTensor = new ReverseGradTensor<T>(column, requiresGrad: true, shape);
-        weight.Tensor = newTensor;
+        if (bias && biasInitializer != null)
+            biasInitializer.Initialize(this.bias!);
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)

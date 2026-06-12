@@ -432,10 +432,14 @@ var loader = new DataLoader<float>(
     new TensorDataset<float>(frame, ["x0", "x1", "x2"], "y"),
     batchSize: 2, shuffle: false);
 
+var model = new LinearModel();
+var optimizer = new SGD<float>(lr: 0.01f);
+optimizer.AddParameterGroup(model.GetParameters().Values, learningRate: 0.01f);
+
 var loop = new TrainingLoop<float>(
-    new LinearModel(), loader,
+    model, loader,
     (pred, target) => new MSELoss<float>().Forward(pred, target),
-    new SGD<float>(lr: 0.01f),
+    optimizer,
     epochs: 5);
 
 var result = loop.Run();
@@ -512,7 +516,7 @@ var model = new FraudNet();
 var optimizer = new Adam<float>(beta1: 0.9, beta2: 0.999);
 
 // Add all model parameters to the optimizer
-optimizer.AddParameterGroup(model.Parameters(), learningRate: 0.001f);
+optimizer.AddParameterGroup(model.GetParameters().Values, learningRate: 0.001f);
 
 var trainer = new DataParallelTrainer<float>(
     model, loader,

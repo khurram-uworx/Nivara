@@ -418,6 +418,30 @@ public class TrainingTests
         Assert.That(result.Epochs[^1].Loss, Is.LessThan(result.Epochs[0].Loss));
     }
 
+    [Test]
+    public void TrainingLoop_MultiLayer_Converges()
+    {
+        var frame = NivaraFrame.Create(
+            ("f1", (IColumn)NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f })),
+            ("f2", (IColumn)NivaraColumn<float>.Create(new float[] { 5f, 6f, 7f, 8f, 1f, 2f, 3f, 4f })),
+            ("label", (IColumn)NivaraColumn<float>.Create(new float[] { 11f, 17f, 25f, 35f, 11f, 17f, 25f, 35f })));
+        var dataset = new TensorDataset<float>(frame, ["f1", "f2"], "label");
+        var loader = new DataLoader<float>(dataset, 8, shuffle: false);
+
+        using var model = new Sequential<float>(
+            new Linear<float>(2, 3),
+            new Linear<float>(3, 1));
+        var lossFn = new MSELoss<float>().Forward;
+        var optimizer = new SGD<float>(0.01f);
+        optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
+
+        using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 50);
+        var result = loop.Run();
+
+        Assert.That(result.Epochs[^1].Loss, Is.LessThan(result.Epochs[0].Loss),
+            "Multi-layer model should converge (all layers training)");
+    }
+
     private sealed class HookTrackingTrainingLoop : TrainingLoop<float>
     {
         public int EpochStarts { get; private set; }
@@ -540,5 +564,60 @@ public class TrainingTests
         var result = loop.Run();
 
         Assert.DoesNotThrow(() => result.PrintSummary());
+    }
+
+    // --- Minibatch test gaps (I5) ---
+
+    [Test]
+    public void TrainingLoop_PartialBatch_TrainsToCompletion()
+    {
+        var frame = CreateTestFrame(10);
+        var dataset = new TensorDataset<float>(frame, ["f1"], "label");
+        var loader = new DataLoader<float>(dataset, 3, shuffle: false);
+
+        using var model = new Linear<float>(1, 1);
+        var lossFn = new MSELoss<float>().Forward;
+        var optimizer = new SGD<float>(0.01f);
+        optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
+
+        using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 20);
+        var result = loop.Run();
+
+        Assert.That(result.Epochs[^1].Loss, Is.LessThan(result.Epochs[0].Loss));
+    }
+
+    [Test]
+    public void DataLoader_PartialBatch_LastBatchHasCorrectSize()
+    {
+        var frame = CreateTestFrame(10);
+        var dataset = new TensorDataset<float>(frame, ["f1"], "label");
+        var loader = new DataLoader<float>(dataset, 3, shuffle: false);
+
+        var batches = loader.ToList();
+
+        Assert.That(batches.Count, Is.EqualTo(4));
+        Assert.That(batches[0].Size, Is.EqualTo(3));
+        Assert.That(batches[1].Size, Is.EqualTo(3));
+        Assert.That(batches[2].Size, Is.EqualTo(3));
+        Assert.That(batches[3].Size, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void TrainingLoop_MultiEpochShuffle_Converges()
+    {
+        var frame = CreateTestFrame(20);
+        var dataset = new TensorDataset<float>(frame, ["f1"], "label");
+        var loader = new DataLoader<float>(dataset, 5, shuffle: true, seed: 42);
+
+        using var model = new Linear<float>(1, 1);
+        var lossFn = new MSELoss<float>().Forward;
+        var optimizer = new SGD<float>(0.01f);
+        optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
+
+        using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 30);
+        var result = loop.Run();
+
+        Assert.That(result.Epochs[^1].Loss, Is.LessThan(result.Epochs[0].Loss),
+            "Shuffled minibatch training should converge");
     }
 }

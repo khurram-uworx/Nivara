@@ -19,3 +19,11 @@ Console.WriteLine();
 
 // Run the automatic differentiation example
 AutoDiffExample.Run();
+
+Console.WriteLine();
+Console.WriteLine();
+Console.WriteLine("═══════════════════════════════════════════════════════════════");
+Console.WriteLine();
+
+// Run the cross-framework FraudNet example
+CrossFrameworkFraudNet.Run();
