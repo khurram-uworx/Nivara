@@ -24,6 +24,9 @@ public static class ModelSerializer
         File.WriteAllText(path, json);
     }
 
+    const string ExpectedModelFormat = "nivara-ss-v1";
+    const string ExpectedCheckpointFormat = "nivara-ckpt-v1";
+
     public static void Load<T>(Module<T> model, string path) where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -35,6 +38,10 @@ public static class ModelSerializer
         var json = File.ReadAllText(path);
         var file = JsonSerializer.Deserialize<ModelFile>(json, s_options)
             ?? throw new InvalidOperationException("Failed to deserialize model file.");
+
+        if (file.Format != ExpectedModelFormat)
+            throw new InvalidOperationException(
+                $"Unsupported model format '{file.Format}'. Expected '{ExpectedModelFormat}'.");
 
         var parameters = model.GetParameters();
 
@@ -94,6 +101,10 @@ public static class ModelSerializer
         var json = File.ReadAllText(path);
         var file = JsonSerializer.Deserialize<CheckpointFile>(json, s_options)
             ?? throw new InvalidOperationException("Failed to deserialize checkpoint file.");
+
+        if (file.Format != ExpectedCheckpointFormat)
+            throw new InvalidOperationException(
+                $"Unsupported checkpoint format '{file.Format}'. Expected '{ExpectedCheckpointFormat}'.");
 
         var parameters = new Dictionary<string, ParameterData<T>>();
         foreach (var (name, entry) in file.Parameters)

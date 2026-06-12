@@ -53,14 +53,19 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
 
     public Dictionary<string, ReverseGradTensor<T>> Parameters()
     {
+        return Parameters("");
+    }
+
+    internal Dictionary<string, ReverseGradTensor<T>> Parameters(string prefix)
+    {
         var result = new Dictionary<string, ReverseGradTensor<T>>();
 
         foreach (var param in parameters)
-            result[param.Name] = param.Tensor;
+            result[prefix + param.Name] = param.Tensor;
 
-        foreach (var module in modules)
+        for (int i = 0; i < modules.Count; i++)
         {
-            var childParams = module.Parameters();
+            var childParams = modules[i].Parameters(prefix + $"Module_{i}.");
             foreach (var kvp in childParams)
                 result[kvp.Key] = kvp.Value;
         }
@@ -70,14 +75,19 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
 
     public Dictionary<string, Parameter<T>> GetParameters()
     {
+        return GetParameters("");
+    }
+
+    internal Dictionary<string, Parameter<T>> GetParameters(string prefix)
+    {
         var result = new Dictionary<string, Parameter<T>>();
 
         foreach (var param in parameters)
-            result[param.Name] = param;
+            result[prefix + param.Name] = param;
 
-        foreach (var module in modules)
+        for (int i = 0; i < modules.Count; i++)
         {
-            var childParams = module.GetParameters();
+            var childParams = modules[i].GetParameters(prefix + $"Module_{i}.");
             foreach (var kvp in childParams)
                 result[kvp.Key] = kvp.Value;
         }

@@ -2332,6 +2332,24 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         return mask.Length > 0;
     }
 
+    /// <summary>
+    /// Returns a new column with the same data but no null mask.
+    /// Null positions are filled with default(T) (zero for numerics).
+    /// When the column is already null-free, returns the same instance (no copy).
+    /// </summary>
+    public NivaraColumn<T> WithoutNulls()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (!HasNulls)
+            return this;
+
+        var data = new T[Length];
+        CopyTo(data.AsSpan(), default(T)!);
+        return new NivaraColumn<T>(
+            ColumnStorageFactory.CreateFromOwnedArray(data, nullMask: null));
+    }
+
     // Arithmetic Operations
 
     /// <summary>

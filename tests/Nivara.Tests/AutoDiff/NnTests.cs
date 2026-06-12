@@ -243,6 +243,202 @@ public class NnTests
         Assert.That(linear.Weight.RequiresGrad, Is.True);
     }
 
+    [Test]
+    public void Sequential_Parameters_ReturnsAllLayers()
+    {
+        using var seq = new Sequential<float>(
+            new Linear<float>(3, 4),
+            new Linear<float>(4, 1));
+        var p = seq.Parameters();
+
+        Assert.That(p.Count, Is.EqualTo(4), "Should have 4 params (Weight+Bias for 2 layers)");
+        Assert.That(p.ContainsKey("Module_0.Weight"), Is.True, "First layer Weight");
+        Assert.That(p.ContainsKey("Module_0.Bias"), Is.True, "First layer Bias");
+        Assert.That(p.ContainsKey("Module_1.Weight"), Is.True, "Second layer Weight");
+        Assert.That(p.ContainsKey("Module_1.Bias"), Is.True, "Second layer Bias");
+    }
+
+    [Test]
+    public void Sequential_GetParameters_ReturnsAllLayers()
+    {
+        using var seq = new Sequential<float>(
+            new Linear<float>(3, 4),
+            new Linear<float>(4, 1));
+        var p = seq.GetParameters();
+
+        Assert.That(p.Count, Is.EqualTo(4), "Should have 4 params (Weight+Bias for 2 layers)");
+        Assert.That(p.ContainsKey("Module_0.Weight"), Is.True);
+        Assert.That(p.ContainsKey("Module_0.Bias"), Is.True);
+        Assert.That(p.ContainsKey("Module_1.Weight"), Is.True);
+        Assert.That(p.ContainsKey("Module_1.Bias"), Is.True);
+    }
+
+    [Test]
+    public void Sequential_Parameters_SingleLayer_BackwardCompatible()
+    {
+        using var seq = new Sequential<float>(
+            new Linear<float>(3, 2));
+        var p = seq.Parameters();
+
+        Assert.That(p.Count, Is.EqualTo(2), "Single layer should still have 2 params");
+        Assert.That(p.ContainsKey("Module_0.Weight"), Is.True);
+        Assert.That(p.ContainsKey("Module_0.Bias"), Is.True);
+    }
+
+    [Test]
+    public void Sequential_Parameters_ThreeLayerModel_CorrectCount()
+    {
+        using var seq = new Sequential<float>(
+            new Linear<float>(4, 8),
+            new Linear<float>(8, 6),
+            new Linear<float>(6, 3));
+        var p = seq.Parameters();
+
+        Assert.That(p.Count, Is.EqualTo(6), "3 layers × 2 params each = 6");
+        Assert.That(p.ContainsKey("Module_0.Weight"), Is.True);
+        Assert.That(p.ContainsKey("Module_2.Bias"), Is.True, "Last layer bias exists");
+    }
+
+    [Test]
+    public void Linear_DefaultInit_MatchesCurrentBehavior()
+    {
+        using var linear = new Linear<float>(4, 3);
+        var w = linear.Weight;
+
+        Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
+        Assert.That(w.RequiresGrad, Is.True);
+        for (int i = 0; i < w.Length; i++)
+            Assert.That(float.IsNaN(w[i]) || float.IsInfinity(w[i]), Is.False);
+    }
+
+    [Test]
+    public void Linear_CustomWeightInit_ChangesValues()
+    {
+        using var linear = new Linear<float>(4, 3, bias: false,
+            weightInitializer: XavierUniformInitializer<float>.Instance);
+
+        var w = linear.Weight;
+        Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
+        for (int i = 0; i < w.Length; i++)
+            Assert.That(float.IsNaN(w[i]) || float.IsInfinity(w[i]), Is.False);
+    }
+
+    [Test]
+    public void Linear_CustomBiasInit_InitializesBias()
+    {
+        using var linear = new Linear<float>(4, 3, bias: true,
+            weightInitializer: KaimingUniformInitializer<float>.Instance,
+            biasInitializer: new UniformInitializer<float>(-0.1f, 0.1f));
+
+        Assert.That(linear.Bias, Is.Not.Null);
+        for (int i = 0; i < linear.Bias!.Length; i++)
+        {
+            Assert.That(float.IsNaN(linear.Bias[i]) || float.IsInfinity(linear.Bias[i]), Is.False);
+            Assert.That(linear.Bias[i], Is.InRange(-0.1f, 0.1f));
+        }
+    }
+
+    [Test]
+    public void Linear_NullBiasInit_BiasStaysZeros()
+    {
+        using var linear = new Linear<float>(4, 3, bias: true,
+            weightInitializer: null,
+            biasInitializer: null);
+
+        for (int i = 0; i < linear.Bias!.Length; i++)
+            Assert.That(linear.Bias[i], Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void KaimingUniformInitializer_Interface_ProducesCorrectShape()
+    {
+        using var linear = new Linear<float>(4, 3,
+            weightInitializer: KaimingUniformInitializer<float>.Instance);
+        var w = linear.Weight;
+
+        Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
+        for (int i = 0; i < w.Length; i++)
+            Assert.That(float.IsNaN(w[i]) || float.IsInfinity(w[i]), Is.False);
+    }
+
+    [Test]
+    public void XavierUniformInitializer_Interface_ProducesCorrectShape()
+    {
+        using var linear = new Linear<float>(4, 3,
+            weightInitializer: XavierUniformInitializer<float>.Instance);
+        var w = linear.Weight;
+
+        Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
+        for (int i = 0; i < w.Length; i++)
+            Assert.That(float.IsNaN(w[i]), Is.False);
+    }
+
+    [Test]
+    public void NormalInitializer_WithCustomParams_AppliesMeanStd()
+    {
+        var init = new NormalInitializer<float>(2.0f, 0.5f);
+        var param = new Parameter<float>("test", new float[1000], requiresGrad: true);
+        init.Initialize(param);
+
+        double sum = 0;
+        for (int i = 0; i < param.Length; i++)
+            sum += param.Tensor[i];
+        var mean = sum / param.Length;
+
+        Assert.That(mean, Is.EqualTo(2.0).Within(0.2));
+    }
+
+    [Test]
+    public void UniformInitializer_WithCustomBounds_ProducesCorrectRange()
+    {
+        var init = new UniformInitializer<float>(5.0f, 10.0f);
+        var param = new Parameter<float>("test", new float[1000], requiresGrad: true);
+        init.Initialize(param);
+
+        for (int i = 0; i < param.Length; i++)
+        {
+            Assert.That(param.Tensor[i], Is.GreaterThanOrEqualTo(5.0f));
+            Assert.That(param.Tensor[i], Is.LessThanOrEqualTo(10.0f));
+        }
+    }
+
+    [Test]
+    public void PyTorchDefaultInitializer_ProducesExpectedBound()
+    {
+        var init = PyTorchDefaultInitializer<float>.Instance;
+        var param = new Parameter<float>("test", new float[1000], requiresGrad: true);
+        param.Tensor.Reshape(10, 100); // fanIn = 100
+        init.Initialize(param);
+
+        // PyTorch bound = 1/sqrt(fanIn) = 1/sqrt(100) = 0.1
+        var bound = 1.0f / MathF.Sqrt(100);
+        for (int i = 0; i < param.Length; i++)
+        {
+            Assert.That(float.IsNaN(param.Tensor[i]) || float.IsInfinity(param.Tensor[i]), Is.False);
+            Assert.That(param.Tensor[i], Is.InRange(-bound, bound));
+        }
+    }
+
+    [Test]
+    public void Sequential_CustomInitForAllLayers()
+    {
+        using var seq = new Sequential<float>(
+            new Linear<float>(3, 4, bias: true,
+                weightInitializer: XavierUniformInitializer<float>.Instance,
+                biasInitializer: new UniformInitializer<float>(-0.05f, 0.05f)),
+            new Linear<float>(4, 1, bias: true,
+                weightInitializer: XavierUniformInitializer<float>.Instance,
+                biasInitializer: new UniformInitializer<float>(-0.05f, 0.05f)));
+
+        var p = seq.Parameters();
+        Assert.That(p.Count, Is.EqualTo(4));
+        foreach (var (_, tensor) in p)
+        {
+            for (int i = 0; i < tensor.Length; i++)
+                Assert.That(float.IsNaN(tensor[i]) || float.IsInfinity(tensor[i]), Is.False);
+        }
+    }
+
     protected static void DisposeModules(params Module<float>[] modules)
     {
         foreach (var m in modules)

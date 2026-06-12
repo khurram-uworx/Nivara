@@ -133,9 +133,10 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     /// Initiates backward pass computation from this tensor
     /// </summary>
     /// <param name="gradient">Optional gradient to use as starting point. If null, uses ones for scalar tensors</param>
+    /// <param name="stripGradientNulls">If true, null masks are stripped from gradients during accumulation (default: true). Set to false for null propagation in gradients.</param>
     /// <exception cref="InvalidOperationException">Thrown when called on non-scalar tensors without gradient, tensors that don't require gradients, or when computation graph has issues</exception>
     /// <exception cref="ArgumentException">Thrown when gradient shape doesn't match tensor shape</exception>
-    public void Backward(ReverseGradTensor<T>? gradient = null)
+    public void Backward(ReverseGradTensor<T>? gradient = null, bool stripGradientNulls = true)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -179,7 +180,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
 
         try
         {
-            ComputationGraph.Backward(this, gradientData);
+            ComputationGraph.Backward(this, gradientData, stripGradientNulls);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Circular dependency"))
         {

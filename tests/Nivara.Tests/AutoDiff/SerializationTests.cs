@@ -230,6 +230,36 @@ public class SerializationTests
     }
 
     [Test]
+    public void SaveLoad_Sequential_MultiLayer_RoundTrip()
+    {
+        using var model = new Sequential<float>(
+            new Linear<float>(2, 3),
+            new Linear<float>(3, 1));
+        var path = Path.Combine(TestDir, "sequential_multilayer.json");
+
+        ModelSerializer.Save(model, path);
+
+        using var loaded = new Sequential<float>(
+            new Linear<float>(2, 3),
+            new Linear<float>(3, 1));
+        ModelSerializer.Load(loaded, path);
+
+        var modelParams = model.Parameters();
+        var loadedParams = loaded.Parameters();
+        Assert.That(loadedParams.Count, Is.EqualTo(modelParams.Count));
+
+        foreach (var (name, tensor) in modelParams)
+        {
+            Assert.That(loadedParams.ContainsKey(name), Is.True,
+                $"Parameter '{name}' should exist in loaded model");
+            for (int i = 0; i < tensor.Length; i++)
+                Assert.That(loadedParams[name][i], Is.EqualTo(tensor[i]).Within(1e-6f));
+        }
+
+        File.Delete(path);
+    }
+
+    [Test]
     public void SaveLoad_NoBiasLinear_RoundTrip()
     {
         var model = new Linear<float>(3, 2, bias: false);

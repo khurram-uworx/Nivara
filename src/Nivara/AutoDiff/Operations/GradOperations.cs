@@ -26,15 +26,15 @@ public static class GradOperations
 
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Add", new object[] { a, b }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Add", new object[] { a, b }, (typedGradOutput, sgn) =>
             {
                 if (a.RequiresGrad)
                 {
-                    AccumulateGradient(a, typedGradOutput);
+                    AccumulateGradient(a, typedGradOutput, sgn);
                 }
                 if (b.RequiresGrad)
                 {
-                    AccumulateGradient(b, typedGradOutput);
+                    AccumulateGradient(b, typedGradOutput, sgn);
                 }
             });
 
@@ -60,16 +60,16 @@ public static class GradOperations
 
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Subtract", new object[] { a, b }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Subtract", new object[] { a, b }, (typedGradOutput, sgn) =>
             {
                 if (a.RequiresGrad)
                 {
-                    AccumulateGradient(a, typedGradOutput);
+                    AccumulateGradient(a, typedGradOutput, sgn);
                 }
                 if (b.RequiresGrad)
                 {
                     var negatedGrad = NegateVectorized(typedGradOutput);
-                    AccumulateGradient(b, negatedGrad);
+                    AccumulateGradient(b, negatedGrad, sgn);
                 }
             });
 
@@ -95,17 +95,17 @@ public static class GradOperations
 
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Multiply", new object[] { a, b }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Multiply", new object[] { a, b }, (typedGradOutput, sgn) =>
             {
                 if (a.RequiresGrad)
                 {
                     var aGrad = MultiplyVectorized(typedGradOutput, b.Data);
-                    AccumulateGradient(a, aGrad);
+                    AccumulateGradient(a, aGrad, sgn);
                 }
                 if (b.RequiresGrad)
                 {
                     var bGrad = MultiplyVectorized(typedGradOutput, a.Data);
-                    AccumulateGradient(b, bGrad);
+                    AccumulateGradient(b, bGrad, sgn);
                 }
             });
 
@@ -139,12 +139,12 @@ public static class GradOperations
 
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Divide", new object[] { a, b }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Divide", new object[] { a, b }, (typedGradOutput, sgn) =>
             {
                 if (a.RequiresGrad)
                 {
                     var aGrad = DivideVectorized(typedGradOutput, b.Data);
-                    AccumulateGradient(a, aGrad);
+                    AccumulateGradient(a, aGrad, sgn);
                 }
                 if (b.RequiresGrad)
                 {
@@ -152,7 +152,7 @@ public static class GradOperations
                     var bGradPositive = DivideVectorized(quotient, b.Data);
                     var bGrad = NegateVectorized(bGradPositive);
                     var finalBGrad = MultiplyVectorized(bGrad, typedGradOutput);
-                    AccumulateGradient(b, finalBGrad);
+                    AccumulateGradient(b, finalBGrad, sgn);
                 }
             });
 
@@ -218,19 +218,19 @@ public static class GradOperations
 
         if (a.RequiresGrad || b.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, typedGradOutput =>
+            var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, (typedGradOutput, sgn) =>
             {
                 if (a.RequiresGrad)
                 {
                     var bTransposed = TransposeVectorized(b.Data, bRows, bCols);
                     var aGrad = MatMulVectorized(typedGradOutput, bTransposed, aRows, bCols, bRows);
-                    AccumulateGradient(a, aGrad);
+                    AccumulateGradient(a, aGrad, sgn);
                 }
                 if (b.RequiresGrad)
                 {
                     var aTransposed = TransposeVectorized(a.Data, aRows, aCols);
                     var bGrad = MatMulVectorized(aTransposed, typedGradOutput, aCols, aRows, bCols);
-                    AccumulateGradient(b, bGrad);
+                    AccumulateGradient(b, bGrad, sgn);
                 }
             });
 
@@ -268,10 +268,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Transpose", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = TransposeVectorized(typedGradOutput, cols, rows);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -301,10 +301,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Sum", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Sum", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -330,11 +330,11 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Mean", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Mean", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
                 var scaledGrad = DivideByScalar(aGrad, a.Length);
-                AccumulateGradient(a, scaledGrad);
+                AccumulateGradient(a, scaledGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -357,10 +357,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Relu", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyReluGradient(a.Data, typedGradOutput);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -379,10 +379,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplySigmoidGradient(result, typedGradOutput);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -401,10 +401,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Tanh", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyTanhGradient(result, typedGradOutput);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -422,10 +422,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Negate", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Negate", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = NegateVectorized(typedGradOutput);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -443,10 +443,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Abs", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Abs", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyAbsGradient(a.Data, typedGradOutput);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -465,10 +465,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Clip", new object[] { a, min, max }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Clip", new object[] { a, min, max }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyClipGradient(a.Data, typedGradOutput, min, max);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -490,10 +490,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("LeakyRelu", new object[] { a, negativeSlope }, typedGradOutput =>
+            var gradFn = new OpNode<T>("LeakyRelu", new object[] { a, negativeSlope }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyLeakyReluGradient(a.Data, typedGradOutput, negativeSlope);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -511,10 +511,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Exp", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Exp", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = MultiplyVectorized(typedGradOutput, result);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -532,10 +532,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("Log", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Log", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyLogGradient(a.Data, typedGradOutput);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -554,10 +554,10 @@ public static class GradOperations
         if (a.RequiresGrad)
         {
             var savedResult = result;
-            var gradFn = new OpNode<T>("Softmax", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("Softmax", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplySoftmaxGradient(savedResult, typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -575,10 +575,10 @@ public static class GradOperations
 
         if (a.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("LogSoftmax", new object[] { a }, typedGradOutput =>
+            var gradFn = new OpNode<T>("LogSoftmax", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyLogSoftmaxGradient(a.Data, typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
-                AccumulateGradient(a, aGrad);
+                AccumulateGradient(a, aGrad, sgn);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -591,15 +591,31 @@ public static class GradOperations
 
     #region Helper Methods
 
-    private static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient) where T : struct, INumber<T>
+    private static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient, bool stripGradientNulls = true) where T : struct, INumber<T>
     {
-        if (tensor.Grad == null)
+        if (stripGradientNulls)
         {
-            tensor.Grad = gradient;
+            var cleanG = gradient.HasNulls ? gradient.WithoutNulls() : gradient;
+            if (tensor.Grad == null)
+            {
+                tensor.Grad = cleanG;
+            }
+            else
+            {
+                var cleanExisting = tensor.Grad.HasNulls ? tensor.Grad.WithoutNulls() : tensor.Grad;
+                tensor.Grad = cleanExisting.Add(cleanG);
+            }
         }
         else
         {
-            tensor.Grad = tensor.Grad + gradient;
+            if (tensor.Grad == null)
+            {
+                tensor.Grad = gradient;
+            }
+            else
+            {
+                tensor.Grad = tensor.Grad.Add(gradient);
+            }
         }
     }
 

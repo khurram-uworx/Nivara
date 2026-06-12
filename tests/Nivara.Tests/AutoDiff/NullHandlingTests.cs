@@ -382,8 +382,8 @@ public class NullHandlingTests
         // Position 0: input -1 <= 0, gradient should be 0
         Assert.That(tensor.Grad![0], Is.EqualTo(0.0f), "Gradient for negative input should be 0");
 
-        // Position 1: input is null, gradient position should remain null
-        Assert.That(tensor.Grad.IsNull(1), Is.True, "Gradient for null input should be null");
+        // Position 1: input is null, gradient should be 0 (nulls stripped by default)
+        Assert.That(tensor.Grad![1], Is.EqualTo(0.0f), "Gradient for null input should be 0");
 
         // Position 2: input 1 > 0, gradient should be 1
         Assert.That(tensor.Grad[2], Is.EqualTo(1.0f), "Gradient for positive input should be 1");
@@ -393,7 +393,7 @@ public class NullHandlingTests
     }
 
     [Test]
-    public void ActivationBackward_WithNullGradientOutput_PreservesNullMask()
+    public void ActivationBackward_WithNullGradientOutput_StripsNullMask()
     {
         var tensor = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { -1.0f, 0.0f, 1.0f }),
@@ -407,12 +407,12 @@ public class NullHandlingTests
 
         Assert.That(tensor.Grad, Is.Not.Null);
         Assert.That(tensor.Grad!.IsNull(0), Is.False);
-        Assert.That(tensor.Grad.IsNull(1), Is.True);
+        Assert.That(tensor.Grad[1], Is.EqualTo(0.0f), "Null in upstream gradient should become 0");
         Assert.That(tensor.Grad.IsNull(2), Is.False);
     }
 
     [Test]
-    public void SumBackward_WithNullGradientOutput_BroadcastsNullMask()
+    public void SumBackward_WithNullGradientOutput_BroadcastsAsZeros()
     {
         var tensor = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
@@ -427,8 +427,27 @@ public class NullHandlingTests
         Assert.That(tensor.Grad, Is.Not.Null);
         for (int i = 0; i < tensor.Length; i++)
         {
-            Assert.That(tensor.Grad!.IsNull(i), Is.True);
+            Assert.That(tensor.Grad![i], Is.EqualTo(0.0f), $"Null gradient broadcast should produce 0 at position {i}");
         }
+    }
+
+    [Test]
+    public void Backward_WithStripGradientNullsFalse_PreservesOriginalNullBehavior()
+    {
+        var tensor = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { -1.0f, 0.0f, 1.0f }),
+            requiresGrad: true);
+        var result = GradOperations.Sigmoid(tensor);
+        var grad = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 1.0f }),
+            requiresGrad: false);
+
+        result.Backward(grad, stripGradientNulls: false);
+
+        Assert.That(tensor.Grad, Is.Not.Null);
+        Assert.That(tensor.Grad!.IsNull(0), Is.False);
+        Assert.That(tensor.Grad.IsNull(1), Is.True, "With stripGradientNulls=false, null should propagate");
+        Assert.That(tensor.Grad.IsNull(2), Is.False);
     }
 
     #endregion
@@ -588,6 +607,35 @@ public class NullHandlingTests
 
         Assert.That(tensor.IsNull(4), Is.False, "Position 4: -1.0 should not be null");
         Assert.That(tensor[4], Is.EqualTo(-1.0f), "Position 4: value should be -1.0");
+    }
+
+    [Test]
+    public void NullSeedGradient_ProducesNullFreeAccumulatedGradients()
+    {
+        // All non-null inputs avoid mixed-storage issues in backward intermediates.
+        // Nulls enter only via the seed gradient, testing AccumulateGradient's stripping.
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
+            requiresGrad: true);
+        var b = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 4f, 5f, 6f }),
+            requiresGrad: true);
+
+        var result = GradOperations.Add(a, b);
+
+        // Seed gradient with null at position 1
+        var seedGrad = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 1f }),
+            requiresGrad: false);
+
+        result.Backward(seedGrad);
+
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(a.Grad.HasNulls, Is.False,
+            "Gradient for a should have no nulls (stripped by default)");
+        Assert.That(b.Grad, Is.Not.Null);
+        Assert.That(b.Grad.HasNulls, Is.False,
+            "Gradient for b should have no nulls (stripped by default)");
     }
 
     #endregion
