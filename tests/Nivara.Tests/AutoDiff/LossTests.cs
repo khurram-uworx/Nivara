@@ -84,10 +84,10 @@ public class LossTests
         var bceLogits = new BCEWithLogitsLoss<float>();
         var loss = bceLogits.Forward(logits, targets);
 
-        // loss = maxX - x*z - log(1+exp(-|x|))
-        // for x=0, z=1: 0 - 0 - log(2) = -0.693
+        // loss = maxX - x*z + log(1+exp(-|x|))
+        // for x=0, z=1: 0 - 0 + log(2) = 0.693
         Assert.That(loss.Length, Is.EqualTo(1));
-        Assert.That(loss[0], Is.EqualTo(-0.693147f).Within(1e-5f));
+        Assert.That(loss[0], Is.EqualTo(0.693147f).Within(1e-5f));
     }
 
     [Test]

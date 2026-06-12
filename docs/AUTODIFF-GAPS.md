@@ -1,5 +1,50 @@
 # AutoDiff Gaps — What Remains
 
+## Icebreaker: Honest comparison with PyTorch
+
+A cross-framework parity exercise (see `examples/README.md`) trained an
+identical 3-layer MLP in both Nivara and PyTorch and compared results.
+
+**Correctness: proven.** Loss curves match within 0.04% relative diff across
+50 epochs. The gradient math, optimizer (Adam), and training loop are correct.
+
+**Developer experience: PyTorch still wins comfortably.** The gaps hit during
+the exercise:
+
+| Dimension | PyTorch | Nivara | Impact |
+|-----------|---------|--------|--------|
+| Model registration | `self.l1 = nn.Linear(8, 64)` — auto-registered | `L1 = new Linear<float>(8, 64)` + manual `RegisterModules(...)` | Easy to forget; no compiler error if you do |
+| Forward pass | `torch.relu(self.l1(x))` — direct | `GradOperations.Relu(L1.Forward(x))` — extra ceremony | More typing, harder to read |
+| Generics | None (dynamic) | `Module<float>`, `Linear<float>`, `ReverseGradTensor<float>` everywhere | Type pollution propagates through all code |
+| Weight loading | `param.data.copy_(tensor)` — one-liner | Custom JSON flatten + manual name mapping (PyTorch name → Nivara key) | ~40 lines of fragile boilerplate, easy to mismatch |
+| Optimizer API | `optimizer = Adam(model.parameters())` — unambiguous | Two `AddParameterGroup` overloads with different semantics — `Dictionary` overload creates copies, `IEnumerable<Parameter<T>>` passes references | Cost hours to debug; the dictionary version silently trains nothing |
+| Error messages | Polished after a decade | Generic operation-node stack traces | Harder to debug autograd failures |
+| Ecosystem | TensorBoard, torchinfo, etc. | `result.PrintSummary()` — minimal | Fine for small models, insufficient at scale |
+
+**Root cause of the optimizer trap:** `AddParameterGroup(Dictionary<string,
+ReverseGradTensor<T>>)` creates **new** `Parameter<T>` wrappers internally.
+`Step()` then updates those copies, never touching the model's actual
+`Parameter<T>` objects. The fix is to always use
+`optimizer.AddParameterGroup(model.GetParameters().Values, ...)` (the
+`IEnumerable<Parameter<T>>` overload). This is not obvious from the API
+surface and the compiler offers no protection.
+
+**Weight divergence is expected but disorienting.** Even with identical
+seeded initialization, SGD trajectories diverge between frameworks (different
+BLAS kernels, FP accumulation order). The loss curves stay aligned, proving
+the gradient computation is correct, but a first-time user comparing weights
+directly will see large differences (e.g., L2.Weight 180% relative diff) and
+may incorrectly conclude something is broken.
+
+**Verdict for this example:** A for correctness, B for usability. The hard
+part (backprop, optimizer, training infrastructure) works. The easy part
+(ergonomics, discoverability, documentation) shows PyTorch's decade of
+iteration.
+
+---
+
+## Current Gaps
+
 This document catalogs future AutoDiff API, performance, testing, and design
 work. Current bugs, correctness risks, and immediate technical debt are tracked
 in `KNOWN-ISSUES.md`.
