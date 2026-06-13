@@ -2,6 +2,8 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Optimizer;
+using Nivara.AutoDiff.Serialization;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -508,5 +510,269 @@ public class NnTests
     {
         foreach (var m in modules)
             m.Dispose();
+    }
+
+    [Test]
+    public void VAE_Forward_ShapeCorrect()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var data = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f]),
+            requiresGrad: false);
+        data.Reshape(2, 4);
+
+        var recon = vae.Forward(data);
+
+        Assert.That(recon.Shape, Is.EqualTo(new[] { 2, 4 }));
+        for (int i = 0; i < recon.Length; i++)
+            Assert.That(float.IsNaN(recon[i]) || float.IsInfinity(recon[i]), Is.False);
+    }
+
+    [Test]
+    public void VAE_Encode_ReturnsCorrectShapes()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var data = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f]),
+            requiresGrad: false);
+        data.Reshape(1, 4);
+
+        var (mu, logVar) = vae.Encode(data);
+
+        Assert.That(mu.Shape, Is.EqualTo(new[] { 1, 2 }));
+        Assert.That(logVar.Shape, Is.EqualTo(new[] { 1, 2 }));
+        Assert.That(mu.RequiresGrad, Is.True);
+        Assert.That(logVar.RequiresGrad, Is.True);
+        for (int i = 0; i < mu.Length; i++)
+        {
+            Assert.That(float.IsNaN(mu[i]) || float.IsInfinity(mu[i]), Is.False);
+            Assert.That(float.IsNaN(logVar[i]) || float.IsInfinity(logVar[i]), Is.False);
+        }
+    }
+
+    [Test]
+    public void VAE_Reparameterize_EvalMode_ReturnsMu()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        vae.Eval();
+
+        var mu = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([0.5f, -1.2f]), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([0.1f, 0.2f]), requiresGrad: true);
+
+        var z = vae.Reparameterize(mu, logVar);
+
+        Assert.That(z, Is.SameAs(mu));
+    }
+
+    [Test]
+    public void VAE_Reparameterize_TrainMode_Stochastic()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        vae.Train();
+
+        var mu = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([0.5f, -1.2f]), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([0.1f, 0.2f]), requiresGrad: true);
+
+        var z1 = vae.Reparameterize(mu, logVar, seed: 42);
+        var z2 = vae.Reparameterize(mu, logVar, seed: 99);
+
+        Assert.That(z1.Length, Is.EqualTo(2));
+        Assert.That(z2.Length, Is.EqualTo(2));
+        bool allEqual = true;
+        for (int i = 0; i < z1.Length; i++)
+        {
+            if (z1[i] != z2[i]) { allEqual = false; break; }
+        }
+        Assert.That(allEqual, Is.False, "Two calls with different seeds should produce different samples");
+    }
+
+    [Test]
+    public void VAE_ElboLoss_ReturnsScalar()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var data = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f]),
+            requiresGrad: false);
+        data.Reshape(1, 4);
+
+        var (mu, logVar) = vae.Encode(data);
+        var z = vae.Reparameterize(mu, logVar);
+        var recon = vae.Decode(z);
+        var loss = vae.ElboLoss(recon, data, mu, logVar);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        Assert.That(float.IsNaN(loss[0]) || float.IsInfinity(loss[0]), Is.False);
+        Assert.That(loss[0], Is.GreaterThan(0f));
+    }
+
+    [Test]
+    public void VAE_Backward_GradientsFlowToAllParams()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var data = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f]),
+            requiresGrad: false);
+        data.Reshape(2, 4);
+
+        var (mu, logVar) = vae.Encode(data);
+        var z = vae.Reparameterize(mu, logVar);
+        var recon = vae.Decode(z);
+        var loss = vae.ElboLoss(recon, data, mu, logVar);
+        loss.Backward();
+
+        foreach (var (name, param) in vae.GetParameters())
+        {
+            // Beta has requiresGrad=false so it never receives gradients
+            if (name == "Beta")
+            {
+                Assert.That(param.Tensor.Grad, Is.Null,
+                    $"Parameter '{name}' (requiresGrad=false) should have no gradient");
+                continue;
+            }
+            Assert.That(param.Tensor.Grad, Is.Not.Null,
+                $"Parameter '{name}' should have gradient after Backward");
+            Assert.That(param.Tensor.Grad!.Length, Is.EqualTo(param.Tensor.Length));
+        }
+    }
+
+    [Test]
+    public void VAE_Training_ReducesLoss()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var raw = new float[16];
+        for (int i = 0; i < raw.Length; i++)
+            raw[i] = (i % 4) + 1;
+        var data = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(raw), requiresGrad: false);
+        data.Reshape(4, 4);
+
+        var optimizer = new SGD<float>(0.01f);
+        optimizer.AddParameterGroup(vae.GetParameters().Values, 0.01f);
+
+        float ComputeLoss()
+        {
+            var (mu, logVar) = vae.Encode(data);
+            var z = vae.Reparameterize(mu, logVar);
+            var recon = vae.Decode(z);
+            var l = vae.ElboLoss(recon, data, mu, logVar);
+            return l[0];
+        }
+
+        var initialLoss = ComputeLoss();
+
+        for (int epoch = 0; epoch < 100; epoch++)
+        {
+            optimizer.ZeroGrad();
+            var (mu, logVar) = vae.Encode(data);
+            var z = vae.Reparameterize(mu, logVar);
+            var recon = vae.Decode(z);
+            var loss = vae.ElboLoss(recon, data, mu, logVar);
+            loss.Backward();
+            optimizer.Step();
+        }
+
+        var finalLoss = ComputeLoss();
+        Assert.That(finalLoss, Is.LessThan(initialLoss),
+            "VAE training should reduce ELBO loss");
+    }
+
+    [Test]
+    public void VAE_Parameters_ReturnsCorrectCount()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var p = vae.Parameters();
+
+        // 6 Linear sub-modules x 2 params each (Weight + Bias) = 12, plus 1 Beta
+        Assert.That(p.Count, Is.EqualTo(13));
+    }
+
+    [Test]
+    public void VAE_GetParameters_IncludesBeta()
+    {
+        using var vae = new VAE<float>(4, 2, 8, beta: 2.5f);
+        var p = vae.GetParameters();
+
+        Assert.That(p.ContainsKey("Beta"), Is.True);
+        Assert.That(p["Beta"].Tensor.RequiresGrad, Is.False);
+        Assert.That(p["Beta"].Tensor[0], Is.EqualTo(2.5f).Within(1e-6f));
+    }
+
+    [Test]
+    public void VAE_Encode_NoSpuriousNulls()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var data = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f]),
+            requiresGrad: false);
+        data.Reshape(2, 4);
+
+        var (mu, logVar) = vae.Encode(data);
+
+        Assert.That(mu.HasNulls, Is.False);
+        Assert.That(logVar.HasNulls, Is.False);
+        for (int i = 0; i < mu.Length; i++)
+        {
+            Assert.That(float.IsNaN(mu[i]) || float.IsInfinity(mu[i]), Is.False);
+            Assert.That(float.IsNaN(logVar[i]) || float.IsInfinity(logVar[i]), Is.False);
+        }
+    }
+
+    [Test]
+    public void VAE_Dispose_DisposesSubModules()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var param = vae.GetParameters().First().Value;
+        var tensor = param.Tensor;
+
+        vae.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = tensor.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = param.Tensor);
+    }
+
+    [Test]
+    public void VAE_Serialization_RoundTrip()
+    {
+        using var vae = new VAE<float>(4, 2, 8);
+        var path = Path.Combine(Path.GetTempPath(),
+            $"vae_test_{Guid.NewGuid()}.json");
+
+        try
+        {
+            ModelSerializer.Save(vae, path);
+
+            using var loaded = new VAE<float>(4, 2, 8);
+            ModelSerializer.Load(loaded, path);
+
+            var originalParams = vae.Parameters();
+            var loadedParams = loaded.Parameters();
+
+            Assert.That(loadedParams.Count, Is.EqualTo(originalParams.Count));
+            foreach (var (name, tensor) in originalParams)
+            {
+                Assert.That(loadedParams.ContainsKey(name), Is.True,
+                    $"Parameter '{name}' should exist in loaded model");
+                Assert.That(loadedParams[name].Shape, Is.EqualTo(tensor.Shape));
+                for (int i = 0; i < tensor.Length; i++)
+                    Assert.That(loadedParams[name][i], Is.EqualTo(tensor[i]).Within(1e-6f));
+            }
+        }
+        finally
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+    }
+
+    [Test]
+    public void VAE_Constructor_InvalidArg_Throws()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new VAE<float>(0, 2, 8));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new VAE<float>(4, 0, 8));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new VAE<float>(4, 2, 0));
     }
 }
