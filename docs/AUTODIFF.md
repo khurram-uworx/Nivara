@@ -49,16 +49,15 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 ├── Sequential<T>                     ← Ordered module chain
 ├── Activation<T>                     ← ReLU, Sigmoid, Tanh, LeakyReLU wrappers
 ├── Dropout<T>                        ← Inverted dropout with train/eval toggle
-└── Initializers/                     ← Kaiming, Xavier, Uniform, Normal
+└── Initializers                     ← static Initializers.KaimingUniform, .KaimingNormal, .XavierUniform, .XavierNormal, .Uniform, .Normal
 
-Loss Functions (Nn.Functional)
-───────────────────────────────
-MSELoss<T>                            ← Σ(pred - target)²
-L1Loss<T>                             ← Σ|pred - target|
-BCELoss<T>                            ← -(y·log(p) + (1-y)·log(1-p))
-BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable)
-CrossEntropyLoss<T>                   ← Fused log-softmax + NLL
-Softmax<T> / LogSoftmax<T>            ← Dim-aware softmax wrappers
+Loss Functions
+────────────────
+LossFunctions.MSE                    ← Σ(pred - target)²
+LossFunctions.L1                     ← Σ|pred - target|
+LossFunctions.BCE                    ← -(y·log(p) + (1-y)·log(1-p))
+LossFunctions.BCEWithLogits          ← Fused sigmoid + BCE (numerically stable)
+LossFunctions.CrossEntropy           ← Fused log-softmax + NLL
 
 Optimizers
 ──────────
@@ -342,16 +341,16 @@ Inverted dropout — scales by `1/(1-p)` during training, identity during eval. 
 
 ### Initializers
 
-| Class | Formula | Use |
-|-------|---------|-----|
-| `KaimingUniform` | `U(-√(6/fanIn), √(6/fanIn))` | ReLU layers |
-| `KaimingNormal` | `N(0, √(2/fanIn))` | ReLU layers |
-| `XavierUniform` | `U(-√(6/(fanIn+fanOut)), √(6/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
-| `XavierNormal` | `N(0, √(2/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
-| `Uniform(bound)` | `U(-bound, bound)` | Generic |
-| `Normal(mean, std)` | `N(mean, std)` | Generic |
+| Method | Formula | Use |
+|--------|---------|-----|
+| `Initializers.KaimingUniform(param)` | `U(-√(6/fanIn), √(6/fanIn))` | ReLU layers |
+| `Initializers.KaimingNormal(param)` | `N(0, √(2/fanIn))` | ReLU layers |
+| `Initializers.XavierUniform(param)` | `U(-√(6/(fanIn+fanOut)), √(6/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
+| `Initializers.XavierNormal(param)` | `N(0, √(2/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
+| `Initializers.Uniform(param, bound)` | `U(-bound, bound)` | Generic |
+| `Initializers.Normal(param, mean, std)` | `N(mean, std)` | Generic |
 
-Call `KaimingUniform.Init(model.Parameters())` or individual parameter init after construction.
+Call `Initializers.KaimingUniform(param)` (or any initializer) after construction. Each method mutates the parameter tensor's data in place.
 
 ### Example
 
@@ -381,17 +380,15 @@ class MLP : Module<float>
 
 ## Loss Functions
 
-All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Each has a `Forward(predictions, targets)` method returning a scalar loss tensor.
+All loss functions are static methods on `LossFunctions` in `Nivara.AutoDiff`. Each returns a `ReverseGradTensor<float>` (or generic overload returning `ReverseGradTensor<T>`).
 
-| Loss | Forward Formula | Notes |
-|------|----------------|-------|
-| `MSELoss<T>` | `Σ(pred - target)²` | Mean Squared Error (sum reduction) |
-| `L1Loss<T>` | `Σ\|pred - target\|` | Mean Absolute Error (sum reduction) |
-| `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability |
-| `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed |
-| `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + one-hot targets |
-| `Softmax<T>` | dim-aware softmax | Wrapper around `GradOperations.Softmax` |
-| `LogSoftmax<T>` | dim-aware log-softmax | Wrapper around `GradOperations.LogSoftmax` |
+| Method | Forward Formula | Notes |
+|--------|----------------|-------|
+| `LossFunctions.MSE(pred, target)` | `Σ(pred - target)²` | Mean Squared Error (sum reduction) |
+| `LossFunctions.L1(pred, target)` | `Σ\|pred - target\|` | Mean Absolute Error (sum reduction) |
+| `LossFunctions.BCE(pred, target)` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability |
+| `LossFunctions.BCEWithLogits(pred, target)` | Fused sigmoid + BCE | Numerically stable — no clamp needed |
+| `LossFunctions.CrossEntropy(pred, target)` | LogSoftmax + NLL ÷ batchSize | Expects logits + one-hot targets |
 
 ---
 
@@ -506,7 +503,7 @@ optimizer.AddParameterGroup(model.GetParameters().Values);
 
 var loop = new TrainingLoop<float>(
     model, loader,
-    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    LossFunctions.MSE,
     optimizer,
     epochs: 20);
 
@@ -553,7 +550,7 @@ optimizer.AddParameterGroup(model.GetParameters().Values);
 
 var trainer = new DataParallelTrainer<float>(
     model, loader,
-    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    LossFunctions.MSE,
     optimizer,
     epochs: 10);
 
@@ -872,7 +869,6 @@ tensors.BatchZeroGrad();
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Training;
 
 // Define model
@@ -907,7 +903,7 @@ optimizer.AddParameterGroup(model.GetParameters().Values);
 
 var loop = new TrainingLoop<float>(
     model, loader,
-    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    LossFunctions.MSE,
     optimizer,
     epochs: 5);
 
@@ -1035,8 +1031,8 @@ var prediction = loaded.Forward(testInput);
 | `Linear<T>` | `src/Nivara/AutoDiff/Nn/Linear.cs` |
 | `Sequential<T>` | `src/Nivara/AutoDiff/Nn/Sequential.cs` |
 | `Activation<T>` / `Dropout<T>` | `src/Nivara/AutoDiff/Nn/Activation.cs` / `Dropout.cs` |
-| Initializers (6) | `src/Nivara/AutoDiff/Nn/Initializers/*.cs` |
-| Loss functions (7) | `src/Nivara/AutoDiff/Nn/Functional/*.cs` |
+| `LossFunctions` | `src/Nivara/AutoDiff/LossFunctions.cs` |
+| `Initializers` | `src/Nivara/AutoDiff/Initializers.cs` |
 | `Optimizer<T>` base | `src/Nivara/AutoDiff/Optimizer/Optimizer.cs` |
 | `SGD<T>` | `src/Nivara/AutoDiff/Optimizer/SGD.cs` |
 | `Adam<T>` | `src/Nivara/AutoDiff/Optimizer/Adam.cs` |

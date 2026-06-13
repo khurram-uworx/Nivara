@@ -1,6 +1,5 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
@@ -178,7 +177,7 @@ public class NnTests
     {
         using var linear = new Linear<float>(4, 3);
         var parameters = linear.Parameters();
-        KaimingUniform.Init(parameters);
+        Initializers.KaimingUniform(parameters);
 
         Assert.That(parameters["Weight"].Shape, Is.EqualTo(new[] { 3, 4 }));
         Assert.That(parameters["Bias"].Shape, Is.EqualTo(new[] { 1, 3 }));
@@ -195,7 +194,7 @@ public class NnTests
     {
         using var linear = new Linear<float>(4, 3);
         var parameters = linear.Parameters();
-        XavierUniform.Init(parameters);
+        Initializers.XavierUniform(parameters);
 
         Assert.That(parameters["Weight"].Shape, Is.EqualTo(new[] { 3, 4 }));
         for (int i = 0; i < parameters["Weight"].Length; i++)
@@ -207,7 +206,7 @@ public class NnTests
     {
         using var linear = new Linear<float>(4, 3);
         var parameters = linear.Parameters();
-        Normal.Init(parameters);
+        Initializers.Normal(parameters);
 
         for (int i = 0; i < parameters["Weight"].Length; i++)
             Assert.That(float.IsNaN(parameters["Weight"][i]), Is.False);
@@ -218,7 +217,7 @@ public class NnTests
     {
         using var linear = new Linear<float>(4, 3);
         var parameters = linear.Parameters();
-        Uniform.Init(parameters);
+        Initializers.Uniform(parameters);
 
         for (int i = 0; i < parameters["Weight"].Length; i++)
             Assert.That(float.IsNaN(parameters["Weight"][i]), Is.False);
@@ -339,7 +338,7 @@ public class NnTests
     public void Linear_CustomWeightInit_ChangesValues()
     {
         using var linear = new Linear<float>(4, 3, bias: false,
-            weightInitializer: XavierUniformInitializer<float>.Instance);
+            weightInitializer: Initializers.XavierUniform);
 
         var w = linear.Weight;
         Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
@@ -351,8 +350,8 @@ public class NnTests
     public void Linear_CustomBiasInit_InitializesBias()
     {
         using var linear = new Linear<float>(4, 3, bias: true,
-            weightInitializer: KaimingUniformInitializer<float>.Instance,
-            biasInitializer: new UniformInitializer<float>(-0.1f, 0.1f));
+            weightInitializer: Initializers.KaimingUniform,
+            biasInitializer: p => Initializers.Uniform(p, -0.1f, 0.1f));
 
         Assert.That(linear.Bias, Is.Not.Null);
         for (int i = 0; i < linear.Bias!.Length; i++)
@@ -377,7 +376,7 @@ public class NnTests
     public void KaimingUniformInitializer_Interface_ProducesCorrectShape()
     {
         using var linear = new Linear<float>(4, 3,
-            weightInitializer: KaimingUniformInitializer<float>.Instance);
+            weightInitializer: Initializers.KaimingUniform);
         var w = linear.Weight;
 
         Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
@@ -389,7 +388,7 @@ public class NnTests
     public void XavierUniformInitializer_Interface_ProducesCorrectShape()
     {
         using var linear = new Linear<float>(4, 3,
-            weightInitializer: XavierUniformInitializer<float>.Instance);
+            weightInitializer: Initializers.XavierUniform);
         var w = linear.Weight;
 
         Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
@@ -400,9 +399,8 @@ public class NnTests
     [Test]
     public void NormalInitializer_WithCustomParams_AppliesMeanStd()
     {
-        var init = new NormalInitializer<float>(2.0f, 0.5f);
         var param = new Parameter<float>("test", new float[1000], requiresGrad: true);
-        init.Initialize(param);
+        Initializers.Normal(param, 2.0f, 0.5f);
 
         double sum = 0;
         for (int i = 0; i < param.Length; i++)
@@ -415,9 +413,8 @@ public class NnTests
     [Test]
     public void UniformInitializer_WithCustomBounds_ProducesCorrectRange()
     {
-        var init = new UniformInitializer<float>(5.0f, 10.0f);
         var param = new Parameter<float>("test", new float[1000], requiresGrad: true);
-        init.Initialize(param);
+        Initializers.Uniform(param, 5.0f, 10.0f);
 
         for (int i = 0; i < param.Length; i++)
         {
@@ -429,10 +426,9 @@ public class NnTests
     [Test]
     public void PyTorchDefaultInitializer_ProducesExpectedBound()
     {
-        var init = PyTorchDefaultInitializer<float>.Instance;
         var param = new Parameter<float>("test", new float[1000], requiresGrad: true);
         param.Tensor.Reshape(10, 100); // fanIn = 100
-        init.Initialize(param);
+        Initializers.PyTorchDefault(param);
 
         // PyTorch bound = 1/sqrt(fanIn) = 1/sqrt(100) = 0.1
         var bound = 1.0f / MathF.Sqrt(100);
@@ -448,11 +444,11 @@ public class NnTests
     {
         using var seq = new Sequential<float>(
             new Linear<float>(3, 4, bias: true,
-                weightInitializer: XavierUniformInitializer<float>.Instance,
-                biasInitializer: new UniformInitializer<float>(-0.05f, 0.05f)),
+                weightInitializer: Initializers.XavierUniform,
+                biasInitializer: p => Initializers.Uniform(p, -0.05f, 0.05f)),
             new Linear<float>(4, 1, bias: true,
-                weightInitializer: XavierUniformInitializer<float>.Instance,
-                biasInitializer: new UniformInitializer<float>(-0.05f, 0.05f)));
+                weightInitializer: Initializers.XavierUniform,
+                biasInitializer: p => Initializers.Uniform(p, -0.05f, 0.05f)));
 
         var p = seq.Parameters();
         Assert.That(p.Count, Is.EqualTo(4));

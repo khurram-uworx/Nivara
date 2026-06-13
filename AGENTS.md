@@ -145,6 +145,27 @@ Suggested small, safe improvements to implement (prioritized)
 - ✓ ArrayPool optimization complete across AutoDiff hot paths — all `new T[n]` in GradOperations, optimizers, GradientUtils, and BCEWithLogitsLoss replaced with `ArrayPool<T>.Shared.Rent/Return`; dead null branches stripped from SGD, Adam, AdamW.
 - Add batch `TensorPrimitives` kernel for `RowNorms` (not yet implemented — currently uses per-row `ArrayPool` loop).
 
+Recent session: API consolidation (Nivara AutoDiff hull)
+- Deleted `src/Nivara/AutoDiff/Nn/Functional/` — loss classes (MSELoss, BCEWithLogitsLoss, etc.),
+  Softmax/LogSoftmax wrappers, and initializer classes (KaimingUniformInitializer, etc.) all removed.
+- Created `src/Nivara/AutoDiff/LossFunctions.cs` — static `LossFunctions.MSE`, `.L1`, `.BCE`,
+  `.BCEWithLogits`, `.CrossEntropy` (returns `ReverseGradTensor<float>` or generic overload).
+- Softmax/LogSoftmax moved into `GradOperations.Softmax` / `GradOperations.LogSoftmax`.
+- Created `src/Nivara/AutoDiff/Initializers.cs` — static `Initializers.KaimingUniform`,
+  `.KaimingNormal`, `.XavierUniform`, `.XavierNormal`, `.Normal`, `.Uniform`, `.PyTorchDefault`.
+- Added operator overloads (`+`, `-`, `*`, `/`) on `ReverseGradTensor<T>` — old `GradOperations.Add`
+  etc. still work.
+- Fixed `EXAMPLES.md` to use new API (removed `using Nivara.AutoDiff.Nn.Functional`, switched
+  loss creation to `LossFunctions.MSE`/`LossFunctions.BCEWithLogits`).
+- All 1238 existing tests pass unchanged; no functional breakage.
+
+Doc update: ARCHITECTURE.md was already clean; AUTODIFF.md and EXAMPLES.md updated:
+  - `AUTODIFF.md` — 9 locations fixed: architecture diagram, init table, loss functions
+    table/section, 3 code examples, implementation map; removed `using Nn.Functional`.
+  - `EXAMPLES.md` — 5 locations fixed: removed `using Nn.Functional`, switched
+    `new MSELoss/BCEWithLogitsLoss` to `LossFunctions.MSE/BCEWithLogits`.
+  - All 1539 tests pass after doc changes.
+
 Common gotchas (use these as lint-like checks in generated code)
 - AutoDiff null branches have been stripped from all optimizers (SGD, Adam, AdamW). Do not regenerate them — AutoDiff is a no-null zone.
 - ArrayPool buffers must never be passed directly to `NivaraColumn<T>.Create(T[])` — always use the `Create(ReadOnlySpan<T>)` overload (or `.AsSpan(0, n)`) so the data is copied and the buffer is safe to return.

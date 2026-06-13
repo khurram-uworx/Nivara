@@ -1,5 +1,4 @@
 using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
@@ -17,8 +16,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var mse = new MSELoss<float>();
-        var loss = mse.Forward(predictions, targets);
+        var loss = LossFunctions.MSE(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
         Assert.That(loss[0], Is.EqualTo(3f));
@@ -32,8 +30,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var mse = new MSELoss<float>();
-        var loss = mse.Forward(predictions, targets);
+        var loss = LossFunctions.MSE(predictions, targets);
         loss.Backward();
 
         Assert.That(predictions.Grad, Is.Not.Null);
@@ -51,8 +48,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var l1 = new L1Loss<float>();
-        var loss = l1.Forward(predictions, targets);
+        var loss = LossFunctions.L1(predictions, targets);
 
         Assert.That(loss[0], Is.EqualTo(3f));
     }
@@ -65,8 +61,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: false);
 
-        var bce = new BCELoss<float>(eps: 1e-7);
-        var loss = bce.Forward(predictions, targets);
+        var loss = LossFunctions.BCE(predictions, targets, eps: 1e-7);
 
         Assert.That(loss.Length, Is.EqualTo(1));
         Assert.That(loss[0], Is.GreaterThan(0f));
@@ -81,8 +76,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: false);
 
-        var bceLogits = new BCEWithLogitsLoss<float>();
-        var loss = bceLogits.Forward(logits, targets);
+        var loss = LossFunctions.BCEWithLogits(logits, targets);
 
         // loss = maxX - x*z + log(1+exp(-|x|))
         // for x=0, z=1: 0 - 0 + log(2) = 0.693
@@ -98,8 +92,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: false);
 
-        var bceLogits = new BCEWithLogitsLoss<float>();
-        var loss = bceLogits.Forward(logits, targets);
+        var loss = LossFunctions.BCEWithLogits(logits, targets);
         loss.Backward();
 
         Assert.That(logits.Grad, Is.Not.Null);
@@ -147,8 +140,7 @@ public class LossTests
             NivaraColumn<float>.Create(new float[] { 0.5f, 1f }), requiresGrad: true);
         var targets = GradientUtils.Constant(new float[] { 1f, 1f });
 
-        var mse = new MSELoss<float>();
-        var loss = mse.Forward(weight, targets);
+        var loss = LossFunctions.MSE(weight, targets);
         loss.Backward();
 
         Assert.That(weight.Grad, Is.Not.Null);
@@ -163,8 +155,7 @@ public class LossTests
         var target = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: false);
 
-        var l1 = new L1Loss<float>();
-        var loss = l1.Forward(pred, target);
+        var loss = LossFunctions.L1(pred, target);
         loss.Backward();
 
         Assert.That(pred.Grad, Is.Not.Null);
@@ -177,8 +168,7 @@ public class LossTests
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var softmax = new Softmax<float>();
-        var output = softmax.Forward(input);
+        var output = GradOperations.Softmax(input);
 
         Assert.That(output.Length, Is.EqualTo(3));
         var sum = 0f;
@@ -196,8 +186,7 @@ public class LossTests
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var logSoftmax = new LogSoftmax<float>();
-        var output = logSoftmax.Forward(input);
+        var output = GradOperations.LogSoftmax(input);
 
         Assert.That(output.Length, Is.EqualTo(3));
         for (int i = 0; i < output.Length; i++)
@@ -217,8 +206,7 @@ public class LossTests
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f }), requiresGrad: false);
         targets.Reshape(2, 2);
 
-        var mse = new MSELoss<float>();
-        var loss = mse.Forward(predictions, targets);
+        var loss = LossFunctions.MSE(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
         Assert.That(loss[0], Is.EqualTo(4f));

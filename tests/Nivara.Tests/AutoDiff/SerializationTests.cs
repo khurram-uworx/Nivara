@@ -1,5 +1,5 @@
+using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
@@ -71,7 +71,7 @@ public class SerializationTests
             ("label", (IColumn)NivaraColumn<float>.Create([10f, 20f, 30f, 40f])));
 
         using var model = new Linear<float>(2, 1);
-        var lossFn = new MSELoss<float>().Forward;
+        Func<ReverseGradTensor<float>, ReverseGradTensor<float>, ReverseGradTensor<float>> lossFn = LossFunctions.MSE;
         var optimizer = new SGD<float>(0.01f);
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
 

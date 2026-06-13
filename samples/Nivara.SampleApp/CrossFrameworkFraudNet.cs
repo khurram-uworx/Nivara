@@ -3,7 +3,6 @@ using System.Text.Json;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
@@ -135,7 +134,7 @@ public static class CrossFrameworkFraudNet
 
         var loop = new TrainingLoop<float>(
             model, loader,
-            (pred, target) => new BCEWithLogitsLoss<float>().Forward(pred, target),
+            (pred, target) => LossFunctions.BCEWithLogits(pred, target),
             optimizer,
             epochs: 50);
 

@@ -408,7 +408,7 @@ See the full sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/N
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Training;
 
 class LinearModel : Module<float>
@@ -442,7 +442,7 @@ optimizer.AddParameterGroup(model.GetParameters().Values, learningRate: 0.01f);
 
 var loop = new TrainingLoop<float>(
     model, loader,
-    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    LossFunctions.MSE,
     optimizer,
     epochs: 5);
 
@@ -470,7 +470,7 @@ result.PrintSummary();
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Training;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Optimizer;
@@ -524,7 +524,7 @@ optimizer.AddParameterGroup(model.GetParameters().Values, learningRate: 0.001f);
 
 var trainer = new DataParallelTrainer<float>(
     model, loader,
-    (pred, target) => new BCEWithLogitsLoss<float>().Forward(pred, target),
+    LossFunctions.BCEWithLogits,
     optimizer,
     epochs: 10);
 
@@ -557,7 +557,7 @@ Console.WriteLine($"Fraud probability: {prob:P2}");
 | Model declaration | `FraudNet : Module<float>` with 3 `Linear` layers |
 | Data packaging | `TensorDataset` → `DataLoader` with shuffle |
 | Multi-core training | `DataParallelTrainer` splits rows across cores via `Parallel.For` |
-| Loss function | `BCEWithLogitsLoss` — numerically stable binary classification |
+| Loss function | `LossFunctions.BCEWithLogits` — numerically stable binary classification |
 | Optimizer | `Adam` with bias-corrected adaptive learning rates |
 | Model persistence | `ModelSerializer.Save` / `ModelSerializer.Load` (JSON + base64 binary) |
 | Inference | `Eval()` mode, no gradient tracking |

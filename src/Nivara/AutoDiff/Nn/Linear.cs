@@ -1,4 +1,3 @@
-using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
@@ -19,8 +18,8 @@ public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
     public ReverseGradTensor<T>? Bias => bias?.Tensor;
 
     public Linear(int inFeatures, int outFeatures, bool bias = true,
-        IInitializer<T>? weightInitializer = null,
-        IInitializer<T>? biasInitializer = null)
+        Action<Parameter<T>>? weightInitializer = null,
+        Action<Parameter<T>>? biasInitializer = null)
     {
         if (inFeatures <= 0) throw new ArgumentOutOfRangeException(nameof(inFeatures));
         if (outFeatures <= 0) throw new ArgumentOutOfRangeException(nameof(outFeatures));
@@ -42,10 +41,10 @@ public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
             RegisterParameters(this.bias);
         }
 
-        (weightInitializer ?? KaimingUniformInitializer<T>.Instance).Initialize(weight);
+        (weightInitializer ?? Initializers.KaimingUniform)(weight);
 
         if (bias && biasInitializer != null)
-            biasInitializer.Initialize(this.bias!);
+            biasInitializer(this.bias!);
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
