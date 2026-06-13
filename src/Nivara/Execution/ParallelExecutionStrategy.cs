@@ -18,6 +18,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             Query.OperationType.Join => true,
             Query.OperationType.Slice => true,
             Query.OperationType.SelectRows => true,
+            Query.OperationType.Distinct => false,
             _ when operationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => true,
             _ => false
         };
@@ -638,6 +639,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
                     Query.OperationType.Select => 150,
                     Query.OperationType.Slice => 200,
                     Query.OperationType.SelectRows => 300,
+                    Query.OperationType.Distinct => 500,
                     Query.OperationType.Sort => 800,
                     Query.OperationType.GroupBy => 1000,
                     Query.OperationType.Join => 1500,

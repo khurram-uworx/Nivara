@@ -207,6 +207,43 @@ public sealed class QueryFrame : IDisposable
     }
 
     /// <summary>
+    /// Adds a distinct operation that removes duplicate rows from the result.
+    /// </summary>
+    /// <returns>A new QueryFrame with the distinct operation added</returns>
+    public QueryFrame Distinct()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var distinctOp = new DistinctOperation();
+        var newOperations = operations.Concat(new[] { distinctOp });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
+    /// Adds a distinct operation that removes rows duplicate in the specified columns.
+    /// </summary>
+    /// <param name="columnNames">The column names to use for deduplication</param>
+    /// <returns>A new QueryFrame with the distinct operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when columnNames is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no column names are specified</exception>
+    public QueryFrame Distinct(params string[] columnNames)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (columnNames == null)
+            throw new ArgumentNullException(nameof(columnNames));
+
+        if (columnNames.Length == 0)
+            throw new ArgumentException("Must specify at least one column name", nameof(columnNames));
+
+        var distinctOp = new DistinctOperation(columnNames);
+        var newOperations = operations.Concat(new[] { distinctOp });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
     /// Adds a sort operation to the query pipeline for single column sorting
     /// </summary>
     /// <param name="columnName">The name of the column to sort by</param>

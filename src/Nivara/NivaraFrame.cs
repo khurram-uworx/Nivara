@@ -328,6 +328,24 @@ public sealed class NivaraFrame : IFrame
         return new NivaraFrame(namedColumns);
     }
 
+    /// <summary>
+    /// Creates a new NivaraFrame with a single typed column, eliminating the need for (IColumn) cast.
+    /// </summary>
+    /// <typeparam name="T">The column element type</typeparam>
+    /// <param name="name">The column name</param>
+    /// <param name="column">The typed column</param>
+    /// <returns>A new NivaraFrame with the specified column</returns>
+    /// <exception cref="ArgumentNullException">Thrown when name or column is null</exception>
+    public static NivaraFrame Create<T>(string name, NivaraColumn<T> column)
+    {
+        if (name == null)
+            throw new ArgumentNullException(nameof(name));
+        if (column == null)
+            throw new ArgumentNullException(nameof(column));
+
+        return Create((name, (IColumn)column));
+    }
+
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly Schema schema;
     bool disposed;

@@ -29,8 +29,8 @@ public class TrainingTests
         }
 
         return NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create(f1)),
-            ("label", (IColumn)NivaraColumn<float>.Create(label)));
+            ("f1", NivaraColumn<float>.Create(f1)),
+            ("label", NivaraColumn<float>.Create(label)));
     }
 
     static List<float> FlattenBatches(DataLoader<float> loader)

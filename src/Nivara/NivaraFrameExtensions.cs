@@ -10,6 +10,17 @@ namespace Nivara;
 public static class NivaraFrameExtensions
 {
     /// <summary>
+    /// Converts a typed column to a single-column NivaraFrame.
+    /// </summary>
+    /// <typeparam name="T">The column element type</typeparam>
+    /// <param name="column">The typed column</param>
+    /// <param name="name">The column name</param>
+    /// <returns>A new NivaraFrame containing only this column</returns>
+    /// <exception cref="ArgumentNullException">Thrown when column or name is null</exception>
+    public static NivaraFrame ToFrame<T>(this NivaraColumn<T> column, string name)
+        => NivaraFrame.Create(name, column);
+
+    /// <summary>
     /// Creates a new frame with a transformed column
     /// </summary>
     /// <typeparam name="T">The type of the source column</typeparam>

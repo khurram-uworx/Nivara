@@ -683,4 +683,50 @@ public class NivaraFrameTests
     }
 
     #endregion
+
+    // ── Create<T> overloads (Task 3) ──
+
+    [Test]
+    public void Create_GenericTypedColumn_CreatesSingleColumnFrame()
+    {
+        var col = NivaraColumn<float>.Create([1f, 2f, 3f]);
+        var frame = NivaraFrame.Create("x", col);
+
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.ColumnCount, Is.EqualTo(1));
+        Assert.That(frame.GetColumn<float>("x")[0], Is.EqualTo(1f));
+        Assert.That(frame.GetColumn<float>("x")[2], Is.EqualTo(3f));
+    }
+
+    [Test]
+    public void Create_GenericTypedColumn_NullName_ThrowsArgumentNullException()
+    {
+        var col = NivaraColumn<int>.Create([1, 2]);
+        Assert.Throws<ArgumentNullException>(() => NivaraFrame.Create<int>(null!, col));
+    }
+
+    [Test]
+    public void ToFrame_Extension_CreatesFrameWithCorrectColumn()
+    {
+        var col = NivaraColumn<double>.Create([10.5, 20.5]);
+        var frame = col.ToFrame("y");
+
+        Assert.That(frame.RowCount, Is.EqualTo(2));
+        Assert.That(frame.ColumnCount, Is.EqualTo(1));
+        Assert.That(frame.GetColumn<double>("y")[0], Is.EqualTo(10.5));
+    }
+
+    [Test]
+    public void Create_Generic_WorksWithDifferentTypes()
+    {
+        var intCol = NivaraColumn<int>.Create([1, 2, 3]);
+        var strCol = NivaraColumn<string>.CreateForReferenceType(["a", "b", "c"]);
+
+        var frame = NivaraFrame.Create("int", intCol).WithColumn("str", strCol);
+
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.ColumnCount, Is.EqualTo(2));
+        Assert.That(frame.GetColumn<int>("int")[0], Is.EqualTo(1));
+        Assert.That(frame.GetColumn<string>("str")[1], Is.EqualTo("b"));
+    }
 }

@@ -226,4 +226,104 @@ public class QueryFrameTests
         Assert.That(parallelResult.GetColumn<int>("X")[0], Is.EqualTo(serialResult.GetColumn<int>("X")[0]));
         Assert.That(parallelResult.GetColumn<int>("X")[1], Is.EqualTo(serialResult.GetColumn<int>("X")[1]));
     }
+
+    // ── Distinct (Task 4) ──
+
+    [Test]
+    public void Distinct_RemovesDuplicateRows()
+    {
+        var col = NivaraColumn<int>.Create([1, 2, 2, 3, 3, 3, 4]);
+        using var frame = NivaraFrame.Create("x", col);
+        using var result = frame.AsQueryFrame().Distinct().Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(4));
+        Assert.That(result.GetColumn<int>("x")[0], Is.EqualTo(1));
+        Assert.That(result.GetColumn<int>("x")[1], Is.EqualTo(2));
+        Assert.That(result.GetColumn<int>("x")[2], Is.EqualTo(3));
+        Assert.That(result.GetColumn<int>("x")[3], Is.EqualTo(4));
+    }
+
+    [Test]
+    public void Distinct_PreservesFirstOccurrence()
+    {
+        var col = NivaraColumn<int>.Create([3, 1, 2, 1, 3]);
+        using var frame = NivaraFrame.Create("x", col);
+        using var result = frame.AsQueryFrame().Distinct().Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(3));
+        Assert.That(result.GetColumn<int>("x")[0], Is.EqualTo(3));
+        Assert.That(result.GetColumn<int>("x")[1], Is.EqualTo(1));
+        Assert.That(result.GetColumn<int>("x")[2], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Distinct_WithNullValues_DeduplicatesNullRows()
+    {
+        var col = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 2, null, 3 });
+        using var frame = NivaraFrame.Create("x", col);
+        using var result = frame.AsQueryFrame().Distinct().Collect();
+
+        // Distinct: 1, null, 2, 3 (only one null kept)
+        Assert.That(result.RowCount, Is.EqualTo(4));
+        Assert.That(result.GetColumn<int>("x")[0], Is.EqualTo(1));
+        Assert.That(result.GetColumn<int>("x").IsNull(1), Is.True);
+        Assert.That(result.GetColumn<int>("x")[2], Is.EqualTo(2));
+        Assert.That(result.GetColumn<int>("x")[3], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Distinct_ByColumnNames_DeduplicatesBySubset()
+    {
+        var x = NivaraColumn<int>.Create([1, 1, 2, 2]);
+        var y = NivaraColumn<string>.CreateForReferenceType(["a", "b", "a", "b"]);
+        using var frame = NivaraFrame.Create("x", x).WithColumn("y", y);
+
+        // Distinct by "y" only: keeps first row for each unique y value
+        using var result = frame.AsQueryFrame().Distinct("y").Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(2));
+        Assert.That(result.GetColumn<int>("x")[0], Is.EqualTo(1));
+        Assert.That(result.GetColumn<int>("x")[1], Is.EqualTo(1));
+        Assert.That(result.GetColumn<string>("y")[0], Is.EqualTo("a"));
+        Assert.That(result.GetColumn<string>("y")[1], Is.EqualTo("b"));
+    }
+
+    [Test]
+    public void Distinct_NoDuplicates_ReturnsSameRows()
+    {
+        var col = NivaraColumn<int>.Create([1, 2, 3, 4, 5]);
+        using var frame = NivaraFrame.Create("x", col);
+        using var result = frame.AsQueryFrame().Distinct().Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void Distinct_ChainedWithFilter_WorksCorrectly()
+    {
+        var x = NivaraColumn<int>.Create([1, 1, 2, 3, 3, 4, 5]);
+        var y = NivaraColumn<int>.Create([10, 10, 20, 30, 30, 40, 50]);
+        using var frame = NivaraFrame.Create("x", x).WithColumn("y", y);
+
+        using var result = frame.AsQueryFrame()
+            .Distinct("x")
+            .Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(5));
+    }
+
+    [Test]
+    public void Distinct_Parallel_RoundTripsIdentical()
+    {
+        var x = NivaraColumn<int>.Create([1, 1, 2, 2, 3, 3, 4]);
+        using var frame = NivaraFrame.Create("x", x);
+        var queryFrame = frame.AsQueryFrame().Distinct();
+
+        var engine = new ExecutionEngine();
+        using var serialResult = engine.Execute(queryFrame.ToQueryPlan(), new NivaraExecutionContext(ExecutionStrategy.Eager));
+        using var parallelResult = engine.Execute(queryFrame.ToQueryPlan(), new NivaraExecutionContext(ExecutionStrategy.Parallel));
+
+        Assert.That(parallelResult.RowCount, Is.EqualTo(serialResult.RowCount));
+        Assert.That(parallelResult.GetColumn<int>("x")[0], Is.EqualTo(serialResult.GetColumn<int>("x")[0]));
+    }
 }
