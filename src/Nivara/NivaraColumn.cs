@@ -1,4 +1,5 @@
 using Nivara.Diagnostics;
+using Nivara.Extensions;
 using Nivara.Helpers;
 using Nivara.Storage;
 using System.Buffers;
@@ -507,51 +508,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
-    /// Helper method to check if a type is numeric and supports arithmetic operations
-    /// </summary>
-    static bool isNumericType(Type type)
-    {
-        return type == typeof(int) ||
-               type == typeof(float) ||
-               type == typeof(double) ||
-               type == typeof(long) ||
-               type == typeof(short) ||
-               type == typeof(byte) ||
-               type == typeof(sbyte) ||
-               type == typeof(uint) ||
-               type == typeof(ulong) ||
-               type == typeof(ushort) ||
-               type == typeof(decimal) ||
-               type == typeof(bool);
-    }
-
-    /// <summary>
-    /// Helper method to check if a type supports comparison operations
-    /// </summary>
-    static bool isComparableType(Type type)
-    {
-        // All numeric types support comparison
-        if (isNumericType(type))
-            return true;
-
-        // String supports comparison
-        if (type == typeof(string))
-            return true;
-
-        // DateTime and other common comparable types
-        if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan))
-            return true;
-
-        // Guid supports comparison
-        if (type == typeof(Guid))
-            return true;
-
-        // Check if type implements IComparable<T> or IComparable
-        return typeof(IComparable<>).MakeGenericType(type).IsAssignableFrom(type) ||
-               typeof(IComparable).IsAssignableFrom(type);
-    }
-
-    /// <summary>
     /// Validates that the type supports the specified operation
     /// </summary>
     /// <param name="operationType">The type of operation being validated</param>
@@ -561,13 +517,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
         switch (operationType.ToLowerInvariant())
         {
             case "arithmetic":
-                if (!isNumericType(typeof(T)))
+                if (!typeof(T).IsNumericType())
                     throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
                 if (!ColumnStorageFactory.IsVectorizable<T>())
                     throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
                 break;
             case "comparison":
-                if (!isComparableType(typeof(T)))
+                if (!typeof(T).IsComparableType())
                     throw new InvalidOperationException($"Comparison operations are not supported for type {typeof(T).Name}. Only comparable types support comparison operations.");
                 break;
             default:

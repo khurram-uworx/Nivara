@@ -97,11 +97,14 @@ Key rules for AI Agents to follow when generating tensor-aware code
    - When converting spans/arrays to typed `Nivara.Storage.TensorStorage<T>`, convert to arrays first and then call the `TensorStorage<T>` constructor. Avoid `MemoryMarshal.Cast` unless `T` is unmanaged.
    - Keep explicit type-switch branches for each supported primitive (int, float, double, long, short, byte, bool, etc.).
 
-8. Testing & diagnostics
-   - Add unit tests covering null-mask propagation across arithmetic and comparisons.
-   - Validate tensor conversions keep correct shape (`tensor.Lengths` is `nint[]`) and use casts `(int)tensor.Lengths[0]` in tests.
-   - Record `Nivara.Diagnostics.OperationDiagnostics` for kernel selection and include in performance tests.
-   - Use `ColumnDiagnostics`, `DiagnosticsTracker`, and `QueryDiagnostics` when changing kernel selection, query execution, or optimization behavior.
+8. Consolidating duplicate logic
+    - When the same helper logic (e.g., type checks, validation, utility methods) is duplicated across multiple files, promote one authoritative implementation as an extension method on the most natural receiver type, then remove all copies and update call sites. Keep thin wrappers only if they serve a distinct API contract (e.g., `protected` visibility for subclass use). Place the extension in the same assembly to avoid cross-project visibility concerns.
+
+9. Testing & diagnostics
+    - Add unit tests covering null-mask propagation across arithmetic and comparisons.
+    - Validate tensor conversions keep correct shape (`tensor.Lengths` is `nint[]`) and use casts `(int)tensor.Lengths[0]` in tests.
+    - Record `Nivara.Diagnostics.OperationDiagnostics` for kernel selection and include in performance tests.
+    - Use `ColumnDiagnostics`, `DiagnosticsTracker`, and `QueryDiagnostics` when changing kernel selection, query execution, or optimization behavior.
 
 Suggested small, safe improvements to implement (prioritized)
 - ✓ Cache flattened buffer in `Nivara.Storage.TensorStorage` (internal, lazy) — DONE via `GetFlattenedSpan()` in Phase 0.

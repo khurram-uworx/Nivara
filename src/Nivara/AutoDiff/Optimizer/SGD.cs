@@ -1,5 +1,4 @@
 using Nivara.Helpers;
-using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
