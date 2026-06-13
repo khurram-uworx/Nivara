@@ -174,9 +174,8 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
     readonly List<T[]> velocityBuffers = [];
 
     public SGD(T learningRate, double momentum = 0.0)
+        : base(learningRate)
     {
-        if (T.IsNegative(learningRate) || learningRate == T.Zero)
-            throw new ArgumentException("Learning rate must be positive", nameof(learningRate));
         if (momentum < 0.0 || momentum >= 1.0)
             throw new ArgumentOutOfRangeException(nameof(momentum), "Momentum must be in [0, 1).");
 

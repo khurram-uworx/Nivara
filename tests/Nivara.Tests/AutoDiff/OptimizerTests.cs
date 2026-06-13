@@ -1,3 +1,4 @@
+using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
@@ -9,12 +10,28 @@ namespace Nivara.Tests.AutoDiff;
 public class OptimizerTests
 {
     [Test]
+    public void Optimizer_DoesNotExposeTensorDictionaryParameterGroupOverload()
+    {
+        var hasUnsafeOverload = typeof(Optimizer<float>)
+            .GetMethods()
+            .Where(m => m.Name == nameof(Optimizer<float>.AddParameterGroup))
+            .Any(m =>
+            {
+                var parameters = m.GetParameters();
+                return parameters.Length > 0 &&
+                    parameters[0].ParameterType == typeof(Dictionary<string, ReverseGradTensor<float>>);
+            });
+
+        Assert.That(hasUnsafeOverload, Is.False);
+    }
+
+    [Test]
     public void Sgd_Step_UpdatesParameterValues()
     {
         var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
 
         var sgd = new SGD<float>(0.1f);
-        sgd.AddParameterGroup(param, 0.1f);
+        sgd.AddParameterGroup(param);
 
         var loss = GradOperations.Sum(param.Tensor);
         loss.Backward();
@@ -33,7 +50,7 @@ public class OptimizerTests
         var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
 
         var sgd = new SGD<float>(0.1f, momentum: 0.9);
-        sgd.AddParameterGroup(param, 0.1f);
+        sgd.AddParameterGroup(param);
 
         var loss = GradOperations.Sum(param.Tensor);
         loss.Backward();
@@ -53,7 +70,7 @@ public class OptimizerTests
         var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
 
         var adam = new Adam<float>(beta1: 0.9, beta2: 0.999, eps: 1e-8);
-        adam.AddParameterGroup(param, 0.001f);
+        adam.AddParameterGroup(param);
 
         var loss = GradOperations.Sum(param.Tensor);
         loss.Backward();
@@ -77,7 +94,7 @@ public class OptimizerTests
         var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
 
         var adamw = new AdamW<float>(beta1: 0.9, beta2: 0.999, eps: 1e-8);
-        adamw.AddParameterGroup(param, 0.001f);
+        adamw.AddParameterGroup(param);
 
         var loss = GradOperations.Sum(param.Tensor);
         loss.Backward();
@@ -123,7 +140,7 @@ public class OptimizerTests
         var param = new Parameter<float>("w", new float[] { 1f, 2f }, requiresGrad: true);
 
         var sgd = new SGD<float>(0.1f);
-        sgd.AddParameterGroup(param, 0.1f);
+        sgd.AddParameterGroup(param);
 
         var loss = GradOperations.Sum(param.Tensor);
         loss.Backward();
@@ -141,7 +158,7 @@ public class OptimizerTests
         var param = new Parameter<float>("w", new float[] { 10f, 20f }, requiresGrad: true);
 
         var sgd = new SGD<float>(0.01f);
-        sgd.AddParameterGroup(param, 0.01f);
+        sgd.AddParameterGroup(param);
 
         // Step 1
         var loss1 = GradOperations.Sum(param.Tensor);
@@ -197,5 +214,94 @@ public class OptimizerTests
         Assert.That(paramA.Tensor[0], Is.EqualTo(0.9f).Within(1e-6f));
         // paramB: 1.0 - 0.5 = 0.5
         Assert.That(paramB.Tensor[0], Is.EqualTo(0.5f).Within(1e-6f));
+    }
+
+    [Test]
+    public void AddParameterGroup_WithoutLearningRate_UsesOptimizerDefault()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.2f);
+
+        sgd.AddParameterGroup(param);
+        GradOperations.Sum(param.Tensor).Backward();
+        sgd.Step();
+
+        Assert.That(param.Tensor[0], Is.EqualTo(0.8f).Within(1e-6f));
+    }
+
+    [Test]
+    public void AddParameterGroup_WithLearningRate_OverridesOptimizerDefault()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.2f);
+
+        sgd.AddParameterGroup(param, 0.05f);
+        GradOperations.Sum(param.Tensor).Backward();
+        sgd.Step();
+
+        Assert.That(param.Tensor[0], Is.EqualTo(0.95f).Within(1e-6f));
+    }
+
+    [Test]
+    public void Adam_DefaultConstructor_UsesCommonDefaultLearningRate()
+    {
+        var adam = new Adam<float>();
+
+        Assert.That(adam.LearningRate, Is.EqualTo(0.001f).Within(1e-8f));
+    }
+
+    [Test]
+    public void AdamW_DefaultConstructor_UsesCommonDefaultLearningRate()
+    {
+        var adamw = new AdamW<float>();
+
+        Assert.That(adamw.LearningRate, Is.EqualTo(0.001f).Within(1e-8f));
+    }
+
+    [Test]
+    public void Adam_ConstructorLearningRate_IsUsedByDefaultParameterGroup()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f }, requiresGrad: true);
+        var adam = new Adam<float>(0.01f);
+
+        adam.AddParameterGroup(param);
+        GradOperations.Sum(param.Tensor).Backward();
+        adam.Step();
+
+        Assert.That(param.Tensor[0], Is.LessThan(1f));
+    }
+
+    [Test]
+    public void AdamW_ConstructorLearningRate_IsUsedByDefaultParameterGroup()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f }, requiresGrad: true);
+        var adamw = new AdamW<float>(0.01f);
+
+        adamw.AddParameterGroup(param);
+        GradOperations.Sum(param.Tensor).Backward();
+        adamw.Step();
+
+        Assert.That(param.Tensor[0], Is.LessThan(1f));
+    }
+
+    [Test]
+    public void Optimizer_Constructors_RejectNonPositiveLearningRates()
+    {
+        Assert.Throws<ArgumentException>(() => new SGD<float>(0f));
+        Assert.Throws<ArgumentException>(() => new Adam<float>(0f));
+        Assert.Throws<ArgumentException>(() => new AdamW<float>(0f));
+        Assert.Throws<ArgumentException>(() => new SGD<float>(-0.01f));
+        Assert.Throws<ArgumentException>(() => new Adam<float>(-0.01f));
+        Assert.Throws<ArgumentException>(() => new AdamW<float>(-0.01f));
+    }
+
+    [Test]
+    public void AddParameterGroup_RejectsNonPositiveLearningRates()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.1f);
+
+        Assert.Throws<ArgumentException>(() => sgd.AddParameterGroup(param, 0f));
+        Assert.Throws<ArgumentException>(() => sgd.AddParameterGroup(param, -0.1f));
     }
 }

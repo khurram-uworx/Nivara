@@ -99,7 +99,7 @@ NivaraAutoGradExtensions              ← NivaraColumn/NivaraSeries/NivaraFrame 
 - **Computation graph is built implicitly** — every `GradOperations` call checks if any input `requiresGrad` and attaches an `OpNode` to the result.
 - **Gradient accumulation** — `AccumulateGradient()` either sets or adds to `Grad` (supports fan-in from multiple paths).
 - **Explicit null-mask propagation** — Nivara's nullable semantics flow through gradients. Nulls propagate via mask OR; null positions in gradients are skipped during accumulation.
-- **IDisposable** — `GradTensor<T>`, `Module<T>`, `Optimizer<T>`, and `TrainingLoop<T>` all implement `IDisposable`.
+- **IDisposable** — `GradTensor<T>`, `Parameter<T>`, `Module<T>`, `Optimizer<T>`, and `TrainingLoop<T>` all implement `IDisposable`.
 
 ---
 
@@ -265,7 +265,7 @@ All operations follow a two-path approach:
 1. **No-null fast path**: Extract `ReadOnlySpan<T>` via `TryGetSpan()`, call `TensorPrimitives` kernel, return `NivaraColumn<T>.Create(result)`.
 2. **Null-aware fallback**: Rent buffers from `ArrayPool<T>.Shared`, call `CopyTo()` to fill buffers with `T.Zero` for null positions, run `TensorPrimitives` kernel, merge null masks via OR, return `NivaraColumn<T>.CreateFromSpans(result, nullMask)`.
 
-Operations that lack `TensorPrimitives` support (e.g., Sigmoid, Tanh, Exp, Log) use manual loops in both paths. MatMul uses `MatMulHelper.Multiply` with `TensorPrimitives.Dot` + `Parallel.For`.
+Operations that lack `TensorPrimitives` support (e.g., Sigmoid, Tanh, Exp, Log) use manual loops in both paths. MatMul uses `MatMulHelper.Multiply` with `TensorPrimitives.Dot` + `Parallel.For`; its null-aware result mask is propagated with row/column null summaries.
 
 ---
 
@@ -288,10 +288,10 @@ The `MergeNullMasks(a, b, destination)` helper performs the OR operation, handli
 ### Parameter\<T\>
 
 ```csharp
-public sealed class Parameter<T> where T : struct, INumber<T>
+public sealed class Parameter<T> : IDisposable where T : struct, INumber<T>
 ```
 
-Wraps a `ReverseGradTensor<T>` with a name. Constructors accept array, size, or an existing tensor. `requiresGrad` defaults to `true`.
+Wraps a `ReverseGradTensor<T>` with a name. Constructors accept array, size, or an existing tensor. `requiresGrad` defaults to `true`. Disposing a parameter disposes its current tensor; module-registered parameters are disposed by their owning module.
 
 ### Module\<T\>
 
@@ -338,7 +338,7 @@ Wraps a single activation function as a module: `Relu`, `Sigmoid`, `Tanh`, `Leak
 
 ### Dropout\<T\>
 
-Inverted dropout — scales by `1/(1-p)` during training, identity during eval.
+Inverted dropout — scales by `1/(1-p)` during training, identity during eval. Training-mode dropout is differentiable: the sampled keep mask is reused during backward so gradients before dropout receive `gradOutput * keepMask * scale`.
 
 ### Initializers
 
@@ -406,16 +406,18 @@ public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
 **Parameter groups** — optimizers can manage multiple groups with different learning rates and weight decays:
 
 ```csharp
+optimizer.AddParameterGroup(parameter);                      // uses optimizer.LearningRate
+optimizer.AddParameterGroup(model.GetParameters().Values);   // uses optimizer.LearningRate
 optimizer.AddParameterGroup(parameter, learningRate, weightDecay);
-optimizer.AddParameterGroup(model.Parameters(), lr, weightDecay);
-optimizer.AddParameterGroup(tensorDictionary, lr, weightDecay);
+optimizer.AddParameterGroup(model.GetParameters().Values, learningRate, weightDecay);
 ```
 
 | Member | Description |
 |--------|-------------|
+| `LearningRate` | Default learning rate used by parameter groups when no group override is supplied |
 | `Step()` | Abstract — applies updates to all parameters |
 | `ZeroGrad()` | Zeros gradients on all managed parameters |
-| `AddParameterGroup(...)` | Three overloads for flexibility |
+| `AddParameterGroup(...)` | Registers owning `Parameter<T>` objects; use `model.GetParameters().Values` for modules |
 | `Dispose()` | Releases rented state buffers |
 
 ### SGD\<T\>
@@ -434,9 +436,12 @@ public sealed class SGD<T> : Optimizer<T>
 
 ```csharp
 public sealed class Adam<T> : Optimizer<T>
+// new Adam<T>()                         // learningRate = 0.001
+// new Adam<T>(learningRate)
 // new Adam<T>(beta1: 0.9, beta2: 0.999, eps: 1e-8)
 ```
 
+- Default learning rate is `0.001` unless overridden by constructor or parameter group
 - Bias-corrected first/second moment estimates
 - State buffers rented from `ArrayPool<T>.Shared`
 - Null-skip: null positions zero momentum buffers (no update)
@@ -446,9 +451,12 @@ public sealed class Adam<T> : Optimizer<T>
 
 ```csharp
 public sealed class AdamW<T> : Optimizer<T>
+// new AdamW<T>()                         // learningRate = 0.001
+// new AdamW<T>(learningRate)
 // new AdamW<T>(beta1: 0.9, beta2: 0.999, eps: 1e-8)
 ```
 
+- Default learning rate is `0.001` unless overridden by constructor or parameter group
 - Identical to Adam except weight decay is applied directly to weights (not through gradients) — Loshchilov & Hutter 2019 formulation
 - Same null-skip semantics and `ArrayPool` buffer management
 
@@ -493,10 +501,13 @@ public class TrainingLoop<T> : IDisposable where T : struct, INumber<T>
 Standard epoch-per-batch training loop:
 
 ```csharp
+var optimizer = new SGD<float>(learningRate: 0.01f);
+optimizer.AddParameterGroup(model.GetParameters().Values);
+
 var loop = new TrainingLoop<float>(
     model, loader,
     (pred, target) => new MSELoss<float>().Forward(pred, target),
-    new SGD<float>(lr: 0.01f),
+    optimizer,
     epochs: 20);
 
 var result = loop.Run();
@@ -537,10 +548,13 @@ Optimizer.Step() + ZeroGrad()
 | Virtual callbacks | `OnEpochStart(epoch)`, `OnEpochEnd(epoch, result)` |
 
 ```csharp
+var optimizer = new Adam<float>(learningRate: 0.001f);
+optimizer.AddParameterGroup(model.GetParameters().Values);
+
 var trainer = new DataParallelTrainer<float>(
     model, loader,
     (pred, target) => new MSELoss<float>().Forward(pred, target),
-    new Adam<float>(model.Parameters(), lr: 0.001f),
+    optimizer,
     epochs: 10);
 
 var result = trainer.Run();
@@ -887,10 +901,14 @@ var loader = new DataLoader<float>(
     batchSize: 2, shuffle: false);
 
 // Train
+var model = new LinearModel();
+var optimizer = new SGD<float>(learningRate: 0.01f);
+optimizer.AddParameterGroup(model.GetParameters().Values);
+
 var loop = new TrainingLoop<float>(
-    new LinearModel(), loader,
+    model, loader,
     (pred, target) => new MSELoss<float>().Forward(pred, target),
-    new SGD<float>(lr: 0.01f),
+    optimizer,
     epochs: 5);
 
 var result = loop.Run();       // TrainingResult<float>

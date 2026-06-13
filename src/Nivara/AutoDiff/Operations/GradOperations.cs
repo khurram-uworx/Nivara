@@ -587,6 +587,50 @@ public static class GradOperations
         return resultTensor;
     }
 
+    public static ReverseGradTensor<T> Dropout<T>(ReverseGradTensor<T> input, double probability, bool isTraining)
+        where T : struct, INumber<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (probability < 0.0 || probability >= 1.0)
+            throw new ArgumentOutOfRangeException(nameof(probability), "Dropout probability must be in [0, 1).");
+
+        if (!isTraining || probability <= 0.0)
+            return input;
+
+        var keepMask = new bool[input.Length];
+        var random = Random.Shared;
+        for (int i = 0; i < keepMask.Length; i++)
+            keepMask[i] = random.NextDouble() >= probability;
+
+        var scale = T.CreateChecked(1.0 / (1.0 - probability));
+        return DropoutWithMask(input, keepMask, scale);
+    }
+
+    internal static ReverseGradTensor<T> DropoutWithMask<T>(ReverseGradTensor<T> input, ReadOnlySpan<bool> keepMask, T scale)
+        where T : struct, INumber<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (keepMask.Length != input.Length)
+            throw new ArgumentException($"Dropout mask length ({keepMask.Length}) must match input length ({input.Length})", nameof(keepMask));
+
+        var savedMask = keepMask.ToArray();
+        var result = ApplyDropout(input.Data, savedMask, scale);
+        var resultTensor = new ReverseGradTensor<T>(result, input.RequiresGrad, PropagateShape(input));
+
+        if (input.RequiresGrad)
+        {
+            var gradFn = new OpNode<T>("Dropout", new object[] { input }, (typedGradOutput, sgn) =>
+            {
+                var inputGrad = ApplyDropoutGradient(input.Data, typedGradOutput, savedMask, scale);
+                AccumulateGradient(input, inputGrad, sgn);
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
     #endregion
 
     #region Helper Methods
@@ -930,6 +974,77 @@ public static class GradOperations
             ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyDropout<T>(NivaraColumn<T> input, ReadOnlySpan<bool> keepMask, T scale)
+        where T : struct, INumber<T>
+    {
+        int n = input.Length;
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+
+        try
+        {
+            if (!input.HasNulls)
+            {
+                input.TryGetSpan(out var span);
+                for (int i = 0; i < n; i++)
+                    resultBuf[i] = keepMask[i] ? span[i] * scale : T.Zero;
+
+                return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
+            }
+
+            input.CopyTo(resultBuf.AsSpan(0, n), T.Zero);
+            input.TryGetNullMask(out var inputMask);
+            for (int i = 0; i < n; i++)
+            {
+                if (!inputMask[i])
+                    resultBuf[i] = keepMask[i] ? resultBuf[i] * scale : T.Zero;
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), inputMask);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyDropoutGradient<T>(
+        NivaraColumn<T> input,
+        NivaraColumn<T> gradOutput,
+        ReadOnlySpan<bool> keepMask,
+        T scale)
+        where T : struct, INumber<T>
+    {
+        int n = input.Length;
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+
+        try
+        {
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            for (int i = 0; i < n; i++)
+                resultBuf[i] = keepMask[i] ? gradBuf[i] * scale : T.Zero;
+
+            if (!input.HasNulls && !gradOutput.HasNulls)
+                return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
+
+            var nullMask = ArrayPool<bool>.Shared.Rent(n);
+            try
+            {
+                var hasNulls = MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
+                return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+            }
+            finally
+            {
+                ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            }
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
         }
     }
 

@@ -25,3 +25,6 @@ approval_mode = "approve"
 
 [mcp_servers.code-memory.tools.rescan_repository]
 approval_mode = "approve"
+
+[mcp_servers.code-memory.tools.find_related_code]
+approval_mode = "approve"
