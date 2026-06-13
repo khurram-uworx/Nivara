@@ -52,41 +52,6 @@ public class SgdOptimizerTests
     }
 
     [Test]
-    public void SgdUpdate_NullGradient_SkipsNullPositions()
-    {
-        var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
-        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
-
-        // Gradient with null at index 1
-        var gradValues = new float?[] { 0.5f, null, 0.3f };
-        var gradColumn = NivaraColumn<float>.CreateFromNullable(gradValues);
-        param.Grad = gradColumn;
-
-        var updated = SgdOptimizer.SgdUpdate(param, 0.1f);
-
-        // index 0: 1.0 - 0.1 * 0.5 = 0.95
-        Assert.That(updated[0], Is.EqualTo(0.95f).Within(1e-6f));
-        // index 1: null gradient → skip, keep 2.0
-        Assert.That(updated[1], Is.EqualTo(2.0f).Within(1e-6f));
-        // index 2: 3.0 - 0.1 * 0.3 = 2.97
-        Assert.That(updated[2], Is.EqualTo(2.97f).Within(1e-6f));
-    }
-
-    [Test]
-    public void SgdUpdate_NullParameter_PreservesNullMask()
-    {
-        var data = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
-        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
-        param.Grad = NivaraColumn<float>.Create(new float[] { 0.5f, 0.5f, 0.5f });
-
-        var updated = SgdOptimizer.SgdUpdate(param, 0.1f);
-
-        Assert.That(updated[0], Is.EqualTo(0.95f).Within(1e-6f));
-        Assert.That(updated.IsNull(1), Is.True);
-        Assert.That(updated[2], Is.EqualTo(2.95f).Within(1e-6f));
-    }
-
-    [Test]
     public void SgdUpdate_PreservesShape()
     {
         var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f, 4.0f });

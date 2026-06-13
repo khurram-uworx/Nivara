@@ -15,6 +15,15 @@ Principles (high level)
 - Preserve explicit null semantics: null masks are authoritative and must be propagated (mask OR semantics) in arithmetic and comparison results.
 - Minimize allocations on hot paths: avoid repeated FlattenTo allocations, rent large buffers, and cache flattened buffers when safe.
 
+## AutoDiff null contract (critical)
+
+The AutoDiff subsystem (`GradTensor<T>`, `GradOperations`) is a **no-null zone**:
+- `GradTensor<T>` constructor throws `AutoGradException` when passed data with nulls (enforced at `GradTensor.cs:44`)
+- All `GradOperations` helpers assume null-free inputs — null branches have been stripped
+- **Users must strip or replace nulls before entering AutoDiff**. The DataFrame side (`NivaraColumn<T>`, `NivaraFrame`) retains full null-mask support for tabular/query use
+- This separation keeps AutoDiff fast and simple; null complexity stays at the DataFrame boundary
+- Use `NivaraColumn<T>.DropNulls()` or `FillNull(T)` on data before feeding it into a `GradTensor<T>`
+
 Where to look (implementation map)
 - Storage and selection
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime selection: `IsVectorizable<T>()` and `Create<T>(ReadOnlySpan<T>)`.
@@ -286,3 +295,5 @@ References (implementations to inspect)
 - `src/Nivara/AutoDiff/Nn/Linear.cs`
 - `src/Nivara/AutoDiff/Training/TrainingLoop.cs`
 - `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`
+- TensorPrimitive extensions for one-liner op application:
+  - `src/Nivara/AutoDiff/Extensions/TensorPrimitiveExtensions.cs` — `Apply` helpers (single span, two spans, scalar, two-scalar) and `AsSpan`

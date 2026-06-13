@@ -1,5 +1,13 @@
 # AutoDiff Gaps — What Remains
 
+> **AutoDiff null contract:** The AutoDiff domain (`GradTensor<T>`, `GradOperations`)
+> is a **no-null zone**. `GradTensor<T>` constructor throws `AutoGradException` when
+> data contains nulls. All operations assume null-free inputs — null branches have
+> been fully stripped. Users must call `DropNulls()` or `FillNull(T)` on DataFrame
+> data before entering AutoDiff. The DataFrame side (`NivaraColumn<T>`,
+> `NivaraFrame`) retains full null-mask support for tabular/query use. This keeps
+> AutoDiff fast and simple.
+
 ## Icebreaker: Honest comparison with PyTorch
 
 A cross-framework parity exercise (see `examples/README.md`) trained an

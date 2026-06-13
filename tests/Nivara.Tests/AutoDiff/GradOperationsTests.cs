@@ -851,32 +851,6 @@ public class GradOperationsTests
     }
 
     [Test]
-    public void KlDivergence_NullValues_PropagatesNulls()
-    {
-        var meanValues = new float?[] { 1f, null, 3f };
-        var logVarValues = new float?[] { 0f, 1f, null };
-        var mean = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(meanValues), requiresGrad: true);
-        var logVar = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
-
-        var kl = GradOperations.KlDivergence(mean, logVar);
-        kl.Backward(stripGradientNulls: false);
-
-        // Non-null contributions: position 0 only (pos 1 has null mean, pos 2 has null logVar)
-        // kl_0 = -0.5 * (1 + 0 - 1 - 1) = 0.5
-        Assert.That(kl[0], Is.EqualTo(0.5f).Within(1e-6f));
-
-        // mean grad: null positions preserved when stripGradientNulls=false
-        Assert.That(mean.Grad, Is.Not.Null);
-        Assert.That(mean.Grad!.IsNull(1), Is.True);
-
-        // logVar grad: null positions preserved when stripGradientNulls=false
-        Assert.That(logVar.Grad, Is.Not.Null);
-        Assert.That(logVar.Grad!.IsNull(2), Is.True);
-    }
-
-    [Test]
     public void KlDivergence_DoubleType_ComputesCorrectly()
     {
         var mean = new ReverseGradTensor<double>(
@@ -1005,22 +979,6 @@ public class GradOperationsTests
 
         // Same seed should produce identical samples
         Assert.That(z1[0], Is.EqualTo(z2[0]).Within(1e-6f));
-    }
-
-    [Test]
-    public void SampleNormal_NullValues_PropagatesNulls()
-    {
-        var meanValues = new float?[] { 1f, null };
-        var logVarValues = new float?[] { 0f, 0f };
-        var mean = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(meanValues), requiresGrad: true);
-        var logVar = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
-
-        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
-
-        // Position 1 has null mean → z should be null
-        Assert.That(z.IsNull(1), Is.True);
     }
 
     [Test]

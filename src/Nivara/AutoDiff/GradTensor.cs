@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Exceptions;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -54,6 +55,10 @@ public class GradTensor<T> : IDisposable where T : struct, INumber<T>
     {
         TypeValidator.ValidateNumericType<T>();
         Data = data ?? throw new ArgumentNullException(nameof(data));
+        if (data.HasNulls)
+            throw new AutoGradException(
+                $"GradTensor does not accept null data. Discard null rows, impute values, " +
+                $"or use a masked sentinel before entering the AutoDiff domain.");
         shape = new[] { data.Length };
     }
 
@@ -64,6 +69,10 @@ public class GradTensor<T> : IDisposable where T : struct, INumber<T>
     {
         TypeValidator.ValidateNumericType<T>();
         Data = data ?? throw new ArgumentNullException(nameof(data));
+        if (data.HasNulls)
+            throw new AutoGradException(
+                $"GradTensor does not accept null data. Discard null rows, impute values, " +
+                $"or use a masked sentinel before entering the AutoDiff domain.");
         this.shape = shape ?? throw new ArgumentNullException(nameof(shape));
     }
 

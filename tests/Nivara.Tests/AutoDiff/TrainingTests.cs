@@ -126,28 +126,6 @@ public class TrainingTests
     }
 
     [Test]
-    public void TensorDataset_GetBatch_NullPropagation()
-    {
-        var frame = NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.CreateFromSpans(
-                new float[] { 1f, 0f, 3f },
-                new bool[] { false, true, false })),
-            ("label", (IColumn)NivaraColumn<float>.CreateFromSpans(
-                new float[] { 10f, 20f, 30f },
-                new bool[] { false, false, false })));
-
-        var dataset = new TensorDataset<float>(frame, ["f1"], "label");
-        var batch = dataset.GetBatch([0, 1, 2]);
-
-        Assert.That(batch.Features.HasNulls, Is.True);
-        Assert.That(batch.Features.IsNull(0), Is.False);
-        Assert.That(batch.Features.IsNull(1), Is.True);
-        Assert.That(batch.Features.IsNull(2), Is.False);
-        Assert.That(batch.Features[1], Is.EqualTo(0f));
-        Assert.That(batch.Labels.HasNulls, Is.False);
-    }
-
-    [Test]
     public void TensorDataset_ColumnNameMismatch_Throws()
     {
         var frame = CreateTestFrame(10);

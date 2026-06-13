@@ -135,7 +135,7 @@ Nivara currently supports:
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics via `ExecutionEngine.LastDiagnostics`
-- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with a full training stack — module system (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core)
+- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with a full training stack — module system (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core). AutoDiff is a **no-null zone** — strip or fill nulls before entering the gradient graph
 
 ---
 

@@ -279,29 +279,4 @@ public class BackwardPassTests
         Assert.That(input.Grad[2], Is.EqualTo(20.0f).Within(1e-6f));
     }
 
-    [Test]
-    public void DropoutWithMask_Nulls_PreserveForwardAndBackwardNullMasks()
-    {
-        var inputColumn = NivaraColumn<float>.CreateFromSpans(
-            new float[] { 2.0f, 4.0f, 6.0f },
-            new[] { false, true, false });
-        var input = new ReverseGradTensor<float>(inputColumn, requiresGrad: true);
-        var output = GradOperations.DropoutWithMask(input, new[] { true, true, false }, 2.0f);
-
-        Assert.That(output[0], Is.EqualTo(4.0f).Within(1e-6f));
-        Assert.That(output.IsNull(1), Is.True);
-        Assert.That(output[2], Is.EqualTo(0.0f).Within(1e-6f));
-
-        var gradientColumn = NivaraColumn<float>.CreateFromSpans(
-            new float[] { 1.0f, 1.0f, 1.0f },
-            new[] { false, false, true });
-        var gradient = new ReverseGradTensor<float>(gradientColumn, requiresGrad: false);
-
-        output.Backward(gradient, stripGradientNulls: false);
-
-        Assert.That(input.Grad, Is.Not.Null);
-        Assert.That(input.Grad![0], Is.EqualTo(2.0f).Within(1e-6f));
-        Assert.That(input.Grad.IsNull(1), Is.True);
-        Assert.That(input.Grad.IsNull(2), Is.True);
-    }
 }

@@ -446,40 +446,4 @@ public class NivaraIntegrationTests
         Assert.That(supportedTypes, Does.Contain(typeof(double)));
     }
 
-    [Test]
-    public void NullHandling_ColumnWithNulls_PreservesNullSemantics()
-    {
-        // Arrange
-        var nullableData = new float?[] { 1.0f, null, 3.0f, null, 5.0f };
-        var column = NivaraColumn<float>.CreateFromNullable(nullableData);
-
-        // Act
-        var gradTensor = column.ToReverseGradTensor(requiresGrad: true);
-
-        // Assert
-        Assert.That(gradTensor.HasNulls, Is.True);
-        Assert.That(gradTensor.IsNull(1), Is.True);
-        Assert.That(gradTensor.IsNull(3), Is.True);
-        Assert.That(gradTensor.IsNull(0), Is.False);
-        Assert.That(gradTensor.IsNull(2), Is.False);
-        Assert.That(gradTensor.IsNull(4), Is.False);
-    }
-
-    [Test]
-    public void NullHandling_RoundTripWithNulls_PreservesNullMask()
-    {
-        // Arrange
-        var nullableData = new double?[] { 1.0, null, 3.0 };
-        var originalColumn = NivaraColumn<double>.CreateFromNullable(nullableData);
-
-        // Act
-        var gradTensor = originalColumn.ToReverseGradTensor(requiresGrad: false);
-        var resultColumn = gradTensor.ToColumn();
-
-        // Assert
-        Assert.That(resultColumn.HasNulls, Is.True);
-        Assert.That(resultColumn.IsNull(0), Is.False);
-        Assert.That(resultColumn.IsNull(1), Is.True);
-        Assert.That(resultColumn.IsNull(2), Is.False);
-    }
 }

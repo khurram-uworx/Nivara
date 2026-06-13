@@ -206,9 +206,11 @@ var dims = (int)docVectors.Lengths[1];
 for (int i = 0; i < scores.Length; i++)
     scores[i] = TensorPrimitives.CosineSimilarity(docVectors.AsSpan().Slice(i * dims, dims), query);
 
-var ranking = documents.GetColumn<string>("DocumentId")
-    .Select((id, i) => (Label: id, Score: scores[i]))
-    .OrderByDescending(x => x.Score).Take(2);
+var ranking = documents
+    .WithColumn("Score", NivaraColumn<float>.Create(scores))
+    .OrderBy("Score", ascending: false)
+    .Take(2)
+    .SelectColumns("DocumentId", "Score");
 ```
 
 ---
@@ -339,6 +341,8 @@ Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
 ---
 
 ### Act 7a: AutoDiff — low-level gradient operations
+
+> **⚠️ AutoDiff null contract:** The AutoDiff subsystem (`GradTensor<T>`, `GradOperations`) is a **no-null zone**. `GradTensor<T>` constructor throws `AutoGradException` when data contains nulls. All gradient operations assume null-free inputs — call `DropNulls()` or `FillNull(T)` on data passing through the DataFrame boundary. This keeps AutoDiff fast and simple; null complexity stays at the DataFrame layer.
 
 > Reverse-mode AutoDiff that works directly with Nivara column data. Build a computation graph, compute gradients via `Backward()`, apply updates via `SgdOptimizer.SgdUpdate`.
 
