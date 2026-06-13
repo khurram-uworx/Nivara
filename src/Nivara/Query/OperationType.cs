@@ -9,5 +9,6 @@ public static class OperationType
     public const string Join = "Join";
     public const string Projection = "Projection";
     public const string Slice = "Slice";
+    public const string SelectRows = "SelectRows";
     public const string ConcatenationPrefix = "Concatenate";
 }

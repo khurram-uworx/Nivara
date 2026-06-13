@@ -371,6 +371,72 @@ public sealed class QueryFrame : IDisposable
     }
 
     /// <summary>
+    /// Adds a row-selection operation that extracts rows by index.
+    /// </summary>
+    /// <param name="indices">The row indices to select</param>
+    /// <returns>A new QueryFrame with the select-rows operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when indices is null</exception>
+    /// <exception cref="ArgumentException">Thrown when indices is empty</exception>
+    public QueryFrame SelectRows(params int[] indices)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var selectRowsOp = new SelectRowsOperation(indices);
+        var newOperations = operations.Concat(new[] { selectRowsOp });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
+    /// Adds a skip operation that omits the first N rows.
+    /// </summary>
+    /// <param name="count">The number of rows to skip (must be non-negative)</param>
+    /// <returns>A new QueryFrame with the skip operation added</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when count is negative</exception>
+    public QueryFrame Skip(int count)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var sliceOp = new SliceOperation(skip: count);
+        var newOperations = operations.Concat(new[] { sliceOp });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
+    /// Adds a take operation that keeps only the first N rows.
+    /// </summary>
+    /// <param name="count">The number of rows to take (must be non-negative)</param>
+    /// <returns>A new QueryFrame with the take operation added</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when count is negative</exception>
+    public QueryFrame Take(int count)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var sliceOp = new SliceOperation(skip: 0, take: count);
+        var newOperations = operations.Concat(new[] { sliceOp });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
+    /// Adds a combined skip-and-take (page) operation.
+    /// </summary>
+    /// <param name="skip">The number of rows to skip (must be non-negative)</param>
+    /// <param name="take">The number of rows to take after skipping (must be non-negative)</param>
+    /// <returns>A new QueryFrame with the slice operation added</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when skip or take are negative</exception>
+    public QueryFrame Slice(int skip, int take)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var sliceOp = new SliceOperation(skip, take);
+        var newOperations = operations.Concat(new[] { sliceOp });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
     /// Extracts the query plan for inspection or custom execution via <see cref="Execution.ExecutionEngine"/>.
     /// </summary>
     /// <returns>A QueryPlan representing this query's source and operations</returns>

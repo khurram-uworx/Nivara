@@ -7,7 +7,7 @@ namespace Nivara.Linq;
 /// <summary>
 /// Extension methods for QueryFrame to support LINQ-like syntax
 /// </summary>
-public static class QueryFrameExtensions
+public static class NivaraLinqExtensions
 {
     /// <summary>
     /// Filters the query frame using a lambda expression
