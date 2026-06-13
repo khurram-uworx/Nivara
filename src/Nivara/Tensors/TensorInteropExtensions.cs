@@ -28,21 +28,6 @@ public static class TensorInteropExtensions
     }
 
     /// <summary>
-    /// Converts a NivaraSeries to a System.Numerics.Tensors.Tensor&lt;T&gt;.
-    /// </summary>
-    /// <typeparam name="T">The unmanaged numeric type</typeparam>
-    /// <param name="series">The NivaraSeries to convert</param>
-    /// <returns>A Tensor&lt;T&gt; containing the series data</returns>
-    /// <exception cref="ArgumentNullException">Thrown when series is null</exception>
-    /// <exception cref="NotSupportedException">Thrown when T does not implement INumber&lt;T&gt;</exception>
-    public static Tensor<T> ToTensor<T>(this NivaraSeries<T> series)
-        where T : unmanaged
-    {
-        ArgumentNullException.ThrowIfNull(series);
-        return series.Values.ToTensor();
-    }
-
-    /// <summary>
     /// Creates a NivaraSeries from a System.Numerics.Tensors.Tensor&lt;T&gt;.
     /// Only supports 1D tensors. For multi-dimensional tensors, use FlattenFromTensor.
     /// </summary>

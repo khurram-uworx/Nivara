@@ -942,16 +942,6 @@ public class TensorInteropTests
     #region Edge Cases and Error Handling
 
     [Test]
-    public void ToTensor_WithNullSeries_ThrowsArgumentNullException()
-    {
-        // Arrange
-        NivaraSeries<float> nullSeries = null!;
-
-        // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => TensorInteropExtensions.ToTensor(nullSeries));
-    }
-
-    [Test]
     public void FromTensor_WithNullTensor_ThrowsArgumentNullException()
     {
         // Arrange
