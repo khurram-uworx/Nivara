@@ -1,3 +1,4 @@
+using Nivara.Extensions;
 using System.Numerics.Tensors;
 
 namespace Nivara;
@@ -185,50 +186,6 @@ public sealed class NivaraSeries<T> : IDisposable
             // Fall back to dynamic division for other types
             return (T)(object)((dynamic)sum! / count)!;
         }
-    }
-
-    /// <summary>
-    /// Helper method to check if a type is numeric and supports arithmetic operations
-    /// </summary>
-    static bool isNumericType(Type type)
-    {
-        return type == typeof(int) ||
-               type == typeof(float) ||
-               type == typeof(double) ||
-               type == typeof(long) ||
-               type == typeof(short) ||
-               type == typeof(byte) ||
-               type == typeof(sbyte) ||
-               type == typeof(uint) ||
-               type == typeof(ulong) ||
-               type == typeof(ushort) ||
-               type == typeof(decimal);
-    }
-
-    /// <summary>
-    /// Helper method to check if a type supports comparison operations
-    /// </summary>
-    static bool isComparableType(Type type)
-    {
-        // All numeric types support comparison
-        if (isNumericType(type))
-            return true;
-
-        // String supports comparison
-        if (type == typeof(string))
-            return true;
-
-        // DateTime and other common comparable types
-        if (type == typeof(DateTime) || type == typeof(DateTimeOffset) || type == typeof(TimeSpan))
-            return true;
-
-        // Guid supports comparison
-        if (type == typeof(Guid))
-            return true;
-
-        // Check if type implements IComparable<T> or IComparable
-        return typeof(IComparable<>).MakeGenericType(type).IsAssignableFrom(type) ||
-               typeof(IComparable).IsAssignableFrom(type);
     }
 
     /// <summary>
@@ -861,7 +818,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute sum of empty series. Series must contain at least one element.");
 
         // Check if T is a supported numeric type
-        if (!isNumericType(typeof(T)))
+        if (!typeof(T).IsNumericType())
             throw new InvalidOperationException($"Sum operation is not supported for type {typeof(T).Name}. Only numeric types support sum operations.");
 
         return sumVectorized();
@@ -882,7 +839,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute average of empty series. Series must contain at least one element.");
 
         // Check if T is a supported numeric type
-        if (!isNumericType(typeof(T)))
+        if (!typeof(T).IsNumericType())
             throw new InvalidOperationException($"Average operation is not supported for type {typeof(T).Name}. Only numeric types support average operations.");
 
         return averageVectorized();
@@ -903,7 +860,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute minimum of empty series. Series must contain at least one element.");
 
         // Check if T is a supported comparable type
-        if (!isComparableType(typeof(T)))
+        if (!typeof(T).IsComparableType())
             throw new InvalidOperationException($"Min operation is not supported for type {typeof(T).Name}. Only comparable types support min operations.");
 
         return minVectorized();
@@ -924,7 +881,7 @@ public sealed class NivaraSeries<T> : IDisposable
             throw new InvalidOperationException("Cannot compute maximum of empty series. Series must contain at least one element.");
 
         // Check if T is a supported comparable type
-        if (!isComparableType(typeof(T)))
+        if (!typeof(T).IsComparableType())
             throw new InvalidOperationException($"Max operation is not supported for type {typeof(T).Name}. Only comparable types support max operations.");
 
         return maxVectorized();

@@ -76,7 +76,7 @@ public static class TensorConversions
     /// <typeparam name="T">The numeric type</typeparam>
     /// <param name="series">The collection of NivaraSeries</param>
     /// <returns>An array of VBuffer tensors</returns>
-    public static VBuffer<T>[] ToBatchTensors<T>(this IEnumerable<NivaraSeries<T>> series)
+    public static VBuffer<T>[] ToMLNetBatchTensors<T>(this IEnumerable<NivaraSeries<T>> series)
         where T : struct, INumber<T>
     {
         if (series == null) throw new ArgumentNullException(nameof(series));
@@ -244,13 +244,13 @@ public static class TensorConversions
     }
 
     /// <summary>
-    /// Reshapes a NivaraSeries into a tensor with specified dimensions.
+    /// Reshapes a NivaraSeries into a multi-dimensional array with specified dimensions.
     /// </summary>
     /// <typeparam name="T">The numeric type</typeparam>
     /// <param name="series">The NivaraSeries to reshape</param>
     /// <param name="dimensions">The target dimensions</param>
-    /// <returns>A multi-dimensional array representing the tensor</returns>
-    public static Array ReshapeToTensor<T>(this NivaraSeries<T> series, params int[] dimensions)
+    /// <returns>A multi-dimensional array representing the reshaped data</returns>
+    public static Array ReshapeToArray<T>(this NivaraSeries<T> series, params int[] dimensions)
         where T : struct, INumber<T>
     {
         if (series == null) throw new ArgumentNullException(nameof(series));

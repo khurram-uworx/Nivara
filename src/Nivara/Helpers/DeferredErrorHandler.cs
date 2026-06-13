@@ -2,14 +2,65 @@ using Nivara.Exceptions;
 
 namespace Nivara.Helpers;
 
+
+/// <summary>
+/// Represents a deferred error with context information
+/// </summary>
+public sealed class DeferredError
+{
+    /// <summary>
+    /// Initializes a new instance of DeferredError
+    /// </summary>
+    /// <param name="error">The error that was deferred</param>
+    /// <param name="context">The context where the error occurred</param>
+    /// <param name="operationType">The type of operation that caused the error</param>
+    /// <param name="timestamp">The timestamp when the error was deferred</param>
+    internal DeferredError(Exception error, string context, string operationType, DateTime timestamp)
+    {
+        Error = error ?? throw new ArgumentNullException(nameof(error));
+        Context = context ?? throw new ArgumentNullException(nameof(context));
+        OperationType = operationType ?? throw new ArgumentNullException(nameof(operationType));
+        Timestamp = timestamp;
+    }
+
+    /// <summary>
+    /// Gets the deferred error
+    /// </summary>
+    public Exception Error { get; }
+
+    /// <summary>
+    /// Gets the context where the error occurred
+    /// </summary>
+    public string Context { get; }
+
+    /// <summary>
+    /// Gets the type of operation that caused the error
+    /// </summary>
+    public string OperationType { get; }
+
+    /// <summary>
+    /// Gets the timestamp when the error was deferred
+    /// </summary>
+    public DateTime Timestamp { get; }
+
+    /// <summary>
+    /// Returns a string representation of the deferred error
+    /// </summary>
+    /// <returns>A formatted string</returns>
+    public override string ToString()
+    {
+        return $"[{OperationType}] {Context}: {Error.GetType().Name} - {Error.Message} (at {Timestamp:HH:mm:ss})";
+    }
+}
+
 /// <summary>
 /// Handles deferred error reporting for lazy operations.
 /// Allows errors to be captured during query building and reported during execution.
 /// </summary>
 public sealed class DeferredErrorHandler
 {
-    private readonly List<DeferredError> deferredErrors;
-    private readonly object lockObject;
+    readonly List<DeferredError> deferredErrors;
+    readonly object lockObject;
 
     /// <summary>
     /// Initializes a new instance of DeferredErrorHandler
@@ -194,55 +245,5 @@ public sealed class DeferredErrorHandler
 
             return summary.ToString();
         }
-    }
-}
-
-/// <summary>
-/// Represents a deferred error with context information
-/// </summary>
-public sealed class DeferredError
-{
-    /// <summary>
-    /// Initializes a new instance of DeferredError
-    /// </summary>
-    /// <param name="error">The error that was deferred</param>
-    /// <param name="context">The context where the error occurred</param>
-    /// <param name="operationType">The type of operation that caused the error</param>
-    /// <param name="timestamp">The timestamp when the error was deferred</param>
-    internal DeferredError(Exception error, string context, string operationType, DateTime timestamp)
-    {
-        Error = error ?? throw new ArgumentNullException(nameof(error));
-        Context = context ?? throw new ArgumentNullException(nameof(context));
-        OperationType = operationType ?? throw new ArgumentNullException(nameof(operationType));
-        Timestamp = timestamp;
-    }
-
-    /// <summary>
-    /// Gets the deferred error
-    /// </summary>
-    public Exception Error { get; }
-
-    /// <summary>
-    /// Gets the context where the error occurred
-    /// </summary>
-    public string Context { get; }
-
-    /// <summary>
-    /// Gets the type of operation that caused the error
-    /// </summary>
-    public string OperationType { get; }
-
-    /// <summary>
-    /// Gets the timestamp when the error was deferred
-    /// </summary>
-    public DateTime Timestamp { get; }
-
-    /// <summary>
-    /// Returns a string representation of the deferred error
-    /// </summary>
-    /// <returns>A formatted string</returns>
-    public override string ToString()
-    {
-        return $"[{OperationType}] {Context}: {Error.GetType().Name} - {Error.Message} (at {Timestamp:HH:mm:ss})";
     }
 }

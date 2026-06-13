@@ -279,11 +279,6 @@ public sealed class NivaraFrame : IFrame
         return NivaraColumn<object>.Create(reorderedArray);
     }
 
-    /// <summary>
-    /// Gets the approximate size of a type in bytes
-    /// </summary>
-    /// <param name="type">The type to get size for</param>
-    /// <returns>Size in bytes</returns>
     static int getTypeSize(Type type)
     {
         if (type == typeof(bool)) return 1;

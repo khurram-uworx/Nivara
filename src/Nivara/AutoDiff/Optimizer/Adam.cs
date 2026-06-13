@@ -1,3 +1,4 @@
+using Nivara.Helpers;
 using System.Buffers;
 using System.Numerics;
 
@@ -5,22 +6,6 @@ namespace Nivara.AutoDiff.Optimizer;
 
 public sealed class Adam<T> : Optimizer<T> where T : struct, INumber<T>
 {
-    static bool mergeNullMasks(NivaraColumn<T> a, NivaraColumn<T> b, Span<bool> destination)
-    {
-        var aHasNulls = a.TryGetNullMask(out var aMask);
-        var bHasNulls = b.TryGetNullMask(out var bMask);
-
-        if (aHasNulls && bHasNulls)
-            for (int i = 0; i < destination.Length; i++)
-                destination[i] = aMask[i] || bMask[i];
-        else if (aHasNulls)
-            aMask.CopyTo(destination);
-        else if (bHasNulls)
-            bMask.CopyTo(destination);
-
-        return aHasNulls || bHasNulls;
-    }
-
     readonly double beta1;
     readonly double beta2;
     readonly double eps;
@@ -106,7 +91,7 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, INumber<T>
         {
             data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
             grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            var hasNulls = mergeNullMasks(data, grad, nullMask.AsSpan(0, n));
+            var hasNulls = NivaraColumnUtility.MergeNullMasks(data, grad, nullMask.AsSpan(0, n));
 
             for (int i = 0; i < n; i++)
             {

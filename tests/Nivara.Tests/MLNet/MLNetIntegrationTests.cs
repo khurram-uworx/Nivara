@@ -315,7 +315,7 @@ public class MLNetIntegrationTests
     }
 
     [Test]
-    public void ToBatchTensors_ConvertsSeriesToVBuffers()
+    public void ToMLNetBatchTensors_ConvertsSeriesToVBuffers()
     {
         // Create test series
         var series1 = NivaraSeries<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
@@ -324,7 +324,7 @@ public class MLNetIntegrationTests
         var seriesList = new[] { series1, series2, series3 };
 
         // Convert to VBuffers
-        var vbuffers = seriesList.ToBatchTensors();
+        var vbuffers = seriesList.ToMLNetBatchTensors();
 
         // Verify structure
         Assert.That(vbuffers.Length, Is.EqualTo(3));
@@ -348,19 +348,19 @@ public class MLNetIntegrationTests
     }
 
     [Test]
-    public void ToBatchTensors_HandlesEmptyCollection()
+    public void ToMLNetBatchTensors_HandlesEmptyCollection()
     {
         var emptySeries = Array.Empty<NivaraSeries<float>>();
-        var vbuffers = emptySeries.ToBatchTensors();
+        var vbuffers = emptySeries.ToMLNetBatchTensors();
 
         Assert.That(vbuffers, Is.Empty);
     }
 
     [Test]
-    public void ToBatchTensors_ThrowsOnNullInput()
+    public void ToMLNetBatchTensors_ThrowsOnNullInput()
     {
         IEnumerable<NivaraSeries<float>> nullSeries = null!;
-        Assert.Throws<ArgumentNullException>(() => nullSeries.ToBatchTensors());
+        Assert.Throws<ArgumentNullException>(() => nullSeries.ToMLNetBatchTensors());
     }
 
     [Test]
@@ -445,7 +445,7 @@ public class MLNetIntegrationTests
         var originalSeries = new[] { floatSeries1, floatSeries2 };
 
         // Round trip: Series -> VBuffer -> Series
-        var vbuffers = originalSeries.ToBatchTensors();
+        var vbuffers = originalSeries.ToMLNetBatchTensors();
         var reconstructedSeries = TensorConversions.FromBatchTensors(vbuffers);
 
         // Verify structure preservation
@@ -472,7 +472,7 @@ public class MLNetIntegrationTests
         var doubleSeries = NivaraSeries<double>.Create(new double[] { 1.123456789, -2.987654321, 0.0 });
         var doubleSeriesArray = new[] { doubleSeries };
 
-        var doubleVBuffers = doubleSeriesArray.ToBatchTensors();
+        var doubleVBuffers = doubleSeriesArray.ToMLNetBatchTensors();
         var reconstructedDoubleSeries = TensorConversions.FromBatchTensors(doubleVBuffers);
 
         Assert.That(reconstructedDoubleSeries.Length, Is.EqualTo(1));
@@ -487,7 +487,7 @@ public class MLNetIntegrationTests
         var intSeries = NivaraSeries<int>.Create(new int[] { -100, 0, 42, 1000 });
         var intSeriesArray = new[] { intSeries };
 
-        var intVBuffers = intSeriesArray.ToBatchTensors();
+        var intVBuffers = intSeriesArray.ToMLNetBatchTensors();
         var reconstructedIntSeries = TensorConversions.FromBatchTensors(intVBuffers);
 
         Assert.That(reconstructedIntSeries.Length, Is.EqualTo(1));
@@ -500,14 +500,14 @@ public class MLNetIntegrationTests
     }
 
     [Test]
-    public void ReshapeToTensor_CreatesCorrectDimensions()
+    public void ReshapeToArray_CreatesCorrectDimensions()
     {
         // Create a series with 12 elements
         var data = Enumerable.Range(1, 12).Select(i => (float)i).ToArray();
         var series = NivaraSeries<float>.Create(data);
 
         // Reshape to 3x4 tensor
-        var tensor = series.ReshapeToTensor(3, 4);
+        var tensor = series.ReshapeToArray(3, 4);
 
         // Verify dimensions
         Assert.That(tensor.Rank, Is.EqualTo(2));
@@ -531,12 +531,12 @@ public class MLNetIntegrationTests
     }
 
     [Test]
-    public void ReshapeToTensor_ThrowsOnDimensionMismatch()
+    public void ReshapeToArray_ThrowsOnDimensionMismatch()
     {
         var series = NivaraSeries<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f });
 
         // Try to reshape 5 elements into 2x3 (6 elements) - should fail
-        Assert.Throws<ArgumentException>(() => series.ReshapeToTensor(2, 3));
+        Assert.Throws<ArgumentException>(() => series.ReshapeToArray(2, 3));
     }
 
     [Test]
@@ -570,7 +570,7 @@ public class MLNetIntegrationTests
         var originalSeries = NivaraSeries<double>.Create(originalData);
 
         // Round trip: Series -> Tensor -> Series
-        var tensor = originalSeries.ReshapeToTensor(2, 4);
+        var tensor = originalSeries.ReshapeToArray(2, 4);
         var reconstructedSeries = TensorConversions.FlattenFromTensor<double>(tensor);
 
         // Verify data preservation

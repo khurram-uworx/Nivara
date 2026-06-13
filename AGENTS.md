@@ -26,6 +26,7 @@ Where to look (implementation map)
 
 - Tensor helpers & interop
   - `src/Nivara/Tensors/TensorInteropExtensions.cs` — conversions `Series/Frame <-> Tensor`, `TensorSpan` utilities, reshape/flatten helpers.
+  - `src/Nivara/Tensors/TensorsHelper.cs` — consolidated tensor kernel helpers (MatMul, SoftMax, Sigmoid, Tanh, Transpose) with null-aware variants and BCL swap-target annotations.
 
 - Kernel selection & diagnostics
   - `src/Nivara/KernelSelector.cs` — centralized `DetermineKernelType` heuristics (used by `NivaraColumn` and `ColumnDiagnostics`).
@@ -51,7 +52,7 @@ Where to look (implementation map)
 
 - AutoDiff subsystem
   - `src/Nivara/AutoDiff/` — core reverse-mode autograd engine (ReverseGradTensor, GradNode, IGradOperation)
-  - `src/Nivara/AutoDiff/Optimizer/SgdOptimizer.cs` — SGD update with null-skip semantics
+  - `src/Nivara/AutoDiff/Optimizer/SGD.cs` — SGD optimizer and SgdUpdate with null-skip semantics
   - `src/Nivara/AutoDiff/Optimizer/AdamOptimizer.cs` — Adam optimizer with bias correction and null-skip
   - `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs` — AdamW optimizer with decoupled weight decay
   - `src/Nivara/AutoDiff/Nn/` — module system (Linear, Sequential, Parameter, activations)
@@ -60,7 +61,8 @@ Where to look (implementation map)
 
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
-  - `src/Nivara/Tensors/TensorExtensions.cs` / `TensorInteropExtensions.cs` — tensor helpers used across codebase.
+  - `src/Nivara/Tensors/NivaraTensorExtensions.cs` — `NivaraColumn<T>` extension methods for element-wise math, gradient helpers.
+  - `src/Nivara/Tensors/TensorInteropExtensions.cs` — tensor helpers used across codebase.
 
 Key rules for AI Agents to follow when generating tensor-aware code
 1. Storage selection
@@ -95,11 +97,14 @@ Key rules for AI Agents to follow when generating tensor-aware code
    - When converting spans/arrays to typed `Nivara.Storage.TensorStorage<T>`, convert to arrays first and then call the `TensorStorage<T>` constructor. Avoid `MemoryMarshal.Cast` unless `T` is unmanaged.
    - Keep explicit type-switch branches for each supported primitive (int, float, double, long, short, byte, bool, etc.).
 
-8. Testing & diagnostics
-   - Add unit tests covering null-mask propagation across arithmetic and comparisons.
-   - Validate tensor conversions keep correct shape (`tensor.Lengths` is `nint[]`) and use casts `(int)tensor.Lengths[0]` in tests.
-   - Record `Nivara.Diagnostics.OperationDiagnostics` for kernel selection and include in performance tests.
-   - Use `ColumnDiagnostics`, `DiagnosticsTracker`, and `QueryDiagnostics` when changing kernel selection, query execution, or optimization behavior.
+8. Consolidating duplicate logic
+    - When the same helper logic (e.g., type checks, validation, utility methods) is duplicated across multiple files, promote one authoritative implementation as an extension method on the most natural receiver type, then remove all copies and update call sites. Keep thin wrappers only if they serve a distinct API contract (e.g., `protected` visibility for subclass use). Place the extension in the same assembly to avoid cross-project visibility concerns.
+
+9. Testing & diagnostics
+    - Add unit tests covering null-mask propagation across arithmetic and comparisons.
+    - Validate tensor conversions keep correct shape (`tensor.Lengths` is `nint[]`) and use casts `(int)tensor.Lengths[0]` in tests.
+    - Record `Nivara.Diagnostics.OperationDiagnostics` for kernel selection and include in performance tests.
+    - Use `ColumnDiagnostics`, `DiagnosticsTracker`, and `QueryDiagnostics` when changing kernel selection, query execution, or optimization behavior.
 
 Suggested small, safe improvements to implement (prioritized)
 - ✓ Cache flattened buffer in `Nivara.Storage.TensorStorage` (internal, lazy) — DONE via `GetFlattenedSpan()` in Phase 0.
@@ -260,7 +265,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SgdOptimizer.SgdUpdate<T>()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
@@ -269,6 +274,7 @@ References (implementations to inspect)
 - `src/Nivara/Storage/ColumnStorageFactory.cs`
 - `src/Nivara/Storage/TensorStorage.cs`
 - `src/Nivara/NivaraColumn.cs`
+- `src/Nivara/Tensors/TensorsHelper.cs`
 - `src/Nivara/Tensors/TensorInteropExtensions.cs`
 - `src/Nivara/KernelSelector.cs`
 - `src/Nivara/NivaraFrame.cs`
@@ -280,7 +286,7 @@ References (implementations to inspect)
 - `src/Nivara/Execution/ParallelExecutionHelper.cs`
 - `src/Nivara/AutoDiff/ReverseGradTensor.cs`
 - `src/Nivara/AutoDiff/GradOperations.cs`
-- `src/Nivara/AutoDiff/Optimizer/SgdOptimizer.cs`
+- `src/Nivara/AutoDiff/Optimizer/SGD.cs`
 - `src/Nivara/AutoDiff/Optimizer/AdamOptimizer.cs`
 - `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs`
 - `src/Nivara/AutoDiff/Nn/Linear.cs`

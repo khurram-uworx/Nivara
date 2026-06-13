@@ -1,3 +1,4 @@
+using Nivara.Extensions;
 using System.Numerics.Tensors;
 
 namespace Nivara;
@@ -88,33 +89,12 @@ public abstract class AggregationFunction
     }
 
     /// <summary>
-    /// Helper method to check if a type is numeric and supports arithmetic operations
-    /// </summary>
-    protected static bool IsNumericType(Type type)
-    {
-        // Handle nullable types by checking the underlying type
-        var underlyingType = Nullable.GetUnderlyingType(type) ?? type;
-
-        return underlyingType == typeof(int) ||
-               underlyingType == typeof(float) ||
-               underlyingType == typeof(double) ||
-               underlyingType == typeof(long) ||
-               underlyingType == typeof(short) ||
-               underlyingType == typeof(byte) ||
-               underlyingType == typeof(sbyte) ||
-               underlyingType == typeof(uint) ||
-               underlyingType == typeof(ulong) ||
-               underlyingType == typeof(ushort) ||
-               underlyingType == typeof(decimal);
-    }
-
-    /// <summary>
     /// Helper method to check if a type supports comparison operations
     /// </summary>
     protected static bool IsComparableType(Type type)
     {
         // All numeric types support comparison
-        if (IsNumericType(type))
+        if (type.IsNumericType())
             return true;
 
         // String supports comparison
@@ -230,7 +210,7 @@ public sealed class SumAggregation : AggregationFunction
     /// <inheritdoc />
     protected override void ValidateInputType(Type inputType)
     {
-        if (!IsNumericType(inputType))
+        if (!inputType.IsNumericType())
             throw new ArgumentException($"Sum aggregation requires numeric type, got {inputType.Name}");
     }
 
@@ -523,7 +503,7 @@ public sealed class MeanAggregation : AggregationFunction
     /// <inheritdoc />
     protected override void ValidateInputType(Type inputType)
     {
-        if (!IsNumericType(inputType))
+        if (!inputType.IsNumericType())
             throw new ArgumentException($"Mean aggregation requires numeric type, got {inputType.Name}");
     }
 }
