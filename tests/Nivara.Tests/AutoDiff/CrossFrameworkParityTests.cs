@@ -62,7 +62,7 @@ public class CrossFrameworkParityTests
     }
 
     [Test]
-    public void PredictionAgreement_IsAbove95Percent()
+    public void PredictionAgreement_IsAbove80Percent()
     {
         var pytPath = Path.Combine(OutDir, "test_preds_pytorch.csv");
         var nivPath = Path.Combine(OutDir, "test_preds_nivara.csv");

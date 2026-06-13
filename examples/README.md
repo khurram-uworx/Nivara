@@ -95,17 +95,23 @@ python examples/pytorch/train_fraud_pytorch.py
 
 This script:
 1. **Loads** the CSV data and computes z-score normalization
-2. **Saves** `norm_params.json` (means/stds for each feature)
-3. **Creates** a 3-layer MLP with `torch.manual_seed(42)`
-4. **Saves** `initial_weights.json` — the seed-bridge file (Nivara loads this)
+2. **Saves** `norm_params.json` (means/stds for each feature) to `examples/data/`
+3. **Creates** a 3-layer MLP with `torch.manual_seed(42)` and `np.random.seed(42)`
+4. **Saves** `initial_weights.json` — the seed-bridge file (Nivara loads this) — to `examples/data/`
 5. **Trains** 50 epochs with Adam (lr=0.001, batch=32, BCEWithLogitsLoss)
 6. **Saves** trained weights, loss curve, and test predictions
 
-**Output files in `examples/pytorch/`:**
+**Output files in `examples/data/` (shared inputs for Nivara):**
 
 | File | Contents |
 |------|----------|
+| `norm_params.json` | Z-score means/stds from PyTorch |
 | `initial_weights.json` | Seeded initial weights (Nivara loads this) |
+
+**Output files in `examples/pytorch/` (training results):**
+
+| File | Contents |
+|------|----------|
 | `epoch_losses_pytorch.json` | 50 epoch losses |
 | `trained_weights_pytorch.json` | Weights after 50 epochs |
 | `test_preds_pytorch.csv` | Logits + probabilities on test set |
@@ -148,8 +154,9 @@ At epoch 1, both should output `≈20.42`. At epoch 50, both should be
 
 ### Loss curves
 
-```powershell
-python -c "
+Save the following as `compare_losses.py` in the repo root and run it:
+
+```python
 import json
 pyt = json.load(open('examples/pytorch/epoch_losses_pytorch.json'))
 niv = json.load(open('examples/pytorch/epoch_losses_nivara.json'))
@@ -158,21 +165,29 @@ for i, (p, n) in enumerate(zip(pyt, niv), 1):
     print(f'Epoch {i:2d}: Py={p:.4f}  Ni={n:.4f}  rel_diff={diff:.4f}%')
 max_rel = max(abs(p-n)/max(abs(p),1e-10)*100 for p,n in zip(pyt,niv))
 print(f'\nMax relative difference: {max_rel:.4f}%')
-"
+```
+
+```powershell
+python compare_losses.py
 ```
 
 **Expected**: max relative diff < 1%.
 
 ### Predictions
 
-```powershell
-python -c "
+Save the following as `compare_preds.py` in the repo root and run it:
+
+```python
 import pandas as pd
 pyt = pd.read_csv('examples/pytorch/test_preds_pytorch.csv')
 niv = pd.read_csv('examples/pytorch/test_preds_nivara.csv')
 agreement = (pyt['prob'].round(3) == niv['prob'].round(3)).mean()
 print(f'Prediction agreement at 3 decimal places: {agreement:.1%}')
-"
+```
+
+```powershell
+python compare_preds.py
+```
 
 **Expected**: >80% agreement. Boundary cases near prob≈0.5 may round
 differently due to small weight differences — this is normal.
@@ -208,8 +223,8 @@ The table below shows the actual measured parity on our reference run
 | Epoch | PyTorch | Nivara | Relative diff |
 |-------|---------|--------|---------------|
 | 1 | 20.4217 | 20.4217 | 0.0001% |
-| 25 | 3.1891 | 3.1891 | 0.001% |
-| 50 | 2.2351 | 2.2355 | 0.019% |
+| 25 | 3.1390 | 3.1390 | 0.0002% |
+| 50 | 2.2351 | 2.2355 | 0.020% |
 
 **Max relative difference across all 50 epochs: 0.04%** — well below
 the 1% test threshold. The convergence trajectories are visually
@@ -226,13 +241,13 @@ slightly different decision boundaries.
 | Layer | Max abs diff | Max relative diff |
 |-------|-------------|-------------------|
 | L1.Weight | 0.0046 | 12% |
-| L1.Bias | 0.0015 | 3.2% |
-| L2.Weight | 0.0329 | 180% |
+| L1.Bias | 0.0016 | 3.3% |
+| L2.Weight | 0.0329 | 181% |
 | L2.Bias | 0.0002 | 5.3% |
 | L3.Weight | 0.0002 | 0.09% |
 | L3.Bias | < 0.0001 | 0.003% |
 
-Large divergence in L2.Weight (180%) is normal — neural nets have many
+Large divergence in L2.Weight (181%) is normal — neural nets have many
 equivalent minima and SGD finds different ones in each framework. L3
 (the output layer) stays tight because it has less rotational symmetry.
 
