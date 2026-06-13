@@ -61,7 +61,8 @@ Where to look (implementation map)
 
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
-  - `src/Nivara/Tensors/TensorExtensions.cs` / `TensorInteropExtensions.cs` — tensor helpers used across codebase.
+  - `src/Nivara/Tensors/NivaraTensorExtensions.cs` — `NivaraColumn<T>` extension methods for element-wise math, gradient helpers.
+  - `src/Nivara/Tensors/TensorInteropExtensions.cs` — tensor helpers used across codebase.
 
 Key rules for AI Agents to follow when generating tensor-aware code
 1. Storage selection

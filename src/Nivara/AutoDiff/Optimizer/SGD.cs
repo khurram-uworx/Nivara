@@ -1,3 +1,5 @@
+using Nivara.Helpers;
+using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -45,7 +47,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
         {
             data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
             grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            var hasNulls = mergeNullMasks(data, grad, nullMask.AsSpan(0, n));
+            var hasNulls = NivaraColumnUtility.MergeNullMasks(data, grad, nullMask.AsSpan(0, n));
 
             for (int i = 0; i < n; i++)
             {
@@ -76,22 +78,6 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
             ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
-    }
-
-    static bool mergeNullMasks(NivaraColumn<T> a, NivaraColumn<T> b, Span<bool> destination)
-    {
-        var aHasNulls = a.TryGetNullMask(out var aMask);
-        var bHasNulls = b.TryGetNullMask(out var bMask);
-
-        if (aHasNulls && bHasNulls)
-            for (int i = 0; i < destination.Length; i++)
-                destination[i] = aMask[i] || bMask[i];
-        else if (aHasNulls)
-            aMask.CopyTo(destination);
-        else if (bHasNulls)
-            bMask.CopyTo(destination);
-
-        return aHasNulls || bHasNulls;
     }
 
     public static ReverseGradTensor<T> SgdUpdate(ReverseGradTensor<T> tensor, T learningRate, T weightDecay = default)
@@ -140,7 +126,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
         {
             data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
             grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            var hasNulls = mergeNullMasks(data, grad, nullMask.AsSpan(0, n));
+            var hasNulls = NivaraColumnUtility.MergeNullMasks(data, grad, nullMask.AsSpan(0, n));
 
             if (weightDecay != T.Zero)
             {

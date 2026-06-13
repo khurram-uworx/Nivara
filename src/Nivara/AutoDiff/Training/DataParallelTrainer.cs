@@ -1,8 +1,8 @@
+using Nivara.AutoDiff.Nn;
+using Nivara.Execution;
 using System.Diagnostics;
 using System.Numerics;
 using System.Numerics.Tensors;
-using Nivara.AutoDiff.Nn;
-using Nivara.Execution;
 
 namespace Nivara.AutoDiff.Training;
 

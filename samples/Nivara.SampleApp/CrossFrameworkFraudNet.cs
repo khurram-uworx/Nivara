@@ -1,12 +1,11 @@
-using System.Numerics;
-using System.Text.Json;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
+using System.Text.Json;
 
 namespace Nivara.SampleApp;
 
@@ -104,11 +103,11 @@ public static class CrossFrameworkFraudNet
 
         // ── Load & normalize data ──────────────────────────────
         var trainFrame = LoadCsv(Path.Combine(DataDir, "train_fraud.csv"));
-        var testFrame  = LoadCsv(Path.Combine(DataDir, "test_fraud.csv"));
+        var testFrame = LoadCsv(Path.Combine(DataDir, "test_fraud.csv"));
 
         var norm = LoadNormParams(Path.Combine(DataDir, "norm_params.json"));
         trainFrame = Normalize(trainFrame, norm, FeatureCols);
-        testFrame  = Normalize(testFrame, norm, FeatureCols);
+        testFrame = Normalize(testFrame, norm, FeatureCols);
 
         Console.WriteLine($"Train: {trainFrame.RowCount} rows");
         Console.WriteLine($"Test:  {testFrame.RowCount} rows");

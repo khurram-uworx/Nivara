@@ -1,9 +1,9 @@
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Training;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Training;
 
 namespace Nivara.AutoDiff.Serialization;
 

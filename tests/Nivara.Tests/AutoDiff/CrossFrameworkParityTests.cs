@@ -1,5 +1,5 @@
-using System.Text.Json;
 using NUnit.Framework;
+using System.Text.Json;
 
 namespace Nivara.Tests.AutoDiff;
 
