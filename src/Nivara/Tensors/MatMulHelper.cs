@@ -125,38 +125,106 @@ static class MatMulHelper
         var bFilled = ArrayPool<T>.Shared.Rent(bLen);
         try
         {
-            a.CopyTo(aFilled);
-            b.CopyTo(bFilled);
+            a.CopyTo(aFilled.AsSpan(0, aLen));
+            b.CopyTo(bFilled.AsSpan(0, bLen));
 
-            for (int idx = 0; idx < aLen; idx++)
-                if (hasAMask && aNullMask[idx]) aFilled[idx] = T.Zero;
+            if (hasAMask)
+            {
+                for (int idx = 0; idx < aLen; idx++)
+                    if (aNullMask[idx]) aFilled[idx] = T.Zero;
+            }
 
-            for (int idx = 0; idx < bLen; idx++)
-                if (hasBMask && bNullMask[idx]) bFilled[idx] = T.Zero;
+            if (hasBMask)
+            {
+                for (int idx = 0; idx < bLen; idx++)
+                    if (bNullMask[idx]) bFilled[idx] = T.Zero;
+            }
 
             MultiplyCore(aFilled.AsSpan(0, aLen), bFilled.AsSpan(0, bLen), result, aRows, aCols, bCols);
 
-            for (int i = 0; i < aRows; i++)
+            PropagateNullMask(aNullMask, bNullMask, resultMask, aRows, aCols, bCols);
+
+            for (int idx = 0; idx < resultMask.Length; idx++)
             {
-                for (int j = 0; j < bCols; j++)
-                {
-                    bool posNull = false;
-                    for (int k = 0; k < aCols && !posNull; k++)
-                    {
-                        if ((hasAMask && aNullMask[i * aCols + k]) ||
-                            (hasBMask && bNullMask[k * bCols + j]))
-                            posNull = true;
-                    }
-                    int ri = i * bCols + j;
-                    resultMask[ri] = posNull;
-                    if (posNull) result[ri] = T.Zero;
-                }
+                if (resultMask[idx])
+                    result[idx] = T.Zero;
             }
         }
         finally
         {
             ArrayPool<T>.Shared.Return(aFilled, clearArray: true);
             ArrayPool<T>.Shared.Return(bFilled, clearArray: true);
+        }
+    }
+
+    internal static void PropagateNullMask(
+        ReadOnlySpan<bool> aNullMask,
+        ReadOnlySpan<bool> bNullMask,
+        Span<bool> resultMask,
+        int aRows,
+        int aCols,
+        int bCols)
+    {
+        bool hasAMask = aNullMask.Length > 0;
+        bool hasBMask = bNullMask.Length > 0;
+
+        if (!hasAMask && !hasBMask)
+        {
+            resultMask.Clear();
+            return;
+        }
+
+        var aRowHasNull = ArrayPool<bool>.Shared.Rent(aRows);
+        var bColumnHasNull = ArrayPool<bool>.Shared.Rent(bCols);
+
+        try
+        {
+            var aRowsSpan = aRowHasNull.AsSpan(0, aRows);
+            var bColsSpan = bColumnHasNull.AsSpan(0, bCols);
+            aRowsSpan.Clear();
+            bColsSpan.Clear();
+
+            if (hasAMask)
+            {
+                for (int i = 0; i < aRows; i++)
+                {
+                    int aRowOffset = i * aCols;
+                    for (int k = 0; k < aCols; k++)
+                    {
+                        if (aNullMask[aRowOffset + k])
+                        {
+                            aRowsSpan[i] = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (hasBMask)
+            {
+                for (int k = 0; k < aCols; k++)
+                {
+                    int bRowOffset = k * bCols;
+                    for (int j = 0; j < bCols; j++)
+                    {
+                        if (bNullMask[bRowOffset + j])
+                            bColsSpan[j] = true;
+                    }
+                }
+            }
+
+            for (int i = 0; i < aRows; i++)
+            {
+                bool rowHasNull = aRowsSpan[i];
+                int resultRowOffset = i * bCols;
+                for (int j = 0; j < bCols; j++)
+                    resultMask[resultRowOffset + j] = rowHasNull || bColsSpan[j];
+            }
+        }
+        finally
+        {
+            ArrayPool<bool>.Shared.Return(aRowHasNull, clearArray: true);
+            ArrayPool<bool>.Shared.Return(bColumnHasNull, clearArray: true);
         }
     }
 }

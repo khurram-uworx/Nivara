@@ -30,6 +30,12 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, INumber<T>
     int step;
 
     public Adam(double beta1 = 0.9, double beta2 = 0.999, double eps = 1e-8)
+        : this(T.CreateChecked(0.001), beta1, beta2, eps)
+    {
+    }
+
+    public Adam(T learningRate, double beta1 = 0.9, double beta2 = 0.999, double eps = 1e-8)
+        : base(learningRate)
     {
         this.beta1 = beta1;
         this.beta2 = beta2;

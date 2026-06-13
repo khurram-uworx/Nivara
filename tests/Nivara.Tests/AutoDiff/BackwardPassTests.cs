@@ -220,4 +220,88 @@ public class BackwardPassTests
         Assert.That(c.Grad![0], Is.EqualTo(0.5f).Within(1e-6f));
         Assert.That(d.Grad![0], Is.EqualTo(-2.0f).Within(1e-6f));
     }
+
+    [Test]
+    public void DropoutWithMask_Forward_ScalesKeptEntriesAndPreservesShape()
+    {
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
+            requiresGrad: true);
+        input.Reshape(1, 3);
+
+        var output = GradOperations.DropoutWithMask(input, new[] { true, false, true }, 2.0f);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 3 }));
+        Assert.That(output[0], Is.EqualTo(2.0f).Within(1e-6f));
+        Assert.That(output[1], Is.EqualTo(0.0f).Within(1e-6f));
+        Assert.That(output[2], Is.EqualTo(6.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void DropoutWithMask_Backward_PropagatesScaledMaskGradient()
+    {
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
+            requiresGrad: true);
+
+        var output = GradOperations.DropoutWithMask(input, new[] { true, false, true }, 2.0f);
+        var gradient = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f }),
+            requiresGrad: false);
+
+        output.Backward(gradient);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad![0], Is.EqualTo(2.0f).Within(1e-6f));
+        Assert.That(input.Grad[1], Is.EqualTo(0.0f).Within(1e-6f));
+        Assert.That(input.Grad[2], Is.EqualTo(2.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void DropoutWithMask_ChainedOperation_PropagatesGradientBeforeDropout()
+    {
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2.0f, 3.0f, 4.0f }),
+            requiresGrad: true);
+        var multiplier = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 10.0f, 10.0f, 10.0f }),
+            requiresGrad: false);
+
+        var product = GradOperations.Multiply(input, multiplier);
+        var dropped = GradOperations.DropoutWithMask(product, new[] { true, false, true }, 2.0f);
+        var loss = GradOperations.Sum(dropped);
+
+        loss.Backward();
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad![0], Is.EqualTo(20.0f).Within(1e-6f));
+        Assert.That(input.Grad[1], Is.EqualTo(0.0f).Within(1e-6f));
+        Assert.That(input.Grad[2], Is.EqualTo(20.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void DropoutWithMask_Nulls_PreserveForwardAndBackwardNullMasks()
+    {
+        var inputColumn = NivaraColumn<float>.CreateFromSpans(
+            new float[] { 2.0f, 4.0f, 6.0f },
+            new[] { false, true, false });
+        var input = new ReverseGradTensor<float>(inputColumn, requiresGrad: true);
+        var output = GradOperations.DropoutWithMask(input, new[] { true, true, false }, 2.0f);
+
+        Assert.That(output[0], Is.EqualTo(4.0f).Within(1e-6f));
+        Assert.That(output.IsNull(1), Is.True);
+        Assert.That(output[2], Is.EqualTo(0.0f).Within(1e-6f));
+
+        var gradientColumn = NivaraColumn<float>.CreateFromSpans(
+            new float[] { 1.0f, 1.0f, 1.0f },
+            new[] { false, false, true });
+        var gradient = new ReverseGradTensor<float>(gradientColumn, requiresGrad: false);
+
+        output.Backward(gradient, stripGradientNulls: false);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad![0], Is.EqualTo(2.0f).Within(1e-6f));
+        Assert.That(input.Grad.IsNull(1), Is.True);
+        Assert.That(input.Grad.IsNull(2), Is.True);
+    }
 }

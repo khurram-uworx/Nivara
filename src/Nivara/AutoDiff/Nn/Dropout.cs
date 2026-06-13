@@ -1,4 +1,4 @@
-using System.Buffers;
+using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
@@ -20,54 +20,6 @@ public sealed class Dropout<T> : Module<T> where T : struct, INumber<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
 
-        if (!IsTraining || probability <= 0.0)
-            return input;
-
-        var n = input.Length;
-        var mask = new bool[n];
-        var scale = T.CreateChecked(1.0 / (1.0 - probability));
-        var random = Random.Shared;
-
-        for (int i = 0; i < n; i++)
-            mask[i] = random.NextDouble() >= probability;
-
-        var data = input.Data;
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-
-        try
-        {
-            if (!data.HasNulls)
-            {
-                data.TryGetSpan(out var span);
-                for (int i = 0; i < n; i++)
-                    resultBuf[i] = mask[i] ? span[i] * scale : T.Zero;
-                var resultColumn = NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-                return new ReverseGradTensor<T>(resultColumn, input.RequiresGrad, input.shape);
-            }
-
-            data.CopyTo(resultBuf.AsSpan(0, n), T.Zero);
-            data.TryGetNullMask(out var nullMask);
-
-            var finalMask = ArrayPool<bool>.Shared.Rent(n);
-            try
-            {
-                nullMask.CopyTo(finalMask.AsSpan(0, n));
-                for (int i = 0; i < n; i++)
-                {
-                    if (!nullMask[i])
-                        resultBuf[i] = mask[i] ? resultBuf[i] * scale : T.Zero;
-                }
-                var resultColumn = NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), finalMask.AsSpan(0, n));
-                return new ReverseGradTensor<T>(resultColumn, input.RequiresGrad, input.shape);
-            }
-            finally
-            {
-                ArrayPool<bool>.Shared.Return(finalMask, clearArray: true);
-            }
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-        }
+        return GradOperations.Dropout(input, probability, IsTraining);
     }
 }

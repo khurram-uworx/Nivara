@@ -110,6 +110,9 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
         {
             foreach (var module in modules)
                 module.Dispose();
+
+            foreach (var parameter in parameters)
+                parameter.Dispose();
         }
         disposed = true;
     }

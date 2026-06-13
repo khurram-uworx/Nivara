@@ -17,17 +17,15 @@ the exercise:
 | Forward pass | `torch.relu(self.l1(x))` — direct | `GradOperations.Relu(L1.Forward(x))` — extra ceremony | More typing, harder to read |
 | Generics | None (dynamic) | `Module<float>`, `Linear<float>`, `ReverseGradTensor<float>` everywhere | Type pollution propagates through all code |
 | Weight loading | `param.data.copy_(tensor)` — one-liner | Custom JSON flatten + manual name mapping (PyTorch name → Nivara key) | ~40 lines of fragile boilerplate, easy to mismatch |
-| Optimizer API | `optimizer = Adam(model.parameters())` — unambiguous | Two `AddParameterGroup` overloads with different semantics — `Dictionary` overload creates copies, `IEnumerable<Parameter<T>>` passes references | Cost hours to debug; the dictionary version silently trains nothing |
+| Optimizer API | `optimizer = Adam(model.parameters())` — unambiguous | Optimizers now register owning `Parameter<T>` objects via `model.GetParameters().Values`; tensor dictionaries are for inspection/initialization, not training | Safer than the old API, still more verbose than PyTorch |
 | Error messages | Polished after a decade | Generic operation-node stack traces | Harder to debug autograd failures |
 | Ecosystem | TensorBoard, torchinfo, etc. | `result.PrintSummary()` — minimal | Fine for small models, insufficient at scale |
 
-**Root cause of the optimizer trap:** `AddParameterGroup(Dictionary<string,
-ReverseGradTensor<T>>)` creates **new** `Parameter<T>` wrappers internally.
-`Step()` then updates those copies, never touching the model's actual
-`Parameter<T>` objects. The fix is to always use
-`optimizer.AddParameterGroup(model.GetParameters().Values, ...)` (the
-`IEnumerable<Parameter<T>>` overload). This is not obvious from the API
-surface and the compiler offers no protection.
+**Resolved optimizer trap:** The old tensor-dictionary optimizer overload was
+removed. Training registration should use owning parameter wrappers:
+`optimizer.AddParameterGroup(model.GetParameters().Values)`. `Parameters()`
+continues to return tensor dictionaries for inspection, initialization, and
+serialization-oriented workflows.
 
 **Weight divergence is expected but disorienting.** Even with identical
 seeded initialization, SGD trajectories diverge between frameworks (different
@@ -46,8 +44,7 @@ iteration.
 ## Current Gaps
 
 This document catalogs future AutoDiff API, performance, testing, and design
-work. Current bugs, correctness risks, and immediate technical debt are tracked
-in `KNOWN-ISSUES.md`.
+work. Fixed issues are reflected in source, tests, and the current API docs.
 
 ---
 
@@ -78,23 +75,6 @@ updates, or null masks.
 **Recommendation:** Before adding AutoGrid APIs, define ownership boundaries:
 who owns tensors, how gradients are zeroed, whether updates mutate or return
 new values, and how null positions flow through grid search or optimization.
-
----
-
-## Performance Gaps
-
-### P2. Null-mask propagation in matrix multiplication uses boolean loops
-
-**Where:** `MatMulHelper.Multiply<T>` (null-aware) / `MatMulHelper.MultiplyCore<T>` (dense).
-
-**Status:** The dense (non-null) path now uses `TensorPrimitives.Dot` + `Parallel.For` with
-a transposed B buffer — efficient and near BLAS-level. The null-aware path fills nulls with
-`T.Zero`, runs the dense kernel, then propagates the result mask via triple-nested boolean
-loops. That mask propagation loop is the remaining bottleneck.
-
-**Recommendation:** Profile the null-aware path to see whether the boolean mask
-propagation dominates. For large matrices with sparse nulls, consider a column-scan or
-bitmask-based propagation. The dense path needs no further work.
 
 ---
 
@@ -142,6 +122,5 @@ flavors.
 | Area | Important | Deferred |
 |------|-----------|----------|
 | API/Ergonomics | | E3, E4 |
-| Performance | P2 | |
 | Testing | T1, T2 | |
 | Design | | D1, D2 |

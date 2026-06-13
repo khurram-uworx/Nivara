@@ -8,6 +8,14 @@ public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
     protected readonly List<ParameterGroup> ParameterGroups = [];
     bool disposed;
 
+    protected Optimizer(T learningRate)
+    {
+        ValidateLearningRate(learningRate);
+        LearningRate = learningRate;
+    }
+
+    public T LearningRate { get; }
+
     public class ParameterGroup
     {
         public IReadOnlyList<Parameter<T>> Parameters { get; }
@@ -23,14 +31,27 @@ public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
     }
 
     public void AddParameterGroup(
+        IEnumerable<Parameter<T>> parameters)
+    {
+        AddParameterGroup(parameters, LearningRate);
+    }
+
+    public void AddParameterGroup(
         IEnumerable<Parameter<T>> parameters,
         T learningRate,
         T weightDecay = default)
     {
         if (parameters == null) throw new ArgumentNullException(nameof(parameters));
+        ValidateLearningRate(learningRate);
         var list = parameters.Where(p => p != null).ToList();
         if (list.Count > 0)
             ParameterGroups.Add(new ParameterGroup(list.AsReadOnly(), learningRate, weightDecay));
+    }
+
+    public void AddParameterGroup(
+        Parameter<T> parameter)
+    {
+        AddParameterGroup(parameter, LearningRate);
     }
 
     public void AddParameterGroup(
@@ -39,21 +60,17 @@ public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
         T weightDecay = default)
     {
         if (parameter == null) throw new ArgumentNullException(nameof(parameter));
+        ValidateLearningRate(learningRate);
         ParameterGroups.Add(new ParameterGroup(
             new List<Parameter<T>> { parameter }.AsReadOnly(),
             learningRate,
             weightDecay));
     }
 
-    public void AddParameterGroup(
-        Dictionary<string, ReverseGradTensor<T>> tensors,
-        T learningRate,
-        T weightDecay = default)
+    protected static void ValidateLearningRate(T learningRate)
     {
-        if (tensors == null) throw new ArgumentNullException(nameof(tensors));
-        var parameters = tensors.Select(kvp => new Parameter<T>(kvp.Key, kvp.Value)).ToList();
-        if (parameters.Count > 0)
-            ParameterGroups.Add(new ParameterGroup(parameters.AsReadOnly(), learningRate, weightDecay));
+        if (learningRate <= T.Zero)
+            throw new ArgumentException("Learning rate must be positive", nameof(learningRate));
     }
 
     public abstract void Step();

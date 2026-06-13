@@ -107,9 +107,31 @@ public class NnTests
 
         var output = dropout.Forward(input);
 
+        Assert.That(output, Is.SameAs(input));
         Assert.That(output[0], Is.EqualTo(1f));
         Assert.That(output[1], Is.EqualTo(2f));
         Assert.That(output[2], Is.EqualTo(3f));
+    }
+
+    [Test]
+    public void Dropout_TrainingMode_ParticipatesInBackwardPass()
+    {
+        using var dropout = new Dropout<float>(0.25);
+        dropout.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f }), requiresGrad: true);
+        var output = dropout.Forward(input);
+        var gradient = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }), requiresGrad: false);
+
+        output.Backward(gradient);
+
+        Assert.That(output, Is.Not.SameAs(input));
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(input.Length));
+        for (int i = 0; i < input.Grad.Length; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
     }
 
     [Test]
@@ -437,6 +459,49 @@ public class NnTests
             for (int i = 0; i < tensor.Length; i++)
                 Assert.That(float.IsNaN(tensor[i]) || float.IsInfinity(tensor[i]), Is.False);
         }
+    }
+
+    [Test]
+    public void Parameter_Dispose_DisposesTensorAndIsIdempotent()
+    {
+        var param = new Parameter<float>("test", new float[] { 1f, 2f }, requiresGrad: true);
+        var tensor = param.Tensor;
+
+        Assert.DoesNotThrow(() => param.Dispose());
+        Assert.DoesNotThrow(() => param.Dispose());
+
+        Assert.Throws<ObjectDisposedException>(() => _ = tensor.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = param.Tensor);
+    }
+
+    [Test]
+    public void Linear_Dispose_DisposesOwnedParameters()
+    {
+        var linear = new Linear<float>(2, 3, bias: true);
+        var weight = linear.Weight;
+        var bias = linear.Bias;
+
+        linear.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = weight.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = bias!.Length);
+        Assert.DoesNotThrow(() => linear.Dispose());
+    }
+
+    [Test]
+    public void Sequential_Dispose_DisposesChildModuleParameters()
+    {
+        var first = new Linear<float>(3, 4);
+        var second = new Linear<float>(4, 2);
+        var firstWeight = first.Weight;
+        var secondBias = second.Bias;
+        var seq = new Sequential<float>(first, second);
+
+        seq.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = firstWeight.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = secondBias!.Length);
+        Assert.DoesNotThrow(() => seq.Dispose());
     }
 
     protected static void DisposeModules(params Module<float>[] modules)
