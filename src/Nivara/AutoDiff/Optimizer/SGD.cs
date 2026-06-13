@@ -19,11 +19,12 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
         int n = data.Length;
         var momentumT = T.CreateChecked(0.9);
 
-        if (!data.HasNulls && !grad.HasNulls)
+        data.TryGetSpan(out var dataSpan);
+        grad.TryGetSpan(out var gradSpan);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            data.TryGetSpan(out var dataSpan);
-            grad.TryGetSpan(out var gradSpan);
-            var result = new T[n];
+            var result = buf.AsSpan(0, n);
 
             for (int i = 0; i < n; i++)
                 velocity[i] = wd != T.Zero
@@ -35,63 +36,10 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
 
             return new ReverseGradTensor<T>(NivaraColumn<T>.Create(result), requiresGrad: true, tensor.shape);
         }
-
-        var dataBuf = ArrayPool<T>.Shared.Rent(n);
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-
-        try
-        {
-            data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
-            grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            var hasNulls = mergeNullMasks(data, grad, nullMask.AsSpan(0, n));
-
-            for (int i = 0; i < n; i++)
-            {
-                if (nullMask[i])
-                {
-                    velocity[i] = T.Zero;
-                    resultBuf[i] = dataBuf[i];
-                }
-                else
-                {
-                    velocity[i] = wd != T.Zero
-                        ? momentumT * velocity[i] + lr * (wd * dataBuf[i] + gradBuf[i])
-                        : momentumT * velocity[i] + lr * gradBuf[i];
-                    resultBuf[i] = dataBuf[i] - velocity[i];
-                }
-            }
-
-            var resultColumn = hasNulls
-                ? NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n))
-                : NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-
-            return new ReverseGradTensor<T>(resultColumn, requiresGrad: true, tensor.shape);
-        }
         finally
         {
-            ArrayPool<T>.Shared.Return(dataBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
         }
-    }
-
-    static bool mergeNullMasks(NivaraColumn<T> a, NivaraColumn<T> b, Span<bool> destination)
-    {
-        var aHasNulls = a.TryGetNullMask(out var aMask);
-        var bHasNulls = b.TryGetNullMask(out var bMask);
-
-        if (aHasNulls && bHasNulls)
-            for (int i = 0; i < destination.Length; i++)
-                destination[i] = aMask[i] || bMask[i];
-        else if (aHasNulls)
-            aMask.CopyTo(destination);
-        else if (bHasNulls)
-            bMask.CopyTo(destination);
-
-        return aHasNulls || bHasNulls;
     }
 
     public static ReverseGradTensor<T> SgdUpdate(ReverseGradTensor<T> tensor, T learningRate, T weightDecay = default)
@@ -109,11 +57,12 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
         var grad = tensor.Grad!;
         int n = data.Length;
 
-        if (!data.HasNulls && !grad.HasNulls)
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
             data.TryGetSpan(out var dataSpan);
             grad.TryGetSpan(out var gradSpan);
-            var result = new T[n];
+            var result = buf.AsSpan(0, n);
 
             if (weightDecay != T.Zero)
             {
@@ -130,43 +79,9 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
 
             return new ReverseGradTensor<T>(NivaraColumn<T>.Create(result), requiresGrad: false, tensor.shape);
         }
-
-        var dataBuf = ArrayPool<T>.Shared.Rent(n);
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-
-        try
-        {
-            data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
-            grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            var hasNulls = mergeNullMasks(data, grad, nullMask.AsSpan(0, n));
-
-            if (weightDecay != T.Zero)
-            {
-                TensorPrimitives.Multiply(dataBuf.AsSpan(0, n), weightDecay, resultBuf.AsSpan(0, n));
-                TensorPrimitives.Add(gradBuf.AsSpan(0, n), resultBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
-                TensorPrimitives.Multiply(resultBuf.AsSpan(0, n), learningRate, resultBuf.AsSpan(0, n));
-                TensorPrimitives.Subtract(dataBuf.AsSpan(0, n), resultBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
-            }
-            else
-            {
-                TensorPrimitives.Multiply(gradBuf.AsSpan(0, n), learningRate, resultBuf.AsSpan(0, n));
-                TensorPrimitives.Subtract(dataBuf.AsSpan(0, n), resultBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
-            }
-
-            var resultColumn = hasNulls
-                ? NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n))
-                : NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-
-            return new ReverseGradTensor<T>(resultColumn, requiresGrad: false, tensor.shape);
-        }
         finally
         {
-            ArrayPool<T>.Shared.Return(dataBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
         }
     }
 

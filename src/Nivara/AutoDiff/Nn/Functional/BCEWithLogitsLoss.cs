@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using System.Buffers;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
@@ -10,9 +11,19 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, INumber<T>
         if (logits == null) throw new ArgumentNullException(nameof(logits));
         if (targets == null) throw new ArgumentNullException(nameof(targets));
 
-        var oneData = new T[logits.Length];
-        Array.Fill(oneData, T.One);
-        var one = new ReverseGradTensor<T>(NivaraColumn<T>.Create(oneData),
+        int n = logits.Length;
+        var oneBuf = ArrayPool<T>.Shared.Rent(n);
+        NivaraColumn<T> oneCol;
+        try
+        {
+            oneBuf.AsSpan(0, n).Fill(T.One);
+            oneCol = NivaraColumn<T>.Create(oneBuf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(oneBuf, clearArray: true);
+        }
+        var one = new ReverseGradTensor<T>(oneCol,
             requiresGrad: false, logits.shape);
 
         var maxX = GradOperations.Relu(logits);

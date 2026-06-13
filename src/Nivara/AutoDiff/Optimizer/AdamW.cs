@@ -5,22 +5,6 @@ namespace Nivara.AutoDiff.Optimizer;
 
 public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
 {
-    static bool mergeNullMasks(NivaraColumn<T> a, NivaraColumn<T> b, Span<bool> destination)
-    {
-        var aHasNulls = a.TryGetNullMask(out var aMask);
-        var bHasNulls = b.TryGetNullMask(out var bMask);
-
-        if (aHasNulls && bHasNulls)
-            for (int i = 0; i < destination.Length; i++)
-                destination[i] = aMask[i] || bMask[i];
-        else if (aHasNulls)
-            aMask.CopyTo(destination);
-        else if (bHasNulls)
-            bMask.CopyTo(destination);
-
-        return aHasNulls || bHasNulls;
-    }
-
     readonly double beta1;
     readonly double beta2;
     readonly double eps;
@@ -52,11 +36,12 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
         var beta2T = T.CreateChecked(beta2);
         var epsT = T.CreateChecked(eps);
 
-        if (!data.HasNulls && !grad.HasNulls)
+        data.TryGetSpan(out var dataSpan);
+        grad.TryGetSpan(out var gradSpan);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            data.TryGetSpan(out var dataSpan);
-            grad.TryGetSpan(out var gradSpan);
-            var result = new T[n];
+            var result = buf.AsSpan(0, n);
 
             for (int i = 0; i < n; i++)
             {
@@ -78,54 +63,9 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
 
             return new ReverseGradTensor<T>(NivaraColumn<T>.Create(result), requiresGrad: true, tensor.shape);
         }
-
-        var dataBuf = ArrayPool<T>.Shared.Rent(n);
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-
-        try
-        {
-            data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
-            grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            var hasNulls = mergeNullMasks(data, grad, nullMask.AsSpan(0, n));
-
-            for (int i = 0; i < n; i++)
-            {
-                if (nullMask[i])
-                {
-                    expAvg[i] = T.Zero;
-                    expAvgSq[i] = T.Zero;
-                    resultBuf[i] = dataBuf[i];
-                }
-                else
-                {
-                    expAvg[i] = beta1T * expAvg[i] + (T.One - beta1T) * gradBuf[i];
-                    expAvgSq[i] = beta2T * expAvgSq[i] + (T.One - beta2T) * gradBuf[i] * gradBuf[i];
-
-                    var mHat = expAvg[i] / biasCorr1;
-                    var vHat = expAvgSq[i] / biasCorr2;
-                    var denom = T.CreateChecked(Math.Sqrt(double.CreateChecked(vHat))) + epsT;
-
-                    resultBuf[i] = dataBuf[i] - lr * mHat / denom;
-
-                    if (wd != T.Zero)
-                        resultBuf[i] -= lr * wd * dataBuf[i];
-                }
-            }
-
-            var resultColumn = hasNulls
-                ? NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n))
-                : NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-
-            return new ReverseGradTensor<T>(resultColumn, requiresGrad: true, tensor.shape);
-        }
         finally
         {
-            ArrayPool<T>.Shared.Return(dataBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
         }
     }
 

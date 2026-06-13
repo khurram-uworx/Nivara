@@ -88,10 +88,36 @@ Key rules for AI Agents to follow when generating tensor-aware code
    - Null propagation rule: resultNullMask = leftNullMask OR rightNullMask (or leftNullMask for scalar op)
    - Where result is boolean (comparisons), null positions should be represented in the result null mask and the boolean output at those positions should be false (SQL-like semantics). Always keep the mask.
 
-5. Minimize allocations
-   - Avoid calling `Tensor.FlattenTo` repeatedly in hot loops.
-   - For temporary buffers larger than 1024 elements, rent arrays from `ArrayPool<T>.Shared` (core) or `BufferPool` (Extensions) and return promptly.
-   - Consider caching the flattened buffer inside `Nivara.Storage.TensorStorage` behind an `internal` API if multiple accesses are expected.
+5. Use `System.Buffers` for all scratch buffers (idiomatic, non-negotiable on hot paths)
+   - **Every** ephemeral `new T[n]` that feeds into `NivaraColumn<T>.Create(span)` must be
+     `ArrayPool<T>.Shared.Rent(n)` instead. The `Create(span)` overload copies data, so the
+     buffer is safe to return immediately after creation.
+   - **Pattern** (exact, copy-paste ready):
+     ```csharp
+     var buf = ArrayPool<T>.Shared.Rent(n);
+     try
+     {
+         var result = buf.AsSpan(0, n);
+         // ... fill result (TensorPrimitives, manual loop, etc.) ...
+         return NivaraColumn<T>.Create(result);
+     }
+     finally
+     {
+         ArrayPool<T>.Shared.Return(buf, clearArray: true);
+     }
+     ```
+   - For typed branches (`new float[n]`, `new double[n]`) use the specific pool:
+     `ArrayPool<float>.Shared.Rent(n)` / `ArrayPool<double>.Shared.Rent(n)`.
+   - For `bool[]` masks: `ArrayPool<bool>.Shared.Rent(n)`.
+   - For `int[]` index arrays on hot paths: `ArrayPool<int>.Shared.Rent(n)`.
+   - **Anti-pattern — do NOT pool**: factory methods (`Zeros`, `Ones`, `Full`),
+     weight initializers, and permanent parameter storage. These own the data for
+     the lifetime of the tensor; pooling would corrupt storage.
+   - `clearArray: true` is safest; the arrays store numeric types and clearing
+     avoids stale-value confusion. You may use `clearArray: false` for `int[]`
+     index arrays that are fully overwritten before any read.
+   - Also avoid calling `Tensor.FlattenTo` repeatedly in hot loops. Cache the
+     flattened buffer via `GetFlattenedSpan()` when multiple accesses are expected.
 
 6. Kernel selection heuristics
    - Implement or reuse `DetermineKernelType()` that considers:
@@ -116,9 +142,12 @@ Suggested small, safe improvements to implement (prioritized)
 - ✓ Add `BufferPool.Rent(int size)` usage in `NivaraColumn` heavy paths — DONE (Phase 0).
 - ✓ Implement `DetermineKernelType` central helper — DONE as `KernelSelector.DetermineKernelType()` (Phase 1).
 - ✓ Add `RowNorms`/`ColumnNorms`/`TopKDescending` on `NivaraFrame` — DONE via per-row loop (Phase 3).
+- ✓ ArrayPool optimization complete across AutoDiff hot paths — all `new T[n]` in GradOperations, optimizers, GradientUtils, and BCEWithLogitsLoss replaced with `ArrayPool<T>.Shared.Rent/Return`; dead null branches stripped from SGD, Adam, AdamW.
 - Add batch `TensorPrimitives` kernel for `RowNorms` (not yet implemented — currently uses per-row `ArrayPool` loop).
 
 Common gotchas (use these as lint-like checks in generated code)
+- AutoDiff null branches have been stripped from all optimizers (SGD, Adam, AdamW). Do not regenerate them — AutoDiff is a no-null zone.
+- ArrayPool buffers must never be passed directly to `NivaraColumn<T>.Create(T[])` — always use the `Create(ReadOnlySpan<T>)` overload (or `.AsSpan(0, n)`) so the data is copied and the buffer is safe to return.
 - `ReadOnlyMemory<T>?` has `HasValue == true` for empty memory; always check `.Length > 0` to decide if mask exists.
 - Slicing null masks: always check `.Length > 0` before slicing to avoid invalid operation on empty memory.
 - `Tensor.Create(..., [length])` in codebase should use `new nint[] { length }` or `new ReadOnlySpan<nint>(new nint[] { length })` for dimensions; ensure creation uses correct API overloads.
@@ -143,6 +172,22 @@ Example patterns (pseudocode for AI Agent to reuse)
 var span = tensorStorage.AsTensorSpan(); // returns TensorSpan<T>
 // Call kernel that accepts TensorSpan<T> directly
 MyKernels.AddTensorSpan(span, otherSpan, destinationSpan);
+```
+
+- Pooled scratch buffer (standard pattern across all AutoDiff)
+
+```csharp
+var buf = ArrayPool<T>.Shared.Rent(n);
+try
+{
+    var result = buf.AsSpan(0, n);
+    TensorPrimitives.Add(aSpan, bSpan, result);
+    return NivaraColumn<T>.Create(result);
+}
+finally
+{
+    ArrayPool<T>.Shared.Return(buf, clearArray: true);
+}
 ```
 
 - Safe tensor creation from nullable values

@@ -1,5 +1,6 @@
 using Nivara.AutoDiff.Extensions;
 using Nivara.Tensors;
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
@@ -23,9 +24,17 @@ public static class GradOperations
         int n = a.Length;
         a.Data.TryGetSpan(out var aSpan);
         b.Data.TryGetSpan(out var bSpan);
-        var resultData = new T[n];
-        TensorPrimitives.Add(aSpan, bSpan, resultData);
-        var result = NivaraColumn<T>.Create(resultData);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        NivaraColumn<T> result;
+        try
+        {
+            TensorPrimitives.Add(aSpan, bSpan, buf.AsSpan(0, n));
+            result = NivaraColumn<T>.Create(buf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
 
         var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, PropagateShape(a, b));
 
@@ -97,9 +106,17 @@ public static class GradOperations
         int n = a.Length;
         a.Data.TryGetSpan(out var aSpan);
         b.Data.TryGetSpan(out var bSpan);
-        var resultData = new T[n];
-        TensorPrimitives.Multiply(aSpan, bSpan, resultData);
-        var result = NivaraColumn<T>.Create(resultData);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        NivaraColumn<T> result;
+        try
+        {
+            TensorPrimitives.Multiply(aSpan, bSpan, buf.AsSpan(0, n));
+            result = NivaraColumn<T>.Create(buf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
 
         var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, PropagateShape(a, b));
 
@@ -698,8 +715,18 @@ public static class GradOperations
                 nameof(logVar));
 
         int n = mean.Length;
-        var epsilon = GenerateStandardNormal<T>(n, seed);
-        var epsilonCol = NivaraColumn<T>.Create(epsilon.AsSpan());
+        var epsilonBuf = ArrayPool<T>.Shared.Rent(n);
+        NivaraColumn<T> epsilonCol;
+        try
+        {
+            var epsilon = epsilonBuf.AsSpan(0, n);
+            GenerateStandardNormal(epsilon, seed);
+            epsilonCol = NivaraColumn<T>.Create(epsilon);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(epsilonBuf, clearArray: true);
+        }
 
         var result = ApplySampleNormalForward(mean.Data, logVar.Data, epsilonCol);
 
@@ -757,20 +784,35 @@ public static class GradOperations
         int n = aRows * bCols;
         a.TryGetSpan(out var aSpan);
         b.TryGetSpan(out var bSpan);
-        var result = new T[n];
-        MatMulHelper.MultiplyCore(aSpan, bSpan, result, aRows, aCols, bCols);
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            MatMulHelper.MultiplyCore(aSpan, bSpan, buf, aRows, aCols, bCols);
+            return NivaraColumn<T>.Create(buf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> TransposeVectorized<T>(NivaraColumn<T> a, int rows, int cols) where T : struct, INumber<T>
     {
         var aSpan = a.AsSpan();
         int n = rows * cols;
-        var result = new T[n];
-        for (int i = 0; i < rows; i++)
-            for (int j = 0; j < cols; j++)
-                result[j * rows + i] = aSpan[i * cols + j];
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < rows; i++)
+                for (int j = 0; j < cols; j++)
+                    result[j * rows + i] = aSpan[i * cols + j];
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> BroadcastGradient<T>(NivaraColumn<T> scalarGrad, int targetLength) where T : struct, INumber<T>
@@ -779,9 +821,17 @@ public static class GradOperations
             throw new ArgumentException($"Expected scalar gradient with length 1, got {scalarGrad.Length}");
 
         var span = scalarGrad.AsSpan();
-        var filled = new T[targetLength];
-        Array.Fill(filled, span[0]);
-        return NivaraColumn<T>.Create(filled);
+        var buf = ArrayPool<T>.Shared.Rent(targetLength);
+        try
+        {
+            var filled = buf.AsSpan(0, targetLength);
+            filled.Fill(span[0]);
+            return NivaraColumn<T>.Create(filled);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> DivideByScalar<T>(NivaraColumn<T> column, int divisor) where T : struct, INumber<T>
@@ -826,10 +876,18 @@ public static class GradOperations
     {
         input.TryGetSpan(out var span);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = keepMask[i] ? span[i] * scale : T.Zero;
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = keepMask[i] ? span[i] * scale : T.Zero;
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyDropoutGradient<T>(
@@ -841,10 +899,18 @@ public static class GradOperations
     {
         gradOutput.TryGetSpan(out var gradSpan);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = keepMask[i] ? gradSpan[i] * scale : T.Zero;
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = keepMask[i] ? gradSpan[i] * scale : T.Zero;
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyReluGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
@@ -852,10 +918,18 @@ public static class GradOperations
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gradSpan);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = inSpan[i] > T.Zero ? gradSpan[i] : T.Zero;
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = inSpan[i] > T.Zero ? gradSpan[i] : T.Zero;
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyAbs<T>(NivaraColumn<T> input) where T : struct, INumber<T>
@@ -866,10 +940,18 @@ public static class GradOperations
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gradSpan);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = T.CreateChecked(T.Sign(inSpan[i])) * gradSpan[i];
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = T.CreateChecked(T.Sign(inSpan[i])) * gradSpan[i];
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyClip<T>(NivaraColumn<T> input, T min, T max) where T : struct, INumber<T>
@@ -880,20 +962,36 @@ public static class GradOperations
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gradSpan);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = (inSpan[i] >= min && inSpan[i] <= max) ? gradSpan[i] : T.Zero;
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = (inSpan[i] >= min && inSpan[i] <= max) ? gradSpan[i] : T.Zero;
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyLeakyRelu<T>(NivaraColumn<T> input, T negativeSlope) where T : struct, INumber<T>
     {
         input.TryGetSpan(out var span);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = span[i] > T.Zero ? span[i] : negativeSlope * span[i];
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = span[i] > T.Zero ? span[i] : negativeSlope * span[i];
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyLeakyReluGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput, T negativeSlope) where T : struct, INumber<T>
@@ -901,40 +999,64 @@ public static class GradOperations
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gradSpan);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = inSpan[i] > T.Zero ? gradSpan[i] : negativeSlope * gradSpan[i];
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = inSpan[i] > T.Zero ? gradSpan[i] : negativeSlope * gradSpan[i];
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyExp<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         input.TryGetSpan(out var span);
         int n = input.Length;
-        var result = new T[n];
-        if (typeof(T) == typeof(float))
-            TensorPrimitives.Exp(MemoryMarshal.Cast<T, float>(span), MemoryMarshal.Cast<T, float>(result.AsSpan()));
-        else if (typeof(T) == typeof(double))
-            TensorPrimitives.Exp(MemoryMarshal.Cast<T, double>(span), MemoryMarshal.Cast<T, double>(result.AsSpan()));
-        else
-            for (int i = 0; i < n; i++)
-                result[i] = T.CreateChecked(Math.Exp(double.CreateChecked(span[i])));
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            if (typeof(T) == typeof(float))
+                TensorPrimitives.Exp(MemoryMarshal.Cast<T, float>(span), MemoryMarshal.Cast<T, float>(result));
+            else if (typeof(T) == typeof(double))
+                TensorPrimitives.Exp(MemoryMarshal.Cast<T, double>(span), MemoryMarshal.Cast<T, double>(result));
+            else
+                for (int i = 0; i < n; i++)
+                    result[i] = T.CreateChecked(Math.Exp(double.CreateChecked(span[i])));
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyLog<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         input.TryGetSpan(out var span);
         int n = input.Length;
-        var result = new T[n];
-        if (typeof(T) == typeof(float))
-            TensorPrimitives.Log(MemoryMarshal.Cast<T, float>(span), MemoryMarshal.Cast<T, float>(result.AsSpan()));
-        else if (typeof(T) == typeof(double))
-            TensorPrimitives.Log(MemoryMarshal.Cast<T, double>(span), MemoryMarshal.Cast<T, double>(result.AsSpan()));
-        else
-            for (int i = 0; i < n; i++)
-                result[i] = T.CreateChecked(Math.Log(double.CreateChecked(span[i])));
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            if (typeof(T) == typeof(float))
+                TensorPrimitives.Log(MemoryMarshal.Cast<T, float>(span), MemoryMarshal.Cast<T, float>(result));
+            else if (typeof(T) == typeof(double))
+                TensorPrimitives.Log(MemoryMarshal.Cast<T, double>(span), MemoryMarshal.Cast<T, double>(result));
+            else
+                for (int i = 0; i < n; i++)
+                    result[i] = T.CreateChecked(Math.Log(double.CreateChecked(span[i])));
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyLogGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
@@ -942,44 +1064,60 @@ public static class GradOperations
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gradSpan);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
-            result[i] = gradSpan[i] / inSpan[i];
-        return NivaraColumn<T>.Create(result);
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+                result[i] = gradSpan[i] / inSpan[i];
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplySigmoid<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         input.TryGetSpan(out var span);
         int n = input.Length;
-        var result = new T[n];
-        if (typeof(T) == typeof(float))
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var s = MemoryMarshal.Cast<T, float>(span);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Negate(s, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Add(d, 1.0f, d);
-            TensorPrimitives.Divide(1.0f, d, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var s = MemoryMarshal.Cast<T, double>(span);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Negate(s, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Add(d, 1.0, d);
-            TensorPrimitives.Divide(1.0, d, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
+            var result = buf.AsSpan(0, n);
+            if (typeof(T) == typeof(float))
             {
-                var x = double.CreateChecked(span[i]);
-                result[i] = T.CreateChecked(1.0 / (1.0 + Math.Exp(-x)));
+                var s = MemoryMarshal.Cast<T, float>(span);
+                var d = MemoryMarshal.Cast<T, float>(result);
+                TensorPrimitives.Negate(s, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Add(d, 1.0f, d);
+                TensorPrimitives.Divide(1.0f, d, d);
             }
+            else if (typeof(T) == typeof(double))
+            {
+                var s = MemoryMarshal.Cast<T, double>(span);
+                var d = MemoryMarshal.Cast<T, double>(result);
+                TensorPrimitives.Negate(s, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Add(d, 1.0, d);
+                TensorPrimitives.Divide(1.0, d, d);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var x = double.CreateChecked(span[i]);
+                    result[i] = T.CreateChecked(1.0 / (1.0 + Math.Exp(-x)));
+                }
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplySigmoidGradient<T>(NivaraColumn<T> sigmoidOutput, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
@@ -987,26 +1125,42 @@ public static class GradOperations
         sigmoidOutput.TryGetSpan(out var sigSpan);
         gradOutput.TryGetSpan(out var gradSpan);
         int n = sigmoidOutput.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var sig = sigSpan[i];
-            result[i] = sig * (T.One - sig) * gradSpan[i];
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+            {
+                var sig = sigSpan[i];
+                result[i] = sig * (T.One - sig) * gradSpan[i];
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyTanh<T>(NivaraColumn<T> input) where T : struct, INumber<T>
     {
         input.TryGetSpan(out var span);
         int n = input.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var x = double.CreateChecked(span[i]);
-            result[i] = T.CreateChecked(Math.Tanh(x));
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+            {
+                var x = double.CreateChecked(span[i]);
+                result[i] = T.CreateChecked(Math.Tanh(x));
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyTanhGradient<T>(NivaraColumn<T> tanhOutput, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
@@ -1014,13 +1168,21 @@ public static class GradOperations
         tanhOutput.TryGetSpan(out var tanhSpan);
         gradOutput.TryGetSpan(out var gradSpan);
         int n = tanhOutput.Length;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var tanh = tanhSpan[i];
-            result[i] = (T.One - tanh * tanh) * gradSpan[i];
+            var result = buf.AsSpan(0, n);
+            for (int i = 0; i < n; i++)
+            {
+                var tanh = tanhSpan[i];
+                result[i] = (T.One - tanh * tanh) * gradSpan[i];
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplySoftmax<T>(NivaraColumn<T> input, int classCount) where T : struct, INumber<T>
@@ -1028,44 +1190,115 @@ public static class GradOperations
         input.TryGetSpan(out var span);
         int n = input.Length;
         int rows = classCount > 0 ? n / classCount : n;
-        var result = new T[n];
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
 
-        if (typeof(T) == typeof(float))
+            if (typeof(T) == typeof(float))
+            {
+                var s = MemoryMarshal.Cast<T, float>(span);
+                var d = MemoryMarshal.Cast<T, float>(result);
+                for (int r = 0; r < rows; r++)
+                {
+                    int start = r * classCount;
+                    var rowSpan = s.Slice(start, classCount);
+                    var rowDst = d.Slice(start, classCount);
+                    float max = float.NegativeInfinity;
+                    for (int c = 0; c < classCount; c++)
+                        if (rowSpan[c] > max) max = rowSpan[c];
+                    TensorPrimitives.Subtract(rowSpan, max, rowDst);
+                    TensorPrimitives.Exp(rowDst, rowDst);
+                    TensorPrimitives.Divide(rowDst, TensorPrimitives.Sum(rowDst), rowDst);
+                }
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var s = MemoryMarshal.Cast<T, double>(span);
+                var d = MemoryMarshal.Cast<T, double>(result);
+                for (int r = 0; r < rows; r++)
+                {
+                    int start = r * classCount;
+                    var rowSpan = s.Slice(start, classCount);
+                    var rowDst = d.Slice(start, classCount);
+                    double max = double.NegativeInfinity;
+                    for (int c = 0; c < classCount; c++)
+                        if (rowSpan[c] > max) max = rowSpan[c];
+                    TensorPrimitives.Subtract(rowSpan, max, rowDst);
+                    TensorPrimitives.Exp(rowDst, rowDst);
+                    TensorPrimitives.Divide(rowDst, TensorPrimitives.Sum(rowDst), rowDst);
+                }
+            }
+            else
+            {
+                for (int r = 0; r < rows; r++)
+                {
+                    int rowStart = r * classCount;
+                    double max = double.NegativeInfinity;
+                    for (int c = 0; c < classCount; c++)
+                    {
+                        var val = double.CreateChecked(span[rowStart + c]);
+                        if (val > max) max = val;
+                    }
+                    double sum = 0.0;
+                    for (int c = 0; c < classCount; c++)
+                    {
+                        var exp = Math.Exp(double.CreateChecked(span[rowStart + c]) - max);
+                        result[rowStart + c] = T.CreateChecked(exp);
+                        sum += exp;
+                    }
+                    for (int c = 0; c < classCount; c++)
+                        result[rowStart + c] = T.CreateChecked(double.CreateChecked(result[rowStart + c]) / sum);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+        finally
         {
-            var s = MemoryMarshal.Cast<T, float>(span);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplySoftmaxGradient<T>(NivaraColumn<T> softmaxOutput, NivaraColumn<T> gradOutput, int classCount) where T : struct, INumber<T>
+    {
+        softmaxOutput.TryGetSpan(out var softSpan);
+        gradOutput.TryGetSpan(out var gradSpan);
+        int n = softmaxOutput.Length;
+        int rows = classCount > 0 ? n / classCount : n;
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
             for (int r = 0; r < rows; r++)
             {
-                int start = r * classCount;
-                var rowSpan = s.Slice(start, classCount);
-                var rowDst = d.Slice(start, classCount);
-                float max = float.NegativeInfinity;
+                int rowStart = r * classCount;
+                double dot = 0.0;
                 for (int c = 0; c < classCount; c++)
-                    if (rowSpan[c] > max) max = rowSpan[c];
-                TensorPrimitives.Subtract(rowSpan, max, rowDst);
-                TensorPrimitives.Exp(rowDst, rowDst);
-                TensorPrimitives.Divide(rowDst, TensorPrimitives.Sum(rowDst), rowDst);
-            }
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var s = MemoryMarshal.Cast<T, double>(span);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            for (int r = 0; r < rows; r++)
-            {
-                int start = r * classCount;
-                var rowSpan = s.Slice(start, classCount);
-                var rowDst = d.Slice(start, classCount);
-                double max = double.NegativeInfinity;
+                    dot += double.CreateChecked(softSpan[rowStart + c]) * double.CreateChecked(gradSpan[rowStart + c]);
                 for (int c = 0; c < classCount; c++)
-                    if (rowSpan[c] > max) max = rowSpan[c];
-                TensorPrimitives.Subtract(rowSpan, max, rowDst);
-                TensorPrimitives.Exp(rowDst, rowDst);
-                TensorPrimitives.Divide(rowDst, TensorPrimitives.Sum(rowDst), rowDst);
+                {
+                    var s = double.CreateChecked(softSpan[rowStart + c]);
+                    var dy = double.CreateChecked(gradSpan[rowStart + c]);
+                    result[rowStart + c] = T.CreateChecked(s * (dy - dot));
+                }
             }
+            return NivaraColumn<T>.Create(result);
         }
-        else
+        finally
         {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyLogSoftmax<T>(NivaraColumn<T> input, int classCount) where T : struct, INumber<T>
+    {
+        input.TryGetSpan(out var span);
+        int n = input.Length;
+        int rows = classCount > 0 ? n / classCount : n;
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var result = buf.AsSpan(0, n);
             for (int r = 0; r < rows; r++)
             {
                 int rowStart = r * classCount;
@@ -1077,64 +1310,17 @@ public static class GradOperations
                 }
                 double sum = 0.0;
                 for (int c = 0; c < classCount; c++)
-                {
-                    var exp = Math.Exp(double.CreateChecked(span[rowStart + c]) - max);
-                    result[rowStart + c] = T.CreateChecked(exp);
-                    sum += exp;
-                }
+                    sum += Math.Exp(double.CreateChecked(span[rowStart + c]) - max);
+                var logSum = Math.Log(sum);
                 for (int c = 0; c < classCount; c++)
-                    result[rowStart + c] = T.CreateChecked(double.CreateChecked(result[rowStart + c]) / sum);
+                    result[rowStart + c] = T.CreateChecked(double.CreateChecked(span[rowStart + c]) - max - logSum);
             }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
-    }
-
-    private static NivaraColumn<T> ApplySoftmaxGradient<T>(NivaraColumn<T> softmaxOutput, NivaraColumn<T> gradOutput, int classCount) where T : struct, INumber<T>
-    {
-        softmaxOutput.TryGetSpan(out var softSpan);
-        gradOutput.TryGetSpan(out var gradSpan);
-        int n = softmaxOutput.Length;
-        int rows = classCount > 0 ? n / classCount : n;
-        var result = new T[n];
-        for (int r = 0; r < rows; r++)
+        finally
         {
-            int rowStart = r * classCount;
-            double dot = 0.0;
-            for (int c = 0; c < classCount; c++)
-                dot += double.CreateChecked(softSpan[rowStart + c]) * double.CreateChecked(gradSpan[rowStart + c]);
-            for (int c = 0; c < classCount; c++)
-            {
-                var s = double.CreateChecked(softSpan[rowStart + c]);
-                var dy = double.CreateChecked(gradSpan[rowStart + c]);
-                result[rowStart + c] = T.CreateChecked(s * (dy - dot));
-            }
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
         }
-        return NivaraColumn<T>.Create(result);
-    }
-
-    private static NivaraColumn<T> ApplyLogSoftmax<T>(NivaraColumn<T> input, int classCount) where T : struct, INumber<T>
-    {
-        input.TryGetSpan(out var span);
-        int n = input.Length;
-        int rows = classCount > 0 ? n / classCount : n;
-        var result = new T[n];
-        for (int r = 0; r < rows; r++)
-        {
-            int rowStart = r * classCount;
-            double max = double.NegativeInfinity;
-            for (int c = 0; c < classCount; c++)
-            {
-                var val = double.CreateChecked(span[rowStart + c]);
-                if (val > max) max = val;
-            }
-            double sum = 0.0;
-            for (int c = 0; c < classCount; c++)
-                sum += Math.Exp(double.CreateChecked(span[rowStart + c]) - max);
-            var logSum = Math.Log(sum);
-            for (int c = 0; c < classCount; c++)
-                result[rowStart + c] = T.CreateChecked(double.CreateChecked(span[rowStart + c]) - max - logSum);
-        }
-        return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplyLogSoftmaxGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput, int classCount) where T : struct, INumber<T>
@@ -1144,21 +1330,29 @@ public static class GradOperations
         gradOutput.TryGetSpan(out var gradSpan);
         int n = input.Length;
         int rows = classCount > 0 ? n / classCount : n;
-        var result = new T[n];
-        for (int r = 0; r < rows; r++)
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            int rowStart = r * classCount;
-            double sumGrad = 0.0;
-            for (int c = 0; c < classCount; c++)
-                sumGrad += double.CreateChecked(gradSpan[rowStart + c]);
-            for (int c = 0; c < classCount; c++)
+            var result = buf.AsSpan(0, n);
+            for (int r = 0; r < rows; r++)
             {
-                var dy = double.CreateChecked(gradSpan[rowStart + c]);
-                var s = double.CreateChecked(softSpan[rowStart + c]);
-                result[rowStart + c] = T.CreateChecked(dy - s * sumGrad);
+                int rowStart = r * classCount;
+                double sumGrad = 0.0;
+                for (int c = 0; c < classCount; c++)
+                    sumGrad += double.CreateChecked(gradSpan[rowStart + c]);
+                for (int c = 0; c < classCount; c++)
+                {
+                    var dy = double.CreateChecked(gradSpan[rowStart + c]);
+                    var s = double.CreateChecked(softSpan[rowStart + c]);
+                    result[rowStart + c] = T.CreateChecked(dy - s * sumGrad);
+                }
             }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar) where T : struct, INumber<T>
@@ -1166,47 +1360,73 @@ public static class GradOperations
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         int n = mean.Length;
-        var result = new T[n];
-        if (typeof(T) == typeof(float))
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            var m2 = new float[n];
-            var expLv = new float[n];
-            var tmp = new float[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0f, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5f, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            var m2 = new double[n];
-            var expLv = new double[n];
-            var tmp = new double[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
+            var result = buf.AsSpan(0, n);
+            if (typeof(T) == typeof(float))
             {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
+                var m = MemoryMarshal.Cast<T, float>(mSpan);
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var r = MemoryMarshal.Cast<T, float>(result);
+                var m2 = ArrayPool<float>.Shared.Rent(n);
+                var expLv = ArrayPool<float>.Shared.Rent(n);
+                var tmp = ArrayPool<float>.Shared.Rent(n);
+                try
+                {
+                    TensorPrimitives.Multiply(m, m, m2.AsSpan(0, n));
+                    TensorPrimitives.Exp(lv, expLv.AsSpan(0, n));
+                    TensorPrimitives.Add(lv, 1.0f, tmp.AsSpan(0, n));
+                    TensorPrimitives.Subtract(tmp.AsSpan(0, n), m2.AsSpan(0, n), tmp.AsSpan(0, n));
+                    TensorPrimitives.Subtract(tmp.AsSpan(0, n), expLv.AsSpan(0, n), tmp.AsSpan(0, n));
+                    TensorPrimitives.Multiply(tmp.AsSpan(0, n), -0.5f, r);
+                }
+                finally
+                {
+                    ArrayPool<float>.Shared.Return(m2, clearArray: true);
+                    ArrayPool<float>.Shared.Return(expLv, clearArray: true);
+                    ArrayPool<float>.Shared.Return(tmp, clearArray: true);
+                }
             }
+            else if (typeof(T) == typeof(double))
+            {
+                var m = MemoryMarshal.Cast<T, double>(mSpan);
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var r = MemoryMarshal.Cast<T, double>(result);
+                var m2 = ArrayPool<double>.Shared.Rent(n);
+                var expLv = ArrayPool<double>.Shared.Rent(n);
+                var tmp = ArrayPool<double>.Shared.Rent(n);
+                try
+                {
+                    TensorPrimitives.Multiply(m, m, m2.AsSpan(0, n));
+                    TensorPrimitives.Exp(lv, expLv.AsSpan(0, n));
+                    TensorPrimitives.Add(lv, 1.0, tmp.AsSpan(0, n));
+                    TensorPrimitives.Subtract(tmp.AsSpan(0, n), m2.AsSpan(0, n), tmp.AsSpan(0, n));
+                    TensorPrimitives.Subtract(tmp.AsSpan(0, n), expLv.AsSpan(0, n), tmp.AsSpan(0, n));
+                    TensorPrimitives.Multiply(tmp.AsSpan(0, n), -0.5, r);
+                }
+                finally
+                {
+                    ArrayPool<double>.Shared.Return(m2, clearArray: true);
+                    ArrayPool<double>.Shared.Return(expLv, clearArray: true);
+                    ArrayPool<double>.Shared.Return(tmp, clearArray: true);
+                }
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var m = double.CreateChecked(mSpan[i]);
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    result[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
+                }
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplyKlMeanGradient<T>(NivaraColumn<T> mean, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
@@ -1217,37 +1437,45 @@ public static class GradOperations
         logVar.TryGetSpan(out var lvSpan);
         gradOutput.TryGetSpan(out var gSpan);
         int n = logVar.Length;
-        var result = new T[n];
-        if (typeof(T) == typeof(float))
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Exp(lv, d);
-            TensorPrimitives.Subtract(1.0f, d, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, -0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Exp(lv, d);
-            TensorPrimitives.Subtract(1.0, d, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, -0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
+            var result = buf.AsSpan(0, n);
+            if (typeof(T) == typeof(float))
             {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 - Math.Exp(lv)) * g);
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var g = MemoryMarshal.Cast<T, float>(gSpan);
+                var d = MemoryMarshal.Cast<T, float>(result);
+                TensorPrimitives.Exp(lv, d);
+                TensorPrimitives.Subtract(1.0f, d, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, -0.5f, d);
             }
+            else if (typeof(T) == typeof(double))
+            {
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var g = MemoryMarshal.Cast<T, double>(gSpan);
+                var d = MemoryMarshal.Cast<T, double>(result);
+                TensorPrimitives.Exp(lv, d);
+                TensorPrimitives.Subtract(1.0, d, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, -0.5, d);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    var g = double.CreateChecked(gSpan[i]);
+                    result[i] = T.CreateChecked(-0.5 * (1.0 - Math.Exp(lv)) * g);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon) where T : struct, INumber<T>
@@ -1256,40 +1484,48 @@ public static class GradOperations
         logVar.TryGetSpan(out var lvSpan);
         epsilon.TryGetSpan(out var eSpan);
         int n = mean.Length;
-        var result = new T[n];
-        if (typeof(T) == typeof(float))
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
+            var result = buf.AsSpan(0, n);
+            if (typeof(T) == typeof(float))
             {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
+                var m = MemoryMarshal.Cast<T, float>(mSpan);
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var e = MemoryMarshal.Cast<T, float>(eSpan);
+                var d = MemoryMarshal.Cast<T, float>(result);
+                TensorPrimitives.Multiply(lv, 0.5f, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Add(d, m, d);
             }
+            else if (typeof(T) == typeof(double))
+            {
+                var m = MemoryMarshal.Cast<T, double>(mSpan);
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var e = MemoryMarshal.Cast<T, double>(eSpan);
+                var d = MemoryMarshal.Cast<T, double>(result);
+                TensorPrimitives.Multiply(lv, 0.5, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Add(d, m, d);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var m = double.CreateChecked(mSpan[i]);
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    var e = double.CreateChecked(eSpan[i]);
+                    result[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> ApplySampleNormalLogVarGradient<T>(NivaraColumn<T> logVar, NivaraColumn<T> gradOutput, NivaraColumn<T> epsilon) where T : struct, INumber<T>
@@ -1298,49 +1534,56 @@ public static class GradOperations
         gradOutput.TryGetSpan(out var gSpan);
         epsilon.TryGetSpan(out var eSpan);
         int n = logVar.Length;
-        var result = new T[n];
-        if (typeof(T) == typeof(float))
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
         {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
+            var result = buf.AsSpan(0, n);
+            if (typeof(T) == typeof(float))
             {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * g);
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var g = MemoryMarshal.Cast<T, float>(gSpan);
+                var e = MemoryMarshal.Cast<T, float>(eSpan);
+                var d = MemoryMarshal.Cast<T, float>(result);
+                TensorPrimitives.Multiply(lv, 0.5f, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, 0.5f, d);
             }
+            else if (typeof(T) == typeof(double))
+            {
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var g = MemoryMarshal.Cast<T, double>(gSpan);
+                var e = MemoryMarshal.Cast<T, double>(eSpan);
+                var d = MemoryMarshal.Cast<T, double>(result);
+                TensorPrimitives.Multiply(lv, 0.5, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, 0.5, d);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    var g = double.CreateChecked(gSpan[i]);
+                    var e = double.CreateChecked(eSpan[i]);
+                    result[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * g);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
         }
-        return NivaraColumn<T>.Create(result);
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
-    private static T[] GenerateStandardNormal<T>(int n, int? seed) where T : struct, INumber<T>
+    private static void GenerateStandardNormal<T>(Span<T> result, int? seed) where T : struct, INumber<T>
     {
         var rng = seed.HasValue ? new Random(seed.Value) : Random.Shared;
-        var result = new T[n];
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < result.Length; i++)
         {
             double u1, u2;
             u1 = rng.NextDouble();
@@ -1348,7 +1591,6 @@ public static class GradOperations
             var z = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
             result[i] = T.CreateChecked(z);
         }
-        return result;
     }
 
     private static int[] PropagateShape<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 
@@ -9,9 +10,17 @@ internal static class TensorPrimitiveExtensions
         where T : struct, INumber<T>
     {
         col.TryGetSpan(out var span);
-        var result = new T[col.Length];
-        op(span, result.AsSpan());
-        return NivaraColumn<T>.Create(result);
+        int n = col.Length;
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            op(span, buf.AsSpan(0, n));
+            return NivaraColumn<T>.Create(buf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     public static NivaraColumn<T> Apply<T>(this NivaraColumn<T> left, NivaraColumn<T> right, Action<ReadOnlySpan<T>, ReadOnlySpan<T>, Span<T>> op)
@@ -19,27 +28,51 @@ internal static class TensorPrimitiveExtensions
     {
         left.TryGetSpan(out var lSpan);
         right.TryGetSpan(out var rSpan);
-        var result = new T[left.Length];
-        op(lSpan, rSpan, result.AsSpan());
-        return NivaraColumn<T>.Create(result);
+        int n = left.Length;
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            op(lSpan, rSpan, buf.AsSpan(0, n));
+            return NivaraColumn<T>.Create(buf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     public static NivaraColumn<T> Apply<T>(this NivaraColumn<T> col, T scalar, Action<ReadOnlySpan<T>, T, Span<T>> op)
         where T : struct, INumber<T>
     {
         col.TryGetSpan(out var span);
-        var result = new T[col.Length];
-        op(span, scalar, result.AsSpan());
-        return NivaraColumn<T>.Create(result);
+        int n = col.Length;
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            op(span, scalar, buf.AsSpan(0, n));
+            return NivaraColumn<T>.Create(buf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     public static NivaraColumn<T> Apply<T>(this NivaraColumn<T> col, T min, T max, Action<ReadOnlySpan<T>, T, T, Span<T>> op)
         where T : struct, INumber<T>
     {
         col.TryGetSpan(out var span);
-        var result = new T[col.Length];
-        op(span, min, max, result.AsSpan());
-        return NivaraColumn<T>.Create(result);
+        int n = col.Length;
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            op(span, min, max, buf.AsSpan(0, n));
+            return NivaraColumn<T>.Create(buf.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+        }
     }
 
     public static ReadOnlySpan<T> AsSpan<T>(this NivaraColumn<T> col)

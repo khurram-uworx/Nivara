@@ -90,9 +90,17 @@ public static class GradientUtils
         if (!grad.HasNulls)
         {
             grad.TryGetSpan(out var span);
-            var clipped = new T[n];
-            TensorPrimitives.Clamp(span, minValue, maxValue, clipped);
-            tensor.Grad = NivaraColumn<T>.Create(clipped);
+            var clipBuf = ArrayPool<T>.Shared.Rent(n);
+            try
+            {
+                var clipped = clipBuf.AsSpan(0, n);
+                TensorPrimitives.Clamp(span, minValue, maxValue, clipped);
+                tensor.Grad = NivaraColumn<T>.Create(clipped);
+            }
+            finally
+            {
+                ArrayPool<T>.Shared.Return(clipBuf, clearArray: true);
+            }
             return;
         }
 
@@ -163,9 +171,17 @@ public static class GradientUtils
             if (!grad.HasNulls)
             {
                 grad.TryGetSpan(out var span);
-                var clipped = new T[n];
-                TensorPrimitives.Multiply(span, scale, clipped);
-                tensor.Grad = NivaraColumn<T>.Create(clipped);
+                var clipBuf = ArrayPool<T>.Shared.Rent(n);
+                try
+                {
+                    var clipped = clipBuf.AsSpan(0, n);
+                    TensorPrimitives.Multiply(span, scale, clipped);
+                    tensor.Grad = NivaraColumn<T>.Create(clipped);
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(clipBuf, clearArray: true);
+                }
                 return;
             }
 
@@ -244,9 +260,17 @@ public static class GradientUtils
                 if (!grad.HasNulls)
                 {
                     grad.TryGetSpan(out var span);
-                    var clipped = new T[n];
-                    TensorPrimitives.Multiply(span, scale, clipped);
-                    tensor.Grad = NivaraColumn<T>.Create(clipped);
+                    var buf = ArrayPool<T>.Shared.Rent(n);
+                    try
+                    {
+                        var clipped = buf.AsSpan(0, n);
+                        TensorPrimitives.Multiply(span, scale, clipped);
+                        tensor.Grad = NivaraColumn<T>.Create(clipped);
+                    }
+                    finally
+                    {
+                        ArrayPool<T>.Shared.Return(buf, clearArray: true);
+                    }
                 }
                 else
                 {
