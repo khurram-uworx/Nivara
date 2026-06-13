@@ -633,6 +633,92 @@ public static class GradOperations
 
     #endregion
 
+    #region VAE Operations
+
+    public static ReverseGradTensor<T> KlDivergence<T>(ReverseGradTensor<T> mean, ReverseGradTensor<T> logVar)
+        where T : struct, INumber<T>
+    {
+        if (mean == null) throw new ArgumentNullException(nameof(mean));
+        if (logVar == null) throw new ArgumentNullException(nameof(logVar));
+
+        if (mean.Length != logVar.Length)
+            throw new ArgumentException(
+                $"mean length ({mean.Length}) must equal logVar length ({logVar.Length})",
+                nameof(logVar));
+
+        var klElements = ApplyKlElementWise(mean.Data, logVar.Data);
+        var klSum = new NivaraSeries<T>(klElements).Sum();
+
+        var resultData = NivaraColumn<T>.Create(new T[] { klSum });
+        var resultTensor = new ReverseGradTensor<T>(resultData, mean.RequiresGrad || logVar.RequiresGrad, ScalarShape());
+
+        if (mean.RequiresGrad || logVar.RequiresGrad)
+        {
+            var gradFn = new OpNode<T>("KlDivergence", new object[] { mean, logVar }, (typedGradOutput, sgn) =>
+            {
+                if (mean.RequiresGrad)
+                {
+                    var broadcast = BroadcastGradient(typedGradOutput, mean.Length);
+                    var dMean = ApplyKlMeanGradient(mean.Data, broadcast);
+                    AccumulateGradient(mean, dMean, sgn);
+                }
+                if (logVar.RequiresGrad)
+                {
+                    var broadcast = BroadcastGradient(typedGradOutput, logVar.Length);
+                    var dLogVar = ApplyKlLogVarGradient(logVar.Data, broadcast);
+                    AccumulateGradient(logVar, dLogVar, sgn);
+                }
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    public static ReverseGradTensor<T> SampleNormal<T>(ReverseGradTensor<T> mean, ReverseGradTensor<T> logVar, int? seed = null)
+        where T : struct, INumber<T>
+    {
+        if (mean == null) throw new ArgumentNullException(nameof(mean));
+        if (logVar == null) throw new ArgumentNullException(nameof(logVar));
+
+        if (mean.Length != logVar.Length)
+            throw new ArgumentException(
+                $"mean length ({mean.Length}) must equal logVar length ({logVar.Length})",
+                nameof(logVar));
+
+        int n = mean.Length;
+        var epsilon = GenerateStandardNormal<T>(n, seed);
+        var epsilonCol = NivaraColumn<T>.Create(epsilon.AsSpan());
+
+        var result = ApplySampleNormalForward(mean.Data, logVar.Data, epsilonCol);
+
+        var resultTensor = new ReverseGradTensor<T>(result, mean.RequiresGrad || logVar.RequiresGrad, PropagateShape(mean, logVar));
+
+        if (mean.RequiresGrad || logVar.RequiresGrad)
+        {
+            var savedEpsilon = epsilonCol;
+            var gradFn = new OpNode<T>("SampleNormal", new object[] { mean, logVar }, (typedGradOutput, sgn) =>
+            {
+                if (mean.RequiresGrad)
+                {
+                    AccumulateGradient(mean, typedGradOutput, sgn);
+                }
+                if (logVar.RequiresGrad)
+                {
+                    var dLogVar = ApplySampleNormalLogVarGradient(logVar.Data, typedGradOutput, savedEpsilon);
+                    AccumulateGradient(logVar, dLogVar, sgn);
+                }
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient, bool stripGradientNulls = true) where T : struct, INumber<T>
@@ -1926,6 +2012,370 @@ public static class GradOperations
             ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
+    }
+
+    private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar) where T : struct, INumber<T>
+    {
+        int n = mean.Length;
+
+        if (!mean.HasNulls && !logVar.HasNulls)
+        {
+            mean.TryGetSpan(out var mSpan);
+            logVar.TryGetSpan(out var lvSpan);
+            var result = new T[n];
+            if (typeof(T) == typeof(float))
+            {
+                var m = MemoryMarshal.Cast<T, float>(mSpan);
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                var m2 = new float[n];
+                var expLv = new float[n];
+                var tmp = new float[n];
+                TensorPrimitives.Multiply(m, m, m2);
+                TensorPrimitives.Exp(lv, expLv);
+                TensorPrimitives.Add(lv, 1.0f, tmp);
+                TensorPrimitives.Subtract(tmp, m2, tmp);
+                TensorPrimitives.Subtract(tmp, expLv, tmp);
+                TensorPrimitives.Multiply(tmp, -0.5f, r);
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var m = MemoryMarshal.Cast<T, double>(mSpan);
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                var m2 = new double[n];
+                var expLv = new double[n];
+                var tmp = new double[n];
+                TensorPrimitives.Multiply(m, m, m2);
+                TensorPrimitives.Exp(lv, expLv);
+                TensorPrimitives.Add(lv, 1.0, tmp);
+                TensorPrimitives.Subtract(tmp, m2, tmp);
+                TensorPrimitives.Subtract(tmp, expLv, tmp);
+                TensorPrimitives.Multiply(tmp, -0.5, r);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var m = double.CreateChecked(mSpan[i]);
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    result[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
+                }
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var meanBuf = ArrayPool<T>.Shared.Rent(n);
+        var logVarBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        try
+        {
+            mean.CopyTo(meanBuf.AsSpan(0, n), T.Zero);
+            logVar.CopyTo(logVarBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(mean, logVar, nullMask.AsSpan(0, n));
+
+            for (int i = 0; i < n; i++)
+            {
+                if (nullMask[i])
+                    continue;
+                var m = double.CreateChecked(meanBuf[i]);
+                var lv = double.CreateChecked(logVarBuf[i]);
+                resultBuf[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
+            }
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(meanBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(logVarBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyKlMeanGradient<T>(NivaraColumn<T> mean, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
+    {
+        // ∂KL/∂μ = μ
+        int n = mean.Length;
+
+        if (!mean.HasNulls && !gradOutput.HasNulls)
+        {
+            mean.TryGetSpan(out var mSpan);
+            gradOutput.TryGetSpan(out var gSpan);
+            var result = new T[n];
+            TensorPrimitives.Multiply(mSpan, gSpan, result);
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var meanBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        try
+        {
+            mean.CopyTo(meanBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(mean, gradOutput, nullMask.AsSpan(0, n));
+            for (int i = 0; i < n; i++)
+                resultBuf[i] = meanBuf[i] * gradBuf[i];
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(meanBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyKlLogVarGradient<T>(NivaraColumn<T> logVar, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
+    {
+        // ∂KL/∂logVar = -0.5 * (1 - exp(logVar))
+        int n = logVar.Length;
+
+        if (!logVar.HasNulls && !gradOutput.HasNulls)
+        {
+            logVar.TryGetSpan(out var lvSpan);
+            gradOutput.TryGetSpan(out var gSpan);
+            var result = new T[n];
+            if (typeof(T) == typeof(float))
+            {
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var g = MemoryMarshal.Cast<T, float>(gSpan);
+                var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                TensorPrimitives.Exp(lv, d);
+                TensorPrimitives.Subtract(1.0f, d, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, -0.5f, d);
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var g = MemoryMarshal.Cast<T, double>(gSpan);
+                var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                TensorPrimitives.Exp(lv, d);
+                TensorPrimitives.Subtract(1.0, d, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, -0.5, d);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    var g = double.CreateChecked(gSpan[i]);
+                    result[i] = T.CreateChecked(-0.5 * (1.0 - Math.Exp(lv)) * g);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var logVarBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        try
+        {
+            logVar.CopyTo(logVarBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(logVar, gradOutput, nullMask.AsSpan(0, n));
+            for (int i = 0; i < n; i++)
+            {
+                var lv = double.CreateChecked(logVarBuf[i]);
+                var g = double.CreateChecked(gradBuf[i]);
+                resultBuf[i] = T.CreateChecked(-0.5 * (1.0 - Math.Exp(lv)) * g);
+            }
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(logVarBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon) where T : struct, INumber<T>
+    {
+        // z = μ + exp(0.5 * logVar) * ε
+        int n = mean.Length;
+
+        if (!mean.HasNulls && !logVar.HasNulls)
+        {
+            mean.TryGetSpan(out var mSpan);
+            logVar.TryGetSpan(out var lvSpan);
+            epsilon.TryGetSpan(out var eSpan);
+            var result = new T[n];
+            if (typeof(T) == typeof(float))
+            {
+                var m = MemoryMarshal.Cast<T, float>(mSpan);
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var e = MemoryMarshal.Cast<T, float>(eSpan);
+                var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                TensorPrimitives.Multiply(lv, 0.5f, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Add(d, m, d);
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var m = MemoryMarshal.Cast<T, double>(mSpan);
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var e = MemoryMarshal.Cast<T, double>(eSpan);
+                var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                TensorPrimitives.Multiply(lv, 0.5, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Add(d, m, d);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var m = double.CreateChecked(mSpan[i]);
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    var e = double.CreateChecked(eSpan[i]);
+                    result[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var meanBuf = ArrayPool<T>.Shared.Rent(n);
+        var logVarBuf = ArrayPool<T>.Shared.Rent(n);
+        var epsBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        try
+        {
+            mean.CopyTo(meanBuf.AsSpan(0, n), T.Zero);
+            logVar.CopyTo(logVarBuf.AsSpan(0, n), T.Zero);
+            epsilon.CopyTo(epsBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(mean, logVar, nullMask.AsSpan(0, n));
+
+            for (int i = 0; i < n; i++)
+            {
+                if (nullMask[i])
+                    continue;
+                var m = double.CreateChecked(meanBuf[i]);
+                var lv = double.CreateChecked(logVarBuf[i]);
+                var e = double.CreateChecked(epsBuf[i]);
+                resultBuf[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
+            }
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(meanBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(logVarBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(epsBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplySampleNormalLogVarGradient<T>(NivaraColumn<T> logVar, NivaraColumn<T> gradOutput, NivaraColumn<T> epsilon) where T : struct, INumber<T>
+    {
+        // ∂z/∂logVar = 0.5 * exp(0.5 * logVar) * ε
+        int n = logVar.Length;
+
+        if (!logVar.HasNulls && !gradOutput.HasNulls)
+        {
+            logVar.TryGetSpan(out var lvSpan);
+            gradOutput.TryGetSpan(out var gSpan);
+            epsilon.TryGetSpan(out var eSpan);
+            var result = new T[n];
+            if (typeof(T) == typeof(float))
+            {
+                var lv = MemoryMarshal.Cast<T, float>(lvSpan);
+                var g = MemoryMarshal.Cast<T, float>(gSpan);
+                var e = MemoryMarshal.Cast<T, float>(eSpan);
+                var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                TensorPrimitives.Multiply(lv, 0.5f, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, 0.5f, d);
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var lv = MemoryMarshal.Cast<T, double>(lvSpan);
+                var g = MemoryMarshal.Cast<T, double>(gSpan);
+                var e = MemoryMarshal.Cast<T, double>(eSpan);
+                var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                TensorPrimitives.Multiply(lv, 0.5, d);
+                TensorPrimitives.Exp(d, d);
+                TensorPrimitives.Multiply(d, e, d);
+                TensorPrimitives.Multiply(d, g, d);
+                TensorPrimitives.Multiply(d, 0.5, d);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var lv = double.CreateChecked(lvSpan[i]);
+                    var g = double.CreateChecked(gSpan[i]);
+                    var e = double.CreateChecked(eSpan[i]);
+                    result[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * g);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var logVarBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var epsBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+
+        try
+        {
+            logVar.CopyTo(logVarBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            epsilon.CopyTo(epsBuf.AsSpan(0, n), T.Zero);
+            var hasNulls = MergeNullMasks(logVar, gradOutput, nullMask.AsSpan(0, n));
+
+            for (int i = 0; i < n; i++)
+            {
+                if (nullMask[i])
+                    continue;
+                var lv = double.CreateChecked(logVarBuf[i]);
+                var g = double.CreateChecked(gradBuf[i]);
+                var e = double.CreateChecked(epsBuf[i]);
+                resultBuf[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * g);
+            }
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(logVarBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(epsBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static T[] GenerateStandardNormal<T>(int n, int? seed) where T : struct, INumber<T>
+    {
+        var rng = seed.HasValue ? new Random(seed.Value) : Random.Shared;
+        var result = new T[n];
+        for (int i = 0; i < n; i++)
+        {
+            double u1, u2;
+            u1 = rng.NextDouble();
+            u2 = rng.NextDouble();
+            var z = Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Cos(2.0 * Math.PI * u2);
+            result[i] = T.CreateChecked(z);
+        }
+        return result;
     }
 
     private static bool MergeNullMasks<T>(NivaraColumn<T> a, NivaraColumn<T> b, Span<bool> destination) where T : struct, INumber<T>

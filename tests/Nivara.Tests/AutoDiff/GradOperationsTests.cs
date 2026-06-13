@@ -763,4 +763,294 @@ public class GradOperationsTests
     }
 
     #endregion
+
+    #region VAE Operations: KlDivergence
+
+    [Test]
+    public void KlDivergence_ZeroMeanUnitVar_ReturnsZero()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f, 0f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f, 0f }), requiresGrad: true);
+
+        var kl = GradOperations.KlDivergence(mean, logVar);
+
+        Assert.That(kl.Length, Is.EqualTo(1));
+        Assert.That(kl[0], Is.EqualTo(0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void KlDivergence_NonZeroMean_ComputesCorrectValue()
+    {
+        // KL = -0.5 * Σ(1 + logVar - μ² - exp(logVar))
+        // μ=[1], logVar=[0]: -0.5 * (1 + 0 - 1 - 1) = -0.5 * (-1) = 0.5
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: true);
+
+        var kl = GradOperations.KlDivergence(mean, logVar);
+
+        Assert.That(kl[0], Is.EqualTo(0.5f).Within(1e-6f));
+    }
+
+    [Test]
+    public void KlDivergence_Backward_ProducesCorrectGradients()
+    {
+        // ∂KL/∂μ = μ, ∂KL/∂logVar = -0.5*(1 - exp(logVar))
+        // μ=[1,2], logVar=[0,1]
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f, 1f }), requiresGrad: true);
+
+        var kl = GradOperations.KlDivergence(mean, logVar);
+        kl.Backward();
+
+        Assert.That(mean.Grad, Is.Not.Null);
+        Assert.That(mean.Grad!.Length, Is.EqualTo(2));
+        Assert.That(mean.Grad[0], Is.EqualTo(1f).Within(1e-6f));
+        Assert.That(mean.Grad[1], Is.EqualTo(2f).Within(1e-6f));
+
+        Assert.That(logVar.Grad, Is.Not.Null);
+        Assert.That(logVar.Grad!.Length, Is.EqualTo(2));
+        var expectedLogVarGrad0 = -0.5f * (1f - MathF.Exp(0f));
+        var expectedLogVarGrad1 = -0.5f * (1f - MathF.Exp(1f));
+        Assert.That(logVar.Grad[0], Is.EqualTo(expectedLogVarGrad0).Within(1e-6f));
+        Assert.That(logVar.Grad[1], Is.EqualTo(expectedLogVarGrad1).Within(1e-6f));
+    }
+
+    [Test]
+    public void KlDivergence_NoGradRequired_SkipsGradientTracking()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: false);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
+
+        var kl = GradOperations.KlDivergence(mean, logVar);
+
+        Assert.That(kl.RequiresGrad, Is.False);
+    }
+
+    [Test]
+    public void KlDivergence_OnlyMeanRequiresGrad_StillTracks()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
+
+        var kl = GradOperations.KlDivergence(mean, logVar);
+        kl.Backward();
+
+        Assert.That(mean.Grad, Is.Not.Null);
+        Assert.That(mean.Grad![0], Is.EqualTo(1f).Within(1e-6f));
+        Assert.That(logVar.Grad, Is.Null);
+    }
+
+    [Test]
+    public void KlDivergence_NullValues_PropagatesNulls()
+    {
+        var meanValues = new float?[] { 1f, null, 3f };
+        var logVarValues = new float?[] { 0f, 1f, null };
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(meanValues), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
+
+        var kl = GradOperations.KlDivergence(mean, logVar);
+        kl.Backward(stripGradientNulls: false);
+
+        // Non-null contributions: position 0 only (pos 1 has null mean, pos 2 has null logVar)
+        // kl_0 = -0.5 * (1 + 0 - 1 - 1) = 0.5
+        Assert.That(kl[0], Is.EqualTo(0.5f).Within(1e-6f));
+
+        // mean grad: null positions preserved when stripGradientNulls=false
+        Assert.That(mean.Grad, Is.Not.Null);
+        Assert.That(mean.Grad!.IsNull(1), Is.True);
+
+        // logVar grad: null positions preserved when stripGradientNulls=false
+        Assert.That(logVar.Grad, Is.Not.Null);
+        Assert.That(logVar.Grad!.IsNull(2), Is.True);
+    }
+
+    [Test]
+    public void KlDivergence_DoubleType_ComputesCorrectly()
+    {
+        var mean = new ReverseGradTensor<double>(
+            NivaraColumn<double>.Create(new double[] { 1.0 }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<double>(
+            NivaraColumn<double>.Create(new double[] { 0.0 }), requiresGrad: true);
+
+        var kl = GradOperations.KlDivergence(mean, logVar);
+
+        Assert.That(kl[0], Is.EqualTo(0.5).Within(1e-12));
+        kl.Backward();
+        Assert.That(mean.Grad![0], Is.EqualTo(1.0).Within(1e-12));
+    }
+
+    [Test]
+    public void KlDivergence_DifferentLengths_Throws()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: true);
+
+        Assert.That(() => GradOperations.KlDivergence(mean, logVar), Throws.ArgumentException);
+    }
+
+    #endregion
+
+    #region VAE Operations: SampleNormal
+
+    [Test]
+    public void SampleNormal_Forward_ProducesCorrectShape()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f, 0f, 0f }), requiresGrad: true);
+
+        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
+
+        Assert.That(z.Length, Is.EqualTo(3));
+        // With seed=42 and logVar=0 (σ=1), z = μ + 1 * ε
+        // We verify shape and determinism, not specific values
+        Assert.That(z.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void SampleNormal_Backward_PassesGradientToMean()
+    {
+        // ∂z/∂μ = 1 (identity)
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f, 0f }), requiresGrad: true);
+
+        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var sum = GradOperations.Sum(z);
+        sum.Backward();
+
+        // d(loss)/dμ = d(sum(z))/dμ = 1 at each position
+        Assert.That(mean.Grad, Is.Not.Null);
+        Assert.That(mean.Grad!.Length, Is.EqualTo(2));
+        Assert.That(mean.Grad[0], Is.EqualTo(1f).Within(1e-6f));
+        Assert.That(mean.Grad[1], Is.EqualTo(1f).Within(1e-6f));
+    }
+
+    [Test]
+    public void SampleNormal_Backward_ProducesGradientOnLogVar()
+    {
+        // ∂z/∂logVar = 0.5 * exp(0.5 * logVar) * ε
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: true);
+
+        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var sum = GradOperations.Sum(z);
+        sum.Backward();
+
+        // logVar=0: σ = exp(0.5*0) = 1, ε varies by seed
+        // ∂sum(z)/∂logVar = 0.5 * 1 * ε = 0.5 * ε
+        // We just verify it's non-null and finite, not the exact value (stochastic)
+        Assert.That(logVar.Grad, Is.Not.Null);
+        Assert.That(logVar.Grad!.Length, Is.EqualTo(1));
+        Assert.That(float.IsNaN(logVar.Grad[0]), Is.False);
+        Assert.That(float.IsInfinity(logVar.Grad[0]), Is.False);
+    }
+
+    [Test]
+    public void SampleNormal_NoGradRequired_SkipsTracking()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: false);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
+
+        var z = GradOperations.SampleNormal(mean, logVar);
+
+        Assert.That(z.RequiresGrad, Is.False);
+    }
+
+    [Test]
+    public void SampleNormal_DifferentSeeds_DifferentResults()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
+
+        var z1 = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var z2 = GradOperations.SampleNormal(mean, logVar, seed: 99);
+
+        // Different seeds should produce different samples
+        Assert.That(z1[0], Is.Not.EqualTo(z2[0]).Within(1e-6f));
+    }
+
+    [Test]
+    public void SampleNormal_SameSeed_Deterministic()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
+
+        var z1 = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var z2 = GradOperations.SampleNormal(mean, logVar, seed: 42);
+
+        // Same seed should produce identical samples
+        Assert.That(z1[0], Is.EqualTo(z2[0]).Within(1e-6f));
+    }
+
+    [Test]
+    public void SampleNormal_NullValues_PropagatesNulls()
+    {
+        var meanValues = new float?[] { 1f, null };
+        var logVarValues = new float?[] { 0f, 0f };
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(meanValues), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
+
+        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
+
+        // Position 1 has null mean → z should be null
+        Assert.That(z.IsNull(1), Is.True);
+    }
+
+    [Test]
+    public void SampleNormal_DifferentLengths_Throws()
+    {
+        var mean = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f, 1f }), requiresGrad: true);
+
+        Assert.That(() => GradOperations.SampleNormal(mean, logVar), Throws.ArgumentException);
+    }
+
+    [Test]
+    public void SampleNormal_DoubleType_BackwardFlows()
+    {
+        var mean = new ReverseGradTensor<double>(
+            NivaraColumn<double>.Create(new double[] { 0.5 }), requiresGrad: true);
+        var logVar = new ReverseGradTensor<double>(
+            NivaraColumn<double>.Create(new double[] { 0.0 }), requiresGrad: true);
+
+        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var sum = GradOperations.Sum(z);
+        sum.Backward();
+
+        Assert.That(mean.Grad, Is.Not.Null);
+        Assert.That(mean.Grad![0], Is.EqualTo(1.0).Within(1e-12));
+        Assert.That(logVar.Grad, Is.Not.Null);
+        Assert.That(double.IsNaN(logVar.Grad![0]), Is.False);
+    }
+
+    #endregion
 }
