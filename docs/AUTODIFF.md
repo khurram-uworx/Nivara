@@ -66,7 +66,7 @@ Optimizer<T> (abstract)              ← Step(), ZeroGrad(), AddParameterGroup()
 ├── SGD<T>                           ← Momentum + weight decay + TensorPrimitives fast path
 ├── Adam<T>                          ← Bias-corrected, β₁/β₂ defaults 0.9/0.999
 ├── AdamW<T>                         ← Decoupled weight decay (Loshchilov & Hutter 2019)
-└── SgdOptimizer (static)            ← Single-parameter SgdUpdate helper
+└── SgdUpdate (static)              ← Single-tensor SgdUpdate helper
 
 Training
 ────────
@@ -460,9 +460,9 @@ public sealed class AdamW<T> : Optimizer<T>
 - Identical to Adam except weight decay is applied directly to weights (not through gradients) — Loshchilov & Hutter 2019 formulation
 - Same null-skip semantics and `ArrayPool` buffer management
 
-### SgdOptimizer (static helper)
+### SGD\<T\>.SgdUpdate (static helper)
 
-The original `SgdOptimizer.SgdUpdate` helper remains available for single-tensor updates outside the module system.
+`SGD<T>.SgdUpdate` is available for single-tensor updates outside the module system.
 
 ---
 
@@ -830,7 +830,7 @@ var param = new ReverseGradTensor<float>(
 var loss = GradOperations.Sum(param);  // loss = 6
 loss.Backward();                       // grad = [1, 1, 1]
 
-var updated = SgdOptimizer.SgdUpdate(param, 0.1f);
+var updated = SGD<float>.SgdUpdate(param, 0.1f);
 // updated = param - 0.1 * grad = [0.9, 1.9, 2.9]
 // updated.RequiresGrad == false
 ```
@@ -1024,7 +1024,7 @@ var prediction = loaded.Forward(testInput);
 | `ComputationGraph` | `src/Nivara/AutoDiff/ComputationGraph.cs` |
 | `GradOperations` (all ops) | `src/Nivara/AutoDiff/Operations/GradOperations.cs` |
 | `MatMulHelper` (SIMD MatMul) | `src/Nivara/Tensors/MatMulHelper.cs` |
-| `SgdOptimizer` | `src/Nivara/AutoDiff/Optimizer/SgdOptimizer.cs` |
+| `SGD<T>.SgdUpdate` (static) | `src/Nivara/AutoDiff/Optimizer/SGD.cs` |
 | `GradientUtils` | `src/Nivara/AutoDiff/Utilities/GradientUtils.cs` |
 | `TypeValidator` | `src/Nivara/AutoDiff/Utilities/TypeValidator.cs` |
 | `TypeConverter` | `src/Nivara/AutoDiff/Utilities/TypeConverter.cs` |

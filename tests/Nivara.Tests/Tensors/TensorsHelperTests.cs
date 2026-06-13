@@ -1,18 +1,19 @@
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Diagnostics;
+using System.Numerics.Tensors;
 
 namespace Nivara.Tests.Tensors;
 
 [TestFixture]
-public class MatMulHelperTests
+public class TensorsHelperTests
 {
     [Test]
     public void PropagateNullMask_NoMasks_ClearsResultMask()
     {
         var resultMask = new[] { true, true, true, true };
 
-        MatMulHelper.PropagateNullMask(
+        TensorsHelper.PropagateNullMask(
             ReadOnlySpan<bool>.Empty,
             ReadOnlySpan<bool>.Empty,
             resultMask,
@@ -33,7 +34,7 @@ public class MatMulHelperTests
         };
         var resultMask = new bool[4];
 
-        MatMulHelper.PropagateNullMask(
+        TensorsHelper.PropagateNullMask(
             aMask,
             ReadOnlySpan<bool>.Empty,
             resultMask,
@@ -54,7 +55,7 @@ public class MatMulHelperTests
         };
         var resultMask = new bool[6];
 
-        MatMulHelper.PropagateNullMask(
+        TensorsHelper.PropagateNullMask(
             ReadOnlySpan<bool>.Empty,
             bMask,
             resultMask,
@@ -80,7 +81,7 @@ public class MatMulHelperTests
         };
         var resultMask = new bool[4];
 
-        MatMulHelper.PropagateNullMask(
+        TensorsHelper.PropagateNullMask(
             aMask,
             bMask,
             resultMask,
@@ -99,7 +100,7 @@ public class MatMulHelperTests
         var result = new float[4];
         var resultMask = new[] { true, true, true, true };
 
-        MatMulHelper.Multiply(
+        TensorsHelper.Multiply(
             a,
             ReadOnlySpan<bool>.Empty,
             b,
@@ -129,12 +130,12 @@ public class MatMulHelperTests
         for (int j = 0; j < size; j += 40)
             bMask[(j % size) * size + j] = true;
 
-        MatMulHelper.PropagateNullMask(aMask, bMask, optimized, size, size, size);
+        TensorsHelper.PropagateNullMask(aMask, bMask, optimized, size, size, size);
         PropagateNullMaskReference(aMask, bMask, reference, size, size, size);
         Assert.That(optimized, Is.EqualTo(reference));
 
         var optimizedTicks = MeasureBestOfFive(() =>
-            MatMulHelper.PropagateNullMask(aMask, bMask, optimized, size, size, size));
+            TensorsHelper.PropagateNullMask(aMask, bMask, optimized, size, size, size));
         var referenceTicks = MeasureBestOfFive(() =>
             PropagateNullMaskReference(aMask, bMask, reference, size, size, size));
 
@@ -184,4 +185,127 @@ public class MatMulHelperTests
             }
         }
     }
+
+    #region Sigmoid
+
+    [Test]
+    public void Sigmoid_Float_MatchesReference()
+    {
+        var x = new[] { 0f, 1f, -1f, 2f, -2f };
+        var dest = new float[5];
+        TensorsHelper.Sigmoid(x.AsSpan(), dest.AsSpan());
+        for (int i = 0; i < x.Length; i++)
+        {
+            var expected = 1.0f / (1.0f + MathF.Exp(-x[i]));
+            Assert.That(dest[i], Is.EqualTo(expected).Within(1e-6f));
+        }
+    }
+
+    [Test]
+    public void Sigmoid_WithNulls_PropagatesMaskAndZerosOutput()
+    {
+        var x = new[] { 0f, 1f, -1f };
+        var mask = new[] { false, true, false };
+        var dest = new float[3];
+        var resultMask = new bool[3];
+        TensorsHelper.Sigmoid(x.AsSpan(), mask.AsSpan(), dest.AsSpan(), resultMask.AsSpan());
+        Assert.That(resultMask, Is.EqualTo(mask));
+        Assert.That(dest[1], Is.EqualTo(0f));
+        Assert.That(dest[0], Is.EqualTo(0.5f).Within(1e-6f));
+    }
+
+    #endregion
+
+    #region Tanh
+
+    [Test]
+    public void Tanh_Float_MatchesReference()
+    {
+        var x = new[] { 0f, 1f, -1f, 2f, -2f };
+        var dest = new float[5];
+        TensorsHelper.Tanh(x.AsSpan(), dest.AsSpan());
+        for (int i = 0; i < x.Length; i++)
+            Assert.That(dest[i], Is.EqualTo(MathF.Tanh(x[i])).Within(1e-6f));
+    }
+
+    [Test]
+    public void Tanh_WithNulls_PropagatesMaskAndZerosOutput()
+    {
+        var x = new[] { 0f, 1f, -1f };
+        var mask = new[] { false, true, false };
+        var dest = new float[3];
+        var resultMask = new bool[3];
+        TensorsHelper.Tanh(x.AsSpan(), mask.AsSpan(), dest.AsSpan(), resultMask.AsSpan());
+        Assert.That(resultMask, Is.EqualTo(mask));
+        Assert.That(dest[1], Is.EqualTo(0f));
+    }
+
+    #endregion
+
+    #region SoftMax
+
+    [Test]
+    public void SoftMax_Float_SumToOne()
+    {
+        var x = new[] { 2f, 1f, 0.1f };
+        var dest = new float[3];
+        TensorsHelper.SoftMax(x.AsSpan(), dest.AsSpan());
+        var sum = TensorPrimitives.Sum(dest.AsSpan());
+        Assert.That(sum, Is.EqualTo(1f).Within(1e-5f));
+    }
+
+    [Test]
+    public void SoftMax_RowWise_SumToOnePerRow()
+    {
+        var x = new[] { 2f, 1f, 0.1f, 1f, 2f, 3f };
+        var dest = new float[6];
+        TensorsHelper.SoftMax(x.AsSpan(), dest.AsSpan(), classCount: 3);
+        for (int r = 0; r < 2; r++)
+        {
+            var rowSum = TensorPrimitives.Sum(dest.AsSpan(r * 3, 3));
+            Assert.That(rowSum, Is.EqualTo(1f).Within(1e-5f));
+        }
+    }
+
+    [Test]
+    public void SoftMax_WithNulls_PropagatesMask()
+    {
+        var x = new[] { 2f, 1f, 0.1f };
+        var mask = new[] { false, true, false };
+        var dest = new float[3];
+        var resultMask = new bool[3];
+        TensorsHelper.SoftMax(x.AsSpan(), mask.AsSpan(), dest.AsSpan(), resultMask.AsSpan(), classCount: 3);
+        Assert.That(resultMask, Is.EqualTo(mask));
+        Assert.That(dest[1], Is.EqualTo(0f));
+    }
+
+    #endregion
+
+    #region Transpose
+
+    [Test]
+    public void Transpose_2x3_CorrectLayout()
+    {
+        var src = new[] { 1, 2, 3, 4, 5, 6 };
+        var dest = new int[6];
+        TensorsHelper.Transpose(src.AsSpan(), dest.AsSpan(), rows: 2, cols: 3);
+        Assert.That(dest, Is.EqualTo(new[] { 1, 4, 2, 5, 3, 6 }));
+    }
+
+    [Test]
+    public void Transpose_WithNulls_PropagatesMask()
+    {
+        var src = new[] { 1f, 2f, 3f, 4f };
+        var mask = new[] { false, true, false, false };
+        var dest = new float[4];
+        var resultMask = new bool[4];
+        TensorsHelper.Transpose(src.AsSpan(), mask.AsSpan(), dest.AsSpan(), resultMask.AsSpan(), rows: 2, cols: 2);
+        // src[0,1]=2 is null -> after transpose it becomes dst[1,0]=index 2
+        Assert.That(dest[2], Is.EqualTo(0f));
+        Assert.That(resultMask[1], Is.False);
+        Assert.That(resultMask[2], Is.True);
+        Assert.That(dest[1], Is.EqualTo(3f)); // src[1,0]=3 is not null
+    }
+
+    #endregion
 }

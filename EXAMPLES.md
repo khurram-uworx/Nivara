@@ -340,7 +340,7 @@ Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
 
 ### Act 7a: AutoDiff — low-level gradient operations
 
-> Reverse-mode AutoDiff that works directly with Nivara column data. Build a computation graph, compute gradients via `Backward()`, apply updates via `SgdOptimizer.SgdUpdate`.
+> Reverse-mode AutoDiff that works directly with Nivara column data. Build a computation graph, compute gradients via `Backward()`, apply updates via `SGD<T>.SgdUpdate`.
 
 #### Linear model with gradient descent
 
@@ -383,8 +383,8 @@ var loss = GradOperations.Mean(
 
 loss.Backward();
 
-using var updatedW = SgdOptimizer.SgdUpdate(w, 0.01f);
-using var updatedB = SgdOptimizer.SgdUpdate(b, 0.01f);
+using var updatedW = SGD<float>.SgdUpdate(w, 0.01f);
+using var updatedB = SGD<float>.SgdUpdate(b, 0.01f);
 ```
 
 See the full sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/Nivara.SampleApp/AutoDiffExample.cs).
