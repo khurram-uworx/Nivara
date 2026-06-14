@@ -2162,13 +2162,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        if (HasNulls)
-            throw new InvalidOperationException("Cannot convert column with null values to Tensor<T>. Use ToTensor(T defaultValue) to provide a null replacement.");
+        return DiagnosticsTracker.MeasureOperation(
+            "ColumnToTensor",
+            determineKernelType(),
+            Length,
+            typeof(T),
+            HasNulls,
+            () =>
+            {
+                if (HasNulls)
+                    throw new InvalidOperationException("Cannot convert column with null values to Tensor<T>. Use ToTensor(T defaultValue) to provide a null replacement.");
 
-        var rawSpan = storage.AsSpan();
-        var result = new T[rawSpan.Length];
-        rawSpan.CopyTo(result);
-        return Tensor.Create(result, new nint[] { result.Length });
+                var rawSpan = storage.AsSpan();
+                var result = new T[rawSpan.Length];
+                rawSpan.CopyTo(result);
+                return Tensor.Create(result, new nint[] { result.Length });
+            },
+            "TensorConversion=Copy");
     }
 
     /// <summary>
@@ -2179,18 +2189,28 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        var rawSpan = storage.AsSpan();
-        var result = new T[rawSpan.Length];
-        rawSpan.CopyTo(result);
-        var nullMask = storage.NullMask;
-        if (nullMask.Length > 0)
-        {
-            for (int i = 0; i < result.Length; i++)
+        return DiagnosticsTracker.MeasureOperation(
+            "ColumnToTensorWithNullReplacement",
+            determineKernelType(),
+            Length,
+            typeof(T),
+            HasNulls,
+            () =>
             {
-                if (nullMask[i]) result[i] = defaultValue;
-            }
-        }
-        return Tensor.Create(result, new nint[] { result.Length });
+                var rawSpan = storage.AsSpan();
+                var result = new T[rawSpan.Length];
+                rawSpan.CopyTo(result);
+                var nullMask = storage.NullMask;
+                if (nullMask.Length > 0)
+                {
+                    for (int i = 0; i < result.Length; i++)
+                    {
+                        if (nullMask[i]) result[i] = defaultValue;
+                    }
+                }
+                return Tensor.Create(result, new nint[] { result.Length });
+            },
+            "TensorConversion=NullReplacement");
     }
 
     /// <summary>

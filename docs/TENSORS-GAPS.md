@@ -149,20 +149,6 @@ or result types rather than changing the existing scalar-returning contract.
 
 ---
 
-## Testing Gaps
-
-### T1. No allocation-count benchmarks for tensor paths
-
-**Status:** No benchmarks measure allocation pressure for repeated
-`ToTensor()`, `FlattenTo`, or batch operation calls.
-
-**Recommendation:** Add benchmarks for:
-- Repeated column flattening and tensor conversion paths.
-- `BatchDot` — allocation per column vs per batch.
-- `RowNorms` — allocation per row vs column-major overhead.
-
----
-
 ## Deferred Design Items
 
 ### D1. Broadcasting
@@ -203,5 +189,4 @@ default.
 |------|----------|-----------|-------------|
 | Correctness | | | |
 | API/Ergonomics | | E1, E2, E3 | E4, E5, E6, E7, E8, E9, E10 |
-| Testing | | T1 | |
 | Design | | | D1, D2, D3, D4 |

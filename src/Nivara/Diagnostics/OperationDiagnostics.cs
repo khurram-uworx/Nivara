@@ -1,4 +1,5 @@
 using Nivara.Storage;
+using System.Diagnostics;
 
 namespace Nivara.Diagnostics;
 
@@ -22,12 +23,31 @@ public sealed class OperationDiagnostics
         int inputLength,
         Type elementType,
         bool hadNulls)
+        : this(operationType, kernelUsed, inputLength, elementType, hadNulls, 0, TimeSpan.Zero, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of OperationDiagnostics with measured allocation and timing data.
+    /// </summary>
+    internal OperationDiagnostics(
+        string operationType,
+        KernelType kernelUsed,
+        int inputLength,
+        Type elementType,
+        bool hadNulls,
+        long allocatedBytes,
+        TimeSpan elapsed,
+        string? notes = null)
     {
         OperationType = operationType ?? throw new ArgumentNullException(nameof(operationType));
         KernelUsed = kernelUsed;
         InputLength = inputLength;
         ElementType = elementType ?? throw new ArgumentNullException(nameof(elementType));
         HadNulls = hadNulls;
+        AllocatedBytes = Math.Max(0, allocatedBytes);
+        Elapsed = elapsed;
+        Notes = notes;
         Timestamp = DateTime.UtcNow;
     }
 
@@ -55,6 +75,21 @@ public sealed class OperationDiagnostics
     /// Gets a value indicating whether the operation involved null values
     /// </summary>
     public bool HadNulls { get; }
+
+    /// <summary>
+    /// Gets the managed bytes allocated by the measured operation, when available.
+    /// </summary>
+    public long AllocatedBytes { get; }
+
+    /// <summary>
+    /// Gets the elapsed time for the measured operation, when available.
+    /// </summary>
+    public TimeSpan Elapsed { get; }
+
+    /// <summary>
+    /// Gets optional operation-specific diagnostic notes.
+    /// </summary>
+    public string? Notes { get; }
 
     /// <summary>
     /// Gets the timestamp when the operation was performed
@@ -94,8 +129,52 @@ public sealed class OperationDiagnostics
         $"Type: {ElementType.Name}, " +
         $"Length: {InputLength:N0}, " +
         $"HadNulls: {HadNulls}, " +
+        $"AllocatedBytes: {AllocatedBytes:N0}, " +
+        $"Elapsed: {Elapsed.TotalMilliseconds:F3}ms, " +
+        (string.IsNullOrWhiteSpace(Notes) ? string.Empty : $"Notes: {Notes}, ") +
         $"Reason: {KernelSelectionReason} " +
         $"}}";
+}
+
+/// <summary>
+/// Captures allocation and timing measurements for a diagnostics operation.
+/// </summary>
+internal readonly struct OperationMeasurement
+{
+    readonly bool enabled;
+    readonly long initialAllocatedBytes;
+    readonly Stopwatch? stopwatch;
+
+    internal OperationMeasurement(bool enabled)
+    {
+        this.enabled = enabled;
+        initialAllocatedBytes = enabled ? GC.GetAllocatedBytesForCurrentThread() : 0;
+        stopwatch = enabled ? Stopwatch.StartNew() : null;
+    }
+
+    public void Record(
+        string operationType,
+        KernelType kernelUsed,
+        int inputLength,
+        Type elementType,
+        bool hadNulls,
+        string? notes = null)
+    {
+        if (!enabled || stopwatch == null)
+            return;
+
+        stopwatch.Stop();
+        var allocatedBytes = Math.Max(0, GC.GetAllocatedBytesForCurrentThread() - initialAllocatedBytes);
+        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
+            operationType,
+            kernelUsed,
+            inputLength,
+            elementType,
+            hadNulls,
+            allocatedBytes,
+            stopwatch.Elapsed,
+            notes));
+    }
 }
 
 /// <summary>
@@ -146,6 +225,37 @@ public static class DiagnosticsTracker
     }
 
     /// <summary>
+    /// Starts a measured operation when diagnostics are enabled; otherwise returns a no-op measurement.
+    /// </summary>
+    internal static OperationMeasurement StartMeasurement()
+    {
+        lock (lockObject)
+        {
+            return new OperationMeasurement(isEnabled);
+        }
+    }
+
+    /// <summary>
+    /// Executes and records a measured operation when diagnostics are enabled.
+    /// </summary>
+    internal static TResult MeasureOperation<TResult>(
+        string operationType,
+        KernelType kernelUsed,
+        int inputLength,
+        Type elementType,
+        bool hadNulls,
+        Func<TResult> operation,
+        string? notes = null)
+    {
+        ArgumentNullException.ThrowIfNull(operation);
+
+        var measurement = StartMeasurement();
+        var result = operation();
+        measurement.Record(operationType, kernelUsed, inputLength, elementType, hadNulls, notes);
+        return result;
+    }
+
+    /// <summary>
     /// Gets a copy of all recorded operations
     /// </summary>
     /// <returns>An array of all recorded operation diagnostics</returns>
@@ -177,12 +287,13 @@ public static class DiagnosticsTracker
         lock (lockObject)
         {
             if (operations.Count == 0)
-                return new OperationSummary(0, 0, 0, 0, new Dictionary<string, int>(), new Dictionary<KernelType, int>());
+                return new OperationSummary(0, 0, 0, 0, 0, new Dictionary<string, int>(), new Dictionary<KernelType, int>(), new Dictionary<string, long>());
 
             var totalOperations = operations.Count;
             var vectorizedOperations = operations.Count(op => op.KernelUsed == KernelType.Vectorized);
             var scalarOperations = operations.Count(op => op.KernelUsed == KernelType.Scalar);
             var operationsWithNulls = operations.Count(op => op.HadNulls);
+            var totalAllocatedBytes = operations.Sum(op => op.AllocatedBytes);
 
             var operationTypes = operations
                 .GroupBy(op => op.OperationType)
@@ -192,13 +303,19 @@ public static class DiagnosticsTracker
                 .GroupBy(op => op.KernelUsed)
                 .ToDictionary(g => g.Key, g => g.Count());
 
+            var allocatedBytesByOperationType = operations
+                .GroupBy(op => op.OperationType)
+                .ToDictionary(g => g.Key, g => g.Sum(op => op.AllocatedBytes));
+
             return new OperationSummary(
                 totalOperations,
                 vectorizedOperations,
                 scalarOperations,
                 operationsWithNulls,
+                totalAllocatedBytes,
                 operationTypes,
-                kernelTypes);
+                kernelTypes,
+                allocatedBytesByOperationType);
         }
     }
 }
@@ -216,15 +333,19 @@ public sealed class OperationSummary
         int vectorizedOperations,
         int scalarOperations,
         int operationsWithNulls,
+        long totalAllocatedBytes,
         Dictionary<string, int> operationTypes,
-        Dictionary<KernelType, int> kernelTypes)
+        Dictionary<KernelType, int> kernelTypes,
+        Dictionary<string, long> allocatedBytesByOperationType)
     {
         TotalOperations = totalOperations;
         VectorizedOperations = vectorizedOperations;
         ScalarOperations = scalarOperations;
         OperationsWithNulls = operationsWithNulls;
+        TotalAllocatedBytes = Math.Max(0, totalAllocatedBytes);
         OperationTypes = operationTypes ?? new Dictionary<string, int>();
         KernelTypes = kernelTypes ?? new Dictionary<KernelType, int>();
+        AllocatedBytesByOperationType = allocatedBytesByOperationType ?? new Dictionary<string, long>();
     }
 
     /// <summary>
@@ -248,6 +369,16 @@ public sealed class OperationSummary
     public int OperationsWithNulls { get; }
 
     /// <summary>
+    /// Gets the total managed bytes allocated by recorded measured operations.
+    /// </summary>
+    public long TotalAllocatedBytes { get; }
+
+    /// <summary>
+    /// Gets the average managed bytes allocated per recorded operation.
+    /// </summary>
+    public double AverageAllocatedBytes => TotalOperations > 0 ? (double)TotalAllocatedBytes / TotalOperations : 0;
+
+    /// <summary>
     /// Gets the count of operations by type
     /// </summary>
     public Dictionary<string, int> OperationTypes { get; }
@@ -256,6 +387,11 @@ public sealed class OperationSummary
     /// Gets the count of operations by kernel type
     /// </summary>
     public Dictionary<KernelType, int> KernelTypes { get; }
+
+    /// <summary>
+    /// Gets allocated bytes grouped by operation type.
+    /// </summary>
+    public Dictionary<string, long> AllocatedBytesByOperationType { get; }
 
     /// <summary>
     /// Gets the percentage of operations that used vectorization
@@ -271,6 +407,7 @@ public sealed class OperationSummary
         $"Total: {TotalOperations:N0}, " +
         $"Vectorized: {VectorizedOperations:N0} ({VectorizationRate:F1}%), " +
         $"Scalar: {ScalarOperations:N0}, " +
-        $"WithNulls: {OperationsWithNulls:N0} " +
+        $"WithNulls: {OperationsWithNulls:N0}, " +
+        $"AllocatedBytes: {TotalAllocatedBytes:N0} " +
         $"}}";
 }

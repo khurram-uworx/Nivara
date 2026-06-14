@@ -568,14 +568,24 @@ public sealed class NivaraFrame : IFrame
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        var tensors = new Tensor<T>[ColumnCount];
-        for (int i = 0; i < ColumnCount; i++)
-        {
-            var name = ColumnNames[i];
-            var col = GetColumn<T>(name);
-            tensors[i] = col.ToTensor();
-        }
-        return tensors;
+        return DiagnosticsTracker.MeasureOperation(
+            "FrameToTensors",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            columns.Values.Any(column => column.HasNulls),
+            () =>
+            {
+                var tensors = new Tensor<T>[ColumnCount];
+                for (int i = 0; i < ColumnCount; i++)
+                {
+                    var name = ColumnNames[i];
+                    var col = GetColumn<T>(name);
+                    tensors[i] = col.ToTensor();
+                }
+                return tensors;
+            },
+            "TensorConversion=FrameColumns");
     }
 
     /// <summary>
@@ -592,6 +602,7 @@ public sealed class NivaraFrame : IFrame
         if (vector.Length != RowCount)
             throw new ArgumentException($"Vector length ({vector.Length}) must match frame row count ({RowCount})", nameof(vector));
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var vectorHasNulls = vector.Values.HasNulls;
         var vectorSpan = vector.Values.AsSpan();
         var scores = new T[ColumnCount];
@@ -620,8 +631,13 @@ public sealed class NivaraFrame : IFrame
         var objectIndex = labels.Cast<object>().ToArray();
         var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameDot", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameDot",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            hasNulls,
+            "FrameBatch=Dot");
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
@@ -642,6 +658,7 @@ public sealed class NivaraFrame : IFrame
         if (RowCount == 0)
             throw new ArgumentException("Cannot compute cosine similarity for empty vectors.", nameof(vector));
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var vectorHasNulls = vector.Values.HasNulls;
         var vectorSpan = vector.Values.AsSpan();
         var scores = new T[ColumnCount];
@@ -670,8 +687,13 @@ public sealed class NivaraFrame : IFrame
         var objectIndex = labels.Cast<object>().ToArray();
         var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameCosineSimilarity", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameCosineSimilarity",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            hasNulls,
+            "FrameBatch=CosineSimilarity");
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
@@ -685,6 +707,7 @@ public sealed class NivaraFrame : IFrame
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var norms = new T[ColumnCount];
         var nullMaskArray = new bool[ColumnCount];
         var hasNulls = false;
@@ -711,8 +734,13 @@ public sealed class NivaraFrame : IFrame
         var objectIndex = labels.Cast<object>().ToArray();
         var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameColumnNorms", KernelSelector.DetermineBatchKernelType<T>(), ColumnCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameColumnNorms",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            ColumnCount,
+            typeof(T),
+            hasNulls,
+            "FrameBatch=ColumnNorms");
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
@@ -726,6 +754,7 @@ public sealed class NivaraFrame : IFrame
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var norms = new T[RowCount];
         var nullMaskArray = new bool[RowCount];
         var hasNulls = false;
@@ -733,7 +762,7 @@ public sealed class NivaraFrame : IFrame
         T[]? pooledRowMajor = null;
         var rowMajor = totalLength >= 1024
             ? (pooledRowMajor = ArrayPool<T>.Shared.Rent(totalLength)).AsSpan(0, totalLength)
-            : new T[totalLength].AsSpan();
+            : (new T[totalLength]).AsSpan();
 
         try
         {
@@ -777,8 +806,13 @@ public sealed class NivaraFrame : IFrame
         var storage = ColumnStorageFactory.CreateFromOwnedArray(norms, nullMask);
         var valuesColumn = new NivaraColumn<T>(storage);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameRowNorms", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameRowNorms",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            hasNulls,
+            totalLength >= 1024 ? "FrameBatch=RowNorms;RowMajorBuffer=Pooled" : "FrameBatch=RowNorms;RowMajorBuffer=Array");
 
         return new NivaraSeries<T>(valuesColumn);
     }
