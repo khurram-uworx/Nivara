@@ -159,6 +159,7 @@ How AI Assistant should use this file
 - When suggesting performance changes, include a small test that validates correctness (null mask and value equality).
 
 Testing & diagnostics patterns
+- Ask before running `dotnet test` or any long-running test/verification command; wait for explicit confirmation before starting it.
 - Avoid `[TestCase]` with null arrays; use regular `[Test]` with inline arrays.
 - For complex anonymous-type arrays, prefer explicit typed tests or separate focused tests per type.
 - Reflection cannot pass `Span<T>` via `MethodInfo.Invoke` — convert to array first.

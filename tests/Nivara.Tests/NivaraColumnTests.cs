@@ -1,4 +1,5 @@
 using Nivara.Storage;
+using Nivara.Tensors;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -1926,6 +1927,180 @@ public class NivaraColumnTests
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => column.TryGetNullMask(out _));
+    }
+
+    #endregion
+
+    #region Property 14: LINQ operations (Select, Zip, Sum, Mean, Min, Max)
+
+    // ── Select ──
+
+    [Test]
+    public void Select_IdentityTransform_EqualsOriginal()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
+        var result = column.Select(x => x);
+
+        Assert.That(result.Length, Is.EqualTo(column.Length));
+        for (int i = 0; i < column.Length; i++)
+            Assert.That(result[i], Is.EqualTo(column[i]));
+    }
+
+    [Test]
+    public void Select_WithNulls_NullsPreserved()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var result = column.Select(x => x * 10);
+
+        Assert.That(result.IsNull(0), Is.False);
+        Assert.That(result.IsNull(1), Is.True);
+        Assert.That(result.IsNull(2), Is.False);
+        Assert.That(result.IsNull(3), Is.True);
+        Assert.That(result.IsNull(4), Is.False);
+        Assert.That(result[0], Is.EqualTo(10));
+        Assert.That(result[2], Is.EqualTo(30));
+        Assert.That(result[4], Is.EqualTo(50));
+    }
+
+    // ── Zip ──
+
+    [Test]
+    public void Zip_MatchingLengths_CombinesCorrectly()
+    {
+        var left = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var right = NivaraColumn<int>.Create(new[] { 10, 20, 30 });
+        var result = left.Zip(right, (a, b) => a + b);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result[0], Is.EqualTo(11));
+        Assert.That(result[1], Is.EqualTo(22));
+        Assert.That(result[2], Is.EqualTo(33));
+    }
+
+    [Test]
+    public void Zip_MismatchedLengths_ThrowsArgumentException()
+    {
+        var left = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var right = NivaraColumn<int>.Create(new[] { 1, 2 });
+
+        Assert.Throws<ArgumentException>(() => left.Zip(right, (a, b) => a + b));
+    }
+
+    [Test]
+    public void Zip_NullPropagation_NullsPreserved()
+    {
+        var left = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var right = NivaraColumn<int>.CreateFromNullable(new int?[] { null, 20, 30 });
+        var result = left.Zip(right, (a, b) => a + b);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result.IsNull(0), Is.True, "Left null at 0");
+        Assert.That(result.IsNull(1), Is.True, "Right null at 1");
+        Assert.That(result.IsNull(2), Is.False, "Neither null at 2");
+        Assert.That(result[2], Is.EqualTo(33));
+    }
+
+    [Test]
+    public void Zip_DifferentTypes_WorksCorrectly()
+    {
+        var left = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var right = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
+        var result = left.Zip(right, (a, b) => $"{a}{b}");
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result[0], Is.EqualTo("1a"));
+        Assert.That(result[1], Is.EqualTo("2b"));
+        Assert.That(result[2], Is.EqualTo("3c"));
+    }
+
+    // ── Sum, Mean, Min, Max ──
+
+    [Test]
+    public void Sum_Basic_CorrectResult()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
+        Assert.That(column.Sum(), Is.EqualTo(15));
+    }
+
+    [Test]
+    public void Sum_WithNulls_NullsSkipped()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        Assert.That(column.Sum(), Is.EqualTo(9));
+    }
+
+    [Test]
+    public void Sum_AllNull_ReturnsZero()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { null, null, null });
+        Assert.That(column.Sum(), Is.EqualTo(0));
+    }
+
+    [Test]
+    public void Sum_EmptyColumn_ThrowsInvalidOperationException()
+    {
+        var column = NivaraColumn<int>.Create(Array.Empty<int>());
+        Assert.Throws<InvalidOperationException>(() => column.Sum());
+    }
+
+    [Test]
+    public void Mean_Basic_CorrectResult()
+    {
+        var column = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0, 4.0 });
+        Assert.That(column.Mean(), Is.EqualTo(2.5));
+    }
+
+    [Test]
+    public void Mean_WithNulls_NullsSkipped()
+    {
+        var column = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.0, null, 3.0 });
+        Assert.That(column.Mean(), Is.EqualTo(2.0));
+    }
+
+    [Test]
+    public void Mean_AllNull_ReturnsNaN()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { null, null });
+        Assert.That(double.IsNaN(column.Mean()), Is.True);
+    }
+
+    [Test]
+    public void Min_Max_Basic_CorrectResult()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 3, 1, 4, 1, 5, 9 });
+        Assert.That(column.Min(), Is.EqualTo(1));
+        Assert.That(column.Max(), Is.EqualTo(9));
+    }
+
+    [Test]
+    public void Min_Max_WithNulls_NullsSkipped()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { null, 3, null, 1, null, 5 });
+        Assert.That(column.Min(), Is.EqualTo(1));
+        Assert.That(column.Max(), Is.EqualTo(5));
+    }
+
+    [Test]
+    public void Min_Max_AllNull_ThrowsInvalidOperationException()
+    {
+        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { null, null });
+        Assert.Throws<InvalidOperationException>(() => column.Min());
+        Assert.Throws<InvalidOperationException>(() => column.Max());
+    }
+
+    [Test]
+    public void Sum_FloatColumn_UsesTensorPrimitives()
+    {
+        var column = NivaraColumn<float>.Create(new[] { 1.5f, 2.5f, 3.0f });
+        Assert.That(column.Sum(), Is.EqualTo(7.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void Min_Max_FloatColumn_UsesTensorPrimitives()
+    {
+        var column = NivaraColumn<float>.Create(new[] { 3.0f, 1.0f, 4.0f });
+        Assert.That(column.Min(), Is.EqualTo(1.0f).Within(1e-6f));
+        Assert.That(column.Max(), Is.EqualTo(4.0f).Within(1e-6f));
     }
 
     #endregion

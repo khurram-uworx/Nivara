@@ -66,9 +66,9 @@ public class SerializationTests
     public void SaveLoad_MultiLayerModel_RoundTrip()
     {
         var frame = NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create([1f, 2f, 3f, 4f])),
-            ("f2", (IColumn)NivaraColumn<float>.Create([5f, 6f, 7f, 8f])),
-            ("label", (IColumn)NivaraColumn<float>.Create([10f, 20f, 30f, 40f])));
+            ("f1", NivaraColumn<float>.Create([1f, 2f, 3f, 4f])),
+            ("f2", NivaraColumn<float>.Create([5f, 6f, 7f, 8f])),
+            ("label", NivaraColumn<float>.Create([10f, 20f, 30f, 40f])));
 
         using var model = new Linear<float>(2, 1);
         var lossFn = new MSELoss<float>().Forward;

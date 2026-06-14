@@ -2867,6 +2867,84 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
     }
 
     /// <summary>
+    /// Projects each element of the column into a new form (LINQ-compatible alias for Transform).
+    /// </summary>
+    /// <typeparam name="TResult">The type of the result column</typeparam>
+    /// <param name="selector">A transform function to apply to each element</param>
+    /// <returns>A new column with transformed values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when selector is null</exception>
+    public NivaraColumn<TResult> Select<TResult>(Func<T, TResult> selector)
+    {
+        return Transform(selector);
+    }
+
+    /// <summary>
+    /// Applies a specified function to the corresponding elements of two columns,
+    /// producing a new column of the results. Null in either column produces null in the result.
+    /// </summary>
+    /// <typeparam name="T2">The type of elements in the second column</typeparam>
+    /// <typeparam name="TResult">The type of elements in the result column</typeparam>
+    /// <param name="other">The second column to combine with this column</param>
+    /// <param name="combine">The function to apply to corresponding element pairs</param>
+    /// <returns>A new column with the combined results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other or combine is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    public NivaraColumn<TResult> Zip<T2, TResult>(NivaraColumn<T2> other, Func<T, T2, TResult> combine)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        ArgumentNullException.ThrowIfNull(other);
+        ArgumentNullException.ThrowIfNull(combine);
+
+        if (other.Length != Length)
+            throw new ArgumentException($"Columns must have the same length for Zip. Left: {Length}, Right: {other.Length}");
+
+        TResult[]? pooledResultBuffer = null;
+        bool[]? pooledNullMaskBuffer = null;
+        try
+        {
+            var resultBuffer = Length >= 1024
+                ? (pooledResultBuffer = ArrayPool<TResult>.Shared.Rent(Length))
+                : new TResult[Length];
+            var nullMaskBuffer = Length >= 1024
+                ? (pooledNullMaskBuffer = ArrayPool<bool>.Shared.Rent(Length))
+                : new bool[Length];
+            bool hasResultNulls = false;
+
+            for (int i = 0; i < Length; i++)
+            {
+                if (IsNull(i) || other.IsNull(i))
+                {
+                    nullMaskBuffer[i] = true;
+                    hasResultNulls = true;
+                    resultBuffer[i] = default!;
+                }
+                else
+                {
+                    nullMaskBuffer[i] = false;
+                    resultBuffer[i] = combine(this[i], other[i]);
+                }
+            }
+
+            if (hasResultNulls)
+                return NivaraColumn<TResult>.CreateFromSpans(
+                    resultBuffer.AsSpan(0, Length),
+                    nullMaskBuffer.AsSpan(0, Length));
+
+            var result = new TResult[Length];
+            Array.Copy(resultBuffer, result, Length);
+            return NivaraColumn<TResult>.Create(result);
+        }
+        finally
+        {
+            if (pooledResultBuffer != null)
+                ArrayPool<TResult>.Shared.Return(pooledResultBuffer, clearArray: true);
+            if (pooledNullMaskBuffer != null)
+                ArrayPool<bool>.Shared.Return(pooledNullMaskBuffer, clearArray: true);
+        }
+    }
+
+    /// <summary>
     /// Creates a new column with null values filled using forward fill strategy.
     /// Each null value is replaced with the last non-null value that appeared before it.
     /// </summary>

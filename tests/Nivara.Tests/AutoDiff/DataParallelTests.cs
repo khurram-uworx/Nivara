@@ -22,8 +22,8 @@ public class DataParallelTests
         }
 
         return NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create(f1)),
-            ("label", (IColumn)NivaraColumn<float>.Create(label)));
+            ("f1", NivaraColumn<float>.Create(f1)),
+            ("label", NivaraColumn<float>.Create(label)));
     }
 
     static DataLoader<float> CreateLoader(int numRows, int batchSize, bool shuffle, int? seed = null)

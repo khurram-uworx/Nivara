@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Helpers;
 using Nivara.Query;
 
 namespace Nivara.Operations;
@@ -114,124 +115,12 @@ sealed class SliceOperation : IQueryOperation
 
         // Fallback: create filtered column using indices
         var indices = Enumerable.Range(start, length).ToList();
-        return CreateFilteredColumn(column, indices);
+        return ColumnFilterHelper.CreateFilteredColumn(column, indices);
     }
 
-    /// <summary>
-    /// Creates an empty column of the specified type
-    /// </summary>
-    /// <param name="elementType">The type of elements in the column</param>
-    /// <returns>An empty column of the specified type</returns>
     static IColumn CreateEmptyColumn(Type elementType)
-    {
-        return elementType switch
-        {
-            Type t when t == typeof(int) => NivaraColumn<int>.Create(Array.Empty<int>()),
-            Type t when t == typeof(double) => NivaraColumn<double>.Create(Array.Empty<double>()),
-            Type t when t == typeof(float) => NivaraColumn<float>.Create(Array.Empty<float>()),
-            Type t when t == typeof(long) => NivaraColumn<long>.Create(Array.Empty<long>()),
-            Type t when t == typeof(string) => NivaraColumn<string>.CreateForReferenceType(Array.Empty<string>()),
-            Type t when t == typeof(bool) => NivaraColumn<bool>.Create(Array.Empty<bool>()),
-            Type t when t == typeof(decimal) => NivaraColumn<decimal>.Create(Array.Empty<decimal>()),
-            Type t when t == typeof(byte) => NivaraColumn<byte>.Create(Array.Empty<byte>()),
-            Type t when t == typeof(short) => NivaraColumn<short>.Create(Array.Empty<short>()),
-            Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.Create(Array.Empty<DateTime>()),
-            _ => NivaraColumn<object>.Create(Array.Empty<object>())
-        };
-    }
+        => ColumnFilterHelper.CreateEmptyColumn(elementType);
 
-    /// <summary>
-    /// Creates a new column containing only the values at the specified indices
-    /// </summary>
-    /// <param name="column">The source column</param>
-    /// <param name="indices">The indices of values to include</param>
-    /// <returns>A new column with filtered values</returns>
-    static IColumn CreateFilteredColumn(IColumn column, List<int> indices)
-    {
-        var elementType = column.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => CreateFilteredColumnTyped<int>(column, indices),
-            Type t when t == typeof(double) => CreateFilteredColumnTyped<double>(column, indices),
-            Type t when t == typeof(float) => CreateFilteredColumnTyped<float>(column, indices),
-            Type t when t == typeof(long) => CreateFilteredColumnTyped<long>(column, indices),
-            Type t when t == typeof(string) => CreateFilteredColumnTyped<string>(column, indices),
-            Type t when t == typeof(bool) => CreateFilteredColumnTyped<bool>(column, indices),
-            Type t when t == typeof(decimal) => CreateFilteredColumnTyped<decimal>(column, indices),
-            Type t when t == typeof(byte) => CreateFilteredColumnTyped<byte>(column, indices),
-            Type t when t == typeof(short) => CreateFilteredColumnTyped<short>(column, indices),
-            Type t when t == typeof(DateTime) => CreateFilteredColumnTyped<DateTime>(column, indices),
-            _ => CreateFilteredColumnGeneric(column, indices)
-        };
-    }
-
-    /// <summary>
-    /// Creates a filtered column for a specific type
-    /// </summary>
-    static IColumn CreateFilteredColumnTyped<T>(IColumn column, List<int> indices)
-    {
-        // Check if T is a value type to determine which creation method to use
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array and use CreateFromNullable
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var filteredArray = System.Array.CreateInstance(nullableType, indices.Count);
-
-            for (int i = 0; i < indices.Count; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                if (value != null)
-                {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    filteredArray.SetValue(nullableInstance, i);
-                }
-                // null values remain null in the array
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { filteredArray })!;
-        }
-        else
-        {
-            // For reference types, create regular array and use CreateForReferenceType
-            var filteredArray = new T[indices.Count];
-
-            for (int i = 0; i < indices.Count; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                filteredArray[i] = (T)value!; // Reference types can be null
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { filteredArray })!;
-        }
-    }
-
-    /// <summary>
-    /// Creates a filtered column for unknown types using object column
-    /// </summary>
-    static IColumn CreateFilteredColumnGeneric(IColumn column, List<int> indices)
-    {
-        var filteredArray = new object[indices.Count];
-
-        for (int i = 0; i < indices.Count; i++)
-        {
-            filteredArray[i] = column.GetValue(indices[i])!;
-        }
-
-        return NivaraColumn<object>.Create(filteredArray);
-    }
-
-    /// <summary>
-    /// Returns a string representation of the slice operation
-    /// </summary>
-    /// <returns>A string representation</returns>
     public override string ToString()
     {
         return Take.HasValue ? $"Slice(Skip: {Skip}, Take: {Take})" : $"Slice(Skip: {Skip})";

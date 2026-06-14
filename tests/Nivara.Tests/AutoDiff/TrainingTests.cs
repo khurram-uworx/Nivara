@@ -29,8 +29,8 @@ public class TrainingTests
         }
 
         return NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create(f1)),
-            ("label", (IColumn)NivaraColumn<float>.Create(label)));
+            ("f1", NivaraColumn<float>.Create(f1)),
+            ("label", NivaraColumn<float>.Create(label)));
     }
 
     static List<float> FlattenBatches(DataLoader<float> loader)
@@ -108,9 +108,9 @@ public class TrainingTests
     public void TensorDataset_MultipleFeatures_CombinesColumns()
     {
         var frame = NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create([1f, 2f, 3f])),
-            ("f2", (IColumn)NivaraColumn<float>.Create([10f, 20f, 30f])),
-            ("label", (IColumn)NivaraColumn<float>.Create([100f, 200f, 300f])));
+            ("f1", NivaraColumn<float>.Create([1f, 2f, 3f])),
+            ("f2", NivaraColumn<float>.Create([10f, 20f, 30f])),
+            ("label", NivaraColumn<float>.Create([100f, 200f, 300f])));
 
         var dataset = new TensorDataset<float>(frame, ["f1", "f2"], "label");
         var batch = dataset.GetBatch([0, 1]);
@@ -128,10 +128,10 @@ public class TrainingTests
     public void TensorDataset_GetBatch_NullPropagation()
     {
         var frame = NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.CreateFromSpans(
+            ("f1", NivaraColumn<float>.CreateFromSpans(
                 new float[] { 1f, 0f, 3f },
                 new bool[] { false, true, false })),
-            ("label", (IColumn)NivaraColumn<float>.CreateFromSpans(
+            ("label", NivaraColumn<float>.CreateFromSpans(
                 new float[] { 10f, 20f, 30f },
                 new bool[] { false, false, false })));
 
@@ -177,8 +177,8 @@ public class TrainingTests
     public void TensorDataset_EmptyFrame_Throws()
     {
         var frame = NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create([])),
-            ("label", (IColumn)NivaraColumn<float>.Create([])));
+            ("f1", NivaraColumn<float>.Create([])),
+            ("label", NivaraColumn<float>.Create([])));
 
         Assert.That(() => new TensorDataset<float>(frame, ["f1"], "label"),
             Throws.ArgumentException);
@@ -308,9 +308,9 @@ public class TrainingTests
     public void DataLoader_MultipleLabelColumns_CombinesCorrectly()
     {
         var frame = NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create([1f, 2f, 3f])),
-            ("l1", (IColumn)NivaraColumn<float>.Create([10f, 20f, 30f])),
-            ("l2", (IColumn)NivaraColumn<float>.Create([100f, 200f, 300f])));
+            ("f1", NivaraColumn<float>.Create([1f, 2f, 3f])),
+            ("l1", NivaraColumn<float>.Create([10f, 20f, 30f])),
+            ("l2", NivaraColumn<float>.Create([100f, 200f, 300f])));
 
         var dataset = new TensorDataset<float>(frame, ["f1"], ["l1", "l2"]);
         var batch = dataset.GetBatch([0, 1]);
@@ -421,9 +421,9 @@ public class TrainingTests
     public void TrainingLoop_MultiLayer_Converges()
     {
         var frame = NivaraFrame.Create(
-            ("f1", (IColumn)NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f })),
-            ("f2", (IColumn)NivaraColumn<float>.Create(new float[] { 5f, 6f, 7f, 8f, 1f, 2f, 3f, 4f })),
-            ("label", (IColumn)NivaraColumn<float>.Create(new float[] { 11f, 17f, 25f, 35f, 11f, 17f, 25f, 35f })));
+            ("f1", NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f })),
+            ("f2", NivaraColumn<float>.Create(new float[] { 5f, 6f, 7f, 8f, 1f, 2f, 3f, 4f })),
+            ("label", NivaraColumn<float>.Create(new float[] { 11f, 17f, 25f, 35f, 11f, 17f, 25f, 35f })));
         var dataset = new TensorDataset<float>(frame, ["f1", "f2"], "label");
         var loader = new DataLoader<float>(dataset, 8, shuffle: false);
 

@@ -188,8 +188,8 @@ public static class NivaraAutoGradExtensions
         if (tensors.Count == 0)
             throw new ArgumentException("Tensors dictionary cannot be empty", nameof(tensors));
 
-        var namedColumns = tensors.Select(kvp => (kvp.Key, (IColumn)kvp.Value.ToColumn()));
-        return NivaraFrame.Create(namedColumns.ToArray());
+        return NivaraFrame.Create(
+            tensors.Select(kvp => (kvp.Key, (IColumn)kvp.Value.ToColumn())).ToArray());
     }
 
     /// <summary>
