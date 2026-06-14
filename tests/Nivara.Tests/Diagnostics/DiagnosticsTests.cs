@@ -251,6 +251,108 @@ public class DiagnosticsTests
     }
 
     [Test]
+    public void DiagnosticsTracker_ColumnToTensor_RecordsAllocationDiagnostics()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            var column = NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f });
+
+            var tensor = column.ToTensor();
+
+            var operation = AssertSingleOperation("ColumnToTensor");
+            Assert.That(operation.AllocatedBytes, Is.GreaterThan(0));
+            Assert.That(operation.Elapsed, Is.GreaterThanOrEqualTo(TimeSpan.Zero));
+            Assert.That(operation.Notes, Does.Contain("TensorConversion=Copy"));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void DiagnosticsTracker_ColumnToTensorWithNullReplacement_RecordsAllocationDiagnostics()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+
+            var tensor = column.ToTensor(-1.0f);
+
+            var operation = AssertSingleOperation("ColumnToTensorWithNullReplacement");
+            Assert.That(operation.AllocatedBytes, Is.GreaterThan(0));
+            Assert.That(operation.HadNulls, Is.True);
+            Assert.That(operation.Notes, Does.Contain("TensorConversion=NullReplacement"));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void DiagnosticsTracker_FrameBatchOperations_RecordAllocationDiagnostics()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            using var frame = CreateDiagnosticsFrameWithNulls();
+
+            using var columnNorms = frame.ColumnNorms<float>();
+            using var rowNorms = frame.RowNorms<float>();
+
+            var operations = DiagnosticsTracker.GetRecordedOperations();
+            var columnNormsOperation = operations.Single(op => op.OperationType == "FrameColumnNorms");
+            var rowNormsOperation = operations.Single(op => op.OperationType == "FrameRowNorms");
+
+            Assert.That(columnNormsOperation.AllocatedBytes, Is.GreaterThan(0));
+            Assert.That(columnNormsOperation.Notes, Does.Contain("FrameBatch=ColumnNorms"));
+            Assert.That(rowNormsOperation.AllocatedBytes, Is.GreaterThan(0));
+            Assert.That(rowNormsOperation.Notes, Does.Contain("FrameBatch=RowNorms"));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void DiagnosticsTracker_GetSummary_IncludesAllocationStatistics()
+    {
+        DiagnosticsTracker.IsEnabled = true;
+        DiagnosticsTracker.ClearRecordedOperations();
+
+        try
+        {
+            var column = NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f });
+            var tensor = column.ToTensor();
+
+            var summary = DiagnosticsTracker.GetSummary();
+
+            Assert.That(summary.TotalAllocatedBytes, Is.GreaterThan(0));
+            Assert.That(summary.AverageAllocatedBytes, Is.GreaterThan(0));
+            Assert.That(summary.AllocatedBytesByOperationType, Contains.Key("ColumnToTensor"));
+            Assert.That(summary.AllocatedBytesByOperationType["ColumnToTensor"], Is.GreaterThan(0));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
     public void OperationDiagnostics_ToString_ReturnsFormattedString()
     {
         // Arrange
@@ -269,6 +371,7 @@ public class DiagnosticsTests
         Assert.That(result, Does.Contain("Vectorized"));
         Assert.That(result, Does.Contain("100"));
         Assert.That(result, Does.Contain("Int32"));
+        Assert.That(result, Does.Contain("AllocatedBytes"));
     }
 
     [Test]

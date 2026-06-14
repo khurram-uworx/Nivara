@@ -171,10 +171,16 @@ public static class TensorInteropExtensions
     /// <typeparam name="T">The unmanaged numeric type</typeparam>
     /// <param name="tensor">The 2D Tensor&lt;T&gt; to convert</param>
     /// <param name="columnNames">Optional column names. If null, generates default names</param>
+    /// <param name="rowLabels">Optional row labels stored as a normal frame column</param>
+    /// <param name="rowLabelColumnName">Column name to use when row labels are provided</param>
     /// <returns>A NivaraFrame containing the tensor data</returns>
     /// <exception cref="ArgumentNullException">Thrown when tensor is null</exception>
     /// <exception cref="ArgumentException">Thrown when tensor is not 2-dimensional or column names count doesn't match</exception>
-    public static NivaraFrame FromTensor<T>(Tensor<T> tensor, string[]? columnNames = null)
+    public static NivaraFrame FromTensor<T>(
+        Tensor<T> tensor,
+        string[]? columnNames = null,
+        object[]? rowLabels = null,
+        string rowLabelColumnName = "Label")
         where T : unmanaged
     {
         ArgumentNullException.ThrowIfNull(tensor);
@@ -191,15 +197,41 @@ public static class TensorInteropExtensions
         if (columnNames.Length != cols)
             throw new ArgumentException($"Column names count ({columnNames.Length}) must match tensor columns ({cols})");
 
-        if (rows == 0 || cols == 0)
+        if (columnNames.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("Column names cannot contain null or whitespace values.", nameof(columnNames));
+
+        if (rowLabels != null && rowLabels.Length != rows)
+            throw new ArgumentException($"Row labels count ({rowLabels.Length}) must match tensor rows ({rows})", nameof(rowLabels));
+
+        if (rowLabels != null && string.IsNullOrWhiteSpace(rowLabelColumnName))
+            throw new ArgumentException("Row label column name cannot be null or whitespace", nameof(rowLabelColumnName));
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (rowLabels != null && !names.Add(rowLabelColumnName))
+            throw new ArgumentException($"Duplicate column name '{rowLabelColumnName}' found.", nameof(rowLabelColumnName));
+
+        foreach (var columnName in columnNames)
         {
-            // Create a minimal empty frame with one empty column
-            var emptyColumn = NivaraColumn<T>.Create(Array.Empty<T>());
-            var emptyColumns = new[] { ("EmptyColumn", (IColumn)emptyColumn) };
-            return new NivaraFrame(emptyColumns);
+            if (!names.Add(columnName))
+                throw new ArgumentException($"Duplicate column name '{columnName}' found. Column names must be unique (case-insensitive).", nameof(columnNames));
         }
 
-        var columns = new Dictionary<string, IColumn>();
+        if (cols == 0)
+            throw new ArgumentException("Tensor must have at least one column for NivaraFrame conversion.", nameof(tensor));
+
+        var columns = new List<(string Name, IColumn Column)>();
+
+        if (rowLabels != null)
+            columns.Add((rowLabelColumnName, NivaraColumn<object>.CreateForReferenceType(rowLabels)));
+
+        if (rows == 0)
+        {
+            foreach (var columnName in columnNames)
+                columns.Add((columnName, NivaraColumn<T>.Create(Array.Empty<T>())));
+
+            return new NivaraFrame(columns);
+        }
+
         var tensorSpan = tensor.AsTensorSpan();
 
         // Create a column for each tensor column
@@ -211,10 +243,10 @@ public static class TensorInteropExtensions
                 columnData[row] = tensorSpan[row, col];
 
             var series = NivaraSeries<T>.Create(columnData);
-            columns[columnNames[col]] = series.Values;
+            columns.Add((columnNames[col], series.Values));
         }
 
-        return new NivaraFrame(columns.Select(kvp => (kvp.Key, kvp.Value)));
+        return new NivaraFrame(columns);
     }
 
     /// <summary>

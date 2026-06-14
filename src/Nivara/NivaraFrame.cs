@@ -3,6 +3,7 @@ using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
 using Nivara.Storage;
+using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -346,6 +347,79 @@ public sealed class NivaraFrame : IFrame
         return Create((name, (IColumn)column));
     }
 
+    /// <summary>
+    /// Creates a frame from a 2D tensor using row-major tensor orientation [rows, columns].
+    /// </summary>
+    public static NivaraFrame FromMatrix<T>(
+        Tensor<T> matrix,
+        string[]? columnNames = null,
+        object[]? rowLabels = null,
+        string rowLabelColumnName = "Label")
+        where T : unmanaged
+        => TensorInteropExtensions.FromTensor(matrix, columnNames, rowLabels, rowLabelColumnName);
+
+    /// <summary>
+    /// Creates a frame from labeled row vectors. Labels are stored as a normal column.
+    /// </summary>
+    public static NivaraFrame FromRows<T>(
+        IEnumerable<(string Label, T[] Vector)> rows,
+        string[]? columnNames = null,
+        string labelColumnName = "Label")
+    {
+        ArgumentNullException.ThrowIfNull(rows);
+
+        if (string.IsNullOrWhiteSpace(labelColumnName))
+            throw new ArgumentException("Label column name cannot be null or whitespace", nameof(labelColumnName));
+
+        var rowList = rows.ToList();
+        if (rowList.Count == 0)
+            throw new ArgumentException("At least one row is required to infer vector width.", nameof(rows));
+
+        var width = rowList[0].Vector?.Length
+            ?? throw new ArgumentException("Row vectors cannot be null.", nameof(rows));
+
+        foreach (var row in rowList)
+        {
+            if (row.Vector == null)
+                throw new ArgumentException("Row vectors cannot be null.", nameof(rows));
+            if (row.Vector.Length != width)
+                throw new ArgumentException("All row vectors must have the same length.", nameof(rows));
+        }
+
+        columnNames ??= Enumerable.Range(0, width).Select(i => $"Col_{i}").ToArray();
+        if (columnNames.Length != width)
+            throw new ArgumentException($"Column names count ({columnNames.Length}) must match vector width ({width}).", nameof(columnNames));
+
+        if (columnNames.Any(string.IsNullOrWhiteSpace))
+            throw new ArgumentException("Column names cannot contain null or whitespace values.", nameof(columnNames));
+
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!names.Add(labelColumnName))
+            throw new ArgumentException($"Duplicate column name '{labelColumnName}' found.", nameof(labelColumnName));
+
+        foreach (var columnName in columnNames)
+        {
+            if (!names.Add(columnName))
+                throw new ArgumentException($"Duplicate column name '{columnName}' found. Column names must be unique (case-insensitive).", nameof(columnNames));
+        }
+
+        var columns = new List<(string Name, IColumn Column)>
+        {
+            (labelColumnName, NivaraColumn<string>.CreateForReferenceType(rowList.Select(row => row.Label).ToArray()))
+        };
+
+        for (int col = 0; col < width; col++)
+        {
+            var values = new T[rowList.Count];
+            for (int row = 0; row < rowList.Count; row++)
+                values[row] = rowList[row].Vector[col];
+
+            columns.Add((columnNames[col], NivaraColumn<T>.Create(values)));
+        }
+
+        return new NivaraFrame(columns);
+    }
+
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly Schema schema;
     bool disposed;
@@ -567,14 +641,24 @@ public sealed class NivaraFrame : IFrame
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        var tensors = new Tensor<T>[ColumnCount];
-        for (int i = 0; i < ColumnCount; i++)
-        {
-            var name = ColumnNames[i];
-            var col = GetColumn<T>(name);
-            tensors[i] = col.ToTensor();
-        }
-        return tensors;
+        return DiagnosticsTracker.MeasureOperation(
+            "FrameToTensors",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            columns.Values.Any(column => column.HasNulls),
+            () =>
+            {
+                var tensors = new Tensor<T>[ColumnCount];
+                for (int i = 0; i < ColumnCount; i++)
+                {
+                    var name = ColumnNames[i];
+                    var col = GetColumn<T>(name);
+                    tensors[i] = col.ToTensor();
+                }
+                return tensors;
+            },
+            "TensorConversion=FrameColumns");
     }
 
     /// <summary>
@@ -591,6 +675,7 @@ public sealed class NivaraFrame : IFrame
         if (vector.Length != RowCount)
             throw new ArgumentException($"Vector length ({vector.Length}) must match frame row count ({RowCount})", nameof(vector));
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var vectorHasNulls = vector.Values.HasNulls;
         var vectorSpan = vector.Values.AsSpan();
         var scores = new T[ColumnCount];
@@ -619,8 +704,13 @@ public sealed class NivaraFrame : IFrame
         var objectIndex = labels.Cast<object>().ToArray();
         var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameDot", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameDot",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            hasNulls,
+            "FrameBatch=Dot");
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
@@ -641,6 +731,7 @@ public sealed class NivaraFrame : IFrame
         if (RowCount == 0)
             throw new ArgumentException("Cannot compute cosine similarity for empty vectors.", nameof(vector));
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var vectorHasNulls = vector.Values.HasNulls;
         var vectorSpan = vector.Values.AsSpan();
         var scores = new T[ColumnCount];
@@ -669,8 +760,13 @@ public sealed class NivaraFrame : IFrame
         var objectIndex = labels.Cast<object>().ToArray();
         var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameCosineSimilarity", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameCosineSimilarity",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            hasNulls,
+            "FrameBatch=CosineSimilarity");
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
@@ -684,6 +780,7 @@ public sealed class NivaraFrame : IFrame
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var norms = new T[ColumnCount];
         var nullMaskArray = new bool[ColumnCount];
         var hasNulls = false;
@@ -710,8 +807,13 @@ public sealed class NivaraFrame : IFrame
         var objectIndex = labels.Cast<object>().ToArray();
         var indexColumn = NivaraColumn<object>.CreateForReferenceType(objectIndex);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameColumnNorms", KernelSelector.DetermineBatchKernelType<T>(), ColumnCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameColumnNorms",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            ColumnCount,
+            typeof(T),
+            hasNulls,
+            "FrameBatch=ColumnNorms");
 
         return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
@@ -725,55 +827,65 @@ public sealed class NivaraFrame : IFrame
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
+        var measurement = DiagnosticsTracker.StartMeasurement();
         var norms = new T[RowCount];
         var nullMaskArray = new bool[RowCount];
         var hasNulls = false;
-        T[]? pooledRowValues = null;
-        var rowValues = ColumnCount >= 1024
-            ? (pooledRowValues = ArrayPool<T>.Shared.Rent(ColumnCount))
-            : new T[ColumnCount];
+        int totalLength = RowCount * ColumnCount;
+        T[]? pooledRowMajor = null;
+        var rowMajor = totalLength >= 1024
+            ? (pooledRowMajor = ArrayPool<T>.Shared.Rent(totalLength)).AsSpan(0, totalLength)
+            : (new T[totalLength]).AsSpan();
 
         try
         {
-            for (int row = 0; row < RowCount; row++)
-            {
-                var rowHasNull = false;
+            CopyToRowMajor(rowMajor, default);
 
-                for (int col = 0; col < ColumnCount; col++)
+            for (int col = 0; col < ColumnCount; col++)
+            {
+                var column = GetColumn<T>(ColumnNames[col]);
+
+                if (!column.HasNulls)
+                    continue;
+
+                for (int row = 0; row < RowCount; row++)
                 {
-                    var column = GetColumn<T>(ColumnNames[col]);
                     if (column.IsNull(row))
                     {
-                        rowHasNull = true;
-                        break;
+                        nullMaskArray[row] = true;
+                        hasNulls = true;
                     }
-                    rowValues[col] = column[row];
                 }
+            }
 
-                if (rowHasNull)
+            TensorsHelper.RowNorms(rowMajor, norms.AsSpan(), RowCount, ColumnCount);
+
+            if (hasNulls)
+            {
+                for (int row = 0; row < RowCount; row++)
                 {
-                    nullMaskArray[row] = true;
-                    hasNulls = true;
-                    norms[row] = default;
-                }
-                else
-                {
-                    norms[row] = normSpan(rowValues.AsSpan(0, ColumnCount));
+                    if (nullMaskArray[row])
+                        norms[row] = default;
                 }
             }
         }
         finally
         {
-            if (pooledRowValues != null)
-                ArrayPool<T>.Shared.Return(pooledRowValues);
+            if (pooledRowMajor != null)
+                ArrayPool<T>.Shared.Return(pooledRowMajor, clearArray: true);
         }
 
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;
         var storage = ColumnStorageFactory.CreateFromOwnedArray(norms, nullMask);
         var valuesColumn = new NivaraColumn<T>(storage);
 
-        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
-            "FrameRowNorms", KernelSelector.DetermineBatchKernelType<T>(), RowCount, typeof(T), hasNulls));
+        measurement.Record(
+            "FrameRowNorms",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            hasNulls,
+            totalLength >= 1024 ? "FrameBatch=RowNorms;RowMajorBuffer=Pooled" : "FrameBatch=RowNorms;RowMajorBuffer=Array");
 
         return new NivaraSeries<T>(valuesColumn);
     }
@@ -868,6 +980,53 @@ public sealed class NivaraFrame : IFrame
             if (pooledTemp != null)
                 ArrayPool<T>.Shared.Return(pooledTemp);
         }
+    }
+
+    /// <summary>
+    /// Converts this frame to a 2D tensor plus an optional explicit null mask.
+    /// All columns must be of the same unmanaged type T. Tensor orientation is [rows, columns].
+    /// </summary>
+    public NullableTensor<T> ToNullableTensor<T>()
+        where T : unmanaged
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (ColumnCount == 0)
+            throw new ArgumentException("Frame must have at least one column");
+
+        foreach (var columnType in Schema.ColumnTypes.Values)
+            if (columnType != typeof(T))
+                throw new ArgumentException($"All columns must be of type {typeof(T).Name}. Found column of type {columnType.Name}");
+
+        var length = RowCount * ColumnCount;
+        var data = new T[length];
+        var mask = new bool[length];
+        var hasNulls = false;
+        var rowStride = ColumnCount;
+
+        for (int col = 0; col < ColumnCount; col++)
+        {
+            var column = GetColumn<T>(ColumnNames[col]);
+            var rawValues = column.AsSpan();
+            column.TryGetNullMask(out var columnMask);
+
+            for (int row = 0; row < RowCount; row++)
+            {
+                var index = row * rowStride + col;
+                data[index] = rawValues[row];
+
+                if (columnMask.Length > 0 && columnMask[row])
+                {
+                    mask[index] = true;
+                    hasNulls = true;
+                }
+            }
+        }
+
+        var dimensions = new nint[] { RowCount, ColumnCount };
+        return new NullableTensor<T>(
+            Tensor.Create(data, dimensions),
+            hasNulls ? Tensor.Create(mask, dimensions) : null);
     }
 
     /// <summary>

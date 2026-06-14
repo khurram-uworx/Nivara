@@ -186,6 +186,42 @@ public class TensorsHelperTests
         }
     }
 
+    #region RowNorms
+
+    [Test]
+    public void RowNorms_FloatRowMajor_MatchesTensorPrimitives()
+    {
+        var rowMajor = new[] { 3f, 4f, 0f, 1f };
+        var destination = new float[2];
+
+        TensorsHelper.RowNorms(rowMajor.AsSpan(), destination.AsSpan(), rows: 2, cols: 2);
+
+        Assert.That(destination[0], Is.EqualTo(TensorPrimitives.Norm(new[] { 3f, 4f })).Within(1e-6f));
+        Assert.That(destination[1], Is.EqualTo(TensorPrimitives.Norm(new[] { 0f, 1f })).Within(1e-6f));
+    }
+
+    [Test]
+    public void RowNorms_ZeroRows_DoesNotWriteDestination()
+    {
+        var destination = new[] { 42f };
+
+        TensorsHelper.RowNorms(ReadOnlySpan<float>.Empty, destination.AsSpan(), rows: 0, cols: 3);
+
+        Assert.That(destination[0], Is.EqualTo(42f));
+    }
+
+    [Test]
+    public void RowNorms_ZeroColumns_WritesZeroNorms()
+    {
+        var destination = new[] { 1f, 1f };
+
+        TensorsHelper.RowNorms(ReadOnlySpan<float>.Empty, destination.AsSpan(), rows: 2, cols: 0);
+
+        Assert.That(destination, Is.EqualTo(new[] { 0f, 0f }));
+    }
+
+    #endregion
+
     #region Sigmoid
 
     [Test]

@@ -16,6 +16,7 @@ This guide provides comprehensive examples and tutorials for using Nivara's Data
 - [Joins and Concatenation](#joins-and-concatenation)
 - [Grouping and Aggregation](#grouping-and-aggregation)
 - [Advanced Features](#advanced-features)
+- [Tensor Interop](#tensor-interop)
 - [Automatic Differentiation](#automatic-differentiation)
 - [Extensions and I/O](#extensions-and-io)
 - [Real World Examples](EXAMPLES.md)
@@ -32,7 +33,7 @@ Nivara columns are strongly typed and immutable:
 using Nivara;
 
 // Create columns with explicit types
-var ages = NivaraColumn<int>.Create(new[] { 25, 30, 35 });
+NivaraColumn<int> ages = [25, 30, 35];
 var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" });
 
 Console.WriteLine(ages.Length); // 3
@@ -62,7 +63,7 @@ var dropped = column.DropNulls(); // [1, 3]
 
 ### Vectorized Operations
 
-For vectorizable types, Nivara automatically uses SIMD-accelerated kernels:
+For vectorizable types, Nivara uses SIMD-accelerated kernels where semantics are simple and null handling is explicit:
 
 ```csharp
 var a = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 });
@@ -72,9 +73,11 @@ var c = a + b;    // Vectorized addition
 // Results: a=[1.0, 2.0, 3.0], b=[1.5, 3.0, 4.5], c=[2.5, 5.0, 7.5]
 ```
 
-Nivara automatically selects the optimal storage backend:
+Nivara automatically selects the storage backend:
 - **TensorStorage**: For vectorizable types (`int`, `float`, `double`, `bool`)
 - **MemoryStorage**: For non-vectorizable types (`string`, `Guid`, reference types)
+
+Use `System.Numerics.Tensors` directly for tensor math such as dot products, norms, cosine similarity, and model-facing APIs. Nivara's role is to preserve typed columns, schemas, labels, and null masks at the tabular boundary.
 
 ---
 
@@ -86,6 +89,10 @@ Nivara automatically selects the optimal storage backend:
 // From arrays
 var integers = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
 var doubles = NivaraColumn<double>.Create(new[] { 1.1, 2.2, 3.3 });
+
+// From collection expressions
+NivaraColumn<int> ids = [101, 102, 103];
+NivaraSeries<float> scores = [0.8f, 0.5f, 0.9f];
 
 // For reference types (strings, objects)
 var strings = NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "C" });
@@ -959,6 +966,59 @@ Console.WriteLine($"Throughput: {summary.AverageThroughput:F0} rows/sec");
 
 ---
 
+## Tensor Interop
+
+Nivara provides tensor interop for moving tabular data into platform tensor APIs. It does not replace `Tensor<T>` or `TensorPrimitives` for numerical kernels.
+
+### Null-Preserving Tensor Export
+
+```csharp
+using Nivara.Tensors;
+
+var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+NullableTensor<float> tensor = column.ToNullableTensor();
+
+Console.WriteLine(tensor.Data.Lengths[0]);       // 3
+Console.WriteLine(tensor.NullMask!.AsTensorSpan()[1]); // True
+```
+
+For null-free data, use `ToTensor()` when you only need tensor data:
+
+```csharp
+var values = NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f });
+var tensor = values.ToTensor();
+```
+
+### 2D Tensor Import With Labels
+
+```csharp
+var matrix = Tensor.Create(
+    new[] { 0.9f, 0.2f, 0.1f, 0.8f },
+    new nint[] { 2, 2 });
+
+using var frame = NivaraFrame.FromMatrix(
+    matrix,
+    columnNames: ["e0", "e1"],
+    rowLabels: ["doc-1", "doc-2"],
+    rowLabelColumnName: "DocumentId");
+```
+
+### Labeled Row Vector Ingestion
+
+```csharp
+using var embeddings = NivaraFrame.FromRows(
+    [
+        ("doc-1", new[] { 0.9f, 0.2f, 0.5f }),
+        ("doc-2", new[] { 0.1f, 0.8f, 0.4f })
+    ],
+    columnNames: ["e0", "e1", "e2"],
+    labelColumnName: "DocumentId");
+```
+
+After ingestion, use Nivara for filtering, joining, grouping, and schema validation. Extract spans or tensors and call `TensorPrimitives` when you need vector math.
+
+---
+
 ## Automatic Differentiation
 
 Nivara provides automatic differentiation (AutoDiff) on DataFrames, enabling gradient-based optimization and machine learning workflows directly on your data.
@@ -1022,7 +1082,7 @@ When training in a loop, zero out gradients before the next pass:
 tensors.BatchZeroGrad();
 ```
 
-> For module-based models (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, model serialization, and data-parallel training, see [AUTODIFF.md](docs/AUTODIFF.md) and the Act 7b / Act 8 examples in [EXAMPLES.md](docs/EXAMPLES.md).
+> For module-based models (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, model serialization, and data-parallel training, see [AUTODIFF.md](docs/AUTODIFF.md) and the Act 7b / Act 8 examples in [EXAMPLES.md](EXAMPLES.md).
 
 ---
 

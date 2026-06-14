@@ -1,6 +1,6 @@
 # Nivara
 
-A high-performance, columnar DataFrame library for .NET, focused on **type safety**, **explicit null semantics**, and **vectorized execution**.
+A high-performance, columnar DataFrame library for .NET, focused on **type safety**, **explicit null semantics**, **query planning**, and clean interop with platform tensor and data APIs.
 
 Nivara is designed for developers who want predictable behavior, strong typing, and performance-oriented data processing without relying on dynamic or NaN-based conventions.
 
@@ -15,7 +15,7 @@ Most DataFrame-style libraries trade correctness and type safety for convenience
 - **Strong typing end-to-end** — column types are explicit and enforced
 - **Explicit null handling** — no NaN-based semantics or hidden behavior
 - **Immutable data model** — operations return new data structures
-- **Vectorized execution where it matters** — SIMD via `System.Numerics`
+- **Interop with .NET primitives** — use Nivara for tabular data and `System.Numerics.Tensors` for tensor math
 - **Schema-aware query planning** — errors surface early, not at runtime
 
 If you care about correctness, debuggability, and performance in .NET data processing, Nivara is built for you.
@@ -45,7 +45,7 @@ using Nivara;
 using Nivara.Linq;
 
 // Create typed columns
-var ages = NivaraColumn<int>.Create(new[] { 25, 30, 35 });
+NivaraColumn<int> ages = [25, 30, 35];
 var names = NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" });
 
 // Combine into a DataFrame
@@ -78,10 +78,16 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 - Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
 - Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with integrated performance diagnostics
 
+### Tensor and AI Interop
+- Convert columns, series, and frames to `Tensor<T>` for platform math APIs
+- Preserve null masks through `NullableTensor<T>` when crossing tensor boundaries
+- Ingest 2D tensors and labeled row vectors into schema-aware frames
+- Keep tensor math in `System.Numerics.Tensors`, not custom DataFrame APIs
+
 ### Performance
-- Vectorized operations using `System.Numerics.Tensors` for numeric types
-- Automatic storage backend selection (tensor vs memory)
-- SIMD acceleration where applicable with scalar fallbacks
+- Vectorized execution where semantics are simple and measurable
+- Automatic storage backend selection for supported types
+- Scalar fallbacks that preserve explicit null semantics
 
 ### Data Operations
 - **Row Operations**: Filtering, slicing, sorting with null-aware semantics
@@ -119,7 +125,8 @@ Nivara currently supports:
 
 - **Core Data Structures**: Typed, immutable columns and frames with automatic storage selection
 - **Null Handling**: Explicit null handling with fill and drop operations, comprehensive null mask tracking
-- **Performance**: Vectorized arithmetic and comparisons using `System.Numerics.Tensors`
+- **Tensor Interop**: `Tensor<T>` and nullable tensor conversion helpers, plus matrix/labeled-row ingestion
+- **Performance**: Vectorized arithmetic and comparisons where semantics are safe
 - **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
 - **Query Engine**: Schema-aware lazy query construction with automatic optimization, `OperationType` constants, diagnostics and plan inspection
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
@@ -133,7 +140,7 @@ Nivara currently supports:
 - **Aggregation Framework**: Extensible aggregation system with built-in functions (Count, Sum, Min, Max, Mean) and vectorized execution
 - **Parquet I/O**: Full read/write support with compression, streaming, and batch operations (via `Nivara.Extensions`)
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
-- **ML.NET Integration**: Tensor conversion helpers for machine learning workflows (via `Nivara.Extensions`)
+- **ML.NET Integration**: ML.NET conversion helpers for machine learning workflows (via `Nivara.Extensions`)
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics via `ExecutionEngine.LastDiagnostics`
 - **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with a full training stack — module system (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core)
 
