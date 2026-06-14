@@ -10,6 +10,31 @@ namespace Nivara;
 /// <typeparam name="T">The type of values in the series</typeparam>
 public sealed class NivaraSeries<T> : IDisposable
 {
+    readonly struct TopKPriority
+    {
+        public TopKPriority(T score, int index)
+        {
+            Score = score;
+            Index = index;
+        }
+
+        public T Score { get; }
+        public int Index { get; }
+    }
+
+    sealed class TopKPriorityComparer : IComparer<TopKPriority>
+    {
+        readonly IComparer<T> scoreComparer = Comparer<T>.Default;
+
+        public int Compare(TopKPriority x, TopKPriority y)
+        {
+            var scoreComparison = scoreComparer.Compare(x.Score, y.Score);
+            return scoreComparison != 0
+                ? scoreComparison
+                : y.Index.CompareTo(x.Index);
+        }
+    }
+
     /// <summary>
     /// Creates a default integer index for the specified length
     /// </summary>
@@ -948,6 +973,9 @@ public sealed class NivaraSeries<T> : IDisposable
         if (count == 0 || Length == 0)
             return Array.Empty<(string? Label, T Score)>();
 
+        if (count <= Length / 10)
+            return topKDescendingWithHeap(count);
+
         var indices = ArgSortDescending();
         var validCount = 0;
         while (validCount < indices.Length && IsValid(indices[validCount]))
@@ -959,6 +987,53 @@ public sealed class NivaraSeries<T> : IDisposable
         var result = new (string? Label, T Score)[k];
 
         for (int i = 0; i < k; i++)
+        {
+            var idx = indices[i];
+            var label = GetLabel(idx);
+            result[i] = (
+                label is string s ? s : null,
+                this[idx]
+            );
+        }
+
+        return result;
+    }
+
+    (string? Label, T Score)[] topKDescendingWithHeap(int count)
+    {
+        var comparer = Comparer<T>.Default;
+        var heap = new PriorityQueue<int, TopKPriority>(count, new TopKPriorityComparer());
+
+        for (int i = 0; i < Length; i++)
+        {
+            if (!IsValid(i))
+                continue;
+
+            var priority = new TopKPriority(values[i], i);
+            if (heap.Count < count)
+            {
+                heap.Enqueue(i, priority);
+            }
+            else
+            {
+                heap.EnqueueDequeue(i, priority);
+            }
+        }
+
+        if (heap.Count == 0)
+            return Array.Empty<(string? Label, T Score)>();
+
+        var indices = heap.UnorderedItems.Select(item => item.Element).ToArray();
+        Array.Sort(indices, (leftIndex, rightIndex) =>
+        {
+            var valueComparison = comparer.Compare(values[leftIndex], values[rightIndex]);
+            return valueComparison != 0
+                ? -valueComparison
+                : leftIndex.CompareTo(rightIndex);
+        });
+
+        var result = new (string? Label, T Score)[indices.Length];
+        for (int i = 0; i < indices.Length; i++)
         {
             var idx = indices[i];
             var label = GetLabel(idx);

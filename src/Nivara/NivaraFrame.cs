@@ -3,6 +3,7 @@ using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
 using Nivara.Storage;
+using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -728,44 +729,48 @@ public sealed class NivaraFrame : IFrame
         var norms = new T[RowCount];
         var nullMaskArray = new bool[RowCount];
         var hasNulls = false;
-        T[]? pooledRowValues = null;
-        var rowValues = ColumnCount >= 1024
-            ? (pooledRowValues = ArrayPool<T>.Shared.Rent(ColumnCount))
-            : new T[ColumnCount];
+        int totalLength = RowCount * ColumnCount;
+        T[]? pooledRowMajor = null;
+        var rowMajor = totalLength >= 1024
+            ? (pooledRowMajor = ArrayPool<T>.Shared.Rent(totalLength)).AsSpan(0, totalLength)
+            : new T[totalLength].AsSpan();
 
         try
         {
-            for (int row = 0; row < RowCount; row++)
-            {
-                var rowHasNull = false;
+            CopyToRowMajor(rowMajor, default);
 
-                for (int col = 0; col < ColumnCount; col++)
+            for (int col = 0; col < ColumnCount; col++)
+            {
+                var column = GetColumn<T>(ColumnNames[col]);
+
+                if (!column.HasNulls)
+                    continue;
+
+                for (int row = 0; row < RowCount; row++)
                 {
-                    var column = GetColumn<T>(ColumnNames[col]);
                     if (column.IsNull(row))
                     {
-                        rowHasNull = true;
-                        break;
+                        nullMaskArray[row] = true;
+                        hasNulls = true;
                     }
-                    rowValues[col] = column[row];
                 }
+            }
 
-                if (rowHasNull)
+            TensorsHelper.RowNorms(rowMajor, norms.AsSpan(), RowCount, ColumnCount);
+
+            if (hasNulls)
+            {
+                for (int row = 0; row < RowCount; row++)
                 {
-                    nullMaskArray[row] = true;
-                    hasNulls = true;
-                    norms[row] = default;
-                }
-                else
-                {
-                    norms[row] = normSpan(rowValues.AsSpan(0, ColumnCount));
+                    if (nullMaskArray[row])
+                        norms[row] = default;
                 }
             }
         }
         finally
         {
-            if (pooledRowValues != null)
-                ArrayPool<T>.Shared.Return(pooledRowValues);
+            if (pooledRowMajor != null)
+                ArrayPool<T>.Shared.Return(pooledRowMajor, clearArray: true);
         }
 
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : (ReadOnlyMemory<bool>?)null;

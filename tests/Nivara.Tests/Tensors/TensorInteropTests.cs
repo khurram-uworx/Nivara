@@ -688,6 +688,28 @@ public class TensorInteropTests
     }
 
     [Test]
+    public void TopKDescending_HeapPath_ExcludesNullsAndPreservesStableTieOrder()
+    {
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[]
+        {
+            0.1f, 0.2f, 0.3f, 0.4f, 0.95f,
+            null, 0.5f, 0.6f, 0.7f, 0.8f,
+            0.95f, null, 0.2f, 0.3f, 0.4f,
+            0.5f, 0.6f, 0.7f, 0.8f, 0.9f
+        });
+        var labels = Enumerable.Range(0, 20).Select(i => $"L{i}").Cast<object>().ToArray();
+        using var series = new NivaraSeries<float>(column, NivaraColumn<object>.CreateForReferenceType(labels));
+
+        var result = series.TopKDescending(2);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result[0].Label, Is.EqualTo("L4"));
+        Assert.That(result[0].Score, Is.EqualTo(0.95f));
+        Assert.That(result[1].Label, Is.EqualTo("L10"));
+        Assert.That(result[1].Score, Is.EqualTo(0.95f));
+    }
+
+    [Test]
     public void TopKDescending_WithEmptySeries_ReturnsEmpty()
     {
         using var series = new NivaraSeries<float>();

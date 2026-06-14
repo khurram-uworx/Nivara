@@ -203,6 +203,27 @@ static class TensorsHelper
         }
     }
 
+    /// <summary>
+    /// Computes one Euclidean norm per row from a flat row-major matrix.
+    /// Null handling is caller-owned.
+    /// </summary>
+    public static void RowNorms<T>(ReadOnlySpan<T> rowMajor, Span<T> destination, int rows, int cols)
+        where T : struct, IRootFunctions<T>
+    {
+        if (destination.Length < rows)
+            throw new ArgumentException($"Destination span length ({destination.Length}) must be at least {rows}", nameof(destination));
+        if (rowMajor.Length < rows * cols)
+            throw new ArgumentException($"Input span length ({rowMajor.Length}) must be at least {rows * cols}", nameof(rowMajor));
+
+        for (int row = 0; row < rows; row++)
+        {
+            var rowSpan = rowMajor.Slice(row * cols, cols);
+            destination[row] = rowSpan.IsEmpty
+                ? T.Zero
+                : TensorPrimitives.Norm(rowSpan);
+        }
+    }
+
     internal static void PropagateNullMask(
         ReadOnlySpan<bool> aNullMask, ReadOnlySpan<bool> bNullMask,
         Span<bool> resultMask, int aRows, int aCols, int bCols)

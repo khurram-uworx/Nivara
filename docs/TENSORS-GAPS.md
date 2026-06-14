@@ -13,34 +13,6 @@ Current bugs, correctness risks, and immediate technical debt are tracked in
 
 ---
 
-## Performance Gaps
-
-### P1. `RowNorms` uses column-major iteration; no batch TensorPrimitives kernel
-
-**Where:** `NivaraFrame.RowNorms<T>()`.
-
-**Status:** Row norms iterate columns for each row with a per-row `T[buffer]`.
-This is correct but not SIMD-optimized despite `TensorPrimitives.Norm` being
-available. The issue is extracting a row-span from column-major storage.
-
-**Recommendation:** Use row-major re-layout (frame → `T[rows*cols]` → `Tensor<T>`,
-then batch `TensorPrimitives.Norm` over individual row slices). Add a pooled
-transpose buffer for large frames.
-
----
-
-### P2. `TopKDescending` has no threshold-based optimization
-
-**Where:** `NivaraSeries<T>.TopKDescending(int count)`.
-
-**Status:** Sorts all values and takes top `count`. For small `count` relative
-to series length, a partial-sort (heap-based) approach would be faster.
-
-**Recommendation:** If `count <= series.Length / 10`, use a bounded min-heap.
-Otherwise use the current full-sort approach. Benchmark first.
-
----
-
 ## API & Ergonomics Gaps
 
 ### E1. No row-wise batch cosine similarity on `NivaraFrame`
@@ -230,7 +202,6 @@ default.
 | Area | Critical | Important | Nice-to-have |
 |------|----------|-----------|-------------|
 | Correctness | | | |
-| Performance | | P1, P2 | |
 | API/Ergonomics | | E1, E2, E3 | E4, E5, E6, E7, E8, E9, E10 |
 | Testing | | T1 | |
 | Design | | | D1, D2, D3, D4 |
