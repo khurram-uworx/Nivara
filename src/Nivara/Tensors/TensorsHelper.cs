@@ -205,22 +205,56 @@ static class TensorsHelper
 
     /// <summary>
     /// Computes one Euclidean norm per row from a flat row-major matrix.
+    /// Uses a batched <see cref="Vector{T}"/> kernel to avoid per-row
+    /// <see cref="TensorPrimitives"/> dispatch overhead when the column
+    /// count is large enough to benefit from SIMD.
     /// Null handling is caller-owned.
     /// </summary>
     public static void RowNorms<T>(ReadOnlySpan<T> rowMajor, Span<T> destination, int rows, int cols)
-        where T : struct, IRootFunctions<T>
+        where T : unmanaged, IRootFunctions<T>
     {
         if (destination.Length < rows)
             throw new ArgumentException($"Destination span length ({destination.Length}) must be at least {rows}", nameof(destination));
         if (rowMajor.Length < rows * cols)
             throw new ArgumentException($"Input span length ({rowMajor.Length}) must be at least {rows * cols}", nameof(rowMajor));
 
+        if (rows == 0) return;
+        if (cols == 0)
+        {
+            destination.Slice(0, rows).Clear();
+            return;
+        }
+
+        bool canVectorize = Vector.IsHardwareAccelerated && Vector<T>.Count > 0
+                            && cols >= Vector<T>.Count;
+
         for (int row = 0; row < rows; row++)
         {
             var rowSpan = rowMajor.Slice(row * cols, cols);
-            destination[row] = rowSpan.IsEmpty
-                ? T.Zero
-                : TensorPrimitives.Norm(rowSpan);
+
+            if (canVectorize)
+            {
+                var acc = Vector<T>.Zero;
+                int col = 0;
+                for (; col <= rowSpan.Length - Vector<T>.Count; col += Vector<T>.Count)
+                {
+                    var v = new Vector<T>(rowSpan.Slice(col));
+                    acc += v * v;
+                }
+
+                T sumSq = Vector.Sum(acc);
+                for (; col < rowSpan.Length; col++)
+                {
+                    T val = rowSpan[col];
+                    sumSq += val * val;
+                }
+
+                destination[row] = T.Sqrt(sumSq);
+            }
+            else
+            {
+                destination[row] = TensorPrimitives.Norm(rowSpan);
+            }
         }
     }
 

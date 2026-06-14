@@ -5,7 +5,7 @@ A miniature GPT language model implemented using Nivara's tensor-based AutoDiff 
 ## Architecture
 
 ```
-Token Embedding → Position Embedding → N × Transformer Block → Output Projection (weight-tied)
+Token Embedding → Position Embedding → N × Transformer Block → Output Projection (weight-tied by default)
 ```
 
 Each Transformer Block:
@@ -15,56 +15,77 @@ Each Transformer Block:
 Key features:
 - **Per-position forward** with KV cache — each token only attends to past tokens
 - **Per-head attention** with differentiable softmax over cached positions
-- **Weight tying** — output projection reuses the token embedding matrix
+- **Weight tying** — output projection reuses the token embedding matrix (optional: separate `lm_head`)
 - **Differentiable concatenation** via selection matrices (no non-differentiable ops)
 
-## A vs B Comparison: Nivara vs AutoGrad-Engine
+## CLI Parameters
 
-Both implementations use identical architecture and training parameters for a fair comparison.
+```
+--n-embd <int>          Embedding dimension (default: 16)
+--n-layer <int>         Number of transformer layers (default: 1)
+--block-size <int>      Context window / block size (default: 8)
+--n-head <int>          Number of attention heads (default: 4)
+--steps <int>           Training steps (default: 1000)
+--lr <float>            Learning rate (default: 0.01)
+--beta1 <float>         Adam beta1 (default: 0.9)
+--beta2 <float>         Adam beta2 (default: 0.95)
+--init-std <float>      Weight init std dev (default: 0.02)
+--no-weight-tying       Use separate lm_head instead of weight tying
+--lr-decay              Linear LR decay to zero over steps
+--temperature <float>   Sampling temperature (default: 1.0)
+--seed <int>            RNG seed (default: 42)
+--samples <int>         Number of generated samples (default: 5)
+--help, -h              Show help
+```
 
-### Settings
+Karpathy defaults for A vs C comparison:
+```bash
+dotnet run -- --block-size 16 --beta1 0.85 --beta2 0.99 --init-std 0.08 --no-weight-tying --lr-decay --temperature 0.5 --samples 20
+```
 
-| Parameter | Value |
-|---|---|
-| `n_embd` | 16 |
-| `n_layer` | 1 |
-| `n_head` | 4 |
-| `block_size` | 8 |
-| `num_steps` | 1000 |
-| `learning_rate` | 0.01 |
-| `beta1` / `beta2` / `eps` | 0.9 / 0.95 / 1e-8 |
-| Dataset | ~32K names (makemore/names.txt) |
-| Vocab size | 28 tokens |
-| Total params | 3,648 |
+## Comparison Results
 
-### Results
+All runs: 1000 steps, same ~32K names dataset (makemore/names.txt).
 
-| Metric | AutoGrad-Engine (scalar) | Nivara (tensor) | Improvement |
+### A vs B: Nivara vs AutoGrad-Engine (default arch)
+
+Same architecture: nEmbd=16, nLayer=1, blockSize=8, nHead=4, weight tying, 3,648 params.
+
+| Implementation | Time | vs A |
+|---|---|---|
+| **A) AutoGrad-Engine** (C#, scalar) | **58.7s** | 1.0× |
+| **B) Nivara** (C#, tensor) | **34.9s** | **1.7× faster** |
+
+### A vs C: Nivara Karpathy-arch vs native Karpathy Python
+
+Same architecture: nEmbd=16, nLayer=1, blockSize=16, nHead=4, separate lm_head, initStd=0.08, β₁=0.85/β₂=0.99, LR decay, 4,224 params.
+
+| Implementation | Time | vs C |
+|---|---|---|
+| **C) Karpathy's microgpt.py** (Python, scalar) | **97.2s** | 1.0× |
+| **B) Nivara** matching Karpathy arch (C#, tensor) | **40.4s** | **2.4× faster** |
+
+### Summary
+
+| Implementation | Arch params | Time | Speedup vs baseline |
 |---|---|---|---|
-| **Training time (1000 steps)** | **58.7s** | **36.4s** | **1.6× faster** |
-| Final loss | 2.88 | 2.29 | Lower is better |
-| Samples | mailaicu, enanjehs, sasiie, zmiha, deosckel | naanaden, araena, ce, sdaa, osjapani | Comparable |
+| AutoGrad-Engine (C#, scalar) | block=8, weight tying | 58.7s | 1.0× (A baseline) |
+| Nivara (C#, tensor) | block=8, weight tying | 34.9s | 1.7× vs A |
+| Nivara (C#, tensor) | block=16, lm_head, Karpathy hparams | 40.4s | 1.5× vs A |
+| microgpt.py (Python, scalar) | block=16, lm_head, Karpathy hparams | 97.2s | 0.6× vs A |
 
-Nivara's tensor operations overcome higher per-op overhead by reducing the total number of operations — one `MatMul` replaces a nested scalar loop. The advantage grows with larger model sizes.
-
-### What This Proves
-
-- **Nivara AutoDiff is production-ready** — supports full transformer training with multi-head attention, RMSNorm, residual connections, and KV cache
-- **Tensor-based autograd is faster than scalar** — even at micro-scale (nEmbd=16), Nivara is 1.6× faster
-- **Nivara scales better** — with larger nEmbd, vectorized `TensorPrimitives` kernels accelerate arithmetic, while scalar engines slow quadratically
+Nivara's tensor operations (MatMul, TensorPrimitives kernels) are faster than scalar loops in both C# and Python. The advantage is larger against Python (2.4×) because of Python interpreter overhead and Nivara's SIMD-accelerated TensorPrimitives.
 
 ## File Map
 
 | File | Purpose |
 |---|---|
-| `Program.cs` | Data loading, training loop, generation, loss function, A/B timing |
-| `MicroGptModel.cs` | Full GPT model: embeddings, transformer blocks, multi-head attention, MLP |
+| `Program.cs` | Data loading, training loop, generation, loss function, CLI args, timing |
+| `MicroGptModel.cs` | Full GPT model: embeddings, transformer blocks, multi-head attention, MLP, lm_head |
 | `Tokenizer.cs` | Char-level tokenizer with BOS/EOS markers |
 | `MicroGpt.csproj` | Project file referencing Nivara core |
 
 ## New AutoDiff Operations Added for MicroGPT
-
-These operations were added to Nivara core to support the transformer architecture:
 
 | Op | File | Purpose |
 |---|---|---|
@@ -72,25 +93,6 @@ These operations were added to Nivara core to support the transformer architectu
 | `RMSNorm` | `ReverseGradOperations.cs` | Fused RMS normalization `x * rsqrt(mean(x²) + eps)` |
 | `Slice` | `ReverseGradOperations.cs` | Differentiable sub-tensor extraction via selection matrix |
 | `Embedding<T>` | `AutoDiff/Nn/Embedding.cs` | Token embedding lookup (one-hot + MatMul) |
-| `RMSNorm<T>` | `AutoDiff/Nn/RMSNorm.cs` | Static RMSNorm wrapper |
-
-## How to Run
-
-```bash
-dotnet run --project examples/MicroGpt
-```
-
-The script downloads names.txt (~32K names), trains for 1000 steps, and prints 5 generated names at the end. Loss starts at ~3.33 (random on 28-chars) and drops to ~2.3 after 1000 steps.
-
-### CLI Arguments (AutoGrad-Engine compatible)
-
-```bash
-# Adjust model size
-dotnet run -- --n_embd 32 --n_layer 2 --num_steps 2000
-
-# Larger model
-dotnet run -- --n_embd 64 --n_layer 4 --block_size 32 --num_steps 5000
-```
 
 ## Design Decisions
 

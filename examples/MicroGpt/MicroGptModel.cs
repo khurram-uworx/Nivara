@@ -48,7 +48,10 @@ public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
     // All parameters
     readonly List<Parameter<T>> allParams;
 
-    public MicroGptModel(int vocabSize, int nEmbd, int nLayer, int blockSize, int nHead)
+    readonly Linear<T>? lmHead;
+
+    public MicroGptModel(int vocabSize, int nEmbd, int nLayer, int blockSize, int nHead,
+        double initStd = 0.02, bool weightTying = true)
     {
         if (nEmbd % nHead != 0)
             throw new ArgumentException("nEmbd must be divisible by nHead");
@@ -66,17 +69,19 @@ public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
         wte = CreateEmbedding("wte", vocabSize, nEmbd);
         wpe = CreateEmbedding("wpe", blockSize, nEmbd);
 
+        lmHead = weightTying ? null : CreateLinear("lm_head", vocabSize, nEmbd, initStd);
+
         attnWq = []; attnWk = []; attnWv = []; attnWo = [];
         mlpFc1 = []; mlpFc2 = [];
 
         for (int i = 0; i < nLayer; i++)
         {
-            attnWq.Add(CreateLinear($"{i}.attn_wq", nEmbd, nEmbd, 0.02));
-            attnWk.Add(CreateLinear($"{i}.attn_wk", nEmbd, nEmbd, 0.02));
-            attnWv.Add(CreateLinear($"{i}.attn_wv", nEmbd, nEmbd, 0.02));
-            attnWo.Add(CreateLinear($"{i}.attn_wo", nEmbd, nEmbd, 0.0));  // zero-init
-            mlpFc1.Add(CreateLinear($"{i}.mlp_fc1", 4 * nEmbd, nEmbd, 0.02));
-            mlpFc2.Add(CreateLinear($"{i}.mlp_fc2", nEmbd, 4 * nEmbd, 0.0));  // zero-init
+            attnWq.Add(CreateLinear($"{i}.attn_wq", nEmbd, nEmbd, initStd));
+            attnWk.Add(CreateLinear($"{i}.attn_wk", nEmbd, nEmbd, initStd));
+            attnWv.Add(CreateLinear($"{i}.attn_wv", nEmbd, nEmbd, initStd));
+            attnWo.Add(CreateLinear($"{i}.attn_wo", nEmbd, nEmbd, 0.0));
+            mlpFc1.Add(CreateLinear($"{i}.mlp_fc1", 4 * nEmbd, nEmbd, initStd));
+            mlpFc2.Add(CreateLinear($"{i}.mlp_fc2", nEmbd, 4 * nEmbd, 0.0));
         }
     }
 
@@ -113,7 +118,7 @@ public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
         {
             // --- Multi-Head Self-Attention (per-position, per-head) ---
             var xResidual = x;
-            x = RMSNorm.Forward(x);                                   // [1, nEmbd]
+            x = ReverseGradOperations.RMSNorm(x);                     // [1, nEmbd]
 
             var q = attnWq[li].Forward(x);                            // [1, nEmbd]
             var k = attnWk[li].Forward(x);                            // [1, nEmbd]
@@ -178,7 +183,7 @@ public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
 
             // --- MLP ---
             xResidual = x;
-            x = RMSNorm.Forward(x);                                    // [1, nEmbd]
+            x = ReverseGradOperations.RMSNorm(x);                     // [1, nEmbd]
             x = mlpFc1[li].Forward(x);                                 // [1, 4*nEmbd]
             var relu = ReverseGradOperations.Relu(x);
             x = ReverseGradOperations.Multiply(relu, relu);            // Squared ReLU [1, 4*nEmbd]
@@ -186,11 +191,18 @@ public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
             x = ReverseGradOperations.Add(x, xResidual);                // [1, nEmbd]
         }
 
-        // Output projection (weight tying with wte)
-        var wteWeight = wte.Weight;
-        var wteT = ReverseGradOperations.Transpose(wteWeight);         // [nEmbd, vocabSize]
-        var logits = ReverseGradOperations.MatMul(x, wteT);            // [1, vocabSize]
-        return logits;
+        // Output projection
+        if (lmHead != null)
+        {
+            return lmHead.Forward(x);                                  // [1, vocabSize]
+        }
+        else
+        {
+            // Weight tying: reuse token embedding weight transposed
+            var wteWeight = wte.Weight;
+            var wteT = ReverseGradOperations.Transpose(wteWeight);     // [nEmbd, vocabSize]
+            return ReverseGradOperations.MatMul(x, wteT);              // [1, vocabSize]
+        }
     }
 
     /// <summary>
