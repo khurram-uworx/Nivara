@@ -73,25 +73,8 @@ dimension overloads.
 
 ---
 
-## Deferred Design Items
-
-### D1. Broadcasting
-
-Broadcasting remains out of scope. Add it only with explicit shape algebra,
-null-mask semantics, and tests for ambiguous cases.
-
-### D2. Operator overloads
-
-Operators such as `+`, `-`, `*`, and `/` would improve ergonomics but need a
-stable policy for shape compatibility, null propagation, and future AutoDiff
-flavors.
-
-
----
-
 ## Summary
 
 | Area | Important | Deferred |
 |------|-----------|----------|
 | Testing | T1, T2 | |
-| Design | | D1, D2 |

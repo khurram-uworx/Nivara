@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
@@ -255,6 +256,21 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
         ObjectDisposedException.ThrowIf(disposed, this);
         return TypeConverter.ToDouble(this, requiresGrad);
     }
+
+    public static ReverseGradTensor<T> operator +(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
+        => GradOperations.Add(a, b);
+
+    public static ReverseGradTensor<T> operator -(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
+        => GradOperations.Subtract(a, b);
+
+    public static ReverseGradTensor<T> operator *(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
+        => GradOperations.Multiply(a, b);
+
+    public static ReverseGradTensor<T> operator /(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
+        => GradOperations.Divide(a, b);
+
+    public static ReverseGradTensor<T> operator -(ReverseGradTensor<T> a)
+        => GradOperations.Negate(a);
 
     /// <summary>
     /// Creates a string representation of this ReverseGradTensor

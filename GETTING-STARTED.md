@@ -1044,18 +1044,18 @@ var y = tensors["y"];
 
 ### Computing Gradients
 
-Perform operations on tensors and call `Backward()` to compute gradients:
+`ReverseGradTensor<T>` supports `+`, `-`, `*`, `/` and unary `-` operator overloads that delegate to `GradOperations`:
 
 ```csharp
-// Simple linear model: z = w * x + b using explicit GradOperations
+// Simple linear model: z = w * x + b using operator overloads
 var w = ReverseGradTensor<float>.FromArray(new[] { 0.5f, 0.5f, 0.5f }, requiresGrad: true);
 var b = ReverseGradTensor<float>.FromArray(new[] { 0.1f, 0.1f, 0.1f }, requiresGrad: true);
 
-var z = GradOperations.Add(GradOperations.Multiply(w, x), b);
+var z = w * x + b;
 
 // MSE loss: mean((z - y)^2)
-var diff = GradOperations.Subtract(z, y);
-var loss = GradOperations.Mean(GradOperations.Multiply(diff, diff));
+var diff = z - y;
+var loss = GradOperations.Mean(diff * diff);
 
 // Backward pass — computes gradients for w and b
 loss.Backward();

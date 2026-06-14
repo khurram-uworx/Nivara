@@ -112,11 +112,11 @@ public static class AutoDiffExample
         Console.WriteLine($"Bias (b): [-1, 0, 1]");
         Console.WriteLine();
 
-        // Forward pass
-        var mul = GradOperations.Multiply(input, weight);
+        // Forward pass (using operator overloads: *, +)
+        var mul = input * weight;
         Console.WriteLine($"Step 1: x * w = [{mul[0]}, {mul[1]}, {mul[2]}]");
 
-        var add = GradOperations.Add(mul, bias);
+        var add = mul + bias;
         Console.WriteLine($"Step 2: x * w + b = [{add[0]}, {add[1]}, {add[2]}]");
 
         var reluResult = GradOperations.Relu(add);
@@ -157,8 +157,8 @@ public static class AutoDiffExample
         // Iteration 1
         Console.WriteLine("Iteration 1:");
         var input1 = GradientUtils.Constant(new float[] { 1.0f, 2.0f, 3.0f });
-        var output1 = GradOperations.Sum(GradOperations.Multiply(input1, weights));
-        output1 = GradOperations.Add(output1, bias);
+        var output1 = GradOperations.Sum(input1 * weights);
+        output1 = output1 + bias;
 
         output1.Backward();
         Console.WriteLine($"  Gradient norm: {GradientUtils.GetGradientNorm(weights):F4}");
@@ -172,8 +172,8 @@ public static class AutoDiffExample
         // Iteration 2 - demonstrate gradient clipping
         Console.WriteLine("Iteration 2 (with gradient clipping):");
         var input2 = GradientUtils.Constant(new float[] { 10.0f, 20.0f, 30.0f });
-        var output2 = GradOperations.Sum(GradOperations.Multiply(input2, weights));
-        output2 = GradOperations.Add(output2, bias);
+        var output2 = GradOperations.Sum(input2 * weights);
+        output2 = output2 + bias;
 
         output2.Backward();
         Console.WriteLine($"  Gradient norm before clipping: {GradientUtils.GetGradientNorm(weights):F4}");
@@ -198,8 +198,8 @@ public static class AutoDiffExample
         Console.WriteLine("Computation graph inspection:");
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
-        var result = GradOperations.Add(a, b);
-        result = GradOperations.Multiply(result, a);
+        var result = a + b;
+        result = result * a;
         result = GradOperations.Sum(result);
 
         var graphInfo = GradientUtils.GetGraphInfo(result);
@@ -230,8 +230,8 @@ public static class AutoDiffExample
         Console.WriteLine("(Tangent = directional derivative along all-ones direction)");
         Console.WriteLine();
 
-        // Forward propagation through operations
-        var squared = ForwardGradOperations.Multiply(x, x);
+        // Forward propagation through operations (using operator overloads: *)
+        var squared = x * x;
         Console.WriteLine($"x * x: primal=[{squared[0]}, {squared[1]}, {squared[2]}], " +
                           $"tangent=[{squared.Tangent![0]}, {squared.Tangent[1]}, {squared.Tangent[2]}]");
         Console.WriteLine("  d(x^2)/dx = 2x => 2x * tangent = [2, 4, 6] ✓");

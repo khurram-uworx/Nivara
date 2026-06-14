@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
 namespace Nivara.AutoDiff;
@@ -130,6 +131,21 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, INumb
         tensor.Reshape(rows, cols);
         return tensor;
     }
+
+    public static ForwardGradTensor<T> operator +(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
+        => ForwardGradOperations.Add(a, b);
+
+    public static ForwardGradTensor<T> operator -(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
+        => ForwardGradOperations.Subtract(a, b);
+
+    public static ForwardGradTensor<T> operator *(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
+        => ForwardGradOperations.Multiply(a, b);
+
+    public static ForwardGradTensor<T> operator /(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
+        => ForwardGradOperations.Divide(a, b);
+
+    public static ForwardGradTensor<T> operator -(ForwardGradTensor<T> a)
+        => ForwardGradOperations.Negate(a);
 
     /// <summary>
     /// Creates a string representation of this ForwardGradTensor
