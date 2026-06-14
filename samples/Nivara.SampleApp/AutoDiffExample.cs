@@ -43,7 +43,7 @@ public static class AutoDiffExample
         var x = new ReverseGradTensor<float>(data, requiresGrad: true);
 
         // Sum operation
-        var sum = GradOperations.Sum(x);
+        var sum = ReverseGradOperations.Sum(x);
         Console.WriteLine($"Input: [1, 2, 3, 4]");
         Console.WriteLine($"Sum: {sum[0]}");
 
@@ -56,7 +56,7 @@ public static class AutoDiffExample
         x.ZeroGrad();
 
         // Mean operation
-        var mean = GradOperations.Mean(x);
+        var mean = ReverseGradOperations.Mean(x);
         Console.WriteLine($"Mean: {mean[0]}");
 
         mean.Backward();
@@ -76,19 +76,19 @@ public static class AutoDiffExample
         Console.WriteLine();
 
         // ReLU
-        var relu = GradOperations.Relu(a);
+        var relu = ReverseGradOperations.Relu(a);
         Console.WriteLine($"ReLU: [{relu[0]}, {relu[1]}, {relu[2]}, {relu[3]}, {relu[4]}]");
         Console.WriteLine("(ReLU(x) = max(0, x))");
         Console.WriteLine();
 
         // Sigmoid
-        var sigmoid = GradOperations.Sigmoid(a);
+        var sigmoid = ReverseGradOperations.Sigmoid(a);
         Console.WriteLine($"Sigmoid: [{sigmoid[0]:F4}, {sigmoid[1]:F4}, {sigmoid[2]:F4}, {sigmoid[3]:F4}, {sigmoid[4]:F4}]");
         Console.WriteLine("(Sigmoid(x) = 1 / (1 + exp(-x)))");
         Console.WriteLine();
 
         // Tanh
-        var tanh = GradOperations.Tanh(a);
+        var tanh = ReverseGradOperations.Tanh(a);
         Console.WriteLine($"Tanh: [{tanh[0]:F4}, {tanh[1]:F4}, {tanh[2]:F4}, {tanh[3]:F4}, {tanh[4]:F4}]");
         Console.WriteLine("(Tanh(x) = (exp(x) - exp(-x)) / (exp(x) + exp(-x)))");
     }
@@ -119,10 +119,10 @@ public static class AutoDiffExample
         var add = mul + bias;
         Console.WriteLine($"Step 2: x * w + b = [{add[0]}, {add[1]}, {add[2]}]");
 
-        var reluResult = GradOperations.Relu(add);
+        var reluResult = ReverseGradOperations.Relu(add);
         Console.WriteLine($"Step 3: relu(x * w + b) = [{reluResult[0]}, {reluResult[1]}, {reluResult[2]}]");
 
-        var output = GradOperations.Mean(reluResult);
+        var output = ReverseGradOperations.Mean(reluResult);
         Console.WriteLine($"Step 4: mean(relu(x * w + b)) = {output[0]:F4}");
         Console.WriteLine();
 
@@ -157,7 +157,7 @@ public static class AutoDiffExample
         // Iteration 1
         Console.WriteLine("Iteration 1:");
         var input1 = GradientUtils.Constant(new float[] { 1.0f, 2.0f, 3.0f });
-        var output1 = GradOperations.Sum(input1 * weights);
+        var output1 = ReverseGradOperations.Sum(input1 * weights);
         output1 = output1 + bias;
 
         output1.Backward();
@@ -172,7 +172,7 @@ public static class AutoDiffExample
         // Iteration 2 - demonstrate gradient clipping
         Console.WriteLine("Iteration 2 (with gradient clipping):");
         var input2 = GradientUtils.Constant(new float[] { 10.0f, 20.0f, 30.0f });
-        var output2 = GradOperations.Sum(input2 * weights);
+        var output2 = ReverseGradOperations.Sum(input2 * weights);
         output2 = output2 + bias;
 
         output2.Backward();
@@ -200,7 +200,7 @@ public static class AutoDiffExample
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
         var result = a + b;
         result = result * a;
-        result = GradOperations.Sum(result);
+        result = ReverseGradOperations.Sum(result);
 
         var graphInfo = GradientUtils.GetGraphInfo(result);
         Console.WriteLine($"  Total nodes: {graphInfo["TotalNodes"]}");
@@ -246,8 +246,8 @@ public static class AutoDiffExample
         var bx = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
             requiresGrad: true);
-        var bSquared = GradOperations.Multiply(bx, bx);
-        var bSummed = GradOperations.Sum(bSquared);
+        var bSquared = ReverseGradOperations.Multiply(bx, bx);
+        var bSummed = ReverseGradOperations.Sum(bSquared);
         bSummed.Backward();
         Console.WriteLine("Backward mode (same computation, sum(x^2)):");
         Console.WriteLine($"  grad = [{bx.Grad![0]}, {bx.Grad[1]}, {bx.Grad[2]}]");

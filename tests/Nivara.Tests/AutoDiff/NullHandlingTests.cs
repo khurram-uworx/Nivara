@@ -28,7 +28,7 @@ public class NullHandlingTests
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Add(a, b);
+        var result = ReverseGradOperations.Add(a, b);
 
         // Assert: Verify null propagation (null + anything = null)
         Assert.That(result.IsNull(0), Is.False, "Position 0: 1 + 2 should not be null");
@@ -56,7 +56,7 @@ public class NullHandlingTests
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Multiply(a, b);
+        var result = ReverseGradOperations.Multiply(a, b);
 
         // Assert: Verify null propagation (null * anything = null)
         Assert.That(result.IsNull(0), Is.False, "Position 0: 2 * 3 should not be null");
@@ -81,7 +81,7 @@ public class NullHandlingTests
         var b = new ReverseGradTensor<double>(bColumn, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Subtract(a, b);
+        var result = ReverseGradOperations.Subtract(a, b);
 
         // Assert: Verify null propagation (null - anything = null)
         Assert.That(result.IsNull(0), Is.False, "Position 0: 10 - 3 should not be null");
@@ -105,7 +105,7 @@ public class NullHandlingTests
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Divide(a, b);
+        var result = ReverseGradOperations.Divide(a, b);
 
         // Assert: Verify null propagation (null / anything = null)
         Assert.That(result.IsNull(0), Is.False, "Position 0: 12 / 3 should not be null");
@@ -138,7 +138,7 @@ public class NullHandlingTests
         b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b);
+        var result = ReverseGradOperations.MatMul(a, b);
 
         // Assert: result[0] = 1*5 + null*7 = null (k=1 has null in a)
         Assert.That(result.IsNull(0), Is.True, "Position 0: a[1]=null -> result should be null");
@@ -170,7 +170,7 @@ public class NullHandlingTests
         b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b);
+        var result = ReverseGradOperations.MatMul(a, b);
 
         // Assert: All positions should be null
         for (int i = 0; i < result.Length; i++)
@@ -191,7 +191,7 @@ public class NullHandlingTests
         a.Reshape(2, 3);
 
         // Act
-        var result = GradOperations.Transpose(a);
+        var result = ReverseGradOperations.Transpose(a);
 
         // Assert: result[j * rows + i] = a[i * cols + j]
         Assert.That(result.IsNull(0), Is.False, "Position 0: from a[0]=1 should not be null");
@@ -226,7 +226,7 @@ public class NullHandlingTests
         b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b);
+        var result = ReverseGradOperations.MatMul(a, b);
 
         // Create gradient output (all ones)
         var gradValues = new float?[] { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -253,7 +253,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Relu(tensor);
+        var result = ReverseGradOperations.Relu(tensor);
 
         // Assert: Verify null propagation
         Assert.That(result.IsNull(0), Is.False, "Position 0: relu(-2) should not be null");
@@ -279,7 +279,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Sigmoid(tensor);
+        var result = ReverseGradOperations.Sigmoid(tensor);
 
         // Assert: Verify null propagation
         Assert.That(result.IsNull(0), Is.False, "Position 0: sigmoid(0) should not be null");
@@ -302,7 +302,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<double>(column, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Tanh(tensor);
+        var result = ReverseGradOperations.Tanh(tensor);
 
         // Assert: Verify null propagation
         Assert.That(result.IsNull(0), Is.False, "Position 0: tanh(0) should not be null");
@@ -332,7 +332,7 @@ public class NullHandlingTests
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act: Forward pass
-        var result = GradOperations.Add(a, b);
+        var result = ReverseGradOperations.Add(a, b);
 
         // Create gradient output (all ones for non-null positions)
         var gradValues = new float?[] { 1.0f, 1.0f, 1.0f };
@@ -367,7 +367,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act: Forward pass
-        var result = GradOperations.Relu(tensor);
+        var result = ReverseGradOperations.Relu(tensor);
 
         // Create gradient output (all ones)
         var gradValues = new float?[] { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -398,7 +398,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { -1.0f, 0.0f, 1.0f }),
             requiresGrad: true);
-        var result = GradOperations.Sigmoid(tensor);
+        var result = ReverseGradOperations.Sigmoid(tensor);
         var grad = new ReverseGradTensor<float>(
             NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 1.0f }),
             requiresGrad: false);
@@ -417,7 +417,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
             requiresGrad: true);
-        var sum = GradOperations.Sum(tensor);
+        var sum = ReverseGradOperations.Sum(tensor);
         var grad = new ReverseGradTensor<float>(
             NivaraColumn<float>.CreateFromNullable(new float?[] { null }),
             requiresGrad: false);
@@ -437,7 +437,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { -1.0f, 0.0f, 1.0f }),
             requiresGrad: true);
-        var result = GradOperations.Sigmoid(tensor);
+        var result = ReverseGradOperations.Sigmoid(tensor);
         var grad = new ReverseGradTensor<float>(
             NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 1.0f }),
             requiresGrad: false);
@@ -490,8 +490,8 @@ public class NullHandlingTests
         var b = new ReverseGradTensor<float>(bColumn, requiresGrad: true);
 
         // Act: Perform multiple operations
-        var add = GradOperations.Add(a, b);
-        var mul = GradOperations.Multiply(a, b);
+        var add = ReverseGradOperations.Add(a, b);
+        var mul = ReverseGradOperations.Multiply(a, b);
 
         // Assert: Verify explicit null semantics are preserved (no sentinel values)
         // Addition result
@@ -521,7 +521,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Sum(tensor);
+        var result = ReverseGradOperations.Sum(tensor);
 
         // Assert: Sum should skip nulls (1 + 3 + 5 = 9)
         Assert.That(result.Length, Is.EqualTo(1), "Result should be scalar");
@@ -538,7 +538,7 @@ public class NullHandlingTests
         var tensor = new ReverseGradTensor<float>(column, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Mean(tensor);
+        var result = ReverseGradOperations.Mean(tensor);
 
         // Assert: Mean should skip nulls (2 + 4 + 6) / 3 = 4
         Assert.That(result.Length, Is.EqualTo(1), "Result should be scalar");
@@ -564,8 +564,8 @@ public class NullHandlingTests
         var w = new ReverseGradTensor<float>(wColumn, requiresGrad: true);
 
         // Act: Forward pass with nulls
-        var mul = GradOperations.Multiply(x, w);  // [0.5, null, null]
-        var relu = GradOperations.Relu(mul);      // [0.5, null, null]
+        var mul = ReverseGradOperations.Multiply(x, w);  // [0.5, null, null]
+        var relu = ReverseGradOperations.Relu(mul);      // [0.5, null, null]
 
         // Assert: Verify null propagation through operations
         Assert.That(mul.IsNull(0), Is.False, "Position 0: 1 * 0.5 should not be null");
@@ -621,7 +621,7 @@ public class NullHandlingTests
             NivaraColumn<float>.Create(new float[] { 4f, 5f, 6f }),
             requiresGrad: true);
 
-        var result = GradOperations.Add(a, b);
+        var result = ReverseGradOperations.Add(a, b);
 
         // Seed gradient with null at position 1
         var seedGrad = new ReverseGradTensor<float>(

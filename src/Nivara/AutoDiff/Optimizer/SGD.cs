@@ -94,6 +94,22 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
         var grad = tensor.Grad!;
         int n = data.Length;
 
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffSgdUpdate",
+            n,
+            data.HasNulls || grad.HasNulls,
+            () => ApplySgdUpdate(tensor, learningRate, weightDecay, data, grad, n),
+            $"AutoDiff=SgdUpdate;Shape=[{string.Join(", ", tensor.Shape)}];WeightDecay={weightDecay != T.Zero}");
+    }
+
+    static ReverseGradTensor<T> ApplySgdUpdate(
+        ReverseGradTensor<T> tensor,
+        T learningRate,
+        T weightDecay,
+        NivaraColumn<T> data,
+        NivaraColumn<T> grad,
+        int n)
+    {
         if (!data.HasNulls && !grad.HasNulls)
         {
             data.TryGetSpan(out var dataSpan);

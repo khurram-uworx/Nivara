@@ -7,7 +7,7 @@ using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Operations;
 
-public static class GradOperations
+public static class ReverseGradOperations
 {
     #region Element-wise Operations
 
@@ -212,33 +212,41 @@ public static class GradOperations
             throw new ArgumentException($"Matrix b dimensions don't match: expected {bRows * bCols} elements, got {b.Length}");
         }
 
-        var result = a.Data.MatMul(b.Data, aRows, aCols, bCols);
-
-        var resultShape = new[] { aRows, bCols };
-        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, resultShape);
-
-        if (a.RequiresGrad || b.RequiresGrad)
-        {
-            var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, (typedGradOutput, sgn) =>
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffMatMul",
+            a.Length + b.Length,
+            a.Data.HasNulls || b.Data.HasNulls,
+            () =>
             {
-                if (a.RequiresGrad)
-                {
-                    var bTransposed = b.Data.Transpose(bRows, bCols);
-                    var aGrad = typedGradOutput.MatMul(bTransposed, aRows, bCols, bRows);
-                    AccumulateGradient(a, aGrad, sgn);
-                }
-                if (b.RequiresGrad)
-                {
-                    var aTransposed = a.Data.Transpose(aRows, aCols);
-                    var bGrad = aTransposed.MatMul(typedGradOutput, aCols, aRows, bCols);
-                    AccumulateGradient(b, bGrad, sgn);
-                }
-            });
+                var result = a.Data.MatMul(b.Data, aRows, aCols, bCols);
 
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
+                var resultShape = new[] { aRows, bCols };
+                var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad || b.RequiresGrad, resultShape);
 
-        return resultTensor;
+                if (a.RequiresGrad || b.RequiresGrad)
+                {
+                    var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, (typedGradOutput, sgn) =>
+                    {
+                        if (a.RequiresGrad)
+                        {
+                            var bTransposed = b.Data.Transpose(bRows, bCols);
+                            var aGrad = typedGradOutput.MatMul(bTransposed, aRows, bCols, bRows);
+                            AccumulateGradient(a, aGrad, sgn);
+                        }
+                        if (b.RequiresGrad)
+                        {
+                            var aTransposed = a.Data.Transpose(aRows, aCols);
+                            var bGrad = aTransposed.MatMul(typedGradOutput, aCols, aRows, bCols);
+                            AccumulateGradient(b, bGrad, sgn);
+                        }
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            AutoDiffDiagnostics.MatrixNote("MatMul", aRows, aCols, bCols));
     }
 
     public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
@@ -262,23 +270,31 @@ public static class GradOperations
             throw new ArgumentException($"Matrix dimensions don't match: expected {rows * cols} elements, got {a.Length}");
         }
 
-        var result = a.Data.Transpose(rows, cols);
-
-        var resultShape = new[] { cols, rows };
-        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, resultShape);
-
-        if (a.RequiresGrad)
-        {
-            var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput, sgn) =>
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffTranspose",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
             {
-                var aGrad = typedGradOutput.Transpose(cols, rows);
-                AccumulateGradient(a, aGrad, sgn);
-            });
+                var result = a.Data.Transpose(rows, cols);
 
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
+                var resultShape = new[] { cols, rows };
+                var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, resultShape);
 
-        return resultTensor;
+                if (a.RequiresGrad)
+                {
+                    var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput, sgn) =>
+                    {
+                        var aGrad = typedGradOutput.Transpose(cols, rows);
+                        AccumulateGradient(a, aGrad, sgn);
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            $"AutoDiff=Transpose;Shape={rows}x{cols}->{cols}x{rows}");
     }
 
     #endregion
@@ -352,66 +368,90 @@ public static class GradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var result = a.Data.Relu();
-
-        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
-
-        if (a.RequiresGrad)
-        {
-            var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput, sgn) =>
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffRelu",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
             {
-                var aGrad = a.Data.ReluGradient(typedGradOutput);
-                AccumulateGradient(a, aGrad, sgn);
-            });
+                var result = a.Data.Relu();
 
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
+                var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
 
-        return resultTensor;
+                if (a.RequiresGrad)
+                {
+                    var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput, sgn) =>
+                    {
+                        var aGrad = a.Data.ReluGradient(typedGradOutput);
+                        AccumulateGradient(a, aGrad, sgn);
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            AutoDiffDiagnostics.ShapeNote("Relu", a.Shape));
     }
 
     public static ReverseGradTensor<T> Sigmoid<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var result = a.Data.Sigmoid();
-
-        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
-
-        if (a.RequiresGrad)
-        {
-            var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput, sgn) =>
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffSigmoid",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
             {
-                var aGrad = result.SigmoidGradient(typedGradOutput);
-                AccumulateGradient(a, aGrad, sgn);
-            });
+                var result = a.Data.Sigmoid();
 
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
+                var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
 
-        return resultTensor;
+                if (a.RequiresGrad)
+                {
+                    var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput, sgn) =>
+                    {
+                        var aGrad = result.SigmoidGradient(typedGradOutput);
+                        AccumulateGradient(a, aGrad, sgn);
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            AutoDiffDiagnostics.ShapeNote("Sigmoid", a.Shape));
     }
 
     public static ReverseGradTensor<T> Tanh<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var result = a.Data.Tanh();
-
-        var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
-
-        if (a.RequiresGrad)
-        {
-            var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput, sgn) =>
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffTanh",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
             {
-                var aGrad = result.TanhGradient(typedGradOutput);
-                AccumulateGradient(a, aGrad, sgn);
-            });
+                var result = a.Data.Tanh();
 
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
+                var resultTensor = new ReverseGradTensor<T>(result, a.RequiresGrad, PropagateShape(a));
 
-        return resultTensor;
+                if (a.RequiresGrad)
+                {
+                    var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput, sgn) =>
+                    {
+                        var aGrad = result.TanhGradient(typedGradOutput);
+                        AccumulateGradient(a, aGrad, sgn);
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            AutoDiffDiagnostics.ShapeNote("Tanh", a.Shape));
     }
 
     public static ReverseGradTensor<T> Negate<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>

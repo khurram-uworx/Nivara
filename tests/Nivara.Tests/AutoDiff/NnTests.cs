@@ -43,7 +43,7 @@ public class NnTests
     public void Parameter_TensorWithRequiresGrad_HasGradAccess()
     {
         var param = new Parameter<float>("w", new float[] { 1f, 2f }, requiresGrad: true);
-        var loss = GradOperations.Sum(param.Tensor);
+        var loss = ReverseGradOperations.Sum(param.Tensor);
         loss.Backward();
 
         Assert.That(param.Tensor.Grad, Is.Not.Null);

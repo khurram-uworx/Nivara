@@ -20,6 +20,6 @@ public sealed class Dropout<T> : Module<T> where T : struct, INumber<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
 
-        return GradOperations.Dropout(input, probability, IsTraining);
+        return ReverseGradOperations.Dropout(input, probability, IsTraining);
     }
 }

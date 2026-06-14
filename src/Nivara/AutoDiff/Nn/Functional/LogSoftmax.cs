@@ -15,6 +15,6 @@ public sealed class LogSoftmax<T> where T : struct, INumber<T>
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
-        return GradOperations.LogSoftmax(input);
+        return ReverseGradOperations.LogSoftmax(input);
     }
 }

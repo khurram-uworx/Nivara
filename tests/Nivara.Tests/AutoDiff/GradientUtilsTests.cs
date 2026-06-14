@@ -22,7 +22,7 @@ public class GradientUtilsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Compute some gradients
-        var result = GradOperations.Sum(a);
+        var result = ReverseGradOperations.Sum(a);
         result.Backward();
 
         Assert.That(a.Grad, Is.Not.Null, "Gradient should exist before clearing");
@@ -44,8 +44,8 @@ public class GradientUtilsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Compute some gradients
-        var result = GradOperations.Add(a, b);
-        var sum = GradOperations.Sum(result);
+        var result = ReverseGradOperations.Add(a, b);
+        var sum = ReverseGradOperations.Sum(result);
         sum.Backward();
 
         Assert.That(a.Grad, Is.Not.Null);
@@ -346,9 +346,9 @@ public class GradientUtilsTests
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
 
-        var add = GradOperations.Add(a, b);
-        var mul = GradOperations.Multiply(add, a);
-        var sum = GradOperations.Sum(mul);
+        var add = ReverseGradOperations.Add(a, b);
+        var mul = ReverseGradOperations.Multiply(add, a);
+        var sum = ReverseGradOperations.Sum(mul);
 
         // Act
         var info = GradientUtils.GetGraphInfo(sum);
@@ -370,7 +370,7 @@ public class GradientUtilsTests
         // Arrange
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 2.0f }), requiresGrad: true);
-        var result = GradOperations.Add(a, b);
+        var result = ReverseGradOperations.Add(a, b);
 
         // Act
         var summary = GradientUtils.PrintGraphSummary(result);
@@ -388,7 +388,7 @@ public class GradientUtilsTests
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
-        var result = GradOperations.Sum(a);
+        var result = ReverseGradOperations.Sum(a);
         result.Backward();
 
         // Act & Assert
@@ -522,9 +522,9 @@ public class GradientUtilsTests
         var targets = GradientUtils.Constant(new float[] { 3.0f });
 
         // Act - simulate one training step
-        var predictions = GradOperations.Multiply(inputs, weights);
-        var sum = GradOperations.Sum(predictions);
-        var loss = GradOperations.Subtract(sum, targets);
+        var predictions = ReverseGradOperations.Multiply(inputs, weights);
+        var sum = ReverseGradOperations.Sum(predictions);
+        var loss = ReverseGradOperations.Subtract(sum, targets);
 
         // Backward pass
         loss.Backward();

@@ -7,7 +7,7 @@ args = ["-y", "@uworx/code-memory"]
 
 [mcp_servers.memori]
 command = "npx"
-args = ["-y", "@uworx/memori"]
+args = ["-y", "@uworx/memori", "--markdown"]
 
 [mcp_servers.code-memory.tools.ping]
 approval_mode = "approve"

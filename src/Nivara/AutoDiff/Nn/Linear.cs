@@ -53,16 +53,16 @@ public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
         if (input == null) throw new ArgumentNullException(nameof(input));
 
         var w = weight.Tensor;
-        var transposed = GradOperations.Transpose(w);
-        var output = GradOperations.MatMul(input, transposed);
+        var transposed = ReverseGradOperations.Transpose(w);
+        var output = ReverseGradOperations.MatMul(input, transposed);
 
         if (useBias && bias != null)
         {
             var biasTensor = bias.Tensor;
             var ones = GradientUtils.Ones<T>(input.shape[0]);
             ones.Reshape(ones.Length, 1);
-            var biasBroadcast = GradOperations.MatMul(ones, biasTensor);
-            output = GradOperations.Add(output, biasBroadcast);
+            var biasBroadcast = ReverseGradOperations.MatMul(ones, biasTensor);
+            output = ReverseGradOperations.Add(output, biasBroadcast);
         }
 
         return output;

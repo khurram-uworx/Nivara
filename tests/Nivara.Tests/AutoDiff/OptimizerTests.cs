@@ -33,7 +33,7 @@ public class OptimizerTests
         var sgd = new SGD<float>(0.1f);
         sgd.AddParameterGroup(param);
 
-        var loss = GradOperations.Sum(param.Tensor);
+        var loss = ReverseGradOperations.Sum(param.Tensor);
         loss.Backward();
 
         sgd.Step();
@@ -52,7 +52,7 @@ public class OptimizerTests
         var sgd = new SGD<float>(0.1f, momentum: 0.9);
         sgd.AddParameterGroup(param);
 
-        var loss = GradOperations.Sum(param.Tensor);
+        var loss = ReverseGradOperations.Sum(param.Tensor);
         loss.Backward();
 
         sgd.Step();
@@ -72,7 +72,7 @@ public class OptimizerTests
         var adam = new Adam<float>(beta1: 0.9, beta2: 0.999, eps: 1e-8);
         adam.AddParameterGroup(param);
 
-        var loss = GradOperations.Sum(param.Tensor);
+        var loss = ReverseGradOperations.Sum(param.Tensor);
         loss.Backward();
 
         var oldValues = new float[] { param.Tensor[0], param.Tensor[1], param.Tensor[2] };
@@ -96,7 +96,7 @@ public class OptimizerTests
         var adamw = new AdamW<float>(beta1: 0.9, beta2: 0.999, eps: 1e-8);
         adamw.AddParameterGroup(param);
 
-        var loss = GradOperations.Sum(param.Tensor);
+        var loss = ReverseGradOperations.Sum(param.Tensor);
         loss.Backward();
 
         var oldValues = new float[] { param.Tensor[0], param.Tensor[1], param.Tensor[2] };
@@ -121,9 +121,9 @@ public class OptimizerTests
         sgd.AddParameterGroup(param1, 0.01f);
         sgd.AddParameterGroup(param2, 0.1f);
 
-        var loss1 = GradOperations.Sum(param1.Tensor);
-        var loss2 = GradOperations.Sum(param2.Tensor);
-        var loss = GradOperations.Add(loss1, loss2);
+        var loss1 = ReverseGradOperations.Sum(param1.Tensor);
+        var loss2 = ReverseGradOperations.Sum(param2.Tensor);
+        var loss = ReverseGradOperations.Add(loss1, loss2);
         loss.Backward();
 
         sgd.Step();
@@ -142,7 +142,7 @@ public class OptimizerTests
         var sgd = new SGD<float>(0.1f);
         sgd.AddParameterGroup(param);
 
-        var loss = GradOperations.Sum(param.Tensor);
+        var loss = ReverseGradOperations.Sum(param.Tensor);
         loss.Backward();
 
         Assert.That(param.Tensor.Grad, Is.Not.Null);
@@ -161,14 +161,14 @@ public class OptimizerTests
         sgd.AddParameterGroup(param);
 
         // Step 1
-        var loss1 = GradOperations.Sum(param.Tensor);
+        var loss1 = ReverseGradOperations.Sum(param.Tensor);
         loss1.Backward();
         sgd.Step();
         Assert.That(param.Tensor[0], Is.EqualTo(9.99f).Within(1e-6f));
 
         // Step 2 (gradients accumulate after ZeroGrad)
         sgd.ZeroGrad();
-        var loss2 = GradOperations.Sum(param.Tensor);
+        var loss2 = ReverseGradOperations.Sum(param.Tensor);
         loss2.Backward();
         sgd.Step();
         Assert.That(param.Tensor[0], Is.EqualTo(9.98f).Within(1e-6f));
@@ -182,7 +182,7 @@ public class OptimizerTests
         var adamw = new AdamW<float>(beta1: 0.9, beta2: 0.999, eps: 1e-8);
         adamw.AddParameterGroup(param, 0.01f, weightDecay: 0.01f);
 
-        var loss = GradOperations.Sum(param.Tensor);
+        var loss = ReverseGradOperations.Sum(param.Tensor);
         loss.Backward();
 
         var old0 = param.Tensor[0];
@@ -203,9 +203,9 @@ public class OptimizerTests
         sgd.AddParameterGroup(paramA, 0.1f);
         sgd.AddParameterGroup(paramB, 0.5f);
 
-        var loss = GradOperations.Add(
-            GradOperations.Sum(paramA.Tensor),
-            GradOperations.Sum(paramB.Tensor));
+        var loss = ReverseGradOperations.Add(
+            ReverseGradOperations.Sum(paramA.Tensor),
+            ReverseGradOperations.Sum(paramB.Tensor));
         loss.Backward();
 
         sgd.Step();
@@ -223,7 +223,7 @@ public class OptimizerTests
         var sgd = new SGD<float>(0.2f);
 
         sgd.AddParameterGroup(param);
-        GradOperations.Sum(param.Tensor).Backward();
+        ReverseGradOperations.Sum(param.Tensor).Backward();
         sgd.Step();
 
         Assert.That(param.Tensor[0], Is.EqualTo(0.8f).Within(1e-6f));
@@ -236,7 +236,7 @@ public class OptimizerTests
         var sgd = new SGD<float>(0.2f);
 
         sgd.AddParameterGroup(param, 0.05f);
-        GradOperations.Sum(param.Tensor).Backward();
+        ReverseGradOperations.Sum(param.Tensor).Backward();
         sgd.Step();
 
         Assert.That(param.Tensor[0], Is.EqualTo(0.95f).Within(1e-6f));
@@ -265,7 +265,7 @@ public class OptimizerTests
         var adam = new Adam<float>(0.01f);
 
         adam.AddParameterGroup(param);
-        GradOperations.Sum(param.Tensor).Backward();
+        ReverseGradOperations.Sum(param.Tensor).Backward();
         adam.Step();
 
         Assert.That(param.Tensor[0], Is.LessThan(1f));
@@ -278,7 +278,7 @@ public class OptimizerTests
         var adamw = new AdamW<float>(0.01f);
 
         adamw.AddParameterGroup(param);
-        GradOperations.Sum(param.Tensor).Backward();
+        ReverseGradOperations.Sum(param.Tensor).Backward();
         adamw.Step();
 
         Assert.That(param.Tensor[0], Is.LessThan(1f));
@@ -310,7 +310,7 @@ public class OptimizerTests
     {
         var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
         var param = new ReverseGradTensor<float>(data, requiresGrad: true);
-        var loss = GradOperations.Sum(param);
+        var loss = ReverseGradOperations.Sum(param);
         loss.Backward();
 
         var updated = SGD<float>.SgdUpdate(param, 0.1f);
@@ -331,14 +331,14 @@ public class OptimizerTests
         float lr = 0.01f;
 
         // Step 1: loss = sum(param), gradient = [1, 1], param -= 0.01 * [1, 1] = [9.99, 19.99]
-        var loss1 = GradOperations.Sum(param);
+        var loss1 = ReverseGradOperations.Sum(param);
         loss1.Backward();
         var updated1 = SGD<float>.SgdUpdate(param, lr);
         Assert.That(updated1[0], Is.EqualTo(9.99f).Within(1e-6f));
 
         // Step 2: wrap updated1 as a new trainable parameter
         var param2 = new ReverseGradTensor<float>(updated1.ToColumn(), requiresGrad: true);
-        var loss2 = GradOperations.Sum(param2);
+        var loss2 = ReverseGradOperations.Sum(param2);
         loss2.Backward();
         var updated2 = SGD<float>.SgdUpdate(param2, lr);
         Assert.That(updated2[0], Is.EqualTo(9.98f).Within(1e-6f));
@@ -401,7 +401,7 @@ public class OptimizerTests
     {
         var data = NivaraColumn<double>.Create(new double[] { 5.0, 10.0 });
         var param = new ReverseGradTensor<double>(data, requiresGrad: true);
-        var loss = GradOperations.Sum(param);
+        var loss = ReverseGradOperations.Sum(param);
         loss.Backward();
 
         var updated = SGD<double>.SgdUpdate(param, 0.5);
@@ -425,7 +425,7 @@ public class OptimizerTests
     {
         var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var param = new ReverseGradTensor<float>(data, requiresGrad: true);
-        var loss = GradOperations.Sum(param);
+        var loss = ReverseGradOperations.Sum(param);
         loss.Backward();
 
         Assert.That(() => SGD<float>.SgdUpdate(param, -0.1f),
