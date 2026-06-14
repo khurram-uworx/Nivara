@@ -377,7 +377,7 @@ with torch.no_grad():
     updated_b = b - 0.01 * b.grad
 ```
 
-**Nivara** — reverse-mode AutoDiff with gradient tracking:
+**Nivara** — reverse-mode AutoDiff with gradient tracking (operator overloads for `+`, `-`, `*`):
 ```csharp
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
@@ -394,11 +394,8 @@ var (x, y) = (tensors["x"], tensors["y"]);
 using var w = ReverseGradTensor<float>.FromArray([0.5f, 0.5f, 0.5f], requiresGrad: true);
 using var b = ReverseGradTensor<float>.FromArray([0.1f, 0.1f, 0.1f], requiresGrad: true);
 
-var prediction = GradOperations.Add(GradOperations.Multiply(w, x), b);
-var loss = GradOperations.Mean(
-    GradOperations.Multiply(
-        GradOperations.Subtract(prediction, y),
-        GradOperations.Subtract(prediction, y)));
+var prediction = w * x + b;
+var loss = GradOperations.Mean((prediction - y) * (prediction - y));
 
 loss.Backward();
 

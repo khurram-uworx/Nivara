@@ -1,0 +1,152 @@
+{
+  "test_cases": [
+    {
+      "name": "square",
+      "description": "f(x) = x*x, seed=[1,0] (derivative w.r.t. first element only)",
+      "inputs": {
+        "x": [
+          2.0,
+          3.0
+        ]
+      },
+      "seeds": {
+        "x": [
+          1.0,
+          0.0
+        ]
+      },
+      "primal": [
+        4.0,
+        9.0
+      ],
+      "jvp": [
+        4.0,
+        0.0
+      ]
+    },
+    {
+      "name": "mul_add",
+      "description": "f(a,b) = a*b + a, seed on a=[1], b=[1]",
+      "inputs": {
+        "a": [
+          1.5
+        ],
+        "b": [
+          2.5
+        ]
+      },
+      "seeds": {
+        "a": [
+          1.0
+        ],
+        "b": [
+          1.0
+        ]
+      },
+      "primal": [
+        5.25
+      ],
+      "jvp": [
+        5.0
+      ]
+    },
+    {
+      "name": "relu",
+      "description": "f(x) = relu(x), seed=[1,1,1]",
+      "inputs": {
+        "x": [
+          -1.0,
+          0.0,
+          2.0
+        ]
+      },
+      "seeds": {
+        "x": [
+          1.0,
+          1.0,
+          1.0
+        ]
+      },
+      "primal": [
+        0.0,
+        0.0,
+        2.0
+      ],
+      "jvp": [
+        0.0,
+        0.0,
+        1.0
+      ]
+    },
+    {
+      "name": "sigmoid",
+      "description": "f(x) = sigmoid(x), seed=[1,1]",
+      "inputs": {
+        "x": [
+          0.0,
+          1.0
+        ]
+      },
+      "seeds": {
+        "x": [
+          1.0,
+          1.0
+        ]
+      },
+      "primal": [
+        0.5,
+        0.7310585786300049
+      ],
+      "jvp": [
+        0.25,
+        0.19661193324148185
+      ]
+    },
+    {
+      "name": "matmul",
+      "description": "f(x) = W@x, W fixed=[[1,2],[3,4]], seed=[1,0] (JVP = W[:,0] = [1,3])",
+      "inputs": {
+        "x": [
+          1.0,
+          2.0
+        ]
+      },
+      "seeds": {
+        "x": [
+          1.0,
+          0.0
+        ]
+      },
+      "primal": [
+        5.0,
+        11.0
+      ],
+      "jvp": [
+        1.0,
+        3.0
+      ]
+    },
+    {
+      "name": "composition",
+      "description": "f(x) = sum(relu(W@x + b)), seed=[1,0], W=[[0.5,-0.5],[-0.5,0.5]], b=[0.1,-0.1]",
+      "inputs": {
+        "x": [
+          1.0,
+          -0.5
+        ]
+      },
+      "seeds": {
+        "x": [
+          1.0,
+          0.0
+        ]
+      },
+      "primal": [
+        0.85
+      ],
+      "jvp": [
+        0.5
+      ]
+    }
+  ]
+}

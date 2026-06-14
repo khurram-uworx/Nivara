@@ -858,7 +858,7 @@ DataFrame → ReverseGradTensor<T> → Computation Graph (GradNode DAG)
 The fundamental autograd tensor. Wraps `Tensor<T>` for the forward value and maintains a `GradNode` DAG for the backward pass. Supports `float` and `double`. Gradients are stored in a nullable `Tensor<T>?` field, with null-mask propagation matching Nivara's column semantics.
 
 #### GradOperations
-Static factory of all differentiable operations — arithmetic (`Add`, `Multiply`, `Subtract`, `Divide`), reductions (`Sum`, `Mean`), activations (`ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `Exp`, `Log`, `Softmax`, `LogSoftmax`), and utilities (`Clip`, `Reshape`, `Transpose`). Each operation creates a `GradNode` in the DAG.
+Static factory of all differentiable operations — arithmetic (`Add`, `Multiply`, `Subtract`, `Divide`), reductions (`Sum`, `Mean`), activations (`ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `Exp`, `Log`, `Softmax`, `LogSoftmax`), and utilities (`Clip`, `Reshape`, `Transpose`). Each operation creates a `GradNode` in the DAG. Arithmetic operations are also available as `+`, `-`, `*`, `/` and unary `-` operator overloads on `ReverseGradTensor<T>`.
 
 #### Module System (`Nn/`)
 - **`Parameter<T>`**: Trainable tensor with gradient tracking and null-mask propagation
@@ -878,6 +878,9 @@ Common base providing `Step()` and `ZeroGrad()`. Implementations:
 
 #### Serialization (`Serialization/`)
 - **`ModelSerializer<T>`**: Save/load models as JSON (parameter tensors serialized as arrays), with type metadata and structure validation
+
+#### ForwardGradTensor\<T\> and ForwardGradOperations
+The forward-mode counterpart stores a `Tangent` (directional derivative) alongside the primal value. `ForwardGradOperations` provides the same 22 JVP operations as `GradOperations` does VJP operations. Arithmetic operations support `+`, `-`, `*`, `/` and unary `-` operator overloads on `ForwardGradTensor<T>`, delegating to the corresponding `ForwardGradOperations` methods.
 
 ### Null Handling in Gradients
 
