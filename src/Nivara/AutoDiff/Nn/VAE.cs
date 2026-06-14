@@ -67,7 +67,7 @@ public sealed class VAE<T> : Module<T> where T : struct, INumber<T>
     {
         if (!IsTraining)
             return mu;
-        return GradOperations.SampleNormal(mu, logVar, seed);
+        return ReverseGradOperations.SampleNormal(mu, logVar, seed);
     }
 
     public ReverseGradTensor<T> Decode(ReverseGradTensor<T> z)
@@ -83,19 +83,19 @@ public sealed class VAE<T> : Module<T> where T : struct, INumber<T>
         ReverseGradTensor<T> logVar,
         ElboLossType lossType = ElboLossType.KldBeta)
     {
-        var diff = GradOperations.Subtract(recon, original);
-        var squared = GradOperations.Multiply(diff, diff);
-        var reconLoss = GradOperations.Sum(squared);
+        var diff = ReverseGradOperations.Subtract(recon, original);
+        var squared = ReverseGradOperations.Multiply(diff, diff);
+        var reconLoss = ReverseGradOperations.Sum(squared);
 
-        var kl = GradOperations.KlDivergence(mu, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mu, logVar);
 
         var betaResult = lossType switch
         {
-            ElboLossType.KldBeta => GradOperations.Multiply(kl, _beta.Tensor),
+            ElboLossType.KldBeta => ReverseGradOperations.Multiply(kl, _beta.Tensor),
             ElboLossType.KldAnnealing => kl,
             _ => throw new ArgumentException($"Unknown ElboLossType: {lossType}", nameof(lossType))
         };
 
-        return GradOperations.Add(reconLoss, betaResult);
+        return ReverseGradOperations.Add(reconLoss, betaResult);
     }
 }

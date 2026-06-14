@@ -31,8 +31,8 @@ class FraudNet : Module<float>
 
     public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
     {
-        var h = GradOperations.Relu(L1.Forward(x));
-        h = GradOperations.Relu(L2.Forward(h));
+        var h = ReverseGradOperations.Relu(L1.Forward(x));
+        h = ReverseGradOperations.Relu(L2.Forward(h));
         return L3.Forward(h);
     }
 

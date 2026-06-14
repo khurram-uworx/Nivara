@@ -3,6 +3,7 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Text;
+using System.Threading;
 
 namespace Nivara.AutoDiff.Utilities;
 
@@ -12,6 +13,55 @@ namespace Nivara.AutoDiff.Utilities;
 /// </summary>
 public static class GradientUtils
 {
+    private static readonly AsyncLocal<int> GradDepth = new();
+
+    /// <summary>
+    /// Gets whether reverse-mode operation tracking is currently enabled.
+    /// Inference is the default; enter <see cref="Grad"/> when building a training graph.
+    /// </summary>
+    public static bool IsGradEnabled => GradDepth.Value > 0;
+
+    /// <summary>
+    /// Enables reverse-mode gradient tracking for the current async control flow.
+    /// Dispose the returned scope to restore the previous inference-default behavior.
+    /// </summary>
+    public static IDisposable Grad()
+    {
+        GradDepth.Value++;
+        return new GradScope();
+    }
+
+    internal static bool ShouldTrackGrad<T>(params ReverseGradTensor<T>[] tensors)
+        where T : struct, INumber<T>
+    {
+        if (!IsGradEnabled)
+            return false;
+
+        foreach (var tensor in tensors)
+        {
+            if (tensor?.RequiresGrad == true)
+                return true;
+        }
+
+        return false;
+    }
+
+    private sealed class GradScope : IDisposable
+    {
+        private bool disposed;
+
+        public void Dispose()
+        {
+            if (disposed)
+                return;
+
+            if (GradDepth.Value > 0)
+                GradDepth.Value--;
+
+            disposed = true;
+        }
+    }
+
     #region Gradient Management
 
     /// <summary>

@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -11,6 +12,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class GradOperationsTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     [Test]
     public void Add_SimpleCase_ComputesCorrectResult()
     {
@@ -21,7 +30,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Add(a, b);
+        var result = ReverseGradOperations.Add(a, b);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(3));
@@ -41,7 +50,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Multiply(a, b);
+        var result = ReverseGradOperations.Multiply(a, b);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(3));
@@ -61,7 +70,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Subtract(a, b);
+        var result = ReverseGradOperations.Subtract(a, b);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(3));
@@ -81,7 +90,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Divide(a, b);
+        var result = ReverseGradOperations.Divide(a, b);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(3));
@@ -106,7 +115,7 @@ public class GradOperationsTests
         b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b);
+        var result = ReverseGradOperations.MatMul(a, b);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(4));
@@ -128,7 +137,7 @@ public class GradOperationsTests
         a.Reshape(2, 3);
 
         // Act
-        var result = GradOperations.Transpose(a);
+        var result = ReverseGradOperations.Transpose(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(6));
@@ -185,7 +194,7 @@ public class GradOperationsTests
         var b = ReverseGradTensor<float>.FromMatrix(
             [5f, 6f, 7f, 8f], 2, 2, requiresGrad: true);
 
-        var result = GradOperations.MatMul(a, b);
+        var result = ReverseGradOperations.MatMul(a, b);
 
         Assert.That(result[0], Is.EqualTo(19.0f));
         Assert.That(result[1], Is.EqualTo(22.0f));
@@ -207,7 +216,7 @@ public class GradOperationsTests
         b.Reshape(2, 2);
 
         // Act
-        var result = GradOperations.MatMul(a, b);
+        var result = ReverseGradOperations.MatMul(a, b);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(4));
@@ -225,7 +234,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true); // shape [2]
 
         // Act & Assert
-        var ex = Assert.Throws<ArgumentException>(() => GradOperations.MatMul(a, b));
+        var ex = Assert.Throws<ArgumentException>(() => ReverseGradOperations.MatMul(a, b));
         Assert.That(ex.Message, Does.Contain("rank 2"));
     }
 
@@ -238,7 +247,7 @@ public class GradOperationsTests
         a.Reshape(2, 3);
 
         // Act
-        var result = GradOperations.Transpose(a);
+        var result = ReverseGradOperations.Transpose(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(6));
@@ -300,7 +309,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Add(a, b);
+        var result = ReverseGradOperations.Add(a, b);
 
         // Assert
         Assert.That(result.Shape, Is.EqualTo(new[] { 3 }), "Add should preserve shape");
@@ -318,7 +327,7 @@ public class GradOperationsTests
         b.Reshape(3, 4);
 
         // Act
-        var result = GradOperations.MatMul(a, b);
+        var result = ReverseGradOperations.MatMul(a, b);
 
         // Assert
         Assert.That(result.Shape, Is.EqualTo(new[] { 2, 4 }), "MatMul result shape should be [aRows, bCols]");
@@ -333,7 +342,7 @@ public class GradOperationsTests
         a.Reshape(2, 3);
 
         // Act
-        var result = GradOperations.Transpose(a);
+        var result = ReverseGradOperations.Transpose(a);
 
         // Assert
         Assert.That(result.Shape, Is.EqualTo(new[] { 3, 2 }), "Transpose result shape should be [cols, rows]");
@@ -351,7 +360,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: false);
 
         // Act
-        var result = GradOperations.Add(a, b);
+        var result = ReverseGradOperations.Add(a, b);
 
         // Assert
         Assert.That(result.RequiresGrad, Is.False);
@@ -367,7 +376,7 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act & Assert
-        Assert.Throws<DivideByZeroException>(() => GradOperations.Divide(a, b));
+        Assert.Throws<DivideByZeroException>(() => ReverseGradOperations.Divide(a, b));
     }
 
     #region Reduction Operations Tests
@@ -380,7 +389,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Sum(a);
+        var result = ReverseGradOperations.Sum(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(1));
@@ -396,7 +405,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => GradOperations.Sum(a));
+        Assert.Throws<InvalidOperationException>(() => ReverseGradOperations.Sum(a));
     }
 
     [Test]
@@ -407,7 +416,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Mean(a);
+        var result = ReverseGradOperations.Mean(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(1));
@@ -423,7 +432,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act & Assert
-        Assert.Throws<InvalidOperationException>(() => GradOperations.Mean(a));
+        Assert.Throws<InvalidOperationException>(() => ReverseGradOperations.Mean(a));
     }
 
     [Test]
@@ -434,7 +443,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Sum(a);
+        var result = ReverseGradOperations.Sum(a);
         result.Backward();
 
         // Assert - gradient of sum is ones for all inputs
@@ -453,7 +462,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Mean(a);
+        var result = ReverseGradOperations.Mean(a);
         result.Backward();
 
         // Assert - gradient of mean is 1/n for all inputs
@@ -477,7 +486,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Relu(a);
+        var result = ReverseGradOperations.Relu(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(5));
@@ -497,7 +506,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Relu(a);
+        var result = ReverseGradOperations.Relu(a);
 
         // Create gradient output (all ones)
         var gradData = NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f, 1.0f });
@@ -521,7 +530,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Sigmoid(a);
+        var result = ReverseGradOperations.Sigmoid(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(3));
@@ -539,7 +548,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Sigmoid(a);
+        var result = ReverseGradOperations.Sigmoid(a);
         result.Backward();
 
         // Assert - gradient at x=0 is sigmoid(0) * (1 - sigmoid(0)) = 0.5 * 0.5 = 0.25
@@ -556,7 +565,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Tanh(a);
+        var result = ReverseGradOperations.Tanh(a);
 
         // Assert
         Assert.That(result.Length, Is.EqualTo(3));
@@ -574,7 +583,7 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var result = GradOperations.Tanh(a);
+        var result = ReverseGradOperations.Tanh(a);
         result.Backward();
 
         // Assert - gradient at x=0 is 1 - tanh(0)^2 = 1 - 0 = 1
@@ -591,9 +600,9 @@ public class GradOperationsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: false);
 
         // Act
-        var reluResult = GradOperations.Relu(a);
-        var sigmoidResult = GradOperations.Sigmoid(a);
-        var tanhResult = GradOperations.Tanh(a);
+        var reluResult = ReverseGradOperations.Relu(a);
+        var sigmoidResult = ReverseGradOperations.Sigmoid(a);
+        var tanhResult = ReverseGradOperations.Tanh(a);
 
         // Assert
         Assert.That(reluResult.RequiresGrad, Is.False);
@@ -619,10 +628,10 @@ public class GradOperationsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act: Forward pass
-        var mul = GradOperations.Multiply(x, w);  // [0.5, 1.0, 1.5]
-        var add = GradOperations.Add(mul, b);     // [-0.5, 1.0, 2.5]
-        var relu = GradOperations.Relu(add);      // [0.0, 1.0, 2.5]
-        var mean = GradOperations.Mean(relu);     // (0 + 1 + 2.5) / 3 = 1.1667
+        var mul = ReverseGradOperations.Multiply(x, w);  // [0.5, 1.0, 1.5]
+        var add = ReverseGradOperations.Add(mul, b);     // [-0.5, 1.0, 2.5]
+        var relu = ReverseGradOperations.Relu(add);      // [0.0, 1.0, 2.5]
+        var mean = ReverseGradOperations.Mean(relu);     // (0 + 1 + 2.5) / 3 = 1.1667
 
         // Backward pass
         mean.Backward();
@@ -649,8 +658,8 @@ public class GradOperationsTests
         var x = new ReverseGradTensor<float>(xData, requiresGrad: true);
 
         // Act: Forward pass
-        var sigmoid = GradOperations.Sigmoid(x);
-        var sum = GradOperations.Sum(sigmoid);
+        var sigmoid = ReverseGradOperations.Sigmoid(x);
+        var sum = ReverseGradOperations.Sum(sigmoid);
 
         // Backward pass
         sum.Backward();
@@ -676,7 +685,7 @@ public class GradOperationsTests
     public void Negate_SimpleValues_NegatesCorrectly()
     {
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, -2.0f, 3.0f }), requiresGrad: true);
-        var result = GradOperations.Negate(a);
+        var result = ReverseGradOperations.Negate(a);
 
         Assert.That(result[0], Is.EqualTo(-1.0f));
         Assert.That(result[1], Is.EqualTo(2.0f));
@@ -687,8 +696,8 @@ public class GradOperationsTests
     public void Negate_Backward_CorrectGradient()
     {
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }), requiresGrad: true);
-        var n = GradOperations.Negate(a);
-        var sum = GradOperations.Sum(n);
+        var n = ReverseGradOperations.Negate(a);
+        var sum = ReverseGradOperations.Sum(n);
         sum.Backward();
 
         // Gradient of -x is -1, so d(loss)/dx = -1
@@ -701,7 +710,7 @@ public class GradOperationsTests
     public void Negate_RequiresGradFalse_ReturnsNoGrad()
     {
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: false);
-        var result = GradOperations.Negate(a);
+        var result = ReverseGradOperations.Negate(a);
 
         Assert.That(result.RequiresGrad, Is.False);
     }
@@ -714,7 +723,7 @@ public class GradOperationsTests
     public void Abs_SimpleValues_ComputesCorrectly()
     {
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { -2.0f, -1.0f, 0.0f, 1.0f, 2.0f }), requiresGrad: true);
-        var result = GradOperations.Abs(a);
+        var result = ReverseGradOperations.Abs(a);
 
         Assert.That(result[0], Is.EqualTo(2.0f));
         Assert.That(result[1], Is.EqualTo(1.0f));
@@ -728,8 +737,8 @@ public class GradOperationsTests
     {
         // d/dx |x| = sign(x), sign(0) = 0
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { -2.0f, 0.0f, 3.0f }), requiresGrad: true);
-        var abs = GradOperations.Abs(a);
-        var sum = GradOperations.Sum(abs);
+        var abs = ReverseGradOperations.Abs(a);
+        var sum = ReverseGradOperations.Sum(abs);
         sum.Backward();
 
         Assert.That(a.Grad![0], Is.EqualTo(-1.0f));
@@ -741,13 +750,13 @@ public class GradOperationsTests
     public void Abs_DoubleType_ComputesCorrectly()
     {
         var a = new ReverseGradTensor<double>(NivaraColumn<double>.Create(new double[] { -3.0, 0.0, 5.0 }), requiresGrad: true);
-        var result = GradOperations.Abs(a);
+        var result = ReverseGradOperations.Abs(a);
 
         Assert.That(result[0], Is.EqualTo(3.0));
         Assert.That(result[1], Is.EqualTo(0.0));
         Assert.That(result[2], Is.EqualTo(5.0));
 
-        var sum = GradOperations.Sum(result);
+        var sum = ReverseGradOperations.Sum(result);
         sum.Backward();
         Assert.That(a.Grad![0], Is.EqualTo(-1.0));
         Assert.That(a.Grad[1], Is.EqualTo(0.0));
@@ -757,7 +766,7 @@ public class GradOperationsTests
     public void Abs_RequiresGradFalse_ReturnsNoGrad()
     {
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { -1.0f, 2.0f }), requiresGrad: false);
-        var result = GradOperations.Abs(a);
+        var result = ReverseGradOperations.Abs(a);
 
         Assert.That(result.RequiresGrad, Is.False);
     }
@@ -774,7 +783,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f, 0f }), requiresGrad: true);
 
-        var kl = GradOperations.KlDivergence(mean, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mean, logVar);
 
         Assert.That(kl.Length, Is.EqualTo(1));
         Assert.That(kl[0], Is.EqualTo(0f).Within(1e-6f));
@@ -790,7 +799,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: true);
 
-        var kl = GradOperations.KlDivergence(mean, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mean, logVar);
 
         Assert.That(kl[0], Is.EqualTo(0.5f).Within(1e-6f));
     }
@@ -805,7 +814,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f, 1f }), requiresGrad: true);
 
-        var kl = GradOperations.KlDivergence(mean, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mean, logVar);
         kl.Backward();
 
         Assert.That(mean.Grad, Is.Not.Null);
@@ -829,7 +838,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
 
-        var kl = GradOperations.KlDivergence(mean, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mean, logVar);
 
         Assert.That(kl.RequiresGrad, Is.False);
     }
@@ -842,7 +851,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
 
-        var kl = GradOperations.KlDivergence(mean, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mean, logVar);
         kl.Backward();
 
         Assert.That(mean.Grad, Is.Not.Null);
@@ -860,7 +869,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
 
-        var kl = GradOperations.KlDivergence(mean, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mean, logVar);
         kl.Backward(stripGradientNulls: false);
 
         // Non-null contributions: position 0 only (pos 1 has null mean, pos 2 has null logVar)
@@ -884,7 +893,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<double>(
             NivaraColumn<double>.Create(new double[] { 0.0 }), requiresGrad: true);
 
-        var kl = GradOperations.KlDivergence(mean, logVar);
+        var kl = ReverseGradOperations.KlDivergence(mean, logVar);
 
         Assert.That(kl[0], Is.EqualTo(0.5).Within(1e-12));
         kl.Backward();
@@ -899,7 +908,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: true);
 
-        Assert.That(() => GradOperations.KlDivergence(mean, logVar), Throws.ArgumentException);
+        Assert.That(() => ReverseGradOperations.KlDivergence(mean, logVar), Throws.ArgumentException);
     }
 
     #endregion
@@ -914,7 +923,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f, 0f, 0f }), requiresGrad: true);
 
-        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var z = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
 
         Assert.That(z.Length, Is.EqualTo(3));
         // With seed=42 and logVar=0 (σ=1), z = μ + 1 * ε
@@ -931,8 +940,8 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f, 0f }), requiresGrad: true);
 
-        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
-        var sum = GradOperations.Sum(z);
+        var z = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
+        var sum = ReverseGradOperations.Sum(z);
         sum.Backward();
 
         // d(loss)/dμ = d(sum(z))/dμ = 1 at each position
@@ -951,8 +960,8 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: true);
 
-        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
-        var sum = GradOperations.Sum(z);
+        var z = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
+        var sum = ReverseGradOperations.Sum(z);
         sum.Backward();
 
         // logVar=0: σ = exp(0.5*0) = 1, ε varies by seed
@@ -972,7 +981,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
 
-        var z = GradOperations.SampleNormal(mean, logVar);
+        var z = ReverseGradOperations.SampleNormal(mean, logVar);
 
         Assert.That(z.RequiresGrad, Is.False);
     }
@@ -985,8 +994,8 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
 
-        var z1 = GradOperations.SampleNormal(mean, logVar, seed: 42);
-        var z2 = GradOperations.SampleNormal(mean, logVar, seed: 99);
+        var z1 = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
+        var z2 = ReverseGradOperations.SampleNormal(mean, logVar, seed: 99);
 
         // Different seeds should produce different samples
         Assert.That(z1[0], Is.Not.EqualTo(z2[0]).Within(1e-6f));
@@ -1000,8 +1009,8 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f }), requiresGrad: false);
 
-        var z1 = GradOperations.SampleNormal(mean, logVar, seed: 42);
-        var z2 = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var z1 = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
+        var z2 = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
 
         // Same seed should produce identical samples
         Assert.That(z1[0], Is.EqualTo(z2[0]).Within(1e-6f));
@@ -1017,7 +1026,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
 
-        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
+        var z = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
 
         // Position 1 has null mean → z should be null
         Assert.That(z.IsNull(1), Is.True);
@@ -1031,7 +1040,7 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f, 1f }), requiresGrad: true);
 
-        Assert.That(() => GradOperations.SampleNormal(mean, logVar), Throws.ArgumentException);
+        Assert.That(() => ReverseGradOperations.SampleNormal(mean, logVar), Throws.ArgumentException);
     }
 
     [Test]
@@ -1042,8 +1051,8 @@ public class GradOperationsTests
         var logVar = new ReverseGradTensor<double>(
             NivaraColumn<double>.Create(new double[] { 0.0 }), requiresGrad: true);
 
-        var z = GradOperations.SampleNormal(mean, logVar, seed: 42);
-        var sum = GradOperations.Sum(z);
+        var z = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
+        var sum = ReverseGradOperations.Sum(z);
         sum.Backward();
 
         Assert.That(mean.Grad, Is.Not.Null);

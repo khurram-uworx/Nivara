@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -11,6 +12,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class BackwardPassTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     [Test]
     public void Backward_SimpleAddition_ComputesCorrectGradients()
     {
@@ -22,7 +31,7 @@ public class BackwardPassTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var y = GradOperations.Add(a, b);
+        var y = ReverseGradOperations.Add(a, b);
         y.Backward();
 
         // Assert
@@ -43,7 +52,7 @@ public class BackwardPassTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var y = GradOperations.Multiply(a, b);
+        var y = ReverseGradOperations.Multiply(a, b);
         y.Backward();
 
         // Assert
@@ -66,8 +75,8 @@ public class BackwardPassTests
         var c = new ReverseGradTensor<float>(cData, requiresGrad: true);
 
         // Act
-        var sum = GradOperations.Add(a, b);
-        var y = GradOperations.Multiply(sum, c);
+        var sum = ReverseGradOperations.Add(a, b);
+        var y = ReverseGradOperations.Multiply(sum, c);
         y.Backward();
 
         // Assert
@@ -88,7 +97,7 @@ public class BackwardPassTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Act
-        var y = GradOperations.Add(a, a);
+        var y = ReverseGradOperations.Add(a, a);
         y.Backward();
 
         // Assert
@@ -106,7 +115,7 @@ public class BackwardPassTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var y = GradOperations.Add(a, b);
+        var y = ReverseGradOperations.Add(a, b);
 
         // Assert
         var ex = Assert.Throws<InvalidOperationException>(() => y.Backward());
@@ -124,7 +133,7 @@ public class BackwardPassTests
             requiresGrad: true);
         a.Reshape(2, 2);
         b.Reshape(2, 2);
-        var y = GradOperations.MatMul(a, b);
+        var y = ReverseGradOperations.MatMul(a, b);
 
         var gradient = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f, 1.0f }),
@@ -158,7 +167,7 @@ public class BackwardPassTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var y = GradOperations.Subtract(a, b);
+        var y = ReverseGradOperations.Subtract(a, b);
         y.Backward();
 
         // Assert
@@ -179,7 +188,7 @@ public class BackwardPassTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Act
-        var y = GradOperations.Divide(a, b);
+        var y = ReverseGradOperations.Divide(a, b);
         y.Backward();
 
         // Assert
@@ -205,9 +214,9 @@ public class BackwardPassTests
         var d = new ReverseGradTensor<float>(dData, requiresGrad: true);
 
         // Act
-        var product = GradOperations.Multiply(a, b);
-        var quotient = GradOperations.Divide(c, d);
-        var y = GradOperations.Add(product, quotient);
+        var product = ReverseGradOperations.Multiply(a, b);
+        var quotient = ReverseGradOperations.Divide(c, d);
+        var y = ReverseGradOperations.Add(product, quotient);
         y.Backward();
 
         // Assert
@@ -229,7 +238,7 @@ public class BackwardPassTests
             requiresGrad: true);
         input.Reshape(1, 3);
 
-        var output = GradOperations.DropoutWithMask(input, new[] { true, false, true }, 2.0f);
+        var output = ReverseGradOperations.DropoutWithMask(input, new[] { true, false, true }, 2.0f);
 
         Assert.That(output.Shape, Is.EqualTo(new[] { 1, 3 }));
         Assert.That(output[0], Is.EqualTo(2.0f).Within(1e-6f));
@@ -244,7 +253,7 @@ public class BackwardPassTests
             NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
             requiresGrad: true);
 
-        var output = GradOperations.DropoutWithMask(input, new[] { true, false, true }, 2.0f);
+        var output = ReverseGradOperations.DropoutWithMask(input, new[] { true, false, true }, 2.0f);
         var gradient = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f }),
             requiresGrad: false);
@@ -267,9 +276,9 @@ public class BackwardPassTests
             NivaraColumn<float>.Create(new float[] { 10.0f, 10.0f, 10.0f }),
             requiresGrad: false);
 
-        var product = GradOperations.Multiply(input, multiplier);
-        var dropped = GradOperations.DropoutWithMask(product, new[] { true, false, true }, 2.0f);
-        var loss = GradOperations.Sum(dropped);
+        var product = ReverseGradOperations.Multiply(input, multiplier);
+        var dropped = ReverseGradOperations.DropoutWithMask(product, new[] { true, false, true }, 2.0f);
+        var loss = ReverseGradOperations.Sum(dropped);
 
         loss.Backward();
 
@@ -286,7 +295,7 @@ public class BackwardPassTests
             new float[] { 2.0f, 4.0f, 6.0f },
             new[] { false, true, false });
         var input = new ReverseGradTensor<float>(inputColumn, requiresGrad: true);
-        var output = GradOperations.DropoutWithMask(input, new[] { true, true, false }, 2.0f);
+        var output = ReverseGradOperations.DropoutWithMask(input, new[] { true, true, false }, 2.0f);
 
         Assert.That(output[0], Is.EqualTo(4.0f).Within(1e-6f));
         Assert.That(output.IsNull(1), Is.True);

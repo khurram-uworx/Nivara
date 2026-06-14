@@ -10,8 +10,8 @@ public sealed class MSELoss<T> where T : struct, INumber<T>
         if (predictions == null) throw new ArgumentNullException(nameof(predictions));
         if (targets == null) throw new ArgumentNullException(nameof(targets));
 
-        var diff = GradOperations.Subtract(predictions, targets);
-        var squared = GradOperations.Multiply(diff, diff);
-        return GradOperations.Sum(squared);
+        var diff = ReverseGradOperations.Subtract(predictions, targets);
+        var squared = ReverseGradOperations.Multiply(diff, diff);
+        return ReverseGradOperations.Sum(squared);
     }
 }

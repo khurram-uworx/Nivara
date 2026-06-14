@@ -33,7 +33,7 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
 
     public void RegisterModules(params Module<T>[] modules)
     {
-        if (modules == null) throw new ArgumentNullException(nameof(modules));
+        ArgumentNullException.ThrowIfNull(modules);
         foreach (var module in modules)
         {
             if (module != null)
@@ -43,7 +43,7 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
 
     public void RegisterParameters(params Parameter<T>[] parameters)
     {
-        if (parameters == null) throw new ArgumentNullException(nameof(parameters));
+        ArgumentNullException.ThrowIfNull(parameters);
         foreach (var param in parameters)
         {
             if (param != null)
@@ -96,6 +96,93 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
     }
 
     public IReadOnlyList<Module<T>> NamedModules() => modules.AsReadOnly();
+
+    public Dictionary<string, ReverseGradTensor<T>> StateDict()
+    {
+        var state = new Dictionary<string, ReverseGradTensor<T>>();
+
+        foreach (var (name, tensor) in Parameters())
+            state[name] = CloneTensor(tensor);
+
+        return state;
+    }
+
+    public void LoadStateDict(
+        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict,
+        bool strict = false)
+    {
+        ArgumentNullException.ThrowIfNull(stateDict);
+
+        var modelParameters = GetParameters();
+
+        foreach (var (name, source) in stateDict)
+        {
+            ArgumentNullException.ThrowIfNull(source);
+
+            if (!modelParameters.TryGetValue(name, out var parameter))
+                throw new InvalidOperationException(
+                    $"Parameter '{name}' not found in model. " +
+                    $"Available parameters: [{string.Join(", ", modelParameters.Keys)}]");
+
+            ValidateShape(name, source.Shape, parameter.Shape);
+            parameter.Tensor = CloneTensor(source, parameter.Tensor.RequiresGrad);
+        }
+
+        if (strict)
+        {
+            var missing = modelParameters.Keys
+                .Where(name => !stateDict.ContainsKey(name))
+                .ToArray();
+
+            if (missing.Length > 0)
+                throw new InvalidOperationException(
+                    $"State dictionary is missing model parameters: [{string.Join(", ", missing)}]");
+        }
+    }
+
+    internal static ReverseGradTensor<T> CloneTensor(
+        ReverseGradTensor<T> tensor,
+        bool? requiresGrad = null)
+    {
+        ArgumentNullException.ThrowIfNull(tensor);
+
+        var values = new T[tensor.Length];
+        tensor.Data.CopyTo(values, T.Zero);
+
+        NivaraColumn<T> data;
+        if (tensor.Data.HasNulls && tensor.Data.TryGetNullMask(out var mask))
+        {
+            var nullMask = new bool[tensor.Length];
+            mask.CopyTo(nullMask);
+            data = NivaraColumn<T>.CreateFromSpans(values, nullMask);
+        }
+        else
+        {
+            data = NivaraColumn<T>.Create(values);
+        }
+
+        return new ReverseGradTensor<T>(
+            data,
+            requiresGrad ?? tensor.RequiresGrad,
+            tensor.Shape);
+    }
+
+    static void ValidateShape(string name, int[] sourceShape, int[] targetShape)
+    {
+        if (sourceShape.Length != targetShape.Length)
+            throw new InvalidOperationException(
+                $"Parameter '{name}' shape rank mismatch: " +
+                $"state has {sourceShape.Length}D, model has {targetShape.Length}D.");
+
+        for (int i = 0; i < sourceShape.Length; i++)
+        {
+            if (sourceShape[i] != targetShape[i])
+                throw new InvalidOperationException(
+                    $"Parameter '{name}' shape mismatch: " +
+                    $"state has [{string.Join(", ", sourceShape)}], " +
+                    $"model has [{string.Join(", ", targetShape)}].");
+        }
+    }
 
     public void Dispose()
     {

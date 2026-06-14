@@ -1,3 +1,4 @@
+using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
@@ -128,6 +129,94 @@ public class SerializationTests
         Assert.That(weightData.Values.Length, Is.EqualTo(model.Weight.Length));
 
         File.Delete(path);
+    }
+
+    [Test]
+    public void StateDict_LoadStateDict_RoundTrip()
+    {
+        using var source = new Linear<float>(2, 3);
+        using var target = new Linear<float>(2, 3);
+
+        source.GetParameters()["Weight"].Tensor =
+            ReverseGradTensor<float>.FromMatrix([1f, 2f, 3f, 4f, 5f, 6f], 3, 2, requiresGrad: true);
+        source.GetParameters()["Bias"].Tensor =
+            ReverseGradTensor<float>.FromMatrix([7f, 8f, 9f], 1, 3, requiresGrad: true);
+
+        target.LoadStateDict(source.StateDict(), strict: true);
+
+        Assert.That(target.Weight.Shape, Is.EqualTo(source.Weight.Shape));
+        for (int i = 0; i < source.Weight.Length; i++)
+            Assert.That(target.Weight[i], Is.EqualTo(source.Weight[i]).Within(1e-6f));
+
+        Assert.That(target.Bias, Is.Not.Null);
+        for (int i = 0; i < source.Bias!.Length; i++)
+            Assert.That(target.Bias![i], Is.EqualTo(source.Bias[i]).Within(1e-6f));
+    }
+
+    [Test]
+    public void LoadStateDict_PartialLoad_LeavesMissingParametersUnchanged()
+    {
+        using var source = new Linear<float>(2, 2);
+        using var target = new Linear<float>(2, 2);
+
+        source.GetParameters()["Weight"].Tensor =
+            ReverseGradTensor<float>.FromMatrix([1f, 2f, 3f, 4f], 2, 2, requiresGrad: true);
+        source.GetParameters()["Bias"].Tensor =
+            ReverseGradTensor<float>.FromMatrix([5f, 6f], 1, 2, requiresGrad: true);
+        target.GetParameters()["Bias"].Tensor =
+            ReverseGradTensor<float>.FromMatrix([10f, 20f], 1, 2, requiresGrad: true);
+
+        var state = source.StateDict();
+        state.Remove("Bias");
+
+        target.LoadStateDict(state);
+
+        for (int i = 0; i < source.Weight.Length; i++)
+            Assert.That(target.Weight[i], Is.EqualTo(source.Weight[i]).Within(1e-6f));
+
+        Assert.That(target.Bias, Is.Not.Null);
+        Assert.That(target.Bias![0], Is.EqualTo(10f).Within(1e-6f));
+        Assert.That(target.Bias[1], Is.EqualTo(20f).Within(1e-6f));
+    }
+
+    [Test]
+    public void LoadStateDict_StrictMissingParameter_Throws()
+    {
+        using var source = new Linear<float>(2, 2);
+        using var target = new Linear<float>(2, 2);
+
+        var state = source.StateDict();
+        state.Remove("Bias");
+
+        Assert.Throws<InvalidOperationException>(() =>
+            target.LoadStateDict(state, strict: true));
+    }
+
+    [Test]
+    public void LoadStateDict_ShapeMismatch_Throws()
+    {
+        using var source = new Linear<float>(3, 2);
+        using var target = new Linear<float>(2, 2);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            target.LoadStateDict(source.StateDict()));
+    }
+
+    [Test]
+    public void StateDictJson_RoundTrip()
+    {
+        using var model = new Linear<float>(2, 2);
+        model.GetParameters()["Weight"].Tensor =
+            ReverseGradTensor<float>.FromMatrix([1f, 2f, 3f, 4f], 2, 2, requiresGrad: true);
+
+        var json = ModelSerializer.StateDictToJson(model.StateDict());
+        var restored = ModelSerializer.JsonToStateDict<float>(json, requiresGrad: true);
+
+        Assert.That(restored.Keys, Does.Contain("Weight"));
+        Assert.That(restored["Weight"].RequiresGrad, Is.True);
+        Assert.That(restored["Weight"].Shape, Is.EqualTo(model.Weight.Shape));
+        for (int i = 0; i < model.Weight.Length; i++)
+            Assert.That(restored["Weight"][i], Is.EqualTo(model.Weight[i]).Within(1e-6f));
     }
 
     [Test]

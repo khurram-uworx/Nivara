@@ -169,19 +169,23 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
                 nameof(gradient));
         }
 
-        NivaraColumn<T> gradientData;
-        if (gradient != null)
-        {
-            gradientData = gradient.Data;
-        }
-        else
-        {
-            gradientData = NivaraColumn<T>.Create(new T[] { T.One });
-        }
-
         try
         {
-            ComputationGraph.Backward(this, gradientData, stripGradientNulls);
+            var hadNulls = Data.HasNulls || (gradient?.Data.HasNulls ?? false);
+            var notes =
+                $"AutoDiff=Backward;Shape=[{string.Join(", ", shape)}];Rank={Rank};" +
+                $"HasGradient={gradient != null};StripGradientNulls={stripGradientNulls}";
+
+            AutoDiffDiagnostics.Measure<T>(
+                "AutoDiffBackward",
+                Length,
+                hadNulls,
+                () =>
+                {
+                    var gradientData = gradient?.Data ?? NivaraColumn<T>.Create(new T[] { T.One });
+                    ComputationGraph.Backward(this, gradientData, stripGradientNulls);
+                },
+                notes);
         }
         catch (InvalidOperationException ex) when (ex.Message.Contains("Circular dependency"))
         {
@@ -258,19 +262,19 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     }
 
     public static ReverseGradTensor<T> operator +(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
-        => GradOperations.Add(a, b);
+        => ReverseGradOperations.Add(a, b);
 
     public static ReverseGradTensor<T> operator -(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
-        => GradOperations.Subtract(a, b);
+        => ReverseGradOperations.Subtract(a, b);
 
     public static ReverseGradTensor<T> operator *(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
-        => GradOperations.Multiply(a, b);
+        => ReverseGradOperations.Multiply(a, b);
 
     public static ReverseGradTensor<T> operator /(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
-        => GradOperations.Divide(a, b);
+        => ReverseGradOperations.Divide(a, b);
 
     public static ReverseGradTensor<T> operator -(ReverseGradTensor<T> a)
-        => GradOperations.Negate(a);
+        => ReverseGradOperations.Negate(a);
 
     /// <summary>
     /// Creates a string representation of this ReverseGradTensor

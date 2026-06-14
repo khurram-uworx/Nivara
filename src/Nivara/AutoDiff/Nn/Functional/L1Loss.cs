@@ -10,8 +10,8 @@ public sealed class L1Loss<T> where T : struct, INumber<T>
         if (predictions == null) throw new ArgumentNullException(nameof(predictions));
         if (targets == null) throw new ArgumentNullException(nameof(targets));
 
-        var diff = GradOperations.Subtract(predictions, targets);
-        var abs = GradOperations.Abs(diff);
-        return GradOperations.Sum(abs);
+        var diff = ReverseGradOperations.Subtract(predictions, targets);
+        var abs = ReverseGradOperations.Abs(diff);
+        return ReverseGradOperations.Sum(abs);
     }
 }

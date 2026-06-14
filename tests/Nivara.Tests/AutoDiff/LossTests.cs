@@ -9,6 +9,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class LossTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     [Test]
     public void MSELoss_Forward_ComputesCorrectValue()
     {
@@ -115,8 +123,8 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 0f, 0f }), requiresGrad: false);
 
-        var logSoftmax = GradOperations.LogSoftmax(logits);
-        var nll = GradOperations.Negate(GradOperations.Sum(GradOperations.Multiply(logSoftmax, targets)));
+        var logSoftmax = ReverseGradOperations.LogSoftmax(logits);
+        var nll = ReverseGradOperations.Negate(ReverseGradOperations.Sum(ReverseGradOperations.Multiply(logSoftmax, targets)));
 
         Assert.That(nll.Length, Is.EqualTo(1));
         Assert.That(nll[0], Is.GreaterThan(0f));
@@ -130,8 +138,8 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 0f, 0f }), requiresGrad: false);
 
-        var logSoftmax = GradOperations.LogSoftmax(logits);
-        var nll = GradOperations.Negate(GradOperations.Sum(GradOperations.Multiply(logSoftmax, targets)));
+        var logSoftmax = ReverseGradOperations.LogSoftmax(logits);
+        var nll = ReverseGradOperations.Negate(ReverseGradOperations.Sum(ReverseGradOperations.Multiply(logSoftmax, targets)));
         nll.Backward();
 
         Assert.That(logits.Grad, Is.Not.Null);
@@ -232,8 +240,8 @@ public class LossTests
         var labels = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0f, 1f, 0f }), requiresGrad: false);
 
-        var lsm = GradOperations.LogSoftmax(logits);
-        var loss = GradOperations.Negate(GradOperations.Sum(GradOperations.Multiply(lsm, labels)));
+        var lsm = ReverseGradOperations.LogSoftmax(logits);
+        var loss = ReverseGradOperations.Negate(ReverseGradOperations.Sum(ReverseGradOperations.Multiply(lsm, labels)));
         loss.Backward();
 
         Assert.That(logits.Grad, Is.Not.Null);

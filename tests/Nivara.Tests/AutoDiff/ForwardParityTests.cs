@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -16,6 +17,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class ForwardParityTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     [Test]
     public void Add_ForwardTangent_EqualsBackwardGradient()
     {
@@ -26,7 +35,7 @@ public class ForwardParityTests
 
         var ra = new ReverseGradTensor<float>(aData, requiresGrad: true);
         var rb = new ReverseGradTensor<float>(bData, requiresGrad: false);
-        GradOperations.Sum(GradOperations.Add(ra, rb)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Add(ra, rb)).Backward();
         var expected = ra.Grad!;
 
         var fa = new ForwardGradTensor<float>(aData, NivaraColumn<float>.Create(new float[] { 1f, 1f }));
@@ -46,7 +55,7 @@ public class ForwardParityTests
 
         var ra = new ReverseGradTensor<float>(aData, requiresGrad: true);
         var rb = new ReverseGradTensor<float>(bData, requiresGrad: false);
-        GradOperations.Sum(GradOperations.Subtract(ra, rb)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Subtract(ra, rb)).Backward();
         var expected = ra.Grad!;
 
         var fa = new ForwardGradTensor<float>(aData, NivaraColumn<float>.Create(new float[] { 1f, 1f }));
@@ -65,7 +74,7 @@ public class ForwardParityTests
 
         var ra = new ReverseGradTensor<float>(aData, requiresGrad: true);
         var rb = new ReverseGradTensor<float>(bData, requiresGrad: false);
-        GradOperations.Sum(GradOperations.Multiply(ra, rb)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Multiply(ra, rb)).Backward();
         var expected = ra.Grad!;
 
         var fa = new ForwardGradTensor<float>(aData, NivaraColumn<float>.Create(new float[] { 1f, 1f }));
@@ -84,7 +93,7 @@ public class ForwardParityTests
 
         var ra = new ReverseGradTensor<float>(aData, requiresGrad: true);
         var rb = new ReverseGradTensor<float>(bData, requiresGrad: false);
-        GradOperations.Sum(GradOperations.Divide(ra, rb)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Divide(ra, rb)).Backward();
         var expected = ra.Grad!;
 
         var fa = new ForwardGradTensor<float>(aData, NivaraColumn<float>.Create(new float[] { 1f, 1f }));
@@ -101,7 +110,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { -1f, 0f, 1f, 2f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Relu(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Relu(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }));
@@ -117,7 +126,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { -1f, 0f, 1f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Sigmoid(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Sigmoid(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }));
@@ -133,7 +142,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { -1f, 0f, 1f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Tanh(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Tanh(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }));
@@ -149,7 +158,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { 1f, -2f, 3f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Negate(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Negate(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }));
@@ -165,7 +174,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { -2f, 0f, 3f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Abs(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Abs(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }));
@@ -181,7 +190,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { 0f, 1f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Exp(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Exp(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f }));
@@ -197,7 +206,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { 1f, 2f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Log(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Log(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f }));
@@ -215,7 +224,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Sum(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Sum(rx)).Backward();
         var backSum = new NivaraSeries<float>(rx.Grad!).Sum();
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }));
@@ -230,7 +239,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<float>.Create(new float[] { 2f, 4f, 6f, 8f });
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Mean(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Mean(rx)).Backward();
         var backSum = new NivaraSeries<float>(rx.Grad!).Sum();
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }));
@@ -257,8 +266,8 @@ public class ForwardParityTests
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: false);
         var rw = new ReverseGradTensor<float>(wData, requiresGrad: true);
         var rb = new ReverseGradTensor<float>(bData, requiresGrad: false);
-        var ry = GradOperations.Relu(GradOperations.Add(GradOperations.Multiply(rx, rw), rb));
-        GradOperations.Sum(ry).Backward();
+        var ry = ReverseGradOperations.Relu(ReverseGradOperations.Add(ReverseGradOperations.Multiply(rx, rw), rb));
+        ReverseGradOperations.Sum(ry).Backward();
         var expectedW = rw.Grad!;
 
         // Forward path: seed tangent only on w
@@ -287,7 +296,7 @@ public class ForwardParityTests
         var rb = new ReverseGradTensor<float>(bData, requiresGrad: false);
         ra.Reshape(2, 2);
         rb.Reshape(2, 2);
-        GradOperations.Sum(GradOperations.MatMul(ra, rb)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.MatMul(ra, rb)).Backward();
 
         // Forward: tangent on A = ones(2x2), no tangent on B
         var fa = new ForwardGradTensor<float>(aData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }));
@@ -312,7 +321,7 @@ public class ForwardParityTests
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
         rx.Reshape(2, 3);
-        GradOperations.Sum(GradOperations.Transpose(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Transpose(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f, 1f, 1f }));
@@ -337,7 +346,7 @@ public class ForwardParityTests
         var xData = NivaraColumn<double>.Create(new double[] { -2.0, 0.0, 3.0 });
 
         var rx = new ReverseGradTensor<double>(xData, requiresGrad: true);
-        GradOperations.Sum(GradOperations.Abs(rx)).Backward();
+        ReverseGradOperations.Sum(ReverseGradOperations.Abs(rx)).Backward();
         var expected = rx.Grad!;
 
         var fx = new ForwardGradTensor<double>(xData, NivaraColumn<double>.Create(new double[] { 1.0, 1.0, 1.0 }));

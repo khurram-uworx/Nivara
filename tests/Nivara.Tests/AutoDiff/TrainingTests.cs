@@ -3,6 +3,7 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Training;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -10,6 +11,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class TrainingTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     static DataLoader<float> CreateLoader(int numRows, int batchSize, bool shuffle, int? seed = null)
     {
         var frame = CreateTestFrame(numRows);

@@ -11,7 +11,7 @@ namespace Nivara.AutoDiff.Operations;
 /// Forward-mode automatic differentiation operations.
 /// Each method computes the primal (forward value) and the tangent (directional derivative
 /// via JVP — Jacobian-Vector Product) for a seeded tangent direction.
-/// Mirrors <see cref="GradOperations"/> in structure and convention.
+/// Mirrors <see cref="ReverseGradOperations"/> in structure and convention.
 /// </summary>
 public static class ForwardGradOperations
 {

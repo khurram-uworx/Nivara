@@ -57,7 +57,7 @@ Where to look (implementation map)
   - `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs` — AdamW optimizer with decoupled weight decay
   - `src/Nivara/AutoDiff/Nn/` — module system (Linear, Sequential, Parameter, activations)
   - `src/Nivara/AutoDiff/Training/` — TrainingLoop, DataParallelTrainer, batch management
-  - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load
+  - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load and state-dict JSON wrappers
 
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
@@ -266,7 +266,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
@@ -293,3 +293,24 @@ References (implementations to inspect)
 - `src/Nivara/AutoDiff/Nn/Linear.cs`
 - `src/Nivara/AutoDiff/Training/TrainingLoop.cs`
 - `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`
+
+## Active AutoDiff Direction (2026-06-14)
+
+The large architectural cleanup in `docs/REFACTORING.md` is **not** active
+for the current implementation work unless explicitly requested.
+
+Current product direction:
+
+- Inference is the common path and the default behavior.
+- Reverse-mode graph construction is opt-in via `using (GradientUtils.Grad())`.
+- `requiresGrad` still marks trainable tensors/parameters, but operation history
+  is only recorded while `GradientUtils.IsGradEnabled` is true.
+- Built-in training APIs (`TrainingLoop`, `DataParallelTrainer`) should enter
+  `GradientUtils.Grad()` internally so high-level training stays simple.
+- Manual training examples should wrap forward/loss/backward/optimizer code in
+  `using (GradientUtils.Grad())`.
+- Do not introduce `NoGrad` as the primary API. The intended user-facing model is
+  "predict by default, train explicitly."
+- The recent AutoDiff plan items are implemented: inference-default
+  `GradientUtils.Grad()` plus `StateDict()` / `LoadStateDict()` and
+  serializer helpers.

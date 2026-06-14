@@ -15,15 +15,15 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, INumber<T>
         var one = new ReverseGradTensor<T>(NivaraColumn<T>.Create(oneData),
             requiresGrad: false, logits.shape);
 
-        var maxX = GradOperations.Relu(logits);
-        var negAbs = GradOperations.Negate(GradOperations.Abs(logits));
-        var negExpNegAbs = GradOperations.Exp(negAbs);
-        var log1pExp = GradOperations.Log(GradOperations.Add(one, negExpNegAbs));
+        var maxX = ReverseGradOperations.Relu(logits);
+        var negAbs = ReverseGradOperations.Negate(ReverseGradOperations.Abs(logits));
+        var negExpNegAbs = ReverseGradOperations.Exp(negAbs);
+        var log1pExp = ReverseGradOperations.Log(ReverseGradOperations.Add(one, negExpNegAbs));
 
         // loss = max(0, x) - x*z + log(1 + exp(-|x|))
-        var loss = GradOperations.Add(
-            GradOperations.Subtract(maxX, GradOperations.Multiply(logits, targets)),
+        var loss = ReverseGradOperations.Add(
+            ReverseGradOperations.Subtract(maxX, ReverseGradOperations.Multiply(logits, targets)),
             log1pExp);
-        return GradOperations.Sum(loss);
+        return ReverseGradOperations.Sum(loss);
     }
 }
