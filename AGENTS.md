@@ -293,3 +293,26 @@ References (implementations to inspect)
 - `src/Nivara/AutoDiff/Nn/Linear.cs`
 - `src/Nivara/AutoDiff/Training/TrainingLoop.cs`
 - `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`
+
+## Active Refactoring (2026-06-14)
+
+The AutoDiff subsystem is being refactored to clean architectural layering.
+**Read `docs/REFACTORING.md` before modifying any AutoDiff-related code.**
+Key constraints during refactoring:
+
+- `GradTensor<T>` backs onto `Tensor<T>` (System.Numerics.Tensors), **not**
+  `NivaraColumn<T>`. No null masks in the AutoDiff layer.
+- AutoDiff operations use `GradKernels` (span-based static methods), not
+  `NivaraColumn<T>` extension methods.
+- `NivaraColumn<float>` (non-nullable) has no null mask. `NivaraColumn<float?>`
+  (nullable) uses `NullableTensorStorage<T>` with `Tensor<T> + Tensor<bool>`
+  mask. `ColumnStorageFactory` dispatches based on whether T is `Nullable<>`.
+- Activation and gradient functions (`Sigmoid`, `Tanh`, `ReLU`, `MatMul`,
+  `Transpose`, and all `*Gradient` methods) move from `NivaraTensorExtensions`
+  to `AutoDiff/Operations/GradKernels.cs`.
+- NivaraSeries keeps only labeled-wrapper functionality; tensor math removed.
+- `NivaraFrame.Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms` move to
+  `Nivara.Extensions.Tensors` (deprecation path).
+- This is a full refactor, not phased. 0.x — no backward compat obligations.
+- See `docs/AUTODIFF-PLAN.md` for the drum-machine philosophy and
+  post-refactor feature plan (NoGrad scope, state_dict/load_state_dict).
