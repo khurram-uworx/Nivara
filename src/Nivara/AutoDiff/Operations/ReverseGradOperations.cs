@@ -586,6 +586,69 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    public static ReverseGradTensor<T> Pow<T>(ReverseGradTensor<T> a, double exponent) where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var result = ApplyPow(a.Data, exponent);
+        var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(a), PropagateShape(a));
+
+        if (GradientUtils.ShouldTrackGrad(a))
+        {
+            var savedInput = a.Data;
+            var gradFn = new OpNode<T>("Pow", new object[] { a, exponent }, (typedGradOutput, sgn) =>
+            {
+                var aGrad = ApplyPowGradient(savedInput, typedGradOutput, exponent);
+                AccumulateGradient(a, aGrad, sgn);
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    /// <summary>
+    /// Extracts a contiguous slice from a 1D or row-vector tensor.
+    /// Input shape: [1, n] or [n]; output shape: [1, length] or [length].
+    /// Gradient flows back to the original positions in the input.
+    /// </summary>
+    public static ReverseGradTensor<T> Slice<T>(ReverseGradTensor<T> a, int start, int length)
+        where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (start < 0) throw new ArgumentOutOfRangeException(nameof(start));
+        if (length <= 0) throw new ArgumentOutOfRangeException(nameof(length));
+        if (start + length > a.Length)
+            throw new ArgumentException($"Slice ({start}..{start + length}) exceeds tensor length {a.Length}");
+
+        int fullDim = a.shape.Length == 2 ? a.shape[1] : a.Length;
+        int batchDim = a.shape.Length == 2 ? a.shape[0] : 1;
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffSlice",
+            length,
+            a.Data.HasNulls,
+            () =>
+            {
+                // Build selection matrix M: [length, fullDim] with M[i, start+i] = 1
+                var mData = new T[length * fullDim];
+                for (int i = 0; i < length; i++)
+                    mData[i * fullDim + start + i] = T.One;
+
+                var mCol = NivaraColumn<T>.Create(mData);
+                var mTensor = new ReverseGradTensor<T>(mCol, requiresGrad: false);
+                mTensor.Reshape(length, fullDim);
+
+                // a is [1, fullDim]. Transpose to [fullDim, 1] for MatMul.
+                var aT = Transpose(a);                          // [fullDim, 1]
+                var sliced = MatMul(mTensor, aT);               // [length, 1]
+                var result = Transpose(sliced);                 // [1, length]
+                return result;
+            },
+            $"AutoDiff=Slice;Start={start};Length={length};FullDim={fullDim}");
+    }
+
     public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -627,6 +690,38 @@ public static class ReverseGradOperations
         }
 
         return resultTensor;
+    }
+
+    public static ReverseGradTensor<T> RMSNorm<T>(ReverseGradTensor<T> a, double eps = 1e-5)
+        where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffRMSNorm",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
+            {
+                var result = ApplyRMSNorm(a.Data, eps);
+                var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(a), PropagateShape(a));
+
+                if (GradientUtils.ShouldTrackGrad(a))
+                {
+                    var savedInput = a.Data;
+                    var savedEps = eps;
+                    var gradFn = new OpNode<T>("RMSNorm", new object[] { a, eps }, (typedGradOutput, sgn) =>
+                    {
+                        var aGrad = ApplyRMSNormGradient(savedInput, typedGradOutput, savedEps);
+                        AccumulateGradient(a, aGrad, sgn);
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            AutoDiffDiagnostics.ShapeNote("RMSNorm", a.Shape));
     }
 
     public static ReverseGradTensor<T> Dropout<T>(ReverseGradTensor<T> input, double probability, bool isTraining)
@@ -1238,6 +1333,325 @@ public static class ReverseGradOperations
             ArrayPool<T>.Shared.Return(logVarBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(epsBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyPow<T>(NivaraColumn<T> input, double exponent) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+
+        if (!input.HasNulls)
+        {
+            input.TryGetSpan(out var span);
+            var result = new T[n];
+            if (typeof(T) == typeof(float))
+            {
+                var s = MemoryMarshal.Cast<T, float>(span);
+                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                TensorPrimitives.Pow(s, (float)exponent, r);
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var s = MemoryMarshal.Cast<T, double>(span);
+                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                TensorPrimitives.Pow(s, exponent, r);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                    result[i] = T.CreateChecked(Math.Pow(double.CreateChecked(span[i]), exponent));
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            input.CopyTo(buf.AsSpan(0, n), T.Zero);
+            input.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+            for (int i = 0; i < n; i++)
+            {
+                if (nullMask[i]) continue;
+                buf[i] = T.CreateChecked(Math.Pow(double.CreateChecked(buf[i]), exponent));
+            }
+            return NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyPowGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput, double exponent) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+
+        if (!input.HasNulls && !gradOutput.HasNulls)
+        {
+            input.TryGetSpan(out var inSpan);
+            gradOutput.TryGetSpan(out var gSpan);
+            var result = new T[n];
+            if (typeof(T) == typeof(float))
+            {
+                var x = MemoryMarshal.Cast<T, float>(inSpan);
+                var g = MemoryMarshal.Cast<T, float>(gSpan);
+                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                TensorPrimitives.Pow(x, (float)(exponent - 1.0), r);
+                TensorPrimitives.Multiply(r, (float)exponent, r);
+                TensorPrimitives.Multiply(r, g, r);
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var x = MemoryMarshal.Cast<T, double>(inSpan);
+                var g = MemoryMarshal.Cast<T, double>(gSpan);
+                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                TensorPrimitives.Pow(x, exponent - 1.0, r);
+                TensorPrimitives.Multiply(r, exponent, r);
+                TensorPrimitives.Multiply(r, g, r);
+            }
+            else
+            {
+                for (int i = 0; i < n; i++)
+                {
+                    var x = double.CreateChecked(inSpan[i]);
+                    var g = double.CreateChecked(gSpan[i]);
+                    result[i] = T.CreateChecked(exponent * Math.Pow(x, exponent - 1.0) * g);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            input.CopyTo(buf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            NivaraColumnUtility.MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
+            for (int i = 0; i < n; i++)
+            {
+                if (nullMask[i]) continue;
+                resultBuf[i] = T.CreateChecked(
+                    exponent * Math.Pow(double.CreateChecked(buf[i]), exponent - 1.0) * double.CreateChecked(gradBuf[i]));
+            }
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyRMSNorm<T>(NivaraColumn<T> input, double eps) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+
+        if (!input.HasNulls)
+        {
+            input.TryGetSpan(out var span);
+            var result = new T[n];
+            if (typeof(T) == typeof(float))
+            {
+                var s = MemoryMarshal.Cast<T, float>(span);
+                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                double sumSq = 0;
+                for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
+                double rms = Math.Sqrt(sumSq / n + eps);
+                float invRms = (float)(1.0 / rms);
+                TensorPrimitives.Multiply(s, invRms, r);
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var s = MemoryMarshal.Cast<T, double>(span);
+                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                double sumSq = 0;
+                for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
+                double rms = Math.Sqrt(sumSq / n + eps);
+                double invRms = 1.0 / rms;
+                TensorPrimitives.Multiply(s, invRms, r);
+            }
+            else
+            {
+                double sumSq = 0;
+                for (int i = 0; i < n; i++)
+                {
+                    var x = double.CreateChecked(span[i]);
+                    sumSq += x * x;
+                }
+                double rms = Math.Sqrt(sumSq / n + eps);
+                double invRms = 1.0 / rms;
+                for (int i = 0; i < n; i++)
+                    result[i] = T.CreateChecked(double.CreateChecked(span[i]) * invRms);
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            input.CopyTo(buf.AsSpan(0, n), T.Zero);
+            input.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+
+            double sumSq = 0;
+            int validCount = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (!nullMask[i])
+                {
+                    var x = double.CreateChecked(buf[i]);
+                    sumSq += x * x;
+                    validCount++;
+                }
+            }
+
+            double rms = Math.Sqrt(sumSq / validCount + eps);
+            double invRms = 1.0 / rms;
+
+            for (int i = 0; i < n; i++)
+            {
+                if (!nullMask[i])
+                    buf[i] = T.CreateChecked(double.CreateChecked(buf[i]) * invRms);
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static NivaraColumn<T> ApplyRMSNormGradient<T>(
+        NivaraColumn<T> input, NivaraColumn<T> gradOutput, double eps) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+
+        if (!input.HasNulls && !gradOutput.HasNulls)
+        {
+            input.TryGetSpan(out var inSpan);
+            gradOutput.TryGetSpan(out var gSpan);
+            var result = new T[n];
+
+            double sumSq = 0;
+            for (int i = 0; i < n; i++)
+            {
+                var x = double.CreateChecked(inSpan[i]);
+                sumSq += x * x;
+            }
+
+            double rms = Math.Sqrt(sumSq / n + eps);
+            double rms3 = rms * rms * rms;
+
+            double sumGradX = 0;
+            for (int i = 0; i < n; i++)
+            {
+                var x = double.CreateChecked(inSpan[i]);
+                var g = double.CreateChecked(gSpan[i]);
+                sumGradX += g * x;
+            }
+
+            double scale = sumGradX / (n * rms3);
+
+            if (typeof(T) == typeof(float))
+            {
+                var x = MemoryMarshal.Cast<T, float>(inSpan);
+                var g = MemoryMarshal.Cast<T, float>(gSpan);
+                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+                float invRms = (float)(1.0 / rms);
+                float s = (float)scale;
+                for (int i = 0; i < n; i++)
+                    r[i] = g[i] * invRms - x[i] * s;
+            }
+            else if (typeof(T) == typeof(double))
+            {
+                var x = MemoryMarshal.Cast<T, double>(inSpan);
+                var g = MemoryMarshal.Cast<T, double>(gSpan);
+                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+                double invRms = 1.0 / rms;
+                for (int i = 0; i < n; i++)
+                    r[i] = g[i] * invRms - x[i] * scale;
+            }
+            else
+            {
+                double invRms = 1.0 / rms;
+                for (int i = 0; i < n; i++)
+                {
+                    var x = double.CreateChecked(inSpan[i]);
+                    var g = double.CreateChecked(gSpan[i]);
+                    result[i] = T.CreateChecked(g * invRms - x * scale);
+                }
+            }
+            return NivaraColumn<T>.Create(result);
+        }
+
+        var buf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            input.CopyTo(buf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            NivaraColumnUtility.MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
+
+            double sumSq = 0;
+            int validCount = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (!nullMask[i])
+                {
+                    var x = double.CreateChecked(buf[i]);
+                    sumSq += x * x;
+                    validCount++;
+                }
+            }
+
+            double rms = Math.Sqrt(sumSq / validCount + eps);
+            double rms3 = rms * rms * rms;
+
+            double sumGradX = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (!nullMask[i])
+                {
+                    var x = double.CreateChecked(buf[i]);
+                    var g = double.CreateChecked(gradBuf[i]);
+                    sumGradX += g * x;
+                }
+            }
+
+            double scale = sumGradX / (validCount * rms3);
+            double invRms = 1.0 / rms;
+
+            for (int i = 0; i < n; i++)
+            {
+                if (!nullMask[i])
+                {
+                    var x = double.CreateChecked(buf[i]);
+                    var g = double.CreateChecked(gradBuf[i]);
+                    resultBuf[i] = T.CreateChecked(g * invRms - x * scale);
+                }
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(buf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
