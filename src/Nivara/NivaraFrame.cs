@@ -885,7 +885,7 @@ public sealed class NivaraFrame : IFrame
             RowCount,
             typeof(T),
             hasNulls,
-            totalLength >= 1024 ? "FrameBatch=RowNorms;RowMajorBuffer=Pooled" : "FrameBatch=RowNorms;RowMajorBuffer=Array");
+            totalLength >= 1024 ? "FrameBatch=RowNorms;BatchKernel=Vectorized;RowMajorBuffer=Pooled" : "FrameBatch=RowNorms;BatchKernel=Vectorized;RowMajorBuffer=Array");
 
         return new NivaraSeries<T>(valuesColumn);
     }

@@ -255,7 +255,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Internal Span access**: consider adding `internal AsSpan()` methods to `NivaraColumn` for zero-copy tensor interop.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets.
 - **NivaraFrame TopKDescending**: added in Phase 3, returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
-- **NivaraFrame RowNorms/ColumnNorms**: added in Phase 3, null-propagating; currently uses per-row `ArrayPool` loop — batch `TensorPrimitives` kernel not yet implemented.
+- ✓ **NivaraFrame RowNorms**: batch `Vector<T>` kernel implemented in `TensorsHelper.RowNorms` — single-pass SIMD square-accumulate per row with `TensorPrimitives.Norm` fallback. ColumnNorms uses per-column `TensorPrimitives.Norm` (no batch needed).
 - **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1216 tests passing.
 - ✓ **AutoDiff P0–P6 complete**: reverse-mode autograd, NN module system, full optimizer family (SGD, Adam, AdamW), training loops, data-parallel training, model serialization — all implemented in core `src/Nivara/AutoDiff/`
 

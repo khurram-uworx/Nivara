@@ -73,6 +73,14 @@ public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
             throw new ArgumentException("Learning rate must be positive", nameof(learningRate));
     }
 
+    public void SetGroupLearningRate(int groupIndex, T learningRate)
+    {
+        if (groupIndex < 0 || groupIndex >= ParameterGroups.Count)
+            throw new ArgumentOutOfRangeException(nameof(groupIndex));
+        ValidateLearningRate(learningRate);
+        ParameterGroups[groupIndex].LearningRate = learningRate;
+    }
+
     public abstract void Step();
 
     public virtual void ZeroGrad()
