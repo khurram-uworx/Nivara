@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -11,6 +12,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class NnTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     private sealed class ModuleWithParams : Module<float>
     {
         public Parameter<float> Weight { get; }

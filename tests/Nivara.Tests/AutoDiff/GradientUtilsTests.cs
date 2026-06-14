@@ -69,8 +69,11 @@ public class GradientUtilsTests
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
         // Compute some gradients
-        var result = ReverseGradOperations.Sum(a);
-        result.Backward();
+        using (GradientUtils.Grad())
+        {
+            var result = ReverseGradOperations.Sum(a);
+            result.Backward();
+        }
 
         Assert.That(a.Grad, Is.Not.Null, "Gradient should exist before clearing");
 
@@ -91,9 +94,12 @@ public class GradientUtilsTests
         var b = new ReverseGradTensor<float>(bData, requiresGrad: true);
 
         // Compute some gradients
-        var result = ReverseGradOperations.Add(a, b);
-        var sum = ReverseGradOperations.Sum(result);
-        sum.Backward();
+        using (GradientUtils.Grad())
+        {
+            var result = ReverseGradOperations.Add(a, b);
+            var sum = ReverseGradOperations.Sum(result);
+            sum.Backward();
+        }
 
         Assert.That(a.Grad, Is.Not.Null);
         Assert.That(b.Grad, Is.Not.Null);
@@ -393,12 +399,16 @@ public class GradientUtilsTests
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
 
-        var add = ReverseGradOperations.Add(a, b);
-        var mul = ReverseGradOperations.Multiply(add, a);
-        var sum = ReverseGradOperations.Sum(mul);
+        Dictionary<string, object> info;
+        using (GradientUtils.Grad())
+        {
+            var add = ReverseGradOperations.Add(a, b);
+            var mul = ReverseGradOperations.Multiply(add, a);
+            var sum = ReverseGradOperations.Sum(mul);
 
-        // Act
-        var info = GradientUtils.GetGraphInfo(sum);
+            // Act
+            info = GradientUtils.GetGraphInfo(sum);
+        }
 
         // Assert
         Assert.That(info["TotalNodes"], Is.EqualTo(3)); // Add, Multiply, Sum
@@ -417,10 +427,14 @@ public class GradientUtilsTests
         // Arrange
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: true);
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 2.0f }), requiresGrad: true);
-        var result = ReverseGradOperations.Add(a, b);
+        string summary;
+        using (GradientUtils.Grad())
+        {
+            var result = ReverseGradOperations.Add(a, b);
 
-        // Act
-        var summary = GradientUtils.PrintGraphSummary(result);
+            // Act
+            summary = GradientUtils.PrintGraphSummary(result);
+        }
 
         // Assert
         Assert.That(summary, Does.Contain("Computation Graph Summary"));
@@ -435,8 +449,11 @@ public class GradientUtilsTests
         var aData = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f });
         var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
 
-        var result = ReverseGradOperations.Sum(a);
-        result.Backward();
+        using (GradientUtils.Grad())
+        {
+            var result = ReverseGradOperations.Sum(a);
+            result.Backward();
+        }
 
         // Act & Assert
         Assert.That(GradientUtils.HasGradient(a), Is.True);
@@ -569,12 +586,15 @@ public class GradientUtilsTests
         var targets = GradientUtils.Constant(new float[] { 3.0f });
 
         // Act - simulate one training step
-        var predictions = ReverseGradOperations.Multiply(inputs, weights);
-        var sum = ReverseGradOperations.Sum(predictions);
-        var loss = ReverseGradOperations.Subtract(sum, targets);
+        using (GradientUtils.Grad())
+        {
+            var predictions = ReverseGradOperations.Multiply(inputs, weights);
+            var sum = ReverseGradOperations.Sum(predictions);
+            var loss = ReverseGradOperations.Subtract(sum, targets);
 
-        // Backward pass
-        loss.Backward();
+            // Backward pass
+            loss.Backward();
+        }
 
         // Check gradient exists
         Assert.That(GradientUtils.HasGradient(weights), Is.True);

@@ -2,6 +2,7 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -9,6 +10,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class OptimizerTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     [Test]
     public void Optimizer_DoesNotExposeTensorDictionaryParameterGroupOverload()
     {

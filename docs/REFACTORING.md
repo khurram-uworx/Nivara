@@ -1,6 +1,48 @@
-# Autograd / Autodiff Refactoring — Plan
+# Autograd / Autodiff Refactoring — Discussion Plan
 
-## Session context (2026-06-14)
+## Status
+
+This document is a **proposal for a future architectural refactor**, not the
+current implementation contract. It should be discussed with the team before
+coding starts.
+
+Since the original draft, the smaller AutoDiff completion plan has been
+implemented:
+
+- Inference is now the default. Reverse-mode graph construction only happens
+  inside `using (GradientUtils.Grad())`.
+- Built-in training APIs enter `GradientUtils.Grad()` internally.
+- `Module<T>.StateDict()` and `Module<T>.LoadStateDict(...)` are implemented.
+- `ModelSerializer.StateDictToJson(...)` and
+  `ModelSerializer.JsonToStateDict<T>(...)` are implemented.
+- `docs/AUTODIFF-PLAN.md` has been removed because its actionable items are
+  complete.
+- Full test suite status after those changes: `1740` passing tests.
+
+Therefore this refactor should preserve the user-facing direction:
+**predict by default, train explicitly**. Do not introduce `NoGrad` as the
+primary public API.
+
+## Discussion points
+
+Before implementation, align on these decisions:
+
+1. **Scope**: keep the original full-refactor stance, or split into reviewable
+   slices with the same final architecture?
+2. **Column nullable model**: confirm the type-level `NivaraColumn<float>` vs.
+   `NivaraColumn<float?>` storage split before changing storage contracts.
+3. **AutoDiff null semantics**: confirm AutoDiff becomes a no-null pure tensor
+   layer, with nullable data cleaned at the DataFrame boundary.
+4. **State-dict compatibility**: decide whether the Tensor-backed serializer
+   must read the current JSON/base64 state-dict format, or whether 0.x can
+   break saved model files.
+5. **Frame tensor methods**: confirm `Dot`, `CosineSimilarity`, `ColumnNorms`,
+   and `RowNorms` move out of core into Extensions, including whether to keep
+   obsolete forwarding shims for one release.
+6. **Test gate**: keep `dotnet test` full-suite green at each validation point,
+   with explicit `GradientUtils.Grad()` scopes for backward/training tests.
+
+## Original session context
 
 This document captures the architectural refactoring plan agreed during a
 conversation between Khurram (maintainer) and the AI coding agent. Key
@@ -19,15 +61,16 @@ architectural layering drifted.
 "drum machine with the best drum sounds" — a small, correct, tasteful set
 of gradient primitives that make the 70–80% case feel complete. It is not
 a PyTorch replacement and should not chase feature parity (no Conv, no
-RNN, no LR schedulers, no AMP, no GPU). See `docs/AUTODIFF-PLAN.md` for
-the exclusion list and rationale, and `examples/README.md` for the parity
-proofs.
+RNN, no LR schedulers, no AMP, no GPU). The current user-facing API and
+exclusion rationale now live in `docs/AUTODIFF.md`; `examples/README.md`
+contains the parity proofs.
 
 **Gardening principle**: subtract → become lean → grow. Remove bad
 coupling first (NivaraColumn from AutoDiff, null masks from hot paths,
 obsolete code), then the remaining surface becomes cleaner and simpler.
-Any needed additions (NoGrad scope, state_dict/load_state_dict) come
-*after* the refactor, on top of the clean foundation.
+The previously planned ergonomic additions (`GradientUtils.Grad()`,
+`StateDict()`, `LoadStateDict()`, and state-dict JSON helpers) have already
+landed before this refactor. The refactor must carry those semantics forward.
 
 **Platform sugar**: Use `Tensor<T>` from System.Numerics.Tensors directly
 as the backing store for AutoDiff. Use `TensorPrimitives` for SIMD-cycled
@@ -46,9 +89,12 @@ data (`DropNulls`, `FillNull`) at the boundary before entering AutoDiff.
 (`Sum`, `Mean`, `AddTensor`, etc.) removed from it. Revisit after the
 next usability layer if it doesn't pull its weight.
 
-**Full refactor, no phasing**: "We have this opportunity here now" — do
-it all in one shot. 0.x, no backward compatibility obligations. Break
-things, come out lean.
+**Refactor stance to discuss**: The original plan assumed a full refactor in
+one shot because Nivara is still 0.x and has no backward compatibility
+obligations. That may still be the right call, but the team should explicitly
+confirm scope before implementation because the current AutoDiff surface now
+has passing tests, docs, examples, inference-default semantics, training
+loops, state dictionaries, and model serialization.
 
 ## Motivation
 
@@ -442,6 +488,18 @@ span operations instead of `NivaraColumn.Slice()` + null mask.
 Simpler format: serialize `Tensor<T>` data as base64 (no null mask per
 parameter). Shape stored as JSON int array.
 
+Preserve the existing public model:
+
+- `Module<T>.StateDict()` returns a copied snapshot dictionary.
+- `Module<T>.LoadStateDict(state, strict: false)` supports partial loading by
+  default and strict full-restore validation when requested.
+- `ModelSerializer.Save/Load` remain file-level wrappers over state dicts.
+- `ModelSerializer.StateDictToJson` / `JsonToStateDict<T>` remain the
+  in-memory JSON boundary.
+
+The refactor may simplify the internal payload because AutoDiff tensors would
+no longer carry null masks, but it should not remove the state-dict workflow.
+
 ### Initializers
 
 Fill `T[]` arrays directly, pass to `Tensor.Create<T>()`. No NivaraColumn
@@ -563,15 +621,17 @@ public static class FrameTensorOperations
 
 | File | Change |
 |---|---|
-| `tests/Nivara.Tests/AutoDiff/GradOperationsTests.cs` | Adapt construction, adjust tolerances |
+| `tests/Nivara.Tests/AutoDiff/GradOperationsTests.cs` | Adapt construction, keep explicit `GradientUtils.Grad()` scope for backward tests |
 | `tests/Nivara.Tests/AutoDiff/ForwardGradOperationsTests.cs` | Same |
 | `tests/Nivara.Tests/AutoDiff/NullHandlingTests.cs` | Keep — validates nullable→non-nullable boundary |
-| `tests/Nivara.Tests/AutoDiff/BackwardPassTests.cs` | Adapt to Tensor<T> |
+| `tests/Nivara.Tests/AutoDiff/BackwardPassTests.cs` | Adapt to Tensor<T>, keep explicit `GradientUtils.Grad()` scope |
 | `tests/Nivara.Tests/AutoDiff/NnTests.cs` | Adapt |
 | `tests/Nivara.Tests/AutoDiff/LossTests.cs` | Adapt |
 | `tests/Nivara.Tests/AutoDiff/ForwardParityTests.cs` | Adapt construction |
 | `tests/Nivara.Tests/AutoDiff/TypeSafetyTests.cs` | Validate FromColumn throws on nullable |
 | `tests/Nivara.Tests/AutoDiff/NivaraIntegrationTests.cs` | Adapt |
+| `tests/Nivara.Tests/AutoDiff/SerializationTests.cs` | Preserve StateDict/LoadStateDict and JSON state-dict coverage |
+| `tests/Nivara.Tests/AutoDiff/GradientUtilsTests.cs` | Preserve inference-default tests and explicit Grad-scope tests |
 | `tests/Nivara.Tests/NivaraSeriesIsValidTests.cs` | Remove obsolete tensor math tests |
 | `samples/Nivara.SampleApp/ForwardParityExample.cs` | Adapt construction |
 | `samples/Nivara.SampleApp/AutoDiffExample.cs` | Adapt construction |
@@ -625,11 +685,18 @@ public static class FrameTensorOperations
 3. **GradKernels unit tests**: Each kernel operation tested against known
    inputs/outputs. Float and double paths both covered.
 
-4. **Existing parity tests (unchanged)**: ForwardCrossFrameworkParityTests,
+4. **Inference/training mode tests**: Preserve the current contract that
+   normal forward operations do not build a graph and backward/training tests
+   opt in with `GradientUtils.Grad()`.
+
+5. **State-dict tests**: Preserve full load, partial load, strict missing-key
+   validation, shape mismatch validation, and state-dict JSON round-trip.
+
+6. **Existing parity tests (unchanged)**: ForwardCrossFrameworkParityTests,
    CrossFrameworkParityTests, GradOperationsTests, ForwardGradOperationsTests
    — adapt construction, keep assertions.
 
-5. **Null handoff test**: `nullableCol.DropNulls()` → `FromColumn` →
+7. **Null handoff test**: `nullableCol.DropNulls()` → `FromColumn` →
    train → `ToColumn` → verify result is non-nullable.
 
 ### Recovery
@@ -659,7 +726,7 @@ that storage changes (1-4) can be validated before AutoDiff kernel changes
 14. Frame deprecations             ← move Dot etc to Extensions
 15. Optimizer adaptation           ← Tensor<T>? Grad
 16. Training adaptation            ← Tensor<T> in datasets
-17. Serialization adaptation       ← Tensor<T> format
+17. Serialization adaptation       ← Tensor<T> format, preserve state dict APIs
 18. Initializer adaptation         ← direct Tensor<T>
 19. Tests + samples                ← adapt everything
     ─── VALIDATE: full dotnet test ───

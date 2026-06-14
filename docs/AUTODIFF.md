@@ -85,7 +85,7 @@ src/Nivara/Tensors/MatMulHelper.cs
 Module System (Nn)
 ──────────────────
 Parameter<T>                          ← Named ReverseGradTensor<T> with requiresGrad=true
-Module<T>                             ← Abstract base: Forward(), Parameters(), Train()/Eval()
+Module<T>                             ← Abstract base: Forward(), Parameters(), StateDict(), Train()/Eval()
 ├── Linear<T>                         ← y = x @ Wᵀ + b (Kaiming-uniform init, bias optional)
 ├── Sequential<T>                     ← Ordered module chain
 ├── Activation<T>                     ← ReLU, Sigmoid, Tanh, LeakyReLU wrappers
@@ -352,6 +352,8 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
 | `RegisterParameters(...)` | Register standalone parameters |
 | `Parameters()` | Returns flat `Dictionary<string, ReverseGradTensor<T>>` |
 | `GetParameters()` | Returns `Dictionary<string, Parameter<T>>` with metadata |
+| `StateDict()` | Returns a snapshot `Dictionary<string, ReverseGradTensor<T>>` for save/transfer/fine-tune workflows |
+| `LoadStateDict(state, strict: false)` | Loads matching parameter tensors with shape validation; missing keys are allowed unless `strict` is true |
 | `NamedModules()` | Returns registered child modules |
 
 ### Linear\<T\>
@@ -613,6 +615,19 @@ result.PrintSummary();
 Static class for saving/loading model parameter state dicts:
 
 ```csharp
+// In-memory state dictionary
+var state = model.StateDict();
+model.LoadStateDict(state);
+
+// Partial load for fine-tuning/model surgery
+state.Remove("Module_1.Weight");
+state.Remove("Module_1.Bias");
+model.LoadStateDict(state);
+
+// State dictionary JSON
+var json = ModelSerializer.StateDictToJson(state);
+var restored = ModelSerializer.JsonToStateDict<float>(json, requiresGrad: true);
+
 // Save
 ModelSerializer.Save(model, "model.json");
 
@@ -624,12 +639,18 @@ ModelSerializer.SaveCheckpoint(model, epochResult, "checkpoint.json");
 var checkpoint = ModelSerializer.LoadCheckpoint<float>("checkpoint.json");
 ```
 
+`StateDict()` returns copied tensors, not live references to the model's
+parameters. You can remove keys, serialize the dictionary, or load it into a
+compatible model without accidentally mutating the source model.
+
 **Format:** JSON with format marker `"nivara-ss-v1"` / `"nivara-ckpt-v1"`, version field, type name, and parameter entries. Each parameter entry stores:
 - `Shape` — `int[]` dimension sizes
 - `Values` — base64-encoded binary (via `MemoryMarshal.AsBytes`), length-validated on load
 - `HasNulls` / `NullMask` — optional null mask as base64 bool array
 
-**Validation on load:** shape rank, element count, and parameter name matching with descriptive error messages.
+**Validation on load:** shape rank, exact shape, element count, and parameter
+name matching with descriptive error messages. `LoadStateDict(..., strict:
+true)` additionally requires every model parameter to be present.
 
 ### Checkpoint\<T\>
 
@@ -658,6 +679,12 @@ var loaded = new MLP(784, 256, 10);
 ModelSerializer.Load(loaded, "trained_model.json");
 loaded.Eval();
 var prediction = loaded.Forward(testInput);
+
+// Or keep it in memory for transfer learning / partial loading
+var state = model.StateDict();
+state.Remove("Module_2.Weight");
+state.Remove("Module_2.Bias");
+loaded.LoadStateDict(state);
 ```
 
 ---
@@ -824,12 +851,15 @@ using (GradientUtils.Grad())
 ```csharp
 var x = new ReverseGradTensor<float>(
     NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }), requiresGrad: true);
-var relu = GradOperations.Relu(GradOperations.Negate(x));
-// relu = max(-x, 0) = [0, 0, 0]
+using (GradientUtils.Grad())
+{
+    var relu = GradOperations.Relu(GradOperations.Negate(x));
+    // relu = max(-x, 0) = [0, 0, 0]
 
-var gradInput = new ReverseGradTensor<float>(
-    NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f }), requiresGrad: false);
-relu.Backward(gradInput);
+    var gradInput = new ReverseGradTensor<float>(
+        NivaraColumn<float>.Create(new float[] { 1.0f, 1.0f, 1.0f }), requiresGrad: false);
+    relu.Backward(gradInput);
+}
 
 Console.WriteLine(x.Grad[0]);  // 0.0  (∂relu/∂x at index 0: -1 < 0 → 0)
 Console.WriteLine(x.Grad[1]);  // 0.0
@@ -847,12 +877,16 @@ var w = new ReverseGradTensor<float>(
 var b = new ReverseGradTensor<float>(
     NivaraColumn<float>.Create(new float[] { -1.0f, 0.0f, 1.0f }), requiresGrad: true);
 
-var mul = GradOperations.Multiply(x, w);    // [0.5, 1.0, 1.5]
-var add = GradOperations.Add(mul, b);       // [-0.5, 1.0, 2.5]
-var relu = GradOperations.Relu(add);        // [0.0, 1.0, 2.5]
-var mean = GradOperations.Mean(relu);       // 1.1667
+using (GradientUtils.Grad())
+{
+    var mul = GradOperations.Multiply(x, w);    // [0.5, 1.0, 1.5]
+    var add = GradOperations.Add(mul, b);       // [-0.5, 1.0, 2.5]
+    var relu = GradOperations.Relu(add);        // [0.0, 1.0, 2.5]
+    var mean = GradOperations.Mean(relu);       // 1.1667
 
-mean.Backward();
+    mean.Backward();
+}
+
 Console.WriteLine(w.Grad[0]);  // 0.0 (relu blocked gradient at index 0: -0.5 < 0)
 Console.WriteLine(w.Grad[1]);  // >0 (∂mean/∂w at index 1 = x[1]/3 = 2/3 ≈ 0.333)
 Console.WriteLine(w.Grad[2]);  // >0 (∂mean/∂w at index 2 = x[2]/3 = 3/3 = 1.0)
@@ -866,9 +900,12 @@ var a = ReverseGradTensor<float>.FromMatrix(
 var b = ReverseGradTensor<float>.FromMatrix(
     new float[] { 5, 6, 7, 8 }, rows: 2, cols: 2, requiresGrad: true);
 
-var c = GradOperations.MatMul(a, b);  // 2x2 matrix product
-var sum = GradOperations.Sum(c);      // scalar sum
-sum.Backward();
+using (GradientUtils.Grad())
+{
+    var c = GradOperations.MatMul(a, b);  // 2x2 matrix product
+    var sum = GradOperations.Sum(c);      // scalar sum
+    sum.Backward();
+}
 
 // a.Grad = grad @ bᵀ  (grad = [1], so a.Grad = bᵀ)
 Console.WriteLine(a.Grad[0]);  // 5
@@ -883,8 +920,11 @@ Console.WriteLine(a.Grad[3]);  // 8
 var param = new ReverseGradTensor<float>(
     NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }), requiresGrad: true);
 
-var loss = GradOperations.Sum(param);  // loss = 6
-loss.Backward();                       // grad = [1, 1, 1]
+using (GradientUtils.Grad())
+{
+    var loss = GradOperations.Sum(param);  // loss = 6
+    loss.Backward();                       // grad = [1, 1, 1]
+}
 
 var updated = SGD<float>.SgdUpdate(param, 0.1f);
 // updated = param - 0.1 * grad = [0.9, 1.9, 2.9]
@@ -1042,9 +1082,12 @@ var b = new ReverseGradTensor<float>(
     NivaraColumn<float>.CreateFromNullable(new float?[] { 10.0f, 20.0f, null }),
     requiresGrad: true);
 
-var result = GradOperations.Add(a, b);  // [11, null, null] (mask OR)
-var sum = GradOperations.Sum(result);   // 11 (nulls skipped in sum)
-sum.Backward();
+using (GradientUtils.Grad())
+{
+    var result = GradOperations.Add(a, b);  // [11, null, null] (mask OR)
+    var sum = GradOperations.Sum(result);   // 11 (nulls skipped in sum)
+    sum.Backward();
+}
 
 Console.WriteLine(a.Grad[0]);  // 1.0  (∂sum/∂a₀)
 Console.WriteLine(a.Grad[1]);  // null (output at position 1 is null, no gradient flows)

@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -7,6 +8,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class MatrixCompatibilityTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
 #pragma warning disable CS0618
     [Test]
     public void MatMul_ShapeAwareAndLegacyOverloads_ProduceEquivalentValuesAndShapes()

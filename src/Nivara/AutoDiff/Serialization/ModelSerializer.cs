@@ -19,9 +19,7 @@ public static class ModelSerializer
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var file = BuildModelFile(model);
-        var json = JsonSerializer.Serialize(file, s_options);
-        File.WriteAllText(path, json);
+        File.WriteAllText(path, StateDictToJson(model.StateDict()));
     }
 
     const string ExpectedModelFormat = "nivara-ss-v1";
@@ -35,7 +33,24 @@ public static class ModelSerializer
         if (!File.Exists(path))
             throw new FileNotFoundException($"Model file not found: {path}", path);
 
-        var json = File.ReadAllText(path);
+        model.LoadStateDict(JsonToStateDict<T>(File.ReadAllText(path)));
+    }
+
+    public static string StateDictToJson<T>(
+        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, INumber<T>
+    {
+        ArgumentNullException.ThrowIfNull(stateDict);
+
+        var file = BuildModelFile(stateDict);
+        return JsonSerializer.Serialize(file, s_options);
+    }
+
+    public static Dictionary<string, ReverseGradTensor<T>> JsonToStateDict<T>(
+        string json,
+        bool requiresGrad = false) where T : struct, INumber<T>
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(json);
+
         var file = JsonSerializer.Deserialize<ModelFile>(json, s_options)
             ?? throw new InvalidOperationException("Failed to deserialize model file.");
 
@@ -43,38 +58,11 @@ public static class ModelSerializer
             throw new InvalidOperationException(
                 $"Unsupported model format '{file.Format}'. Expected '{ExpectedModelFormat}'.");
 
-        var parameters = model.GetParameters();
-
+        var state = new Dictionary<string, ReverseGradTensor<T>>();
         foreach (var (name, entry) in file.Parameters)
-        {
-            if (!parameters.TryGetValue(name, out var param))
-                throw new InvalidOperationException(
-                    $"Parameter '{name}' not found in model. " +
-                    $"Available parameters: [{string.Join(", ", parameters.Keys)}]");
+            state[name] = DeserializeTensor<T>(entry, requiresGrad);
 
-            if (entry.Shape.Length != param.Shape.Length)
-                throw new InvalidOperationException(
-                    $"Parameter '{name}' shape rank mismatch: " +
-                    $"file has {entry.Shape.Length}D, model has {param.Shape.Length}D.");
-
-            int expectedLength = 1;
-            foreach (var d in entry.Shape)
-                expectedLength *= d;
-
-            if (expectedLength != param.Length)
-                throw new InvalidOperationException(
-                    $"Parameter '{name}' length mismatch: " +
-                    $"file has {expectedLength}, model has {param.Length}.");
-
-            var values = DeserializeBinary<T>(entry.Values, expectedLength);
-            var column = entry.HasNulls && entry.NullMask != null
-                ? NivaraColumn<T>.CreateFromSpans(
-                    values.AsSpan(0, expectedLength),
-                    DeserializeBinary<bool>(entry.NullMask, expectedLength).AsSpan(0, expectedLength))
-                : NivaraColumn<T>.Create(values.AsSpan(0, expectedLength));
-
-            param.Tensor = new ReverseGradTensor<T>(column, param.Tensor.RequiresGrad, param.Tensor.Shape);
-        }
+        return state;
     }
 
     public static void SaveCheckpoint<T>(
@@ -137,38 +125,16 @@ public static class ModelSerializer
 
     static ModelFile BuildModelFile<T>(Module<T> model) where T : struct, INumber<T>
     {
-        var parameters = model.Parameters();
-        var entries = new Dictionary<string, ParameterEntry>();
+        return BuildModelFile(model.StateDict());
+    }
 
-        foreach (var (name, tensor) in parameters)
-        {
-            var data = tensor.Data;
-            int length = data.Length;
-            var values = new T[length];
-            data.CopyTo(values, T.Zero);
-
-            bool hasNulls = data.HasNulls;
-            bool[]? nullMask = null;
-
-            if (hasNulls && data.TryGetNullMask(out var mask))
-            {
-                nullMask = new bool[length];
-                mask.CopyTo(nullMask);
-            }
-
-            entries[name] = new ParameterEntry
-            {
-                Shape = tensor.Shape,
-                Values = SerializeBinary(values),
-                HasNulls = hasNulls,
-                NullMask = nullMask != null ? SerializeBinary(nullMask) : null
-            };
-        }
-
+    static ModelFile BuildModelFile<T>(
+        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, INumber<T>
+    {
         return new ModelFile
         {
             Type = typeof(T).Name,
-            Parameters = entries
+            Parameters = BuildParameterEntries(stateDict)
         };
     }
 
@@ -176,33 +142,7 @@ public static class ModelSerializer
         Module<T> model,
         EpochResult<T> epoch) where T : struct, INumber<T>
     {
-        var parameters = model.Parameters();
-        var entries = new Dictionary<string, ParameterEntry>();
-
-        foreach (var (name, tensor) in parameters)
-        {
-            var data = tensor.Data;
-            int length = data.Length;
-            var values = new T[length];
-            data.CopyTo(values, T.Zero);
-
-            bool hasNulls = data.HasNulls;
-            bool[]? nullMask = null;
-
-            if (hasNulls && data.TryGetNullMask(out var mask))
-            {
-                nullMask = new bool[length];
-                mask.CopyTo(nullMask);
-            }
-
-            entries[name] = new ParameterEntry
-            {
-                Shape = tensor.Shape,
-                Values = SerializeBinary(values),
-                HasNulls = hasNulls,
-                NullMask = nullMask != null ? SerializeBinary(nullMask) : null
-            };
-        }
+        var entries = BuildParameterEntries(model.StateDict());
 
         return new CheckpointFile
         {
@@ -211,6 +151,76 @@ public static class ModelSerializer
             Loss = double.CreateChecked(epoch.Loss),
             Parameters = entries
         };
+    }
+
+    static Dictionary<string, ParameterEntry> BuildParameterEntries<T>(
+        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, INumber<T>
+    {
+        var entries = new Dictionary<string, ParameterEntry>();
+
+        foreach (var (name, tensor) in stateDict)
+        {
+            ArgumentException.ThrowIfNullOrWhiteSpace(name);
+            ArgumentNullException.ThrowIfNull(tensor);
+
+            var data = tensor.Data;
+            int length = data.Length;
+            var values = new T[length];
+            data.CopyTo(values, T.Zero);
+
+            bool hasNulls = data.HasNulls;
+            bool[]? nullMask = null;
+
+            if (hasNulls && data.TryGetNullMask(out var mask))
+            {
+                nullMask = new bool[length];
+                mask.CopyTo(nullMask);
+            }
+
+            entries[name] = new ParameterEntry
+            {
+                Shape = tensor.Shape,
+                Values = SerializeBinary(values),
+                HasNulls = hasNulls,
+                NullMask = nullMask != null ? SerializeBinary(nullMask) : null
+            };
+        }
+
+        return entries;
+    }
+
+    static ReverseGradTensor<T> DeserializeTensor<T>(
+        ParameterEntry entry,
+        bool requiresGrad) where T : struct, INumber<T>
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+
+        int length = GetElementCount(entry.Shape);
+        var values = DeserializeBinary<T>(entry.Values, length);
+        var column = entry.HasNulls && entry.NullMask != null
+            ? NivaraColumn<T>.CreateFromSpans(
+                values.AsSpan(0, length),
+                DeserializeBinary<bool>(entry.NullMask, length).AsSpan(0, length))
+            : NivaraColumn<T>.Create(values.AsSpan(0, length));
+
+        return new ReverseGradTensor<T>(column, requiresGrad, entry.Shape);
+    }
+
+    static int GetElementCount(int[] shape)
+    {
+        if (shape.Length == 0)
+            throw new InvalidOperationException("Parameter shape must contain at least one dimension.");
+
+        int length = 1;
+        foreach (var d in shape)
+        {
+            if (d <= 0)
+                throw new InvalidOperationException($"Parameter shape dimensions must be positive, got {d}.");
+
+            length *= d;
+        }
+
+        return length;
     }
 
     static string SerializeBinary<T>(T[] data) where T : struct

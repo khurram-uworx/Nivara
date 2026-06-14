@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -12,6 +13,14 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class NullHandlingTests
 {
+    IDisposable? gradScope;
+
+    [SetUp]
+    public void SetUp() => gradScope = GradientUtils.Grad();
+
+    [TearDown]
+    public void TearDown() => gradScope?.Dispose();
+
     #region Element-wise Operations Null Handling
 
     [Test]

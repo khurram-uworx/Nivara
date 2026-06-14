@@ -83,7 +83,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 - Preserve null masks through `NullableTensor<T>` when crossing tensor boundaries
 - Ingest 2D tensors and labeled row vectors into schema-aware frames
 - Keep tensor math in `System.Numerics.Tensors`, not custom DataFrame APIs
-- Run lightweight reverse-mode AutoDiff when you need local training; inference is the default, and manual training is explicit with `GradientUtils.Grad()`
+- Run lightweight reverse-mode AutoDiff when you need local training; inference is the default, manual training is explicit with `GradientUtils.Grad()`, and module state can be copied via `StateDict()` / `LoadStateDict()`
 
 ### Performance
 - Vectorized execution where semantics are simple and measurable
@@ -143,7 +143,7 @@ Nivara currently supports:
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: ML.NET conversion helpers for machine learning workflows (via `Nivara.Extensions`)
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics via `ExecutionEngine.LastDiagnostics`
-- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with inference by default, explicit manual training via `GradientUtils.Grad()`, plus a full training stack — module system (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core)
+- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with inference by default, explicit manual training via `GradientUtils.Grad()`, plus a full training stack — module system (`Linear`, `Sequential`, `StateDict` / `LoadStateDict`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core)
 
 ---
 

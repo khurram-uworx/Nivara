@@ -552,6 +552,10 @@ result.PrintSummary();
 // 4. Save trained model
 ModelSerializer.Save(model, "fraud_model.json");
 
+// Optional: keep an in-memory snapshot for transfer learning or partial restore
+var state = model.StateDict();
+var stateJson = ModelSerializer.StateDictToJson(state);
+
 // 5. Inference on new data
 var loaded = new FraudNet();
 ModelSerializer.Load(loaded, "fraud_model.json");
@@ -575,7 +579,7 @@ Console.WriteLine($"Fraud probability: {prob:P2}");
 | Multi-core training | `DataParallelTrainer` splits rows across cores via `Parallel.For` |
 | Loss function | `BCEWithLogitsLoss` — numerically stable binary classification |
 | Optimizer | `Adam` with bias-corrected adaptive learning rates |
-| Model persistence | `ModelSerializer.Save` / `ModelSerializer.Load` (JSON + base64 binary) |
+| Model persistence | `StateDict` / `LoadStateDict` plus `ModelSerializer.Save` / `Load` (JSON + base64 binary) |
 | Inference | `Eval()` mode, no gradient tracking by default |
 
 ---

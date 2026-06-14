@@ -1092,6 +1092,11 @@ tensors.BatchZeroGrad();
 
 > For module-based models (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, model serialization, and data-parallel training, see [AUTODIFF.md](docs/AUTODIFF.md) and the Act 7b / Act 8 examples in [EXAMPLES.md](EXAMPLES.md).
 
+Module models expose `StateDict()` and `LoadStateDict()` for in-memory
+save/restore, transfer learning, and partial loading. Use
+`ModelSerializer.StateDictToJson(state)` / `JsonToStateDict<T>(json)` when you
+want the same state dictionary on disk or over the wire.
+
 ---
 
 ## Extensions and I/O

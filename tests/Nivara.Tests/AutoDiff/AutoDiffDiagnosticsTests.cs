@@ -1,6 +1,7 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
+using Nivara.AutoDiff.Utilities;
 using Nivara.Diagnostics;
 using NUnit.Framework;
 
@@ -9,9 +10,12 @@ namespace Nivara.Tests.AutoDiff;
 [TestFixture]
 public class AutoDiffDiagnosticsTests
 {
+    IDisposable? gradScope;
+
     [SetUp]
     public void SetUp()
     {
+        gradScope = GradientUtils.Grad();
         DiagnosticsTracker.IsEnabled = true;
         DiagnosticsTracker.ClearRecordedOperations();
     }
@@ -21,6 +25,7 @@ public class AutoDiffDiagnosticsTests
     {
         DiagnosticsTracker.IsEnabled = false;
         DiagnosticsTracker.ClearRecordedOperations();
+        gradScope?.Dispose();
     }
 
     [Test]

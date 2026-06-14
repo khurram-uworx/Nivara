@@ -16,6 +16,8 @@ default, and reverse-mode graph tracking is enabled only for training.
 The built-in training loops enter `GradientUtils.Grad()` internally; manual
 training code should wrap the forward/loss/backward/update step in that
 scope.
+Trained modules can be copied with `StateDict()` / `LoadStateDict()` for
+partial loading, fine-tuning, and JSON round-trips through `ModelSerializer`.
 
 ### The two parity examples
 

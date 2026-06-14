@@ -57,7 +57,7 @@ Where to look (implementation map)
   - `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs` — AdamW optimizer with decoupled weight decay
   - `src/Nivara/AutoDiff/Nn/` — module system (Linear, Sequential, Parameter, activations)
   - `src/Nivara/AutoDiff/Training/` — TrainingLoop, DataParallelTrainer, batch management
-  - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load
+  - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load and state-dict JSON wrappers
 
 - Factory & utilities
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
@@ -266,7 +266,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
@@ -311,5 +311,6 @@ Current product direction:
   `using (GradientUtils.Grad())`.
 - Do not introduce `NoGrad` as the primary API. The intended user-facing model is
   "predict by default, train explicitly."
-- The next planned AutoDiff feature after the Grad scope is
-  `StateDict()` / `LoadStateDict()` plus serializer helpers.
+- The recent AutoDiff plan items are implemented: inference-default
+  `GradientUtils.Grad()` plus `StateDict()` / `LoadStateDict()` and
+  serializer helpers.
