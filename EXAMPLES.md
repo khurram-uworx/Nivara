@@ -2,7 +2,7 @@
 
 ## Positioning
 
-Nivara is **not** a NumPy-for-.NET, tensor library, vector math library, embedding similarity engine, or AutoDiff framework.
+Nivara is **not** a NumPy-for-.NET, tensor library, vector math library, embedding similarity engine, or general-purpose AutoDiff framework.
 
 It is:
 
@@ -93,6 +93,19 @@ var price = NivaraColumn<float>.CreateFromNullable(new float?[] { 10.0f, 20.0f, 
 var qty = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f, 2.0f });
 var total = price.Multiply(qty);
 // [10.0, null, null, 80.0]
+```
+
+#### 2c. Null-preserving tensor export
+
+**Nivara** — data plus explicit mask:
+```csharp
+using Nivara.Tensors;
+
+var score = NivaraColumn<float>.CreateFromNullable(new float?[] { 0.9f, null, 0.4f });
+NullableTensor<float> tensor = score.ToNullableTensor();
+
+// Tensor data is available for platform APIs; the mask remains authoritative.
+var isMissing = tensor.NullMask!.AsTensorSpan()[1]; // true
 ```
 
 ---
@@ -187,16 +200,18 @@ scores = doc_vectors @ query / (np.linalg.norm(doc_vectors, axis=1) * np.linalg.
 ranking = sorted(zip(documents["DocumentId"], scores), key=lambda x: x[1], reverse=True)[:2]
 ```
 
-**Nivara** — frame handles schema and row-major layout:
+**Nivara** — frame handles labels, schema, and row-major layout:
 ```csharp
 var query = new[] { 0.8f, 0.1f, 0.6f, 0.3f };
 
-var documents = NivaraFrame.Create(
-    ("DocumentId", NivaraColumn<string>.CreateForReferenceType(["doc-101", "doc-102", "doc-103"])),
-    ("e0", NivaraColumn<float>.Create([0.9f, 0.1f, 0.7f])),
-    ("e1", NivaraColumn<float>.Create([0.2f, 0.9f, 0.1f])),
-    ("e2", NivaraColumn<float>.Create([0.5f, 0.2f, 0.8f])),
-    ("e3", NivaraColumn<float>.Create([0.4f, 0.7f, 0.2f]))
+var documents = NivaraFrame.FromRows(
+    [
+        ("doc-101", new[] { 0.9f, 0.2f, 0.5f, 0.4f }),
+        ("doc-102", new[] { 0.1f, 0.9f, 0.2f, 0.7f }),
+        ("doc-103", new[] { 0.7f, 0.1f, 0.8f, 0.2f })
+    ],
+    columnNames: ["e0", "e1", "e2", "e3"],
+    labelColumnName: "DocumentId"
 );
 
 var docVectors = documents.SelectColumns("e0", "e1", "e2", "e3").ToTensor<float>();
@@ -296,14 +311,18 @@ top = active.nlargest(100, "RiskScore")[["CustomerId", "RiskScore"]]
 
 **Nivara** — build once, swap strategies:
 ```csharp
-var customers = NivaraFrame.Create(
-    ("CustomerId", NivaraColumn<string>.CreateForReferenceType(["C001", "C002", "C003"])),
-    ("Segment", NivaraColumn<string>.CreateForReferenceType(["standard", "vip", "standard"])),
-    ("e0", NivaraColumn<float>.Create([0.9f, 0.1f, 0.7f])),
-    ("e1", NivaraColumn<float>.Create([0.2f, 0.9f, 0.1f])),
-    ("e2", NivaraColumn<float>.Create([0.5f, 0.2f, 0.8f])),
-    ("e3", NivaraColumn<float>.Create([0.4f, 0.7f, 0.2f]))
-);
+var vectors = NivaraFrame.FromRows(
+    [
+        ("C001", new[] { 0.9f, 0.2f, 0.5f, 0.4f }),
+        ("C002", new[] { 0.1f, 0.9f, 0.2f, 0.7f }),
+        ("C003", new[] { 0.7f, 0.1f, 0.8f, 0.2f })
+    ],
+    columnNames: ["e0", "e1", "e2", "e3"],
+    labelColumnName: "CustomerId");
+
+var customers = vectors.WithColumn(
+    "Segment",
+    NivaraColumn<string>.CreateForReferenceType(["standard", "vip", "standard"]));
 
 var embeddings = customers.SelectColumns("e0", "e1", "e2", "e3").ToTensor<float>();
 
@@ -562,5 +581,4 @@ Console.WriteLine($"Fraud probability: {prob:P2}");
 
 ## Related docs
 
-- [`docs/TENSORS.md`](docs/TENSORS.md) — full positioning discussion
 - [`docs/AUTODIFF-GAPS.md`](docs/AUTODIFF-GAPS.md) — AutoDiff gaps

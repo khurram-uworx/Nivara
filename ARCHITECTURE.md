@@ -37,6 +37,7 @@ At a high level, Nivara consists of:
 - **Execution strategies** (`Nivara.Execution` - lazy, eager, streaming, parallel)
 - **Operation implementations** (`Nivara.Operations` - joins, aggregations, filtering, sorting)
 - **Diagnostics and planning infrastructure** (`Nivara.Diagnostics`)
+- **Interop boundaries** (`Nivara.Tensors`, Arrow/Parquet/CSV/JSON extensions)
 
 ```
 Data Source (CSV/Parquet/Arrow)
@@ -91,7 +92,7 @@ The `ColumnStorageFactory` automatically selects the optimal storage backend:
 - Automatic SIMD acceleration via `TensorPrimitives`
 - Falls back to scalar operations when needed
 
-This selection is **transparent** to users and happens at column creation time.
+This selection is **transparent** to users and happens at column creation time. It is an internal storage and execution choice, not a promise that Nivara owns tensor math APIs.
 
 ### Null Representation Decision
 
@@ -167,6 +168,17 @@ var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b",
 ```
 
 This distinction is **internal** and transparent to users.
+
+### Tensor Interop Boundary
+
+Nivara's public tensor boundary is conversion and metadata preservation:
+
+- `ToTensor()` exports null-free columns, series, and homogeneous frames to `Tensor<T>`
+- `ToNullableTensor()` exports data plus an explicit `Tensor<bool>` null mask
+- `FromTensor()` / `FromMatrix()` ingest 2D tensors as schema-aware frames
+- `FromRows()` ingests labeled row vectors as a label column plus feature columns
+
+Nivara does not implement a competing tensor math layer. Callers should use `System.Numerics.Tensors.TensorPrimitives`, `Tensor<T>`, `ReadOnlySpan<T>`, and Microsoft AI abstractions for numerical kernels, embeddings, and model-facing APIs. Nivara owns the tabular concerns around those APIs: typed columns, schemas, labels, query planning, and explicit null masks.
 
 ### Vectorization Strategy Decision
 
@@ -578,9 +590,9 @@ Characteristics:
 - Uses `System.Numerics.Tensors` for storage
 - Automatic SIMD acceleration via `TensorPrimitives`
 - Falls back to scalar paths when required
-- Higher performance for mathematical operations
+- Higher performance for simple numeric column operations
 
-This distinction is **internal** and transparent to users. The system automatically selects the optimal storage backend based on type analysis.
+This distinction is **internal** and transparent to users. The system automatically selects the optimal storage backend based on type analysis. Public tensor APIs are limited to conversion and ingestion so platform libraries remain responsible for tensor math.
 
 ### Vectorization Strategy
 

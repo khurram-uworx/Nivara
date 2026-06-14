@@ -81,6 +81,37 @@ public class TensorInteropTests
     }
 
     [Test]
+    public void ColumnToNullableTensor_WithNoNulls_ReturnsNullMaskAsNull()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+
+        var nullableTensor = column.ToNullableTensor();
+
+        Assert.That(nullableTensor.Data.Rank, Is.EqualTo(1));
+        Assert.That(nullableTensor.Data.Lengths[0], Is.EqualTo((nint)3));
+        Assert.That(nullableTensor.NullMask, Is.Null);
+        Assert.That(nullableTensor.Data.AsTensorSpan()[0], Is.EqualTo(1));
+        Assert.That(nullableTensor.Data.AsTensorSpan()[2], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void SeriesToNullableTensor_WithNulls_PreservesMask()
+    {
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+        using var series = new NivaraSeries<float>(column);
+
+        var nullableTensor = series.ToNullableTensor();
+
+        Assert.That(nullableTensor.Data.Rank, Is.EqualTo(1));
+        Assert.That(nullableTensor.Data.Lengths[0], Is.EqualTo((nint)3));
+        Assert.That(nullableTensor.NullMask, Is.Not.Null);
+        Assert.That(nullableTensor.NullMask!.Lengths[0], Is.EqualTo((nint)3));
+        Assert.That(nullableTensor.NullMask.AsTensorSpan()[0], Is.False);
+        Assert.That(nullableTensor.NullMask.AsTensorSpan()[1], Is.True);
+        Assert.That(nullableTensor.NullMask.AsTensorSpan()[2], Is.False);
+    }
+
+    [Test]
     public void FromTensor_WithValidTensor_ReturnsCorrectSeries()
     {
         // Arrange
@@ -389,6 +420,146 @@ public class TensorInteropTests
         Assert.That(ex.Message, Does.Contain("Column names count"));
     }
 
+    [Test]
+    public void FrameToNullableTensor_WithNulls_UsesTwoDimensionalMask()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1.0f, 3.0f })),
+            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 4.0f })),
+        });
+
+        var nullableTensor = frame.ToNullableTensor<float>();
+
+        Assert.That(nullableTensor.Data.Rank, Is.EqualTo(2));
+        Assert.That(nullableTensor.Data.Lengths[0], Is.EqualTo((nint)2));
+        Assert.That(nullableTensor.Data.Lengths[1], Is.EqualTo((nint)2));
+        Assert.That(nullableTensor.NullMask, Is.Not.Null);
+        Assert.That(nullableTensor.NullMask!.Rank, Is.EqualTo(2));
+        Assert.That(nullableTensor.NullMask.Lengths[0], Is.EqualTo((nint)2));
+        Assert.That(nullableTensor.NullMask.Lengths[1], Is.EqualTo((nint)2));
+        Assert.That(nullableTensor.NullMask.AsTensorSpan()[0, 0], Is.False);
+        Assert.That(nullableTensor.NullMask.AsTensorSpan()[0, 1], Is.True);
+        Assert.That(nullableTensor.NullMask.AsTensorSpan()[1, 0], Is.False);
+        Assert.That(nullableTensor.NullMask.AsTensorSpan()[1, 1], Is.False);
+    }
+
+    [Test]
+    public void FrameToNullableTensor_WithoutNulls_ReturnsNullMaskAsNull()
+    {
+        using var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1, 3 })),
+            ("B", (IColumn)NivaraColumn<int>.Create(new[] { 2, 4 })),
+        });
+
+        var nullableTensor = frame.ToNullableTensor<int>();
+
+        Assert.That(nullableTensor.NullMask, Is.Null);
+        Assert.That(nullableTensor.Data.AsTensorSpan()[0, 0], Is.EqualTo(1));
+        Assert.That(nullableTensor.Data.AsTensorSpan()[0, 1], Is.EqualTo(2));
+        Assert.That(nullableTensor.Data.AsTensorSpan()[1, 0], Is.EqualTo(3));
+        Assert.That(nullableTensor.Data.AsTensorSpan()[1, 1], Is.EqualTo(4));
+    }
+
+    [Test]
+    public void FromTensor_WithRowLabels_AddsLabelColumn()
+    {
+        var data = new double[] { 1.0, 2.0, 3.0, 4.0 };
+        var tensor = Tensor.Create(data, new ReadOnlySpan<nint>(new nint[] { 2, 2 }));
+
+        using var frame = TensorInteropExtensions.FromTensor(
+            tensor,
+            new[] { "X", "Y" },
+            new object[] { "row-1", "row-2" },
+            "Id");
+
+        Assert.That(frame.ColumnNames.ToArray(), Is.EqualTo(new[] { "Id", "X", "Y" }));
+        Assert.That(frame.GetColumn<object>("Id")[0], Is.EqualTo("row-1"));
+        Assert.That(frame.GetColumn<object>("Id")[1], Is.EqualTo("row-2"));
+        Assert.That(frame.GetColumn<double>("X")[1], Is.EqualTo(3.0));
+        Assert.That(frame.GetColumn<double>("Y")[1], Is.EqualTo(4.0));
+    }
+
+    [Test]
+    public void FromTensor_WithMismatchedRowLabels_ThrowsException()
+    {
+        var tensor = Tensor.Create(new[] { 1, 2, 3, 4 }, new ReadOnlySpan<nint>(new nint[] { 2, 2 }));
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            TensorInteropExtensions.FromTensor(tensor, new[] { "A", "B" }, new object[] { "row-1" }));
+
+        Assert.That(ex!.Message, Does.Contain("Row labels count"));
+    }
+
+    [Test]
+    public void FromTensor_WithRowLabelColumnCollision_ThrowsException()
+    {
+        var tensor = Tensor.Create(new[] { 1, 2, 3, 4 }, new ReadOnlySpan<nint>(new nint[] { 2, 2 }));
+
+        var ex = Assert.Throws<ArgumentException>(() =>
+            TensorInteropExtensions.FromTensor(tensor, new[] { "Label", "B" }, new object[] { "row-1", "row-2" }));
+
+        Assert.That(ex!.Message, Does.Contain("Duplicate column name"));
+    }
+
+    [Test]
+    public void FromMatrix_DelegatesToTensorConversion()
+    {
+        var tensor = Tensor.Create(new[] { 1.0f, 2.0f, 3.0f, 4.0f }, new ReadOnlySpan<nint>(new nint[] { 2, 2 }));
+
+        using var frame = NivaraFrame.FromMatrix(
+            tensor,
+            new[] { "Left", "Right" },
+            new object[] { "r1", "r2" },
+            "RowId");
+
+        Assert.That(frame.ColumnNames.ToArray(), Is.EqualTo(new[] { "RowId", "Left", "Right" }));
+        Assert.That(frame.GetColumn<object>("RowId")[0], Is.EqualTo("r1"));
+        Assert.That(frame.GetColumn<float>("Left")[0], Is.EqualTo(1.0f));
+        Assert.That(frame.GetColumn<float>("Right")[1], Is.EqualTo(4.0f));
+    }
+
+    [Test]
+    public void FromRows_CreatesLabelAndFeatureColumns()
+    {
+        using var frame = NivaraFrame.FromRows(
+            new[]
+            {
+                ("A", new[] { 0.1f, 0.2f }),
+                ("B", new[] { 0.3f, 0.4f }),
+            },
+            new[] { "e0", "e1" },
+            "DocumentId");
+
+        Assert.That(frame.ColumnNames.ToArray(), Is.EqualTo(new[] { "DocumentId", "e0", "e1" }));
+        Assert.That(frame.GetColumn<string>("DocumentId")[0], Is.EqualTo("A"));
+        Assert.That(frame.GetColumn<float>("e0")[1], Is.EqualTo(0.3f));
+        Assert.That(frame.GetColumn<float>("e1")[1], Is.EqualTo(0.4f));
+    }
+
+    [Test]
+    public void FromRows_WithMismatchedVectorWidths_ThrowsException()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            NivaraFrame.FromRows(new[]
+            {
+                ("A", new[] { 1, 2 }),
+                ("B", new[] { 3 }),
+            }));
+
+        Assert.That(ex!.Message, Does.Contain("same length"));
+    }
+
+    [Test]
+    public void FromRows_WithEmptyRows_ThrowsException()
+    {
+        var ex = Assert.Throws<ArgumentException>(() =>
+            NivaraFrame.FromRows<int>(Array.Empty<(string Label, int[] Vector)>()));
+
+        Assert.That(ex!.Message, Does.Contain("At least one row"));
+    }
+
     #endregion
 
     #region Reshape Operations
@@ -547,6 +718,20 @@ public class TensorInteropTests
                 series.Dispose();
             }
         }
+    }
+
+    [Test]
+    public void CollectionExpressions_CreateColumnAndSeries()
+    {
+        NivaraColumn<int> column = [1, 2, 3];
+        NivaraSeries<float> series = [1.0f, 2.0f, 3.0f];
+
+        Assert.That(column.Length, Is.EqualTo(3));
+        Assert.That(column[0], Is.EqualTo(1));
+        Assert.That(column[2], Is.EqualTo(3));
+        Assert.That(series.Length, Is.EqualTo(3));
+        Assert.That(series[0], Is.EqualTo(1.0f));
+        Assert.That(series[2], Is.EqualTo(3.0f));
     }
 
     [Test]

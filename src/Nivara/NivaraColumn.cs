@@ -3,7 +3,9 @@ using Nivara.Extensions;
 using Nivara.Helpers;
 using Nivara.Storage;
 using System.Buffers;
+using System.Collections;
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 
 namespace Nivara;
 
@@ -12,7 +14,8 @@ namespace Nivara;
 /// Provides the main public API for columnar data processing in Nivara.
 /// </summary>
 /// <typeparam name="T">The type of elements in the column</typeparam>
-public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
+[CollectionBuilder(typeof(NivaraColumnBuilder), nameof(NivaraColumnBuilder.Create))]
+public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
 {
     /// <summary>
     /// Helper method to perform vectorized multiplication using TensorPrimitives with runtime type dispatch
@@ -2148,6 +2151,20 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
 
     IColumn IColumn.Slice(int start, int length) => Slice(start, length);
 
+    /// <summary>
+    /// Enumerates stored column values in positional order.
+    /// Null positions yield the stored value; use <see cref="IsNull"/> to inspect nullness.
+    /// </summary>
+    public IEnumerator<T> GetEnumerator()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        for (int i = 0; i < Length; i++)
+            yield return this[i];
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
     // Tensor<T> Conversion
 
     /// <summary>
@@ -2211,6 +2228,32 @@ public sealed class NivaraColumn<T> : IColumn<T>, IDisposable
                 return Tensor.Create(result, new nint[] { result.Length });
             },
             "TensorConversion=NullReplacement");
+    }
+
+    /// <summary>
+    /// Converts this column to tensor data plus an optional explicit null mask.
+    /// The returned tensors own copies so column immutability is preserved.
+    /// </summary>
+    /// <returns>A nullable tensor representation of the column.</returns>
+    public Tensors.NullableTensor<T> ToNullableTensor()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var rawSpan = storage.AsSpan();
+        var data = new T[rawSpan.Length];
+        rawSpan.CopyTo(data);
+
+        Tensor<bool>? nullMaskTensor = null;
+        var nullMask = storage.NullMask;
+        if (nullMask.Length > 0)
+        {
+            var mask = nullMask.ToArray();
+            nullMaskTensor = Tensor.Create(mask, new nint[] { mask.Length });
+        }
+
+        return new Tensors.NullableTensor<T>(
+            Tensor.Create(data, new nint[] { data.Length }),
+            nullMaskTensor);
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
 using Nivara.Extensions;
+using System.Collections;
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 
 namespace Nivara;
 
@@ -8,7 +10,8 @@ namespace Nivara;
 /// Provides label-based access and maintains index-value relationships during operations.
 /// </summary>
 /// <typeparam name="T">The type of values in the series</typeparam>
-public sealed class NivaraSeries<T> : IDisposable
+[CollectionBuilder(typeof(NivaraSeriesBuilder), nameof(NivaraSeriesBuilder.Create))]
+public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
 {
     readonly struct TopKPriority
     {
@@ -600,6 +603,20 @@ public sealed class NivaraSeries<T> : IDisposable
     }
 
     /// <summary>
+    /// Enumerates stored series values in positional order.
+    /// Null positions yield the stored value; use <see cref="IsNull"/> to inspect nullness.
+    /// </summary>
+    public IEnumerator<T> GetEnumerator()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        for (int i = 0; i < Length; i++)
+            yield return this[i];
+    }
+
+    IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+    /// <summary>
     /// Tries to get the value associated with the specified label
     /// </summary>
     /// <param name="label">The label to look up</param>
@@ -824,6 +841,16 @@ public sealed class NivaraSeries<T> : IDisposable
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return values.ToTensor(defaultValue);
+    }
+
+    /// <summary>
+    /// Converts this series to tensor data plus an optional explicit null mask.
+    /// The index is not represented in the tensor result.
+    /// </summary>
+    public Tensors.NullableTensor<T> ToNullableTensor()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return values.ToNullableTensor();
     }
 
     // Aggregate Functions
