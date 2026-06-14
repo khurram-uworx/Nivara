@@ -1023,19 +1023,24 @@ After ingestion, use Nivara for filtering, joining, grouping, and schema validat
 
 Nivara provides automatic differentiation (AutoDiff) on DataFrames, enabling gradient-based optimization and machine learning workflows directly on your data.
 
+Inference is the default. A normal `model.Forward(input)` or tensor operation computes values without building a training graph. When you are writing a manual training step, wrap the forward/loss/backward/update code in `using (GradientUtils.Grad())`. Built-in training loops enter that scope for you.
+
 ### Converting to Gradient Tensors
 
 You can convert Columns, Series, or entire DataFrames into `ReverseGradTensor<T>` objects:
 
 ```csharp
 using Nivara.AutoDiff;
+using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 
 var df = NivaraFrame.Create(
     ("x", NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })),
     ("y", NivaraColumn<float>.Create(new[] { 2.0f, 4.0f, 6.0f }))
 );
 
-// Convert to dictionary of ReverseGradTensors, enabling gradient tracking
+// Convert to dictionary of ReverseGradTensors.
+// requiresGrad marks trainable inputs, but graph tracking only happens inside GradientUtils.Grad().
 var tensors = df.ToReverseGradTensors<float>(new[] { "x", "y" }, requiresGrad: true);
 
 var x = tensors["x"];
@@ -1047,18 +1052,21 @@ var y = tensors["y"];
 `ReverseGradTensor<T>` supports `+`, `-`, `*`, `/` and unary `-` operator overloads that delegate to `GradOperations`:
 
 ```csharp
-// Simple linear model: z = w * x + b using operator overloads
+// Simple linear model: z = w * x + b using operator overloads.
 var w = ReverseGradTensor<float>.FromArray(new[] { 0.5f, 0.5f, 0.5f }, requiresGrad: true);
 var b = ReverseGradTensor<float>.FromArray(new[] { 0.1f, 0.1f, 0.1f }, requiresGrad: true);
 
-var z = w * x + b;
+using (GradientUtils.Grad())
+{
+    var z = w * x + b;
 
-// MSE loss: mean((z - y)^2)
-var diff = z - y;
-var loss = GradOperations.Mean(diff * diff);
+    // MSE loss: mean((z - y)^2)
+    var diff = z - y;
+    var loss = GradOperations.Mean(diff * diff);
 
-// Backward pass — computes gradients for w and b
-loss.Backward();
+    // Backward pass — computes gradients for w and b
+    loss.Backward();
+}
 
 // Access gradients directly on the tensor
 Console.WriteLine($"w gradient at index 0: {w.Grad![0]:F4}");

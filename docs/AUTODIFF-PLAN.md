@@ -43,32 +43,56 @@ Two additions make the existing set feel **complete for practical workflows**.
 Both are small, high-leverage additions that close the last common friction
 points.
 
-### 1. `NoGrad` scope
+### 1. `Grad` scope
 
 **Why it matters:**
 
-Every inference pass today builds a computation graph and runs dropout in
-training mode. Users must manually track `model.Train()`/`model.Eval()`
-and accept wasteful graph construction. A `NoGrad` scope context manager:
+Inference is the common path. Training is the special path. Users should
+be able to call `model.Forward(input)` for predictions without paying for
+graph construction or thinking about gradient bookkeeping. A `Grad` scope
+context manager:
 
-- Suppresses gradient tracking inside the block
-- Forces modules to eval mode (dropout disabled)
-- Avoids unnecessary graph memory
-- Makes inference code read naturally
+- Enables gradient tracking only inside the block
+- Makes normal forward passes inference by default
+- Avoids unnecessary graph memory during prediction
+- Makes training code read as an explicit declaration of intent
 
 **Design sketch:**
 
 ```csharp
-using (GradientUtils.NoGrad())
+var pred = model.Forward(input); // inference by default
+
+using (GradientUtils.Grad())
 {
     var pred = model.Forward(input);
-    // No graph built, no gradients tracked
+    var loss = lossFn(pred, target);
+    loss.Backward();
+    optimizer.Step();
 }
 ```
 
-Implementation: ~50 lines. A `IDisposable` struct that saves/restores a
-thread-local `_noGrad` flag. `ReverseGradTensor` constructors and
-`OpNode` registration check the flag and skip graph wiring.
+Implementation: ~50 lines. An `IDisposable` scope saves/restores an ambient
+`AsyncLocal` depth counter. `ReverseGradTensor` operations and `OpNode`
+registration check the flag and skip graph wiring unless gradient tracking
+is enabled.
+
+Built-in training APIs (`TrainingLoop`, `DataParallelTrainer`) enter the
+scope internally, so high-level training remains simple. Manual training
+loops use `GradientUtils.Grad()` explicitly.
+
+```csharp
+// Built-in loop: scope handled by Nivara
+var result = trainingLoop.Run();
+
+// Manual loop: scope is explicit
+using (GradientUtils.Grad())
+{
+    var pred = model.Forward(input);
+    var loss = lossFn(pred, target);
+    loss.Backward();
+    optimizer.Step();
+}
+```
 
 ### 2. `state_dict()` / `load_state_dict()`
 
@@ -136,7 +160,7 @@ or not in Nivara at all.
 
 ## Implementation order
 
-1. **NoGrad scope** — trivial, unlocks clean inference, unblocks nothing
+1. **Grad scope** — inference by default, explicit training, unblocks nothing
 2. **state_dict / load_state_dict** — small, unlocks model surgery pattern
 3. Existing surface: lint, harden null-mask edge cases, improve diagnostics
 
@@ -150,7 +174,7 @@ queries, joins, grouping, schema, null semantics) per `TENSORS.md`.
    What we have: A complete CPU ML toolkit with proven gradient correctness
                  (Linear, optimizers, losses, training loop, serialization)
 
-  What we add  : NoGrad scope    (10 lines of logic, 50 lines total)
+  What we add  : Grad scope      (10 lines of logic, 50 lines total)
                  state_dict/...  (100 lines, enables model surgery)
 
    What we ship: A drum machine with the best drum sounds.

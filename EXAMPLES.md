@@ -359,7 +359,7 @@ Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
 
 ### Act 7a: AutoDiff — low-level gradient operations
 
-> Reverse-mode AutoDiff that works directly with Nivara column data. Build a computation graph, compute gradients via `Backward()`, apply updates via `SGD<T>.SgdUpdate`.
+> Reverse-mode AutoDiff that works directly with Nivara column data. Inference is the default; use `GradientUtils.Grad()` when you intentionally want to build a training graph, compute gradients via `Backward()`, and apply updates via `SGD<T>.SgdUpdate`.
 
 #### Linear model with gradient descent
 
@@ -382,6 +382,7 @@ with torch.no_grad():
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
+using Nivara.AutoDiff.Utilities;
 
 var df = NivaraFrame.Create(
     ("x", NivaraColumn<float>.Create([1.0f, 2.0f, 3.0f])),
@@ -394,10 +395,13 @@ var (x, y) = (tensors["x"], tensors["y"]);
 using var w = ReverseGradTensor<float>.FromArray([0.5f, 0.5f, 0.5f], requiresGrad: true);
 using var b = ReverseGradTensor<float>.FromArray([0.1f, 0.1f, 0.1f], requiresGrad: true);
 
-var prediction = w * x + b;
-var loss = GradOperations.Mean((prediction - y) * (prediction - y));
+using (GradientUtils.Grad())
+{
+    var prediction = w * x + b;
+    var loss = GradOperations.Mean((prediction - y) * (prediction - y));
 
-loss.Backward();
+    loss.Backward();
+}
 
 using var updatedW = SGD<float>.SgdUpdate(w, 0.01f);
 using var updatedB = SGD<float>.SgdUpdate(b, 0.01f);
@@ -409,7 +413,7 @@ See the full sample in [`samples/Nivara.SampleApp/AutoDiffExample.cs`](samples/N
 
 ### Act 7b: AutoDiff — module-based model with TrainingLoop
 
-> Build models using `Module<T>` / `Linear<T>`, train with `TrainingLoop<T>` — no manual graph construction or gradient management needed.
+> Build models using `Module<T>` / `Linear<T>`, train with `TrainingLoop<T>` — no manual graph construction or gradient management needed. The training loop enables `GradientUtils.Grad()` internally for each batch.
 
 **Python**
 ```python
@@ -572,7 +576,7 @@ Console.WriteLine($"Fraud probability: {prob:P2}");
 | Loss function | `BCEWithLogitsLoss` — numerically stable binary classification |
 | Optimizer | `Adam` with bias-corrected adaptive learning rates |
 | Model persistence | `ModelSerializer.Save` / `ModelSerializer.Load` (JSON + base64 binary) |
-| Inference | `Eval()` mode, no gradient tracking |
+| Inference | `Eval()` mode, no gradient tracking by default |
 
 ---
 

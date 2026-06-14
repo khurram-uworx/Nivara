@@ -9,6 +9,12 @@ args = ["-y", "@uworx/code-memory"]
 command = "npx"
 args = ["-y", "@uworx/memori", "--markdown"]
 
+[mcp_servers.memori.tools.search]
+approval_mode = "approve"
+
+[mcp_servers.memori.tools.remember]
+approval_mode = "approve"
+
 [mcp_servers.code-memory.tools.ping]
 approval_mode = "approve"
 
@@ -34,4 +40,7 @@ approval_mode = "approve"
 approval_mode = "approve"
 
 [mcp_servers.code-memory.tools.get_repository_root]
+approval_mode = "approve"
+
+[mcp_servers.code-memory.tools.sql_query]
 approval_mode = "approve"

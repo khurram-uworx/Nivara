@@ -11,6 +11,12 @@ This isn't a PyTorch replacement — it's a .NET-native path to correct
 gradients for the 70–80% of enterprise ML work that never touches a GPU.
 NuGet add, enjoy your language and tools, and get back to building.
 
+Nivara's user model is intentionally app-friendly: inference is the
+default, and reverse-mode graph tracking is enabled only for training.
+The built-in training loops enter `GradientUtils.Grad()` internally; manual
+training code should wrap the forward/loss/backward/update step in that
+scope.
+
 ### The two parity examples
 
 | Mode | What it validates | Approach |
@@ -112,7 +118,9 @@ dotnet run --project samples/Nivara.SampleApp
 Look for the **"Cross-Framework FraudNet"** section in the output. The
 Nivara code loads the same CSV data, normalization params, and initial
 weights, then trains with identical hyperparameters (Adam, lr=0.001,
-batch=32, 50 epochs).
+batch=32, 50 epochs). Nivara's `TrainingLoop` handles gradient tracking
+internally, so the sample's inference pass after training runs without a
+computation graph.
 
 **Output files in `examples/pytorch/`:**
 
@@ -311,7 +319,7 @@ where `x` = logits and `z` = target labels (0 or 1).
 |---|---|---|
 | **What it validates** | Reverse-mode autograd + optimizer + training loop correctness | Forward-mode autograd per-operation correctness |
 | **Tensor type** | `ReverseGradTensor<float>` | `ForwardGradTensor<float>` |
-| **PyTorch equivalent** | `backward()` + SGD/Adam | `torch.autograd.forward_ad` |
+| **PyTorch equivalent** | `backward()` + SGD/Adam; Nivara enables tracking through `GradientUtils.Grad()` | `torch.autograd.forward_ad` |
 | **Randomness** | Yes — SGD minibatch order | None — deterministic |
 | **Test granularity** | End-to-end (whole model training) | Per-operation (6 isolated test cases) |
 | **Tolerance** | 1% relative loss diff | 1e-5 absolute diff |

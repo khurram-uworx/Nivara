@@ -137,7 +137,8 @@ NivaraAutoGradExtensions              ← NivaraColumn/NivaraSeries/NivaraFrame 
 
 - **Only `float` and `double` are supported** — enforced at runtime by `TypeValidator.ValidateNumericType<T>()`. Other numeric types (int, long, etc.) throw `TypeValidationException`.
 - **1D storage, shape metadata** — data is always stored as a flat `NivaraColumn<T>`. Shape is metadata (`int[] shape`) with `Reshape()` validation. Default shape is `[Length]`.
-- **Computation graph is built implicitly** — every `GradOperations` call checks if any input `requiresGrad` and attaches an `OpNode` to the result.
+- **Inference is the default** — normal `Forward` and `GradOperations` calls compute values without building a computation graph.
+- **Training is explicit** — wrap manual training code in `using (GradientUtils.Grad())`; inside that scope, operations check trainable inputs (`requiresGrad`) and attach `OpNode` history to results.
 - **Gradient accumulation** — `AccumulateGradient()` either sets or adds to `Grad` (supports fan-in from multiple paths).
 - **Explicit null-mask propagation** — Nivara's nullable semantics flow through gradients. Nulls propagate via mask OR; null positions in gradients are skipped during accumulation.
 - **IDisposable** — `GradTensor<T>`, `Parameter<T>`, `Module<T>`, `Optimizer<T>`, and `TrainingLoop<T>` all implement `IDisposable`.
@@ -796,19 +797,26 @@ NivaraAutoGradExtensions.GetSupportedAutoGradTypes();  // [typeof(float), typeof
 
 ## Examples
 
+Manual examples that call `Backward()` run inside `GradientUtils.Grad()`.
+Plain forward calls outside this scope are inference and do not build a
+computation graph.
+
 ### 1. Basic scalar gradient
 
 ```csharp
-var a = new ReverseGradTensor<float>(
-    NivaraColumn<float>.Create(new float[] { 3.0f }), requiresGrad: true);
-var b = new ReverseGradTensor<float>(
-    NivaraColumn<float>.Create(new float[] { 4.0f }), requiresGrad: true);
+using (GradientUtils.Grad())
+{
+    var a = new ReverseGradTensor<float>(
+        NivaraColumn<float>.Create(new float[] { 3.0f }), requiresGrad: true);
+    var b = new ReverseGradTensor<float>(
+        NivaraColumn<float>.Create(new float[] { 4.0f }), requiresGrad: true);
 
-var result = GradOperations.Add(a, b);  // 7.0
-result.Backward();
+    var result = GradOperations.Add(a, b);  // 7.0
+    result.Backward();
 
-Console.WriteLine(a.Grad[0]);  // 1.0  (∂result/∂a)
-Console.WriteLine(b.Grad[0]);  // 1.0  (∂result/∂b)
+    Console.WriteLine(a.Grad[0]);  // 1.0  (∂result/∂a)
+    Console.WriteLine(b.Grad[0]);  // 1.0  (∂result/∂b)
+}
 ```
 
 ### 2. Non-scalar backward with explicit gradient

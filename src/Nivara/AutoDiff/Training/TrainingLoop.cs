@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
 using System.Numerics;
 
@@ -92,6 +93,8 @@ public class TrainingLoop<T> : IDisposable where T : struct, INumber<T>
 
             foreach (var batch in _loader)
             {
+                using var gradScope = GradientUtils.Grad();
+
                 var output = _model.Forward(batch.Features);
                 var loss = _lossFn(output, batch.Labels);
                 loss.Backward();

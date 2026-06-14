@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Utilities;
 using Nivara.Execution;
 using System.Diagnostics;
 using System.Numerics;
@@ -68,6 +69,7 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, INumber<T>
                     var chunkIndices = indices.AsSpan(range.Start, range.Length);
                     var batch = dataset.GetBatch(chunkIndices);
 
+                    using var gradScope = GradientUtils.Grad();
                     var output = _model.Forward(batch.Features);
                     var loss = _lossFn(output, batch.Labels);
 
@@ -82,6 +84,7 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, INumber<T>
                     var chunkIndices = indices.AsSpan(range.Start, range.Length);
                     var batch = dataset.GetBatch(chunkIndices);
 
+                    using var gradScope = GradientUtils.Grad();
                     var output = _model.Forward(batch.Features);
                     var loss = _lossFn(output, batch.Labels);
 
@@ -96,6 +99,7 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, INumber<T>
 
                 try
                 {
+                    using var gradScope = GradientUtils.Grad();
                     r.loss.Backward();
                     batchCount++;
 

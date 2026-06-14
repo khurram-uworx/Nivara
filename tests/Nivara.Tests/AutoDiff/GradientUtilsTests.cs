@@ -15,6 +15,53 @@ public class GradientUtilsTests
     #region Gradient Management Tests
 
     [Test]
+    public void GradTracking_DefaultInference_DoesNotBuildGraph()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }),
+            requiresGrad: true);
+        var b = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }),
+            requiresGrad: true);
+
+        var result = ReverseGradOperations.Sum(a + b);
+        var info = GradientUtils.GetGraphInfo(result);
+
+        Assert.That(GradientUtils.IsGradEnabled, Is.False);
+        Assert.That(result.RequiresGrad, Is.False);
+        Assert.That(info["TotalNodes"], Is.EqualTo(0));
+    }
+
+    [Test]
+    public void GradTracking_InsideGradScope_BuildsGraphAndComputesGradients()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }),
+            requiresGrad: true);
+        var b = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }),
+            requiresGrad: true);
+
+        using (GradientUtils.Grad())
+        {
+            var result = ReverseGradOperations.Sum(a + b);
+            var info = GradientUtils.GetGraphInfo(result);
+
+            Assert.That(GradientUtils.IsGradEnabled, Is.True);
+            Assert.That(result.RequiresGrad, Is.True);
+            Assert.That(info["TotalNodes"], Is.EqualTo(2));
+
+            result.Backward();
+        }
+
+        Assert.That(GradientUtils.IsGradEnabled, Is.False);
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(b.Grad, Is.Not.Null);
+        Assert.That(a.Grad![0], Is.EqualTo(1.0f));
+        Assert.That(b.Grad![1], Is.EqualTo(1.0f));
+    }
+
+    [Test]
     public void ZeroGrad_SingleTensor_ClearsGradient()
     {
         // Arrange

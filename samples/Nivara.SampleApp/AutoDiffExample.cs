@@ -42,26 +42,29 @@ public static class AutoDiffExample
         var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f, 4.0f });
         var x = new ReverseGradTensor<float>(data, requiresGrad: true);
 
-        // Sum operation
-        var sum = ReverseGradOperations.Sum(x);
-        Console.WriteLine($"Input: [1, 2, 3, 4]");
-        Console.WriteLine($"Sum: {sum[0]}");
+        using (GradientUtils.Grad())
+        {
+            // Sum operation
+            var sum = ReverseGradOperations.Sum(x);
+            Console.WriteLine($"Input: [1, 2, 3, 4]");
+            Console.WriteLine($"Sum: {sum[0]}");
 
-        sum.Backward();
-        Console.WriteLine($"Gradient (d_sum/d_x): [{x.Grad![0]}, {x.Grad[1]}, {x.Grad[2]}, {x.Grad[3]}]");
-        Console.WriteLine("(All gradients are 1 because d/dx(sum) = 1 for each element)");
-        Console.WriteLine();
+            sum.Backward();
+            Console.WriteLine($"Gradient (d_sum/d_x): [{x.Grad![0]}, {x.Grad[1]}, {x.Grad[2]}, {x.Grad[3]}]");
+            Console.WriteLine("(All gradients are 1 because d/dx(sum) = 1 for each element)");
+            Console.WriteLine();
 
-        // Reset gradients
-        x.ZeroGrad();
+            // Reset gradients
+            x.ZeroGrad();
 
-        // Mean operation
-        var mean = ReverseGradOperations.Mean(x);
-        Console.WriteLine($"Mean: {mean[0]}");
+            // Mean operation
+            var mean = ReverseGradOperations.Mean(x);
+            Console.WriteLine($"Mean: {mean[0]}");
 
-        mean.Backward();
-        Console.WriteLine($"Gradient (d_mean/d_x): [{x.Grad![0]}, {x.Grad[1]}, {x.Grad[2]}, {x.Grad[3]}]");
-        Console.WriteLine("(All gradients are 0.25 because d/dx(mean) = 1/n = 1/4)");
+            mean.Backward();
+            Console.WriteLine($"Gradient (d_mean/d_x): [{x.Grad![0]}, {x.Grad[1]}, {x.Grad[2]}, {x.Grad[3]}]");
+            Console.WriteLine("(All gradients are 0.25 because d/dx(mean) = 1/n = 1/4)");
+        }
     }
 
     private static void RunActivationFunctionsDemo()
@@ -112,26 +115,29 @@ public static class AutoDiffExample
         Console.WriteLine($"Bias (b): [-1, 0, 1]");
         Console.WriteLine();
 
-        // Forward pass (using operator overloads: *, +)
-        var mul = input * weight;
-        Console.WriteLine($"Step 1: x * w = [{mul[0]}, {mul[1]}, {mul[2]}]");
+        using (GradientUtils.Grad())
+        {
+            // Forward pass (using operator overloads: *, +)
+            var mul = input * weight;
+            Console.WriteLine($"Step 1: x * w = [{mul[0]}, {mul[1]}, {mul[2]}]");
 
-        var add = mul + bias;
-        Console.WriteLine($"Step 2: x * w + b = [{add[0]}, {add[1]}, {add[2]}]");
+            var add = mul + bias;
+            Console.WriteLine($"Step 2: x * w + b = [{add[0]}, {add[1]}, {add[2]}]");
 
-        var reluResult = ReverseGradOperations.Relu(add);
-        Console.WriteLine($"Step 3: relu(x * w + b) = [{reluResult[0]}, {reluResult[1]}, {reluResult[2]}]");
+            var reluResult = ReverseGradOperations.Relu(add);
+            Console.WriteLine($"Step 3: relu(x * w + b) = [{reluResult[0]}, {reluResult[1]}, {reluResult[2]}]");
 
-        var output = ReverseGradOperations.Mean(reluResult);
-        Console.WriteLine($"Step 4: mean(relu(x * w + b)) = {output[0]:F4}");
-        Console.WriteLine();
+            var output = ReverseGradOperations.Mean(reluResult);
+            Console.WriteLine($"Step 4: mean(relu(x * w + b)) = {output[0]:F4}");
+            Console.WriteLine();
 
-        // Backward pass
-        output.Backward();
+            // Backward pass
+            output.Backward();
 
-        Console.WriteLine($"Gradients after backward pass:");
-        Console.WriteLine($"  d_output/d_weight: [{weight.Grad![0]:F4}, {weight.Grad[1]:F4}, {weight.Grad[2]:F4}]");
-        Console.WriteLine($"  d_output/d_bias: [{bias.Grad![0]:F4}, {bias.Grad[1]:F4}, {bias.Grad[2]:F4}]");
+            Console.WriteLine($"Gradients after backward pass:");
+            Console.WriteLine($"  d_output/d_weight: [{weight.Grad![0]:F4}, {weight.Grad[1]:F4}, {weight.Grad[2]:F4}]");
+            Console.WriteLine($"  d_output/d_bias: [{bias.Grad![0]:F4}, {bias.Grad[1]:F4}, {bias.Grad[2]:F4}]");
+        }
         Console.WriteLine();
         Console.WriteLine("These gradients show how to adjust weights and biases to increase the output.");
         Console.WriteLine("In a real neural network, you would use these gradients to update parameters:");
@@ -154,34 +160,37 @@ public static class AutoDiffExample
         Console.WriteLine("Simulating a training loop with gradient utilities:");
         Console.WriteLine();
 
-        // Iteration 1
-        Console.WriteLine("Iteration 1:");
-        var input1 = GradientUtils.Constant(new float[] { 1.0f, 2.0f, 3.0f });
-        var output1 = ReverseGradOperations.Sum(input1 * weights);
-        output1 = output1 + bias;
+        using (GradientUtils.Grad())
+        {
+            // Iteration 1
+            Console.WriteLine("Iteration 1:");
+            var input1 = GradientUtils.Constant(new float[] { 1.0f, 2.0f, 3.0f });
+            var output1 = ReverseGradOperations.Sum(input1 * weights);
+            output1 = output1 + bias;
 
-        output1.Backward();
-        Console.WriteLine($"  Gradient norm: {GradientUtils.GetGradientNorm(weights):F4}");
-        Console.WriteLine($"  Has gradient: {GradientUtils.HasGradient(weights)}");
+            output1.Backward();
+            Console.WriteLine($"  Gradient norm: {GradientUtils.GetGradientNorm(weights):F4}");
+            Console.WriteLine($"  Has gradient: {GradientUtils.HasGradient(weights)}");
 
-        // Clear gradients for next iteration
-        GradientUtils.ZeroGrad(new[] { weights, bias });
-        Console.WriteLine($"  After ZeroGrad: {GradientUtils.HasGradient(weights)}");
-        Console.WriteLine();
+            // Clear gradients for next iteration
+            GradientUtils.ZeroGrad(new[] { weights, bias });
+            Console.WriteLine($"  After ZeroGrad: {GradientUtils.HasGradient(weights)}");
+            Console.WriteLine();
 
-        // Iteration 2 - demonstrate gradient clipping
-        Console.WriteLine("Iteration 2 (with gradient clipping):");
-        var input2 = GradientUtils.Constant(new float[] { 10.0f, 20.0f, 30.0f });
-        var output2 = ReverseGradOperations.Sum(input2 * weights);
-        output2 = output2 + bias;
+            // Iteration 2 - demonstrate gradient clipping
+            Console.WriteLine("Iteration 2 (with gradient clipping):");
+            var input2 = GradientUtils.Constant(new float[] { 10.0f, 20.0f, 30.0f });
+            var output2 = ReverseGradOperations.Sum(input2 * weights);
+            output2 = output2 + bias;
 
-        output2.Backward();
-        Console.WriteLine($"  Gradient norm before clipping: {GradientUtils.GetGradientNorm(weights):F4}");
+            output2.Backward();
+            Console.WriteLine($"  Gradient norm before clipping: {GradientUtils.GetGradientNorm(weights):F4}");
 
-        // Clip gradients to prevent exploding gradients
-        GradientUtils.ClipGradNorm(weights, 5.0);
-        Console.WriteLine($"  Gradient norm after clipping: {GradientUtils.GetGradientNorm(weights):F4}");
-        Console.WriteLine();
+            // Clip gradients to prevent exploding gradients
+            GradientUtils.ClipGradNorm(weights, 5.0);
+            Console.WriteLine($"  Gradient norm after clipping: {GradientUtils.GetGradientNorm(weights):F4}");
+            Console.WriteLine();
+        }
 
         // Demonstrate constant tensor creation
         Console.WriteLine("Creating constant tensors (no gradient tracking):");
@@ -198,6 +207,7 @@ public static class AutoDiffExample
         Console.WriteLine("Computation graph inspection:");
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
+        using var graphScope = GradientUtils.Grad();
         var result = a + b;
         result = result * a;
         result = ReverseGradOperations.Sum(result);
@@ -243,16 +253,19 @@ public static class AutoDiffExample
         Console.WriteLine();
 
         // Compare with backward mode on the same computation
-        var bx = new ReverseGradTensor<float>(
-            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
-            requiresGrad: true);
-        var bSquared = ReverseGradOperations.Multiply(bx, bx);
-        var bSummed = ReverseGradOperations.Sum(bSquared);
-        bSummed.Backward();
-        Console.WriteLine("Backward mode (same computation, sum(x^2)):");
-        Console.WriteLine($"  grad = [{bx.Grad![0]}, {bx.Grad[1]}, {bx.Grad[2]}]");
-        Console.WriteLine("  (Forward tangent at Sum = backward gradient magnitude = 12)");
-        Console.WriteLine();
+        using (GradientUtils.Grad())
+        {
+            var bx = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
+                requiresGrad: true);
+            var bSquared = ReverseGradOperations.Multiply(bx, bx);
+            var bSummed = ReverseGradOperations.Sum(bSquared);
+            bSummed.Backward();
+            Console.WriteLine("Backward mode (same computation, sum(x^2)):");
+            Console.WriteLine($"  grad = [{bx.Grad![0]}, {bx.Grad[1]}, {bx.Grad[2]}]");
+            Console.WriteLine("  (Forward tangent at Sum = backward gradient magnitude = 12)");
+            Console.WriteLine();
+        }
 
         // Works with activations too
         var act = ForwardGradTensor<float>.FromArray(

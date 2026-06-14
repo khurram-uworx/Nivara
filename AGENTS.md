@@ -294,25 +294,22 @@ References (implementations to inspect)
 - `src/Nivara/AutoDiff/Training/TrainingLoop.cs`
 - `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`
 
-## Active Refactoring (2026-06-14)
+## Active AutoDiff Direction (2026-06-14)
 
-The AutoDiff subsystem is being refactored to clean architectural layering.
-**Read `docs/REFACTORING.md` before modifying any AutoDiff-related code.**
-Key constraints during refactoring:
+The large architectural cleanup in `docs/REFACTORING.md` is **not** active
+for the current implementation work unless explicitly requested.
 
-- `GradTensor<T>` backs onto `Tensor<T>` (System.Numerics.Tensors), **not**
-  `NivaraColumn<T>`. No null masks in the AutoDiff layer.
-- AutoDiff operations use `GradKernels` (span-based static methods), not
-  `NivaraColumn<T>` extension methods.
-- `NivaraColumn<float>` (non-nullable) has no null mask. `NivaraColumn<float?>`
-  (nullable) uses `NullableTensorStorage<T>` with `Tensor<T> + Tensor<bool>`
-  mask. `ColumnStorageFactory` dispatches based on whether T is `Nullable<>`.
-- Activation and gradient functions (`Sigmoid`, `Tanh`, `ReLU`, `MatMul`,
-  `Transpose`, and all `*Gradient` methods) move from `NivaraTensorExtensions`
-  to `AutoDiff/Operations/GradKernels.cs`.
-- NivaraSeries keeps only labeled-wrapper functionality; tensor math removed.
-- `NivaraFrame.Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms` move to
-  `Nivara.Extensions.Tensors` (deprecation path).
-- This is a full refactor, not phased. 0.x — no backward compat obligations.
-- See `docs/AUTODIFF-PLAN.md` for the drum-machine philosophy and
-  post-refactor feature plan (NoGrad scope, state_dict/load_state_dict).
+Current product direction:
+
+- Inference is the common path and the default behavior.
+- Reverse-mode graph construction is opt-in via `using (GradientUtils.Grad())`.
+- `requiresGrad` still marks trainable tensors/parameters, but operation history
+  is only recorded while `GradientUtils.IsGradEnabled` is true.
+- Built-in training APIs (`TrainingLoop`, `DataParallelTrainer`) should enter
+  `GradientUtils.Grad()` internally so high-level training stays simple.
+- Manual training examples should wrap forward/loss/backward/optimizer code in
+  `using (GradientUtils.Grad())`.
+- Do not introduce `NoGrad` as the primary API. The intended user-facing model is
+  "predict by default, train explicitly."
+- The next planned AutoDiff feature after the Grad scope is
+  `StateDict()` / `LoadStateDict()` plus serializer helpers.
