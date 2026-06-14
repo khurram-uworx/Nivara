@@ -48,34 +48,6 @@ work. Fixed issues are reflected in source, tests, and the current API docs.
 
 ---
 
-## API & Ergonomics Gaps
-
-### E3. No forward-mode or mixed-mode AutoDiff flavor yet
-
-**Where:** `GradTensor<T>` / `ReverseGradTensor<T>` type hierarchy.
-
-**Status:** The base `GradTensor<T>` is now intentionally separated from
-reverse-mode graph behavior, but no `ForwardGradTensor<T>` or mixed-mode
-abstraction exists.
-
-**Recommendation:** Keep reverse-mode APIs explicitly named. Add a new forward
-flavor only after tangent storage, operation coverage, and null-gradient policy
-are documented.
-
----
-
-### E4. No AutoGrid integration contract
-
-**Where:** Future AutoGrid work.
-
-**Status:** AutoDiff is explicit about reverse-mode tensors, but there is no
-contract that defines how AutoGrid should consume gradients, tensors, parameter
-updates, or null masks.
-
-**Recommendation:** Before adding AutoGrid APIs, define ownership boundaries:
-who owns tensors, how gradients are zeroed, whether updates mutate or return
-new values, and how null positions flow through grid search or optimization.
-
 ---
 
 ## Testing Gaps
@@ -121,6 +93,5 @@ flavors.
 
 | Area | Important | Deferred |
 |------|-----------|----------|
-| API/Ergonomics | | E3, E4 |
 | Testing | T1, T2 | |
 | Design | | D1, D2 |

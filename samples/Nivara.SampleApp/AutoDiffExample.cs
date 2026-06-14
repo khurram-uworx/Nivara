@@ -28,6 +28,9 @@ public static class AutoDiffExample
         RunGradientUtilitiesDemo();
         Console.WriteLine();
 
+        RunForwardModeDemo();
+        Console.WriteLine();
+
         Console.WriteLine("=== Example Complete ===");
     }
 
@@ -207,5 +210,58 @@ public static class AutoDiffExample
 
         Console.WriteLine("Graph summary:");
         Console.WriteLine(GradientUtils.PrintGraphSummary(result));
+    }
+
+    private static void RunForwardModeDemo()
+    {
+        Console.WriteLine("5. Forward-Mode AutoDiff (Tangent Propagation)");
+        Console.WriteLine("----------------------------------------------");
+
+        // ForwardGradTensor computes a directional derivative (tangent)
+        // alongside the primal value — no computation graph, no backward pass.
+        // Seed a tangent on the input, then every operation propagates it.
+
+        var x = ForwardGradTensor<float>.FromArray(
+            new float[] { 1.0f, 2.0f, 3.0f },
+            new float[] { 1.0f, 1.0f, 1.0f });
+
+        Console.WriteLine($"Primal: [1, 2, 3]");
+        Console.WriteLine($"Tangent (seed): [1, 1, 1]");
+        Console.WriteLine("(Tangent = directional derivative along all-ones direction)");
+        Console.WriteLine();
+
+        // Forward propagation through operations
+        var squared = ForwardGradOperations.Multiply(x, x);
+        Console.WriteLine($"x * x: primal=[{squared[0]}, {squared[1]}, {squared[2]}], " +
+                          $"tangent=[{squared.Tangent![0]}, {squared.Tangent[1]}, {squared.Tangent[2]}]");
+        Console.WriteLine("  d(x^2)/dx = 2x => 2x * tangent = [2, 4, 6] ✓");
+        Console.WriteLine();
+
+        var summed = ForwardGradOperations.Sum(squared);
+        Console.WriteLine($"sum(x^2): primal={summed[0]}, tangent={summed.Tangent![0]}");
+        Console.WriteLine("  JVP = sum(2x * tangent) = 2 + 4 + 6 = 12 ✓");
+        Console.WriteLine();
+
+        // Compare with backward mode on the same computation
+        var bx = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }),
+            requiresGrad: true);
+        var bSquared = GradOperations.Multiply(bx, bx);
+        var bSummed = GradOperations.Sum(bSquared);
+        bSummed.Backward();
+        Console.WriteLine("Backward mode (same computation, sum(x^2)):");
+        Console.WriteLine($"  grad = [{bx.Grad![0]}, {bx.Grad[1]}, {bx.Grad[2]}]");
+        Console.WriteLine("  (Forward tangent at Sum = backward gradient magnitude = 12)");
+        Console.WriteLine();
+
+        // Works with activations too
+        var act = ForwardGradTensor<float>.FromArray(
+            new float[] { -2.0f, 0.0f, 2.0f },
+            new float[] { 1.0f, 1.0f, 1.0f });
+        var relu = ForwardGradOperations.Relu(act);
+        Console.WriteLine("Forward-mode through ReLU:");
+        Console.WriteLine($"  primal=[{relu[0]}, {relu[1]}, {relu[2]}]");
+        Console.WriteLine($"  tangent=[{relu.Tangent![0]}, {relu.Tangent[1]}, {relu.Tangent[2]}]");
+        Console.WriteLine("  (ReLU' = 0 for x <= 0, 1 for x > 0)");
     }
 }
