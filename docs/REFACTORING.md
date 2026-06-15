@@ -23,6 +23,119 @@ Therefore this refactor should preserve the user-facing direction:
 **predict by default, train explicitly**. Do not introduce `NoGrad` as the
 primary public API.
 
+## Observations
+
+These observations were gathered after the original plan and should be used
+when revising the implementation approach:
+
+- `TensorPrimitives` APIs are span-based. Inputs are generally
+  `ReadOnlySpan<T>` and outputs are `Span<T>`.
+- `TensorPrimitives` does not operate directly on `IReadOnlyMemory<T>` or
+  `ReadOnlyMemory<T>`. Memory remains useful for ownership or transport, but
+  callers should use `.Span` before invoking `TensorPrimitives`.
+- Tensor-backed paths should first try to get a contiguous
+  `ReadOnlySpan<T>` or `Span<T>` from `Tensor<T>`, `ReadOnlyTensorSpan<T>`, or
+  `TensorSpan<T>`. If that is unavailable, flatten or copy into a temporary
+  span-backed buffer before calling `TensorPrimitives`.
+- Generic `TensorPrimitives` overloads are governed by generic math
+  constraints per operation, not only by a hardcoded SIMD-supported type list.
+- SIMD support is an implementation and performance detail. The API contract
+  is the relevant generic math interface support for each operation.
+- Operation constraints vary by method:
+  - `Add`, `Subtract`, and `Multiply` use operator and identity constraints.
+  - `Exp` and `Sigmoid` use `IExponentialFunctions<T>`.
+  - `Log` uses `ILogarithmicFunctions<T>`.
+  - `Tanh` uses hyperbolic-function constraints or specific overloads,
+    depending on the package/API version.
+  - `Norm` and `CosineSimilarity` use floating/root-style constraints.
+- The current repo targets `net10.0` and references
+  `System.Numerics.Tensors` `10.0.9`.
+- Any future `GradKernels` design should use `ReadOnlySpan<T>` input and
+  `Span<T>` output signatures, not `IReadOnlyMemory<T>`.
+- The refactor should distinguish "type satisfies the API constraints" from
+  "type is SIMD-accelerated."
+- AutoDiff may not need a full raw-`Tensor<T>` rewrite to use
+  `TensorPrimitives` well. The current common path already creates
+  `NivaraColumn<T>` values through `ColumnStorageFactory`, which selects
+  `TensorStorage<T>` for supported unmanaged numeric types, and many AutoDiff
+  paths already call `TryGetSpan(...)` before using `TensorPrimitives`.
+- The stronger requirement is that AutoDiff declare its boundary explicitly:
+  tensors entering AutoDiff should be dense, non-null, numeric, and
+  span-capable/tensor-backed for the operations being performed.
+- Once that boundary is enforced, AutoDiff does not need to carry nullable
+  column semantics through the graph. Null cleaning should happen before entry
+  (`DropNulls`, `FillNull`, or explicit rejection), and gradients should remain
+  dense non-null numeric values.
+- A smaller revision may be enough: keep `NivaraColumn<T>` as the AutoDiff data
+  boundary, validate `HasNulls == false` and span/tensor capability on entry,
+  then implement internal kernels over `ReadOnlySpan<T>` and `Span<T>`. Only
+  replace AutoDiff storage with raw `Tensor<T>` if profiling or API pressure
+  proves the column wrapper is the actual problem.
+- The bigger cleanup target may be the extension-method boundary rather than
+  the storage type itself. Many methods in `src/Nivara/Tensors`, especially
+  activation, gradient, matrix, and helper operations currently used mainly by
+  AutoDiff, are written as general `NivaraColumn<T>` extensions and therefore
+  carry null-aware and mixed-storage branches. See
+  `src/Nivara/Tensors/NivaraTensorExtensions.cs` for definitions such as
+  `Exp`, `Log`, `Relu`, `Sigmoid`, `Tanh`, `Softmax`, `LogSoftmax`, `MatMul`,
+  `Transpose`, and the gradient helpers.
+- Moving AutoDiff-only tensor helpers into an AutoDiff-owned namespace/folder,
+  such as `src/Nivara/AutoDiff/Tensors`, would let those methods assume the
+  explicit AutoDiff boundary: dense, non-null, numeric, span-capable data. That
+  would simplify implementations substantially while keeping column-level
+  reductions and genuinely public tensor interop in the column/tensor layer.
+- Current AutoDiff call sites include
+  `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` and
+  `src/Nivara/AutoDiff/Operations/ForwardGradOperations.cs`, which call these
+  column extensions through expressions like `a.Data.Sigmoid()`,
+  `a.Data.Tanh()`, `a.Data.MatMul(...)`, `typedGradOutput.Transpose(...)`, and
+  gradient helpers such as `a.Data.ReluGradient(typedGradOutput)`.
+- Under that narrower refactor, the plan should separate three categories:
+  public column reductions and interop stay in `Nivara.Tensors`; obsolete
+  `NivaraSeries` tensor helpers can be removed; AutoDiff-only kernels move into
+  AutoDiff and become simpler span-based methods with no null-mask propagation.
+- A cleaner revision may be to make `GradTensor<T>`,
+  `ReverseGradTensor<T>`, and `ForwardGradTensor<T>` the explicit AutoDiff
+  boundary gates. Their constructors and factories (`FromColumn`, `FromArray`,
+  `FromMatrix`, `FromSeries`, and any future tensor/span factory) should
+  validate the AutoDiff contract once: numeric type, dense non-null data,
+  correct shape, and span/tensor capability for the needed operations.
+- Those boundary gates can pluck the required representation from constructor
+  inputs, using zero-copy access from tensor-backed `NivaraColumn<T>` where
+  available and copying only when necessary. After construction, AutoDiff
+  operations, modules, optimizers, training, and AutoDiff-owned tensor helpers
+  should use `GradTensor<T>`/span-facing APIs rather than reaching back into
+  general `NivaraColumn<T>` extension methods.
+- This may be cleaner than the lower plan's broad raw-`Tensor<T>` rewrite:
+  keep `NivaraColumn<T>` as an accepted input/output boundary, but do not make
+  it the internal abstraction every AutoDiff kernel must reason about.
+- After the `GradTensor<T>` boundary decision, the next plan areas to revisit
+  are the dependent AutoDiff plumbing: `OpNode` and `ComputationGraph`
+  gradient delegate types, `ReverseGradOperations` and `ForwardGradOperations`,
+  optimizers (`SGD`, `Adam`, `AdamW`), training/data loaders, state-dict and
+  model serialization, initializers, and cleanup of remaining tensor helpers.
+  The important question for those sections is whether they should use raw
+  `Tensor<T>` directly, or a `GradTensor<T>`/span-facing internal abstraction
+  that already enforces the AutoDiff boundary.
+- Future Streamix interop should influence the AutoDiff/tensor boundary.
+  Streamix pipelines are `IAsyncEnumerable<T>`-based, windowed,
+  cancellation-aware, error-aware, and backpressure-sensitive, so Nivara should
+  expose clean frame/window-to-column/tensor conversion boundaries without
+  requiring `ReadOnlySpan<T>`, `Span<T>`, or `TensorSpan<T>` to escape across
+  `await`, `yield`, channel, or stream-window boundaries. Spans should be
+  acquired and consumed inside synchronous kernel calls only.
+- Streamix windows can materialize to `NivaraFrame`, transformations can
+  produce derived columns, and prediction should enter inference through the
+  same dense non-null `GradTensor<T>`/span-facing boundary. Keep Streamix
+  integration out of Nivara core unless there is a strong reason otherwise;
+  prefer an adapter or extension package that provides operators such as
+  `ToFrame()`, `ToTensor<T>()`, and `Predict(...)` while preserving Streamix
+  ordering, cancellation, error, and backpressure semantics.
+- The refactor should preserve inference as the cheap/default path for
+  streaming prediction. `Predict(...)` over Streamix windows should not build
+  reverse-mode graphs unless explicitly inside `GradientUtils.Grad()` or a
+  training API.
+
 ## Discussion points
 
 Before implementation, align on these decisions:

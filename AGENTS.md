@@ -294,7 +294,7 @@ References (implementations to inspect)
 - `src/Nivara/AutoDiff/Training/TrainingLoop.cs`
 - `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`
 
-## Active AutoDiff Direction (2026-06-14)
+## Active AutoDiff Direction
 
 The large architectural cleanup in `docs/REFACTORING.md` is **not** active
 for the current implementation work unless explicitly requested.
