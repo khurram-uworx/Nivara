@@ -8,7 +8,7 @@ Beyond the core autograd engine, Nivara delivers a full training stack: module s
 
 ## Icebreaker: Honest comparison with PyTorch
 
-A cross-framework parity exercise (see `examples/README.md`) trained an
+A cross-framework parity exercise (see `samples/README.md`) trained an
 identical 3-layer MLP in both Nivara and PyTorch and compared results.
 
 **Correctness: proven.** Loss curves match within 0.04% relative diff across

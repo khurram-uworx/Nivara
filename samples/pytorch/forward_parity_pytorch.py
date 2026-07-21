@@ -6,10 +6,10 @@ using PyTorch's forward-mode AD (torch.autograd.forward_ad), then
 saves inputs, seeds, and JVP results to JSON for Nivara to validate.
 
 Usage:
-    python examples/pytorch/forward_parity_pytorch.py
+    python samples/pytorch/forward_parity_pytorch.py
 
 Output:
-    examples/data/jvp_cases.json  — consumed by ForwardParityExample (Nivara)
+    samples/data/jvp_cases.json  — consumed by ForwardParityExample (Nivara)
 """
 
 import json

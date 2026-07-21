@@ -80,30 +80,30 @@ trajectories are nearly identical.
 ### Step 1 — Generate synthetic fraud data
 
 ```powershell
-python examples/data/generate_fraud_data.py
+python samples/data/generate_fraud_data.py
 ```
 
 **Output files:**
 
 | File | Contents |
 |------|----------|
-| `examples/data/train_fraud.csv` | 1000 training rows, ~86% fraud rate |
-| `examples/data/test_fraud.csv` | 100 test rows, ~89% fraud rate |
+| `samples/data/train_fraud.csv` | 1000 training rows, ~86% fraud rate |
+| `samples/data/test_fraud.csv` | 100 test rows, ~89% fraud rate |
 
 ### Step 2 — Train the PyTorch reference model
 
 ```powershell
-python examples/pytorch/train_fraud_pytorch.py
+python samples/pytorch/train_fraud_pytorch.py
 ```
 
-**Output files in `examples/data/` (shared inputs for Nivara):**
+**Output files in `samples/data/` (shared inputs for Nivara):**
 
 | File | Contents |
 |------|----------|
 | `norm_params.json` | Z-score means/stds from PyTorch |
 | `initial_weights.json` | Seeded initial weights (Nivara loads this) |
 
-**Output files in `examples/pytorch/` (training results):**
+**Output files in `samples/pytorch/` (training results):**
 
 | File | Contents |
 |------|----------|
@@ -124,7 +124,7 @@ batch=32, 50 epochs). Nivara's `TrainingLoop` handles gradient tracking
 internally, so the sample's inference pass after training runs without a
 computation graph.
 
-**Output files in `examples/pytorch/`:**
+**Output files in `samples/pytorch/`:**
 
 | File | Contents |
 |------|----------|
@@ -215,14 +215,14 @@ compares its results against the PyTorch reference.
 ### Step 1 — Generate PyTorch reference JVPs
 
 ```powershell
-python examples/pytorch/forward_parity_pytorch.py
+python samples/pytorch/forward_parity_pytorch.py
 ```
 
 **Output file:**
 
 | File | Contents |
 |------|----------|
-| `examples/data/jvp_cases.json` | 6 test cases: inputs, seeds, primal, JVP |
+| `samples/data/jvp_cases.json` | 6 test cases: inputs, seeds, primal, JVP |
 
 **Test cases covered:**
 

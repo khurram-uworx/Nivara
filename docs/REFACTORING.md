@@ -175,7 +175,7 @@ architectural layering drifted.
 of gradient primitives that make the 70–80% case feel complete. It is not
 a PyTorch replacement and should not chase feature parity (no Conv, no
 RNN, no LR schedulers, no AMP, no GPU). The current user-facing API and
-exclusion rationale now live in `docs/AUTODIFF.md`; `examples/README.md`
+exclusion rationale now live in `docs/AUTODIFF.md`; `samples/README.md`
 contains the parity proofs.
 
 **Gardening principle**: subtract → become lean → grow. Remove bad

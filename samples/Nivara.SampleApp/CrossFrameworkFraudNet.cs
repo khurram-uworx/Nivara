@@ -10,7 +10,7 @@ using System.Text.Json;
 namespace Nivara.SampleApp;
 
 /// <summary>
-/// Cross-framework FraudNet — corresponds to examples/pytorch/train_fraud_pytorch.py.
+/// Cross-framework FraudNet — corresponds to samples/pytorch/train_fraud_pytorch.py.
 ///
 /// Trains a 3-layer MLP on synthetic fraud data using BCEWithLogitsLoss + Adam.
 /// Run the PyTorch example first to generate input CSVs.
@@ -87,10 +87,10 @@ class FraudNet : Module<float>
 public static class CrossFrameworkFraudNet
 {
     static string DataDir => Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples", "data"));
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "data"));
 
     static string OutDir => Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples", "pytorch"));
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "pytorch"));
 
     static readonly string[] FeatureCols =
         ["amount", "hour", "distance", "prev_attempts",

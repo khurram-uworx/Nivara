@@ -9,14 +9,14 @@ public class ForwardCrossFrameworkParityTests
     static string RepoRoot => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
-    static string DataDir => Path.Combine(RepoRoot, "examples", "data");
+    static string DataDir => Path.Combine(RepoRoot, "samples", "data");
 
     [Test]
     public void JvpCasesFile_Exists()
     {
         var path = Path.Combine(DataDir, "jvp_cases.json");
         Assert.That(File.Exists(path), Is.True,
-            "jvp_cases.json not found. Run: python examples/pytorch/forward_parity_pytorch.py");
+            "jvp_cases.json not found. Run: python samples/pytorch/forward_parity_pytorch.py");
     }
 
     [Test]
@@ -140,7 +140,7 @@ public class ForwardCrossFrameworkParityTests
     {
         var path = Path.Combine(DataDir, "jvp_cases.json");
         if (!File.Exists(path))
-            Assert.Ignore("jvp_cases.json not found — run python examples/pytorch/forward_parity_pytorch.py first");
+            Assert.Ignore("jvp_cases.json not found — run python samples/pytorch/forward_parity_pytorch.py first");
         return JsonDocument.Parse(File.ReadAllBytes(path));
     }
 

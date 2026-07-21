@@ -7,7 +7,7 @@ namespace Nivara.SampleApp;
 public static class ForwardParityExample
 {
     static string DataDir => Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "examples", "data"));
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "data"));
 
     public static void Run()
     {
@@ -18,7 +18,7 @@ public static class ForwardParityExample
         if (!File.Exists(jvpPath))
         {
             Console.WriteLine("No jvp_cases.json found. Run the PyTorch script first:");
-            Console.WriteLine("  python examples/pytorch/forward_parity_pytorch.py");
+            Console.WriteLine("  python samples/pytorch/forward_parity_pytorch.py");
             return;
         }
 

@@ -9,8 +9,8 @@ public class CrossFrameworkParityTests
     static string RepoRoot => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
-    static string DataDir => Path.Combine(RepoRoot, "examples", "data");
-    static string OutDir => Path.Combine(RepoRoot, "examples", "pytorch");
+    static string DataDir => Path.Combine(RepoRoot, "samples", "data");
+    static string OutDir => Path.Combine(RepoRoot, "samples", "pytorch");
 
     [Test]
     public void LossCurves_AreWithinOnePercentRelativeDifference()
@@ -21,7 +21,7 @@ public class CrossFrameworkParityTests
         if (!File.Exists(pytPath) || !File.Exists(nivPath))
             Assert.Ignore(
                 "Run the Python and Nivara training scripts first. " +
-                "See examples/README.md for setup instructions.");
+                "See samples/README.md for setup instructions.");
 
         var pytLosses = JsonSerializer.Deserialize<double[]>(File.ReadAllBytes(pytPath))!;
         var nivLosses = JsonSerializer.Deserialize<double[]>(File.ReadAllBytes(nivPath))!;
@@ -50,7 +50,7 @@ public class CrossFrameworkParityTests
         if (!File.Exists(pytPath) || !File.Exists(nivPath))
             Assert.Ignore(
                 "Run the Python and Nivara training scripts first. " +
-                "See examples/README.md for setup instructions.");
+                "See samples/README.md for setup instructions.");
 
         var pytLosses = JsonSerializer.Deserialize<double[]>(File.ReadAllBytes(pytPath))!;
         var nivLosses = JsonSerializer.Deserialize<double[]>(File.ReadAllBytes(nivPath))!;
@@ -70,7 +70,7 @@ public class CrossFrameworkParityTests
         if (!File.Exists(pytPath) || !File.Exists(nivPath))
             Assert.Ignore(
                 "Run the Python and Nivara training scripts first. " +
-                "See examples/README.md for setup instructions.");
+                "See samples/README.md for setup instructions.");
 
         var pytLines = File.ReadAllLines(pytPath);
         var nivLines = File.ReadAllLines(nivPath);
@@ -102,7 +102,7 @@ public class CrossFrameworkParityTests
 
         if (!File.Exists(initPath) || !File.Exists(normPath))
             Assert.Ignore(
-                "Run the PyTorch training script first (Step 3 in examples/README.md) " +
+                "Run the PyTorch training script first (Step 3 in samples/README.md) " +
                 "to generate initial_weights.json and norm_params.json.");
 
         var weights = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(

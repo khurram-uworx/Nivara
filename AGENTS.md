@@ -1,5 +1,11 @@
 # Guidance for AI-assisted coding
 
+## Facts & Research
+
+- Nivara AutoDiff product direction updated: inference is the default/common path; reverse-mode training is opt-in via using (GradientUtils.Grad()). Do not implement NoGrad as the primary API. Built-in training loops should enter Grad() internally, while manual training examples/docs should wrap forward/loss/backward/optimizer code in Grad(). <!-- id=46e6ece9693740e49c42877dcc92abab entity=default type=fact ts=2026-06-14T14:10:17.7172876+00:00 v=1 tags=Nivara,AutoDiff,GradScope,inference-default -->
+- Nivara AutoDiff refactor plan: first complete architectural cleanup from docs/REFACTORING.md (GradTensor backed by System.Numerics.Tensors.Tensor<T>, no NivaraColumn/null masks in AutoDiff, GradKernels span-based ops, nullable column storage split) before implementing docs/AUTODIFF-PLAN.md features. Post-cleanup features are NoGrad via ambient AsyncLocal-style scope and Module StateDict/LoadStateDict plus serializer wrappers. <!-- id=3fec03ab399d47b7a6e7450785292834 entity=default type=fact ts=2026-06-14T13:51:53.8257787+00:00 v=1 tags=Nivara,AutoDiff,refactor,planning -->
+- Key BCL .NET 10 tensor patterns found via MS Learn: TensorPrimitives now generic (200+ overloads for any INumber/IRootFunctions T), ReadOnlyTensorSpan<T> with TryGetSpan, implicit conversion from T[] to ReadOnlyTensorSpan<T>, Tensor<T> stable in .NET 10. Spans are the currency. <!-- id=8e2b4e3243a847899af3c2d8ce7acceb entity=default type=research ts=2026-06-08T05:58:48.7959337+00:00 v=1 tags=MSLearn,BCL,tensor,patterns -->
+
 ## Shell environment (Windows with GNU coreutils)
 
 This environment has GNU coreutils at `C:\Program Files\coreutils\bin\` on PATH. Most Linux commands work directly (`grep`, `find`, `touch`, `sort`, `head`, `tail`, `wc`, `cat`, `ls`, `rm`, `mv`, `cp`). PowerShell aliases map `rm`/`mv`/`cp`/`cat`/`ls` to their PowerShell cmdlet equivalents, which behave similarly for basic file operations. Use normal command syntax — avoid verbose PowerShell idioms like `Remove-Item -LiteralPath`.
