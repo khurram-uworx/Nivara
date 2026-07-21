@@ -946,4 +946,75 @@ public class NnTests
         Assert.That(parameters.ContainsKey("Weight"), Is.True);
         Assert.That(parameters["Weight"].Length, Is.EqualTo(40));
     }
+
+    [Test]
+    public void SparseEmbedding_Forward_SumsRowsPerBatch()
+    {
+        using var emb = new SparseEmbedding<float>(5, 3);
+        emb.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(
+            [
+                1f, 2f, 3f,
+                4f, 5f, 6f,
+                7f, 8f, 9f,
+                10f, 11f, 12f,
+                13f, 14f, 15f
+            ],
+            5,
+            3,
+            requiresGrad: true);
+
+        var indices = ReverseGradTensor<float>.FromArray([0f, 2f, -1f, 1f, 3f, 4f]);
+        indices.Reshape(2, 3);
+
+        var result = emb.Forward(indices);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 3 }));
+        Assert.That(result.Data[0], Is.EqualTo(8f).Within(1e-6f));
+        Assert.That(result.Data[1], Is.EqualTo(10f).Within(1e-6f));
+        Assert.That(result.Data[2], Is.EqualTo(12f).Within(1e-6f));
+        Assert.That(result.Data[3], Is.EqualTo(27f).Within(1e-6f));
+        Assert.That(result.Data[4], Is.EqualTo(30f).Within(1e-6f));
+        Assert.That(result.Data[5], Is.EqualTo(33f).Within(1e-6f));
+    }
+
+    [Test]
+    public void SparseEmbedding_Backward_DuplicateIndicesAccumulateAndPaddingIsIgnored()
+    {
+        using var emb = new SparseEmbedding<float>(4, 2);
+        var indices = ReverseGradTensor<float>.FromArray([1f, 1f, -1f, 2f]);
+        indices.Reshape(2, 2);
+
+        var result = emb.Forward(indices);
+        var grad = ReverseGradTensor<float>.FromArray([1f, 1f, 2f, 2f]);
+        grad.Reshape(2, 2);
+        result.Backward(grad);
+
+        var weightGrad = emb.Weight.Grad;
+        Assert.That(weightGrad, Is.Not.Null);
+        Assert.That(weightGrad![0], Is.EqualTo(0f).Within(1e-6f));
+        Assert.That(weightGrad[1], Is.EqualTo(0f).Within(1e-6f));
+        Assert.That(weightGrad[2], Is.EqualTo(2f).Within(1e-6f));
+        Assert.That(weightGrad[3], Is.EqualTo(2f).Within(1e-6f));
+        Assert.That(weightGrad[4], Is.EqualTo(2f).Within(1e-6f));
+        Assert.That(weightGrad[5], Is.EqualTo(2f).Within(1e-6f));
+    }
+
+    [Test]
+    public void SparseEmbedding_Forward_OutOfRangeIndex_Throws()
+    {
+        using var emb = new SparseEmbedding<float>(4, 2);
+        var indices = ReverseGradTensor<float>.FromArray([0f, 4f]);
+        indices.Reshape(1, 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => emb.Forward(indices));
+    }
+
+    [Test]
+    public void SparseEmbedding_Forward_RequiresTwoDimensionalInput()
+    {
+        using var emb = new SparseEmbedding<float>(4, 2);
+        var indices = ReverseGradTensor<float>.FromArray([0f, 1f]);
+
+        Assert.Throws<ArgumentException>(() => emb.Forward(indices));
+    }
 }

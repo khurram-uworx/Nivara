@@ -300,6 +300,50 @@ public class GradOperationsTests
     }
 
     [Test]
+    public void ReverseGradTensor_Reshape_NegativeOne_InfersDimension()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6 });
+        var tensor = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        tensor.Reshape(-1, 3);
+
+        Assert.That(tensor.Rank, Is.EqualTo(2));
+        Assert.That(tensor.Shape, Is.EqualTo(new[] { 2, 3 }));
+        Assert.That(tensor.Data[0], Is.EqualTo(1f));
+        Assert.That(tensor.Data[5], Is.EqualTo(6f));
+    }
+
+    [Test]
+    public void ReverseGradTensor_Reshape_FirstDimNegativeOne_InfersCorrectly()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6 });
+        var tensor = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        tensor.Reshape(3, -1);
+
+        Assert.That(tensor.Shape, Is.EqualTo(new[] { 3, 2 }));
+    }
+
+    [Test]
+    public void ReverseGradTensor_Reshape_MultipleNegativeOnes_Throws()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4 });
+        var tensor = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        Assert.Throws<ArgumentException>(() => tensor.Reshape(-1, -1));
+    }
+
+    [Test]
+    public void ReverseGradTensor_Reshape_NegativeOne_Incompatible_Throws()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5 });
+        var tensor = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        var ex = Assert.Throws<ArgumentException>(() => tensor.Reshape(-1, 3));
+        Assert.That(ex.Message, Does.Contain("Cannot infer"));
+    }
+
+    [Test]
     public void Add_PreservesInputShape()
     {
         // Arrange

@@ -2,7 +2,7 @@
 
 This folder contains sample projects and documentation demonstrating Nivara's capabilities in .NET-native machine learning.
 
-## [1-PyTorch.md](1-PyTorch.md) — Cross-Framework Parity: PyTorch ↔ Nivara
+## [PyTorch.md](PyTorch.md) — Cross-Framework Parity: PyTorch ↔ Nivara
 
 Nivara provides .NET developers correct autograd without leaving the ecosystem — no Python runtime, no 900 MB PyTorch install, no GPU required. These parity examples prove it: for CPU-based training, inference, and gradient computation, Nivara's forward and backward autograd produce effectively identical results to PyTorch.
 
@@ -12,7 +12,7 @@ The examples include:
 
 Results show <0.04% loss-curve divergence and 1e-5 JVP tolerance.
 
-## [2-MicroGpt.md](2-MicroGpt.md) — Character-level Transformer on Nivara AutoDiff
+## [MicroGpt/README.md](MicroGpt/README.md) — Character-level Transformer on Nivara AutoDiff
 
 A faithful per-position port of Andrej Karpathy's microgpt.py that trains a miniature GPT language model on the makemore names dataset (~32K names). This is the first Nivara showcase example, proving that Nivara's AutoDiff engine can train a real transformer — not just MLPs — with correct gradients, comparable performance to PyTorch (2.4× faster on CPU), and no external dependencies beyond the Nivara core library.
 
@@ -20,6 +20,12 @@ Key characteristics:
 - Per-position forward/backward (not batched) — each token attends only to cached past tokens
 - Weight tying by default (output projection reuses token embedding matrix)
 - Uses `Embedding<T>`, `Linear<T>`, RMSNorm, SoftmaxList, and ConcatHeads via PadRight/PadLeft selection matrices
+
+## [NivaraChess/README.md](NivaraChess/README.md) — Neural Chess Position Evaluator
+
+Trains a neural network to evaluate chess positions using Nivara's autograd engine. Demonstrates non-NLP use of the library: sparse embeddings (`SparseEmbedding<T>` for NNUE halfKP features), Stockfish knowledge distillation via UCI, and `IEmbeddingGenerator<T>` integration.
+
+Three phases: material counting (MLP), NNUE halfKP (sparse embedding), and Stockfish-labeled training. Includes save/load, interactive REPL, UCI engine mode, and embedding demo.
 
 ---
 

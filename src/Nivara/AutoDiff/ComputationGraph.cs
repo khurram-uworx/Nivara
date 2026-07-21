@@ -27,8 +27,6 @@ public sealed class ComputationGraph
             throw new InvalidOperationException("Cannot perform backward pass on tensor that doesn't require gradients");
         }
 
-        ValidateGraph(tensor);
-
         if (gradient == null)
         {
             if (tensor.Length == 1)
@@ -43,91 +41,69 @@ public sealed class ComputationGraph
 
         tensor.Grad = gradient;
 
-        var nodeToOutputMap = new Dictionary<OpNode<T>, ReverseGradTensor<T>>();
-        BuildNodeToOutputMap(tensor, nodeToOutputMap);
+        var plan = BuildBackwardPlan(tensor);
 
-        var nodes = TopologicalSort(tensor);
-
-        foreach (var node in nodes.AsEnumerable().Reverse())
+        for (int i = plan.Nodes.Count - 1; i >= 0; i--)
         {
-            if (!nodeToOutputMap.TryGetValue(node, out var outputTensor))
-            {
-                throw new InvalidOperationException($"Could not find output tensor for operation '{node.OperationName}'");
-            }
-
+            var node = plan.Nodes[i];
+            var outputTensor = plan.NodeToOutputMap[node];
             var outputGrad = outputTensor.Grad;
-            if (outputGrad == null)
-            {
-                continue;
-            }
 
-            try
-            {
-                node.Apply(outputGrad, stripGradientNulls);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Failed to apply gradients for operation '{node.OperationName}': {ex.Message}", ex);
-            }
+            if (outputGrad == null)
+                continue;
+
+            node.Apply(outputGrad, stripGradientNulls);
         }
     }
 
-    private static void BuildNodeToOutputMap<T>(ReverseGradTensor<T> tensor, Dictionary<OpNode<T>, ReverseGradTensor<T>> nodeToOutputMap)
-        where T : struct, INumber<T>
+    readonly struct BackwardPlan<T> where T : struct, INumber<T>
     {
-        var visited = new HashSet<ReverseGradTensor<T>>();
+        public readonly List<OpNode<T>> Nodes;
+        public readonly Dictionary<OpNode<T>, ReverseGradTensor<T>> NodeToOutputMap;
 
-        void Visit(ReverseGradTensor<T> t)
+        public BackwardPlan(List<OpNode<T>> nodes, Dictionary<OpNode<T>, ReverseGradTensor<T>> nodeToOutputMap)
         {
-            if (visited.Contains(t))
+            Nodes = nodes;
+            NodeToOutputMap = nodeToOutputMap;
+        }
+    }
+
+    private static BackwardPlan<T> BuildBackwardPlan<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
+    {
+        var visited = new HashSet<OpNode<T>>();
+        var visiting = new HashSet<OpNode<T>>();
+        var result = new List<OpNode<T>>();
+        var nodeToOutput = new Dictionary<OpNode<T>, ReverseGradTensor<T>>();
+
+        void VisitTensors(ReverseGradTensor<T> t)
+        {
+            if (t.GradFn == null)
                 return;
 
-            visited.Add(t);
+            nodeToOutput[t.GradFn] = t;
 
-            if (t.GradFn != null)
+            foreach (var input in t.GradFn.Inputs)
             {
-                nodeToOutputMap[t.GradFn] = t;
-
-                foreach (var input in t.GradFn.Inputs)
-                {
-                    if (input is ReverseGradTensor<T> inputTensor)
-                    {
-                        Visit(inputTensor);
-                    }
-                }
+                if (input is ReverseGradTensor<T> inputTensor)
+                    VisitTensors(inputTensor);
             }
         }
 
-        Visit(tensor);
-    }
-
-    internal static List<OpNode<T>> TopologicalSort<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
-    {
-        if (root == null)
-            throw new ArgumentNullException(nameof(root));
-
-        var visited = new HashSet<OpNode<T>>();
-        var result = new List<OpNode<T>>();
-        var visiting = new HashSet<OpNode<T>>();
-
-        void Visit(OpNode<T>? node)
+        void VisitNodes(OpNode<T>? node)
         {
             if (node == null || visited.Contains(node))
                 return;
 
             if (visiting.Contains(node))
-            {
-                throw new InvalidOperationException($"Circular dependency detected in computation graph at operation '{node.OperationName}'");
-            }
+                throw new InvalidOperationException(
+                    $"Circular dependency detected in computation graph at operation '{node.OperationName}'");
 
             visiting.Add(node);
 
             foreach (var input in node.Inputs)
             {
                 if (input is ReverseGradTensor<T> gradTensor && gradTensor.GradFn != null)
-                {
-                    Visit(gradTensor.GradFn);
-                }
+                    VisitNodes(gradTensor.GradFn);
             }
 
             visiting.Remove(node);
@@ -135,8 +111,18 @@ public sealed class ComputationGraph
             result.Add(node);
         }
 
-        Visit(root.GradFn);
-        return result;
+        VisitTensors(root);
+        VisitNodes(root.GradFn);
+
+        return new BackwardPlan<T>(result, nodeToOutput);
+    }
+
+    internal static List<OpNode<T>> TopologicalSort<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
+    {
+        if (root == null)
+            throw new ArgumentNullException(nameof(root));
+
+        return BuildBackwardPlan(root).Nodes;
     }
 
     internal static void ValidateGraph<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
@@ -144,14 +130,7 @@ public sealed class ComputationGraph
         if (root == null)
             throw new ArgumentNullException(nameof(root));
 
-        try
-        {
-            TopologicalSort(root);
-        }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("Circular dependency"))
-        {
-            throw new InvalidOperationException("Computation graph contains circular dependencies, which would cause infinite loops during backward pass", ex);
-        }
+        BuildBackwardPlan(root);
     }
 
     public static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
@@ -159,14 +138,13 @@ public sealed class ComputationGraph
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
 
-        var visited = new HashSet<object>();
+        var visited = new HashSet<ReverseGradTensor<T>>();
 
         void ClearGradients(ReverseGradTensor<T> t)
         {
-            if (visited.Contains(t))
+            if (!visited.Add(t))
                 return;
 
-            visited.Add(t);
             t.ZeroGrad();
 
             if (t.GradFn != null)

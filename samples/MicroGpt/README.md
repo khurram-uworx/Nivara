@@ -2,6 +2,20 @@
 
 A miniature GPT language model implemented using Nivara's tensor-based AutoDiff engine. Faithful per-position port of [Andrej Karpathy's microgpt.py](https://gist.github.com/karpathy/8627fe009c40f57531cb18360106ce95), learning to generate human names character-by-character.
 
+This is the first Nivara showcase example. It proves that Nivara's AutoDiff engine can train a real transformer — not just MLPs — with correct gradients, comparable performance to PyTorch (2.4× faster on CPU), and no external dependencies beyond the Nivara core library.
+
+## How to run
+
+```bash
+cd samples/MicroGpt
+dotnet run
+```
+
+With Karpathy's hyperparameters (for A vs C comparison):
+```bash
+dotnet run -- --block-size 16 --beta1 0.85 --beta2 0.99 --init-std 0.08 --no-weight-tying --lr-decay --temperature 0.5 --samples 20
+```
+
 ## Architecture
 
 ```
@@ -94,6 +108,36 @@ Nivara's tensor operations (MatMul, TensorPrimitives kernels) are faster than sc
 | `Slice` | `ReverseGradOperations.cs` | Differentiable sub-tensor extraction via selection matrix |
 | `Embedding<T>` | `AutoDiff/Nn/Embedding.cs` | Token embedding lookup (one-hot + MatMul) |
 
+## How the training loop works
+
+```
+for each step:
+    pick a random name document
+    tokenize → list of ints with BOS/EOS
+    sequence length = min(doc length, blockSize - 1)
+
+    using (GradientUtils.Grad()):
+        new KV cache lists per layer
+        for each position t in sequence:
+            logits = model.Forward(token[t], t, keys, values)
+            loss = NLL(logits, target_token[t+1])
+            scaledLoss.Backward()         // per-position backward
+            lossVal += scaledLoss.Data[0]
+        optimizer.Step()
+        optimizer.ZeroGrad()
+```
+
+The per-position backward pattern is specific to MicroGpt — it backprops each token's loss immediately rather than accumulating all positions. This matches the original AutoGrad-Engine approach and keeps peak memory low.
+
+## How inference/generation works
+
+- Start with `[BOS]` token
+- At each position, run `model.Forward(token[pos], pos, keys, values)` with gradient tracking disabled
+- Apply softmax with temperature to the output logits
+- Sample from the probability distribution
+- Append to token list; stop at `[EOS]` or blockSize
+- Decode tokens (skip BOS/EOS) back to characters
+
 ## Design Decisions
 
 1. **Per-position (faithful) approach** — matches AutoGrad-Engine exactly, processing one token at a time with KV cache. Not batched causal attention.
@@ -107,3 +151,7 @@ Nivara's tensor operations (MatMul, TensorPrimitives kernels) are faster than sc
 5. **Direct loss computation** — uses `LogSoftmax + MatMul(one_hot_selector) + Negate` instead of `CrossEntropyLoss<T>` to avoid shape compatibility issues and simplify the graph.
 
 6. **No Module<T> inheritance** — MicroGptModel manages parameters explicitly via `List<Parameter<T>>` for clarity over the module system's `GetParameters()` dictionary.
+
+## Relationship to other examples
+
+MicroGpt is the **training** showcase — it proves Nivara can train a transformer. The NivaraChatClient example (`samples/NivaraChatClient.md`) is the **serving/integration** showcase — it shows how a trained Nivara model participates in a Microsoft Agent Framework workflow alongside an LLM. They are complementary: MicroGpt trains the model, NivaraChatClient puts it to work.
