@@ -88,7 +88,7 @@ public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
     Embedding<T> CreateEmbedding(string name, int num, int dim)
     {
         var emb = new Embedding<T>(num, dim);
-        allParams.AddRange(emb.Parameters);
+        allParams.AddRange(emb.GetParameters().Values);
         return emb;
     }
 

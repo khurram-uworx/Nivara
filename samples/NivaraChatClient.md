@@ -59,17 +59,13 @@ The workflow graph is defined once in `WorkflowBuilder` and all routing is type-
 
 ### What this discovers and fixes in Nivara's library (Gaps)
 
-#### Gap 1: Embedding\<T\> does not extend Module\<T\>
+#### Gap 1: ~~Embedding\<T\> does not extend Module\<T\>~~ **RESOLVED**
 
-**Problem:** `Embedding<T>` implements `IDisposable` but not `Module<T>`. It cannot be used with `TrainingLoop<T>`, `StateDict()`, `LoadStateDict()`, or `ModelSerializer`.
+`Embedding<T>` now extends `Module<T>`. It registers its weight via `RegisterParameters`, inherits `StateDict()`/`LoadStateDict()`, `Train()`/`Eval()`, and `GetParameters()`. The `Forward(int tokenId)` convenience method remains; `Forward(ReverseGradTensor<T>)` (the `Module<T>` override) extracts a scalar int and delegates. The batch `Forward(ReverseGradTensor<T> tokenIds)` for multi-token lookup still depends on a future Gather operation (see Gap 2).
 
-**Fix:** Change `Embedding<T>` from `IDisposable` to `Module<T>`. Remove its own `Parameters` property (inherited from `Module<T>`). Remove its own weights list (use Module's built-in `RegisterParameters`). The `Forward(int)` method remains; add a batch `Forward(ReverseGradTensor<T> tokenIds)` method (see Gap 2).
+#### Gap 2: ~~Embedding\<T\> has no batch/lookup Forward for token IDs~~ **RESOLVED**
 
-#### Gap 2: Embedding\<T\> has no batch/lookup Forward for token IDs
-
-**Problem:** `Embedding<T>.Forward(int)` only supports single token lookup. A batched transformer needs `Embedding<T>.Forward(ReverseGradTensor<T> tokenIds)`.
-
-**Fix:** Add `Forward(ReverseGradTensor<T> tokenIds)` where `tokenIds` is an integer tensor `[B, L]`. The implementation uses Gather (preferred) or one-hot + MatMul (fallback) to select embeddings.
+`Embedding<T>.Forward(ReverseGradTensor<T> tokenIds)` now accepts `[L]` or `[B, L]` integer token ID tensors and returns `[L, nEmbd]` or `[B, L, nEmbd]`. Implementation uses batched one-hot + single MatMul. For large vocabularies, a `Gather` operation (Gap C in README.md) would replace the one-hot expansion.
 
 #### Gap 3: CrossEntropyLoss already exists — reuse
 

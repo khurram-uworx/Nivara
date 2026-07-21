@@ -235,15 +235,12 @@ selection matrices as a workaround, which is O(n²).
 supports concatenating along a specified dimension with proper gradient
 split in the backward pass.
 
-### Gap 4: No Gather operation
+### Gap 4: ~~No Gather operation~~ **PARTIALLY RESOLVED**
 
-**Problem:** Autoregressive generation selects the next token logits
-from the full `[B, L, V]` output. Without a Gather op, this requires
-one-hot + Sum or similar workaround.
-
-**Fix:** Add `ReverseGradOperations.Gather<T>(tensor, indices, dim)`
-that selects elements along a dimension. The backward pass scatters
-gradients back using the same indices.
+Batched embedding lookup (`Embedding<T>.Forward(ReverseGradTensor<T>)`) is implemented
+via batched one-hot + single MatMul. For token selection during autoregressive generation
+(selecting next-token logits from `[B, L, V]`), a formal `Gather` op is still needed.
+The one-hot fallback is acceptable for small-to-medium vocabularies.
 
 ### Gap 5: No LayerNorm op (see Gap 1)
 
@@ -259,9 +256,9 @@ entire tensor.
 parameter. For rank-3 tensors `[B, L, D]`, `dim=2` softmaxes each
 feature vector of length D independently.
 
-### Gap 7: Embedding<T> not a Module<T>
+### Gap 7: ~~Embedding<T> not a Module<T>~~ **RESOLVED**
 
-Same gap as identified in the TextClassifier design.
+`Embedding<T>` now extends `Module<T>` (see NivaraChatClient.md Gap 1).
 
 ### Gap 8: Position encoding
 
