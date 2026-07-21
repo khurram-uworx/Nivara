@@ -138,8 +138,8 @@ public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
                 var qHead = ReverseGradOperations.Slice(q, hs, headDim);
 
                 // Per-position scores and value slices
-                    var scores = new List<ReverseGradTensor<T>>(cacheLen);
-                    var vSlices = new List<ReverseGradTensor<T>>(cacheLen);
+                var scores = new List<ReverseGradTensor<T>>(cacheLen);
+                var vSlices = new List<ReverseGradTensor<T>>(cacheLen);
 
                 for (int t = 0; t < cacheLen; t++)
                 {

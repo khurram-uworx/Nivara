@@ -1,5 +1,5 @@
-using Nivara.Helpers;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Helpers;
 using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;

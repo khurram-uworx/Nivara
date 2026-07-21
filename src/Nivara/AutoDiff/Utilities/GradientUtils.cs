@@ -3,7 +3,6 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Text;
-using System.Threading;
 
 namespace Nivara.AutoDiff.Utilities;
 

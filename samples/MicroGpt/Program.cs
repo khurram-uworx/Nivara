@@ -5,7 +5,6 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
-using System.Net.Http;
 
 int nEmbd = 16;
 int nLayer = 1;

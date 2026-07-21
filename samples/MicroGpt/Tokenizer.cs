@@ -12,7 +12,7 @@ public class Tokenizer
     public Tokenizer(List<string> docs)
     {
         var allChars = new SortedSet<char>(string.Join("", docs).ToCharArray());
-        Chars = [ "<BOS>", "<EOS>" ];
+        Chars = ["<BOS>", "<EOS>"];
         Chars.AddRange(allChars.Select(c => c.ToString()));
         VocabSize = Chars.Count;
 
