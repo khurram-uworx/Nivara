@@ -1,11 +1,13 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace NivaraChess;
 
 public sealed class StockfishEvaluator : IDisposable
 {
-    readonly Process process;
+    readonly string stockfishPath;
     readonly object sync = new();
+    Process? process;
     bool disposed;
 
     public StockfishEvaluator(string stockfishPath, int depth = 16)
@@ -13,8 +15,16 @@ public sealed class StockfishEvaluator : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(stockfishPath);
         if (depth <= 0) throw new ArgumentOutOfRangeException(nameof(depth));
 
+        this.stockfishPath = stockfishPath;
         Depth = depth;
 
+        StartStockfish();
+    }
+
+    public int Depth { get; }
+
+    void StartStockfish()
+    {
         process = new Process
         {
             StartInfo = new ProcessStartInfo
@@ -23,16 +33,39 @@ public sealed class StockfishEvaluator : IDisposable
                 UseShellExecute = false,
                 RedirectStandardInput = true,
                 RedirectStandardOutput = true,
+                RedirectStandardError = true,
                 CreateNoWindow = true,
             }
         };
 
+        process.ErrorDataReceived += (_, _) => { };
         process.Start();
+        process.BeginErrorReadLine();
+
         Send("uci");
         WaitFor("uciok");
+        Send("setoption name Threads value 1");
+        Send("setoption name MultiPV value 1");
+        Send("isready");
+        WaitFor("readyok");
     }
 
-    public int Depth { get; }
+    void StopStockfish()
+    {
+        try
+        {
+            if (process is { HasExited: false })
+            {
+                Send("quit");
+                process.WaitForExit(2000);
+            }
+        }
+        catch { }
+
+        try { process?.CancelErrorRead(); } catch { }
+        process?.Dispose();
+        process = null;
+    }
 
     public int Evaluate(ChessBoard board)
     {
@@ -40,25 +73,79 @@ public sealed class StockfishEvaluator : IDisposable
 
         lock (sync)
         {
-            Send($"position fen {board.ToFen()}");
-            Send($"go depth {Depth}");
+            var fen = board.ToFen();
+            const int maxRetries = 3;
 
-            int score = 0;
-            while (true)
+            for (int attempt = 0; attempt < maxRetries; attempt++)
             {
-                var line = process.StandardOutput.ReadLine();
-                if (line == null)
-                    throw new InvalidOperationException("Stockfish process ended unexpectedly.");
+                try
+                {
+                    if (process == null || process.HasExited)
+                    {
+                        Console.WriteLine($"  [INFO] Starting Stockfish (attempt {attempt + 1})...");
+                        StopStockfish();
+                        StartStockfish();
+                    }
 
-                if (line.StartsWith("info") && line.Contains("score cp"))
-                    score = ParseInfoScoreCp(line);
+                    Send("ucinewgame");
+                    Send("isready");
+                    WaitFor("readyok");
 
-                if (line.StartsWith("bestmove"))
-                    break;
+                    Send($"position fen {fen}");
+                    Send("eval");
+
+                    int score = ParseEvalOutput();
+                    return score;
+                }
+                catch (InvalidOperationException ex) when (attempt < maxRetries - 1)
+                {
+                    Console.WriteLine($"  [WARN] Stockfish issue on attempt {attempt + 1}: {ex.Message} — restarting...");
+                    StopStockfish();
+                }
             }
 
-            return score;
+            Console.WriteLine($"  [ERROR] Stockfish failed after {maxRetries} attempts. FEN={fen}. Returning 0.");
+            return 0;
         }
+    }
+
+    int ParseEvalOutput()
+    {
+        int score = 0;
+        int linesRead = 0;
+        const int maxLines = 80;
+
+        while (linesRead < maxLines)
+        {
+            var line = process!.StandardOutput.ReadLine();
+            if (line == null)
+                break;
+
+            linesRead++;
+
+            if (line.Contains("Final evaluation"))
+            {
+                var match = Regex.Match(line, @"([+-]?\d+\.\d+)");
+                if (match.Success && double.TryParse(match.Groups[1].Value,
+                    System.Globalization.CultureInfo.InvariantCulture, out double val))
+                {
+                    score = (int)(val * 100);
+                }
+                break;
+            }
+
+            if (line.Contains("NNUE evaluation") && !line.Contains("NNUE derived") && !line.Contains("NNUE network"))
+            {
+                var match = Regex.Match(line, @"([+-]?\d+\.\d+)");
+                if (match.Success && double.TryParse(match.Groups[1].Value,
+                    System.Globalization.CultureInfo.InvariantCulture, out double val))
+                {
+                    score = (int)(val * 100);
+                }
+            }
+        }
+
+        return score;
     }
 
     public int[] EvaluateBatch(IReadOnlyList<ChessBoard> boards, Action<int, int>? progress = null)
@@ -66,7 +153,16 @@ public sealed class StockfishEvaluator : IDisposable
         var scores = new int[boards.Count];
         for (int i = 0; i < boards.Count; i++)
         {
-            scores[i] = Evaluate(boards[i]);
+            try
+            {
+                scores[i] = Evaluate(boards[i]);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"  [ERROR] Position {i + 1}/{boards.Count} failed: {ex.Message}. Score=0.");
+                scores[i] = 0;
+            }
+
             progress?.Invoke(i + 1, boards.Count);
         }
         return scores;
@@ -74,6 +170,9 @@ public sealed class StockfishEvaluator : IDisposable
 
     void Send(string command)
     {
+        if (process == null || process.HasExited)
+            throw new InvalidOperationException("Stockfish process is not running.");
+
         process.StandardInput.WriteLine(command);
         process.StandardInput.Flush();
     }
@@ -82,27 +181,12 @@ public sealed class StockfishEvaluator : IDisposable
     {
         while (true)
         {
-            var line = process.StandardOutput.ReadLine();
+            var line = process!.StandardOutput.ReadLine();
             if (line == null)
-                throw new InvalidOperationException("Stockfish process ended unexpectedly.");
+                throw new InvalidOperationException($"Stockfish ended while waiting for '{expected}'.");
             if (line.StartsWith(expected))
                 return line;
         }
-    }
-
-    static int ParseInfoScoreCp(string infoLine)
-    {
-        // info score cp -35 depth 16 ...
-        var parts = infoLine.Split(' ');
-        for (int i = 0; i < parts.Length - 1; i++)
-        {
-            if (parts[i] == "score" && parts[i + 1] == "cp")
-            {
-                if (int.TryParse(parts[i + 2], out int cp))
-                    return cp;
-            }
-        }
-        return 0;
     }
 
     public void Dispose()
@@ -110,13 +194,6 @@ public sealed class StockfishEvaluator : IDisposable
         if (disposed) return;
         disposed = true;
 
-        try
-        {
-            Send("quit");
-            process.WaitForExit(2000);
-        }
-        catch { }
-
-        process.Dispose();
+        StopStockfish();
     }
 }

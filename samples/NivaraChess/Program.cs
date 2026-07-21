@@ -6,7 +6,9 @@ using NivaraChess;
 using System.Globalization;
 using System.Numerics.Tensors;
 
-var options = Options.Parse(args);
+var options = args.Length == 0
+    ? InteractiveWizard.Run()
+    : Options.Parse(args);
 if (options.Help)
 {
     Options.PrintHelp();
@@ -178,22 +180,22 @@ static void RunEmbeddingDemo(ChessEvalModelBase model)
 
 sealed class Options
 {
-    public int Epochs { get; private init; } = 20;
-    public int BatchSize { get; private init; } = 128;
-    public int HiddenDim { get; private init; } = 64;
-    public int FeatureDim { get; private init; } = 256;
-    public double LearningRate { get; private init; } = 0.001;
-    public string? StockfishPath { get; private init; }
-    public string? SavePath { get; private init; }
-    public string? LoadPath { get; private init; }
-    public string? Fen { get; private init; }
-    public bool Interactive { get; private init; }
-    public bool Embed { get; private init; }
-    public bool Uci { get; private init; }
-    public int Phase { get; private init; } = 1;
-    public int NumPositions { get; private init; } = 10000;
-    public int Seed { get; private init; } = 42;
-    public bool Help { get; private init; }
+    public int Epochs { get; init; } = 20;
+    public int BatchSize { get; init; } = 128;
+    public int HiddenDim { get; init; } = 64;
+    public int FeatureDim { get; init; } = 256;
+    public double LearningRate { get; init; } = 0.001;
+    public string? StockfishPath { get; init; }
+    public string? SavePath { get; init; }
+    public string? LoadPath { get; init; }
+    public string? Fen { get; init; }
+    public bool Interactive { get; init; }
+    public bool Embed { get; init; }
+    public bool Uci { get; init; }
+    public int Phase { get; init; } = 1;
+    public int NumPositions { get; init; } = 10000;
+    public int Seed { get; init; } = 42;
+    public bool Help { get; init; }
 
     public static Options Parse(string[] args)
     {
@@ -354,5 +356,191 @@ Examples:
                 Help = Help
             };
         }
+    }
+}
+
+static class InteractiveWizard
+{
+    sealed class WizardState
+    {
+        public int Epochs { get; set; } = 20;
+        public int BatchSize { get; set; } = 128;
+        public int HiddenDim { get; set; } = 64;
+        public int FeatureDim { get; set; } = 256;
+        public double LearningRate { get; set; } = 0.001;
+        public string? StockfishPath { get; set; }
+        public string? SavePath { get; set; }
+        public string? LoadPath { get; set; }
+        public string? Fen { get; set; }
+        public bool Interactive { get; set; }
+        public bool Embed { get; set; }
+        public bool Uci { get; set; }
+        public int Phase { get; set; } = 1;
+        public int NumPositions { get; set; } = 10000;
+        public int Seed { get; set; } = 42;
+    }
+
+    public static Options Run()
+    {
+        Console.WriteLine();
+        Console.WriteLine("NivaraChess — Neural Chess Position Evaluator");
+        Console.WriteLine();
+
+        int action = ReadChoice("What would you like to do?\n" +
+            "  1. Train a model          — generate positions, train, validate\n" +
+            "  2. Evaluate a position    — score a single FEN\n" +
+            "  3. Interactive REPL       — evaluate positions in a loop\n" +
+            "  4. Embedding demo         — position embeddings + cosine similarity\n" +
+            "  5. UCI engine mode        — connect to a chess GUI\n",
+            defaultValue: 1, min: 1, max: 5);
+
+        int phase = ReadChoice("\nPhase — which neural evaluator?\n" +
+            "  1. Material evaluator       — fast MLP on piece counts (~12s)\n" +
+            "  2. NNUE halfKP              — sparse embedding, positional (~45s/epoch)\n" +
+            "  3. NNUE + Stockfish labels  — requires Stockfish binary, highest quality\n",
+            defaultValue: 1, min: 1, max: 3);
+
+        if (phase == 3 && action != 1)
+        {
+            Console.WriteLine("\n  (Phase 3 training labels require Stockfish; for inference this behaves like Phase 2.)");
+        }
+
+        var s = new WizardState { Phase = phase };
+
+        if (phase == 3 && action == 1)
+        {
+            s.StockfishPath = ReadRequired("\nPath to Stockfish executable:");
+        }
+
+        switch (action)
+        {
+            case 1:
+                ConfigureTraining(s);
+                break;
+            case 2:
+                ConfigureEvaluate(s);
+                break;
+            case 3:
+                ConfigureInteractive(s);
+                break;
+            case 4:
+                ConfigureEmbed(s);
+                break;
+            case 5:
+                ConfigureUci(s);
+                break;
+        }
+
+        return new Options
+        {
+            Epochs = s.Epochs,
+            BatchSize = s.BatchSize,
+            HiddenDim = s.HiddenDim,
+            FeatureDim = s.FeatureDim,
+            LearningRate = s.LearningRate,
+            StockfishPath = s.StockfishPath,
+            SavePath = s.SavePath,
+            LoadPath = s.LoadPath,
+            Fen = s.Fen,
+            Interactive = s.Interactive,
+            Embed = s.Embed,
+            Uci = s.Uci,
+            Phase = s.Phase,
+            NumPositions = s.NumPositions,
+            Seed = s.Seed,
+        };
+    }
+
+    static void ConfigureTraining(WizardState s)
+    {
+        Console.WriteLine("\nTraining settings (press Enter for defaults):");
+        s.NumPositions = ReadInt("  Number of positions", 10000);
+        s.Epochs = ReadInt("  Epochs", 20);
+        s.BatchSize = ReadInt("  Batch size", 128);
+        s.LearningRate = ReadDouble("  Learning rate", 0.001);
+        s.Seed = ReadInt("  RNG seed", 42);
+        s.SavePath = ReadOptional("  Save model as (blank = no save)", "");
+        if (string.IsNullOrWhiteSpace(s.SavePath))
+            s.SavePath = null;
+    }
+
+    static void ConfigureEvaluate(WizardState s)
+    {
+        s.LoadPath = ReadRequired("\nModel JSON path:");
+        s.Fen = ReadOptional("  FEN string or \"start\"", "start");
+    }
+
+    static void ConfigureInteractive(WizardState s)
+    {
+        s.LoadPath = ReadRequired("\nModel JSON path:");
+        s.Interactive = true;
+    }
+
+    static void ConfigureEmbed(WizardState s)
+    {
+        s.LoadPath = ReadRequired("\nModel JSON path:");
+        s.Embed = true;
+    }
+
+    static void ConfigureUci(WizardState s)
+    {
+        s.LoadPath = ReadRequired("\nModel JSON path:");
+        s.Uci = true;
+    }
+
+    static int ReadChoice(string prompt, int defaultValue, int min, int max)
+    {
+        Console.Write(prompt);
+        Console.Write($"  Choice [{defaultValue}]: ");
+        string? input = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(input))
+            return defaultValue;
+        if (int.TryParse(input, out int value) && value >= min && value <= max)
+            return value;
+        Console.WriteLine($"  Invalid choice. Using {defaultValue}.");
+        return defaultValue;
+    }
+
+    static string ReadRequired(string prompt)
+    {
+        while (true)
+        {
+            Console.Write($"{prompt} ");
+            string? input = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(input))
+                return input;
+            Console.WriteLine("  This is required. Please enter a value.");
+        }
+    }
+
+    static string ReadOptional(string prompt, string defaultValue)
+    {
+        Console.Write($"{prompt} [{defaultValue}]: ");
+        string? input = Console.ReadLine()?.Trim();
+        return string.IsNullOrEmpty(input) ? defaultValue : input;
+    }
+
+    static int ReadInt(string prompt, int defaultValue)
+    {
+        Console.Write($"{prompt} [{defaultValue}]: ");
+        string? input = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(input))
+            return defaultValue;
+        if (int.TryParse(input, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value))
+            return value;
+        Console.WriteLine($"  Invalid number. Using {defaultValue}.");
+        return defaultValue;
+    }
+
+    static double ReadDouble(string prompt, double defaultValue)
+    {
+        Console.Write($"{prompt} [{defaultValue}]: ");
+        string? input = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(input))
+            return defaultValue;
+        if (double.TryParse(input, NumberStyles.Float, CultureInfo.InvariantCulture, out double value))
+            return value;
+        Console.WriteLine($"  Invalid number. Using {defaultValue}.");
+        return defaultValue;
     }
 }

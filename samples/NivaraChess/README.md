@@ -20,7 +20,7 @@ NivaraChess trains a model to predict centipawn scores for chess positions. It s
 |-------|-------------|----------------|----------|----------------|
 | 1 | MLP (material → hidden → output) | Material piece counts | 12 categorical counts | `Linear<T>`, `Activation.Relu`, `MSELoss<T>`, `AdamW<T>` |
 | 2 | NNUE halfKP (sparse embedding → hidden → output) | Material + PSQT heuristic | Sparse (king index + 63 piece slots) | `SparseEmbedding<T>`, `SparseEmbeddingBag<T>` |
-| 3 | Same as Phase 2 | Stockfish evaluation (depth 16) | Same sparse features | `StockfishEvaluator` (UCI), knowledge distillation |
+| 3 | Same as Phase 2 | Stockfish static NNUE evaluation (`eval` command) | Same sparse features | `StockfishEvaluator` (UCI `eval` + `ucinewgame`), knowledge distillation |
 
 ### Phase 1 — Material Evaluator
 Trains a simple MLP on 12 categorical features (piece counts for white/black). Fast to train (~12s for 10K positions, 20 epochs). Demonstrates the basic autograd training pipeline.
@@ -29,11 +29,14 @@ Trains a simple MLP on 12 categorical features (piece counts for white/black). F
 Uses `SparseEmbedding<T>` (wrapping `SparseEmbeddingBag<T>`) to learn from sparse king-relative features. ~50s/epoch with 10K positions. Demonstrates sparse embedding performance and the autograd infrastructure overhead tradeoff.
 
 ### Phase 3 — Stockfish Distillation
-Replaces the heuristic training labels with Stockfish's UCI evaluation. The neural network learns to approximate Stockfish's position assessment — compressing a strong engine's knowledge into a smaller, faster model. Requires Stockfish installed locally.
+Replaces the heuristic training labels with Stockfish's static NNUE evaluation. The neural network learns to approximate Stockfish's position assessment — compressing a strong engine's knowledge into a smaller, faster model. Uses the `eval` command (not `go depth`) for fast, crash-free evaluation with `ucinewgame` synchronization between positions. Requires Stockfish installed locally.
 
 ## Quick start
 
 ```bash
+# Interactive wizard (no args) — pick action, phase, and options
+dotnet run --project samples/NivaraChess
+
 # Phase 1: train a material evaluator
 dotnet run --project samples/NivaraChess -- --phase 1 --epochs 5 --save material.json
 
@@ -76,6 +79,7 @@ dotnet run --project samples/NivaraChess -- --load nnue.json --embed
 | `--embed` | — | Demo position embeddings and cosine similarity |
 | `--uci` | — | Minimal UCI evaluation mode for GUI integration |
 | `--seed <int>` | 42 | RNG seed |
+| `--help`, `-h` | — | Show CLI help |
 
 ## Modes of use
 
@@ -104,7 +108,7 @@ NivaraChess/
 ├── ChessDataGenerator.cs       # Training data generation (material positions + Stockfish scoring)
 ├── ChessEmbeddingGenerator.cs  # IEmbeddingGenerator<ChessBoard> implementation
 ├── ChessEvalConsole.cs         # Interactive REPL, UCI mode, evaluation display
-├── StockfishEvaluator.cs       # UCI process wrapper for Stockfish communication
+├── StockfishEvaluator.cs       # UCI process wrapper: `eval` command + `ucinewgame` sync, crash-safe with retry
 └── NivaraChess.csproj          # References Nivara core + Microsoft.Extensions.AI.Abstractions
 ```
 
@@ -184,7 +188,7 @@ The Phase 2 training loop (sparse embeddings, 10K positions, ~50s/epoch) exposed
 |-------|--------------|-------|
 | 1 (MLP) | ~12s | 10K positions, 20 epochs. Fast baseline. |
 | 2 (NNUE) | ~40–47s/epoch | 10K positions. Autograd infrastructure overhead dominates over arithmetic kernels. |
-| 3 (Stockfish) | ~100ms/position | Stockfish depth 16. Total training time = data generation time + NN training time. |
+| 3 (Stockfish) | ~10ms/position | Stockfish `eval` command (static NNUE, no search). Much faster than `go depth`. |
 
 Phase 2 epoch time breakdown (before optimization → after):
 - Before: ~50s/epoch (scalar loops, triple DFS traversal, LINQ reverse)
@@ -195,9 +199,10 @@ The remaining overhead is the autograd graph infrastructure itself (node creatio
 ## Limitations
 
 - **No move search** — the model evaluates positions but does not play. The UCI mode returns placeholder `bestmove`.
-- **Random position generation** — training data is random material distributions, not realistic game positions. Real applications would use opening books or game databases.
+- **Random position generation** — training data uses random material distributions with validity constraints (pawns on ranks 2–7, kings non-adjacent, at least 1 pawn per side). Positions are chess-valid but not from actual game play. Real applications would use opening books or game databases.
 - **Phase 3 validation** compares against the PSQT heuristic (not Stockfish) since Stockfish is not available at inference time in this demo.
 - **Single-threaded Stockfish** — `EvaluateBatch` processes positions sequentially. Parallel Stockfish instances would speed up phase 3 data generation.
+- **Stockfish 18 network replica** — Stockfish 18 creates a child process for shared NNUE memory. The `eval` command avoids the search path that triggers crashes, but `go depth` may still crash on some setups.
 
 ## Future work: Expanding the embedding demo
 

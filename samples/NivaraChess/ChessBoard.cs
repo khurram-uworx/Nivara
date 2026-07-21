@@ -149,25 +149,95 @@ public sealed class ChessBoard
         if (counts.Length != ChessFeatures.FeatureCount)
             throw new ArgumentException($"Expected {ChessFeatures.FeatureCount} piece counts.", nameof(counts));
 
+        int totalPieces = 0;
+        for (int f = 0; f < counts.Length; f++)
+            totalPieces += counts[f];
+
+        if (totalPieces > 64)
+            throw new InvalidOperationException($"Too many pieces ({totalPieces}) for 64 squares.");
+
         var board = new ChessPiece?[64];
-        var availableSquares = Enumerable.Range(0, 64).ToList();
+
+        int whiteKingIdx = ChessFeatures.IndexOf(new ChessPiece(PieceColor.White, PieceKind.King));
+        int blackKingIdx = ChessFeatures.IndexOf(new ChessPiece(PieceColor.Black, PieceKind.King));
+
+        int whiteKingSquare = PlaceKing(board, whiteKingIdx, counts, rng);
+        int blackKingSquare = PlaceKing(board, blackKingIdx, counts, rng, whiteKingSquare);
 
         for (int feature = 0; feature < counts.Length; feature++)
         {
+            if (feature == whiteKingIdx || feature == blackKingIdx)
+                continue;
+
             var (color, kind) = ChessFeatures.DecodeFeature(feature);
             for (int i = 0; i < counts[feature]; i++)
             {
-                if (availableSquares.Count == 0)
-                    throw new InvalidOperationException("Cannot place more than 64 pieces.");
-
-                int pick = rng.Next(availableSquares.Count);
-                int square = availableSquares[pick];
-                availableSquares.RemoveAt(pick);
+                int square = PickNonKingSquare(board, kind, rng);
                 board[square] = new ChessPiece(color, kind);
             }
         }
 
         return new ChessBoard(board, sideToMove);
+    }
+
+    static int PlaceKing(ChessPiece?[] board, int featureIdx, int[] counts, Random rng, int? otherKingSquare = null)
+    {
+        if (counts[featureIdx] != 1)
+            throw new InvalidOperationException("There must be exactly one king per side.");
+
+        var (color, _) = ChessFeatures.DecodeFeature(featureIdx);
+
+        while (true)
+        {
+            int square = rng.Next(64);
+            if (board[square].HasValue)
+                continue;
+
+            if (otherKingSquare.HasValue && KingsAreAdjacent(square, otherKingSquare.Value))
+                continue;
+
+            board[square] = new ChessPiece(color, PieceKind.King);
+            return square;
+        }
+    }
+
+    static int PickNonKingSquare(ChessPiece?[] board, PieceKind kind, Random rng)
+    {
+        for (int tries = 0; tries < 1000; tries++)
+        {
+            int square = rng.Next(64);
+            if (board[square].HasValue)
+                continue;
+
+            if (kind == PieceKind.Pawn)
+            {
+                int rank = square / 8;
+                if (rank == 0 || rank == 7)
+                    continue;
+            }
+
+            return square;
+        }
+
+        for (int square = 0; square < 64; square++)
+        {
+            if (board[square].HasValue)
+                continue;
+            if (kind == PieceKind.Pawn && (square / 8 == 0 || square / 8 == 7))
+                continue;
+            return square;
+        }
+
+        throw new InvalidOperationException("No valid square available for piece placement.");
+    }
+
+    static bool KingsAreAdjacent(int sq1, int sq2)
+    {
+        int r1 = sq1 / 8, f1 = sq1 % 8;
+        int r2 = sq2 / 8, f2 = sq2 % 8;
+        int dr = Math.Abs(r1 - r2);
+        int df = Math.Abs(f1 - f2);
+        return dr <= 1 && df <= 1;
     }
 
     public float[] ToFeatureVector()

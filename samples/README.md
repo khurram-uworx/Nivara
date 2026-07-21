@@ -23,9 +23,9 @@ Key characteristics:
 
 ## [NivaraChess/README.md](NivaraChess/README.md) — Neural Chess Position Evaluator
 
-Trains a neural network to evaluate chess positions using Nivara's autograd engine. Demonstrates non-NLP use of the library: sparse embeddings (`SparseEmbedding<T>` for NNUE halfKP features), Stockfish knowledge distillation via UCI, and `IEmbeddingGenerator<T>` integration.
+Trains a neural network to evaluate chess positions using Nivara's autograd engine. Demonstrates non-NLP use of the library: sparse embeddings (`SparseEmbedding<T>` for NNUE halfKP features), Stockfish knowledge distillation via UCI (`eval` command with `ucinewgame` sync), and `IEmbeddingGenerator<T>` integration.
 
-Three phases: material counting (MLP), NNUE halfKP (sparse embedding), and Stockfish-labeled training. Includes save/load, interactive REPL, UCI engine mode, and embedding demo.
+Three phases: material counting (MLP), NNUE halfKP (sparse embedding), and Stockfish-labeled training. Includes save/load, interactive wizard, interactive REPL, UCI engine mode, and embedding demo.
 
 ---
 

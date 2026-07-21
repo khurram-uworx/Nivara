@@ -116,7 +116,7 @@ public sealed class ChessDataGenerator
 
     void AddPieceCounts(int[] counts, PieceColor color)
     {
-        Set(counts, color, PieceKind.Pawn, rng.Next(0, 9));
+        Set(counts, color, PieceKind.Pawn, rng.Next(1, 9));
         Set(counts, color, PieceKind.Knight, rng.Next(0, 3));
         Set(counts, color, PieceKind.Bishop, rng.Next(0, 3));
         Set(counts, color, PieceKind.Rook, rng.Next(0, 3));
