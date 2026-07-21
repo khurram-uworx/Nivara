@@ -12,7 +12,12 @@ if (options.Help)
     return;
 }
 
-using var model = new ChessEvalModel(options.HiddenDim);
+using ChessEvalModelBase model = options.Phase switch
+{
+    1 => new ChessEvalModel(options.HiddenDim),
+    2 => new NnueChessEvalModel(options.FeatureDim),
+    _ => throw new NotSupportedException($"Phase {options.Phase} is not supported. Use 1 or 2.")
+};
 
 if (!string.IsNullOrWhiteSpace(options.LoadPath))
 {
@@ -50,17 +55,22 @@ Console.WriteLine();
 Console.WriteLine("Sample evaluations:");
 EvaluateFen(model, ChessBoard.StartingFen);
 
-static void Train(ChessEvalModel model, Options options)
+static void Train(ChessEvalModelBase model, Options options)
 {
-    if (options.Phase != 1)
-        throw new NotSupportedException("This sample currently implements Phase 1 only. Use --phase 1.");
+    var phaseLabel = options.Phase switch
+    {
+        1 => "material evaluator",
+        2 => "NNUE halfKP evaluator",
+        _ => throw new NotSupportedException($"Phase {options.Phase} is not supported. Use 1 or 2.")
+    };
 
-    Console.WriteLine("NivaraChess Phase 1: material evaluator");
+    Console.WriteLine($"NivaraChess Phase {options.Phase}: {phaseLabel}");
     Console.WriteLine($"Generating {options.NumPositions} synthetic positions...");
 
+    var featureNames = ChessDataGenerator.GetFeatureNames(options.Phase);
     var generator = new ChessDataGenerator(options.Seed);
-    var frame = generator.GenerateFrame(options.NumPositions);
-    var dataset = new TensorDataset<float>(frame, ChessFeatures.Names, "score");
+    var frame = generator.GenerateFrame(options.NumPositions, options.Phase);
+    var dataset = new TensorDataset<float>(frame, featureNames, "score");
     var loader = new DataLoader<float>(dataset, options.BatchSize, shuffle: true, seed: options.Seed);
 
     var mse = new MSELoss<float>();
@@ -86,7 +96,7 @@ static void Train(ChessEvalModel model, Options options)
     Console.WriteLine($"Validation MAE: {meanAbsoluteError:0.0} cp");
 }
 
-static void EvaluateFen(ChessEvalModel model, string fen)
+static void EvaluateFen(ChessEvalModelBase model, string fen)
 {
     var resolvedFen = fen.Equals("start", StringComparison.OrdinalIgnoreCase)
         ? ChessBoard.StartingFen
@@ -102,6 +112,7 @@ sealed class Options
     public int Epochs { get; private init; } = 20;
     public int BatchSize { get; private init; } = 128;
     public int HiddenDim { get; private init; } = 64;
+    public int FeatureDim { get; private init; } = 256;
     public double LearningRate { get; private init; } = 0.001;
     public string? SavePath { get; private init; }
     public string? LoadPath { get; private init; }
@@ -134,6 +145,9 @@ sealed class Options
                     break;
                 case "--hidden-dim":
                     options.HiddenDim = ReadInt(args, ref i, arg);
+                    break;
+                case "--feature-dim":
+                    options.FeatureDim = ReadInt(args, ref i, arg);
                     break;
                 case "--lr":
                     options.LearningRate = ReadDouble(args, ref i, arg);
@@ -177,28 +191,30 @@ sealed class Options
     public static void PrintHelp()
     {
         Console.WriteLine("""
-NivaraChess Phase 1: neural material evaluator
+NivaraChess: neural chess position evaluator
 
 Options:
   --generate <int>      Generate N random positions for training
   --num-positions <int> Number of positions to generate (default: 10000)
   --epochs <int>        Training epochs (default: 20)
   --batch-size <int>    Batch size (default: 128)
-  --hidden-dim <int>    Hidden layer size (default: 64)
+  --phase <int>         Data generation phase: 1=material, 2=NNUE halfKP (default: 1)
+  --hidden-dim <int>    Hidden layer size for phase 1 (default: 64)
+  --feature-dim <int>   Feature transformer size for phase 2 (default: 256)
   --lr <float>          Learning rate (default: 0.001)
   --save <path>         Save trained model
-  --load <path>         Load trained model; use the same --hidden-dim used when saving
+  --load <path>         Load trained model; use the same hidden/feature dim used when saving
   --fen <fen-string>    Evaluate a single FEN position
   --interactive         Interactive FEN evaluation REPL
   --uci                 Minimal UCI evaluation mode
-  --phase <int>         Data generation phase; only 1 is implemented
   --seed <int>          RNG seed (default: 42)
   --help, -h            Show this help
 
 Examples:
-  dotnet run --project samples/NivaraChess -- --epochs 5 --num-positions 2000 --save material.json
+  dotnet run --project samples/NivaraChess -- --phase 1 --epochs 5 --num-positions 2000 --save material.json
+  dotnet run --project samples/NivaraChess -- --phase 2 --epochs 10 --feature-dim 128 --save nnue.json
   dotnet run --project samples/NivaraChess -- --load material.json --fen "start"
-  dotnet run --project samples/NivaraChess -- --load material.json --interactive
+  dotnet run --project samples/NivaraChess -- --load nnue.json --interactive
 """);
     }
 
@@ -225,6 +241,7 @@ Examples:
         public int Epochs { get; set; } = 20;
         public int BatchSize { get; set; } = 128;
         public int HiddenDim { get; set; } = 64;
+        public int FeatureDim { get; set; } = 256;
         public double LearningRate { get; set; } = 0.001;
         public string? SavePath { get; set; }
         public string? LoadPath { get; set; }
@@ -243,6 +260,7 @@ Examples:
                 Epochs = Epochs,
                 BatchSize = BatchSize,
                 HiddenDim = HiddenDim,
+                FeatureDim = FeatureDim,
                 LearningRate = LearningRate,
                 SavePath = SavePath,
                 LoadPath = LoadPath,

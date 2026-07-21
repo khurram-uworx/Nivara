@@ -11,44 +11,64 @@ public sealed class ChessDataGenerator
         rng = new Random(seed);
     }
 
-    public IReadOnlyList<ChessTrainingExample> Generate(int count)
+    public IReadOnlyList<ChessTrainingExample> Generate(int count, int phase = 1)
     {
         if (count <= 0)
             throw new ArgumentOutOfRangeException(nameof(count), "Position count must be positive.");
+        if (phase is not 1 and not 2)
+            throw new ArgumentOutOfRangeException(nameof(phase), "Only phases 1 and 2 are implemented.");
 
         var examples = new List<ChessTrainingExample>(count);
         for (int i = 0; i < count; i++)
         {
             var board = GenerateMaterialPosition();
+            var features = phase == 1
+                ? board.ToFeatureVector()
+                : board.ToHalfKpFeatureVector();
+            int score = phase == 1
+                ? board.MaterialScoreCentipawns()
+                : board.MaterialPlusPieceSquareScoreCentipawns();
+
             examples.Add(new ChessTrainingExample(
                 board,
-                board.ToFeatureVector(),
-                board.MaterialScoreCentipawns()));
+                features,
+                score));
         }
 
         return examples;
     }
 
-    public NivaraFrame GenerateFrame(int count)
+    public NivaraFrame GenerateFrame(int count, int phase = 1)
     {
-        return ToFrame(Generate(count));
+        return ToFrame(Generate(count, phase), GetFeatureNames(phase));
     }
 
-    public static NivaraFrame ToFrame(IReadOnlyList<ChessTrainingExample> examples)
+    public static string[] GetFeatureNames(int phase)
+    {
+        return phase switch
+        {
+            1 => ChessFeatures.Names,
+            2 => ChessFeatures.HalfKpNames,
+            _ => throw new ArgumentOutOfRangeException(nameof(phase), "Only phases 1 and 2 are implemented.")
+        };
+    }
+
+    public static NivaraFrame ToFrame(IReadOnlyList<ChessTrainingExample> examples, string[] featureNames)
     {
         ArgumentNullException.ThrowIfNull(examples);
+        ArgumentNullException.ThrowIfNull(featureNames);
 
         if (examples.Count == 0)
             throw new ArgumentException("At least one example is required.", nameof(examples));
 
-        var columns = new List<(string Name, IColumn Column)>(ChessFeatures.FeatureCount + 1);
-        for (int feature = 0; feature < ChessFeatures.FeatureCount; feature++)
+        var columns = new List<(string Name, IColumn Column)>(featureNames.Length + 1);
+        for (int feature = 0; feature < featureNames.Length; feature++)
         {
             var values = new float[examples.Count];
             for (int row = 0; row < examples.Count; row++)
                 values[row] = examples[row].Features[feature];
 
-            columns.Add((ChessFeatures.Names[feature], NivaraColumn<float>.Create(values)));
+            columns.Add((featureNames[feature], NivaraColumn<float>.Create(values)));
         }
 
         var labels = new float[examples.Count];

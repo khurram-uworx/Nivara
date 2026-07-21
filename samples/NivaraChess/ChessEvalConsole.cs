@@ -2,7 +2,7 @@ namespace NivaraChess;
 
 public static class ChessEvalConsole
 {
-    public static void RunInteractive(ChessEvalModel model)
+    public static void RunInteractive(ChessEvalModelBase model)
     {
         ArgumentNullException.ThrowIfNull(model);
 
@@ -41,7 +41,7 @@ public static class ChessEvalConsole
         }
     }
 
-    public static void RunUci(ChessEvalModel model)
+    public static void RunUci(ChessEvalModelBase model)
     {
         ArgumentNullException.ThrowIfNull(model);
 

@@ -773,6 +773,122 @@ public static class ReverseGradOperations
     #region Indexing Operations
 
     /// <summary>
+    /// Looks up sparse feature rows from an embedding matrix and sums them per batch row.
+    /// weight shape: [numEmbeddings, embeddingDim], indices shape: [batchSize, maxActiveFeatures].
+    /// Each valid index contributes one embedding row to the corresponding output row.
+    /// paddingIndex entries are ignored in both forward and backward passes.
+    /// </summary>
+    public static ReverseGradTensor<T> SparseEmbeddingBag<T>(
+        ReverseGradTensor<T> weight,
+        ReverseGradTensor<T> indices,
+        int paddingIndex = -1)
+        where T : struct, INumber<T>
+    {
+        if (weight == null) throw new ArgumentNullException(nameof(weight));
+        if (indices == null) throw new ArgumentNullException(nameof(indices));
+        if (weight.Rank != 2)
+            throw new ArgumentException("SparseEmbeddingBag weight must be a 2D tensor.", nameof(weight));
+        if (indices.Rank != 2)
+            throw new ArgumentException("SparseEmbeddingBag indices must be a 2D tensor.", nameof(indices));
+
+        int numEmbeddings = weight.shape[0];
+        int embeddingDim = weight.shape[1];
+        int batchSize = indices.shape[0];
+        int maxActiveFeatures = indices.shape[1];
+
+        var parsedIndices = new int[indices.Length];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            int index = int.CreateChecked(indices.Data[i]);
+            if (index != paddingIndex && ((uint)index >= (uint)numEmbeddings))
+                throw new ArgumentOutOfRangeException(
+                    nameof(indices),
+                    $"Index at position {i} is {index}, must be {paddingIndex} or in range [0, {numEmbeddings}).");
+
+            parsedIndices[i] = index;
+        }
+
+        bool weightHasNulls = weight.HasNulls;
+        var resultValues = new T[batchSize * embeddingDim];
+        bool[]? resultNullMask = weightHasNulls ? new bool[resultValues.Length] : null;
+        bool anyResultNulls = false;
+
+        for (int batch = 0; batch < batchSize; batch++)
+        {
+            int indexBase = batch * maxActiveFeatures;
+            int outputBase = batch * embeddingDim;
+
+            for (int slot = 0; slot < maxActiveFeatures; slot++)
+            {
+                int index = parsedIndices[indexBase + slot];
+                if (index == paddingIndex)
+                    continue;
+
+                int weightBase = index * embeddingDim;
+                for (int dim = 0; dim < embeddingDim; dim++)
+                {
+                    int weightOffset = weightBase + dim;
+                    int outputOffset = outputBase + dim;
+
+                    if (weightHasNulls && weight.IsNull(weightOffset))
+                    {
+                        resultNullMask![outputOffset] = true;
+                        anyResultNulls = true;
+                        continue;
+                    }
+
+                    resultValues[outputOffset] += weight.Data[weightOffset];
+                }
+            }
+        }
+
+        var resultColumn = anyResultNulls
+            ? NivaraColumn<T>.CreateFromSpans(resultValues, resultNullMask!)
+            : NivaraColumn<T>.Create(resultValues);
+
+        var result = new ReverseGradTensor<T>(
+            resultColumn,
+            GradientUtils.ShouldTrackGrad(weight),
+            new[] { batchSize, embeddingDim });
+
+        if (GradientUtils.ShouldTrackGrad(weight))
+        {
+            var savedIndices = parsedIndices;
+            var gradFn = new OpNode<T>("SparseEmbeddingBag", new object[] { weight }, (typedGradOutput, stripGradientNulls) =>
+            {
+                var weightGrad = new T[weight.Length];
+
+                for (int batch = 0; batch < batchSize; batch++)
+                {
+                    int indexBase = batch * maxActiveFeatures;
+                    int gradBase = batch * embeddingDim;
+
+                    for (int slot = 0; slot < maxActiveFeatures; slot++)
+                    {
+                        int index = savedIndices[indexBase + slot];
+                        if (index == paddingIndex)
+                            continue;
+
+                        int weightBase = index * embeddingDim;
+                        for (int dim = 0; dim < embeddingDim; dim++)
+                        {
+                            int gradOffset = gradBase + dim;
+                            if (!typedGradOutput.IsNull(gradOffset))
+                                weightGrad[weightBase + dim] += typedGradOutput[gradOffset];
+                        }
+                    }
+                }
+
+                AccumulateGradient(weight, NivaraColumn<T>.Create(weightGrad), stripGradientNulls);
+            });
+
+            ComputationGraph.AddNode(result, gradFn);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Selects rows from a source tensor by integer index along axis 0.
     /// source shape: [N, ...], indices length: L → result shape: [L, ...].
     /// Backward scatters gradients back to source positions (supports duplicate indices via accumulation).
@@ -979,7 +1095,7 @@ public static class ReverseGradOperations
 
     #region Helper Methods
 
-    private static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient, bool stripGradientNulls = true) where T : struct, INumber<T>
+    internal static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient, bool stripGradientNulls = true) where T : struct, INumber<T>
     {
         if (stripGradientNulls)
         {
