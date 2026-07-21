@@ -21,23 +21,23 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Parquet.Net" Version="6.0.3" />
-    <PackageReference Include="Apache.Arrow" Version="23.0.0" />
-    <PackageReference Include="Microsoft.ML" Version="5.0.0" />
-    <PackageReference Include="System.Numerics.Tensors" Version="10.0.9" />
-    <PackageReference Include="CsvHelper" Version="33.1.0" />
-  </ItemGroup>
-
-  <ItemGroup>
     <ProjectReference Include="..\Nivara\Nivara.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.10" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.300" />
+    <PackageReference Include="Apache.Arrow" Version="23.0.0" />
+    <PackageReference Include="CsvHelper" Version="33.1.0" />
+    <PackageReference Include="Microsoft.ML" Version="5.0.0" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.301" />
+    <PackageReference Include="Parquet.Net" Version="6.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 
 </Project>
