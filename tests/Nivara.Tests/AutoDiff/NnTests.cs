@@ -784,4 +784,166 @@ public class NnTests
         Assert.Throws<ArgumentOutOfRangeException>(() => new VAE<float>(4, 0, 8));
         Assert.Throws<ArgumentOutOfRangeException>(() => new VAE<float>(4, 2, 0));
     }
+
+    [Test]
+    public void Embedding_ScalarForward_ReturnsCorrectShape()
+    {
+        using var emb = new Embedding<float>(10, 4);
+        var result = emb.Forward(3);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 1, 4 }));
+        Assert.That(result.Length, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_1D_ReturnsCorrectShape()
+    {
+        using var emb = new Embedding<float>(10, 4);
+        var tokenIds = new float[] { 0, 1, 2, 3 };
+        var input = ReverseGradTensor<float>.FromArray(tokenIds);
+        input.Reshape(4);
+
+        var result = emb.Forward(input);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 4, 4 }));
+        Assert.That(result.Length, Is.EqualTo(16));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_2D_ReturnsCorrectShape()
+    {
+        using var emb = new Embedding<float>(10, 4);
+        var tokenIds = new float[] { 0, 1, 2, 3, 4, 5 };
+        var input = ReverseGradTensor<float>.FromArray(tokenIds);
+        input.Reshape(2, 3);
+
+        var result = emb.Forward(input);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 3, 4 }));
+        Assert.That(result.Length, Is.EqualTo(24));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_MatchesSingleForward()
+    {
+        using var emb = new Embedding<float>(10, 4);
+        var tokenIds = new float[] { 2, 5, 7 };
+        var input = ReverseGradTensor<float>.FromArray(tokenIds);
+        input.Reshape(3);
+
+        var batched = emb.Forward(input);
+        var single0 = emb.Forward(2);
+        var single1 = emb.Forward(5);
+        var single2 = emb.Forward(7);
+
+        for (int i = 0; i < 4; i++)
+        {
+            Assert.That(batched.Data[i], Is.EqualTo(single0.Data[i]).Within(1e-6f),
+                $"Position 0, dim {i} mismatch");
+            Assert.That(batched.Data[4 + i], Is.EqualTo(single1.Data[i]).Within(1e-6f),
+                $"Position 1, dim {i} mismatch");
+            Assert.That(batched.Data[8 + i], Is.EqualTo(single2.Data[i]).Within(1e-6f),
+                $"Position 2, dim {i} mismatch");
+        }
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_GradientAccumulatesForRepeatedTokens()
+    {
+        using var emb = new Embedding<float>(5, 4);
+
+        var tokenIds = new float[] { 2, 2, 2 };
+        var input = ReverseGradTensor<float>.FromArray(tokenIds);
+        input.Reshape(3);
+
+        var result = emb.Forward(input);
+        var grad = new float[12];
+        for (int i = 0; i < 12; i++) grad[i] = 1f;
+        var gradTensor = ReverseGradTensor<float>.FromArray(grad);
+        gradTensor.Reshape(3, 4);
+
+        result.Backward(gradTensor);
+
+        var weightGrad = emb.Weight.Grad;
+        Assert.That(weightGrad, Is.Not.Null, "Weight should have gradients");
+
+        for (int d = 0; d < 4; d++)
+            Assert.That(weightGrad[2 * 4 + d], Is.EqualTo(3f).Within(1e-5f),
+                $"Token 2 appeared 3 times — element {d} should accumulate to 3.0");
+
+        float otherRowSum = 0f;
+        for (int d = 0; d < 4; d++)
+            otherRowSum += weightGrad[0 * 4 + d];
+
+        Assert.That(otherRowSum, Is.EqualTo(0f).Within(1e-5f),
+            "Token 0 was not used — gradient should be 0");
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_OutOfRangeToken_Throws()
+    {
+        using var emb = new Embedding<float>(5, 4);
+        var tokenIds = new float[] { 0, 10, 2 };
+        var input = ReverseGradTensor<float>.FromArray(tokenIds);
+        input.Reshape(3);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => emb.Forward(input));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_EmptyInput_Throws()
+    {
+        using var emb = new Embedding<float>(5, 4);
+        var input = ReverseGradTensor<float>.FromArray(new float[0]);
+
+        Assert.Throws<ArgumentException>(() => emb.Forward(input));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_NullInput_Throws()
+    {
+        using var emb = new Embedding<float>(5, 4);
+        Assert.Throws<ArgumentNullException>(() => emb.Forward(null!));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_StateDict_ContainsWeight()
+    {
+        using var emb = new Embedding<float>(10, 4);
+        var state = emb.StateDict();
+
+        Assert.That(state.ContainsKey("Weight"), Is.True);
+        Assert.That(state["Weight"].Shape, Is.EqualTo(new[] { 10, 4 }));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_LoadStateDict_RestoresWeights()
+    {
+        using var emb1 = new Embedding<float>(10, 4);
+        var tokenIds = new float[] { 1, 3, 5 };
+        var input = ReverseGradTensor<float>.FromArray(tokenIds);
+        input.Reshape(3);
+        var original = emb1.Forward(input);
+        var origData = new float[12];
+        original.Data.CopyTo(origData, 0f);
+
+        var state = emb1.StateDict();
+
+        using var emb2 = new Embedding<float>(10, 4);
+        emb2.LoadStateDict(state);
+
+        var restored = emb2.Forward(input);
+        for (int i = 0; i < 12; i++)
+            Assert.That(restored.Data[i], Is.EqualTo(origData[i]).Within(1e-6f));
+    }
+
+    [Test]
+    public void Embedding_BatchedForward_GetParameters_IncludesWeight()
+    {
+        using var emb = new Embedding<float>(10, 4);
+        var parameters = emb.GetParameters();
+
+        Assert.That(parameters.ContainsKey("Weight"), Is.True);
+        Assert.That(parameters["Weight"].Length, Is.EqualTo(40));
+    }
 }

@@ -61,41 +61,24 @@ Inference: predict sentiment on new text strings
 
 ## Gaps This Will Discover and Fix
 
-### Gap 1: `Embedding<T>` is not a `Module<T>`
+### Gap 1: ~~`Embedding<T>` is not a `Module<T>`~~ **RESOLVED**
 
-**Problem:** `Embedding<T>` implements `IDisposable` directly, not
-`Module<T>`. This means:
-- `TrainingLoop<T>` cannot manage its parameters via `GetParameters()`
-- `ModelSerializer.Save/Load` cannot access its state dict
-- No `Train()` / `Eval()` mode propagation
+`Embedding<T>` now extends `Module<T>`, inheriting `StateDict()`/`LoadStateDict()`,
+`Train()`/`Eval()`, `GetParameters()`, and `Dispose()`. The `Forward(int tokenId)`
+convenience method is preserved; the abstract `Forward(ReverseGradTensor<T>)` override
+accepts scalar, 1D `[L]`, or 2D `[B, L]` token ID tensors and returns
+`[1, nEmbd]`, `[L, nEmbd]`, or `[B, L, nEmbd]` respectively.
 
-**Fix:** Make `Embedding<T>` extend `Module<T>`. This is backward-compatible
-since `MicroGptModel` collects parameters manually via `emb.Parameters`
-and doesn't rely on `Module<T>` methods. The change adds `Module<T>`'s
-`RegisterParameters`, `StateDict()`, `LoadStateDict()`, `Train()`, `Eval()`,
-and `Dispose()`.
+### Gap 2: ~~No batch embedding lookup~~ **RESOLVED**
 
-The `Forward(int tokenId)` signature (single int) doesn't fit `Module<T>`'s
-`Forward(ReverseGradTensor<T> input)`. Two options:
-- **Option A:** Add `Forward(ReverseGradTensor<T> tokenIds)` for batch
-  lookup, and keep `Forward(int)` as an overload. The batch variant
-  does `Gather`-like selection from the weight matrix.
-- **Option B:** Keep single-token `Forward(int)` and add a separate
-  `EmbeddingBag<T>` module for mean-pooled sequence embedding.
+`Embedding<T>.Forward(ReverseGradTensor<T> tokenIds)` now handles batched input:
+- `[L]` → `[L, nEmbd]`
+- `[B, L]` → `[B, L, nEmbd]`
 
-**Recommendation: Option A.** Add batch embedding lookup so the
-TextClassifier can embed a full sequence in one forward call.
-
-### Gap 2: No batch embedding lookup
-
-**Problem:** `Embedding<T>.Forward(int)` does one-hot → MatMul for one
-token. Training on sequences of length L with batch size B requires
-looking up B×L embeddings efficiently.
-
-**Fix:** Add `Forward(ReverseGradTensor<T> tokenIds)` to `Embedding<T>`.
-The input is `[batchSize, seqLen]` of integer token IDs. The output is
-`[batchSize, seqLen, embedDim]`. Implementation uses one-hot encoding
-per position expanded to a 3D tensor then MatMul'd with the weight matrix.
+Implementation builds a batched one-hot matrix `[totalTokens, vocabSize]` and performs
+a single MatMul against the weight matrix. The MatMul kernel uses `Parallel.For` +
+`TensorPrimitives.Dot` (SIMD-accelerated). Gradients accumulate correctly for repeated
+tokens via autograd. Token IDs are validated at lookup time.
 
 Since Nivara's ops are 2D only (no `BatchMatMul`), the implementation
 flattens the batch×seqLen dimension:
@@ -395,8 +378,8 @@ samples/NivaraTextClassifier/
 |---|---|---|---|
 | Architecture | Transformer (complex) | Embedding+MLP (lean) | New |
 | Tokenization | Char-level (in example) | Word-level (reusable) | New utility |
-| Embedding<T> | Used internally | First-class layer, Module<T> | **Gap to fix** |
-| Batch embedding lookup | No | Yes (new Forward overload) | **Gap to fix** |
+| Embedding<T> | Used internally | First-class layer, Module<T> | **RESOLVED** |
+| Batch embedding lookup | No | Yes (new Forward overload) | **RESOLVED** |
 | TrainingLoop<T> | No (manual loop) | Yes (structured, epoch-based) | New |
 | DataLoader<T> | No (one doc/step) | Yes (batched, shuffled) | New |
 | Data source | HTTP download | CSV via Csv.ReadAsFrame | Exercises Extensions |
@@ -406,7 +389,7 @@ samples/NivaraTextClassifier/
 | Evaluation | Subjective | Accuracy metric | New |
 | Interactive mode | Generate text | Predict sentiment (REPL) | New |
 | Synthetic data | No (real names) | Yes (generator) | New |
-| Embedding<T> unit tests | No (not tested) | Yes (part of example) | **Gap to fix** |
+| Embedding<T> unit tests | No (not tested) | Yes (part of example) | Still needed |
 
 ## Anticipated Gaps & Fixes to Implement
 

@@ -90,11 +90,9 @@ They are complementary: MicroGpt proves the AutoDiff engine works at transformer
 
 ### 2.4 Embedding via one-hot + MatMul instead of Gather
 
-**Current:** `Embedding<T>.Forward(int)` creates a one-hot vector and does `MatMul(oneHot, weight)`.
+**Current:** `Embedding<T>.Forward(int)` creates a one-hot vector and does `MatMul(oneHot, weight)`. Batched forward uses the same approach with a batched one-hot matrix.
 
-**Better:** A `Gather` operation that directly indexes into the embedding weight matrix by token ID.
-
-**Why we didn't:** Gather requires a differentiable backward pass (scatter the gradient to the correct row of the embedding weight). This is correct but more complex to implement. The one-hot + MatMul approach is trivially correct at small vocab sizes. For large vocabs (50K+), Gather is essential.
+**Better:** `ReverseGradOperations.Gather<T>` is now available and could replace the one-hot path for O(nEmbd) per lookup instead of O(vocabSize × nEmbd). For small vocabs (MicroGpt's ~55 chars), the current approach is adequate.
 
 ### 2.5 NivaraChatClient is documentation-only, not runnable code
 
@@ -116,52 +114,30 @@ They are complementary: MicroGpt proves the AutoDiff engine works at transformer
 
 ## 3. What's Missing from the Library (Gaps That Would Enable a More Complete/Perfect Implementation)
 
-### Gap A: Embedding\<T\> does not extend Module\<T\>
+### Gap A: ~~Embedding\<T\> does not extend Module\<T\>~~ **RESOLVED**
 
-**Already documented** in NivaraChatClient.md as Gap 1.
+`Embedding<T>` now extends `Module<T>`. It registers its weight via `RegisterParameters(weight)` in the constructor, inherits `StateDict()`/`LoadStateDict()`, `Train()`/`Eval()`, `GetParameters()`, and `Dispose()` from `Module<T>`. The `Forward(int tokenId)` convenience method is preserved; the abstract `Forward(ReverseGradTensor<T>)` override extracts a scalar int and delegates. MicroGptModel was updated to use `emb.GetParameters().Values` instead of the old `emb.Parameters` property. Batched `Forward(ReverseGradTensor<T> tokenIds)` uses one-hot + MatMul; Gather (resolved) could replace it for large vocabs.
 
-**Impact:** `Embedding<T>` cannot participate in `TrainingLoop<T>`, `StateDict()`, `LoadStateDict()`, `ModelSerializer.Save<T>()`, or `ModelSerializer.Load<T>()`. MicroGptModel works around this with manual `allParams` management, but any model using `Embedding<T>` through the `Module<T>` system is broken.
+### Gap B: ~~Embedding\<T\> has no batch/lookup Forward for token IDs~~ **RESOLVED**
 
-**Fix:** Change `Embedding<T>` from `IDisposable` to `Module<T>`. Remove its own `Parameters` property and redundant `weights` list. Use `RegisterParameters(weight)` in constructor. Inherit `Dispose()` from `Module<T>`.
+`Embedding<T>.Forward(ReverseGradTensor<T> tokenIds)` now accepts batched input:
+- `[L]` 1D tensor → `[L, nEmbd]` output
+- `[B, L]` 2D tensor → `[B, L, nEmbd]` output
+- Scalar (length=1) delegates to `Forward(int tokenId)` for backward compatibility
 
-### Gap B: Embedding\<T\> has no batch/lookup Forward for token IDs
+Implementation: builds a batched one-hot matrix `[totalTokens, vocabSize]`, performs a single MatMul against the weight matrix `[vocabSize, nEmbd]`. The MatMul kernel uses `Parallel.For` + `TensorPrimitives.Dot` (SIMD-accelerated). Gradients accumulate correctly for repeated tokens via autograd's `AccumulateGradient` in the MatMul backward pass. Token IDs are validated at lookup time with descriptive error messages.
 
-**Already documented** as Gap 2.
+For large vocabularies (32K–128K), this is still O(vocabSize × nEmbd) per batch due to one-hot expansion. The `Gather` operation is now available (Gap C resolved) and could replace this path.
 
-**Impact:** A batched transformer needs `Forward(ReverseGradTensor<T> tokenIds)` where `tokenIds` is shape `[B, L]`. Without this, no batched embedding lookup is possible. MicroGpt works around it by doing one token at a time.
+### Gap C: ~~No Gather operation~~ **RESOLVED**
 
-**Fix:** Add `Forward(ReverseGradTensor<T> tokenIds)`. Implementation via Gather (preferred) or one-hot + MatMul (fallback).
+`ReverseGradOperations.Gather<T>(ReverseGradTensor<T> source, int[] indices, int axis)` is now implemented. Supports 1D and multi-dimensional source tensors. Forward copies stride-contiguous rows by index; backward scatters gradients back to source positions via accumulation (handles duplicate indices correctly). Null mask propagation is included. Shape metadata is correctly propagated for multi-dimensional sources. 8 tests cover forward correctness (1D, 2D), backward gradient accumulation, duplicate indices, out-of-range, nulls, empty indices, and sum-then-backward flow.
 
-### Gap C: No Gather operation
+**Note:** Embedding's batched `Forward` still uses one-hot + MatMul. It could be refactored to use `Gather` internally for O(nEmbd) per lookup instead of O(vocabSize × nEmbd), but the current approach is functionally correct and adequate for small vocabs.
 
-**Not previously documented in explicit gap list.**
+### Gap D: ~~No way to convert integer data to a differentiable tensor~~ **RESOLVED**
 
-**Impact:** The fundamental operation for batched embedding lookup is missing. MicroGpt simulates it with one-hot + MatMul, which is O(vocabSize × nEmbd) per lookup instead of O(nEmbd). For small vocabs (MicroGpt's ~55 chars) this is fine; for realistic NLP vocabs (32K–128K) it's prohibitive.
-
-**Fix needed:**
-- `ReverseGradOperations.Gather<T>(ReverseGradTensor<T> source, int[] indices, int axis)`
-- Backward: scatter gradient to the gathered positions, zeros elsewhere
-- Could also add `Gather<T>(ReverseGradTensor<T> source, ReverseGradTensor<T> indices)` for differentiable index tensors
-
-**Example usage (the batched embedding lookup):**
-```csharp
-// tokenIds is [B, L] of integer token IDs
-// embedding weight is [vocabSize, nEmbd]
-var embedded = ReverseGradOperations.Gather(wte.Weight, tokenIds, axis: 0);
-// result: [B, L, nEmbd]
-```
-
-### Gap D: No way to convert integer data to a differentiable tensor
-
-**Not previously documented.**
-
-**Background:** `ReverseGradTensor<T>` is generic over `T` where `T : INumber<T>`. Token IDs are integers. If `T` is `float` or `double`, you can't store `int` directly in the tensor. The one-hot approach works around this. A proper `Gather` op that accepts `int[]` or `ReadOnlySpan<int>` indices (not a tensor) avoids needing integer tensors entirely.
-
-**Impact:** Without Gather accepting plain integer indices, batched embedding lookup requires either:
-1. One-hot vectors (expensive, as noted)
-2. Integer tensors (would need `ReverseGradTensor<int>` support, which adds weight to the autograd system)
-
-**Fix:** Implement `Gather` as `Gather<T>(ReverseGradTensor<T> source, int[] indices, int axis)` — indices are plain integers, no autograd through them. This is the standard approach in ML frameworks (indices are never differentiated).
+Gather's API accepts `int[]` indices directly (not a tensor), so integer tensors are unnecessary. The `Gather<T>` backward pass accumulates gradients at source positions by index — no autograd through the indices themselves. This is the standard ML framework approach (indices are never differentiated).
 
 ### Gap E: No batched transformer block (attention + MLP)
 
@@ -289,10 +265,10 @@ This requires either a discriminated JSON format (architecture name stored in fi
 
 | Priority | Gap | Effort | Impact |
 |----------|-----|--------|--------|
-| P0 | A: Embedding as Module | Small | Unblocks all Module<T> features for embedding-based models |
+| ~~P0~~ | ~~A: Embedding as Module~~ | ~~Small~~ | **RESOLVED** |
 | P0 | N: Build the actual example project | Large | Validates everything; biggest single improvement |
-| P1 | C + D: Gather op | Medium | Eliminates one-hot overhead; enables batched embedding |
-| P1 | B: Batched embedding Forward | Small | Layer on Gather; trivial once Gather exists |
+| ~~P1~~ | ~~C + D: Gather op~~ | ~~Medium~~ | **RESOLVED** — `int[]` indices, backward scatter-add, 8 tests |
+| ~~P1~~ | ~~B: Batched embedding Forward~~ | ~~Small~~ | **RESOLVED** — one-hot + MatMul; Gather available for large vocab |
 | P1 | E: Batched TransformerBlock | Medium | Building block for any sequence model |
 | P2 | F: LinearClassifier | Tiny | Developer convenience |
 | P2 | H: Integer-label CrossEntropyLoss | Small | Reduces boilerplate in all classification tasks |

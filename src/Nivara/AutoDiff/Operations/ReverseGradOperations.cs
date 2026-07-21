@@ -770,6 +770,127 @@ public static class ReverseGradOperations
 
     #endregion
 
+    #region Indexing Operations
+
+    /// <summary>
+    /// Selects rows from a source tensor by integer index along axis 0.
+    /// source shape: [N, ...], indices length: L → result shape: [L, ...].
+    /// Backward scatters gradients back to source positions (supports duplicate indices via accumulation).
+    /// </summary>
+    public static ReverseGradTensor<T> Gather<T>(ReverseGradTensor<T> source, int[] indices, int axis = 0)
+        where T : struct, INumber<T>
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (indices == null) throw new ArgumentNullException(nameof(indices));
+        if (axis != 0) throw new ArgumentOutOfRangeException(nameof(axis), "Only axis 0 is currently supported.");
+        if (indices.Length == 0)
+            return new ReverseGradTensor<T>(
+                NivaraColumn<T>.Create(Array.Empty<T>()),
+                requiresGrad: false,
+                new[] { 0 });
+
+        int sourceRowCount = source.shape[0];
+        int stride = source.Length / sourceRowCount;
+
+        for (int i = 0; i < indices.Length; i++)
+        {
+            if (indices[i] < 0 || indices[i] >= sourceRowCount)
+                throw new ArgumentOutOfRangeException(
+                    nameof(indices),
+                    $"Index at position {i} is {indices[i]}, must be in range [0, {sourceRowCount}).");
+        }
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffGather",
+            indices.Length,
+            source.Data.HasNulls,
+            () =>
+            {
+                bool sourceHasNulls = source.HasNulls;
+                int resultLen = indices.Length * stride;
+                bool anyResultNulls = false;
+                var resultValues = new T[resultLen];
+                bool[]? resultNullMask = sourceHasNulls ? new bool[resultLen] : null;
+
+                for (int i = 0; i < indices.Length; i++)
+                {
+                    int srcOffset = indices[i] * stride;
+                    int dstOffset = i * stride;
+                    for (int j = 0; j < stride; j++)
+                    {
+                        resultValues[dstOffset + j] = source.Data[srcOffset + j];
+                        if (sourceHasNulls)
+                        {
+                            bool isNull = source.Data.IsNull(srcOffset + j);
+                            resultNullMask![dstOffset + j] = isNull;
+                            anyResultNulls |= isNull;
+                        }
+                    }
+                }
+
+                var resultCol = anyResultNulls
+                    ? NivaraColumn<T>.CreateFromSpans(resultValues, resultNullMask!)
+                    : NivaraColumn<T>.Create(resultValues);
+
+                var resultShape = new int[source.shape.Length];
+                resultShape[0] = indices.Length;
+                for (int d = 1; d < source.shape.Length; d++)
+                    resultShape[d] = source.shape[d];
+
+                var result = new ReverseGradTensor<T>(resultCol, GradientUtils.ShouldTrackGrad(source), resultShape);
+
+                if (GradientUtils.ShouldTrackGrad(source))
+                {
+                    var savedIndices = indices;
+                    var gradFn = new OpNode<T>("Gather", new object[] { source }, (typedGradOutput, sgn) =>
+                    {
+                        var gradBuf = new T[source.Length];
+                        var sourceGradNullMask = sourceHasNulls ? new bool[source.Length] : null;
+
+                        for (int i = 0; i < savedIndices.Length; i++)
+                        {
+                            int dstOffset = savedIndices[i] * stride;
+                            int srcOffset = i * stride;
+                            for (int j = 0; j < stride; j++)
+                            {
+                                int flatIdx = dstOffset + j;
+                                int gradIdx = srcOffset + j;
+                                if (!typedGradOutput.IsNull(gradIdx))
+                                    gradBuf[flatIdx] += typedGradOutput[gradIdx];
+                            }
+                        }
+
+                        if (sourceHasNulls)
+                        {
+                            for (int i = 0; i < savedIndices.Length; i++)
+                            {
+                                int flatIdx = savedIndices[i] * stride;
+                                for (int j = 0; j < stride; j++)
+                                {
+                                    if (source.Data.IsNull(flatIdx + j))
+                                        sourceGradNullMask![flatIdx + j] = true;
+                                }
+                            }
+                            var sourceGrad = NivaraColumn<T>.CreateFromSpans(gradBuf, sourceGradNullMask!);
+                            AccumulateGradient(source, sourceGrad, sgn);
+                        }
+                        else
+                        {
+                            var sourceGrad = NivaraColumn<T>.Create(gradBuf);
+                            AccumulateGradient(source, sourceGrad, sgn);
+                        }
+                    });
+
+                    ComputationGraph.AddNode(result, gradFn);
+                }
+
+                return result;
+            },
+            $"AutoDiff=Gather;IndicesLength={indices.Length};SourceShape=[{string.Join(", ", source.shape)}]");
+    }
+
+    #endregion
+
     #region VAE Operations
 
     public static ReverseGradTensor<T> KlDivergence<T>(ReverseGradTensor<T> mean, ReverseGradTensor<T> logVar)

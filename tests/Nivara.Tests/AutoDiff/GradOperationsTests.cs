@@ -1062,4 +1062,144 @@ public class GradOperationsTests
     }
 
     #endregion
+
+    #region Gather Operation Tests
+
+    [Test]
+    public void Gather_1DSource_SelectsCorrectElements()
+    {
+        var source = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 10f, 20f, 30f, 40f, 50f }),
+            requiresGrad: true);
+
+        var result = ReverseGradOperations.Gather(source, new[] { 0, 2, 4 });
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result[0], Is.EqualTo(10f));
+        Assert.That(result[1], Is.EqualTo(30f));
+        Assert.That(result[2], Is.EqualTo(50f));
+        Assert.That(result.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void Gather_2DSource_SelectsCorrectRows()
+    {
+        // Source: [3 rows, 2 cols] = [[1,2], [3,4], [5,6]]
+        var source = ReverseGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, rows: 3, cols: 2, requiresGrad: true);
+
+        var result = ReverseGradOperations.Gather(source, new[] { 2, 0 });
+
+        // Result: [[5,6], [1,2]]
+        Assert.That(result.Length, Is.EqualTo(4)); // 2 rows × 2 cols
+        Assert.That(result[0], Is.EqualTo(5f));
+        Assert.That(result[1], Is.EqualTo(6f));
+        Assert.That(result[2], Is.EqualTo(1f));
+        Assert.That(result[3], Is.EqualTo(2f));
+        Assert.That(result.Shape[0], Is.EqualTo(2));
+        Assert.That(result.Shape[1], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Gather_Backward_AccumulatesGradientsCorrectly()
+    {
+        var source = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }),
+            requiresGrad: true);
+        source.Reshape(3, 2); // [3 rows, 2 cols]
+
+        var result = ReverseGradOperations.Gather(source, new[] { 2, 0 });
+        var grad = ReverseGradTensor<float>.FromMatrix(
+            new float[] { 10f, 20f, 30f, 40f }, rows: 2, cols: 2, requiresGrad: false);
+        result.Backward(grad);
+
+        // Row 2 got gradient [10,20], Row 0 got gradient [30,40], Row 1 untouched
+        Assert.That(source.Grad![0], Is.EqualTo(30f)); // row 0, col 0
+        Assert.That(source.Grad[1], Is.EqualTo(40f));  // row 0, col 1
+        Assert.That(source.Grad[2], Is.EqualTo(0f));   // row 1, col 0 (untouched)
+        Assert.That(source.Grad[3], Is.EqualTo(0f));   // row 1, col 1 (untouched)
+        Assert.That(source.Grad[4], Is.EqualTo(10f));  // row 2, col 0
+        Assert.That(source.Grad[5], Is.EqualTo(20f));  // row 2, col 1
+    }
+
+    [Test]
+    public void Gather_DuplicateIndices_AccumulatesGradients()
+    {
+        var source = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f }),
+            requiresGrad: true);
+
+        // Index 0 appears twice
+        var result = ReverseGradOperations.Gather(source, new[] { 0, 0, 1 });
+        var grad = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 10f, 20f, 30f }),
+            requiresGrad: false);
+        result.Backward(grad);
+
+        // Index 0 gets gradient 10 + 20 = 30, index 1 gets 30
+        Assert.That(source.Grad![0], Is.EqualTo(30f));
+        Assert.That(source.Grad[1], Is.EqualTo(30f));
+    }
+
+    [Test]
+    public void Gather_OutOfRangeIndex_Throws()
+    {
+        var source = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
+            requiresGrad: true);
+
+        Assert.That(
+            () => ReverseGradOperations.Gather(source, new[] { 0, 5 }),
+            Throws.InstanceOf<ArgumentOutOfRangeException>());
+    }
+
+    [Test]
+    public void Gather_NullSourceElements_PropagatesNulls()
+    {
+        var sourceValues = new float?[] { 1f, null, 3f, 4f, null };
+        var source = new ReverseGradTensor<float>(
+            NivaraColumn<float>.CreateFromNullable(sourceValues),
+            requiresGrad: true);
+
+        var result = ReverseGradOperations.Gather(source, new[] { 0, 1, 3 });
+
+        Assert.That(result[0], Is.EqualTo(1f));
+        Assert.That(result.IsNull(1), Is.True);  // source[1] was null
+        Assert.That(result[2], Is.EqualTo(4f));
+    }
+
+    [Test]
+    public void Gather_EmptyIndices_ReturnsEmptyTensor()
+    {
+        var source = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
+            requiresGrad: true);
+
+        var result = ReverseGradOperations.Gather(source, Array.Empty<int>());
+
+        Assert.That(result.Length, Is.EqualTo(0));
+        Assert.That(result.RequiresGrad, Is.False);
+    }
+
+    [Test]
+    public void Gather_SumThenBackward_GradientFlowsToSource()
+    {
+        var source = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 10f, 20f, 30f, 40f, 50f, 60f }),
+            requiresGrad: true);
+        source.Reshape(3, 2); // [[10,20],[30,40],[50,60]]
+
+        var selected = ReverseGradOperations.Gather(source, new[] { 0, 2 }); // [[10,20],[50,60]]
+        var sumResult = ReverseGradOperations.Sum(selected); // 10+20+50+60 = 140
+        sumResult.Backward();
+
+        Assert.That(source.Grad![0], Is.EqualTo(1f)); // row 0 selected once
+        Assert.That(source.Grad[1], Is.EqualTo(1f));
+        Assert.That(source.Grad[2], Is.EqualTo(0f)); // row 1 not selected
+        Assert.That(source.Grad[3], Is.EqualTo(0f));
+        Assert.That(source.Grad[4], Is.EqualTo(1f)); // row 2 selected once
+        Assert.That(source.Grad[5], Is.EqualTo(1f));
+    }
+
+    #endregion
 }

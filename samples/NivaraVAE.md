@@ -300,9 +300,9 @@ reconstruction. Two approaches:
 
 These are things we expect to discover while writing this example:
 
-### Gap 1: Embedding<T> is not a Module<T>
+### Gap 1: ~~Embedding<T> is not a Module<T>~~ **RESOLVED**
 
-Not relevant for VAE (we don't need embedding lookup), but noted.
+`Embedding<T>` now extends `Module<T>` (not relevant for VAE, but resolved).
 
 ### Gap 2: TrainingLoop<T>.Forward only takes one tensor
 
