@@ -813,31 +813,55 @@ public static class ReverseGradOperations
         bool[]? resultNullMask = weightHasNulls ? new bool[resultValues.Length] : null;
         bool anyResultNulls = false;
 
-        for (int batch = 0; batch < batchSize; batch++)
+        if (weightHasNulls)
         {
-            int indexBase = batch * maxActiveFeatures;
-            int outputBase = batch * embeddingDim;
-
-            for (int slot = 0; slot < maxActiveFeatures; slot++)
+            for (int batch = 0; batch < batchSize; batch++)
             {
-                int index = parsedIndices[indexBase + slot];
-                if (index == paddingIndex)
-                    continue;
+                int indexBase = batch * maxActiveFeatures;
+                int outputBase = batch * embeddingDim;
 
-                int weightBase = index * embeddingDim;
-                for (int dim = 0; dim < embeddingDim; dim++)
+                for (int slot = 0; slot < maxActiveFeatures; slot++)
                 {
-                    int weightOffset = weightBase + dim;
-                    int outputOffset = outputBase + dim;
-
-                    if (weightHasNulls && weight.IsNull(weightOffset))
-                    {
-                        resultNullMask![outputOffset] = true;
-                        anyResultNulls = true;
+                    int index = parsedIndices[indexBase + slot];
+                    if (index == paddingIndex)
                         continue;
-                    }
 
-                    resultValues[outputOffset] += weight.Data[weightOffset];
+                    int weightBase = index * embeddingDim;
+                    for (int dim = 0; dim < embeddingDim; dim++)
+                    {
+                        int weightOffset = weightBase + dim;
+                        int outputOffset = outputBase + dim;
+
+                        if (weight.IsNull(weightOffset))
+                        {
+                            resultNullMask![outputOffset] = true;
+                            anyResultNulls = true;
+                            continue;
+                        }
+
+                        resultValues[outputOffset] += weight.Data[weightOffset];
+                    }
+                }
+            }
+        }
+        else
+        {
+            var weightSpan = weight.Data.AsSpan();
+            for (int batch = 0; batch < batchSize; batch++)
+            {
+                int indexBase = batch * maxActiveFeatures;
+                int outputBase = batch * embeddingDim;
+
+                for (int slot = 0; slot < maxActiveFeatures; slot++)
+                {
+                    int index = parsedIndices[indexBase + slot];
+                    if (index == paddingIndex)
+                        continue;
+
+                    int weightBase = index * embeddingDim;
+                    var src = weightSpan.Slice(weightBase, embeddingDim);
+                    var dst = resultValues.AsSpan().Slice(outputBase, embeddingDim);
+                    TensorPrimitives.Add(src, dst, dst);
                 }
             }
         }
@@ -857,24 +881,49 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("SparseEmbeddingBag", new object[] { weight }, (typedGradOutput, stripGradientNulls) =>
             {
                 var weightGrad = new T[weight.Length];
+                bool gradHasNulls = typedGradOutput.HasNulls;
 
-                for (int batch = 0; batch < batchSize; batch++)
+                if (!gradHasNulls)
                 {
-                    int indexBase = batch * maxActiveFeatures;
-                    int gradBase = batch * embeddingDim;
-
-                    for (int slot = 0; slot < maxActiveFeatures; slot++)
+                    var gradSpan = typedGradOutput.AsSpan();
+                    for (int batch = 0; batch < batchSize; batch++)
                     {
-                        int index = savedIndices[indexBase + slot];
-                        if (index == paddingIndex)
-                            continue;
+                        int indexBase = batch * maxActiveFeatures;
+                        int gradBase = batch * embeddingDim;
 
-                        int weightBase = index * embeddingDim;
-                        for (int dim = 0; dim < embeddingDim; dim++)
+                        for (int slot = 0; slot < maxActiveFeatures; slot++)
                         {
-                            int gradOffset = gradBase + dim;
-                            if (!typedGradOutput.IsNull(gradOffset))
-                                weightGrad[weightBase + dim] += typedGradOutput[gradOffset];
+                            int index = savedIndices[indexBase + slot];
+                            if (index == paddingIndex)
+                                continue;
+
+                            int weightBase = index * embeddingDim;
+                            var src = gradSpan.Slice(gradBase, embeddingDim);
+                            var dst = weightGrad.AsSpan().Slice(weightBase, embeddingDim);
+                            TensorPrimitives.Add(src, dst, dst);
+                        }
+                    }
+                }
+                else
+                {
+                    for (int batch = 0; batch < batchSize; batch++)
+                    {
+                        int indexBase = batch * maxActiveFeatures;
+                        int gradBase = batch * embeddingDim;
+
+                        for (int slot = 0; slot < maxActiveFeatures; slot++)
+                        {
+                            int index = savedIndices[indexBase + slot];
+                            if (index == paddingIndex)
+                                continue;
+
+                            int weightBase = index * embeddingDim;
+                            for (int dim = 0; dim < embeddingDim; dim++)
+                            {
+                                int gradOffset = gradBase + dim;
+                                if (!typedGradOutput.IsNull(gradOffset))
+                                    weightGrad[weightBase + dim] += typedGradOutput[gradOffset];
+                            }
                         }
                     }
                 }
@@ -1097,29 +1146,37 @@ public static class ReverseGradOperations
 
     internal static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient, bool stripGradientNulls = true) where T : struct, INumber<T>
     {
+        if (tensor.Grad == null)
+        {
+            tensor.Grad = stripGradientNulls && gradient.HasNulls ? gradient.WithoutNulls() : gradient;
+            return;
+        }
+
         if (stripGradientNulls)
         {
-            var cleanG = gradient.HasNulls ? gradient.WithoutNulls() : gradient;
-            if (tensor.Grad == null)
+            bool existingHasNulls = tensor.Grad.HasNulls;
+            bool newHasNulls = gradient.HasNulls;
+
+            if (!existingHasNulls && !newHasNulls)
             {
-                tensor.Grad = cleanG;
+                int len = tensor.Grad.Length;
+                var result = new T[len];
+                tensor.Grad.CopyTo(result, default(T)!);
+                var gradData = new T[len];
+                gradient.CopyTo(gradData, default(T)!);
+                TensorPrimitives.Add(result.AsSpan(), gradData.AsSpan(), result.AsSpan());
+                tensor.Grad = NivaraColumn<T>.Create(result);
             }
             else
             {
-                var cleanExisting = tensor.Grad.HasNulls ? tensor.Grad.WithoutNulls() : tensor.Grad;
+                var cleanExisting = existingHasNulls ? tensor.Grad.WithoutNulls() : tensor.Grad;
+                var cleanG = newHasNulls ? gradient.WithoutNulls() : gradient;
                 tensor.Grad = cleanExisting.Add(cleanG);
             }
         }
         else
         {
-            if (tensor.Grad == null)
-            {
-                tensor.Grad = gradient;
-            }
-            else
-            {
-                tensor.Grad = tensor.Grad.Add(gradient);
-            }
+            tensor.Grad = tensor.Grad.Add(gradient);
         }
     }
 

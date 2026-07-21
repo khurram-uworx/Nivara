@@ -229,6 +229,34 @@ public sealed class ChessBoard
         return score;
     }
 
+    public string ToFen()
+    {
+        var sb = new System.Text.StringBuilder();
+        for (int rank = 7; rank >= 0; rank--)
+        {
+            int empty = 0;
+            for (int file = 0; file < 8; file++)
+            {
+                var piece = this[rank, file];
+                if (piece.HasValue)
+                {
+                    if (empty > 0) { sb.Append(empty); empty = 0; }
+                    sb.Append(piece.Value.ToFenChar());
+                }
+                else
+                {
+                    empty++;
+                }
+            }
+            if (empty > 0) sb.Append(empty);
+            if (rank > 0) sb.Append('/');
+        }
+
+        sb.Append(SideToMove == PieceColor.White ? " w " : " b ");
+        sb.Append("- - 0 1");
+        return sb.ToString();
+    }
+
     public string ToAscii()
     {
         var lines = new List<string>();

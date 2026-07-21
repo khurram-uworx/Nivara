@@ -7,6 +7,7 @@ public static class ChessEvalConsole
         ArgumentNullException.ThrowIfNull(model);
 
         model.Eval();
+        var targetLabel = TargetLabel(model.Phase);
         Console.WriteLine("NivaraChess interactive evaluator");
         Console.WriteLine("Type a FEN string, 'start', or 'quit'.");
         Console.WriteLine();
@@ -32,7 +33,8 @@ public static class ChessEvalConsole
                     : line;
                 var board = ChessBoard.ParseFen(fen);
                 Console.WriteLine(board.ToAscii());
-                PrintEvaluation(model.PredictCentipawns(board), board.MaterialScoreCentipawns());
+                var target = TargetValue(board, model.Phase);
+                PrintEvaluation(model.PredictCentipawns(board), target, targetLabel);
             }
             catch (Exception ex) when (ex is FormatException or ArgumentException)
             {
@@ -82,13 +84,27 @@ public static class ChessEvalConsole
         }
     }
 
-    public static void PrintEvaluation(float predicted, float target)
+    public static void PrintEvaluation(float predicted, float target, string targetLabel = "Material")
     {
-        Console.WriteLine($"Nivara score: {predicted:+0.0;-0.0;0.0} cp");
-        Console.WriteLine($"Material score: {target:+0;-0;0} cp");
-        Console.WriteLine($"Error: {MathF.Abs(predicted - target):0.0} cp");
+        Console.WriteLine($"Nivara score:   {predicted:+0.0;-0.0;0.0} cp");
+        Console.WriteLine($"{targetLabel,-16}{target:+0;-0;0} cp");
+        Console.WriteLine($"Error:          {MathF.Abs(predicted - target):0.0} cp");
         Console.WriteLine();
     }
+
+    internal static string TargetLabel(int phase) => phase switch
+    {
+        3 => "Stockfish eval",
+        2 => "Material+PSQT",
+        _ => "Material",
+    };
+
+    internal static float TargetValue(ChessBoard board, int phase) => phase switch
+    {
+        3 => board.MaterialPlusPieceSquareScoreCentipawns(),
+        2 => board.MaterialPlusPieceSquareScoreCentipawns(),
+        _ => board.MaterialScoreCentipawns(),
+    };
 
     static ChessBoard ParseUciPosition(string line)
     {

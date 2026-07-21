@@ -80,20 +80,49 @@ public class GradTensor<T> : IDisposable where T : struct, INumber<T>
         if (dims == null || dims.Length == 0)
             throw new ArgumentException("Shape must have at least one dimension", nameof(dims));
 
-        int total = 1;
-        foreach (var d in dims)
+        int inferIndex = Array.IndexOf(dims, -1);
+
+        if (inferIndex >= 0)
         {
-            if (d <= 0)
-                throw new ArgumentException($"All dimensions must be positive, got {d}", nameof(dims));
-            total *= d;
+            if (Array.IndexOf(dims, -1, inferIndex + 1) >= 0)
+                throw new ArgumentException("Only one dimension can be -1 for auto-inference.", nameof(dims));
+
+            int knownProduct = 1;
+            for (int i = 0; i < dims.Length; i++)
+            {
+                if (i == inferIndex) continue;
+                if (dims[i] <= 0)
+                    throw new ArgumentException($"All non-inferred dimensions must be positive, got {dims[i]}", nameof(dims));
+                knownProduct *= dims[i];
+            }
+
+            if (knownProduct == 0 || Length % knownProduct != 0)
+                throw new ArgumentException(
+                    $"Cannot infer dimension: tensor has {Length} elements but other dimensions multiply to {knownProduct}",
+                    nameof(dims));
+
+            dims = (int[])dims.Clone();
+            dims[inferIndex] = Length / knownProduct;
+        }
+        else
+        {
+            int total = 1;
+            foreach (var d in dims)
+            {
+                if (d <= 0)
+                    throw new ArgumentException($"All dimensions must be positive, got {d}", nameof(dims));
+                total *= d;
+            }
+
+            if (total != Length)
+                throw new ArgumentException(
+                    $"New shape ({string.Join(", ", dims)}) has {total} elements but tensor has {Length} elements",
+                    nameof(dims));
+
+            dims = (int[])dims.Clone();
         }
 
-        if (total != Length)
-            throw new ArgumentException(
-                $"New shape ({string.Join(", ", dims)}) has {total} elements but tensor has {Length} elements",
-                nameof(dims));
-
-        shape = (int[])dims.Clone();
+        shape = dims;
     }
 
     /// <summary>

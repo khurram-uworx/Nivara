@@ -11,36 +11,57 @@ public sealed class ChessDataGenerator
         rng = new Random(seed);
     }
 
-    public IReadOnlyList<ChessTrainingExample> Generate(int count, int phase = 1)
+    public IReadOnlyList<ChessTrainingExample> Generate(int count, int phase = 1, StockfishEvaluator? stockfish = null)
     {
         if (count <= 0)
             throw new ArgumentOutOfRangeException(nameof(count), "Position count must be positive.");
-        if (phase is not 1 and not 2)
-            throw new ArgumentOutOfRangeException(nameof(phase), "Only phases 1 and 2 are implemented.");
+        if (phase is not 1 and not 2 and not 3)
+            throw new ArgumentOutOfRangeException(nameof(phase), "Phases 1, 2, and 3 are supported.");
+        if (phase == 3 && stockfish == null)
+            throw new ArgumentException("Stockfish evaluator is required for phase 3.", nameof(stockfish));
 
         var examples = new List<ChessTrainingExample>(count);
+        var boards = new List<ChessBoard>(count);
         for (int i = 0; i < count; i++)
         {
             var board = GenerateMaterialPosition();
+            boards.Add(board);
             var features = phase == 1
                 ? board.ToFeatureVector()
                 : board.ToHalfKpFeatureVector();
-            int score = phase == 1
-                ? board.MaterialScoreCentipawns()
-                : board.MaterialPlusPieceSquareScoreCentipawns();
+            examples.Add(new ChessTrainingExample(board, features, 0));
+        }
 
-            examples.Add(new ChessTrainingExample(
-                board,
-                features,
-                score));
+        if (phase == 3)
+        {
+            Console.WriteLine($"  Evaluating {count} positions with Stockfish (depth {stockfish!.Depth})...");
+            var scores = stockfish.EvaluateBatch(boards, (done, total) =>
+            {
+                if (done % 500 == 0 || done == total)
+                    Console.Write($"\r  {done}/{total}");
+            });
+            Console.WriteLine();
+
+            for (int i = 0; i < count; i++)
+                examples[i] = examples[i] with { ScoreCentipawns = scores[i] };
+        }
+        else
+        {
+            for (int i = 0; i < count; i++)
+            {
+                int score = phase == 1
+                    ? boards[i].MaterialScoreCentipawns()
+                    : boards[i].MaterialPlusPieceSquareScoreCentipawns();
+                examples[i] = examples[i] with { ScoreCentipawns = score };
+            }
         }
 
         return examples;
     }
 
-    public NivaraFrame GenerateFrame(int count, int phase = 1)
+    public NivaraFrame GenerateFrame(int count, int phase = 1, StockfishEvaluator? stockfish = null)
     {
-        return ToFrame(Generate(count, phase), GetFeatureNames(phase));
+        return ToFrame(Generate(count, phase, stockfish), GetFeatureNames(phase));
     }
 
     public static string[] GetFeatureNames(int phase)
@@ -48,8 +69,8 @@ public sealed class ChessDataGenerator
         return phase switch
         {
             1 => ChessFeatures.Names,
-            2 => ChessFeatures.HalfKpNames,
-            _ => throw new ArgumentOutOfRangeException(nameof(phase), "Only phases 1 and 2 are implemented.")
+            2 or 3 => ChessFeatures.HalfKpNames,
+            _ => throw new ArgumentOutOfRangeException(nameof(phase), "Phases 1, 2, and 3 are supported.")
         };
     }
 
