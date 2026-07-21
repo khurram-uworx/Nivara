@@ -6,6 +6,7 @@
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/MicroGpt/MicroGpt.csproj" />
+    <Project Path="samples/NivaraChess/NivaraChess.csproj" />
     <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
