@@ -1411,16 +1411,26 @@ public static class ReverseGradOperations
                 var resultValues = new T[resultLen];
                 bool[]? resultNullMask = sourceHasNulls ? new bool[resultLen] : null;
 
+                var sourceData = new T[source.Length];
+                source.Data.CopyTo(sourceData, default(T)!);
+
+                bool[]? sourceNullMask = null;
+                if (sourceHasNulls && source.Data.TryGetNullMask(out var srcMask))
+                {
+                    sourceNullMask = new bool[source.Length];
+                    srcMask.CopyTo(sourceNullMask);
+                }
+
                 for (int i = 0; i < indices.Length; i++)
                 {
                     int srcOffset = indices[i] * stride;
                     int dstOffset = i * stride;
-                    for (int j = 0; j < stride; j++)
+                    Array.Copy(sourceData, srcOffset, resultValues, dstOffset, stride);
+                    if (sourceHasNulls)
                     {
-                        resultValues[dstOffset + j] = source.Data[srcOffset + j];
-                        if (sourceHasNulls)
+                        for (int j = 0; j < stride; j++)
                         {
-                            bool isNull = source.Data.IsNull(srcOffset + j);
+                            bool isNull = sourceNullMask![srcOffset + j];
                             resultNullMask![dstOffset + j] = isNull;
                             anyResultNulls |= isNull;
                         }
@@ -1441,25 +1451,38 @@ public static class ReverseGradOperations
                 if (GradientUtils.ShouldTrackGrad(source))
                 {
                     var savedIndices = indices;
+                    var savedSourceHasNulls = sourceHasNulls;
                     var gradFn = new OpNode<T>("Gather", new object[] { source }, (typedGradOutput, sgn) =>
                     {
                         var gradBuf = new T[source.Length];
-                        var sourceGradNullMask = sourceHasNulls ? new bool[source.Length] : null;
+                        var sourceGradNullMask = savedSourceHasNulls ? new bool[source.Length] : null;
 
-                        for (int i = 0; i < savedIndices.Length; i++)
+                        bool gradHasNulls = typedGradOutput.HasNulls;
+                        if (!gradHasNulls && typedGradOutput.TryGetSpan(out var gradSpan))
                         {
-                            int dstOffset = savedIndices[i] * stride;
-                            int srcOffset = i * stride;
-                            for (int j = 0; j < stride; j++)
+                            for (int i = 0; i < savedIndices.Length; i++)
                             {
-                                int flatIdx = dstOffset + j;
-                                int gradIdx = srcOffset + j;
-                                if (!typedGradOutput.IsNull(gradIdx))
-                                    gradBuf[flatIdx] += typedGradOutput[gradIdx];
+                                int dstOffset = savedIndices[i] * stride;
+                                int srcOffset = i * stride;
+                                for (int j = 0; j < stride; j++)
+                                    gradBuf[dstOffset + j] += gradSpan[srcOffset + j];
+                            }
+                        }
+                        else
+                        {
+                            for (int i = 0; i < savedIndices.Length; i++)
+                            {
+                                int dstOffset = savedIndices[i] * stride;
+                                int srcOffset = i * stride;
+                                for (int j = 0; j < stride; j++)
+                                {
+                                    if (!typedGradOutput.IsNull(srcOffset + j))
+                                        gradBuf[dstOffset + j] += typedGradOutput[srcOffset + j];
+                                }
                             }
                         }
 
-                        if (sourceHasNulls)
+                        if (savedSourceHasNulls && sourceGradNullMask != null)
                         {
                             for (int i = 0; i < savedIndices.Length; i++)
                             {
@@ -1467,7 +1490,7 @@ public static class ReverseGradOperations
                                 for (int j = 0; j < stride; j++)
                                 {
                                     if (source.Data.IsNull(flatIdx + j))
-                                        sourceGradNullMask![flatIdx + j] = true;
+                                        sourceGradNullMask[flatIdx + j] = true;
                                 }
                             }
                             var sourceGrad = NivaraColumn<T>.CreateFromSpans(gradBuf, sourceGradNullMask!);
