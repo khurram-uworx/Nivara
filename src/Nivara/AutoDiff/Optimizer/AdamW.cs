@@ -12,6 +12,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
 
     readonly List<T[]> expAvgBuffers = [];
     readonly List<T[]> expAvgSqBuffers = [];
+    readonly List<T[]> resultBuffers = [];
     int step;
 
     public AdamW(double beta1 = 0.9, double beta2 = 0.999, double eps = 1e-8)
@@ -28,7 +29,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
     }
 
     ReverseGradTensor<T> applyAdamW(
-        ReverseGradTensor<T> tensor, T[] expAvg, T[] expAvgSq, T lr, T wd, T biasCorr1, T biasCorr2)
+        ReverseGradTensor<T> tensor, T[] expAvg, T[] expAvgSq, T[] resultBuf, T lr, T wd, T biasCorr1, T biasCorr2)
     {
         var data = tensor.Data;
         var grad = tensor.Grad!;
@@ -41,7 +42,6 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
         {
             data.TryGetSpan(out var dataSpan);
             grad.TryGetSpan(out var gradSpan);
-            var result = new T[n];
 
             for (int i = 0; i < n; i++)
             {
@@ -55,18 +55,18 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
                 var vHat = expAvgSq[i] / biasCorr2;
                 var denom = T.CreateChecked(Math.Sqrt(double.CreateChecked(vHat))) + epsT;
 
-                result[i] = dataSpan[i] - lr * mHat / denom;
+                resultBuf[i] = dataSpan[i] - lr * mHat / denom;
 
                 if (wd != T.Zero)
-                    result[i] -= lr * wd * dataSpan[i];
+                    resultBuf[i] -= lr * wd * dataSpan[i];
             }
 
-            return new ReverseGradTensor<T>(NivaraColumn<T>.Create(result), requiresGrad: true, tensor.shape);
+            return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf.AsSpan(0, n)), requiresGrad: true, tensor.shape);
         }
 
         var dataBuf = ArrayPool<T>.Shared.Rent(n);
         var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var pooledResult = ArrayPool<T>.Shared.Rent(n);
         var nullMask = ArrayPool<bool>.Shared.Rent(n);
 
         try
@@ -81,7 +81,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
                 {
                     expAvg[i] = T.Zero;
                     expAvgSq[i] = T.Zero;
-                    resultBuf[i] = dataBuf[i];
+                    pooledResult[i] = dataBuf[i];
                 }
                 else
                 {
@@ -92,16 +92,16 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
                     var vHat = expAvgSq[i] / biasCorr2;
                     var denom = T.CreateChecked(Math.Sqrt(double.CreateChecked(vHat))) + epsT;
 
-                    resultBuf[i] = dataBuf[i] - lr * mHat / denom;
+                    pooledResult[i] = dataBuf[i] - lr * mHat / denom;
 
                     if (wd != T.Zero)
-                        resultBuf[i] -= lr * wd * dataBuf[i];
+                        pooledResult[i] -= lr * wd * dataBuf[i];
                 }
             }
 
             var resultColumn = hasNulls
-                ? NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n))
-                : NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
+                ? NivaraColumn<T>.CreateFromSpans(pooledResult.AsSpan(0, n), nullMask.AsSpan(0, n))
+                : NivaraColumn<T>.Create(pooledResult.AsSpan(0, n));
 
             return new ReverseGradTensor<T>(resultColumn, requiresGrad: true, tensor.shape);
         }
@@ -109,7 +109,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
         {
             ArrayPool<T>.Shared.Return(dataBuf, clearArray: true);
             ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(pooledResult, clearArray: true);
             ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
         }
     }
@@ -134,7 +134,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
                     continue;
 
                 EnsureBuffer(bufIdx, tensor.Length);
-                var newTensor = applyAdamW(tensor, expAvgBuffers[bufIdx], expAvgSqBuffers[bufIdx], lr, wd, biasCorr1, biasCorr2);
+                var newTensor = applyAdamW(tensor, expAvgBuffers[bufIdx], expAvgSqBuffers[bufIdx], resultBuffers[bufIdx], lr, wd, biasCorr1, biasCorr2);
                 param.Tensor = newTensor;
                 bufIdx++;
             }
@@ -145,8 +145,15 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
     {
         while (idx >= expAvgBuffers.Count)
         {
-            expAvgBuffers.Add(ArrayPool<T>.Shared.Rent(size));
-            expAvgSqBuffers.Add(ArrayPool<T>.Shared.Rent(size));
+            var expAvg = ArrayPool<T>.Shared.Rent(size);
+            expAvg.AsSpan(0, size).Clear();
+            expAvgBuffers.Add(expAvg);
+
+            var expAvgSq = ArrayPool<T>.Shared.Rent(size);
+            expAvgSq.AsSpan(0, size).Clear();
+            expAvgSqBuffers.Add(expAvgSq);
+
+            resultBuffers.Add(new T[size]);
         }
     }
 
@@ -159,5 +166,6 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
         }
         expAvgBuffers.Clear();
         expAvgSqBuffers.Clear();
+        resultBuffers.Clear();
     }
 }

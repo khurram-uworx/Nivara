@@ -625,28 +625,342 @@ public static class ReverseGradOperations
         int fullDim = a.shape.Length == 2 ? a.shape[1] : a.Length;
         int batchDim = a.shape.Length == 2 ? a.shape[0] : 1;
 
+        if (start + length > fullDim)
+            throw new ArgumentException($"Slice ({start}..{start + length}) exceeds dimension size {fullDim}");
+
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffSlice",
             length,
             a.Data.HasNulls,
             () =>
             {
-                // Build selection matrix M: [length, fullDim] with M[i, start+i] = 1
-                var mData = new T[length * fullDim];
-                for (int i = 0; i < length; i++)
-                    mData[i * fullDim + start + i] = T.One;
+                int resultLen = batchDim * length;
+                var resultValues = new T[resultLen];
+                bool[]? resultNullMask = a.HasNulls ? new bool[resultLen] : null;
+                bool anyResultNulls = false;
 
-                var mCol = NivaraColumn<T>.Create(mData);
-                var mTensor = new ReverseGradTensor<T>(mCol, requiresGrad: false);
-                mTensor.Reshape(length, fullDim);
+                var srcData = new T[a.Length];
+                a.Data.CopyTo(srcData, default(T)!);
 
-                // a is [1, fullDim]. Transpose to [fullDim, 1] for MatMul.
-                var aT = Transpose(a);                          // [fullDim, 1]
-                var sliced = MatMul(mTensor, aT);               // [length, 1]
-                var result = Transpose(sliced);                 // [1, length]
+                for (int r = 0; r < batchDim; r++)
+                {
+                    int srcOffset = r * fullDim + start;
+                    int dstOffset = r * length;
+                    Array.Copy(srcData, srcOffset, resultValues, dstOffset, length);
+
+                    if (a.HasNulls && resultNullMask != null)
+                    {
+                        if (a.Data.TryGetNullMask(out var srcNull))
+                        {
+                            for (int i = 0; i < length; i++)
+                            {
+                                bool isNull = srcNull[srcOffset + i];
+                                resultNullMask[dstOffset + i] = isNull;
+                                anyResultNulls |= isNull;
+                            }
+                        }
+                    }
+                }
+
+                var resultCol = anyResultNulls
+                    ? NivaraColumn<T>.CreateFromSpans(resultValues, resultNullMask!)
+                    : NivaraColumn<T>.Create(resultValues);
+
+                var resultShape = batchDim == 1
+                    ? new[] { length }
+                    : new[] { batchDim, length };
+
+                var result = new ReverseGradTensor<T>(resultCol, a.RequiresGrad, resultShape);
+
+                if (a.RequiresGrad)
+                {
+                    var savedStart = start;
+                    var savedLength = length;
+                    var savedFullDim = fullDim;
+                    var savedBatchDim = batchDim;
+                    var gradFn = new OpNode<T>("Slice", [a], (typedGradOutput, sgn) =>
+                    {
+                        var gradData = new T[typedGradOutput.Length];
+                        typedGradOutput.CopyTo(gradData, default(T)!);
+
+                        var gradResult = new T[a.Length];
+
+                        if (savedBatchDim == 1)
+                        {
+                            Array.Copy(gradData, 0, gradResult, savedStart, savedLength);
+                        }
+                        else
+                        {
+                            for (int r = 0; r < savedBatchDim; r++)
+                            {
+                                int srcOffset = r * savedLength;
+                                int dstOffset = r * savedFullDim + savedStart;
+                                Array.Copy(gradData, srcOffset, gradResult, dstOffset, savedLength);
+                            }
+                        }
+
+                        var gradCol = NivaraColumn<T>.Create(gradResult);
+                        AccumulateGradient(a, gradCol, sgn);
+                    });
+
+                    ComputationGraph.AddNode(result, gradFn);
+                }
+
                 return result;
             },
             $"AutoDiff=Slice;Start={start};Length={length};FullDim={fullDim}");
+    }
+
+    public static ReverseGradTensor<T> Concat<T>(ReverseGradTensor<T>[] tensors, int axis = 0)
+        where T : struct, INumber<T>
+    {
+        if (tensors == null || tensors.Length == 0)
+            throw new ArgumentException("At least one tensor is required for Concat.", nameof(tensors));
+        if (tensors.Length == 1)
+            return tensors[0];
+
+        int rank = tensors[0].Rank;
+        if (rank < 1 || rank > 2)
+            throw new ArgumentException($"Concat supports 1D or 2D tensors, got rank {rank}.");
+
+        for (int i = 1; i < tensors.Length; i++)
+        {
+            if (tensors[i].Rank != rank)
+                throw new ArgumentException(
+                    $"All tensors must have the same rank. Tensor 0 has rank {rank}, tensor {i} has rank {tensors[i].Rank}.");
+
+            if (rank == 2 && axis == 1 && tensors[i].shape[0] != tensors[0].shape[0])
+                throw new ArgumentException(
+                    $"For axis=1 concatenation, all tensors must have the same number of rows. " +
+                    $"Tensor 0 has {tensors[0].shape[0]} rows, tensor {i} has {tensors[i].shape[0]} rows.");
+
+            if (rank == 2 && axis == 0 && tensors[i].shape[1] != tensors[0].shape[1])
+                throw new ArgumentException(
+                    $"For axis=0 concatenation, all tensors must have the same number of columns. " +
+                    $"Tensor 0 has {tensors[0].shape[1]} columns, tensor {i} has {tensors[i].shape[1]} columns.");
+        }
+
+        // Compute sizes for backward splitting
+        int[] inputLengths = new int[tensors.Length];
+        for (int i = 0; i < tensors.Length; i++)
+            inputLengths[i] = tensors.Length == 1 ? tensors[i].Length : tensors[i].Length;
+
+        bool shouldTrack = false;
+        foreach (var t in tensors)
+        {
+            if (t.RequiresGrad) { shouldTrack = true; break; }
+        }
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffConcat",
+            tensors.Sum(t => t.Length),
+            tensors.Any(t => t.Data.HasNulls),
+            () =>
+            {
+                if (rank == 1)
+                {
+                    // 1D concatenation: copy data sequentially
+                    int totalLen = tensors.Sum(t => t.Length);
+                    var resultData = new T[totalLen];
+                    int offset = 0;
+                    foreach (var t in tensors)
+                    {
+                        t.Data.CopyTo(resultData.AsSpan(offset, t.Length), default(T)!);
+                        offset += t.Length;
+                    }
+
+                    var resultCol = NivaraColumn<T>.Create(resultData);
+                    var result = new ReverseGradTensor<T>(resultCol, shouldTrack, [totalLen]);
+
+                    if (shouldTrack)
+                    {
+                        var savedLengths = inputLengths;
+                        var gradFn = new OpNode<T>("Concat", tensors, (typedGradOutput, sgn) =>
+                        {
+                            var fullGrad = new T[typedGradOutput.Length];
+                            typedGradOutput.CopyTo(fullGrad.AsSpan(), default(T)!);
+                            int gradOffset = 0;
+                            for (int i = 0; i < tensors.Length; i++)
+                            {
+                                if (tensors[i].RequiresGrad)
+                                {
+                                    var gradSlice = new T[savedLengths[i]];
+                                    for (int j = 0; j < savedLengths[i]; j++)
+                                        gradSlice[j] = fullGrad[gradOffset + j];
+
+                                    var gradCol = NivaraColumn<T>.Create(gradSlice);
+                                    AccumulateGradient(tensors[i], gradCol, sgn);
+                                }
+                                gradOffset += savedLengths[i];
+                            }
+                        });
+
+                        ComputationGraph.AddNode(result, gradFn);
+                    }
+
+                    return result;
+                }
+                else // rank == 2
+                {
+                    int rows = tensors[0].shape[0];
+                    int totalCols = tensors.Sum(t => t.shape[1]);
+
+                    var resultData = new T[rows * totalCols];
+
+                    if (axis == 1)
+                    {
+                        // Column concatenation: place each tensor's columns side by side
+                        int colOffset = 0;
+                        foreach (var t in tensors)
+                        {
+                            int tCols = t.shape[1];
+                            var srcData = new T[t.Length];
+                            t.Data.CopyTo(srcData, default(T)!);
+                            for (int r = 0; r < rows; r++)
+                            {
+                                Array.Copy(srcData, r * tCols, resultData, r * totalCols + colOffset, tCols);
+                            }
+                            colOffset += tCols;
+                        }
+                    }
+                    else // axis == 0
+                    {
+                        // Row concatenation: stack tensors vertically
+                        int totalRows = tensors.Sum(t => t.shape[0]);
+                        int cols = tensors[0].shape[1];
+                        resultData = new T[totalRows * cols];
+                        int rowOffset = 0;
+                        foreach (var t in tensors)
+                        {
+                            int tRows = t.shape[0];
+                            var srcData = new T[t.Length];
+                            t.Data.CopyTo(srcData, default(T)!);
+                            Array.Copy(srcData, 0, resultData, rowOffset * cols, tRows * cols);
+                            rowOffset += tRows;
+                        }
+                        totalCols = cols;
+                    }
+
+                    var resultCol = NivaraColumn<T>.Create(resultData);
+                    var resultShape = axis == 0
+                        ? new[] { tensors.Sum(t => t.shape[0]), tensors[0].shape[1] }
+                        : new[] { tensors[0].shape[0], totalCols };
+                    var result = new ReverseGradTensor<T>(resultCol, shouldTrack, resultShape);
+
+                    if (shouldTrack)
+                    {
+                        // Save shape info for backward (NivaraColumn<T> doesn't have .shape)
+                        int outputRows = resultShape[0];
+                        int outputCols = resultShape[1];
+                        var inputShapes = new int[tensors.Length][];
+                        var inputCols = new int[tensors.Length];
+                        var inputRows = new int[tensors.Length];
+                        for (int i = 0; i < tensors.Length; i++)
+                        {
+                            inputShapes[i] = tensors[i].shape;
+                            inputCols[i] = tensors[i].shape[1];
+                            inputRows[i] = tensors[i].shape[0];
+                        }
+
+                        var savedTensors = tensors;
+                        var savedAxis = axis;
+                        var gradFn = new OpNode<T>("Concat", tensors, (typedGradOutput, sgn) =>
+                        {
+                            if (savedAxis == 1)
+                            {
+                                // Split along columns — extract column slices per row
+                                int colOff = 0;
+                                if (typedGradOutput.TryGetSpan(out var srcSpan))
+                                {
+                                    for (int i = 0; i < savedTensors.Length; i++)
+                                    {
+                                        if (savedTensors[i].RequiresGrad)
+                                        {
+                                            int tCols = inputCols[i];
+                                            var gradData = new T[outputRows * tCols];
+                                            for (int r = 0; r < outputRows; r++)
+                                            {
+                                                srcSpan.Slice(r * outputCols + colOff, tCols).CopyTo(gradData.AsSpan(r * tCols));
+                                            }
+                                            var gradCol = NivaraColumn<T>.Create(gradData);
+                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                        }
+                                        colOff += inputCols[i];
+                                    }
+                                }
+                                else
+                                {
+                                    var srcArr = new T[typedGradOutput.Length];
+                                    typedGradOutput.CopyTo(srcArr.AsSpan(), default(T)!);
+                                    for (int i = 0; i < savedTensors.Length; i++)
+                                    {
+                                        if (savedTensors[i].RequiresGrad)
+                                        {
+                                            int tCols = inputCols[i];
+                                            var gradData = new T[outputRows * tCols];
+                                            for (int r = 0; r < outputRows; r++)
+                                            {
+                                                Array.Copy(srcArr, r * outputCols + colOff, gradData, r * tCols, tCols);
+                                            }
+                                            var gradCol = NivaraColumn<T>.Create(gradData);
+                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                        }
+                                        colOff += inputCols[i];
+                                    }
+                                }
+                            }
+                            else // axis == 0
+                            {
+                                // Split along rows — extract row-contiguous blocks
+                                int rowOff = 0;
+                                if (typedGradOutput.TryGetSpan(out var srcSpan))
+                                {
+                                    for (int i = 0; i < savedTensors.Length; i++)
+                                    {
+                                        if (savedTensors[i].RequiresGrad)
+                                        {
+                                            int tRows = inputRows[i];
+                                            var gradData = new T[tRows * outputCols];
+                                            for (int r = 0; r < tRows; r++)
+                                            {
+                                                srcSpan.Slice((rowOff + r) * outputCols, outputCols).CopyTo(gradData.AsSpan(r * outputCols));
+                                            }
+                                            var gradCol = NivaraColumn<T>.Create(gradData);
+                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                        }
+                                        rowOff += inputRows[i];
+                                    }
+                                }
+                                else
+                                {
+                                    var srcFull = new T[typedGradOutput.Length];
+                                    typedGradOutput.CopyTo(srcFull.AsSpan(), default(T)!);
+                                    for (int i = 0; i < savedTensors.Length; i++)
+                                    {
+                                        if (savedTensors[i].RequiresGrad)
+                                        {
+                                            int tRows = inputRows[i];
+                                            var gradData = new T[tRows * outputCols];
+                                            for (int r = 0; r < tRows; r++)
+                                            {
+                                                Array.Copy(srcFull, (rowOff + r) * outputCols, gradData, r * outputCols, outputCols);
+                                            }
+                                            var gradCol = NivaraColumn<T>.Create(gradData);
+                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                        }
+                                        rowOff += inputRows[i];
+                                    }
+                                }
+                            }
+                        });
+
+                        ComputationGraph.AddNode(result, gradFn);
+                    }
+
+                    return result;
+                }
+            },
+            $"AutoDiff=Concat;Axis={axis};Count={tensors.Length}");
     }
 
     public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
@@ -722,6 +1036,126 @@ public static class ReverseGradOperations
                 return resultTensor;
             },
             AutoDiffDiagnostics.ShapeNote("RMSNorm", a.Shape));
+    }
+
+    public static ReverseGradTensor<T> PerRowRMSNorm<T>(ReverseGradTensor<T> a, int rows, int cols, double eps = 1e-5)
+        where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffPerRowRMSNorm",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
+            {
+                var srcData = new T[a.Length];
+                a.Data.CopyTo(srcData, default(T)!);
+                var resultData = new T[rows * cols];
+
+                if (typeof(T) == typeof(float))
+                {
+                    var srcFloat = System.Runtime.CompilerServices.Unsafe.As<T[], float[]>(ref srcData);
+                    var resFloat = System.Runtime.CompilerServices.Unsafe.As<T[], float[]>(ref resultData);
+                    for (int i = 0; i < rows; i++)
+                    {
+                        int baseIdx = i * cols;
+                        var row = srcFloat.AsSpan(baseIdx, cols);
+                        var dst = resFloat.AsSpan(baseIdx, cols);
+                        float sumSq = TensorPrimitives.Dot(row, row);
+                        float rms = MathF.Sqrt(sumSq / cols + (float)eps);
+                        TensorPrimitives.Multiply(row, 1.0f / rms, dst);
+                    }
+                }
+                else if (typeof(T) == typeof(double))
+                {
+                    var srcDouble = System.Runtime.CompilerServices.Unsafe.As<T[], double[]>(ref srcData);
+                    var resDouble = System.Runtime.CompilerServices.Unsafe.As<T[], double[]>(ref resultData);
+                    for (int i = 0; i < rows; i++)
+                    {
+                        int baseIdx = i * cols;
+                        var row = srcDouble.AsSpan(baseIdx, cols);
+                        var dst = resDouble.AsSpan(baseIdx, cols);
+                        double sumSq = TensorPrimitives.Dot(row, row);
+                        double rms = Math.Sqrt(sumSq / cols + eps);
+                        TensorPrimitives.Multiply(row, 1.0 / rms, dst);
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < rows; i++)
+                    {
+                        int baseIdx = i * cols;
+                        double sumSq = 0;
+                        for (int j = 0; j < cols; j++)
+                        {
+                            double v = double.CreateChecked(srcData[baseIdx + j]);
+                            sumSq += v * v;
+                        }
+                        double rms = Math.Sqrt(sumSq / cols + eps);
+                        double invRms = 1.0 / rms;
+                        for (int j = 0; j < cols; j++)
+                            resultData[baseIdx + j] = T.CreateChecked(double.CreateChecked(srcData[baseIdx + j]) * invRms);
+                    }
+                }
+
+                var resultCol = NivaraColumn<T>.Create(resultData);
+                var result = new ReverseGradTensor<T>(resultCol, a.RequiresGrad, a.Shape);
+
+                if (a.RequiresGrad)
+                {
+                    var savedInput = new T[a.Length];
+                    a.Data.CopyTo(savedInput, default(T)!);
+
+                    var gradFn = new OpNode<T>("PerRowRMSNorm", [a], (typedGradOutput, sgn) =>
+                    {
+                        var gradOut = new T[typedGradOutput.Length];
+                        typedGradOutput.CopyTo(gradOut.AsSpan(), default(T)!);
+
+                        var gradResult = new T[rows * cols];
+
+                        for (int i = 0; i < rows; i++)
+                        {
+                            int baseIdx = i * cols;
+
+                            double sumSq = 0;
+                            for (int j = 0; j < cols; j++)
+                            {
+                                double v = double.CreateChecked(savedInput[baseIdx + j]);
+                                sumSq += v * v;
+                            }
+                            double rms = Math.Sqrt(sumSq / cols + eps);
+                            double invRms = 1.0 / rms;
+                            double rms3 = rms * rms * rms;
+
+                            double sumGradX = 0;
+                            for (int j = 0; j < cols; j++)
+                            {
+                                double g = double.CreateChecked(gradOut[baseIdx + j]);
+                                double v = double.CreateChecked(savedInput[baseIdx + j]);
+                                sumGradX += g * v;
+                            }
+
+                            double scale = sumGradX / (cols * rms3);
+
+                            for (int j = 0; j < cols; j++)
+                            {
+                                double g = double.CreateChecked(gradOut[baseIdx + j]);
+                                double v = double.CreateChecked(savedInput[baseIdx + j]);
+                                gradResult[baseIdx + j] = T.CreateChecked(g * invRms - v * scale);
+                            }
+                        }
+
+                        var gradCol = NivaraColumn<T>.Create(gradResult);
+                        AccumulateGradient(a, gradCol, sgn);
+                    });
+
+                    ComputationGraph.AddNode(result, gradFn);
+                }
+
+                return result;
+            },
+            AutoDiffDiagnostics.ShapeNote("PerRowRMSNorm", a.Shape));
     }
 
     public static ReverseGradTensor<T> Dropout<T>(ReverseGradTensor<T> input, double probability, bool isTraining)
@@ -977,16 +1411,26 @@ public static class ReverseGradOperations
                 var resultValues = new T[resultLen];
                 bool[]? resultNullMask = sourceHasNulls ? new bool[resultLen] : null;
 
+                var sourceData = new T[source.Length];
+                source.Data.CopyTo(sourceData, default(T)!);
+
+                bool[]? sourceNullMask = null;
+                if (sourceHasNulls && source.Data.TryGetNullMask(out var srcMask))
+                {
+                    sourceNullMask = new bool[source.Length];
+                    srcMask.CopyTo(sourceNullMask);
+                }
+
                 for (int i = 0; i < indices.Length; i++)
                 {
                     int srcOffset = indices[i] * stride;
                     int dstOffset = i * stride;
-                    for (int j = 0; j < stride; j++)
+                    Array.Copy(sourceData, srcOffset, resultValues, dstOffset, stride);
+                    if (sourceHasNulls)
                     {
-                        resultValues[dstOffset + j] = source.Data[srcOffset + j];
-                        if (sourceHasNulls)
+                        for (int j = 0; j < stride; j++)
                         {
-                            bool isNull = source.Data.IsNull(srcOffset + j);
+                            bool isNull = sourceNullMask![srcOffset + j];
                             resultNullMask![dstOffset + j] = isNull;
                             anyResultNulls |= isNull;
                         }
@@ -1007,25 +1451,38 @@ public static class ReverseGradOperations
                 if (GradientUtils.ShouldTrackGrad(source))
                 {
                     var savedIndices = indices;
+                    var savedSourceHasNulls = sourceHasNulls;
                     var gradFn = new OpNode<T>("Gather", new object[] { source }, (typedGradOutput, sgn) =>
                     {
                         var gradBuf = new T[source.Length];
-                        var sourceGradNullMask = sourceHasNulls ? new bool[source.Length] : null;
+                        var sourceGradNullMask = savedSourceHasNulls ? new bool[source.Length] : null;
 
-                        for (int i = 0; i < savedIndices.Length; i++)
+                        bool gradHasNulls = typedGradOutput.HasNulls;
+                        if (!gradHasNulls && typedGradOutput.TryGetSpan(out var gradSpan))
                         {
-                            int dstOffset = savedIndices[i] * stride;
-                            int srcOffset = i * stride;
-                            for (int j = 0; j < stride; j++)
+                            for (int i = 0; i < savedIndices.Length; i++)
                             {
-                                int flatIdx = dstOffset + j;
-                                int gradIdx = srcOffset + j;
-                                if (!typedGradOutput.IsNull(gradIdx))
-                                    gradBuf[flatIdx] += typedGradOutput[gradIdx];
+                                int dstOffset = savedIndices[i] * stride;
+                                int srcOffset = i * stride;
+                                for (int j = 0; j < stride; j++)
+                                    gradBuf[dstOffset + j] += gradSpan[srcOffset + j];
+                            }
+                        }
+                        else
+                        {
+                            for (int i = 0; i < savedIndices.Length; i++)
+                            {
+                                int dstOffset = savedIndices[i] * stride;
+                                int srcOffset = i * stride;
+                                for (int j = 0; j < stride; j++)
+                                {
+                                    if (!typedGradOutput.IsNull(srcOffset + j))
+                                        gradBuf[dstOffset + j] += typedGradOutput[srcOffset + j];
+                                }
                             }
                         }
 
-                        if (sourceHasNulls)
+                        if (savedSourceHasNulls && sourceGradNullMask != null)
                         {
                             for (int i = 0; i < savedIndices.Length; i++)
                             {
@@ -1033,7 +1490,7 @@ public static class ReverseGradOperations
                                 for (int j = 0; j < stride; j++)
                                 {
                                     if (source.Data.IsNull(flatIdx + j))
-                                        sourceGradNullMask![flatIdx + j] = true;
+                                        sourceGradNullMask[flatIdx + j] = true;
                                 }
                             }
                             var sourceGrad = NivaraColumn<T>.CreateFromSpans(gradBuf, sourceGradNullMask!);
@@ -1160,10 +1617,10 @@ public static class ReverseGradOperations
             if (!existingHasNulls && !newHasNulls)
             {
                 int len = tensor.Grad.Length;
-                var result = new T[len];
-                tensor.Grad.CopyTo(result, default(T)!);
                 var gradData = new T[len];
                 gradient.CopyTo(gradData, default(T)!);
+                var result = new T[len];
+                tensor.Grad.CopyTo(result.AsSpan(), default(T)!);
                 TensorPrimitives.Add(result.AsSpan(), gradData.AsSpan(), result.AsSpan());
                 tensor.Grad = NivaraColumn<T>.Create(result);
             }

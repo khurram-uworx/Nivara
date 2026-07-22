@@ -320,3 +320,9 @@ Current product direction:
 - The recent AutoDiff plan items are implemented: inference-default
   `GradientUtils.Grad()` plus `StateDict()` / `LoadStateDict()` and
   serializer helpers.
+
+## Architectural Decisions (ADRs)
+
+See `docs/adr/` for recorded decisions:
+
+- **ADR-001**: AutoDiff is a non-nullable domain. Null boundary enforced at domain entry points (`NivaraColumn<T>` → `ReverseGradTensor<T>` conversion). All AutoDiff ops assume non-null data. Storage layer remains nullable.
