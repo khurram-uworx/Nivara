@@ -197,9 +197,7 @@ for (int pos = 0; pos < blockSize; pos++) {
 | Sampling | Inline softmax + loop | `Sampler<T>` with temperature and top-k |
 | Inference mode | Manual (no eval mode) | `model.Eval()` / `model.Train()` |
 
-## Library gaps this example exposed and resolved
-
-NivaraGpt drove several core library additions. The original spec identified these gaps; all were resolved during implementation.
+## Library gaps this example resolved
 
 ### Core library additions
 
@@ -210,16 +208,6 @@ NivaraGpt drove several core library additions. The original spec identified the
 | `ReverseGradOperations.PerRowRMSNorm<T>` | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | SIMD-accelerated per-row RMS normalization with differentiable backward pass |
 | `Sampler<T>` | `src/Nivara/AutoDiff/Nn/Sampler.cs` | Temperature and top-k sampling from logit tensors |
 | `CrossEntropyLoss<T>.Forward(logits, int[])` | `src/Nivara/AutoDiff/Nn/Functional/CrossEntropyLoss.cs` | Integer-label overload — converts targets to one-hot internally |
-
-### Gap analysis (from `samples/README.md`)
-
-| Gap | Status | Resolution |
-|-----|--------|------------|
-| **E: No batched TransformerBlock** | Resolved | `TransformerBlock<T>` in core — pre-LN, causal mask, dropout, residual |
-| **H: No integer-label CrossEntropyLoss** | Resolved | New overload accepts `int[]` targets |
-| **K: No Sampler utilities** | Resolved | `Sampler<T>` with `Sample(logits, temperature, topK)` |
-| **New: No Concat op** | Resolved | `ReverseGradOperations.Concat<T>` with correct backward |
-| **New: No per-row RMSNorm** | Resolved | `ReverseGradOperations.PerRowRMSNorm<T>` with SIMD + backward |
 
 ### What MicroGpt does that NivaraGpt improves
 
