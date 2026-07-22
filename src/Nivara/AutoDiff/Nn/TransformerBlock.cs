@@ -105,8 +105,9 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
         var V = vProj.Forward(xNorm);
 
         var xAttn = MultiHeadAttention(Q, K, V, L);
+        var xProj = oProj.Forward(xAttn);
 
-        var oDrop = attnDropout != null ? attnDropout.Forward(xAttn) : xAttn;
+        var oDrop = attnDropout != null ? attnDropout.Forward(xProj) : xProj;
         var x = ReverseGradOperations.Add(oDrop, xResidual);
 
         xResidual = x;
