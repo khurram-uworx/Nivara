@@ -19,6 +19,7 @@ bool lrDecay = false;
 double temperature = 1.0;
 int rngSeed = 42;
 int numSamples = 5;
+string? dumpWeightsPath = null;
 bool help = false;
 
 for (int i = 0; i < args.Length; i++)
@@ -39,6 +40,7 @@ for (int i = 0; i < args.Length; i++)
         case "--temperature": temperature = double.Parse(args[++i]); break;
         case "--seed": rngSeed = int.Parse(args[++i]); break;
         case "--samples": numSamples = int.Parse(args[++i]); break;
+        case "--dump-weights": dumpWeightsPath = args[++i]; break;
         case "--help": help = true; break;
         case "-h": help = true; break;
     }
@@ -73,10 +75,16 @@ Karpathy defaults for A vs C comparison:
     return;
 }
 
-Console.Write("Downloading names dataset... ");
-using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-var namesText = await client.GetStringAsync(
-    "https://raw.githubusercontent.com/karpathy/makemore/refs/heads/master/names.txt");
+Console.Write("Loading names dataset... ");
+var namesPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "samples", "data", "names.txt");
+if (!File.Exists(namesPath))
+    namesPath = Path.Combine("samples", "data", "names.txt");
+if (!File.Exists(namesPath))
+    namesPath = Path.Combine("..", "data", "names.txt");
+if (!File.Exists(namesPath))
+    throw new FileNotFoundException($"Could not find names.txt. Place it in samples/data/names.txt relative to the repo root.");
+
+var namesText = await File.ReadAllTextAsync(namesPath);
 
 var docs = namesText.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
     .Where(l => l.Length > 0).ToList();
@@ -150,6 +158,43 @@ for (int step = 0; step < numSteps; step++)
 
 sw.Stop();
 Console.WriteLine($"\ntime: {sw.Elapsed.TotalSeconds:F2}s");
+
+if (!string.IsNullOrWhiteSpace(dumpWeightsPath))
+{
+    Console.Write($"Dumping weights to {dumpWeightsPath}... ");
+    var weightDict = new Dictionary<string, float[]>();
+    var paramNames = new[] { "wte", "wpe" };
+    var allWeightArrays = new List<(string name, float[] data)>();
+
+    // Collect all param data
+    for (int pi = 0; pi < model.Parameters.Count; pi++)
+    {
+        var p = model.Parameters[pi];
+        var data = new float[p.Length];
+        p.Tensor.Data.CopyTo(data, 0f);
+        string name = pi < 2 ? paramNames[pi] : $"param_{pi}";
+        allWeightArrays.Add((name, data));
+    }
+
+    // Write as JSON
+    using (var fs = File.CreateText(dumpWeightsPath))
+    {
+        fs.WriteLine("{");
+        for (int i = 0; i < allWeightArrays.Count; i++)
+        {
+            var (name, data) = allWeightArrays[i];
+            float mean = data.Average();
+            float variance = data.Sum(x => (x - mean) * (x - mean)) / data.Length;
+            float std = MathF.Sqrt(variance);
+            float min = data.Min();
+            float max = data.Max();
+            float l2 = MathF.Sqrt(data.Sum(x => x * x));
+            fs.WriteLine($"  \"{name}\": {{\"len\":{data.Length},\"mean\":{mean:F6},\"std\":{std:F6},\"min\":{min:F6},\"max\":{max:F6},\"l2\":{l2:F4}}}{(i < allWeightArrays.Count - 1 ? "," : "")}");
+        }
+        fs.WriteLine("}");
+    }
+    Console.WriteLine("done");
+}
 
 Console.WriteLine("\n--- generation ---");
 for (int i = 0; i < numSamples; i++)
