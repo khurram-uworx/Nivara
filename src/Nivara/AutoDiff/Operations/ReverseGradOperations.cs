@@ -361,6 +361,76 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// MeanPool: averages values within consecutive groups of <paramref name="poolSize"/>.
+    /// Expects a flattened 1D or row-major 2D tensor where each row is [poolSize * embedDim].
+    /// The first dimension (batch) is inferred from tensor length / (poolSize * embedDim).
+    /// Output shape: [batchSize, embedDim].
+    /// Backward: gradients are distributed equally to all positions in each pool window.
+    /// </summary>
+    public static ReverseGradTensor<T> MeanPool<T>(ReverseGradTensor<T> a, int poolSize, int embedDim)
+        where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (poolSize <= 0) throw new ArgumentOutOfRangeException(nameof(poolSize));
+        if (embedDim <= 0) throw new ArgumentOutOfRangeException(nameof(embedDim));
+        if (a.Length == 0) throw new InvalidOperationException("Cannot mean-pool an empty tensor.");
+        if (a.Length % (poolSize * embedDim) != 0)
+            throw new ArgumentException(
+                $"Tensor length {a.Length} is not divisible by poolSize*embedDim = {poolSize * embedDim}.");
+
+        int batchSize = a.Length / (poolSize * embedDim);
+
+        var src = new T[a.Length];
+        a.Data.CopyTo(src, default(T)!);
+
+        var resultValues = new T[batchSize * embedDim];
+        T tPoolSize = T.CreateChecked(poolSize);
+
+        for (int b = 0; b < batchSize; b++)
+        {
+            int rowOffset = b * poolSize * embedDim;
+            for (int d = 0; d < embedDim; d++)
+            {
+                T sum = T.Zero;
+                for (int l = 0; l < poolSize; l++)
+                    sum += src[rowOffset + l * embedDim + d];
+                resultValues[b * embedDim + d] = sum / tPoolSize;
+            }
+        }
+
+        var resultCol = NivaraColumn<T>.Create(resultValues);
+        var result = new ReverseGradTensor<T>(resultCol, GradientUtils.ShouldTrackGrad(a), [batchSize, embedDim]);
+
+        if (GradientUtils.ShouldTrackGrad(a))
+        {
+            var gradFn = new OpNode<T>("MeanPool", new object[] { a }, (typedGradOutput, sgn) =>
+            {
+                var gradOut = new T[a.Length];
+                var gradSrc = new T[typedGradOutput.Length];
+                typedGradOutput.Data.CopyTo(gradSrc, default(T)!);
+
+                for (int b = 0; b < batchSize; b++)
+                {
+                    int rowOffset = b * poolSize * embedDim;
+                    for (int d = 0; d < embedDim; d++)
+                    {
+                        T gradVal = gradSrc[b * embedDim + d] / tPoolSize;
+                        for (int l = 0; l < poolSize; l++)
+                            gradOut[rowOffset + l * embedDim + d] = gradVal;
+                    }
+                }
+
+                var gradCol = NivaraColumn<T>.Create(gradOut);
+                AccumulateGradient(a, gradCol, sgn);
+            });
+
+            ComputationGraph.AddNode(result, gradFn);
+        }
+
+        return result;
+    }
+
     #endregion
 
     #region Activation Functions

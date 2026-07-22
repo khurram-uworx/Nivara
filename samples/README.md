@@ -61,9 +61,9 @@ Key characteristics of the approach:
 
 # Gap Analysis
 
-## Resolved Gaps (captured in [NivaraGpt/README.md](NivaraGpt/README.md))
+## Resolved Gaps
 
-The following gaps were identified during early example development and have been resolved. See NivaraGpt's README for details on the core library additions that addressed them:
+The following gaps were identified during early example development and have been resolved.
 
 | Gap | Resolution |
 |-----|------------|
