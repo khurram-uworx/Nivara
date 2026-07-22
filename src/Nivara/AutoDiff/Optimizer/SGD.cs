@@ -186,7 +186,11 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
     void ensureVelocityBuffer(int idx, int size)
     {
         while (idx >= velocityBuffers.Count)
-            velocityBuffers.Add(ArrayPool<T>.Shared.Rent(size));
+        {
+            var buf = ArrayPool<T>.Shared.Rent(size);
+            buf.AsSpan(0, size).Clear();
+            velocityBuffers.Add(buf);
+        }
     }
 
     public override void Step()

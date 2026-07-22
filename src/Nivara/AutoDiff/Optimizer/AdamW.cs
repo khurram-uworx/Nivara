@@ -145,8 +145,14 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
     {
         while (idx >= expAvgBuffers.Count)
         {
-            expAvgBuffers.Add(ArrayPool<T>.Shared.Rent(size));
-            expAvgSqBuffers.Add(ArrayPool<T>.Shared.Rent(size));
+            var expAvg = ArrayPool<T>.Shared.Rent(size);
+            expAvg.AsSpan(0, size).Clear();
+            expAvgBuffers.Add(expAvg);
+
+            var expAvgSq = ArrayPool<T>.Shared.Rent(size);
+            expAvgSq.AsSpan(0, size).Clear();
+            expAvgSqBuffers.Add(expAvgSq);
+
             resultBuffers.Add(new T[size]);
         }
     }
