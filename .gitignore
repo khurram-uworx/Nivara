@@ -333,3 +333,5 @@ FodyWeavers.xsd
 .codememory.json
 
 .mimocode
+samples/data/sentiment_data.csv
+samples/data/classifier.model*
