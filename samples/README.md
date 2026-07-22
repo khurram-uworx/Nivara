@@ -32,6 +32,19 @@ Key characteristics:
 - `CrossEntropyLoss<T>` with integer labels, `Dropout<T>`, `Sampler<T>`
 - **7x higher throughput** than MicroGpt (3,400 vs 460 tok/s) due to batched MatMul kernels and SIMD-accelerated TensorPrimitives
 
+## [NivaraClassifier/README.md](NivaraClassifier/README.md) — Word-Level Text Classifier
+
+A word-level text classifier that trains a sentiment model (positive/negative) using learned embeddings and an MLP head. Exercises the full autograd training pipeline with sequence data: synthetic data generation → tokenization → embedding → mean pool → MLP → cross-entropy loss → training → inference.
+
+Key characteristics:
+- `Embedding<T>` → `MeanPool` → `Linear(ReLU)` → `Linear` architecture
+- `ReverseGradOperations.MeanPool<T>` — new core autograd operation for `[B, L, D]` → `[B, D]` sequence reduction
+- Reusable `TextTokenizer` with vocab building, encode/decode, special tokens
+- Synthetic data generator — no external datasets required
+- `TrainingLoop<T>`, `DataLoader<T>`, `TensorDataset<T>`, `CrossEntropyLoss<T>` with integer labels
+- Interactive wizard, CLI commands (`generate`, `train`, `predict`), model save/load
+- **100% test accuracy** on synthetic data after 20 epochs (~1.5s)
+
 ## [NivaraChess/README.md](NivaraChess/README.md) — Neural Chess Position Evaluator
 
 Trains a neural network to evaluate chess positions using Nivara's autograd engine. Demonstrates non-NLP use of the library: sparse embeddings (`SparseEmbedding<T>` for NNUE halfKP features), Stockfish knowledge distillation via UCI (`eval` command with `ucinewgame` sync), and `IEmbeddingGenerator<T>` integration.
@@ -74,6 +87,7 @@ The following gaps were identified during early example development and have bee
 | **E: No batched TransformerBlock** | `TransformerBlock<T>` in core — pre-LN, causal mask, dropout, residual |
 | **H: No integer-label CrossEntropyLoss** | `CrossEntropyLoss<T>.Forward(logits, int[])` overload added |
 | **K: No sampling utilities** | `Sampler<T>` with temperature and top-k |
+| **O: No MeanPool operation** | `ReverseGradOperations.MeanPool<T>` added — core autograd op for `[B,L,D]` → `[B,D]` with backward gradient distribution |
 
 ## Open Gaps
 
@@ -87,15 +101,7 @@ The following gaps were identified during early example development and have bee
 
 **Impact:** Every example project must write its own tokenizer/feature extractor. No "load text → feature vector" pipeline exists in the library.
 
-**Fix:** Application-level concern. A `Nivara.Extensions.Text` package with bag-of-words or TF-IDF would help.
-
-### Gap I: No batched NLL loss
-
-**Impact:** `CrossEntropyLoss<T>` already works for batched input with the `int[]` targets overload (Gap H resolved). No additional fix needed.
-
-### Gap J: No Dropout handling for Embedding
-
-**Impact:** `Dropout<T>` can already be composed in a `Sequential` pipeline. NivaraGpt demonstrates embedding/attention/residual dropout.
+**Fix:** Application-level concern. A `Nivara.Extensions.Text` package with bag-of-words or TF-IDF would help. NivaraClassifier's `TextTokenizer` could be promoted if useful.
 
 ### Gap L: ModelSerializer cannot load into non-Module\<T\> models
 
