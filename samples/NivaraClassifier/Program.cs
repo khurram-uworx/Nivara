@@ -33,14 +33,17 @@ return;
 
 void RunGenerate(Options opt)
 {
-    string csvPath = opt.DataPath ?? "sentiment_data.csv";
+    string csvPath = opt.DataPath ?? Path.Combine("samples", "data", "sentiment_data.csv");
+    string? dir = Path.GetDirectoryName(csvPath);
+    if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
+        Directory.CreateDirectory(dir);
     DataGenerator.SaveCsv(csvPath, opt.NumSamples, opt.Seed);
     Console.WriteLine($"Generated {opt.NumSamples} samples → {csvPath}");
 }
 
 void RunTraining(Options opt)
 {
-    string csvPath = opt.DataPath ?? "sentiment_data.csv";
+    string csvPath = opt.DataPath ?? Path.Combine("samples", "data", "sentiment_data.csv");
     if (!File.Exists(csvPath))
     {
         Console.WriteLine($"Data file not found: {csvPath}");
@@ -92,7 +95,14 @@ void RunTraining(Options opt)
 
     var trainLoop = new TrainingLoop<double>(
         model, trainLoader,
-        (logits, labels) => lossFn.Forward(logits, labels),
+        (logits, labels) =>
+        {
+            int batchSize = logits.Length / 2;
+            var targets = new int[batchSize];
+            for (int i = 0; i < batchSize; i++)
+                targets[i] = int.CreateChecked(labels.Data[i]);
+            return lossFn.Forward(logits, targets);
+        },
         optimizer, opt.Epochs);
 
     var result = trainLoop.Run();
@@ -115,7 +125,11 @@ void RunTraining(Options opt)
         Console.WriteLine($"Saved model: {opt.SavePath}");
     }
 
-    tokenizer.Save(Path.ChangeExtension(opt.SavePath ?? "classifier", ".vocab.json"));
+    string vocabPath = Path.Combine("samples", "data", "classifier.vocab.json");
+    if (!string.IsNullOrWhiteSpace(opt.SavePath))
+        vocabPath = Path.ChangeExtension(opt.SavePath, ".vocab.json");
+    tokenizer.Save(vocabPath);
+    Console.WriteLine($"Saved vocabulary: {vocabPath}");
     Console.WriteLine("Done.");
 }
 
@@ -270,7 +284,7 @@ sealed class Options
 
             Options:
               --command, -c <cmd>     Command: train, predict, generate
-              --data-path <path>      CSV data file (default: sentiment_data.csv)
+              --data-path <path>      CSV data file (default: samples/data/sentiment_data.csv)
               --save <path>           Save trained model
               --load <path>           Load model for prediction
               --epochs <n>            Training epochs (default: 10)
