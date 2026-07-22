@@ -28,28 +28,34 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
-        var embedded = embedding.Forward(input);
-        int batchTokens = embedded.Length;
-        int batchSize = batchTokens / embeddingDim;
-        int seqLen = batchTokens / (batchSize * embeddingDim);
+        int batchSize = input.Length / maxSeqLen;
 
-        var pooled = ReverseGradOperations.MeanPool(embedded, seqLen, embeddingDim);
+        var embedded = embedding.Forward(input);
+        var pooled = ReverseGradOperations.MeanPool(embedded, maxSeqLen, embeddingDim);
         var h = fc1.Forward(pooled);
         var hRelu = ReverseGradOperations.Relu(h);
         var logits = fc2.Forward(hRelu);
         return logits;
     }
 
-    public int[] ForwardWithLogits(NivaraColumn<T> batchInput, int batchSize)
+    public int[] Predict(NivaraColumn<T> tokenIds, int batchSize)
     {
-        using var gradScope = GradientUtils.Grad();
         var input = ReverseGradTensor<T>.FromMatrix(
-            batchInput, batchSize, batchInput.Length / batchSize, requiresGrad: false);
-
+            tokenIds, batchSize, tokenIds.Length / batchSize, requiresGrad: false);
         var logits = Forward(input);
-        var result = new int[logits.Length];
-        for (int i = 0; i < logits.Length; i++)
-            result[i] = int.CreateChecked(logits.Data[i]);
+        var result = new int[batchSize];
+        int numClasses = logits.Length / batchSize;
+        for (int b = 0; b < batchSize; b++)
+        {
+            int bestClass = 0;
+            T bestVal = logits.Data[b * numClasses];
+            for (int c = 1; c < numClasses; c++)
+            {
+                T val = logits.Data[b * numClasses + c];
+                if (val > bestVal) { bestVal = val; bestClass = c; }
+            }
+            result[b] = bestClass;
+        }
         return result;
     }
 }
