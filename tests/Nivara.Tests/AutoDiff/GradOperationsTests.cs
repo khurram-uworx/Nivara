@@ -1246,4 +1246,159 @@ public class GradOperationsTests
     }
 
     #endregion
+
+    #region MeanPool Tests
+
+    [Test]
+    public void MeanPool_SingleBatch_ComputesCorrectAverages()
+    {
+        // Input: 1 batch, poolSize=2, embedDim=3 → data: [1,2,3, 4,5,6]
+        // Output: [(1+4)/2, (2+5)/2, (3+6)/2] = [2.5, 3.5, 4.5]
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: true);
+
+        var result = ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 3);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result.Rank, Is.EqualTo(2));
+        Assert.That(result[0], Is.EqualTo(2.5f).Within(1e-6f));
+        Assert.That(result[1], Is.EqualTo(3.5f).Within(1e-6f));
+        Assert.That(result[2], Is.EqualTo(4.5f).Within(1e-6f));
+        Assert.That(result.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void MeanPool_MultipleBatches_ComputesCorrectAverages()
+    {
+        // 2 batches, poolSize=2, embedDim=2
+        // batch 0: [1,2, 3,4] → [(1+3)/2, (2+4)/2] = [2, 3]
+        // batch 1: [5,6, 7,8] → [(5+7)/2, (6+8)/2] = [6, 7]
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: true);
+
+        var result = ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 2);
+
+        Assert.That(result.Length, Is.EqualTo(4));
+        Assert.That(result[0], Is.EqualTo(2.0f).Within(1e-6f));
+        Assert.That(result[1], Is.EqualTo(3.0f).Within(1e-6f));
+        Assert.That(result[2], Is.EqualTo(6.0f).Within(1e-6f));
+        Assert.That(result[3], Is.EqualTo(7.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void MeanPool_PoolSize1_ReturnsSameValues()
+    {
+        // poolSize=1 means no averaging — each position passes through
+        var data = NivaraColumn<float>.Create(new float[] { 10f, 20f, 30f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: true);
+
+        var result = ReverseGradOperations.MeanPool(input, poolSize: 1, embedDim: 3);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result[0], Is.EqualTo(10.0f).Within(1e-6f));
+        Assert.That(result[1], Is.EqualTo(20.0f).Within(1e-6f));
+        Assert.That(result[2], Is.EqualTo(30.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void MeanPool_SumThenBackward_GradientDistributedEvenly()
+    {
+        // Input: [1,2,3, 4,5,6], poolSize=2, embedDim=3
+        // MeanPool → [2.5, 3.5, 4.5], Sum → 10.5
+        // Backward: grad of Sum is 1.0 for each output position
+        // MeanPool backward: grad_in[d] = grad_out[d] / poolSize for each pool position
+        // So each input element gets grad = 1.0 / 2 = 0.5
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: true);
+
+        var pooled = ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 3);
+        var loss = ReverseGradOperations.Sum(pooled);
+        loss.Backward();
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < 6; i++)
+            Assert.That(input.Grad![i], Is.EqualTo(0.5f).Within(1e-6f),
+                $"Gradient at position {i} should be 0.5 (1.0 / poolSize=2)");
+    }
+
+    [Test]
+    public void MeanPool_MultiBatchBackward_GradientCorrectPerBatch()
+    {
+        // 2 batches, poolSize=2, embedDim=2: [[1,2,3,4], [5,6,7,8]]
+        // MeanPool → [[2,3], [6,7]], Sum → 18
+        // Backward: each element gets 1.0 / 2 = 0.5
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: true);
+
+        var pooled = ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 2);
+        var loss = ReverseGradOperations.Sum(pooled);
+        loss.Backward();
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < 8; i++)
+            Assert.That(input.Grad![i], Is.EqualTo(0.5f).Within(1e-6f));
+    }
+
+    [Test]
+    public void MeanPool_NullInput_ThrowsArgumentNullException()
+    {
+        Assert.Throws<ArgumentNullException>(() =>
+            ReverseGradOperations.MeanPool<float>(null!, poolSize: 2, embedDim: 3));
+    }
+
+    [Test]
+    public void MeanPool_ZeroPoolSize_ThrowsArgumentOutOfRange()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ReverseGradOperations.MeanPool(input, poolSize: 0, embedDim: 2));
+    }
+
+    [Test]
+    public void MeanPool_ZeroEmbedDim_ThrowsArgumentOutOfRange()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 0));
+    }
+
+    [Test]
+    public void MeanPool_EmptyTensor_ThrowsInvalidOperation()
+    {
+        var data = NivaraColumn<float>.Create(Array.Empty<float>());
+        var input = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        Assert.Throws<InvalidOperationException>(() =>
+            ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 3));
+    }
+
+    [Test]
+    public void MeanPool_LengthNotDivisible_ThrowsArgumentException()
+    {
+        // Length 5 is not divisible by poolSize*embedDim = 2*3 = 6
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        Assert.Throws<ArgumentException>(() =>
+            ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 3));
+    }
+
+    [Test]
+    public void MeanPool_NoGradRequired_ReturnsNoGradTensor()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f });
+        var input = new ReverseGradTensor<float>(data, requiresGrad: false);
+
+        var result = ReverseGradOperations.MeanPool(input, poolSize: 2, embedDim: 2);
+
+        Assert.That(result.RequiresGrad, Is.False);
+        Assert.That(result[0], Is.EqualTo(2.0f).Within(1e-6f));
+        Assert.That(result[1], Is.EqualTo(3.0f).Within(1e-6f));
+    }
+
+    #endregion
 }
