@@ -180,7 +180,7 @@ for (int pos = 0; pos < blockSize; pos++) {
 | `ReverseGradOperations.Concat` | `TransformerBlock` (core) | Differentiable head concatenation |
 | `ReverseGradOperations.Softmax` | `TransformerBlock` (core) | Batched softmax with axis support |
 | `ReverseGradOperations.MatMul` | Throughout | Matrix multiplication |
-| `ReverseGradOperations.RMSNorm` | `TransformerBlock` (core) | Normalization |
+| `PerRowRMSNorm` (SIMD) | `TransformerBlock` (core) | Pre-LayerNorm with TensorPrimitives acceleration |
 
 ## Comparison with MicroGpt
 
@@ -207,6 +207,7 @@ NivaraGpt drove several core library additions. The original spec identified the
 |---------|----------|---------|
 | `TransformerBlock<T>` | `src/Nivara/AutoDiff/Nn/TransformerBlock.cs` | Reusable pre-LN transformer block with batched multi-head causal attention, MLP, residual connections, and configurable dropout |
 | `ReverseGradOperations.Concat<T>` | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | Differentiable tensor concatenation along an axis; backward splits gradient along the same axis |
+| `ReverseGradOperations.PerRowRMSNorm<T>` | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | SIMD-accelerated per-row RMS normalization with differentiable backward pass |
 | `Sampler<T>` | `src/Nivara/AutoDiff/Nn/Sampler.cs` | Temperature and top-k sampling from logit tensors |
 | `CrossEntropyLoss<T>.Forward(logits, int[])` | `src/Nivara/AutoDiff/Nn/Functional/CrossEntropyLoss.cs` | Integer-label overload — converts targets to one-hot internally |
 
@@ -218,6 +219,7 @@ NivaraGpt drove several core library additions. The original spec identified the
 | **H: No integer-label CrossEntropyLoss** | Resolved | New overload accepts `int[]` targets |
 | **K: No Sampler utilities** | Resolved | `Sampler<T>` with `Sample(logits, temperature, topK)` |
 | **New: No Concat op** | Resolved | `ReverseGradOperations.Concat<T>` with correct backward |
+| **New: No per-row RMSNorm** | Resolved | `ReverseGradOperations.PerRowRMSNorm<T>` with SIMD + backward |
 
 ### What MicroGpt does that NivaraGpt improves
 
@@ -246,11 +248,11 @@ Measured on the names.txt dataset (32K names, ~292K tokens) with identical archi
 | Tokens/step | 256 | ~10 (1 seq × ~10 chars) |
 | Steps per epoch | 1,141 | 1,141 |
 | Total tokens processed | ~292K | ~11K |
-| Final epoch loss | **~2.05** | ~2.82 |
-| Wall-clock time | ~175s | ~53s |
-| Throughput | **~1,700 tok/s** | ~210 tok/s |
+| Final epoch loss | **~2.04** | ~2.21 |
+| Wall-clock time | ~86s | ~22s |
+| Throughput | **~3,400 tok/s** | ~460 tok/s |
 
-NivaraGpt processes **26x more data** per epoch and achieves **significantly better loss**. Per-token throughput is **8x faster** due to batched MatMul kernels and SIMD-accelerated TensorPrimitives. The wall-clock difference is purely because NivaraGpt does far more work per epoch.
+NivaraGpt processes **26x more data** per epoch and achieves **better loss**. Per-token throughput is **7x faster** due to batched MatMul kernels and SIMD-accelerated TensorPrimitives. The wall-clock difference is purely because NivaraGpt does far more work per epoch.
 
 **Convergence** — with matching architecture and init (NormalInitializer, zero-init for output projections), NivaraGpt converges to the same or better loss as MicroGpt. Pre-LN + weight tying + proper init are the key ingredients.
 
