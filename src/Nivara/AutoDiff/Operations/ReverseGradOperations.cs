@@ -408,7 +408,7 @@ public static class ReverseGradOperations
             {
                 var gradOut = new T[a.Length];
                 var gradSrc = new T[typedGradOutput.Length];
-                typedGradOutput.Data.CopyTo(gradSrc, default(T)!);
+                typedGradOutput.CopyTo(gradSrc, default(T)!);
 
                 for (int b = 0; b < batchSize; b++)
                 {

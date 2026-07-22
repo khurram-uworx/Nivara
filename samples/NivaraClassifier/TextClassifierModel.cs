@@ -1,3 +1,5 @@
+using System.Numerics;
+using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
@@ -18,18 +20,14 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber
         this.maxSeqLen = maxSeqLen;
 
         embedding = new Embedding<T>(vocabSize, embeddingDim);
-        fc1 = new Linear<T>(embeddingDim, hiddenDim, useBias: true);
-        fc2 = new Linear<T>(hiddenDim, numClasses, useBias: true);
+        fc1 = new Linear<T>(embeddingDim, hiddenDim, bias: true);
+        fc2 = new Linear<T>(hiddenDim, numClasses, bias: true);
 
-        RegisterSubModule("embedding", embedding);
-        RegisterSubModule("fc1", fc1);
-        RegisterSubModule("fc2", fc2);
+        RegisterModules(embedding, fc1, fc2);
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
-        int batchSize = input.Length / maxSeqLen;
-
         var embedded = embedding.Forward(input);
         var pooled = ReverseGradOperations.MeanPool(embedded, maxSeqLen, embeddingDim);
         var h = fc1.Forward(pooled);
@@ -38,10 +36,13 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber
         return logits;
     }
 
-    public int[] Predict(NivaraColumn<T> tokenIds, int batchSize)
+    public int[] Predict(int[] tokenIds)
     {
-        var input = ReverseGradTensor<T>.FromMatrix(
-            tokenIds, batchSize, tokenIds.Length / batchSize, requiresGrad: false);
+        int batchSize = tokenIds.Length / maxSeqLen;
+        var data = new T[tokenIds.Length];
+        for (int i = 0; i < tokenIds.Length; i++)
+            data[i] = T.CreateChecked(tokenIds[i]);
+        var input = ReverseGradTensor<T>.FromMatrix(data, batchSize, maxSeqLen, requiresGrad: false);
         var logits = Forward(input);
         var result = new int[batchSize];
         int numClasses = logits.Length / batchSize;

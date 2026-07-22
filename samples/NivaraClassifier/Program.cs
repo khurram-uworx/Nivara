@@ -1,3 +1,5 @@
+using Nivara;
+using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
@@ -74,14 +76,15 @@ void RunTraining(Options opt)
     using var model = new TextClassifierModel<double>(
         tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
 
-    using var optimizer = new Adam<double>(T.CreateChecked(opt.LearningRate));
-    var parameters = model.GetParameters();
-    optimizer.AddParameterGroup(parameters);
+    using var optimizer = new Adam<double>(learningRate: 0.001);
+    var allParams = model.GetParameters().Values;
+    optimizer.AddParameterGroup(allParams);
 
     var lossFn = new CrossEntropyLoss<double>();
 
     var trainFrame = BuildFrame(trainTokens, trainLabels, trainCount, opt.MaxSeqLen);
-    var trainDataset = new TensorDataset<double>(trainFrame, ["tokens"], ["label"]);
+    var featureColumns = Enumerable.Range(0, opt.MaxSeqLen).Select(d => $"tok_{d}").ToArray();
+    var trainDataset = new TensorDataset<double>(trainFrame, featureColumns, ["label"]);
     var trainLoader = new DataLoader<double>(trainDataset, opt.BatchSize, shuffle: true, seed: opt.Seed);
 
     Console.WriteLine($"\nTraining: {trainCount} samples, {testLabels.Length} test");
@@ -98,8 +101,8 @@ void RunTraining(Options opt)
     int correct = 0;
     for (int i = 0; i < testLabels.Length; i++)
     {
-        var tokenCol = NivaraColumn<double>.Create(testTokens.AsSpan(i * opt.MaxSeqLen, opt.MaxSeqLen));
-        var preds = model.Predict(tokenCol, 1);
+        var encoded = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
+        var preds = model.Predict(encoded);
         if (preds[0] == testLabels[i]) correct++;
     }
 
@@ -147,8 +150,7 @@ void RunPrediction(Options opt)
         if (string.IsNullOrWhiteSpace(line)) break;
 
         var encoded = tokenizer.Encode(line, fixedLength: opt.MaxSeqLen);
-        var tokenCol = NivaraColumn<double>.Create(encoded);
-        var preds = model.Predict(tokenCol, 1);
+        var preds = model.Predict(encoded);
         string label = preds[0] == 1 ? "POSITIVE" : "NEGATIVE";
         Console.WriteLine($"  → {label}\n");
     }
@@ -156,106 +158,97 @@ void RunPrediction(Options opt)
 
 NivaraFrame BuildFrame(int[] tokens, int[] labels, int count, int seqLen)
 {
-    var tokenCols = new NivaraColumn<int>[seqLen];
+    var columns = new List<(string Name, IColumn Column)>();
+
     for (int d = 0; d < seqLen; d++)
     {
-        var colData = new int[count];
+        var colData = new double[count];
         for (int i = 0; i < count; i++)
             colData[i] = tokens[i * seqLen + d];
-        tokenCols[d] = NivaraColumn<int>.Create(colData);
+        columns.Add(($"tok_{d}", NivaraColumn<double>.Create(colData)));
     }
 
-    var intLabels = NivaraColumn<int>.Create(labels);
-    var doubleLabels = new NivaraColumn<double>[1];
     var labelData = new double[count];
     for (int i = 0; i < count; i++)
         labelData[i] = labels[i];
-    doubleLabels[0] = NivaraColumn<double>.Create(labelData);
+    columns.Add(("label", NivaraColumn<double>.Create(labelData)));
 
-    var columns = new Dictionary<string, NivaraColumnBase>
-    {
-        ["label"] = doubleLabels[0]
-    };
-    for (int d = 0; d < seqLen; d++)
-        columns[$"tok_{d}"] = tokenCols[d];
-
-    return new NivaraFrame(columns);
+    return NivaraFrame.Create(columns.ToArray());
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
 sealed class Options
 {
-    public string Command { get; init; } = "train";
-    public string? DataPath { get; init; }
-    public string? SavePath { get; init; }
-    public string? LoadPath { get; init; }
-    public int Epochs { get; init; } = 10;
-    public int BatchSize { get; init; } = 32;
-    public int EmbeddingDim { get; init; } = 32;
-    public int HiddenDim { get; init; } = 64;
-    public int MaxSeqLen { get; init; } = 20;
-    public int MaxVocab { get; init; } = 5000;
-    public int NumSamples { get; init; } = 1000;
-    public double LearningRate { get; init; } = 0.001;
-    public int Seed { get; init; } = 42;
-    public bool Help { get; init; }
+    public string Command { get; set; } = "train";
+    public string? DataPath { get; set; }
+    public string? SavePath { get; set; }
+    public string? LoadPath { get; set; }
+    public int Epochs { get; set; } = 10;
+    public int BatchSize { get; set; } = 32;
+    public int EmbeddingDim { get; set; } = 32;
+    public int HiddenDim { get; set; } = 64;
+    public int MaxSeqLen { get; set; } = 20;
+    public int MaxVocab { get; set; } = 5000;
+    public int NumSamples { get; set; } = 1000;
+    public double LearningRate { get; set; } = 0.001;
+    public int Seed { get; set; } = 42;
+    public bool Help { get; set; }
 
     public static Options Parse(string[] args)
     {
         var o = new Options();
         for (int i = 0; i < args.Length; i++)
         {
-            string arg = args[i].ToLowerInvariant();
-            switch (arg)
+            switch (args[i].ToLowerInvariant())
             {
                 case "--command":
                 case "-c":
-                    o = o with { Command = ReadString(args, ref i, arg) };
+                    o.Command = ReadString(args, ref i, args[i]);
                     break;
                 case "--data-path":
-                    o = o with { DataPath = ReadString(args, ref i, arg) };
+                    o.DataPath = ReadString(args, ref i, args[i]);
                     break;
                 case "--save":
-                    o = o with { SavePath = ReadString(args, ref i, arg) };
+                    o.SavePath = ReadString(args, ref i, args[i]);
                     break;
                 case "--load":
-                    o = o with { LoadPath = ReadString(args, ref i, arg) };
+                    o.LoadPath = ReadString(args, ref i, args[i]);
                     break;
                 case "--epochs":
-                    o = o with { Epochs = ReadInt(args, ref i, arg) };
+                    o.Epochs = ReadInt(args, ref i, args[i]);
                     break;
                 case "--batch-size":
-                    o = o with { BatchSize = ReadInt(args, ref i, arg) };
+                    o.BatchSize = ReadInt(args, ref i, args[i]);
                     break;
                 case "--embedding-dim":
-                    o = o with { EmbeddingDim = ReadInt(args, ref i, arg) };
+                    o.EmbeddingDim = ReadInt(args, ref i, args[i]);
                     break;
                 case "--hidden-dim":
-                    o = o with { HiddenDim = ReadInt(args, ref i, arg) };
+                    o.HiddenDim = ReadInt(args, ref i, args[i]);
                     break;
                 case "--max-seq-len":
-                    o = o with { MaxSeqLen = ReadInt(args, ref i, arg) };
+                    o.MaxSeqLen = ReadInt(args, ref i, args[i]);
                     break;
                 case "--max-vocab":
-                    o = o with { MaxVocab = ReadInt(args, ref i, arg) };
+                    o.MaxVocab = ReadInt(args, ref i, args[i]);
                     break;
                 case "--num-samples":
-                    o = o with { NumSamples = ReadInt(args, ref i, arg) };
+                    o.NumSamples = ReadInt(args, ref i, args[i]);
                     break;
                 case "--lr":
-                    o = o with { LearningRate = ReadDouble(args, ref i, arg) };
+                    o.LearningRate = ReadDouble(args, ref i, args[i]);
                     break;
                 case "--seed":
-                    o = o with { Seed = ReadInt(args, ref i, arg) };
+                    o.Seed = ReadInt(args, ref i, args[i]);
                     break;
                 case "--help":
                 case "-h":
-                    o = o with { Help = true };
+                    o.Help = true;
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown option: {args[i]}");
-                    o = o with { Help = true };
+                    o.Help = true;
                     break;
             }
         }
