@@ -6,7 +6,7 @@ A sample project demonstrating Nivara-trained domain-specific models as first-cl
 
 ## What it does
 
-NivaraChat trains three small domain-specific models (sentiment classifier, entity extractor, output validator) and wires them into a `WorkflowBuilder` graph alongside an Ollama-backed LLM agent. The workflow processes input text through deterministic Nivara nodes first, then hands structured context to the LLM for fluent response generation, and finally validates the LLM output for consistency.
+NivaraChat trains three small domain-specific models (sentiment classifier, entity extractor, output validator) and wires them into a `WorkflowBuilder` graph. With `--ollama`, an Ollama-backed LLM agent is appended after the validator for fluent response generation.
 
 ```
 Input text
@@ -18,18 +18,18 @@ Input text
 [EntityExtractor]            Nivara-trained NER model, deterministic, <1ms
     │   returns: { person, org, date, location }
     v
-[LLMAgent]                   ChatClientAgent + Ollama, stochastic
-    │   receives sentiment + entities + original text
-    │   returns: a helpful response
-    v
 [ValidatorExecutor]          Rule-based consistency check, deterministic, <1ms
-    │   checks LLM output for factual consistency with extracted entities
+    │   checks entity extraction quality
+    v
+[LLMAgent]                   (optional) ChatClientAgent + Ollama, stochastic
+    │   receives validator output
+    │   returns: a helpful response
     v
 Final output: structured result with confidence score
 ```
 
 Key characteristics:
-- **First Nivara sample with Agent Framework integration** — `Executor` subclasses with `[MessageHandler]` for type-safe routing
+- **First Nivara sample with Agent Framework integration** — `Executor<TInput, TOutput>` with `override` for type-safe routing
 - **Three separate trained models** in one workflow — exercises `TrainingLoop<T>`, `DataLoader<T>`, `TensorDataset<T>`, `ModelSerializer`
 - **Hybrid deterministic + stochastic** — Nivara nodes are fast/consistent; LLM node is fluent/contextual
 - **NER (token classification)** — `TokenClassifierModel<T>` for sequence labeling (new core API)
@@ -40,13 +40,16 @@ Key characteristics:
 ## Quick start
 
 ```bash
-# Train all three models
+# Train all three models (overwrites existing)
 dotnet run --project samples/NivaraChat -- --train
 
 # Run workflow (Nivara nodes only — no LLM needed)
 dotnet run --project samples/NivaraChat -- --workflow
 
-# Run workflow with Ollama LLM (requires Ollama running locally)
+# Single-shot test
+dotnet run --project samples/NivaraChat -- --workflow --text "I love this product!"
+
+# Run workflow with Ollama LLM (requires --ollama flag)
 dotnet run --project samples/NivaraChat -- --workflow --ollama http://localhost:11434 --model llama3.2
 
 # Interactive demo
@@ -57,12 +60,12 @@ dotnet run --project samples/NivaraChat -- --interactive
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--train` | — | Mode: train all three models |
-| `--workflow` | (default) | Mode: run the workflow pipeline |
+| `--train` | — | Mode: train all three models (overwrites existing) |
+| `--workflow` | (default) | Mode: run the workflow pipeline (Nivara-only unless `--ollama` passed) |
 | `--interactive` | — | Mode: type text, see full pipeline output |
-| `--ollama <url>` | `http://localhost:11434` | Ollama endpoint (used with `--workflow` or `--interactive`) |
+| `--ollama <url>` | — | Ollama endpoint — only connects when this flag is present |
 | `--model <name>` | `llama3.2` | Ollama model name |
-| `--help`, `-h` | — | Show CLI help |
+| `--text "<message>"` | — | Single-shot: run workflow on one message and exit |
 
 ## Modes of use
 
@@ -70,10 +73,10 @@ dotnet run --project samples/NivaraChat -- --interactive
 Trains all three models on synthetic data. Each model follows the same pattern as NivaraClassifier: generate data → tokenize → build frame → train with `TrainingLoop<T>` → save with `ModelSerializer`. No external datasets required.
 
 ### Workflow (`--workflow`)
-Runs the full pipeline on user input. Without `--ollama`, the workflow runs Nivara nodes only. With `--ollama`, sends structured context to Ollama and validates the LLM response.
+Runs the full pipeline on user input. Without `--ollama`, the workflow runs Nivara nodes only (Sentiment → EntityExtractor → Validator). With `--ollama`, sends structured context to Ollama and validates the LLM response. Use `--text "message"` for single-shot testing.
 
 ### Interactive (`--interactive`)
-Type sentences and see the full pipeline output: sentiment, entities, LLM response, and validation score. Type `quit` to exit.
+Type sentences and see the full pipeline output: sentiment, entities, and optionally LLM response. Without `--ollama`, runs Nivara nodes only. With `--ollama`, also sends to Ollama for a fluent response. Type `quit` to exit.
 
 ## Architecture
 
@@ -120,24 +123,29 @@ The workflow uses `Microsoft.Agents.AI.Workflows` for type-safe message routing:
 ```csharp
 var sentimentExecutor = new SentimentExecutor(model, tokenizer);
 var entityExecutor = new EntityExtractor(model, tokenizer);
-var llmAgent = new ChatClientAgent(ollamaClient, "You are a helpful assistant.");
 var validatorExecutor = new ValidatorExecutor();
 
 var workflow = new WorkflowBuilder(sentimentExecutor)
     .AddEdge(sentimentExecutor, entityExecutor)
-    .AddEdge(entityExecutor, validator)
-    .AddEdge(validator, llmAgent)
+    .AddEdge(entityExecutor, validatorExecutor)
+    .WithOutputFrom(sentimentExecutor, entityExecutor, validatorExecutor)
     .Build();
 
 var run = await InProcessExecution.RunAsync(workflow, "Acme Corp owes $5000 by March 15");
+
+foreach (var evt in run.NewEvents)
+{
+    if (evt is ExecutorCompletedEvent executorEvt)
+        Console.WriteLine($"{executorEvt.ExecutorId}: {executorEvt.Data}");
+}
 ```
 
 ### Executor structure
 
-Each executor wraps a Nivara-trained model:
+Each executor wraps a Nivara-trained model using `Executor<TInput, TOutput>` with `override`:
 
 ```csharp
-internal sealed partial class SentimentExecutor : Executor
+internal sealed class SentimentExecutor : Executor<string, string>
 {
     private readonly TextClassifierModel<float> _model;
     private readonly TextTokenizer _tokenizer;
@@ -150,8 +158,7 @@ internal sealed partial class SentimentExecutor : Executor
         _tokenizer = tokenizer;
     }
 
-    [MessageHandler]
-    public ValueTask<string> HandleAsync(string text, IWorkflowContext context)
+    public override ValueTask<string> HandleAsync(string text, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         var tokens = _tokenizer.Encode(text, fixedLength: MaxSeqLen);
         var input = ToTensor(tokens);
@@ -162,6 +169,8 @@ internal sealed partial class SentimentExecutor : Executor
     }
 }
 ```
+
+Output is surfaced via `.WithOutputFrom()` on the `WorkflowBuilder` and read from `ExecutorCompletedEvent` in `run.NewEvents`.
 
 ## Nivara APIs demonstrated
 
@@ -179,7 +188,7 @@ internal sealed partial class SentimentExecutor : Executor
 | `DataLoader<T>` | Training | Batched data loading |
 | `TensorDataset<T>` | Training | Frame-backed dataset |
 | `ModelSerializer.Save/Load` | Training + inference | JSON model persistence |
-| `Executor` + `[MessageHandler]` | Executors | Workflow node with type-safe routing |
+| `Executor<TInput, TOutput>` | Executors | Workflow node with type-safe routing |
 | `WorkflowBuilder` | Program.cs | Workflow graph construction |
 | `InProcessExecution.RunAsync` | Program.cs | Static workflow execution |
 | `ChatClientAgent` | Program.cs | LLM agent node (Ollama) |
@@ -188,7 +197,7 @@ internal sealed partial class SentimentExecutor : Executor
 
 - .NET 10.0 SDK
 - Nivara core library (`src/Nivara/Nivara.csproj`)
-- Ollama (only for `--ollama` mode; install from [ollama.com](https://ollama.com))
+- Ollama (optional — only when `--ollama` flag is used; install from [ollama.com](https://ollama.com))
 
 ### Packages (example project only — core stays clean)
 
@@ -217,7 +226,7 @@ internal sealed partial class SentimentExecutor : Executor
 | **No document classifier module** | Simplest classifier requires composing Embedding → MeanPool → Linear manually. | `TextClassifierModel<T>` promoted from NivaraClassifier to core. Reusable for any document classification task. |
 | **No token classifier module** | NER/sequence labeling needs per-token predictions without pooling. No core module for this. | `TokenClassifierModel<T>` created in core. Same as TextClassifierModel but without MeanPool — outputs `[B, L, numClasses]`. |
 | **No word-level tokenizer** | Only char-level tokenizer existed (MicroGpt). | `TextTokenizer` promoted from NivaraClassifier to core. Word-level with vocab building, encode/decode, special tokens, save/load. |
-| **Agent Framework not integrated** | No Nivara sample used `Microsoft.Agents.AI.Workflows`. | `NivaraChat/` references Agent Framework packages. Demonstrates `Executor` + `[MessageHandler]` + `WorkflowBuilder` + `InProcessExecution` pattern. |
+| **Agent Framework not integrated** | No Nivara sample used `Microsoft.Agents.AI.Workflows`. | `NivaraChat/` references Agent Framework packages. Demonstrates `Executor<TInput, TOutput>` + `WorkflowBuilder` + `InProcessExecution` pattern. |
 | **No hybrid workflow example** | Deterministic ML and LLM nodes not shown working together. | Full pipeline: Nivara sentiment → Nivara NER → Ollama LLM → validator. Shows the value of mixing deterministic and stochastic models. |
 
 ### ADR-001 opportunistic cleanup
@@ -230,7 +239,6 @@ While building this example, removed redundant inner null checks in `Module.cs` 
 - **Synthetic training data** — entity extraction and validation use template-based synthetic data. Real applications would use annotated corpora.
 - **No LLM streaming** — the workflow runs non-streaming. The LLM response is collected in full before validation.
 - **Simple validator** — the validator checks entity consistency via rule-based heuristics, not a trained model. A production validator would use more sophisticated checks.
-- **Ollama dependency** — the LLM node requires Ollama running locally. The workflow runs without LLM for testing the Nivara nodes.
 - **Single-model training** — `--train` trains all three models at once. Individual model training/retuning is not yet supported via CLI.
 
 ## File map

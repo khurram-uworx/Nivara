@@ -2,15 +2,14 @@ using Microsoft.Agents.AI.Workflows;
 
 namespace NivaraChat;
 
-internal sealed partial class ValidatorExecutor : Executor
+internal sealed class ValidatorExecutor : Executor<string, string>
 {
     public ValidatorExecutor()
         : base("Validator")
     {
     }
 
-    [MessageHandler]
-    public ValueTask<string> HandleAsync(string llmResponse, IWorkflowContext context)
+    public override ValueTask<string> HandleAsync(string llmResponse, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         var hasHallucination = llmResponse.Contains("unknown", StringComparison.OrdinalIgnoreCase)
             || llmResponse.Contains("unverified", StringComparison.OrdinalIgnoreCase)

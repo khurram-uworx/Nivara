@@ -1,11 +1,10 @@
 using Microsoft.Agents.AI.Workflows;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
-using System.Text.Json;
 
 namespace NivaraChat;
 
-internal sealed partial class SentimentExecutor : Executor
+internal sealed class SentimentExecutor : Executor<string, string>
 {
     private readonly TextClassifierModel<float> _model;
     private readonly TextTokenizer _tokenizer;
@@ -22,8 +21,7 @@ internal sealed partial class SentimentExecutor : Executor
         _maxSeqLen = maxSeqLen;
     }
 
-    [MessageHandler]
-    public ValueTask<string> HandleAsync(string text, IWorkflowContext context)
+    public override ValueTask<string> HandleAsync(string text, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         var tokens = _tokenizer.Encode(text, fixedLength: _maxSeqLen);
         var data = new float[tokens.Length];

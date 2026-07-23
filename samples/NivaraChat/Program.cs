@@ -15,11 +15,14 @@ const string ModelsDir = "samples/data/nivarachat";
 var mode = args.Length > 0 ? args[0] : "--workflow";
 var ollamaUrl = DefaultOllamaUrl;
 var modelName = DefaultModel;
+string? workflowText = null;
+bool useOllama = false;
 
 for (int i = 1; i < args.Length; i++)
 {
-    if (args[i] == "--ollama" && i + 1 < args.Length) ollamaUrl = args[++i];
+    if (args[i] == "--ollama" && i + 1 < args.Length) { ollamaUrl = args[++i]; useOllama = true; }
     if (args[i] == "--model" && i + 1 < args.Length) modelName = args[++i];
+    if (args[i] == "--text" && i + 1 < args.Length) workflowText = args[++i];
 }
 
 switch (mode)
@@ -28,10 +31,10 @@ switch (mode)
         RunTraining();
         break;
     case "--workflow":
-        await RunWorkflow(ollamaUrl, modelName);
+        await RunWorkflow(ollamaUrl, modelName, workflowText, useOllama);
         break;
     case "--interactive":
-        await RunInteractive(ollamaUrl, modelName);
+        await RunInteractive(ollamaUrl, modelName, useOllama);
         break;
     default:
         PrintUsage();
@@ -42,12 +45,6 @@ void RunTraining()
 {
     Console.WriteLine("=== NivaraChat Model Training ===\n");
     Directory.CreateDirectory(ModelsDir);
-
-    if (File.Exists(Path.Combine(ModelsDir, "sentiment_model.json")))
-    {
-        Console.WriteLine("Models already exist in samples/data/nivarachat/. Delete to retrain.\n");
-        return;
-    }
 
     Console.WriteLine("[1/3] Training sentiment classifier...");
     SentimentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
@@ -62,7 +59,7 @@ void RunTraining()
     Console.WriteLine("Run with --workflow to test the pipeline, or --interactive for chat.");
 }
 
-async Task RunWorkflow(string ollamaUrl, string modelName)
+async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
 {
     Console.WriteLine("=== NivaraChat Workflow ===\n");
 
@@ -77,32 +74,83 @@ async Task RunWorkflow(string ollamaUrl, string modelName)
     var (entityModel, entityTok) = LoadEntityModel();
     Console.WriteLine("Models loaded.\n");
 
-    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
-    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
-    var agent = new ChatClientAgent(chatClient, "You are a helpful assistant. Analyze user messages and provide relevant information.");
-
     var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok);
     var entityExtractor = new EntityExtractor(entityModel, entityTok);
     var validator = new ValidatorExecutor();
 
-    Console.WriteLine("Building workflow graph...\n");
-    var workflow = new WorkflowBuilder(sentimentExecutor)
-        .AddEdge(sentimentExecutor, entityExtractor)
-        .AddEdge(entityExtractor, validator)
-        .AddEdge(validator, agent)
-        .Build();
-
-    Console.WriteLine("Graph: SentimentExecutor -> EntityExtractor -> ValidatorExecutor -> Ollama LLM\n");
-    Console.WriteLine("Type a message to analyze (or 'quit' to exit):\n");
-
-    while (true)
+    ChatClientAgent? agent = null;
+    if (useOllama)
     {
-        Console.Write("> ");
-        var input = Console.ReadLine()?.Trim();
-        if (string.IsNullOrEmpty(input) || input == "quit") break;
+        Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+        var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+        agent = new ChatClientAgent(chatClient, "You are a helpful assistant. Analyze user messages and provide relevant information.");
+        Console.WriteLine("Ollama connected.\n");
+    }
 
-        var run = await InProcessExecution.RunAsync(workflow, input);
-        Console.WriteLine($"\n--- Result ---\n{run}\n");
+    Workflow workflow;
+    if (agent != null)
+    {
+        workflow = new WorkflowBuilder(sentimentExecutor)
+            .AddEdge(sentimentExecutor, entityExtractor)
+            .AddEdge(entityExtractor, validator)
+            .AddEdge(validator, agent)
+            .WithOutputFrom(sentimentExecutor, entityExtractor, validator)
+            .Build();
+        Console.WriteLine("Graph: SentimentExecutor -> EntityExtractor -> ValidatorExecutor -> Ollama LLM\n");
+    }
+    else
+    {
+        workflow = new WorkflowBuilder(sentimentExecutor)
+            .AddEdge(sentimentExecutor, entityExtractor)
+            .AddEdge(entityExtractor, validator)
+            .WithOutputFrom(sentimentExecutor, entityExtractor, validator)
+            .Build();
+        Console.WriteLine("Graph: SentimentExecutor -> EntityExtractor -> ValidatorExecutor\n");
+    }
+    if (singleShotText != null)
+    {
+        var run = await InProcessExecution.RunAsync(workflow, singleShotText);
+        Console.WriteLine("\n--- Workflow Results ---");
+        foreach (var evt in run.NewEvents)
+        {
+            switch (evt)
+            {
+                case ExecutorCompletedEvent executorEvt:
+                    Console.WriteLine($"  [{executorEvt.ExecutorId}] {executorEvt.Data}");
+                    break;
+                case AgentResponseEvent agentEvt:
+                    Console.WriteLine($"  [LLM] {agentEvt.Data}");
+                    break;
+            }
+        }
+    }
+    else
+    {
+        Console.WriteLine("Type a message to analyze (or 'quit' to exit):\n");
+
+        while (true)
+        {
+            Console.Write("> ");
+            var input = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(input) || input == "quit") break;
+
+            var run = await InProcessExecution.RunAsync(workflow, input);
+
+            Console.WriteLine("\n--- Workflow Results ---");
+            foreach (var evt in run.NewEvents)
+            {
+                switch (evt)
+                {
+                    case ExecutorCompletedEvent executorEvt:
+                        Console.WriteLine($"  [{executorEvt.ExecutorId}] {executorEvt.Data}");
+                        break;
+                    case AgentResponseEvent agentEvt:
+                        Console.WriteLine($"  [LLM] {agentEvt.Data}");
+                        break;
+                }
+            }
+            Console.WriteLine();
+        }
     }
 
     sentimentModel.Dispose();
@@ -110,7 +158,7 @@ async Task RunWorkflow(string ollamaUrl, string modelName)
     Console.WriteLine("\nDone.");
 }
 
-async Task RunInteractive(string ollamaUrl, string modelName)
+async Task RunInteractive(string ollamaUrl, string modelName, bool useOllama)
 {
     Console.WriteLine("=== NivaraChat Interactive ===\n");
 
@@ -125,8 +173,12 @@ async Task RunInteractive(string ollamaUrl, string modelName)
     var (entityModel, entityTok) = LoadEntityModel();
     Console.WriteLine("Models loaded.\n");
 
-    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
-    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    IChatClient? chatClient = null;
+    if (useOllama)
+    {
+        Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+        chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    }
 
     Console.WriteLine("\nType a message (or 'quit' to exit):\n");
 
@@ -147,9 +199,16 @@ async Task RunInteractive(string ollamaUrl, string modelName)
                 Console.WriteLine($"    {type}: {string.Join(", ", names)}");
         }
 
-        var prompt = $"User message: \"{input}\"\n\nClassify the sentiment of this message and identify any named entities (person, organization, date, location). Provide a brief, helpful response.";
-        var response = await chatClient.GetResponseAsync(prompt);
-        Console.WriteLine($"  [Ollama] {response}\n");
+        if (chatClient != null)
+        {
+            var prompt = $"User message: \"{input}\"\n\nClassify the sentiment of this message and identify any named entities (person, organization, date, location). Provide a brief, helpful response.";
+            var response = await chatClient.GetResponseAsync(prompt);
+            Console.WriteLine($"  [Ollama] {response}\n");
+        }
+        else
+        {
+            Console.WriteLine();
+        }
     }
 
     sentimentModel.Dispose();
@@ -242,10 +301,11 @@ void PrintUsage()
 {
     Console.WriteLine("Usage: NivaraChat <mode> [options]\n");
     Console.WriteLine("Modes:");
-    Console.WriteLine("  --train          Train sentiment, entity, and validator models");
-    Console.WriteLine("  --workflow       Run the Agent Framework workflow (requires Ollama)");
-    Console.WriteLine("  --interactive    Interactive mode: local inference + Ollama chat");
+    Console.WriteLine("  --train              Train sentiment, entity, and validator models");
+    Console.WriteLine("  --workflow           Run the Agent Framework workflow (Ollama optional)");
+    Console.WriteLine("  --interactive        Interactive mode: local inference + Ollama chat");
     Console.WriteLine("\nOptions:");
-    Console.WriteLine("  --ollama <url>   Ollama endpoint (default: http://localhost:11434)");
-    Console.WriteLine("  --model <name>   Model name (default: llama3.2)");
+    Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
+    Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
+    Console.WriteLine("  --text \"<message>\"   Single-shot: run workflow on one message and exit");
 }
