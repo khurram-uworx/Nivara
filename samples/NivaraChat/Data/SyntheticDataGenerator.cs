@@ -12,6 +12,8 @@ public static class SyntheticDataGenerator
     static readonly string[] NegativePhrases = ["needs improvement", "behind schedule", "below targets", "concerns raised", "issues found", "declining metrics"];
     static readonly string[] NeutralPhrases = ["status update", "regular review", "ongoing monitoring", "standard procedure", "routine check", "scheduled assessment"];
     static readonly string[] Activities = ["completed the project", "submitted the report", "reviewed the proposal", "updated the system", "resolved the issue", "analyzed the data"];
+    static readonly string[] ShortPositive = ["I love this", "this is great", "amazing work", "fantastic", "brilliant", "wonderful", "excellent", "perfect", "outstanding", "superb", "I like it", "great job", "well done", "impressive", "delighted", "thrilled", "excited", "happy with this", "so good", "best thing"];
+    static readonly string[] ShortNegative = ["I hate this", "this is terrible", "awful", "horrible", "worst", "disgusting", "pathetic", "dreadful", "miserable", "I hate it", "so bad", "terrible", "awful experience", "hate it", "this sucks", "awful", "disappointing", "frustrated", "annoying", "unacceptable", "poor quality", "waste of time", "never again", "disaster", "I despise this"];
 
     public static (string[] texts, int[] labels) GenerateSentimentData(int count, int seed = 42)
     {
@@ -22,12 +24,21 @@ public static class SyntheticDataGenerator
         for (int i = 0; i < count; i++)
         {
             int sentiment = rng.Next(3);
-            string text = sentiment switch
-            {
-                0 => GenerateNegativeSentence(rng),
-                1 => GenerateNeutralSentence(rng),
-                _ => GeneratePositiveSentence(rng)
-            };
+            string text;
+            if (rng.Next(4) == 0)
+                text = sentiment switch
+                {
+                    0 => Pick(rng, ShortNegative),
+                    1 => Pick(rng, NeutralPhrases),
+                    _ => Pick(rng, ShortPositive)
+                };
+            else
+                text = sentiment switch
+                {
+                    0 => GenerateNegativeSentence(rng),
+                    1 => GenerateNeutralSentence(rng),
+                    _ => GeneratePositiveSentence(rng)
+                };
             texts[i] = text;
             labels[i] = sentiment;
         }
@@ -66,6 +77,92 @@ public static class SyntheticDataGenerator
             labels[i] = consistent ? 1 : 0;
         }
         return (inputs, labels);
+    }
+
+    public static (string[] inputs, int[] labels) GenerateAgentsValidatorData(int count, int seed = 42)
+    {
+        var rng = new Random(seed);
+        var inputs = new string[count];
+        var labels = new int[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            bool consistent = rng.Next(2) == 0;
+            inputs[i] = GenerateAgentsPipelineOutput(rng, consistent);
+            labels[i] = consistent ? 1 : 0;
+        }
+        return (inputs, labels);
+    }
+
+    static string GenerateAgentsPipelineOutput(Random rng, bool consistent)
+    {
+        var sentimentLabels = new[] { "Positive", "Negative", "Neutral" };
+        var sentiment = Pick(rng, sentimentLabels);
+        float confidence = consistent ? (float)(0.7 + rng.NextDouble() * 0.3) : (float)(0.1 + rng.NextDouble() * 0.3);
+
+        string entityLine;
+        if (consistent)
+        {
+            bool hasEntities = rng.Next(3) > 0;
+            if (hasEntities)
+            {
+                var (original, entities) = GenerateEntitySentence(rng);
+                var entityDict = new Dictionary<string, List<string>>
+                {
+                    ["person"] = [], ["org"] = [], ["date"] = [], ["location"] = []
+                };
+                var tokens = original.Split(' ');
+                var wordToEntity = BuildEntityLookup();
+                foreach (var token in tokens)
+                {
+                    if (wordToEntity.TryGetValue(token, out var label) && label != "O")
+                    {
+                        var entityType = label.Replace("B-", "").ToLower();
+                        if (entityDict.ContainsKey(entityType))
+                            entityDict[entityType].Add(token.ToLower());
+                    }
+                }
+                var json = System.Text.Json.JsonSerializer.Serialize(entityDict);
+                float entityConf = (float)(0.7 + rng.NextDouble() * 0.3);
+                entityLine = $"{json}\n(confidence: {entityConf:F2})";
+            }
+            else
+            {
+                float entityConf = (float)(0.1 + rng.NextDouble() * 0.3);
+                entityLine = $"Unable to extract entities (confidence: {entityConf:F2})\n{{\"person\":[],\"org\":[],\"date\":[],\"location\":[]}}";
+            }
+        }
+        else
+        {
+            var failureTypes = new[]
+            {
+                "Unable to extract entities (confidence: 0.20)\n{\"person\":[],\"org\":[],\"date\":[],\"location\":[]}",
+                "{\"person\":[],\"org\":[],\"date\":[],\"location\":[]}",
+                "Error: model output truncated",
+                ""
+            };
+            entityLine = Pick(rng, failureTypes);
+        }
+
+        return $"{sentiment} (confidence: {confidence:F2})\n{entityLine}";
+    }
+
+    static Dictionary<string, string> BuildEntityLookup()
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in PersonNames)
+            foreach (var word in name.Split(' '))
+                lookup[word] = "B-person";
+        foreach (var org in OrgNames)
+            foreach (var word in org.Split(' '))
+                lookup[word] = "B-org";
+        foreach (var date in Dates)
+            foreach (var word in date.Split(' '))
+                lookup[word] = "B-date";
+        foreach (var loc in Locations)
+            foreach (var word in loc.Split(' '))
+                lookup[word] = "B-location";
+        return lookup;
     }
 
     static string GeneratePositiveSentence(Random rng)

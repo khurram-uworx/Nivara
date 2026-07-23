@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Serialization;
 using NivaraChat;
@@ -19,7 +18,7 @@ bool useOllama = false;
 
 for (int i = 1; i < args.Length; i++)
 {
-    if (args[i] == "--ollama" && i + 1 < args.Length) { ollamaUrl = args[++i]; useOllama = true; }
+    if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
     if (args[i] == "--model" && i + 1 < args.Length) modelName = args[++i];
     if (args[i] == "--text" && i + 1 < args.Length) workflowText = args[++i];
 }
@@ -33,7 +32,10 @@ switch (mode)
         await RunWorkflow(ollamaUrl, modelName, workflowText, useOllama);
         break;
     case "--interactive":
-        await RunInteractive(ollamaUrl, modelName, useOllama);
+        await RunAgents(ollamaUrl, modelName, null, useOllama);
+        break;
+    case "--agents":
+        await RunAgents(ollamaUrl, modelName, workflowText, useOllama);
         break;
     default:
         PrintUsage();
@@ -45,17 +47,20 @@ void RunTraining()
     Console.WriteLine("=== NivaraChat Model Training ===\n");
     Directory.CreateDirectory(ModelsDir);
 
-    Console.WriteLine("[1/3] Training sentiment classifier...");
+    Console.WriteLine("[1/4] Training sentiment classifier...");
     SentimentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
 
-    Console.WriteLine("\n[2/3] Training entity extractor...");
+    Console.WriteLine("\n[2/4] Training entity extractor...");
     EntityTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
 
-    Console.WriteLine("\n[3/3] Training response validator...");
+    Console.WriteLine("\n[3/4] Training workflow validator...");
     ValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
 
+    Console.WriteLine("\n[4/4] Training agents validator...");
+    AgentsValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
+
     Console.WriteLine("\n=== Training complete! ===");
-    Console.WriteLine("Run with --workflow to test the pipeline, or --interactive for chat.");
+    Console.WriteLine("Run with --workflow or --agents to test the pipeline, or --interactive for chat.");
 }
 
 async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
@@ -161,9 +166,9 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
     Console.WriteLine("\nDone.");
 }
 
-async Task RunInteractive(string ollamaUrl, string modelName, bool useOllama)
+async Task RunAgents(string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
 {
-    Console.WriteLine("=== NivaraChat Interactive ===\n");
+    Console.WriteLine("=== NivaraChat Agents ===\n");
 
     if (!File.Exists(Path.Combine(ModelsDir, "sentiment_model.json")))
     {
@@ -174,112 +179,114 @@ async Task RunInteractive(string ollamaUrl, string modelName, bool useOllama)
     Console.WriteLine("Loading trained models...");
     var (sentimentModel, sentimentTok) = LoadSentimentModel();
     var (entityModel, entityTok) = LoadEntityModel();
+    var (validatorModel, validatorTok) = LoadValidatorModel(useAgentsFormat: true);
     Console.WriteLine("Models loaded.\n");
 
-    IChatClient? chatClient = null;
+    var sentimentText = new SentimentTextModel(sentimentModel, sentimentTok);
+    var entityText = new EntityTextModel(entityModel, entityTok);
+    var validatorText = new ValidatorTextModel(validatorModel, validatorTok);
+
+    var sentimentAgent = new NivaraChatClient(sentimentText).AsAIAgent("NivaraSentiment");
+    var entityAgent = new NivaraChatClient(entityText).AsAIAgent("NivaraEntity");
+    var validatorAgent = new NivaraChatClient(validatorText).AsAIAgent("NivaraValidator");
+
     if (useOllama)
     {
         Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
-        chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+        var ollamaClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+        var llmAgent = new NivaraChatClient(new PassthroughTextModel(ollamaClient)).AsAIAgent("OllamaLLM");
+        Console.WriteLine("Ollama connected.\n");
+
+        var workflow = new WorkflowBuilder(sentimentAgent)
+            .AddEdge(sentimentAgent, entityAgent)
+            .AddEdge(entityAgent, validatorAgent)
+            .AddEdge(validatorAgent, llmAgent)
+            .WithOutputFrom(sentimentAgent, entityAgent, validatorAgent, llmAgent)
+            .Build();
+        Console.WriteLine("Graph: NivaraSentiment -> NivaraEntity -> NivaraValidator -> OllamaLLM\n");
+
+        if (singleShotText != null)
+            await RunSingleShot(workflow, singleShotText);
+        else
+            await RunLoop(workflow);
+    }
+    else
+    {
+        var workflow = new WorkflowBuilder(sentimentAgent)
+            .AddEdge(sentimentAgent, entityAgent)
+            .AddEdge(entityAgent, validatorAgent)
+            .WithOutputFrom(sentimentAgent, entityAgent, validatorAgent)
+            .Build();
+        Console.WriteLine("Graph: NivaraSentiment -> NivaraEntity -> NivaraValidator\n");
+
+        if (singleShotText != null)
+            await RunSingleShot(workflow, singleShotText);
+        else
+            await RunLoop(workflow);
     }
 
-    Console.WriteLine("\nType a message (or 'quit' to exit):\n");
+    sentimentModel.Dispose();
+    entityModel.Dispose();
+    validatorModel.Dispose();
+    Console.WriteLine("\nDone.");
+}
 
+async Task RunSingleShot(Workflow workflow, string text)
+{
+    var run = await InProcessExecution.RunAsync(workflow, text);
+    Console.WriteLine("\n--- Agent Results ---");
+    PrintAgentResults(run);
+}
+
+async Task RunLoop(Workflow workflow)
+{
+    Console.WriteLine("Type a message (or 'quit' to exit):\n");
     while (true)
     {
         Console.Write("> ");
         var input = Console.ReadLine()?.Trim();
         if (string.IsNullOrEmpty(input) || input == "quit") break;
 
-        var sentiment = AnalyzeSentiment(input, sentimentModel, sentimentTok);
-        var entities = AnalyzeEntities(input, entityModel, entityTok);
-        Console.WriteLine($"  [Nivara] Sentiment: {sentiment}");
-
-        if (entities.Count > 0)
-        {
-            Console.WriteLine("  [Nivara] Entities:");
-            foreach (var (type, names) in entities)
-                Console.WriteLine($"    {type}: {string.Join(", ", names)}");
-        }
-
-        if (chatClient != null)
-        {
-            var prompt = $"User message: \"{input}\"\n\nClassify the sentiment of this message and identify any named entities (person, organization, date, location). Provide a brief, helpful response.";
-            var response = await chatClient.GetResponseAsync(prompt);
-            Console.WriteLine($"  [Ollama] {response}\n");
-        }
-        else
-        {
-            Console.WriteLine();
-        }
+        var run = await InProcessExecution.RunAsync(workflow, input);
+        Console.WriteLine("\n--- Agent Results ---");
+        PrintAgentResults(run);
+        Console.WriteLine();
     }
-
-    sentimentModel.Dispose();
-    entityModel.Dispose();
-    Console.WriteLine("\nDone.");
 }
 
-Dictionary<string, List<string>> AnalyzeEntities(string text, TokenClassifierModel<float> model, TextTokenizer tokenizer)
+void PrintAgentResults(Run run)
 {
-    var tokens = tokenizer.Encode(text, fixedLength: 20, addBosEos: false);
-    var data = new float[tokens.Length];
-    for (int i = 0; i < tokens.Length; i++)
-        data[i] = tokens[i];
-    var input = ReverseGradTensor<float>.FromMatrix(data, 1, 20, requiresGrad: false);
-    var logits = model.Forward(input);
-
-    var wordTokens = TextTokenizer.Tokenize(text);
-    var entities = new Dictionary<string, List<string>>();
-    var entityClasses = new[] { "O", "B-person", "B-org", "B-date", "B-location" };
-
-    int numClasses = entityClasses.Length;
-    for (int i = 0; i < Math.Min(wordTokens.Count, 20); i++)
+    var events = run.NewEvents.ToList();
+    foreach (var evt in events)
     {
-        int bestClass = 0;
-        float bestVal = logits.Data[i * numClasses];
-        for (int c = 1; c < numClasses; c++)
+        switch (evt)
         {
-            if (logits.Data[i * numClasses + c] > bestVal)
-            {
-                bestVal = logits.Data[i * numClasses + c];
-                bestClass = c;
-            }
-        }
-
-        string label = entityClasses[bestClass];
-        if (label != "O")
-        {
-            string entityType = label.Replace("B-", "");
-            if (!entities.ContainsKey(entityType))
-                entities[entityType] = [];
-            entities[entityType].Add(wordTokens[i]);
+            case AgentResponseUpdateEvent updateEvt:
+                if (updateEvt.Update?.Text is string text && !string.IsNullOrEmpty(text))
+                    Console.WriteLine($"  [{updateEvt.ExecutorId}] {text}");
+                break;
+            case ExecutorCompletedEvent executorEvt:
+                if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                    Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
+                break;
+            case ExecutorFailedEvent failedEvt:
+                Console.WriteLine($"  [{failedEvt.ExecutorId}] FAILED: {failedEvt}");
+                break;
+            case WorkflowErrorEvent errorEvt:
+                Console.WriteLine($"  WORKFLOW ERROR: {errorEvt}");
+                break;
         }
     }
-    return entities;
 }
 
-string AnalyzeSentiment(string text, TextClassifierModel<float> model, TextTokenizer tokenizer)
+(TextClassifierModel<float> model, TextTokenizer tokenizer) LoadValidatorModel(bool useAgentsFormat = false)
 {
-    var tokens = tokenizer.Encode(text, fixedLength: 20);
-    var data = new float[tokens.Length];
-    for (int i = 0; i < tokens.Length; i++)
-        data[i] = tokens[i];
-    var input = ReverseGradTensor<float>.FromMatrix(data, 1, 20, requiresGrad: false);
-    var logits = model.Forward(input);
-
-    int bestClass = 0;
-    float bestVal = logits.Data[0];
-    for (int c = 1; c < 3; c++)
-    {
-        if (logits.Data[c] > bestVal) { bestVal = logits.Data[c]; bestClass = c; }
-    }
-
-    return bestClass switch
-    {
-        0 => "Negative",
-        1 => "Neutral",
-        _ => "Positive"
-    };
+    var suffix = useAgentsFormat ? "agents_validator" : "validator";
+    var tokenizer = TextTokenizer.Load(Path.Combine(ModelsDir, $"{suffix}_tokenizer.json"));
+    var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, 2, 40);
+    ModelSerializer.Load(model, Path.Combine(ModelsDir, $"{suffix}_model.json"));
+    model.Eval();
+    return (model, tokenizer);
 }
 
 (TextClassifierModel<float> model, TextTokenizer tokenizer) LoadSentimentModel()
@@ -306,9 +313,10 @@ void PrintUsage()
     Console.WriteLine("Modes:");
     Console.WriteLine("  --train              Train sentiment, entity, and validator models");
     Console.WriteLine("  --workflow           Run the Agent Framework workflow (Ollama optional)");
-    Console.WriteLine("  --interactive        Interactive mode: local inference + Ollama chat");
+    Console.WriteLine("  --interactive        Interactive mode: agents pipeline with live input");
+    Console.WriteLine("  --agents             Same as --interactive, with --text for single-shot");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
-    Console.WriteLine("  --text \"<message>\"   Single-shot: run workflow on one message and exit");
+    Console.WriteLine("  --text \"<message>\"   Single-shot: run pipeline on one message and exit");
 }
