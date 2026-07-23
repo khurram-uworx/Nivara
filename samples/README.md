@@ -88,20 +88,10 @@ The following gaps were identified during early example development and have bee
 | **H: No integer-label CrossEntropyLoss** | `CrossEntropyLoss<T>.Forward(logits, int[])` overload added |
 | **K: No sampling utilities** | `Sampler<T>` with temperature and top-k |
 | **O: No MeanPool operation** | `ReverseGradOperations.MeanPool<T>` added — core autograd op for `[B,L,D]` → `[B,D]` with backward gradient distribution |
+| **F: No LinearClassifier\<T\>** | `TextClassifierModel<T>` in NivaraClassifier demonstrates the pattern (Linear → ReLU → Linear). A convenience `LinearClassifier<T>` could be promoted to core when a second classifier example needs it. |
+| **G: No text feature extraction pipeline** | `TextTokenizer` in NivaraClassifier provides word-level tokenization (vocab build, encode/decode, special tokens, save/load). Could be promoted to `Nivara.Extensions.Text` when reuse across examples is needed. |
 
 ## Open Gaps
-
-### Gap F: No LinearClassifier\<T\> convenience class
-
-**Impact:** The simplest classifier (linear → softmax) requires `Sequential(Linear, Softmax)` each time. Not a correctness issue, but a developer-experience gap.
-
-**Fix:** Add `LinearClassifier<T> : Module<T>` in `AutoDiff/Nn/`.
-
-### Gap G: Vocabulary/feature extraction pipeline is not part of the library
-
-**Impact:** Every example project must write its own tokenizer/feature extractor. No "load text → feature vector" pipeline exists in the library.
-
-**Fix:** Application-level concern. A `Nivara.Extensions.Text` package with bag-of-words or TF-IDF would help. NivaraClassifier's `TextTokenizer` could be promoted if useful.
 
 ### Gap L: ModelSerializer cannot load into non-Module\<T\> models
 
@@ -122,7 +112,5 @@ The following gaps were identified during early example development and have bee
 | Priority | Gap | Effort | Impact |
 |----------|-----|--------|--------|
 | P0 | N: Build the NivaraChatClient example | Large | Validates everything; biggest single improvement |
-| P2 | F: LinearClassifier | Tiny | Developer convenience |
-| P3 | G: Text feature extraction | Large | Application-level, could be an extension |
 | P3 | L: LoadModel factory | Small | Nice-to-have API convenience |
 | P3 | M: Agent Framework refs | None | Example concern only |
