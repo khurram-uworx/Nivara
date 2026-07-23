@@ -131,56 +131,9 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 
 The workflow uses `Microsoft.Agents.AI.Workflows` for type-safe message routing with fan-out/fan-in topology:
 
-```csharp
-var router = new TextRouter();
-var sentimentExecutor = new SentimentExecutor(model, tokenizer);
-var entityExecutor = new EntityExtractor(model, tokenizer);
-var validatorExecutor = new ValidatorExecutor();
-
-var workflow = new WorkflowBuilder(router)
-    .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExecutor })
-    .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExecutor }, validatorExecutor)
-    .WithOutputFrom(sentimentExecutor, entityExecutor, validatorExecutor)
-    .Build();
-
-var run = await InProcessExecution.RunAsync(workflow, "Acme Corp in New York announced on March 3");
-
-foreach (var evt in run.NewEvents)
-{
-    if (evt is ExecutorCompletedEvent executorEvt)
-        Console.WriteLine($"{executorEvt.ExecutorId}: {executorEvt.Data}");
-}
-```
-
 ### Executor structure
 
 Each executor wraps a Nivara-trained model using `Executor<TInput, TOutput>` with `override`:
-
-```csharp
-internal sealed class SentimentExecutor : Executor<string, string>
-{
-    private readonly TextClassifierModel<float> _model;
-    private readonly TextTokenizer _tokenizer;
-
-    public SentimentExecutor(TextClassifierModel<float> model, TextTokenizer tokenizer)
-        : base("Sentiment")
-    {
-        _model = model;
-        _model.Eval();
-        _tokenizer = tokenizer;
-    }
-
-    public override ValueTask<string> HandleAsync(string text, IWorkflowContext context, CancellationToken cancellationToken = default)
-    {
-        var tokens = _tokenizer.Encode(text, fixedLength: MaxSeqLen);
-        var input = ToTensor(tokens);
-        var logits = _model.Forward(input);
-        int predicted = ArgMax(logits);
-        string[] classes = ["negative", "neutral", "positive"];
-        return ValueTask.FromResult(classes[predicted]);
-    }
-}
-```
 
 Output is surfaced via `.WithOutputFrom()` on the `WorkflowBuilder` and read from `ExecutorCompletedEvent` in `run.NewEvents`.
 
@@ -232,20 +185,6 @@ Output is surfaced via `.WithOutputFrom()` on the `WorkflowBuilder` and read fro
 | `TextClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TextClassifierModel.cs` | Promoted from NivaraClassifier. Embedding → MeanPool → MLP document classifier. |
 | `TokenClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TokenClassifierModel.cs` | New. Embedding → MLP per-token classifier for NER and sequence labeling. |
 | `TextTokenizer` | `src/Nivara/AutoDiff/Nn/TextTokenizer.cs` | Promoted from NivaraClassifier. Word-level tokenizer with vocab, encode/decode, special tokens, save/load. |
-
-### What this exposed in the library
-
-| Gap | Problem | Resolution |
-|-----|---------|------------|
-| **No document classifier module** | Simplest classifier requires composing Embedding → MeanPool → Linear manually. | `TextClassifierModel<T>` promoted from NivaraClassifier to core. Reusable for any document classification task. |
-| **No token classifier module** | NER/sequence labeling needs per-token predictions without pooling. No core module for this. | `TokenClassifierModel<T>` created in core. Same as TextClassifierModel but without MeanPool — outputs `[B, L, numClasses]`. |
-| **No word-level tokenizer** | Only char-level tokenizer existed (MicroGpt). | `TextTokenizer` promoted from NivaraClassifier to core. Word-level with vocab building, encode/decode, special tokens, save/load. |
-| **Agent Framework not integrated** | No Nivara sample used `Microsoft.Agents.AI.Workflows`. | `NivaraChat/` references Agent Framework packages. Demonstrates `Executor<TInput, TOutput>` + `WorkflowBuilder` + `InProcessExecution` pattern. |
-| **No hybrid workflow example** | Deterministic ML and LLM nodes not shown working together. | Full pipeline: Nivara sentiment → Nivara NER → Ollama LLM → validator. Shows the value of mixing deterministic and stochastic models. |
-
-### ADR-001 opportunistic cleanup
-
-While building this example, removed redundant inner null checks in `Module.cs` (`RegisterModules` and `RegisterParameters`) — under ADR-001, modules/parameters passed to these methods should never be null.
 
 ## Limitations
 
