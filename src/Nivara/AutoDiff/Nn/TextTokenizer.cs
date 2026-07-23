@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.Json;
 
-namespace NivaraClassifier;
+namespace Nivara.AutoDiff.Nn;
 
 public sealed class TextTokenizer
 {
@@ -35,6 +35,8 @@ public sealed class TextTokenizer
         int maxVocabSize = 10000,
         int minFreq = 1)
     {
+        ArgumentNullException.ThrowIfNull(documents);
+
         var freq = new Dictionary<string, int>();
         foreach (var doc in documents)
         {
@@ -77,6 +79,8 @@ public sealed class TextTokenizer
 
     public int[] Encode(string text, int? fixedLength = null, bool addBosEos = true)
     {
+        ArgumentNullException.ThrowIfNull(text);
+
         var tokens = new List<int>();
 
         if (addBosEos)
@@ -132,6 +136,8 @@ public sealed class TextTokenizer
 
     public void Save(string path)
     {
+        ArgumentNullException.ThrowIfNull(path);
+
         var data = itos.ToDictionary(kv => kv.Key.ToString(), kv => kv.Value);
         var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
         File.WriteAllText(path, json);
@@ -139,6 +145,8 @@ public sealed class TextTokenizer
 
     public static TextTokenizer Load(string path)
     {
+        ArgumentNullException.ThrowIfNull(path);
+
         var json = File.ReadAllText(path);
         var data = JsonSerializer.Deserialize<Dictionary<string, string>>(json)
             ?? throw new InvalidOperationException("Failed to deserialize tokenizer.");
@@ -156,8 +164,10 @@ public sealed class TextTokenizer
         return new TextTokenizer(stoi, itos);
     }
 
-    internal static List<string> Tokenize(string text)
+    public static List<string> Tokenize(string text)
     {
+        ArgumentNullException.ThrowIfNull(text);
+
         var tokens = new List<string>();
         var current = new StringBuilder();
 

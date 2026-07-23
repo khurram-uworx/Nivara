@@ -51,66 +51,15 @@ Trains a neural network to evaluate chess positions using Nivara's autograd engi
 
 Three phases: material counting (MLP), NNUE halfKP (sparse embedding), and Stockfish-labeled training. Includes save/load, interactive wizard, interactive REPL, UCI engine mode, and embedding demo.
 
-## [NivaraChatClient.md](NivaraChatClient.md) — Hybrid Agent Workflow (Planned)
+## [NivaraChat/README.md](NivaraChat/README.md) — Hybrid Agent Workflow
 
-**Status:** Spec/plan — not yet implemented as a runnable project.
+Demonstrates Nivara-trained domain-specific models as custom `Executor` subclasses in `Microsoft.Agents.AI.Workflows` graphs, mixed with an Ollama-backed `ChatClientAgent` node.
 
-Demonstrates Nivara-trained domain-specific models as custom `Executor` subclasses in `Microsoft.Agents.AI.Workflows` graphs, mixed with LLM-backed `ChatClientAgent` nodes.
+Key characteristics:
+- Three trained models (sentiment, entity, validator) wired into a workflow graph
+- `Executor` subclasses with `[MessageHandler]` for type-safe routing
+- Hybrid deterministic (Nivara) + stochastic (LLM) pipeline
+- `TextClassifierModel<T>`, `TokenClassifierModel<T>`, `TextTokenizer` — core APIs exercised
+- `ModelSerializer` bridges training output to inference input
 
-Architecture (conceptual):
-```
-Input → [NivaraSentimentExecutor] → [NivaraEntityExtractor] → [LLMAgent] → [NivaraValidator] → Output
-```
 
-Key characteristics of the approach:
-- No `IChatClient` implementation — the prior standalone-chat-client direction was abandoned
-- Training pipelines are separate from inference workflows (different projects/phases)
-- Each domain model (sentiment, entity, validator) is a `Module<T>` subclass trained via `TrainingLoop<T>`
-- Each is wrapped in an `Executor` subclass with `[MessageHandler]` for type-safe routing
-- `ModelSerializer` bridges training output to inference input (JSON save/load)
-- The example builds toward a hybrid workflow: deterministic Nivara nodes + stochastic LLM node
-
----
-
-# Gap Analysis
-
-## Resolved Gaps
-
-The following gaps were identified during early example development and have been resolved.
-
-| Gap | Resolution |
-|-----|------------|
-| **A: Embedding\<T\> not a Module\<T\>** | `Embedding<T>` now extends `Module<T>` |
-| **B: No batched Embedding Forward** | `Embedding<T>.Forward(ReverseGradTensor<T>)` accepts batched token IDs |
-| **C: No Gather operation** | `ReverseGradOperations.Gather<T>` implemented with backward scatter-add |
-| **D: No integer-to-differentiable-tensor path** | `Gather` accepts `int[]` indices directly |
-| **E: No batched TransformerBlock** | `TransformerBlock<T>` in core — pre-LN, causal mask, dropout, residual |
-| **H: No integer-label CrossEntropyLoss** | `CrossEntropyLoss<T>.Forward(logits, int[])` overload added |
-| **K: No sampling utilities** | `Sampler<T>` with temperature and top-k |
-| **O: No MeanPool operation** | `ReverseGradOperations.MeanPool<T>` added — core autograd op for `[B,L,D]` → `[B,D]` with backward gradient distribution |
-| **F: No LinearClassifier\<T\>** | Not needed. `Sequential(Linear)` already composes a linear classifier in one line. Loss functions and activations are standalone functional classes (not `Module<T>`), so a wrapper would add API surface without real value. |
-| **G: No text feature extraction pipeline** | `TextTokenizer` in NivaraClassifier provides word-level tokenization (vocab build, encode/decode, special tokens, save/load). Could be promoted to `Nivara.Extensions.Text` when reuse across examples is needed. |
-
-## Open Gaps
-
-### Gap L: ModelSerializer cannot load into non-Module\<T\> models
-
-**Impact:** `ModelSerializer.Load<T>(model, path)` requires an already-instantiated `Module<T>`. A factory method that reads JSON and instantiates the correct subclass would be convenient.
-
-### Gap M: Agent Framework packages not referenced anywhere
-
-**Impact:** The NivaraChatClient example project must reference `Microsoft.Agents.AI`, `Microsoft.Agents.AI.Workflows`, and `Microsoft.Extensions.AI`. Core stays clean. Documentation/example concern only.
-
-### Gap N: No runnable NivaraChatClient example yet
-
-**Impact:** The best showcase of Nivara's value proposition (deterministic model in an Agent Framework workflow) only exists as a markdown spec. Building `samples/NivaraWorkflow/` is the next implementation step.
-
----
-
-## Priority Order for Open Gaps
-
-| Priority | Gap | Effort | Impact |
-|----------|-----|--------|--------|
-| P0 | N: Build the NivaraChatClient example | Large | Validates everything; biggest single improvement |
-| P3 | L: LoadModel factory | Small | Nice-to-have API convenience |
-| P3 | M: Agent Framework refs | None | Example concern only |

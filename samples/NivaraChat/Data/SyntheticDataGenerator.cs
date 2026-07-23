@@ -1,0 +1,199 @@
+using System.Text;
+
+namespace NivaraChat.Data;
+
+public static class SyntheticDataGenerator
+{
+    static readonly string[] PersonNames = ["John Smith", "Jane Doe", "Bob Wilson", "Alice Brown", "Charlie Davis", "Emma Johnson", "Michael Lee", "Sarah Garcia"];
+    static readonly string[] OrgNames = ["Acme Corp", "TechStart Inc", "Global Industries", "MegaSoft", "InnovateLab", "DataFlow Systems", "CloudNine Ltd", "NetWave"];
+    static readonly string[] Dates = ["January 15", "March 3", "June 20", "September 8", "December 25", "next Monday", "end of month", "Q3 2026"];
+    static readonly string[] Locations = ["New York", "London", "Tokyo", "San Francisco", "Berlin", "Sydney", "Toronto", "Singapore"];
+    static readonly string[] PositivePhrases = ["great work", "excellent results", "on track", "ahead of schedule", "exceeding expectations", "strong performance"];
+    static readonly string[] NegativePhrases = ["needs improvement", "behind schedule", "below targets", "concerns raised", "issues found", "declining metrics"];
+    static readonly string[] NeutralPhrases = ["status update", "regular review", "ongoing monitoring", "standard procedure", "routine check", "scheduled assessment"];
+    static readonly string[] Activities = ["completed the project", "submitted the report", "reviewed the proposal", "updated the system", "resolved the issue", "analyzed the data"];
+
+    public static (string[] texts, int[] labels) GenerateSentimentData(int count, int seed = 42)
+    {
+        var rng = new Random(seed);
+        var texts = new string[count];
+        var labels = new int[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            int sentiment = rng.Next(3);
+            string text = sentiment switch
+            {
+                0 => GenerateNegativeSentence(rng),
+                1 => GenerateNeutralSentence(rng),
+                _ => GeneratePositiveSentence(rng)
+            };
+            texts[i] = text;
+            labels[i] = sentiment;
+        }
+        return (texts, labels);
+    }
+
+    public static (string[] texts, string[] labelSequences) GenerateEntityData(int count, int seed = 42)
+    {
+        var rng = new Random(seed);
+        var texts = new string[count];
+        var labelSequences = new string[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            var (text, labels) = GenerateEntitySentence(rng);
+            texts[i] = text;
+            labelSequences[i] = labels;
+        }
+        return (texts, labelSequences);
+    }
+
+    public static (string[] inputs, int[] labels) GenerateValidatorData(int count, int seed = 42)
+    {
+        var rng = new Random(seed);
+        var inputs = new string[count];
+        var labels = new int[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            bool consistent = rng.Next(2) == 0;
+            var (original, entities) = GenerateEntitySentence(rng);
+            string response = consistent
+                ? GenerateConsistentResponse(entities, rng)
+                : GenerateInconsistentResponse(rng);
+            inputs[i] = original + " || " + response;
+            labels[i] = consistent ? 1 : 0;
+        }
+        return (inputs, labels);
+    }
+
+    static string GeneratePositiveSentence(Random rng)
+    {
+        var person = Pick(rng, PersonNames);
+        var org = Pick(rng, OrgNames);
+        var activity = Pick(rng, PositivePhrases);
+        return $"{person} from {org} reported {activity} this quarter";
+    }
+
+    static string GenerateNegativeSentence(Random rng)
+    {
+        var person = Pick(rng, PersonNames);
+        var org = Pick(rng, OrgNames);
+        var activity = Pick(rng, NegativePhrases);
+        return $"{person} at {org} noted {activity} in the recent review";
+    }
+
+    static string GenerateNeutralSentence(Random rng)
+    {
+        var person = Pick(rng, PersonNames);
+        var org = Pick(rng, OrgNames);
+        var activity = Pick(rng, NeutralPhrases);
+        return $"{person} from {org} provided a {activity} during the meeting";
+    }
+
+    static (string text, string labels) GenerateEntitySentence(Random rng)
+    {
+        var templates = new[]
+        {
+            () => {
+                var person = Pick(rng, PersonNames);
+                var org = Pick(rng, OrgNames);
+                var date = Pick(rng, Dates);
+                var tokens = $"{person} from {org} on {date}".Split(' ');
+                var lbs = new List<string>();
+                foreach (var t in tokens)
+                {
+                    if (PersonNames.Contains(t)) lbs.Add("B-person");
+                    else if (OrgNames.Contains(t)) lbs.Add("B-org");
+                    else if (Dates.Contains(t)) lbs.Add("B-date");
+                    else if (Locations.Contains(t)) lbs.Add("B-location");
+                    else lbs.Add("O");
+                }
+                return (string.Join(' ', tokens), string.Join(' ', lbs));
+            },
+            () => {
+                var org = Pick(rng, OrgNames);
+                var loc = Pick(rng, Locations);
+                var date = Pick(rng, Dates);
+                var tokens = $"{org} in {loc} announced on {date}".Split(' ');
+                var lbs = new List<string>();
+                foreach (var t in tokens)
+                {
+                    if (OrgNames.Contains(t)) lbs.Add("B-org");
+                    else if (Locations.Contains(t)) lbs.Add("B-location");
+                    else if (Dates.Contains(t)) lbs.Add("B-date");
+                    else lbs.Add("O");
+                }
+                return (string.Join(' ', tokens), string.Join(' ', lbs));
+            },
+            () => {
+                var person = Pick(rng, PersonNames);
+                var loc = Pick(rng, Locations);
+                var tokens = $"{person} will visit {loc} next week".Split(' ');
+                var lbs = new List<string>();
+                foreach (var t in tokens)
+                {
+                    if (PersonNames.Contains(t)) lbs.Add("B-person");
+                    else if (Locations.Contains(t)) lbs.Add("B-location");
+                    else lbs.Add("O");
+                }
+                return (string.Join(' ', tokens), string.Join(' ', lbs));
+            }
+        };
+
+        return Pick(rng, templates)();
+    }
+
+    static string GenerateConsistentResponse(string entityLabels, Random rng)
+    {
+        var entities = entityLabels.Split(' ')
+            .Where(l => l != "O")
+            .Select(l => l.Replace("B-", ""))
+            .Distinct()
+            .ToArray();
+
+        if (entities.Length == 0)
+            return "The information has been reviewed and confirmed.";
+
+        var sb = new StringBuilder("Confirmed: ");
+        sb.Append(string.Join(", ", entities.Take(2)));
+        sb.Append(" noted in the record.");
+        return sb.ToString();
+    }
+
+    static string GenerateInconsistentResponse(Random rng)
+    {
+        var wrongEntities = new[] { "unknown entity", "unverified source", "pending confirmation", "no record found" };
+        return $"Review complete. {Pick(rng, wrongEntities)}. No further action needed.";
+    }
+
+    static T Pick<T>(Random rng, T[] array) => array[rng.Next(array.Length)];
+
+    public static void SaveSentimentCsv(string path, string[] texts, int[] labels)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("text,label");
+        for (int i = 0; i < texts.Length; i++)
+            sb.AppendLine($"\"{texts[i].Replace("\"", "\"\"")}\",{labels[i]}");
+        File.WriteAllText(path, sb.ToString());
+    }
+
+    public static void SaveEntityCsv(string path, string[] texts, string[] labels)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("text,labels");
+        for (int i = 0; i < texts.Length; i++)
+            sb.AppendLine($"\"{texts[i].Replace("\"", "\"\"")}\",\"{labels[i]}\"");
+        File.WriteAllText(path, sb.ToString());
+    }
+
+    public static void SaveValidatorCsv(string path, string[] inputs, int[] labels)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("input,label");
+        for (int i = 0; i < inputs.Length; i++)
+            sb.AppendLine($"\"{inputs[i].Replace("\"", "\"\"")}\",{labels[i]}");
+        File.WriteAllText(path, sb.ToString());
+    }
+}

@@ -35,20 +35,14 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(modules);
         foreach (var module in modules)
-        {
-            if (module != null)
-                this.modules.Add(module);
-        }
+            this.modules.Add(module);
     }
 
     public void RegisterParameters(params Parameter<T>[] parameters)
     {
         ArgumentNullException.ThrowIfNull(parameters);
         foreach (var param in parameters)
-        {
-            if (param != null)
-                this.parameters.Add(param);
-        }
+            this.parameters.Add(param);
     }
 
     public Dictionary<string, ReverseGradTensor<T>> Parameters()
@@ -182,6 +176,18 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
                     $"state has [{string.Join(", ", sourceShape)}], " +
                     $"model has [{string.Join(", ", targetShape)}].");
         }
+    }
+
+    protected static int ArgMax(ReverseGradTensor<T> logits, int row, int numClasses)
+    {
+        int bestClass = 0;
+        T bestVal = logits.Data[row * numClasses];
+        for (int c = 1; c < numClasses; c++)
+        {
+            T val = logits.Data[row * numClasses + c];
+            if (val > bestVal) { bestVal = val; bestClass = c; }
+        }
+        return bestClass;
     }
 
     public void Dispose()
