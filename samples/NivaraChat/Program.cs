@@ -1,4 +1,3 @@
-using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Nivara.AutoDiff;
@@ -79,23 +78,23 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
     var entityExtractor = new EntityExtractor(entityModel, entityTok);
     var validator = new ValidatorExecutor();
 
-    ChatClientAgent? agent = null;
+    Executor<string, string>? llmExecutor = null;
     if (useOllama)
     {
         Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
         var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
-        agent = new ChatClientAgent(chatClient, "You are a helpful assistant. Analyze user messages and provide relevant information.");
+        llmExecutor = new LlmExecutor(chatClient);
         Console.WriteLine("Ollama connected.\n");
     }
 
     Workflow workflow;
-    if (agent != null)
+    if (llmExecutor != null)
     {
         workflow = new WorkflowBuilder(router)
             .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExtractor })
             .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExtractor }, validator)
-            .AddEdge(validator, agent)
-            .WithOutputFrom(sentimentExecutor, entityExtractor, validator)
+            .AddEdge(validator, llmExecutor)
+            .WithOutputFrom(sentimentExecutor, entityExtractor, validator, llmExecutor)
             .Build();
         Console.WriteLine("Graph: TextRouter --fan-out--> [SentimentExecutor, EntityExtractor] --fan-in--> ValidatorExecutor -> Ollama LLM\n");
     }
@@ -112,7 +111,8 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
     {
         var run = await InProcessExecution.RunAsync(workflow, singleShotText);
         Console.WriteLine("\n--- Workflow Results ---");
-        foreach (var evt in run.NewEvents)
+        var events = run.NewEvents.ToList();
+        foreach (var evt in events)
         {
             switch (evt)
             {
