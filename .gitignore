@@ -335,3 +335,4 @@ FodyWeavers.xsd
 .mimocode
 samples/data/sentiment_data.csv
 samples/data/classifier.model*
+/samples/data/nivarachat

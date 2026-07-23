@@ -2,24 +2,45 @@ using Microsoft.Agents.AI.Workflows;
 
 namespace NivaraChat;
 
-internal sealed partial class ValidatorExecutor : Executor
+internal sealed class ValidatorExecutor : Executor<string, string>
 {
+    private readonly List<string> _pending = [];
+    private const int ExpectedCount = 2;
+
     public ValidatorExecutor()
         : base("Validator")
     {
     }
 
-    [MessageHandler]
-    public ValueTask<string> HandleAsync(string llmResponse, IWorkflowContext context)
+    public override ValueTask<string> HandleAsync(string input, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        var hasHallucination = llmResponse.Contains("unknown", StringComparison.OrdinalIgnoreCase)
-            || llmResponse.Contains("unverified", StringComparison.OrdinalIgnoreCase)
-            || llmResponse.Contains("no record", StringComparison.OrdinalIgnoreCase);
+        if (!string.IsNullOrEmpty(input))
+            _pending.Add(input);
 
-        var confidence = hasHallucination ? 0.3 : 0.9;
-        var status = hasHallucination ? "INCONSISTENT" : "CONSISTENT";
+        if (_pending.Count < ExpectedCount)
+            return ValueTask.FromResult("");
 
-        var result = $"{{\"status\":\"{status}\",\"confidence\":{confidence:F1},\"response\":\"{llmResponse.Replace("\"", "\\\"")}\"}}";
+        string? sentiment = null;
+        string? entities = null;
+        foreach (var msg in _pending)
+        {
+            if (msg.StartsWith('{'))
+                entities = msg;
+            else
+                sentiment = msg;
+        }
+        _pending.Clear();
+
+        sentiment ??= "unknown";
+        entities ??= "{}";
+
+        bool hasEntities = entities.Contains("\"person\"") || entities.Contains("\"org\"")
+            || entities.Contains("\"date\"") || entities.Contains("\"location\"");
+        bool hasMeaningfulSentiment = sentiment != "Neutral" && sentiment != "unknown";
+
+        var confidence = (hasEntities || hasMeaningfulSentiment) ? 0.9 : 0.3;
+        var status = (hasEntities || hasMeaningfulSentiment) ? "CONSISTENT" : "INCONSISTENT";
+        var result = $"{{\"status\":\"{status}\",\"confidence\":{confidence:F1},\"sentiment\":\"{sentiment}\",\"entities\":{entities}}}";
         return ValueTask.FromResult(result);
     }
 }

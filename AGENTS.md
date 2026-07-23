@@ -12,6 +12,8 @@ This environment has GNU coreutils at `C:\Program Files\coreutils\bin\` on PATH.
 
 **PowerShell string escaping gotcha:** PowerShell interprets backslash sequences in double-quoted strings (e.g. `\t` becomes a tab, `\n` becomes a newline). This breaks multi-line strings passed to CLI tools like `gh pr create --body "..."`. When the PR body or any CLI argument contains backticks or backslashes (common in markdown code references like `\`src/Foo.cs\``), write the content to a temp file first and use `--body-file` / `--description-file` instead of inline `--body` / `--description`.
 
+**Solution file:** This repo uses `.slnx` (XML-based solution format), not `.sln`. Build with `dotnet build Nivara.slnx`.
+
 Purpose
 - Concise, machine-friendly rules and locations to guide automated code generation and human edits that use System.Numerics.Tensors opportunistically.
 - Designed to be consumed by AI assistants when producing or refactoring tensor-aware code.
@@ -322,6 +324,10 @@ Current product direction:
 - The recent AutoDiff plan items are implemented: inference-default
   `GradientUtils.Grad()` plus `StateDict()` / `LoadStateDict()` and
   serializer helpers.
+
+## Agent Framework Workflow Patterns
+
+See `docs/agent-framework-workflows.md` for Nivara-specific integration notes from the NivaraChat sample.
 
 ## Architectural Decisions (ADRs)
 

@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace NivaraChat;
 
-internal sealed partial class EntityExtractor : Executor
+internal sealed class EntityExtractor : Executor<string, string>
 {
     private readonly TokenClassifierModel<float> _model;
     private readonly TextTokenizer _tokenizer;
@@ -22,8 +22,7 @@ internal sealed partial class EntityExtractor : Executor
         _maxSeqLen = maxSeqLen;
     }
 
-    [MessageHandler]
-    public ValueTask<string> HandleAsync(string text, IWorkflowContext context)
+    public override ValueTask<string> HandleAsync(string text, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
         var tokens = _tokenizer.Encode(text, fixedLength: _maxSeqLen, addBosEos: false);
         var data = new float[tokens.Length];

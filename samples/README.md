@@ -57,9 +57,10 @@ Demonstrates Nivara-trained domain-specific models as custom `Executor` subclass
 
 Key characteristics:
 - Three trained models (sentiment, entity, validator) wired into a workflow graph
-- `Executor` subclasses with `[MessageHandler]` for type-safe routing
+- `Executor<TInput, TOutput>` with `override` for type-safe routing
 - Hybrid deterministic (Nivara) + stochastic (LLM) pipeline
 - `TextClassifierModel<T>`, `TokenClassifierModel<T>`, `TextTokenizer` — core APIs exercised
 - `ModelSerializer` bridges training output to inference input
+- Ollama optional — pass `--ollama` to include LLM agent
 
 
