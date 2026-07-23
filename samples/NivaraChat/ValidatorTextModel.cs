@@ -1,4 +1,3 @@
-using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Serialization;
 
@@ -32,11 +31,7 @@ internal sealed class ValidatorTextModel : ITextModel
 
     public string Process(string input)
     {
-        var tokens = _tokenizer.Encode(input, fixedLength: _maxSeqLen);
-        var data = new float[tokens.Length];
-        for (int i = 0; i < tokens.Length; i++)
-            data[i] = tokens[i];
-        var tensorInput = ReverseGradTensor<float>.FromMatrix(data, 1, _maxSeqLen, requiresGrad: false);
+        var tensorInput = ModelInferenceHelper.ToTensor(_tokenizer, input, _maxSeqLen);
         var logits = _model.Forward(tensorInput);
 
         float validScore = logits.Data[0];

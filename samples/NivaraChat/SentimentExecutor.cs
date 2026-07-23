@@ -1,5 +1,4 @@
 using Microsoft.Agents.AI.Workflows;
-using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 
 namespace NivaraChat;
@@ -23,20 +22,7 @@ internal sealed class SentimentExecutor : Executor<string, string>
 
     public override ValueTask<string> HandleAsync(string text, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        var tokens = _tokenizer.Encode(text, fixedLength: _maxSeqLen);
-        var data = new float[tokens.Length];
-        for (int i = 0; i < tokens.Length; i++)
-            data[i] = tokens[i];
-        var input = ReverseGradTensor<float>.FromMatrix(data, 1, _maxSeqLen, requiresGrad: false);
-        var logits = _model.Forward(input);
-
-        int bestClass = 0;
-        float bestVal = logits.Data[0];
-        for (int c = 1; c < 3; c++)
-        {
-            if (logits.Data[c] > bestVal) { bestVal = logits.Data[c]; bestClass = c; }
-        }
-
+        int bestClass = ModelInferenceHelper.RunClassifier(_model, _tokenizer, text, _maxSeqLen, numClasses: 3);
         return ValueTask.FromResult(Classes[bestClass]);
     }
 }

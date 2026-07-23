@@ -18,7 +18,7 @@ bool useOllama = false;
 
 for (int i = 1; i < args.Length; i++)
 {
-    if (args[i] == "--ollama" && i + 1 < args.Length) { ollamaUrl = args[++i]; useOllama = true; }
+    if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
     if (args[i] == "--model" && i + 1 < args.Length) modelName = args[++i];
     if (args[i] == "--text" && i + 1 < args.Length) workflowText = args[++i];
 }
