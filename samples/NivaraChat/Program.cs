@@ -10,7 +10,7 @@ using OllamaSharp;
 
 const string DefaultOllamaUrl = "http://localhost:11434";
 const string DefaultModel = "llama3.2";
-const string ModelsDir = "models";
+const string ModelsDir = "samples/data/nivarachat";
 
 var mode = args.Length > 0 ? args[0] : "--workflow";
 var ollamaUrl = DefaultOllamaUrl;
@@ -45,7 +45,7 @@ void RunTraining()
 
     if (File.Exists(Path.Combine(ModelsDir, "sentiment_model.json")))
     {
-        Console.WriteLine("Models already exist in models/. Delete to retrain.\n");
+        Console.WriteLine("Models already exist in samples/data/nivarachat/. Delete to retrain.\n");
         return;
     }
 
@@ -222,18 +222,18 @@ string AnalyzeSentiment(string text, TextClassifierModel<float> model, TextToken
 
 (TextClassifierModel<float> model, TextTokenizer tokenizer) LoadSentimentModel()
 {
-    var model = new TextClassifierModel<float>(1, 32, 64, 3, 20);
-    ModelSerializer.Load(model, Path.Combine(ModelsDir, "sentiment_model.json"));
     var tokenizer = TextTokenizer.Load(Path.Combine(ModelsDir, "sentiment_tokenizer.json"));
+    var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, 3, 20);
+    ModelSerializer.Load(model, Path.Combine(ModelsDir, "sentiment_model.json"));
     model.Eval();
     return (model, tokenizer);
 }
 
 (TokenClassifierModel<float> model, TextTokenizer tokenizer) LoadEntityModel()
 {
-    var model = new TokenClassifierModel<float>(1, 32, 64, 5, 20);
-    ModelSerializer.Load(model, Path.Combine(ModelsDir, "entity_model.json"));
     var tokenizer = TextTokenizer.Load(Path.Combine(ModelsDir, "entity_tokenizer.json"));
+    var model = new TokenClassifierModel<float>(tokenizer.VocabSize, 32, 64, 5, 20);
+    ModelSerializer.Load(model, Path.Combine(ModelsDir, "entity_model.json"));
     model.Eval();
     return (model, tokenizer);
 }
