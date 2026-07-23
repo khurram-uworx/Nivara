@@ -15,7 +15,7 @@ NivaraClassifier trains a model to predict sentiment (positive/negative) from te
 - **CrossEntropyLoss<T>** with integer labels for multi-class classification
 - **Model serialization** (`ModelSerializer.Save`/`Load`) for persistence
 - **Synthetic data generation** — self-contained, no external datasets required
-- **Reusable tokenizer** (`TextTokenizer`) — a word-level tokenizer with vocab building, encoding, and special tokens
+- **Reusable tokenizer** (`TextTokenizer`) — a word-level tokenizer with vocab building, encoding, and special tokens (now a core API in `Nivara.AutoDiff.Nn`)
 
 ## Quick start
 
@@ -68,11 +68,11 @@ Interactive REPL: type sentences, get predicted sentiment. Requires a trained mo
 ```
 NivaraClassifier/
 ├── Program.cs                  # CLI entry, training loop, inference, wizard
-├── TextClassifierModel.cs      # TextClassifierModel<T> : Module<T>
-├── TextTokenizer.cs            # Reusable word-level tokenizer (vocab, encode/decode, save/load)
 ├── DataGenerator.cs            # Synthetic sentiment CSV generator
 └── NivaraClassifier.csproj     # References Nivara core
 ```
+
+> **Note:** `TextClassifierModel<T>` and `TextTokenizer` were originally defined in this sample but have been promoted to core APIs in `Nivara.AutoDiff.Nn`. The sample now references them from the core library.
 
 ### Model architecture
 
@@ -147,16 +147,17 @@ NivaraClassifier drove several core library additions and fixes. The original sp
 | **Embedding\<T\> not a Module\<T\>** | Embedding wasn't a Module — no StateDict, no Train/Eval, no Dispose lifecycle. | `Embedding<T>` now extends `Module<T>` (resolved during NivaraGpt development). |
 | **No batched Embedding Forward** | Single-token `Forward(int)` only. Classifier needs batch `[B, L]` → `[B, L, D]`. | `Embedding<T>.Forward(ReverseGradTensor<T>)` handles batched input via one-hot + MatMul (resolved during NivaraGpt development). |
 | **No integer-label CrossEntropyLoss** | `CrossEntropyLoss<T>` required one-hot targets. | `Forward(logits, int[])` overload added — builds one-hot internally (resolved during NivaraGpt development). |
-| **No word-level tokenizer** | Only char-level tokenizer existed (MicroGpt). | `TextTokenizer` built as example-local reusable utility. Candidate for promotion to `Nivara.Extensions.Text` if useful. |
+| **No word-level tokenizer** | Only char-level tokenizer existed (MicroGpt). | `TextTokenizer` promoted to `Nivara.AutoDiff.Nn` core. |
+| **No document classifier module** | Simplest classifier requires composing Embedding → MeanPool → Linear manually. | `TextClassifierModel<T>` promoted to `Nivara.AutoDiff.Nn` core. Reusable for any document classification task. |
 | **No MeanPool operation** | No built-in mean-over-dimension reduction for `[B, L, D]` → `[B, D]`. | `ReverseGradOperations.MeanPool<T>` added to core with full autograd backward support. |
-| **Gap F: No LinearClassifier\<T\>** | Simplest classifier (linear → softmax → CE) requires boilerplate. | **Not yet resolved.** Candidate for core addition: `LinearClassifier<T> : Module<T>`. |
 
 ### Core library additions from this example
 
 | New API | Location | Purpose |
 |---------|----------|---------|
 | `ReverseGradOperations.MeanPool<T>` | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | Core autograd mean-pooling with backward gradient distribution |
-| `TextTokenizer` | `samples/NivaraClassifier/TextTokenizer.cs` | Reusable word-level tokenizer with vocab building, encode/decode, special tokens |
+| `TextClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TextClassifierModel.cs` | Promoted from this sample. Embedding → MeanPool → MLP document classifier. |
+| `TextTokenizer` | `src/Nivara/AutoDiff/Nn/TextTokenizer.cs` | Promoted from this sample. Word-level tokenizer with vocab, encode/decode, special tokens. |
 
 ### Core library performance considerations
 

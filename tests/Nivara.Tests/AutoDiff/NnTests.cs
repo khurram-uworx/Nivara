@@ -1017,4 +1017,40 @@ public class NnTests
 
         Assert.Throws<ArgumentException>(() => emb.Forward(indices));
     }
+
+    [Test]
+    public void RegisterModules_NullElement_ThrowsArgumentNullException()
+    {
+        var module = new ModuleWithParams();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            module.RegisterModules(null!));
+    }
+
+    [Test]
+    public void RegisterModules_NullArray_ThrowsArgumentNullException()
+    {
+        var module = new ModuleWithParams();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            module.RegisterModules((Module<float>[])null!));
+    }
+
+    [Test]
+    public void RegisterParameters_NullElement_ThrowsArgumentNullException()
+    {
+        var module = new ModuleWithParams();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            module.RegisterParameters(null!));
+    }
+
+    [Test]
+    public void RegisterParameters_NullArray_ThrowsArgumentNullException()
+    {
+        var module = new ModuleWithParams();
+
+        Assert.Throws<ArgumentNullException>(() =>
+            module.RegisterParameters((Parameter<float>[])null!));
+    }
 }

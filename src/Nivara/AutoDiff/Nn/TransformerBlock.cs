@@ -1,10 +1,8 @@
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
-using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Nn;
 

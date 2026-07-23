@@ -1,10 +1,7 @@
-using System.Numerics;
-using Nivara;
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using System.Numerics;
 
-namespace NivaraClassifier;
+namespace Nivara.AutoDiff.Nn;
 
 public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber<T>
 {
@@ -13,6 +10,10 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber
     readonly Linear<T> fc2;
     readonly int embeddingDim;
     readonly int maxSeqLen;
+
+    public int VocabSize => embedding.NumEmbeddings;
+    public int EmbeddingDim => embeddingDim;
+    public int MaxSeqLen => maxSeqLen;
 
     public TextClassifierModel(int vocabSize, int embeddingDim, int hiddenDim, int numClasses, int maxSeqLen)
     {
@@ -28,6 +29,8 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+
         var embedded = embedding.Forward(input);
         var pooled = ReverseGradOperations.MeanPool(embedded, maxSeqLen, embeddingDim);
         var h = fc1.Forward(pooled);
@@ -38,25 +41,23 @@ public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber
 
     public int[] Predict(int[] tokenIds)
     {
+        ArgumentNullException.ThrowIfNull(tokenIds);
+
+        if (tokenIds.Length % maxSeqLen != 0)
+            throw new ArgumentException(
+                $"tokenIds length ({tokenIds.Length}) must be divisible by MaxSeqLen ({maxSeqLen}).",
+                nameof(tokenIds));
+
         int batchSize = tokenIds.Length / maxSeqLen;
         var data = new T[tokenIds.Length];
         for (int i = 0; i < tokenIds.Length; i++)
             data[i] = T.CreateChecked(tokenIds[i]);
         var input = ReverseGradTensor<T>.FromMatrix(data, batchSize, maxSeqLen, requiresGrad: false);
         var logits = Forward(input);
-        var result = new int[batchSize];
         int numClasses = logits.Length / batchSize;
+        var result = new int[batchSize];
         for (int b = 0; b < batchSize; b++)
-        {
-            int bestClass = 0;
-            T bestVal = logits.Data[b * numClasses];
-            for (int c = 1; c < numClasses; c++)
-            {
-                T val = logits.Data[b * numClasses + c];
-                if (val > bestVal) { bestVal = val; bestClass = c; }
-            }
-            result[b] = bestClass;
-        }
+            result[b] = ArgMax(logits, b, numClasses);
         return result;
     }
 }
