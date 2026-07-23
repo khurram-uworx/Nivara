@@ -88,7 +88,7 @@ The following gaps were identified during early example development and have bee
 | **H: No integer-label CrossEntropyLoss** | `CrossEntropyLoss<T>.Forward(logits, int[])` overload added |
 | **K: No sampling utilities** | `Sampler<T>` with temperature and top-k |
 | **O: No MeanPool operation** | `ReverseGradOperations.MeanPool<T>` added — core autograd op for `[B,L,D]` → `[B,D]` with backward gradient distribution |
-| **F: No LinearClassifier\<T\>** | `TextClassifierModel<T>` in NivaraClassifier demonstrates the pattern (Linear → ReLU → Linear). A convenience `LinearClassifier<T>` could be promoted to core when a second classifier example needs it. |
+| **F: No LinearClassifier\<T\>** | Not needed. `Sequential(Linear)` already composes a linear classifier in one line. Loss functions and activations are standalone functional classes (not `Module<T>`), so a wrapper would add API surface without real value. |
 | **G: No text feature extraction pipeline** | `TextTokenizer` in NivaraClassifier provides word-level tokenization (vocab build, encode/decode, special tokens, save/load). Could be promoted to `Nivara.Extensions.Text` when reuse across examples is needed. |
 
 ## Open Gaps
