@@ -100,49 +100,53 @@ public static class SyntheticDataGenerator
                 var person = Pick(rng, PersonNames);
                 var org = Pick(rng, OrgNames);
                 var date = Pick(rng, Dates);
-                var tokens = $"{person} from {org} on {date}".Split(' ');
-                var lbs = new List<string>();
-                foreach (var t in tokens)
-                {
-                    if (PersonNames.Contains(t)) lbs.Add("B-person");
-                    else if (OrgNames.Contains(t)) lbs.Add("B-org");
-                    else if (Dates.Contains(t)) lbs.Add("B-date");
-                    else if (Locations.Contains(t)) lbs.Add("B-location");
-                    else lbs.Add("O");
-                }
-                return (string.Join(' ', tokens), string.Join(' ', lbs));
+                var text = $"{person} from {org} on {date}";
+                return LabelEntities(text);
             },
             () => {
                 var org = Pick(rng, OrgNames);
                 var loc = Pick(rng, Locations);
                 var date = Pick(rng, Dates);
-                var tokens = $"{org} in {loc} announced on {date}".Split(' ');
-                var lbs = new List<string>();
-                foreach (var t in tokens)
-                {
-                    if (OrgNames.Contains(t)) lbs.Add("B-org");
-                    else if (Locations.Contains(t)) lbs.Add("B-location");
-                    else if (Dates.Contains(t)) lbs.Add("B-date");
-                    else lbs.Add("O");
-                }
-                return (string.Join(' ', tokens), string.Join(' ', lbs));
+                var text = $"{org} in {loc} announced on {date}";
+                return LabelEntities(text);
             },
             () => {
                 var person = Pick(rng, PersonNames);
                 var loc = Pick(rng, Locations);
-                var tokens = $"{person} will visit {loc} next week".Split(' ');
-                var lbs = new List<string>();
-                foreach (var t in tokens)
-                {
-                    if (PersonNames.Contains(t)) lbs.Add("B-person");
-                    else if (Locations.Contains(t)) lbs.Add("B-location");
-                    else lbs.Add("O");
-                }
-                return (string.Join(' ', tokens), string.Join(' ', lbs));
+                var text = $"{person} will visit {loc} next week";
+                return LabelEntities(text);
             }
         };
 
         return Pick(rng, templates)();
+    }
+
+    static (string text, string labels) LabelEntities(string text)
+    {
+        var wordToEntity = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in PersonNames)
+            foreach (var word in name.Split(' '))
+                wordToEntity[word] = "B-person";
+        foreach (var org in OrgNames)
+            foreach (var word in org.Split(' '))
+                wordToEntity[word] = "B-org";
+        foreach (var date in Dates)
+            foreach (var word in date.Split(' '))
+                wordToEntity[word] = "B-date";
+        foreach (var loc in Locations)
+            foreach (var word in loc.Split(' '))
+                wordToEntity[word] = "B-location";
+
+        var tokens = text.Split(' ');
+        var lbs = new List<string>();
+        foreach (var t in tokens)
+        {
+            if (wordToEntity.TryGetValue(t, out var label))
+                lbs.Add(label);
+            else
+                lbs.Add("O");
+        }
+        return (string.Join(' ', tokens), string.Join(' ', lbs));
     }
 
     static string GenerateConsistentResponse(string entityLabels, Random rng)

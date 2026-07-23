@@ -74,6 +74,7 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
     var (entityModel, entityTok) = LoadEntityModel();
     Console.WriteLine("Models loaded.\n");
 
+    var router = new TextRouter();
     var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok);
     var entityExtractor = new EntityExtractor(entityModel, entityTok);
     var validator = new ValidatorExecutor();
@@ -90,22 +91,22 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
     Workflow workflow;
     if (agent != null)
     {
-        workflow = new WorkflowBuilder(sentimentExecutor)
-            .AddEdge(sentimentExecutor, entityExtractor)
-            .AddEdge(entityExtractor, validator)
+        workflow = new WorkflowBuilder(router)
+            .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExtractor })
+            .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExtractor }, validator)
             .AddEdge(validator, agent)
             .WithOutputFrom(sentimentExecutor, entityExtractor, validator)
             .Build();
-        Console.WriteLine("Graph: SentimentExecutor -> EntityExtractor -> ValidatorExecutor -> Ollama LLM\n");
+        Console.WriteLine("Graph: TextRouter --fan-out--> [SentimentExecutor, EntityExtractor] --fan-in--> ValidatorExecutor -> Ollama LLM\n");
     }
     else
     {
-        workflow = new WorkflowBuilder(sentimentExecutor)
-            .AddEdge(sentimentExecutor, entityExtractor)
-            .AddEdge(entityExtractor, validator)
+        workflow = new WorkflowBuilder(router)
+            .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExtractor })
+            .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExtractor }, validator)
             .WithOutputFrom(sentimentExecutor, entityExtractor, validator)
             .Build();
-        Console.WriteLine("Graph: SentimentExecutor -> EntityExtractor -> ValidatorExecutor\n");
+        Console.WriteLine("Graph: TextRouter --fan-out--> [SentimentExecutor, EntityExtractor] --fan-in--> ValidatorExecutor\n");
     }
     if (singleShotText != null)
     {
@@ -116,7 +117,8 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
             switch (evt)
             {
                 case ExecutorCompletedEvent executorEvt:
-                    Console.WriteLine($"  [{executorEvt.ExecutorId}] {executorEvt.Data}");
+                    if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                        Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
                     break;
                 case AgentResponseEvent agentEvt:
                     Console.WriteLine($"  [LLM] {agentEvt.Data}");
@@ -142,7 +144,8 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
                 switch (evt)
                 {
                     case ExecutorCompletedEvent executorEvt:
-                        Console.WriteLine($"  [{executorEvt.ExecutorId}] {executorEvt.Data}");
+                        if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                            Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
                         break;
                     case AgentResponseEvent agentEvt:
                         Console.WriteLine($"  [LLM] {agentEvt.Data}");
