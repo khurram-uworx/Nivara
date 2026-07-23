@@ -20,11 +20,12 @@ internal sealed class ValidatorTextModel : ITextModel
         _maxSeqLen = maxSeqLen;
     }
 
-    public static ValidatorTextModel Load(string saveDir)
+    public static ValidatorTextModel Load(string saveDir, bool useAgentsFormat = false)
     {
-        var tokenizer = TextTokenizer.Load(Path.Combine(saveDir, "validator_tokenizer.json"));
+        var suffix = useAgentsFormat ? "agents_validator" : "validator";
+        var tokenizer = TextTokenizer.Load(Path.Combine(saveDir, $"{suffix}_tokenizer.json"));
         var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, 2, 40);
-        ModelSerializer.Load(model, Path.Combine(saveDir, "validator_model.json"));
+        ModelSerializer.Load(model, Path.Combine(saveDir, $"{suffix}_model.json"));
         model.Eval();
         return new ValidatorTextModel(model, tokenizer);
     }

@@ -68,6 +68,91 @@ public static class SyntheticDataGenerator
         return (inputs, labels);
     }
 
+    public static (string[] inputs, int[] labels) GenerateAgentsValidatorData(int count, int seed = 42)
+    {
+        var rng = new Random(seed);
+        var inputs = new string[count];
+        var labels = new int[count];
+
+        for (int i = 0; i < count; i++)
+        {
+            bool consistent = rng.Next(2) == 0;
+            inputs[i] = GenerateAgentsPipelineOutput(rng, consistent);
+            labels[i] = consistent ? 1 : 0;
+        }
+        return (inputs, labels);
+    }
+
+    static string GenerateAgentsPipelineOutput(Random rng, bool consistent)
+    {
+        var sentimentLabels = new[] { "Positive", "Negative", "Neutral" };
+        var sentiment = Pick(rng, sentimentLabels);
+        float confidence = consistent ? (float)(0.7 + rng.NextDouble() * 0.3) : (float)(0.1 + rng.NextDouble() * 0.3);
+
+        string entityLine;
+        if (consistent)
+        {
+            var (original, entities) = GenerateEntitySentence(rng);
+            var detectedEntities = entities.Split(' ')
+                .Where(l => l != "O")
+                .Select(l => l.Replace("B-", "").ToLower())
+                .Distinct()
+                .ToList();
+
+            var entityDict = new Dictionary<string, List<string>>
+            {
+                ["person"] = [], ["org"] = [], ["date"] = [], ["location"] = []
+            };
+
+            var tokens = original.Split(' ');
+            var entityClasses = new[] { "O", "B-person", "B-org", "B-date", "B-location" };
+            var wordToEntity = BuildEntityLookup();
+
+            foreach (var token in tokens)
+            {
+                if (wordToEntity.TryGetValue(token, out var label) && label != "O")
+                {
+                    var entityType = label.Replace("B-", "").ToLower();
+                    if (entityDict.ContainsKey(entityType))
+                        entityDict[entityType].Add(token.ToLower());
+                }
+            }
+
+            entityLine = System.Text.Json.JsonSerializer.Serialize(entityDict);
+        }
+        else
+        {
+            var failureTypes = new[]
+            {
+                "Unable to extract entities (confidence: 0.20)\n{\"person\":[],\"org\":[],\"date\":[],\"location\":[]}",
+                "{\"person\":[],\"org\":[],\"date\":[],\"location\":[]}",
+                "Error: model output truncated",
+                ""
+            };
+            entityLine = Pick(rng, failureTypes);
+        }
+
+        return $"{sentiment} (confidence: {confidence:F2})\n{entityLine}";
+    }
+
+    static Dictionary<string, string> BuildEntityLookup()
+    {
+        var lookup = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in PersonNames)
+            foreach (var word in name.Split(' '))
+                lookup[word] = "B-person";
+        foreach (var org in OrgNames)
+            foreach (var word in org.Split(' '))
+                lookup[word] = "B-org";
+        foreach (var date in Dates)
+            foreach (var word in date.Split(' '))
+                lookup[word] = "B-date";
+        foreach (var loc in Locations)
+            foreach (var word in loc.Split(' '))
+                lookup[word] = "B-location";
+        return lookup;
+    }
+
     static string GeneratePositiveSentence(Random rng)
     {
         var person = Pick(rng, PersonNames);

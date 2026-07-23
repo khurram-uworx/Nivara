@@ -18,23 +18,30 @@ internal sealed class NivaraChatClient : IChatClient
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var lastUserMessage = messages
+        var originalInput = messages
             .Where(m => m.Role == ChatRole.User)
-            .LastOrDefault();
+            .FirstOrDefault();
 
-        var text = lastUserMessage?.Text ?? string.Empty;
+        var text = originalInput?.Text ?? string.Empty;
         var result = _model.Process(text);
 
         var responseMessage = new ChatMessage(ChatRole.Assistant, result);
         return Task.FromResult(new ChatResponse([responseMessage]));
     }
 
-    public IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+    public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
-        CancellationToken cancellationToken = default)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        throw new NotSupportedException("NivaraChatClient does not support streaming.");
+        var originalInput = messages
+            .Where(m => m.Role == ChatRole.User)
+            .FirstOrDefault();
+
+        var text = originalInput?.Text ?? string.Empty;
+        var result = _model.Process(text);
+
+        yield return new ChatResponseUpdate(ChatRole.Assistant, result);
     }
 
     public void Dispose() { }
