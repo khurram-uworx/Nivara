@@ -12,6 +12,8 @@ public static class SyntheticDataGenerator
     static readonly string[] NegativePhrases = ["needs improvement", "behind schedule", "below targets", "concerns raised", "issues found", "declining metrics"];
     static readonly string[] NeutralPhrases = ["status update", "regular review", "ongoing monitoring", "standard procedure", "routine check", "scheduled assessment"];
     static readonly string[] Activities = ["completed the project", "submitted the report", "reviewed the proposal", "updated the system", "resolved the issue", "analyzed the data"];
+    static readonly string[] ShortPositive = ["I love this", "this is great", "amazing work", "fantastic", "brilliant", "wonderful", "excellent", "perfect", "outstanding", "superb", "I like it", "great job", "well done", "impressive", "delighted", "thrilled", "excited", "happy with this", "so good", "best thing"];
+    static readonly string[] ShortNegative = ["I hate this", "this is terrible", "awful", "horrible", "worst", "disgusting", "pathetic", "dreadful", "miserable", "I hate it", "so bad", "terrible", "awful experience", "hate it", "this sucks", "awful", "disappointing", "frustrated", "annoying", "unacceptable", "poor quality", "waste of time", "never again", "disaster", "I despise this"];
 
     public static (string[] texts, int[] labels) GenerateSentimentData(int count, int seed = 42)
     {
@@ -22,12 +24,21 @@ public static class SyntheticDataGenerator
         for (int i = 0; i < count; i++)
         {
             int sentiment = rng.Next(3);
-            string text = sentiment switch
-            {
-                0 => GenerateNegativeSentence(rng),
-                1 => GenerateNeutralSentence(rng),
-                _ => GeneratePositiveSentence(rng)
-            };
+            string text;
+            if (rng.Next(4) == 0)
+                text = sentiment switch
+                {
+                    0 => Pick(rng, ShortNegative),
+                    1 => Pick(rng, NeutralPhrases),
+                    _ => Pick(rng, ShortPositive)
+                };
+            else
+                text = sentiment switch
+                {
+                    0 => GenerateNegativeSentence(rng),
+                    1 => GenerateNeutralSentence(rng),
+                    _ => GeneratePositiveSentence(rng)
+                };
             texts[i] = text;
             labels[i] = sentiment;
         }
@@ -92,33 +103,34 @@ public static class SyntheticDataGenerator
         string entityLine;
         if (consistent)
         {
-            var (original, entities) = GenerateEntitySentence(rng);
-            var detectedEntities = entities.Split(' ')
-                .Where(l => l != "O")
-                .Select(l => l.Replace("B-", "").ToLower())
-                .Distinct()
-                .ToList();
-
-            var entityDict = new Dictionary<string, List<string>>
+            bool hasEntities = rng.Next(3) > 0;
+            if (hasEntities)
             {
-                ["person"] = [], ["org"] = [], ["date"] = [], ["location"] = []
-            };
-
-            var tokens = original.Split(' ');
-            var entityClasses = new[] { "O", "B-person", "B-org", "B-date", "B-location" };
-            var wordToEntity = BuildEntityLookup();
-
-            foreach (var token in tokens)
-            {
-                if (wordToEntity.TryGetValue(token, out var label) && label != "O")
+                var (original, entities) = GenerateEntitySentence(rng);
+                var entityDict = new Dictionary<string, List<string>>
                 {
-                    var entityType = label.Replace("B-", "").ToLower();
-                    if (entityDict.ContainsKey(entityType))
-                        entityDict[entityType].Add(token.ToLower());
+                    ["person"] = [], ["org"] = [], ["date"] = [], ["location"] = []
+                };
+                var tokens = original.Split(' ');
+                var wordToEntity = BuildEntityLookup();
+                foreach (var token in tokens)
+                {
+                    if (wordToEntity.TryGetValue(token, out var label) && label != "O")
+                    {
+                        var entityType = label.Replace("B-", "").ToLower();
+                        if (entityDict.ContainsKey(entityType))
+                            entityDict[entityType].Add(token.ToLower());
+                    }
                 }
+                var json = System.Text.Json.JsonSerializer.Serialize(entityDict);
+                float entityConf = (float)(0.7 + rng.NextDouble() * 0.3);
+                entityLine = $"{json}\n(confidence: {entityConf:F2})";
             }
-
-            entityLine = System.Text.Json.JsonSerializer.Serialize(entityDict);
+            else
+            {
+                float entityConf = (float)(0.1 + rng.NextDouble() * 0.3);
+                entityLine = $"Unable to extract entities (confidence: {entityConf:F2})\n{{\"person\":[],\"org\":[],\"date\":[],\"location\":[]}}";
+            }
         }
         else
         {
