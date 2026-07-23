@@ -10,6 +10,8 @@
 
 This environment has GNU coreutils at `C:\Program Files\coreutils\bin\` on PATH. Most Linux commands work directly (`grep`, `find`, `touch`, `sort`, `head`, `tail`, `wc`, `cat`, `ls`, `rm`, `mv`, `cp`). PowerShell aliases map `rm`/`mv`/`cp`/`cat`/`ls` to their PowerShell cmdlet equivalents, which behave similarly for basic file operations. Use normal command syntax — avoid verbose PowerShell idioms like `Remove-Item -LiteralPath`.
 
+**PowerShell string escaping gotcha:** PowerShell interprets backslash sequences in double-quoted strings (e.g. `\t` becomes a tab, `\n` becomes a newline). This breaks multi-line strings passed to CLI tools like `gh pr create --body "..."`. When the PR body or any CLI argument contains backticks or backslashes (common in markdown code references like `\`src/Foo.cs\``), write the content to a temp file first and use `--body-file` / `--description-file` instead of inline `--body` / `--description`.
+
 Purpose
 - Concise, machine-friendly rules and locations to guide automated code generation and human edits that use System.Numerics.Tensors opportunistically.
 - Designed to be consumed by AI assistants when producing or refactoring tensor-aware code.
