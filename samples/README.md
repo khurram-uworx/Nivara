@@ -53,11 +53,12 @@ Three phases: material counting (MLP), NNUE halfKP (sparse embedding), and Stock
 
 ## [NivaraChat/README.md](NivaraChat/README.md) — Hybrid Agent Workflow
 
-Demonstrates Nivara-trained domain-specific models as custom `Executor` subclasses in `Microsoft.Agents.AI.Workflows` graphs, mixed with an Ollama-backed `ChatClientAgent` node.
+Demonstrates Nivara-trained domain-specific models as first-class participants in `Microsoft.Agents.AI.Workflows` graphs, mixed with an Ollama-backed `ChatClientAgent` node.
 
 Key characteristics:
-- Three trained models (sentiment, entity, validator) wired into a workflow graph
-- `Executor<TInput, TOutput>` with `override` for type-safe routing
+- Four trained models (sentiment, entity, workflow validator, agents validator) wired into a workflow graph
+- Two execution modes: `--workflow` (fan-out/fan-in executors) and `--agents` (sequential `IChatClient` → `AsAIAgent()` pipeline)
+- `NivaraChatClient : IChatClient` wraps each model for Agent Framework participation
 - Hybrid deterministic (Nivara) + stochastic (LLM) pipeline
 - `TextClassifierModel<T>`, `TokenClassifierModel<T>`, `TextTokenizer` — core APIs exercised
 - `ModelSerializer` bridges training output to inference input

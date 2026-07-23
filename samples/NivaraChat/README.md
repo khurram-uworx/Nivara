@@ -16,7 +16,7 @@ With `--ollama`, an Ollama-backed LLM agent is appended after the validator for 
 ## Quick start
 
 ```bash
-# Train all three models (overwrites existing)
+# Train all four models (overwrites existing)
 dotnet run --project samples/NivaraChat -- --train
 
 # Run workflow (Nivara nodes only — no LLM needed)
@@ -30,43 +30,45 @@ dotnet run --project samples/NivaraChat -- --workflow --text "John Smith from Ac
 dotnet run --project samples/NivaraChat -- --workflow --text "Acme Corp in New York announced on March 3"
 
 # Run workflow with Ollama LLM
-dotnet run --project samples/NivaraChat -- --workflow --ollama http://localhost:11434 --model llama3.2
+dotnet run --project samples/NivaraChat -- --workflow --ollama --model llama3.2
+
+# Agents mode (Nivara-only, single-shot)
+dotnet run --project samples/NivaraChat -- --agents --text "Jane Doe at TechStart Inc reported issues in San Francisco"
+
+# Agents mode with Ollama LLM
+dotnet run --project samples/NivaraChat -- --agents --ollama --text "Acme Corp in New York announced on March 3"
 
 # Interactive agents mode (Nivara-only)
 dotnet run --project samples/NivaraChat -- --interactive
 
 # Interactive agents mode with Ollama LLM
-dotnet run --project samples/NivaraChat -- --interactive --ollama http://localhost:11434
-
-# Single-shot agents mode
-dotnet run --project samples/NivaraChat -- --agents --text "Jane Doe at TechStart Inc reported issues in San Francisco"
+dotnet run --project samples/NivaraChat -- --interactive --ollama
 ```
 
 ## CLI options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--train` | — | Mode: train all three models (overwrites existing) |
+| `--train` | — | Mode: train all four models (overwrites existing) |
 | `--workflow` | (default) | Mode: executor-based workflow pipeline with fan-out/fan-in |
 | `--interactive` | — | Mode: agents pipeline with live interactive input |
 | `--agents` | — | Mode: same as `--interactive`, supports `--text` for single-shot |
-| `--ollama <url>` | — | Ollama endpoint — only connects when this flag is present |
+| `--ollama` | — | Flag: enable Ollama LLM agent (default URL: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
-| `--text "<message>"` | — | Single-shot: run pipeline on one message and exit |
 
 ## Modes of use
 
 ### Training (`--train`)
-Trains all three models on synthetic data. Each model follows the same pattern: generate data → tokenize → build frame → train with `TrainingLoop<T>` → save with `ModelSerializer`. No external datasets required.
+Trains all four models on synthetic data: sentiment classifier, entity extractor, workflow validator, and agents validator. Each model follows the same pattern: generate data → tokenize → build frame → train with `TrainingLoop<T>` → save with `ModelSerializer`. No external datasets required.
 
 ### Workflow (`--workflow`)
 Classic executor-based pipeline with fan-out/fan-in topology. `TextRouter` broadcasts input to `SentimentExecutor` and `EntityExtractor` in parallel; results merge at `ValidatorExecutor` via barrier. Without `--ollama`, runs Nivara nodes only. With `--ollama`, appends an LLM agent after the validator.
 
-### Interactive (`--interactive`)
-Agents-based pipeline with live input. Each trained model is wrapped as an `IChatClient` via `NivaraChatClient` and participates as a `ChatClientAgent`. Sequential pipeline: NivaraSentiment → NivaraEntity → NivaraValidator. With `--ollama`, an Ollama LLM agent is appended. Type `quit` to exit.
+### Agents (`--agents`)
+Sequential pipeline where each trained model is wrapped as an `IChatClient` via `NivaraChatClient` and participates as a `ChatClientAgent`. Supports `--text` for single-shot execution. With `--ollama`, an Ollama LLM agent is appended after the validator.
 
-### Agents single-shot (`--agents`)
-Same pipeline as `--interactive`, but accepts `--text` for single-shot execution. Useful for scripting and testing.
+### Interactive (`--interactive`)
+Same as `--agents` but with live input. Type `quit` to exit. With `--ollama`, the LLM agent is appended after the validator.
 
 ## Agents pipeline architecture
 
@@ -94,7 +96,7 @@ Final output: structured result with confidence scores
 
 Key design decisions:
 - **No conditional edges** — low-confidence signals are expressed in the model output text itself (e.g. "Unable to determine sentiment (confidence: 0.31)"), letting downstream agents — including the LLM — reason about uncertainty naturally
-- **Stateless models** — each agent extracts the last user message from the conversation history, ignoring prior turns
+- **Stateless models** — each agent extracts the original user message from the conversation history, ignoring prior turns
 - **Same `IChatClient` abstraction** — Nivara models and Ollama LLM use the identical `AsAIAgent()` pipeline, no special executor types needed
 
 ## Workflow architecture (fan-out/fan-in)
@@ -132,18 +134,21 @@ NivaraChat/
 ├── SentimentExecutor.cs               # Sentiment classification executor (--workflow)
 ├── EntityExtractor.cs                 # NER entity extraction executor (--workflow)
 ├── ValidatorExecutor.cs               # Rule-based validator executor (--workflow)
+├── LlmExecutor.cs                     # Ollama LLM executor (--workflow)
 ├── ITextModel.cs                      # Text-in/text-out abstraction for ML models
 ├── SentimentTextModel.cs              # ITextModel wrapping TextClassifierModel<float>
 ├── EntityTextModel.cs                 # ITextModel wrapping TokenClassifierModel<float>
 ├── ValidatorTextModel.cs              # ITextModel wrapping TextClassifierModel<float>
 ├── NivaraChatClient.cs                # IChatClient wrapping ITextModel for agent participation
 ├── PassthroughTextModel.cs            # ITextModel wrapping IChatClient (Ollama passthrough)
+├── ModelInferenceHelper.cs            # Shared inference pipeline (DRY)
 ├── Training/
 │   ├── SentimentTrainer.cs           # Train sentiment model
 │   ├── EntityTrainer.cs              # Train entity NER model
-│   └── ValidatorTrainer.cs           # Train validator model
+│   ├── ValidatorTrainer.cs           # Train workflow validator model
+│   └── AgentsValidatorTrainer.cs     # Train agents validator model
 ├── Data/
-│   └── SyntheticDataGenerator.cs     # Generate all three datasets
+│   └── SyntheticDataGenerator.cs     # Generate all four datasets
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```
@@ -162,11 +167,17 @@ Embedding(vocab, 32) → Linear(32, 64) → ReLU → Linear(64, 5)
 ```
 5 classes per token: O, B-person, B-org, B-date, B-location. No MeanPool — per-token predictions.
 
-**Validator (`TextClassifierModel<float>`):**
+**Workflow validator (`TextClassifierModel<float>`):**
 ```
 Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 ```
-2 classes: valid, invalid. Checks if extracted data is consistent and meaningful.
+2 classes: valid, invalid. Trained on `"original || response"` format.
+
+**Agents validator (`TextClassifierModel<float>`):**
+```
+Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
+```
+2 classes: valid, invalid. Trained on multi-line accumulated pipeline output format.
 
 ## Nivara APIs demonstrated
 
@@ -224,5 +235,4 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 - **Word-level tokenization** — no subword (BPE) support. Out-of-vocabulary words map to UNK. Sufficient for synthetic data.
 - **Synthetic training data** — entity extraction and validation use template-based synthetic data. Real applications would use annotated corpora.
 - **No LLM streaming** — the workflow runs non-streaming. The LLM response is collected in full before validation.
-- **Single-model training** — `--train` trains all three models at once. Individual model training/retuning is not yet supported via CLI.
 - **Sequential agents** — the agents pipeline runs sequentially (Sentiment → Entity → Validator). Fan-out parallelism is only available in `--workflow` mode.
