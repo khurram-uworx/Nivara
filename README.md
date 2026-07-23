@@ -84,6 +84,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 - Ingest 2D tensors and labeled row vectors into schema-aware frames
 - Keep tensor math in `System.Numerics.Tensors`, not custom DataFrame APIs
 - Run lightweight reverse-mode AutoDiff when you need local training; inference is the default, manual training is explicit with `GradientUtils.Grad()`, and module state can be copied via `StateDict()` / `LoadStateDict()`
+- NLP building blocks out of the box: `Embedding<T>`, `SparseEmbedding<T>`, `TransformerBlock<T>`, `TextClassifierModel<T>`, `TokenClassifierModel<T>`, `TextTokenizer`, and `Sampler<T>` — all differentiable and composable with the existing module system
 
 ### Performance
 - Vectorized execution where semantics are simple and measurable
@@ -143,7 +144,7 @@ Nivara currently supports:
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: ML.NET conversion helpers for machine learning workflows (via `Nivara.Extensions`)
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics via `ExecutionEngine.LastDiagnostics`
-- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with inference by default, explicit manual training via `GradientUtils.Grad()`, plus a full training stack — module system (`Linear`, `Sequential`, `StateDict` / `LoadStateDict`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core)
+- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with inference by default, explicit manual training via `GradientUtils.Grad()`, plus a full training stack — module system (`Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `TransformerBlock`, `TextClassifierModel`, `TokenClassifierModel`, `StateDict` / `LoadStateDict`), NLP utilities (`TextTokenizer`, `Sampler`), operations (`MeanPool`, `SparseEmbeddingBag`, `Gather`, `Softmax`, `LogSoftmax`, `Dropout`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core)
 
 ---
 

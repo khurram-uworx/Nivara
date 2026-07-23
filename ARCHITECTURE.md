@@ -858,19 +858,26 @@ DataFrame → ReverseGradTensor<T> → Computation Graph (GradNode DAG)
 The fundamental autograd tensor. Wraps `Tensor<T>` for the forward value and maintains a `GradNode` DAG for the backward pass. Supports `float` and `double`. Gradients are stored in a nullable `Tensor<T>?` field, with null-mask propagation matching Nivara's column semantics.
 
 #### GradOperations
-Static factory of all differentiable operations — arithmetic (`Add`, `Multiply`, `Subtract`, `Divide`), reductions (`Sum`, `Mean`), activations (`ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `Exp`, `Log`, `Softmax`, `LogSoftmax`), and utilities (`Clip`, `Reshape`, `Transpose`). Each operation creates a `GradNode` in the DAG. Arithmetic operations are also available as `+`, `-`, `*`, `/` and unary `-` operator overloads on `ReverseGradTensor<T>`.
+Static factory of all differentiable operations — arithmetic (`Add`, `Multiply`, `Subtract`, `Divide`), reductions (`Sum`, `Mean`, `MeanPool`), activations (`ReLU`, `LeakyReLU`, `Sigmoid`, `Tanh`, `Exp`, `Log`, `Softmax`, `LogSoftmax`), linear algebra (`MatMul`, `Transpose`, `Slice`, `Concat`), indexing (`Gather`, `EmbeddingBag`, `SparseEmbeddingBag`), normalization (`PerRowRMSNorm`), and utilities (`Clip`, `Reshape`, `Dropout`). Each operation creates a `GradNode` in the DAG. Arithmetic operations are also available as `+`, `-`, `*`, `/` and unary `-` operator overloads on `ReverseGradTensor<T>`.
 
 #### Module System (`Nn/`)
 - **`Parameter<T>`**: Trainable tensor with gradient tracking and null-mask propagation
 - **`Linear<T>`**: Fully connected layer with optional bias, null-aware weight updates
 - **`Sequential<T>`**: Layer composition with forward pass chaining
+- **`Embedding<T>`**: Dense lookup table mapping token IDs to vectors; uses one-hot × weight for differentiable forward pass
+- **`SparseEmbedding<T>`**: Sparse embedding bag for fixed-width batches of active feature indices; padding-index entries ignored in forward and backward
+- **`TransformerBlock<T>`**: Pre-norm transformer with multi-head causal self-attention (Q/K/V projections, scaled dot-product, causal mask, output projection), Gated MLP (`ReLU²`), residual connections, optional dropout, and `PerRowRMSNorm` normalization
+- **`TextClassifierModel<T>`**: Embedding → mean pooling → hidden FC → ReLU → output logits; includes `Predict()` for inference
+- **`TokenClassifierModel<T>`**: Embedding → per-token FC → ReLU → output logits; includes `Predict()` for sequence labeling
+- **`TextTokenizer`**: Word-level tokenizer built from documents via `FromDocuments()`, with `<PAD>`, `<UNK>`, `<BOS>`, `<EOS>` specials; supports encode/decode and JSON serialization
+- **`Sampler<T>`**: Temperature-scaled categorical sampling with optional top-K filtering
 - Activations available as standalone operations in `GradOperations`
 
 #### Optimizers (`Optimizer/`)
 Common base providing `Step()` and `ZeroGrad()`. Implementations:
-- **`SGD<T>`**: Momentum and Nesterov support, weight decay, null-skip update
-- **`Adam<T>`**: Bias-corrected momentum, RMS scaling, configurable betas/eps
-- **`AdamW<T>`**: Decoupled weight decay separate from adaptive gradient scaling
+- **`SGD<T>`**: Momentum and Nesterov support, weight decay, null-skip update; velocity buffers zero-initialized on allocation
+- **`Adam<T>`**: Bias-corrected momentum, RMS scaling, configurable betas/eps; pre-allocated result buffers avoid per-step `T[]` allocation; ArrayPool buffers cleared on rent to prevent NaN from stale data
+- **`AdamW<T>`**: Decoupled weight decay separate from adaptive gradient scaling; same buffer pre-allocation and NaN-safe initialization as Adam
 
 #### Training (`Training/`)
 - **`TrainingLoop<T>`**: Epoch loop with loss tracking, batch iteration, gradient zeroing, and optional validation

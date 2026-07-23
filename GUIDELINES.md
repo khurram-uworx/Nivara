@@ -374,6 +374,27 @@ Aggregations are both fast (when vectorizable) and correct (always), with predic
 
 ---
 
+### ArrayPool Buffers Must Be Cleared on Rent
+
+**Problem**  
+`ArrayPool<T>.Shared.Rent(size)` returns buffers that may contain stale data from previous usage. When these buffers are used as accumulators or intermediate results, stale values produce silent numerical corruption — most commonly NaN propagation in floating-point paths.
+
+**Constraint**  
+- The pool contract does not guarantee zeroed memory
+- Clearing every rented buffer on every call adds overhead
+- The bug is invisible until the stale value happens to be nonzero
+
+**Pattern That Worked**  
+Clear rented buffers immediately after allocation (`buf.AsSpan(0, size).Clear()`) in setup/initialization paths where the buffer will be reused across iterations. For per-call hot paths, clear only the portion of the buffer that will be read before it is fully written.
+
+**Negative Rule**  
+Never assume `ArrayPool` returns zeroed memory. Always clear when the buffer is used as an accumulator or when stale values could affect correctness.
+
+**Outcome**  
+Eliminates a class of silent numerical bugs that are extremely difficult to diagnose because they depend on allocation reuse order.
+
+---
+
 ### Property-Based Testing
 
 **Problem**  

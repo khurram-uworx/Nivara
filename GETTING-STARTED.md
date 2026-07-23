@@ -1097,6 +1097,110 @@ save/restore, transfer learning, and partial loading. Use
 `ModelSerializer.StateDictToJson(state)` / `JsonToStateDict<T>(json)` when you
 want the same state dictionary on disk or over the wire.
 
+### Embedding Layers
+
+Nivara includes differentiable embedding layers for mapping discrete token IDs to dense vectors:
+
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+
+// Dense embedding: vocabSize → embeddingDim
+var embedding = new Embedding<float>(vocabSize: 1000, embeddingDim: 64);
+
+// Forward pass with token IDs (flattened batch)
+var tokenIds = ReverseGradTensor<float>.FromMatrix(
+    new[] { 1.0f, 5.0f, 12.0f, 3.0f }, batchSize: 2, seqLen: 2, requiresGrad: false);
+var embedded = embedding.Forward(tokenIds);
+// embedded.Shape = [2, 2, 64]
+
+// Sparse embedding bag: sums active feature rows per batch, ignores padding index
+var sparseEmb = new SparseEmbedding<float>(numEmbeddings: 500, embeddingDim: 32, paddingIndex: -1);
+// Input shape: [batchSize, maxActiveFeatures] — padding index entries are skipped
+```
+
+### Transformer Blocks
+
+The `TransformerBlock` implements a pre-norm transformer with causal self-attention:
+
+```csharp
+var block = new TransformerBlock<float>(
+    nEmbd: 128, nHead: 4, dropout: 0.1, maxSeqLen: 256);
+
+// Forward: [seqLen, nEmbd] → [seqLen, nEmbd]
+var output = block.Forward(inputTensor);
+```
+
+Architecture per block: `RMSNorm → Multi-Head Causal Attention → Residual → RMSNorm → Gated MLP (ReLU²) → Residual`.
+
+### NLP Models
+
+Two ready-to-use differentiable NLP models are included:
+
+#### Text Classifier (sequence → single label)
+
+```csharp
+var classifier = new TextClassifierModel<float>(
+    vocabSize: 5000, embeddingDim: 64, hiddenDim: 128, numClasses: 3, maxSeqLen: 50);
+
+// Training
+using (GradientUtils.Grad())
+{
+    var logits = classifier.Forward(inputTokens);
+    var loss = CrossEntropyLoss<float>.Compute(logits, labels);
+    loss.Backward();
+    optimizer.Step();
+    classifier.ZeroGrad();
+}
+
+// Inference
+int[] predictedClasses = classifier.Predict(tokenIds);
+```
+
+#### Token Classifier (sequence → per-token labels)
+
+```csharp
+var tokenClassifier = new TokenClassifierModel<float>(
+    vocabSize: 5000, embeddingDim: 64, hiddenDim: 128, numClasses: 9, maxSeqLen: 50);
+
+// Forward: [batchSize, maxSeqLen] → [batchSize * maxSeqLen, numClasses]
+var logits = tokenClassifier.Forward(inputTokens);
+
+// Inference — returns one label per token position
+int[] tokenLabels = tokenClassifier.Predict(tokenIds);
+```
+
+### Tokenization
+
+`TextTokenizer` builds a word-level vocabulary from documents and encodes/decodes text:
+
+```csharp
+var tokenizer = TextTokenizer.FromDocuments(
+    trainingDocuments, maxVocabSize: 10000, minFreq: 2);
+
+int[] tokenIds = tokenizer.Encode("hello world");
+string text = tokenizer.Decode(tokenIds);
+
+// Special tokens
+Console.WriteLine(tokenizer.PadToken);  // <PAD> index
+Console.WriteLine(tokenizer.VocabSize);
+
+// Serialize/deserialize
+string json = tokenizer.ToJson();
+var restored = TextTokenizer.FromJson(json);
+```
+
+### Sampling
+
+`Sampler` provides temperature-scaled categorical sampling with optional top-K filtering:
+
+```csharp
+var sampler = new Sampler<float>(seed: 42);
+
+// logits: [vocabSize] raw model output
+int nextToken = sampler.Sample(logits, temperature: 0.8, topK: 50);
+```
+
 ---
 
 ## Extensions and I/O
