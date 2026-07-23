@@ -12,16 +12,19 @@ NivaraChat trains three small domain-specific models (sentiment classifier, enti
 Input text
     │
     v
-[SentimentExecutor]          Nivara-trained model, deterministic, <1ms
-    │   returns: "positive" / "negative" / "neutral"
-    v
-[EntityExtractor]            Nivara-trained NER model, deterministic, <1ms
-    │   returns: { person, org, date, location }
-    v
-[ValidatorExecutor]          Rule-based consistency check, deterministic, <1ms
+[TextRouter]                   Pass-through, fans out to both analyzers
+    │
+    ├──> [SentimentExecutor]   Nivara-trained model, deterministic, <1ms
+    │        returns: "positive" / "negative" / "neutral"
+    │
+    └──> [EntityExtractor]     Nivara-trained NER model, deterministic, <1ms
+             returns: { person, org, date, location }
+    │
+    v  (fan-in barrier — waits for both)
+[ValidatorExecutor]            Rule-based consistency check, deterministic, <1ms
     │   checks entity extraction quality
     v
-[LLMAgent]                   (optional) ChatClientAgent + Ollama, stochastic
+[LLMAgent]                     (optional) ChatClientAgent + Ollama, stochastic
     │   receives validator output
     │   returns: a helpful response
     v
@@ -29,6 +32,7 @@ Final output: structured result with confidence score
 ```
 
 Key characteristics:
+- **Fan-out/fan-in topology** — `TextRouter` broadcasts input to SentimentExecutor and EntityExtractor in parallel; results merge at ValidatorExecutor via barrier
 - **First Nivara sample with Agent Framework integration** — `Executor<TInput, TOutput>` with `override` for type-safe routing
 - **Three separate trained models** in one workflow — exercises `TrainingLoop<T>`, `DataLoader<T>`, `TensorDataset<T>`, `ModelSerializer`
 - **Hybrid deterministic + stochastic** — Nivara nodes are fast/consistent; LLM node is fluent/contextual
@@ -48,6 +52,12 @@ dotnet run --project samples/NivaraChat -- --workflow
 
 # Single-shot test
 dotnet run --project samples/NivaraChat -- --workflow --text "I love this product!"
+
+# Multi-word entity examples
+dotnet run --project samples/NivaraChat -- --workflow --text "John Smith from Acme Corp reported great work on January 15"
+dotnet run --project samples/NivaraChat -- --workflow --text "Jane Doe at TechStart Inc noted issues in San Francisco"
+dotnet run --project samples/NivaraChat -- --workflow --text "Acme Corp in New York announced on March 3"
+dotnet run --project samples/NivaraChat -- --workflow --text "Bob Wilson will visit Tokyo next week"
 
 # Run workflow with Ollama LLM (requires --ollama flag)
 dotnet run --project samples/NivaraChat -- --workflow --ollama http://localhost:11434 --model llama3.2
@@ -73,7 +83,7 @@ dotnet run --project samples/NivaraChat -- --interactive
 Trains all three models on synthetic data. Each model follows the same pattern as NivaraClassifier: generate data → tokenize → build frame → train with `TrainingLoop<T>` → save with `ModelSerializer`. No external datasets required.
 
 ### Workflow (`--workflow`)
-Runs the full pipeline on user input. Without `--ollama`, the workflow runs Nivara nodes only (Sentiment → EntityExtractor → Validator). With `--ollama`, sends structured context to Ollama and validates the LLM response. Use `--text "message"` for single-shot testing.
+Runs the full pipeline on user input. Without `--ollama`, the workflow runs Nivara nodes only (TextRouter → [Sentiment, EntityExtractor] → Validator). With `--ollama`, sends structured context to Ollama and validates the LLM response. Use `--text "message"` for single-shot testing. Example phrases: "John Smith from Acme Corp reported great work on January 15", "Acme Corp in New York announced on March 3".
 
 ### Interactive (`--interactive`)
 Type sentences and see the full pipeline output: sentiment, entities, and optionally LLM response. Without `--ollama`, runs Nivara nodes only. With `--ollama`, also sends to Ollama for a fluent response. Type `quit` to exit.
@@ -83,6 +93,7 @@ Type sentences and see the full pipeline output: sentiment, entities, and option
 ```
 NivaraChat/
 ├── Program.cs                         # CLI entry, training orchestration, workflow setup
+├── TextRouter.cs                      # Pass-through executor for fan-out routing
 ├── SentimentExecutor.cs               # Sentiment classification executor
 ├── EntityExtractor.cs                 # NER entity extraction executor
 ├── ValidatorExecutor.cs               # LLM output validator executor
@@ -118,20 +129,21 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 
 ### Workflow execution
 
-The workflow uses `Microsoft.Agents.AI.Workflows` for type-safe message routing:
+The workflow uses `Microsoft.Agents.AI.Workflows` for type-safe message routing with fan-out/fan-in topology:
 
 ```csharp
+var router = new TextRouter();
 var sentimentExecutor = new SentimentExecutor(model, tokenizer);
 var entityExecutor = new EntityExtractor(model, tokenizer);
 var validatorExecutor = new ValidatorExecutor();
 
-var workflow = new WorkflowBuilder(sentimentExecutor)
-    .AddEdge(sentimentExecutor, entityExecutor)
-    .AddEdge(entityExecutor, validatorExecutor)
+var workflow = new WorkflowBuilder(router)
+    .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExecutor })
+    .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExecutor }, validatorExecutor)
     .WithOutputFrom(sentimentExecutor, entityExecutor, validatorExecutor)
     .Build();
 
-var run = await InProcessExecution.RunAsync(workflow, "Acme Corp owes $5000 by March 15");
+var run = await InProcessExecution.RunAsync(workflow, "Acme Corp in New York announced on March 3");
 
 foreach (var evt in run.NewEvents)
 {
@@ -189,7 +201,9 @@ Output is surfaced via `.WithOutputFrom()` on the `WorkflowBuilder` and read fro
 | `TensorDataset<T>` | Training | Frame-backed dataset |
 | `ModelSerializer.Save/Load` | Training + inference | JSON model persistence |
 | `Executor<TInput, TOutput>` | Executors | Workflow node with type-safe routing |
-| `WorkflowBuilder` | Program.cs | Workflow graph construction |
+| `WorkflowBuilder` | Program.cs | Workflow graph construction with fan-out/fan-in |
+| `AddFanOutEdge` | Program.cs | Broadcast input to multiple executors in parallel |
+| `AddFanInBarrierEdge` | Program.cs | Wait for all parallel executors before proceeding |
 | `InProcessExecution.RunAsync` | Program.cs | Static workflow execution |
 | `ChatClientAgent` | Program.cs | LLM agent node (Ollama) |
 
@@ -246,6 +260,7 @@ While building this example, removed redundant inner null checks in `Module.cs` 
 | File | Purpose |
 |------|---------|
 | `Program.cs` | CLI entry, training orchestration, workflow setup, interactive REPL |
+| `TextRouter.cs` | Pass-through executor that fans out input to SentimentExecutor and EntityExtractor |
 | `SentimentExecutor.cs` | `Executor` subclass wrapping `TextClassifierModel<float>` for sentiment |
 | `EntityExtractor.cs` | `Executor` subclass wrapping `TokenClassifierModel<float>` for NER |
 | `ValidatorExecutor.cs` | Rule-based `Executor` for LLM output consistency checking |
