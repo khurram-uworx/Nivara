@@ -1,0 +1,62 @@
+using System.Numerics;
+using Nivara;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Operations;
+
+namespace NivaraClassifier;
+
+public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber<T>
+{
+    readonly Embedding<T> embedding;
+    readonly Linear<T> fc1;
+    readonly Linear<T> fc2;
+    readonly int embeddingDim;
+    readonly int maxSeqLen;
+
+    public TextClassifierModel(int vocabSize, int embeddingDim, int hiddenDim, int numClasses, int maxSeqLen)
+    {
+        this.embeddingDim = embeddingDim;
+        this.maxSeqLen = maxSeqLen;
+
+        embedding = new Embedding<T>(vocabSize, embeddingDim);
+        fc1 = new Linear<T>(embeddingDim, hiddenDim, bias: true);
+        fc2 = new Linear<T>(hiddenDim, numClasses, bias: true);
+
+        RegisterModules(embedding, fc1, fc2);
+    }
+
+    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+    {
+        var embedded = embedding.Forward(input);
+        var pooled = ReverseGradOperations.MeanPool(embedded, maxSeqLen, embeddingDim);
+        var h = fc1.Forward(pooled);
+        var hRelu = ReverseGradOperations.Relu(h);
+        var logits = fc2.Forward(hRelu);
+        return logits;
+    }
+
+    public int[] Predict(int[] tokenIds)
+    {
+        int batchSize = tokenIds.Length / maxSeqLen;
+        var data = new T[tokenIds.Length];
+        for (int i = 0; i < tokenIds.Length; i++)
+            data[i] = T.CreateChecked(tokenIds[i]);
+        var input = ReverseGradTensor<T>.FromMatrix(data, batchSize, maxSeqLen, requiresGrad: false);
+        var logits = Forward(input);
+        var result = new int[batchSize];
+        int numClasses = logits.Length / batchSize;
+        for (int b = 0; b < batchSize; b++)
+        {
+            int bestClass = 0;
+            T bestVal = logits.Data[b * numClasses];
+            for (int c = 1; c < numClasses; c++)
+            {
+                T val = logits.Data[b * numClasses + c];
+                if (val > bestVal) { bestVal = val; bestClass = c; }
+            }
+            result[b] = bestClass;
+        }
+        return result;
+    }
+}
