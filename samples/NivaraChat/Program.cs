@@ -10,72 +10,142 @@ const string DefaultOllamaUrl = "http://localhost:11434";
 const string DefaultModel = "llama3.2";
 const string ModelsDir = "samples/data/nivarachat";
 
-var mode = args.Length > 0 ? args[0] : "--workflow";
-var ollamaUrl = DefaultOllamaUrl;
-var modelName = DefaultModel;
-string? workflowText = null;
-bool useOllama = false;
+var modelsDir = Path.Combine(GetRepoRoot(), ModelsDir);
 
-for (int i = 1; i < args.Length; i++)
+if (args.Length > 0)
 {
-    if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
-    if (args[i] == "--model" && i + 1 < args.Length) modelName = args[++i];
-    if (args[i] == "--text" && i + 1 < args.Length) workflowText = args[++i];
+    var mode = args[0];
+    var ollamaUrl = DefaultOllamaUrl;
+    var modelName = DefaultModel;
+    string? workflowText = null;
+    bool useOllama = false;
+
+    for (int i = 1; i < args.Length; i++)
+    {
+        if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
+        if (args[i] == "--model" && i + 1 < args.Length) modelName = args[++i];
+        if (args[i] == "--text" && i + 1 < args.Length) workflowText = args[++i];
+    }
+
+    switch (mode)
+    {
+        case "--train":
+            RunTraining(modelsDir);
+            break;
+        case "--workflow":
+            await RunWorkflow(modelsDir, ollamaUrl, modelName, workflowText, useOllama);
+            break;
+        case "--interactive":
+            await RunAgents(modelsDir, ollamaUrl, modelName, null, useOllama);
+            break;
+        case "--agents":
+            await RunAgents(modelsDir, ollamaUrl, modelName, workflowText, useOllama);
+            break;
+        default:
+            PrintUsage();
+            break;
+    }
+}
+else
+{
+    await RunInteractiveMenu(modelsDir);
 }
 
-switch (mode)
+async Task RunInteractiveMenu(string modelsDir)
 {
-    case "--train":
-        RunTraining();
-        break;
-    case "--workflow":
-        await RunWorkflow(ollamaUrl, modelName, workflowText, useOllama);
-        break;
-    case "--interactive":
-        await RunAgents(ollamaUrl, modelName, null, useOllama);
-        break;
-    case "--agents":
-        await RunAgents(ollamaUrl, modelName, workflowText, useOllama);
-        break;
-    default:
-        PrintUsage();
-        break;
+    while (true)
+    {
+        var choice = ShowMainMenu();
+
+        switch (choice)
+        {
+            case "1":
+                RunTraining(modelsDir);
+                Console.WriteLine();
+                break;
+            case "2":
+                var (useOllama2, url2, model2) = AskOllama();
+                await RunWorkflow(modelsDir, url2, model2, null, useOllama2);
+                Console.WriteLine();
+                break;
+            case "3":
+                var (useOllama3, url3, model3) = AskOllama();
+                await RunAgents(modelsDir, url3, model3, null, useOllama3);
+                Console.WriteLine();
+                break;
+            case "q":
+                return;
+        }
+    }
 }
 
-void RunTraining()
+string ShowMainMenu()
+{
+    Console.WriteLine("=== NivaraChat ===\n");
+    Console.WriteLine("Select a mode:");
+    Console.WriteLine("  1. Training    - Train sentiment, entity, and validator models");
+    Console.WriteLine("  2. Workflow    - Run the Agent Framework workflow pipeline");
+    Console.WriteLine("  3. Agents      - Run the agents pipeline with live chat");
+    Console.WriteLine("  q. Quit\n");
+    Console.Write("> ");
+    return Console.ReadLine()?.Trim().ToLower() ?? "";
+}
+
+(bool useOllama, string url, string model) AskOllama()
+{
+    Console.Write("\nUse Ollama for LLM enrichment? (y/n, default: n): ");
+    var answer = Console.ReadLine()?.Trim().ToLower();
+    if (answer == "y" || answer == "yes")
+    {
+        Console.WriteLine($"  Using Ollama at {DefaultOllamaUrl} with model {DefaultModel}\n");
+        return (true, DefaultOllamaUrl, DefaultModel);
+    }
+    Console.WriteLine();
+    return (false, DefaultOllamaUrl, DefaultModel);
+}
+
+string GetRepoRoot()
+    => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory,
+    "..", "..", "..", "..", ".."));
+
+
+void RunTraining(string modelsDir)
 {
     Console.WriteLine("=== NivaraChat Model Training ===\n");
-    Directory.CreateDirectory(ModelsDir);
+    Directory.CreateDirectory(modelsDir);
 
     Console.WriteLine("[1/4] Training sentiment classifier...");
-    SentimentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
+    SentimentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: modelsDir);
 
     Console.WriteLine("\n[2/4] Training entity extractor...");
-    EntityTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
+    EntityTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: modelsDir);
 
     Console.WriteLine("\n[3/4] Training workflow validator...");
-    ValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
+    ValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: modelsDir);
 
     Console.WriteLine("\n[4/4] Training agents validator...");
-    AgentsValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: ModelsDir);
+    AgentsValidatorTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: modelsDir);
 
     Console.WriteLine("\n=== Training complete! ===");
-    Console.WriteLine("Run with --workflow or --agents to test the pipeline, or --interactive for chat.");
+    if (args.Length > 0)
+        Console.WriteLine("Run with --workflow or --agents to test the pipeline, or --interactive for chat.");
+    else
+        Console.WriteLine("Returning to main menu...");
 }
 
-async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
+async Task RunWorkflow(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
 {
     Console.WriteLine("=== NivaraChat Workflow ===\n");
 
-    if (!File.Exists(Path.Combine(ModelsDir, "sentiment_model.json")))
+    if (!File.Exists(Path.Combine(modelsDir, "sentiment_model.json")))
     {
         Console.WriteLine("Models not found. Run with --train first.");
         return;
     }
 
     Console.WriteLine("Loading trained models...");
-    var (sentimentModel, sentimentTok) = LoadSentimentModel();
-    var (entityModel, entityTok) = LoadEntityModel();
+    var (sentimentModel, sentimentTok) = LoadSentimentModel(modelsDir);
+    var (entityModel, entityTok) = LoadEntityModel(modelsDir);
     Console.WriteLine("Models loaded.\n");
 
     var router = new TextRouter();
@@ -166,20 +236,20 @@ async Task RunWorkflow(string ollamaUrl, string modelName, string? singleShotTex
     Console.WriteLine("\nDone.");
 }
 
-async Task RunAgents(string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
+async Task RunAgents(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
 {
     Console.WriteLine("=== NivaraChat Agents ===\n");
 
-    if (!File.Exists(Path.Combine(ModelsDir, "sentiment_model.json")))
+    if (!File.Exists(Path.Combine(modelsDir, "sentiment_model.json")))
     {
         Console.WriteLine("Models not found. Run with --train first.");
         return;
     }
 
     Console.WriteLine("Loading trained models...");
-    var (sentimentModel, sentimentTok) = LoadSentimentModel();
-    var (entityModel, entityTok) = LoadEntityModel();
-    var (validatorModel, validatorTok) = LoadValidatorModel(useAgentsFormat: true);
+    var (sentimentModel, sentimentTok) = LoadSentimentModel(modelsDir);
+    var (entityModel, entityTok) = LoadEntityModel(modelsDir);
+    var (validatorModel, validatorTok) = LoadValidatorModel(modelsDir, useAgentsFormat: true);
     Console.WriteLine("Models loaded.\n");
 
     var sentimentText = new SentimentTextModel(sentimentModel, sentimentTok);
@@ -194,7 +264,14 @@ async Task RunAgents(string ollamaUrl, string modelName, string? singleShotText,
     {
         Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
         var ollamaClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
-        var llmAgent = new NivaraChatClient(new PassthroughTextModel(ollamaClient)).AsAIAgent("OllamaLLM");
+        var llmAgent = ollamaClient.AsAIAgent(
+            //new NivaraChatClient(new PassthroughTextModel(ollamaClient)).AsAIAgent("OllamaLLM");
+            name: "OllamaLLM", instructions:
+                """
+                Trust what NivaraSentiment, NivaraEntity and NivaraValidator agents.
+                Present the gathered fact in user friendly summary,
+                if any fact is missing due to low score, figure out yourself"
+                """);
         Console.WriteLine("Ollama connected.\n");
 
         var workflow = new WorkflowBuilder(sentimentAgent)
@@ -279,30 +356,30 @@ void PrintAgentResults(Run run)
     }
 }
 
-(TextClassifierModel<float> model, TextTokenizer tokenizer) LoadValidatorModel(bool useAgentsFormat = false)
+(TextClassifierModel<float> model, TextTokenizer tokenizer) LoadValidatorModel(string modelsDir, bool useAgentsFormat = false)
 {
     var suffix = useAgentsFormat ? "agents_validator" : "validator";
-    var tokenizer = TextTokenizer.Load(Path.Combine(ModelsDir, $"{suffix}_tokenizer.json"));
+    var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, $"{suffix}_tokenizer.json"));
     var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, 2, 40);
-    ModelSerializer.Load(model, Path.Combine(ModelsDir, $"{suffix}_model.json"));
+    ModelSerializer.Load(model, Path.Combine(modelsDir, $"{suffix}_model.json"));
     model.Eval();
     return (model, tokenizer);
 }
 
-(TextClassifierModel<float> model, TextTokenizer tokenizer) LoadSentimentModel()
+(TextClassifierModel<float> model, TextTokenizer tokenizer) LoadSentimentModel(string modelsDir)
 {
-    var tokenizer = TextTokenizer.Load(Path.Combine(ModelsDir, "sentiment_tokenizer.json"));
+    var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, "sentiment_tokenizer.json"));
     var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, 3, 20);
-    ModelSerializer.Load(model, Path.Combine(ModelsDir, "sentiment_model.json"));
+    ModelSerializer.Load(model, Path.Combine(modelsDir, "sentiment_model.json"));
     model.Eval();
     return (model, tokenizer);
 }
 
-(TokenClassifierModel<float> model, TextTokenizer tokenizer) LoadEntityModel()
+(TokenClassifierModel<float> model, TextTokenizer tokenizer) LoadEntityModel(string modelsDir)
 {
-    var tokenizer = TextTokenizer.Load(Path.Combine(ModelsDir, "entity_tokenizer.json"));
+    var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, "entity_tokenizer.json"));
     var model = new TokenClassifierModel<float>(tokenizer.VocabSize, 32, 64, 5, 20);
-    ModelSerializer.Load(model, Path.Combine(ModelsDir, "entity_model.json"));
+    ModelSerializer.Load(model, Path.Combine(modelsDir, "entity_model.json"));
     model.Eval();
     return (model, tokenizer);
 }
