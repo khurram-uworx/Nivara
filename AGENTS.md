@@ -3,7 +3,7 @@
 ## Facts & Research
 
 - Nivara AutoDiff product direction updated: inference is the default/common path; reverse-mode training is opt-in via using (GradientUtils.Grad()). Do not implement NoGrad as the primary API. Built-in training loops should enter Grad() internally, while manual training examples/docs should wrap forward/loss/backward/optimizer code in Grad(). <!-- id=46e6ece9693740e49c42877dcc92abab entity=default type=fact ts=2026-06-14T14:10:17.7172876+00:00 v=1 tags=Nivara,AutoDiff,GradScope,inference-default -->
-- Nivara AutoDiff refactor plan: first complete architectural cleanup from docs/REFACTORING.md (GradTensor backed by System.Numerics.Tensors.Tensor<T>, no NivaraColumn/null masks in AutoDiff, GradKernels span-based ops, nullable column storage split) before implementing docs/AUTODIFF-PLAN.md features. Post-cleanup features are NoGrad via ambient AsyncLocal-style scope and Module StateDict/LoadStateDict plus serializer wrappers. <!-- id=3fec03ab399d47b7a6e7450785292834 entity=default type=fact ts=2026-06-14T13:51:53.8257787+00:00 v=1 tags=Nivara,AutoDiff,refactor,planning -->
+- Nivara AutoDiff refactor plan: first complete architectural cleanup from docs/NEXT-REFACTORING.md (GradTensor backed by System.Numerics.Tensors.Tensor<T>, no NivaraColumn/null masks in AutoDiff, GradKernels span-based ops, nullable column storage split) before implementing docs/AUTODIFF.md features. Post-cleanup features are NoGrad via ambient AsyncLocal-style scope and Module StateDict/LoadStateDict plus serializer wrappers. <!-- id=3fec03ab399d47b7a6e7450785292834 entity=default type=fact ts=2026-06-14T13:51:53.8257787+00:00 v=1 tags=Nivara,AutoDiff,refactor,planning -->
 - Key BCL .NET 10 tensor patterns found via MS Learn: TensorPrimitives now generic (200+ overloads for any INumber/IRootFunctions T), ReadOnlyTensorSpan<T> with TryGetSpan, implicit conversion from T[] to ReadOnlyTensorSpan<T>, Tensor<T> stable in .NET 10. Spans are the currency. <!-- id=8e2b4e3243a847899af3c2d8ce7acceb entity=default type=research ts=2026-06-08T05:58:48.7959337+00:00 v=1 tags=MSLearn,BCL,tensor,patterns -->
 
 ## Shell environment (Windows with GNU coreutils)
@@ -58,13 +58,16 @@ Where to look (implementation map)
   - `src/Nivara/Query/OperationType.cs` — `OperationType.Filter`, `.Select`, `.Sort`, `.GroupBy`, `.Join`, etc.
 
 - Frame-level batch ops
-  - `src/Nivara/NivaraFrame.cs` — `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` with null propagation and `OperationDiagnostics` recording.
+  - `src/Nivara/NivaraFrame.cs` — `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` (all `[Obsolete]` — use `TensorPrimitives` on column spans directly) with null propagation and `OperationDiagnostics` recording.
 
 - AutoDiff subsystem
+  - `docs/AUTODIFF.md` — canonical reference for all AutoDiff operations, modules, optimizers, forward-mode AD, and DataFrame integration
   - `src/Nivara/AutoDiff/` — core reverse-mode autograd engine (ReverseGradTensor, GradNode, IGradOperation)
+  - `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` — all differentiable operations (VJP rules)
+  - `src/Nivara/AutoDiff/Operations/ForwardGradOperations.cs` — forward-mode JVP operations
   - `src/Nivara/AutoDiff/Optimizer/SGD.cs` — SGD optimizer and SgdUpdate with null-skip semantics
-  - `src/Nivara/AutoDiff/Optimizer/AdamOptimizer.cs` — Adam optimizer with bias correction and null-skip
-  - `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs` — AdamW optimizer with decoupled weight decay
+  - `src/Nivara/AutoDiff/Optimizer/Adam.cs` — Adam optimizer with bias correction and null-skip
+  - `src/Nivara/AutoDiff/Optimizer/AdamW.cs` — AdamW optimizer with decoupled weight decay
   - `src/Nivara/AutoDiff/Nn/` — module system (Linear, Sequential, Parameter, activations)
   - `src/Nivara/AutoDiff/Training/` — TrainingLoop, DataParallelTrainer, batch management
   - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load and state-dict JSON wrappers
@@ -121,8 +124,8 @@ Suggested small, safe improvements to implement (prioritized)
 - ✓ Add internal `AsTensorSpanIfNoNulls()` to `Nivara.Storage.TensorStorage` — DONE (Phase 0).
 - ✓ Add `BufferPool.Rent(int size)` usage in `NivaraColumn` heavy paths — DONE (Phase 0).
 - ✓ Implement `DetermineKernelType` central helper — DONE as `KernelSelector.DetermineKernelType()` (Phase 1).
-- ✓ Add `RowNorms`/`ColumnNorms`/`TopKDescending` on `NivaraFrame` — DONE via per-row loop (Phase 3).
-- Add batch `TensorPrimitives` kernel for `RowNorms` (not yet implemented — currently uses per-row `ArrayPool` loop).
+- ✓ Add `RowNorms`/`ColumnNorms` on `NivaraFrame` — DONE (Phase 3). `RowNorms` uses `Vector<T>` SIMD kernel in `TensorsHelper.RowNorms` with `TensorPrimitives.Norm` fallback.
+- ✓ Add `TopKDescending` on `NivaraSeries<T>` — DONE (Phase 3).
 
 Common gotchas (use these as lint-like checks in generated code)
 - `ReadOnlyMemory<T>?` has `HasValue == true` for empty memory; always check `.Length > 0` to decide if mask exists.
@@ -213,6 +216,29 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 
 ---
 
+## Code Style
+
+- `.editorconfig` at repo root is authoritative; follow it over any convention below.
+- **Private fields:** `camelCase` without `_` prefix (`logger`, not `_logger`).
+- **Member ordering:** inner classes → constructors → properties → methods; static before instance; private → protected → internal → public.
+- **Primary constructors:** preferred for service/DI classes over classic constructor with field assignment.
+- **Sealed by default:** use `sealed class` for non-abstract classes unless inheritance is explicitly designed.
+- **Collection expressions:** `[]` for empty/static collections; `new List<T>()` or `new Dictionary<K,V>()` for mutable ones.
+- **Nullable reference types:** enabled; do not introduce avoidable warnings.
+- **Omit braces** from single-line `if`/`else` bodies when the body fits one line and is on the same line as the condition.
+- **No comments** in generated code unless explaining a non-obvious design decision.
+- **No Hungarian notation** — no prefixes encoding scope or mutability.
+
+## Testing Conventions
+
+- **Framework:** NUnit 4.x — `[Test]`, `Assert.That(...)`, `Assert.ThrowsAsync`, no `[TestCase]`
+- **Naming:** `Method_Scenario_ExpectedBehavior` PascalCase
+- **Pattern:** Arrange-Act-Assert (AAA); no explicit comments needed
+- **Organization:** one test class per source class, `*Tests.cs` suffix; split by behavior when a class is large
+- **Mocking:** prefer real implementations where feasible; use `Substitute.For<T>()` only when external dependencies require it
+
+---
+
 ## I/O & Interop Guidance
 
 ### General Principles
@@ -264,7 +290,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Column creation dynamic dispatch**: improve coverage for less common CLR types.
 - **Internal Span access**: consider adding `internal AsSpan()` methods to `NivaraColumn` for zero-copy tensor interop.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets.
-- **NivaraFrame TopKDescending**: added in Phase 3, returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
+- **NivaraSeries TopKDescending**: added in Phase 3 on `NivaraSeries<T>` (not `NivaraFrame`), returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
 - ✓ **NivaraFrame RowNorms**: batch `Vector<T>` kernel implemented in `TensorsHelper.RowNorms` — single-pass SIMD square-accumulate per row with `TensorPrimitives.Norm` fallback. ColumnNorms uses per-column `TensorPrimitives.Norm` (no batch needed).
 - **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1216 tests passing.
 - ✓ **AutoDiff P0–P6 complete**: reverse-mode autograd, NN module system, full optimizer family (SGD, Adam, AdamW), training loops, data-parallel training, model serialization — all implemented in core `src/Nivara/AutoDiff/`
@@ -276,7 +302,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `AdamOptimizer`, `AdamWOptimizer`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer<T>`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `Adam<T>`, `AdamW<T>`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
@@ -296,17 +322,18 @@ References (implementations to inspect)
 - `src/Nivara/Execution/ExecutionStrategyBase.cs`
 - `src/Nivara/Execution/ParallelExecutionHelper.cs`
 - `src/Nivara/AutoDiff/ReverseGradTensor.cs`
-- `src/Nivara/AutoDiff/GradOperations.cs`
+- `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`
+- `src/Nivara/AutoDiff/Operations/ForwardGradOperations.cs`
 - `src/Nivara/AutoDiff/Optimizer/SGD.cs`
-- `src/Nivara/AutoDiff/Optimizer/AdamOptimizer.cs`
-- `src/Nivara/AutoDiff/Optimizer/AdamWOptimizer.cs`
+- `src/Nivara/AutoDiff/Optimizer/Adam.cs`
+- `src/Nivara/AutoDiff/Optimizer/AdamW.cs`
 - `src/Nivara/AutoDiff/Nn/Linear.cs`
 - `src/Nivara/AutoDiff/Training/TrainingLoop.cs`
 - `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs`
 
 ## Active AutoDiff Direction
 
-The large architectural cleanup in `docs/REFACTORING.md` is **not** active
+The large architectural cleanup in `docs/NEXT-REFACTORING.md` is **not** active
 for the current implementation work unless explicitly requested.
 
 Current product direction:
@@ -327,10 +354,10 @@ Current product direction:
 
 ## Agent Framework Workflow Patterns
 
-See `docs/agent-framework-workflows.md` for Nivara-specific integration notes from the NivaraChat sample.
+See `docs/AGENT-FRAMEWORK-NIVARACHAT-PATTERNS.md` for Nivara-specific integration notes from the NivaraChat sample.
 
 ## Architectural Decisions (ADRs)
 
 See `docs/adr/` for recorded decisions:
 
-- **ADR-001**: AutoDiff is a non-nullable domain. Null boundary enforced at domain entry points (`NivaraColumn<T>` → `ReverseGradTensor<T>` conversion). All AutoDiff ops assume non-null data. Storage layer remains nullable.
+- **ADR-001** (`docs/adr/001-autodiff-nonnullable-domain.md`): AutoDiff is a non-nullable domain. Null boundary enforced at domain entry points (`NivaraColumn<T>` → `ReverseGradTensor<T>` conversion). All AutoDiff ops assume non-null data. Storage layer remains nullable.

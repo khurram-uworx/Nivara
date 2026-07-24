@@ -884,15 +884,15 @@ var engine = new ExecutionEngine();
 var plan = query.GetQueryPlan();
 
 // Lazy execution (default) - optimal for most cases
-var lazyContext = new ExecutionContext(ExecutionStrategy.Lazy);
+var lazyContext = new NivaraExecutionContext(ExecutionStrategy.Lazy);
 var lazyResult = engine.Execute(plan, lazyContext);
 
 // Parallel execution - for CPU-intensive operations
-var parallelContext = ExecutionContext.WithParallelism(Environment.ProcessorCount);
+var parallelContext = NivaraExecutionContext.WithParallelism(Environment.ProcessorCount);
 var parallelResult = engine.Execute(plan, parallelContext);
 
 // Streaming execution - for large datasets
-var streamingContext = ExecutionContext.WithMemoryBudget(512 * 1024 * 1024); // 512MB
+var streamingContext = NivaraExecutionContext.WithMemoryBudget(512 * 1024 * 1024); // 512MB
 streamingContext.Strategy = ExecutionStrategy.Streaming;
 var streamingResult = engine.Execute(plan, streamingContext);
 
@@ -903,7 +903,7 @@ var progress = new Progress<ExecutionProgress>(p =>
     Console.WriteLine($"{p.OperationName}: {p.PercentComplete:P1}");
 });
 
-var asyncContext = new ExecutionContext
+var asyncContext = new NivaraExecutionContext
 {
     Strategy = ExecutionStrategy.Parallel,
     CancellationToken = cancellationTokenSource.Token,
@@ -914,7 +914,7 @@ var asyncResult = await engine.ExecuteAsync(plan, asyncContext);
 
 // Diagnostics integration — wire ExecutionDiagnostics into the context
 var diagnostics = new ExecutionDiagnostics();
-var diagContext = new ExecutionContext
+var diagContext = new NivaraExecutionContext
 {
     Strategy = ExecutionStrategy.Parallel,
     ExecutionDiagnostics = diagnostics
@@ -1268,21 +1268,19 @@ NivaraFrameExtensions.WriteParquetBatch("batch.parquet", frames, parquetOptions)
 
 ### Configuration and Performance Tuning
 
+Nivara's performance tuning is built into the core APIs:
+
 ```csharp
-// Memory management
-var memoryManager = new NivaraMemoryManager();
-memoryManager.SetMemoryBudget(1024 * 1024 * 1024); // 1GB
-memoryManager.EnableBufferPooling(true);
+// Streaming execution with memory budget for large datasets
+var result = frame.AsQueryFrame()
+    .Filter(condition)
+    .CollectStreaming(memoryBudgetBytes: 256 * 1024 * 1024); // 256 MB
 
-// Performance monitoring
-var performanceMonitor = new PerformanceMonitor();
-performanceMonitor.EnableDetailedMetrics(true);
-performanceMonitor.SetSamplingInterval(TimeSpan.FromSeconds(1));
+// Execution diagnostics for performance analysis
+Console.WriteLine(query.GetDiagnosticInfo());
 
-// Resource management
-using var resourceManager = new ResourceManager();
-resourceManager.SetMaxParallelism(Environment.ProcessorCount);
-resourceManager.EnableAutoGarbageCollection(true);
+// Query optimization analysis
+var suggestions = query.AnalyzeOptimizations();
 ```
 
 ---

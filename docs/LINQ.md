@@ -9,7 +9,7 @@ Nivara provides a deferred, plan-based LINQ-like query engine over typed columna
 ```
 User API              QueryFrame / Linq Extensions (Where, Select, OrderBy, GroupBy)
 Plan Layer            QueryPlan (IQuerySource + ordered IQueryOperation[])
-Execution Layer       QueryExecutor / IExecutionStrategy (Eager, Lazy, Streaming, Parallel)
+Execution Layer       QueryExecutor (internal) / IExecutionStrategy (Eager, Lazy, Streaming, Parallel)
 ```
 
 **Key design principles:**
@@ -36,7 +36,7 @@ var query = frame.AsQueryFrame();  // QueryFrame — deferred, nothing executed 
 ### From file sources
 
 ```csharp
-var query = JsonExtensions.ScanJsonAsQueryFrame("data.json");
+var query = Json.ScanJsonAsQueryFrame("data.json");
 ```
 
 ### From custom IQuerySource
@@ -47,8 +47,18 @@ public interface IQuerySource : IDisposable
     Schema Schema { get; }
     bool IsLazy { get; }
     IReadOnlyDictionary<string, IColumn> Execute();
+
+    // Chunked and async members (used by streaming/parallel strategies)
+    Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default);
+    bool CanReadInChunks => false;
+    int? EstimatedRowCount => null;
+    IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize);
+    ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(int chunkIndex, int chunkSize, CancellationToken cancellationToken = default);
+    IAsyncEnumerable<IReadOnlyDictionary<string, IColumn>> ToAsyncEnumerable(int chunkSize, CancellationToken cancellationToken = default);
 }
 ```
+
+The `Execute()` and `Schema` members are required for basic operation. The chunked and async members enable streaming and parallel execution strategies.
 
 ---
 
@@ -107,7 +117,9 @@ The `ExpressionEvaluator` (in `Helpers/ExpressionEvaluator.cs`) walks the tree a
 | **Join** | `"Join"` | `JoinOperation` | Hash-based join between two frames (Inner/Left/Right/FullOuter) |
 | **Projection** | `"Projection"` | `ProjectionOperation` | Renames and/or selects columns |
 | **Slice** | `"Slice"` | `SliceOperation` | Row-range slicing by index |
-| **Concatenate*** | `"Concatenate"` | `ConcatenationOperation` | Vertical concatenation |
+| **Distinct** | `"Distinct"` | `DistinctOperation` | Removes duplicate rows (all columns or specified subset) |
+| **SelectRows** | `"SelectRows"` | `SelectRowsOperation` | Selects specific rows by positional index |
+| **Concatenate** | `"ConcatenateVertical"` / `"ConcatenateHorizontal"` | `ConcatenationOperation` | Vertical (row append) or horizontal (column append) concatenation |
 
 Each operation implements `IQueryOperation`:
 ```csharp
@@ -180,20 +192,59 @@ Hash-map join between two frame snapshots. Builds a right-side hash table, probe
 
 Join key columns are coalesced in outer joins (left value wins, falls back to right).
 
+### Distinct
+
+Removes duplicate rows. Without arguments, deduplicates on all columns. With column names, deduplicates on the specified subset.
+
+```csharp
+public QueryFrame Distinct()
+public QueryFrame Distinct(params string[] columnNames)
+```
+
+### SelectRows
+
+Selects specific rows by positional index.
+
+```csharp
+public QueryFrame SelectRows(params int[] indices)
+```
+
+### Skip / Take / Slice
+
+Row-range operations for pagination and windowing.
+
+```csharp
+public QueryFrame Skip(int count)
+public QueryFrame Take(int count)
+public QueryFrame Slice(int skip, int take)
+```
+
+`Skip` skips the first N rows, `Take` takes the first N rows, `Slice` combines both into a single operation.
+
 ---
 
 ## API Surfaces
 
 ### 1. Expression-based API (on QueryFrame)
 
+Every `Filter`/`Select`/`Sort`/`GroupBy`/`Distinct`/`Skip`/`Take`/`Slice`/`SelectRows` call returns a **new** `QueryFrame` with the operation appended.
+
 ```csharp
+// Basic filter + select
 var result = frame.AsQueryFrame()
     .Filter(ColumnExpressions.Col("Salary") > 50000)
     .Select("Name", "Salary")
     .Collect();
-```
 
-Every `Filter`/`Select`/`Sort`/`GroupBy` call returns a **new** `QueryFrame` with the operation appended.
+// Row-range operations
+var page = frame.AsQueryFrame().Skip(10).Take(5).Collect();
+
+// Distinct on specific columns
+var unique = frame.AsQueryFrame().Distinct("Department").Collect();
+
+// Select specific rows by index
+var sampled = frame.AsQueryFrame().SelectRows(0, 2, 4).Collect();
+```
 
 ### 2. Lambda-based LINQ API (extension methods)
 
@@ -209,7 +260,7 @@ var result = frame.AsQueryFrame()
 
 The `RowExpressionBuilder` singleton's indexer `this[string]` returns `ColumnExpressions.Col(name)`, so the lambda composes into the same `ColumnExpression` tree.
 
-Available LINQ extensions (`QueryFrameExtensions`):
+Available LINQ extensions (`NivaraLinqExtensions` in `src/Nivara/Linq/NivaraLinqExtensions.cs`):
 | Method | Maps to | Notes |
 |--------|---------|-------|
 | `Where(predicate)` | `Filter(expression)` | Accepts `Func<RowExpressionBuilder, ColumnExpression>` |
@@ -220,15 +271,18 @@ Available LINQ extensions (`QueryFrameExtensions`):
 | `ToList()` | `Collect()` | Materializes to `NivaraFrame` |
 | `ToNivaraFrame()` | `Collect()` | Alias for `ToList` |
 
-### 3. Frame-level operations (on NivaraFrame directly)
+### 3. Frame-level operations (extension methods on NivaraFrame)
+
+Join operations are extension methods in `NivaraFrameExtensions`, not through QueryFrame:
 
 ```csharp
-// Join operations — not through QueryFrame
-var joined = left.InnerJoin(right, "KeyColumn");
-var leftJoin = left.LeftJoin(right, new JoinKey("OrderId", "Id"));
+var joined = left.InnerJoin(right, "KeyColumn");                    // same column name
+var leftJoin = left.LeftJoin(right, "OrderId", "Id");              // different column names
 var rightJoin = left.RightJoin(right, "Id");
 var fullOuter = left.FullOuterJoin(right, "Id");
 ```
+
+All join methods accept additional optional parameters: `ColumnDisambiguationStrategy`, `leftPrefix`, and `rightPrefix`.
 
 ---
 
@@ -244,8 +298,10 @@ When `.Collect()` is called, a `QueryPlan` is created:
 
 ### QueryExecutor.Execute()
 
+`QueryExecutor` is an `internal sealed class` invoked by `QueryFrame.Collect()`:
+
 ```csharp
-public NivaraFrame Execute(QueryPlan plan)
+internal NivaraFrame Execute(QueryPlan plan)
 ```
 
 1. Validates the plan schema
@@ -419,12 +475,18 @@ var suggestions = query.AnalyzeOptimizations();
 | GroupByOperation | `src/Nivara/Operations/GroupByOperation.cs` |
 | JoinOperation | `src/Nivara/Operations/JoinOperation.cs` |
 | ProjectionOperation | `src/Nivara/Operations/ProjectionOperation.cs` |
+| SliceOperation | `src/Nivara/Operations/SliceOperation.cs` |
+| DistinctOperation | `src/Nivara/Operations/DistinctOperation.cs` |
+| SelectRowsOperation | `src/Nivara/Operations/SelectRowsOperation.cs` |
 | ConcatenationOperation | `src/Nivara/Operations/ConcatenationOperation.cs` |
+| AggregationFunction | `src/Nivara/Operations/AggregationFunction.cs` |
 | ColumnExpression | `src/Nivara/Expressions/ColumnExpression.cs` |
 | ExpressionEvaluator | `src/Nivara/Helpers/ExpressionEvaluator.cs` |
 | RowExpressionBuilder | `src/Nivara/Linq/RowExpressionBuilder.cs` |
-| QueryFrameExtensions | `src/Nivara/Linq/QueryFrameExtensions.cs` |
+| NivaraLinqExtensions | `src/Nivara/Linq/NivaraLinqExtensions.cs` |
 | ExecutionEngine | `src/Nivara/Execution/ExecutionEngine.cs` |
 | QueryOptimizer | `src/Nivara/Query/QueryOptimizer.cs` |
 | QueryPlanAnalyzer | `src/Nivara/Query/QueryPlan.cs` |
+| QueryDiagnostics | `src/Nivara/Query/QueryDiagnosticMode.cs` |
 | NivaraFrame.AsQueryFrame | `src/Nivara/NivaraFrame.cs` |
+| NivaraFrameExtensions (joins) | `src/Nivara/NivaraFrameExtensions.cs` |

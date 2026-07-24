@@ -367,3 +367,4 @@ dotnet add package Microsoft.Extensions.AI.OpenAI --version 10.7.0
 - Agent Framework workflows: `learn.microsoft.com/agent-framework/workflows`
 - Agent Framework executors: `learn.microsoft.com/agent-framework/workflows/executors`
 - Agent Framework agents: `learn.microsoft.com/agent-framework/agents`
+- Practical gotchas from NivaraChat sample: `AGENT-FRAMEWORK-NIVARACHAT-PATTERNS.md`

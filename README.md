@@ -115,7 +115,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 
 For detailed examples and tutorials, see [**GETTING-STARTED.md**](https://github.com/khurram-uworx/nivara/blob/main/GETTING-STARTED.md).
 
-For comprehensive API documentation and advanced usage patterns, explore the samples in the `samples/` directory.
+For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory.
 
 ---
 
@@ -152,6 +152,7 @@ Nivara currently supports:
 
 - [**GETTING-STARTED**](https://github.com/khurram-uworx/nivara/blob/main/GETTING-STARTED.md) — tutorials, examples, and step-by-step guides
 - [**ARCHITECTURE**](https://github.com/khurram-uworx/nivara/blob/main/ARCHITECTURE.md) — design and internal architecture
+- [**AUTODIFF**](https://github.com/khurram-uworx/nivara/blob/main/docs/AUTODIFF.md) — automatic differentiation subsystem (operations, modules, optimizers, forward-mode AD, training)
 - [**CONTRIBUTING**](https://github.com/khurram-uworx/nivara/blob/main/CONTRIBUTING.md) — how to contribute to the project
 - [**GUIDELINES**](https://github.com/khurram-uworx/nivara/blob/main/GUIDELINES.md) — architectural rationale, lessons learned, and known gotchas
 

@@ -15,3 +15,4 @@ Lessons learned from `samples/NivaraChat/`. Agent Framework is external; this do
 
 - `samples/NivaraChat/` — working example
 - [Microsoft Agent Framework docs](https://learn.microsoft.com/agent-framework/workflows/executors)
+- API reference and integration patterns: `RESEARCH-AGENT-FRAMEWORK.md`
