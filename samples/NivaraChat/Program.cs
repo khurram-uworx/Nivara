@@ -162,29 +162,26 @@ async Task RunWorkflow(string modelsDir, string ollamaUrl, string modelName, str
         Console.WriteLine("Ollama connected.\n");
     }
 
-    Workflow workflow;
-    if (llmExecutor != null)
-    {
-        workflow = new WorkflowBuilder(router)
+    Console.WriteLine(llmExecutor != null
+        ? "Graph: TextRouter --fan-out--> [SentimentExecutor, EntityExtractor] --fan-in--> ValidatorExecutor -> Ollama LLM\n"
+        : "Graph: TextRouter --fan-out--> [SentimentExecutor, EntityExtractor] --fan-in--> ValidatorExecutor\n");
+
+    Workflow BuildWorkflow() => llmExecutor != null
+        ? new WorkflowBuilder(router)
             .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExtractor })
             .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExtractor }, validator)
             .AddEdge(validator, llmExecutor)
             .WithOutputFrom(sentimentExecutor, entityExtractor, validator, llmExecutor)
-            .Build();
-        Console.WriteLine("Graph: TextRouter --fan-out--> [SentimentExecutor, EntityExtractor] --fan-in--> ValidatorExecutor -> Ollama LLM\n");
-    }
-    else
-    {
-        workflow = new WorkflowBuilder(router)
+            .Build()
+        : new WorkflowBuilder(router)
             .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExtractor })
             .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExtractor }, validator)
             .WithOutputFrom(sentimentExecutor, entityExtractor, validator)
             .Build();
-        Console.WriteLine("Graph: TextRouter --fan-out--> [SentimentExecutor, EntityExtractor] --fan-in--> ValidatorExecutor\n");
-    }
+
     if (singleShotText != null)
     {
-        var run = await InProcessExecution.RunAsync(workflow, singleShotText);
+        var run = await InProcessExecution.RunAsync(BuildWorkflow(), singleShotText);
         Console.WriteLine("\n--- Workflow Results ---");
         var events = run.NewEvents.ToList();
         foreach (var evt in events)
@@ -211,7 +208,7 @@ async Task RunWorkflow(string modelsDir, string ollamaUrl, string modelName, str
             var input = Console.ReadLine()?.Trim();
             if (string.IsNullOrEmpty(input) || input == "quit") break;
 
-            var run = await InProcessExecution.RunAsync(workflow, input);
+            var run = await InProcessExecution.RunAsync(BuildWorkflow(), input);
 
             Console.WriteLine("\n--- Workflow Results ---");
             foreach (var evt in run.NewEvents)
@@ -273,33 +270,34 @@ async Task RunAgents(string modelsDir, string ollamaUrl, string modelName, strin
                 if any fact is missing due to low score, figure out yourself"
                 """);
         Console.WriteLine("Ollama connected.\n");
+        Console.WriteLine("Graph: NivaraSentiment -> NivaraEntity -> NivaraValidator -> OllamaLLM\n");
 
-        var workflow = new WorkflowBuilder(sentimentAgent)
+        Workflow BuildWorkflowWithOllama() => new WorkflowBuilder(sentimentAgent)
             .AddEdge(sentimentAgent, entityAgent)
             .AddEdge(entityAgent, validatorAgent)
             .AddEdge(validatorAgent, llmAgent)
             .WithOutputFrom(sentimentAgent, entityAgent, validatorAgent, llmAgent)
             .Build();
-        Console.WriteLine("Graph: NivaraSentiment -> NivaraEntity -> NivaraValidator -> OllamaLLM\n");
 
         if (singleShotText != null)
-            await RunSingleShot(workflow, singleShotText);
+            await RunSingleShot(BuildWorkflowWithOllama(), singleShotText);
         else
-            await RunLoop(workflow);
+            await RunLoop(BuildWorkflowWithOllama);
     }
     else
     {
-        var workflow = new WorkflowBuilder(sentimentAgent)
+        Console.WriteLine("Graph: NivaraSentiment -> NivaraEntity -> NivaraValidator\n");
+
+        Workflow BuildWorkflow() => new WorkflowBuilder(sentimentAgent)
             .AddEdge(sentimentAgent, entityAgent)
             .AddEdge(entityAgent, validatorAgent)
             .WithOutputFrom(sentimentAgent, entityAgent, validatorAgent)
             .Build();
-        Console.WriteLine("Graph: NivaraSentiment -> NivaraEntity -> NivaraValidator\n");
 
         if (singleShotText != null)
-            await RunSingleShot(workflow, singleShotText);
+            await RunSingleShot(BuildWorkflow(), singleShotText);
         else
-            await RunLoop(workflow);
+            await RunLoop(BuildWorkflow);
     }
 
     sentimentModel.Dispose();
@@ -315,7 +313,7 @@ async Task RunSingleShot(Workflow workflow, string text)
     PrintAgentResults(run);
 }
 
-async Task RunLoop(Workflow workflow)
+async Task RunLoop(Func<Workflow> workflowFactory)
 {
     Console.WriteLine("Type a message (or 'quit' to exit):\n");
     while (true)
@@ -324,7 +322,7 @@ async Task RunLoop(Workflow workflow)
         var input = Console.ReadLine()?.Trim();
         if (string.IsNullOrEmpty(input) || input == "quit") break;
 
-        var run = await InProcessExecution.RunAsync(workflow, input);
+        var run = await InProcessExecution.RunAsync(workflowFactory(), input);
         Console.WriteLine("\n--- Agent Results ---");
         PrintAgentResults(run);
         Console.WriteLine();
@@ -334,17 +332,30 @@ async Task RunLoop(Workflow workflow)
 void PrintAgentResults(Run run)
 {
     var events = run.NewEvents.ToList();
+    var streamingBuffers = new Dictionary<string, string>();
+
     foreach (var evt in events)
     {
         switch (evt)
         {
             case AgentResponseUpdateEvent updateEvt:
                 if (updateEvt.Update?.Text is string text && !string.IsNullOrEmpty(text))
-                    Console.WriteLine($"  [{updateEvt.ExecutorId}] {text}");
+                {
+                    var id = updateEvt.ExecutorId;
+                    streamingBuffers.TryGetValue(id, out var existing);
+                    streamingBuffers[id] = (existing ?? "") + text;
+                }
                 break;
             case ExecutorCompletedEvent executorEvt:
-                if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                if (streamingBuffers.TryGetValue(executorEvt.ExecutorId, out var buffered) && buffered.Length > 0)
+                {
+                    Console.WriteLine($"  [{executorEvt.ExecutorId}] {buffered}");
+                    streamingBuffers.Remove(executorEvt.ExecutorId);
+                }
+                else if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                {
                     Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
+                }
                 break;
             case ExecutorFailedEvent failedEvt:
                 Console.WriteLine($"  [{failedEvt.ExecutorId}] FAILED: {failedEvt}");
@@ -353,6 +364,12 @@ void PrintAgentResults(Run run)
                 Console.WriteLine($"  WORKFLOW ERROR: {errorEvt}");
                 break;
         }
+    }
+
+    foreach (var (id, text) in streamingBuffers)
+    {
+        if (text.Length > 0)
+            Console.WriteLine($"  [{id}] {text}");
     }
 }
 
