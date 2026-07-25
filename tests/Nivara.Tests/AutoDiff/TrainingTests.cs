@@ -345,10 +345,10 @@ public class TrainingTests
         var optimizer = new SGD<float>(0.001f);
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.001f);
 
-        using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 3);
+        using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 10);
         var result = loop.Run();
 
-        Assert.That(result.Epochs.Count, Is.EqualTo(3));
+        Assert.That(result.Epochs.Count, Is.EqualTo(10));
         Assert.That(result.Epochs[0].Loss, Is.GreaterThan(0f));
         Assert.That(result.Epochs[^1].Loss, Is.LessThan(result.Epochs[0].Loss));
         Assert.That(result.TotalElapsed.TotalMilliseconds, Is.GreaterThan(0d));
