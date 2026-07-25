@@ -115,7 +115,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 
 For detailed examples and tutorials, see [**GETTING-STARTED.md**](https://github.com/khurram-uworx/nivara/blob/main/GETTING-STARTED.md).
 
-For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory.
+For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory — including a character-level GPT trained on Nivara AutoDiff, a neural chess evaluator, a hybrid Nivara+LLM agent workflow, and PyTorch parity benchmarks showing <0.04% loss-curve divergence.
 
 ---
 

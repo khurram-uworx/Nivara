@@ -189,30 +189,6 @@ public static class ReverseGradOperations
                 $"Matrix dimensions incompatible: a({aRows}x{aCols}) @ b({bRows}x{bCols}). " +
                 $"a's column count ({aCols}) must equal b's row count ({bRows}).");
 
-#pragma warning disable CS0618 // internal call to legacy overload
-        return MatMul(a, b, aRows, aCols, bCols);
-#pragma warning restore CS0618
-    }
-
-    [Obsolete("Use the shape-aware MatMul overload instead — reshape your tensors before calling MatMul(a, b)")]
-    public static ReverseGradTensor<T> MatMul<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b, int aRows, int aCols, int bCols)
-        where T : struct, INumber<T>
-    {
-        if (a == null) throw new ArgumentNullException(nameof(a));
-        if (b == null) throw new ArgumentNullException(nameof(b));
-
-        var bRows = aCols;
-
-        if (a.Length != aRows * aCols)
-        {
-            throw new ArgumentException($"Matrix a dimensions don't match: expected {aRows * aCols} elements, got {a.Length}");
-        }
-
-        if (b.Length != bRows * bCols)
-        {
-            throw new ArgumentException($"Matrix b dimensions don't match: expected {bRows * bCols} elements, got {b.Length}");
-        }
-
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffMatMul",
             a.Length + b.Length,
@@ -256,20 +232,8 @@ public static class ReverseGradOperations
         if (a.Rank != 2)
             throw new ArgumentException($"Transpose requires a matrix (rank 2), got rank {a.Rank}", nameof(a));
 
-#pragma warning disable CS0618 // internal call to legacy overload
-        return Transpose(a, a.shape[0], a.shape[1]);
-#pragma warning restore CS0618
-    }
-
-    [Obsolete("Use the shape-aware Transpose overload instead — reshape your tensor before calling Transpose(a)")]
-    public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a, int rows, int cols) where T : struct, INumber<T>
-    {
-        if (a == null) throw new ArgumentNullException(nameof(a));
-
-        if (a.Length != rows * cols)
-        {
-            throw new ArgumentException($"Matrix dimensions don't match: expected {rows * cols} elements, got {a.Length}");
-        }
+        var rows = a.shape[0];
+        var cols = a.shape[1];
 
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffTranspose",
