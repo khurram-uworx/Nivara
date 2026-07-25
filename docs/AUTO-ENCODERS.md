@@ -1,4 +1,4 @@
-# VAE Foundation — Plan & Progress
+# AutoDiff NN Layers — Plan & Progress
 
 ## Context
 
@@ -8,44 +8,127 @@ Nivara is positioned as a **typed, immutable, null-aware DataFrame/query layer f
 - AutoDiff stays in core Nivara (not moving to Extensions)
 - AutoDiff is a **non-nullable domain** per ADR-001 — null boundary enforced at `NivaraColumn<T>` → `ReverseGradTensor<T>` conversion; all AutoDiff ops assume non-null data
 
-## Design decisions
+## Implemented Components
 
-| Decision | Choice | Rationale |
-|----------|--------|-----------|
-| Placement | `src/Nivara/AutoDiff/` (core) | AutoDiff lives here permanently |
-| Encoder API | `VAE<T>` class with `Encode()` → `(Mu, LogVar)` tuple | C# value tuples are idiomatic; PyTorch-aligned pattern; does not fight `Module<T>.Forward` single-output contract |
-| Operation scope | Fused KlDivergence + SampleNormal | Single OpNode each for efficiency; backward closures capture needed intermediates |
-| Training integration | Existing `TrainingLoop<T>` + optimizer | No new training infrastructure needed |
-| Loss type | `ElboLossType` enum (`KldBeta`, `KldAnnealing`) | Type-safe, discoverable, no magic strings |
-| Beta param | `Parameter<float>` on VAE instance | Consistent with Module<T> serialization/optimizer contract; `requiresGrad: false` for fixed β, `true` for learnable β-VAE |
-| Default activation | `Activation.Relu` (configurable via constructor) | Matches PyTorch VAE conventions, MSE-compatible |
+### BatchNorm1d / BatchNorm2d
 
-## Architecture
+**Files:** `BatchNorm.cs`, `BatchNormKernel.cs`
 
-```text
-VAE<T> : Module<T>
-├── _encoder: Sequential<T>        (shared: Linear → ReLU → Linear → ReLU)
-├── _muHead: Linear<T>             (projects hidden → latentDim, registered as sub-module)
-├── _logVarHead: Linear<T>         (projects hidden → latentDim, registered as sub-module)
-├── _decoder: Sequential<T>        (Linear → ReLU → Linear, no final activation)
-├── _beta: Parameter<T>            (scalar, requiresGrad: false; registered as parameter)
-│
-├── Forward(x) → recon             (full pipeline: encode → reparam → decode)
-├── Encode(x) → (Mu, LogVar)       (shared encoder → muHead → logVarHead)
-├── Reparameterize(mu, logVar) → z (static; eval mode returns mu directly)
-├── Decode(z) → recon              (decoder forward)
-└── ElboLoss(recon, x, mu, logVar, lossType) → scalar (recon + β·KL)
+Fused span-based kernel with `TensorPrimitives` — single `OpNode` per call (like `PerRowRMSNorm` pattern). No expanded tensors, no intermediate autograd nodes.
+
+```
+BatchNormKernel<T>
+├── Forward(input, n, c, hw, gamma, beta, eps, affine) → (Output, XHat, InvStd, Mean)
+├── BackwardInput(gradOut, xHat, gamma, invStd, n, c, hw) → gradInput
+├── BackwardWeight(gradOut, xHat, n, c, hw) → gradGamma
+└── BackwardBias(gradOut, n, c, hw) → gradBeta
 ```
 
-## Known limitations
+- Train mode: computes batch statistics, updates running stats via direct span arithmetic
+- Eval mode: uses cached running mean/var
+- StateDict/LoadStateDict includes `running_mean`, `running_var`, `num_batches_tracked`
+- **7 tests per variant** (1d/2d): forward shape, train stats update, eval running stats, affine=false, backward gradients, state dict round-trip, dispose
 
-- **Null propagation through VAE**: `Linear.Forward` cannot mix tensor-backed parameters with nullable column inputs (storage type mismatch). Null inputs to `VAE.Encode()` or `VAE.Forward()` will fail. The individual VAE operations (`KlDivergence`, `SampleNormal`) handle nulls correctly — see their tests in `GradOperationsTests`. Per ADR-001, AutoDiff is non-nullable; this is a storage-layer boundary issue, not an AutoDiff issue.
-- **VAE training loop**: Standard `TrainingLoop<T>` expects a 2-arg loss `(predictions, targets) → scalar`. VAE's `ElboLoss` needs 4 args. VAE training uses manual loops (demonstrated in `VAE_Training_ReducesLoss`).
+### Conv2d
 
-### Future (deferred)
+**Files:** `Conv2d.cs`, `Im2Col.cs`
 
-| Feature | Reason deferred |
-|---------|----------------|
-| Conditional VAE | Add condition tensor to `Encode(x, condition)` |
-| Conv encoder/decoder | No Conv layers exist yet in Nn |
-| BatchNorm | Separate effort, not VAE-specific |
+Tiled im2col → `TensorPrimitives.Dot` per output channel. Key optimizations:
+
+- **PatchLocation lookup table**: `PatchLocation` struct precomputes `(Batch, OH, OW)` per-tile, eliminates 4 integer divisions per position from all hot loops
+- **ConvForward1x1**: bypasses im2col entirely for 1×1 kernels (stride=1, padding=0). Gathers input channels into pooled buffer, TensorPrimitives.Dot per output channel
+- **InputGrad specializations**: `InputGrad1x1` (direct MultiplyAdd), `InputGrad3x3` (unrolled 9-tap scatter), `InputGradGeneric` (nested loops)
+- **Zero-copy via TryGetSpan**: eliminates tensor copy when storage is contiguous
+- **Weight gradient**: tiled im2col → `TensorPrimitives.MultiplyAdd`
+- **Bias gradient**: `TensorPrimitives.Sum` per channel
+
+```
+Forward:   Im2ColTile → Dot per output channel
+InputGrad: InputGrad1x1 | InputGrad3x3 | InputGradGeneric
+WeightGrad: Im2ColTile → MultiplyAdd per output channel
+BiasGrad:   Sum per channel
+```
+
+- **8 tests**: forward shapes (basic, padding, stride), bias, backward gradients, no-bias backward, 1×1=Linear equivalence, dispose
+
+### ConvTranspose2d
+
+**Files:** Same as Conv2d
+
+Direct scatter kernel (not im2col-based) — forward uses `Col2ImForward`, backward uses `ConvTransposeInputGradKernel` and `ConvTransposeWeightGradKernel`.
+
+```
+Forward:     Col2ImForward (scatter) + bias
+InputGrad:   ConvTransposeInputGradKernel (scatter with stride check)
+WeightGrad:  ConvTransposeWeightGradKernel (reduction over ih, iw)
+```
+
+- **6 tests**: forward shapes (basic, padding, stride), backward gradients, bias, dispose
+
+### Conditional VAE
+
+**Files:** `VAE.cs`
+
+Extended `VAE<T>` with `conditionDim` parameter. Encoder/decoder accept optional condition tensor via `Concat`.
+
+```
+VAE<T> : Module<T>
+├── Forward(x) → recon
+├── Forward(x, condition) → recon
+├── Encode(x) → (Mu, LogVar)
+├── Encode(x, condition) → (Mu, LogVar)
+├── Reparameterize(mu, logVar) → z
+├── Decode(z) → recon
+├── Decode(z, condition) → recon
+└── ElboLoss(recon, x, mu, logVar, lossType) → scalar
+```
+
+- **7 tests**: encode shape, null condition handling, forward end-to-end, elbo loss, decode with condition, backward gradients, invalid ctor throws
+
+### Broadcast Operations
+
+**File:** `ReverseGradOperations.cs`
+
+- `BroadcastMultiply<T>(input, scale)` — channel-wise multiply with 1D scale tensor
+- `BroadcastAdd<T>(input, bias)` — channel-wise add with 1D bias tensor
+- Used by BatchNorm backward for gamma/beta application
+
+### Other Prerequisites (pre-existing)
+
+- `Linear<T>` — fully connected layer
+- `Sequential<T>` — module container
+- `Activation` — Relu, Sigmoid, Tanh
+- `SGD<T>`, `Adam<T>`, `AdamW<T>` — optimizers
+- `TrainingLoop<T>` — standard training loop
+- `Module<T>.StateDict()` / `LoadStateDict()` — serialization (made virtual)
+
+## Test Coverage Summary
+
+| Component | Tests | Coverage Notes |
+|-----------|-------|----------------|
+| BatchNorm1d | 7 | Forward, train/eval modes, affine, backward, state dict, dispose |
+| BatchNorm2d | 7 | Same pattern as 1d |
+| Conv2d | 8 | Shapes, padding, stride, bias, backward, 1×1, dispose |
+| ConvTranspose2d | 6 | Shapes, padding, stride, backward, bias, dispose |
+| Conditional VAE | 7 | Encode, decode, forward, elbo, backward, null condition |
+| BroadcastMultiply | 0 | No dedicated tests (exercised via BatchNorm backward) |
+| BroadcastAdd | 0 | No dedicated tests (exercised via BatchNorm backward) |
+| **Total new tests** | **35** | |
+
+## Known Limitations
+
+- **Null propagation through VAE**: `Linear.Forward` cannot mix tensor-backed parameters with nullable column inputs (storage type mismatch). Null inputs to `VAE.Encode()` or `VAE.Forward()` will fail. Per ADR-001, AutoDiff is non-nullable; this is a storage-layer boundary issue.
+- **VAE training loop**: Standard `TrainingLoop<T>` expects 2-arg loss. VAE's `ElboLoss` needs 4 args. VAE training uses manual loops (demonstrated in `VAE_Training_ReducesLoss`).
+
+## Deferred Features
+
+| Feature | Reason |
+|---------|--------|
+| Conv encoder/decoder for VAE | Conv layers exist now; could build ConvVAE as a composition |
+| Grouped/depthwise convolution | Requires `groups` parameter on Conv2d |
+| Dropout | Simple to add, no architectural questions |
+| LayerNorm | Alternative to BatchNorm; straightforward implementation |
+| Residual connections | Already possible via `Sequential` + manual add; could add `Residual<T>` wrapper |
+| Multi-head attention / Transformer | Larger effort; would need `MultiheadAttention<T>` module |
+| BroadcastMultiply/BroadcastAdd dedicated tests | Currently only exercised indirectly via BatchNorm backward |
+| Conv backward tests with stride/padding | Current backward tests only cover basic case |
