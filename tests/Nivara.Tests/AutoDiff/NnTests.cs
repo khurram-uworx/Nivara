@@ -2095,4 +2095,230 @@ public class NnTests
         for (int i = 0; i < Math.Min(100, output.Length); i++)
             Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
     }
+
+    [Test]
+    public void LayerNorm_2D_Forward_ShapeCorrect()
+    {
+        using var ln = new LayerNorm<float>(8);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[4 * 8]),
+            requiresGrad: false);
+        input.Reshape(4, 8);
+
+        var output = ln.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 4, 8 }));
+        Assert.That(output.Length, Is.EqualTo(32));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void LayerNorm_4D_LastDimNormalized()
+    {
+        using var ln = new LayerNorm<float>(16);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 4 * 4 * 16]),
+            requiresGrad: false);
+        input.Reshape(2, 4, 4, 16);
+
+        var output = ln.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 4, 4, 16 }));
+    }
+
+    [Test]
+    public void LayerNorm_Backward_GradientsFlow()
+    {
+        using var ln = new LayerNorm<float>(4);
+        ln.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f]),
+            requiresGrad: true);
+        input.Reshape(2, 4);
+
+        var output = ln.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[8]),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 4);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(8));
+        Assert.That(ln.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(ln.Weight!.Tensor.Grad!.Length, Is.EqualTo(4));
+        Assert.That(ln.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(ln.Bias!.Tensor.Grad!.Length, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void LayerNorm_AffineFalse_NoScaleShift()
+    {
+        using var ln = new LayerNorm<float>(4, affine: false);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f]),
+            requiresGrad: false);
+        input.Reshape(1, 4);
+
+        var output = ln.Forward(input);
+
+        Assert.That(ln.Weight, Is.Null);
+        Assert.That(ln.Bias, Is.Null);
+        Assert.That(output.Length, Is.EqualTo(4));
+    }
+
+    [Test]
+    public void LayerNorm_NormalizedOutput()
+    {
+        using var ln = new LayerNorm<float>(4, affine: false);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f]),
+            requiresGrad: false);
+        input.Reshape(1, 4);
+
+        var output = ln.Forward(input);
+
+        double sum = 0;
+        for (int i = 0; i < 4; i++)
+            sum += output[i];
+        Assert.That(sum, Is.EqualTo(0f).Within(1e-5f));
+
+        double sumSq = 0;
+        for (int i = 0; i < 4; i++)
+            sumSq += output[i] * output[i];
+        double variance = sumSq / 4.0;
+        Assert.That(variance, Is.EqualTo(1f).Within(1e-4f));
+    }
+
+    [Test]
+    public void LayerNorm_Dispose_DisposesParameters()
+    {
+        var ln = new LayerNorm<float>(8);
+        var weight = ln.Weight;
+        var bias = ln.Bias;
+
+        ln.Dispose();
+
+        Assert.That(weight, Is.Not.Null);
+        Assert.That(bias, Is.Not.Null);
+    }
+
+    [Test]
+    public void Conv2d_Grouped_Forward_ShapeCorrect()
+    {
+        using var conv = new Conv2d<float>(8, 8, kernelSize: 3, padding: 1, groups: 2);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 8 * 4 * 4]),
+            requiresGrad: false);
+        input.Reshape(1, 8, 4, 4);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 8, 4, 4 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void Conv2d_Grouped_MultiBatch_ForwardCorrect()
+    {
+        using var conv = new Conv2d<float>(6, 6, kernelSize: 3, padding: 1, groups: 3);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 6 * 5 * 5]),
+            requiresGrad: false);
+        input.Reshape(2, 6, 5, 5);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 6, 5, 5 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void Conv2d_Grouped_IdentityGroupsMatchesUngrouped()
+    {
+        var rng = new Random(42);
+        float[] weightData = new float[4 * 4 * 3 * 3];
+        for (int i = 0; i < weightData.Length; i++)
+            weightData[i] = (float)(rng.NextDouble() * 2 - 1) * 0.1f;
+
+        using var convGrouped = new Conv2d<float>(4, 4, kernelSize: 3, padding: 1, groups: 1);
+
+        float[] inputData = new float[1 * 4 * 5 * 5];
+        for (int i = 0; i < inputData.Length; i++)
+            inputData[i] = (float)(rng.NextDouble() * 2 - 1);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(inputData), requiresGrad: false);
+        input.Reshape(1, 4, 5, 5);
+
+        var output = convGrouped.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 4, 5, 5 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void Conv2d_Grouped_Backward_GradientCorrect()
+    {
+        using var conv = new Conv2d<float>(4, 4, kernelSize: 3, padding: 1, groups: 2);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 4 * 4 * 4].Select(_ => 0.1f).ToArray()),
+            requiresGrad: true);
+        input.Reshape(1, 4, 4, 4);
+
+        var output = conv.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Repeat(1f, output.Length).ToArray()),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < input.Grad!.Length; i++)
+        {
+            Assert.That(float.IsNaN(input.Grad[i]), Is.False);
+            Assert.That(float.IsInfinity(input.Grad[i]), Is.False);
+        }
+
+        foreach (var p in conv.Parameters())
+        {
+            Assert.That(p.Value.Grad, Is.Not.Null);
+            for (int i = 0; i < p.Value.Grad!.Length; i++)
+            {
+                Assert.That(float.IsNaN(p.Value.Grad[i]), Is.False);
+                Assert.That(float.IsInfinity(p.Value.Grad[i]), Is.False);
+            }
+        }
+    }
+
+    [Test]
+    public void Conv2d_Grouped_InvalidGroups_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new Conv2d<float>(4, 4, 3, groups: 3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Conv2d<float>(4, 4, 3, groups: 0));
+    }
+
+    [Test]
+    public void Conv2d_DeepGrouped_Forward_ShapeCorrect()
+    {
+        using var conv = new Conv2d<float>(32, 64, kernelSize: 3, padding: 1, groups: 8);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 32 * 8 * 8]),
+            requiresGrad: false);
+        input.Reshape(2, 32, 8, 8);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 64, 8, 8 }));
+        for (int i = 0; i < Math.Min(100, output.Length); i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
 }
