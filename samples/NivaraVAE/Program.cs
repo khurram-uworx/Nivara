@@ -217,10 +217,16 @@ static void Evaluate(VaeModel<float> model, PatternDataset dataset, Options opts
     int testSize = Math.Max(1, (int)(dataset.Count * 0.2));
     var bceLoss = new BCEWithLogitsLoss<float>();
 
+    var rng = new Random(opts.Seed);
+    var indices = new int[dataset.Count];
+    for (int i = 0; i < dataset.Count; i++)
+        indices[i] = i;
+    Shuffle(indices, rng);
+
     double totalLoss = 0;
     for (int i = 0; i < testSize; i++)
     {
-        var pattern = dataset.GetPattern(i);
+        var pattern = dataset.GetPattern(indices[i]);
         var input = ReverseGradTensor<float>.FromMatrix(pattern, 1, numPixels, requiresGrad: false);
 
         var (mu, logVar) = model.Encode(input);
@@ -231,6 +237,7 @@ static void Evaluate(VaeModel<float> model, PatternDataset dataset, Options opts
         totalLoss += bce[0];
     }
 
+    model.Train();
     Console.WriteLine($"\n--- Evaluation ({testSize} samples) ---");
     Console.WriteLine($"  Mean BCE loss: {totalLoss / testSize:F4}");
 }
