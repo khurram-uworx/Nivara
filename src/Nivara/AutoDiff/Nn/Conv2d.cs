@@ -9,6 +9,8 @@ namespace Nivara.AutoDiff.Nn;
 
 public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
 {
+    const int TargetL1Bytes = 32 * 1024;
+
     readonly int _inChannels;
     readonly int _outChannels;
     readonly int _kernelSize;
@@ -89,22 +91,25 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         int patchSize = c * kW * kW;
         int totalPatches = n * oH * oW;
 
-        var inputData = new T[n * c * h * w];
-        input.Data.CopyTo(inputData, T.Zero);
+        ReadOnlySpan<T> inputSpan = input.Data.TryGetSpan(out var iSpan)
+            ? iSpan
+            : CopyToTemp(input.Data, n * c * h * w);
 
-        var weightData = new T[_outChannels * patchSize];
-        _weight.Tensor.Data.CopyTo(weightData, T.Zero);
+        ReadOnlySpan<T> weightSpan = _weight.Tensor.Data.TryGetSpan(out var wSpan)
+            ? wSpan
+            : CopyToTemp(_weight.Tensor.Data, _outChannels * patchSize);
 
-        T[]? biasData = null;
+        ReadOnlySpan<T> biasSpan = ReadOnlySpan<T>.Empty;
         if (_useBias && _bias != null)
         {
-            biasData = new T[_outChannels];
-            _bias.Tensor.Data.CopyTo(biasData, T.Zero);
+            biasSpan = _bias.Tensor.Data.TryGetSpan(out var bSpan)
+                ? bSpan
+                : CopyToTemp(_bias.Tensor.Data, _outChannels);
         }
 
         var outputData = new T[n * _outChannels * oH * oW];
 
-        ConvForwardKernel(inputData, weightData, biasData, outputData,
+        ConvForwardKernel(inputSpan, weightSpan, biasSpan, outputData,
             n, c, h, w, kW, _stride, _padding, oH, oW, patchSize, totalPatches, _outChannels);
 
         var outShape = new[] { n, _outChannels, oH, oW };
@@ -116,9 +121,9 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
 
         if (shouldTrack)
         {
-            var capturedInputData = inputData;
-            var capturedWeightData = weightData;
-            var capturedBiasData = biasData;
+            var capturedInputData = inputSpan.ToArray();
+            var capturedWeightData = weightSpan.ToArray();
+            var capturedBiasData = biasSpan.Length > 0 ? biasSpan.ToArray() : null;
 
             var gradFn = new OpNode<T>("Conv2d", new object[] { input, _weight.Tensor }, (gradOutput, sgn) =>
             {
@@ -155,19 +160,26 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         return resultTensor;
     }
 
+    static T[] CopyToTemp(NivaraColumn<T> column, int length)
+    {
+        var arr = new T[length];
+        column.CopyTo(arr, T.Zero);
+        return arr;
+    }
+
     static int ComputeTileCapacity(int patchSize)
     {
         int bytesPerElement = Unsafe.SizeOf<T>();
-        int targetBytes = 32 * 1024;
-        return Math.Max(1, targetBytes / (patchSize * bytesPerElement));
+        return Math.Max(1, TargetL1Bytes / (patchSize * bytesPerElement));
     }
 
     static void ConvForwardKernel(
-        T[] inputData, T[] weightData, T[]? biasData, T[] outputData,
+        ReadOnlySpan<T> inputData, ReadOnlySpan<T> weightSpan, ReadOnlySpan<T> biasSpan, T[] outputData,
         int n, int c, int h, int w, int kW, int stride, int padding,
         int oH, int oW, int patchSize, int totalPatches, int outChannels)
     {
         int tileSize = Math.Min(ComputeTileCapacity(patchSize), totalPatches);
+        int positionsPerBatch = oH * oW;
 
         var scratchBuf = ArrayPool<T>.Shared.Rent(tileSize * patchSize);
         try
@@ -183,22 +195,23 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                 for (int t = 0; t < tileLen; t++)
                 {
                     int globalIdx = tileStart + t;
-                    int batch = globalIdx / (oH * oW);
-                    int spatialIdx = globalIdx % (oH * oW);
+                    int batch = globalIdx / positionsPerBatch;
+                    int spatialIdx = globalIdx % positionsPerBatch;
                     int oh = spatialIdx / oW;
                     int ow = spatialIdx % oW;
 
                     var patchSpan = scratch.Slice(t * patchSize, patchSize);
+                    int outBase = (batch * outChannels) * positionsPerBatch + spatialIdx;
 
                     for (int oc = 0; oc < outChannels; oc++)
                     {
-                        var weightSlice = weightData.AsSpan(oc * patchSize, patchSize);
+                        var weightSlice = weightSpan.Slice(oc * patchSize, patchSize);
                         T dot = TensorPrimitives.Dot(patchSpan, weightSlice);
 
-                        if (biasData != null)
-                            dot += biasData[oc];
+                        if (biasSpan.Length > 0)
+                            dot += biasSpan[oc];
 
-                        outputData[((batch * outChannels + oc) * oH + oh) * oW + ow] = dot;
+                        outputData[outBase + oc * positionsPerBatch] = dot;
                     }
                 }
             }
@@ -210,11 +223,12 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     }
 
     static void ConvWeightGradKernel(
-        T[] inputData, T[] gradOutData, T[] weightGrad,
+        ReadOnlySpan<T> inputData, T[] gradOutData, T[] weightGrad,
         int n, int c, int h, int w, int oH, int oW,
         int kW, int stride, int padding, int outChannels, int patchSize, int totalPatches)
     {
         int tileSize = Math.Min(ComputeTileCapacity(patchSize), totalPatches);
+        int positionsPerBatch = oH * oW;
 
         var scratchBuf = ArrayPool<T>.Shared.Rent(tileSize * patchSize);
         try
@@ -230,14 +244,15 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                 for (int t = 0; t < tileLen; t++)
                 {
                     int globalIdx = tileStart + t;
-                    int batch = globalIdx / (oH * oW);
-                    int spatialIdx = globalIdx % (oH * oW);
+                    int batch = globalIdx / positionsPerBatch;
+                    int spatialIdx = globalIdx % positionsPerBatch;
 
                     var patchSpan = scratch.Slice(t * patchSize, patchSize);
+                    int gradBase = (batch * outChannels) * positionsPerBatch + spatialIdx;
 
                     for (int oc = 0; oc < outChannels; oc++)
                     {
-                        T g = gradOutData[((batch * outChannels + oc) * oH) * oW + spatialIdx];
+                        T g = gradOutData[gradBase + oc * positionsPerBatch];
                         if (g == T.Zero) continue;
 
                         var wSlice = weightGrad.AsSpan(oc * patchSize, patchSize);
@@ -253,6 +268,103 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     }
 
     static void ConvInputGradKernel(
+        T[] gradOutData, T[] weightData, T[] inputGrad,
+        int n, int c, int h, int w, int oH, int oW,
+        int kW, int stride, int padding, int outChannels, int patchSize)
+    {
+        if (kW == 1 && stride == 1 && padding == 0)
+        {
+            ConvInputGrad1x1(gradOutData, weightData, inputGrad, n, c, h, w, oH, oW, outChannels);
+            return;
+        }
+
+        if (kW == 3 && stride == 1 && padding == 1)
+        {
+            ConvInputGrad3x3(gradOutData, weightData, inputGrad, n, c, h, w, oH, oW, outChannels);
+            return;
+        }
+
+        ConvInputGradGeneric(gradOutData, weightData, inputGrad,
+            n, c, h, w, oH, oW, kW, stride, padding, outChannels, patchSize);
+    }
+
+    static void ConvInputGrad1x1(
+        T[] gradOutData, T[] weightData, T[] inputGrad,
+        int n, int c, int h, int w, int oH, int oW, int outChannels)
+    {
+        int spatialIn = h * w;
+        int spatialOut = oH * oW;
+
+        for (int batch = 0; batch < n; batch++)
+        {
+            int inBase = batch * c * spatialIn;
+            int outBase = batch * outChannels * spatialOut;
+
+            for (int oc = 0; oc < outChannels; oc++)
+            {
+                var gradSlice = gradOutData.AsSpan(outBase + oc * spatialOut, spatialOut);
+
+                for (int ic = 0; ic < c; ic++)
+                {
+                    T weightVal = weightData[oc * c + ic];
+                    if (weightVal == T.Zero) continue;
+
+                    var inSlice = inputGrad.AsSpan(inBase + ic * spatialIn, spatialIn);
+                    TensorPrimitives.MultiplyAdd(gradSlice, weightVal, inSlice, inSlice);
+                }
+            }
+        }
+    }
+
+    static void ConvInputGrad3x3(
+        T[] gradOutData, T[] weightData, T[] inputGrad,
+        int n, int c, int h, int w, int oH, int oW, int outChannels)
+    {
+        int patchSize = c * 9;
+
+        for (int batch = 0; batch < n; batch++)
+        {
+            int outBase = batch * outChannels * oH * oW;
+            int inBase = batch * c * h * w;
+
+            for (int oc = 0; oc < outChannels; oc++)
+            {
+                int gradChBase = outBase + oc * oH * oW;
+
+                for (int ic = 0; ic < c; ic++)
+                {
+                    int inputChBase = inBase + ic * h * w;
+                    int weightBase = oc * patchSize + ic * 9;
+
+                    for (int oh = 0; oh < oH; oh++)
+                    {
+                        int baseIH = oh;
+
+                        for (int ow = 0; ow < oW; ow++)
+                        {
+                            T g = gradOutData[gradChBase + oh * oW + ow];
+                            if (g == T.Zero) continue;
+
+                            int iRow0 = inputChBase + baseIH * w + ow;
+                            int wRow0 = weightBase;
+
+                            inputGrad[iRow0]     += g * weightData[wRow0];
+                            inputGrad[iRow0 + 1] += g * weightData[wRow0 + 1];
+                            inputGrad[iRow0 + 2] += g * weightData[wRow0 + 2];
+                            inputGrad[iRow0 + w]     += g * weightData[wRow0 + 3];
+                            inputGrad[iRow0 + w + 1] += g * weightData[wRow0 + 4];
+                            inputGrad[iRow0 + w + 2] += g * weightData[wRow0 + 5];
+                            inputGrad[iRow0 + 2 * w]     += g * weightData[wRow0 + 6];
+                            inputGrad[iRow0 + 2 * w + 1] += g * weightData[wRow0 + 7];
+                            inputGrad[iRow0 + 2 * w + 2] += g * weightData[wRow0 + 8];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    static void ConvInputGradGeneric(
         T[] gradOutData, T[] weightData, T[] inputGrad,
         int n, int c, int h, int w, int oH, int oW,
         int kW, int stride, int padding, int outChannels, int patchSize)
@@ -397,28 +509,31 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
         if (oH <= 0 || oW <= 0)
             throw new ArgumentException($"Output dimensions are non-positive ({oH}x{oW}). Check input size, kernel, stride, and padding.");
 
-        var inputData = new T[n * c * h * w];
-        input.Data.CopyTo(inputData, T.Zero);
+        ReadOnlySpan<T> inputSpan = input.Data.TryGetSpan(out var iSpan)
+            ? iSpan
+            : CopyToTemp(input.Data, n * c * h * w);
 
-        var weightData = new T[c * _outChannels * _kernelSize * _kernelSize];
-        _weight.Tensor.Data.CopyTo(weightData, T.Zero);
+        ReadOnlySpan<T> weightSpan = _weight.Tensor.Data.TryGetSpan(out var wSpan)
+            ? wSpan
+            : CopyToTemp(_weight.Tensor.Data, c * _outChannels * _kernelSize * _kernelSize);
 
-        T[]? biasData = null;
+        ReadOnlySpan<T> biasSpan = ReadOnlySpan<T>.Empty;
         if (_useBias && _bias != null)
         {
-            biasData = new T[_outChannels];
-            _bias.Tensor.Data.CopyTo(biasData, T.Zero);
+            biasSpan = _bias.Tensor.Data.TryGetSpan(out var bSpan)
+                ? bSpan
+                : CopyToTemp(_bias.Tensor.Data, _outChannels);
         }
 
         var outputData = new T[n * _outChannels * oH * oW];
         int kW = _kernelSize;
 
         Im2Col.Col2ImForward(
-            inputData, weightData, outputData,
+            inputSpan, weightSpan, outputData,
             c, _outChannels, h, w, oH, oW,
             kW, _stride, _padding, n);
 
-        if (biasData != null)
+        if (biasSpan.Length > 0)
         {
             int spatialSize = oH * oW;
             for (int batch = 0; batch < n; batch++)
@@ -427,7 +542,7 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
                 for (int oc = 0; oc < _outChannels; oc++)
                 {
                     int rowStart = outBase + oc * spatialSize;
-                    TensorPrimitives.Add(outputData.AsSpan(rowStart, spatialSize), biasData[oc], outputData.AsSpan(rowStart, spatialSize));
+                    TensorPrimitives.Add(outputData.AsSpan(rowStart, spatialSize), biasSpan[oc], outputData.AsSpan(rowStart, spatialSize));
                 }
             }
         }
@@ -441,8 +556,8 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
 
         if (shouldTrack)
         {
-            var capturedInputData = inputData;
-            var capturedWeightData = weightData;
+            var capturedInputData = inputSpan.ToArray();
+            var capturedWeightData = weightSpan.ToArray();
 
             var gradFn = new OpNode<T>("ConvTranspose2d", new object[] { input, _weight.Tensor }, (gradOutput, sgn) =>
             {
@@ -491,5 +606,12 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
         }
 
         return resultTensor;
+    }
+
+    static T[] CopyToTemp(NivaraColumn<T> column, int length)
+    {
+        var arr = new T[length];
+        column.CopyTo(arr, T.Zero);
+        return arr;
     }
 }
