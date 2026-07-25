@@ -294,6 +294,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - ✓ **NivaraFrame RowNorms**: batch `Vector<T>` kernel implemented in `TensorsHelper.RowNorms` — single-pass SIMD square-accumulate per row with `TensorPrimitives.Norm` fallback. ColumnNorms uses per-column `TensorPrimitives.Norm` (no batch needed).
 - **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1216 tests passing.
 - ✓ **AutoDiff P0–P6 complete**: reverse-mode autograd, NN module system, full optimizer family (SGD, Adam, AdamW), training loops, data-parallel training, model serialization — all implemented in core `src/Nivara/AutoDiff/`
+- ✓ **BCEWithLogitsLoss fused backward**: replaced multi-op decomposition (Relu + Abs + SoftPlus) with single `OpNode<T>` computing `sigmoid(x) - z` directly. Fixes subgradient error at x=0 where Relu and Abs both return 0. `reduceToMean` overload added. `LeakyRelu` default slope corrected from 0 to 0.01. ADR-001 null cleanup removed ~200 lines of dead null branches from AccumulateGradient, KL/sample ops, and AdamW.
 
 ---
 

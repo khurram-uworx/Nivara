@@ -116,7 +116,7 @@ Loss Functions (Nn.Functional)
 MSELoss<T>                            ← Σ(pred - target)²
 L1Loss<T>                             ← Σ|pred - target|
 BCELoss<T>                            ← -(y·log(p) + (1-y)·log(1-p))
-BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable)
+BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable); fused backward via single OpNode; reduceToMean overload
 CrossEntropyLoss<T>                   ← Fused log-softmax + NLL
 Softmax<T> / LogSoftmax<T>            ← Dim-aware softmax wrappers
 
@@ -238,7 +238,7 @@ sealed class OpNode<T> where T : struct, INumber<T>
 {
     string OperationName { get; }           // "Add", "MatMul", "Relu", etc.
     IReadOnlyList<object> Inputs { get; }   // parent tensors
-    Action<NivaraColumn<T>> BackwardFunction { get; }
+    Action<NivaraColumn<T>, bool> BackwardFunction { get; }
     bool ShouldSaveForBackward { get; }
     Dictionary<string, object>? SavedValues { get; }
     void Apply(NivaraColumn<T> gradOutput);
@@ -316,7 +316,7 @@ MatMul is implemented in `ReverseGradOperations.MatMul` via `NivaraColumn<T>.Mat
 | Op | Forward | Backward Rule | Vectorization |
 |----|---------|---------------|---------------|
 | `Relu(a)` | `max(a, 0)` | `grad * (1 if a > 0 else 0)` | `TensorPrimitives.Max` for forward; manual loop for grad |
-| `LeakyRelu(a, slope)` | `max(a, 0) + slope * min(a, 0)` | `grad * (1 if a > 0 else slope)` | Manual loop |
+| `LeakyRelu(a, slope)` | `max(a, 0) + slope * min(a, 0)` | `grad * (1 if a > 0 else slope)` | Default slope is 0.01 (not `default(T)` which is 0). Manual loop |
 | `Sigmoid(a)` | `σ(a) = 1/(1+e⁻ᵃ)` | `σ(a) * (1-σ(a)) * grad` | Manual loop via `Math.Exp` |
 | `Tanh(a)` | `tanh(a)` | `(1 - tanh²(a)) * grad` | Manual loop via `Math.Tanh` |
 | `Negate(a)` | `-a` | `-grad` | `TensorPrimitives.Negate` |
@@ -417,11 +417,11 @@ Reverse-mode is the default and is used by all training infrastructure (`Trainin
 
 ## Null Handling
 
-Nivara's explicit null-mask semantics flow through all gradient operations:
+Nivara's explicit null-mask semantics flow through all gradient operations. Per [ADR-001](../adr/001-autodiff-nonnullable-domain.md), AutoDiff is a **non-nullable domain**: null boundary is enforced at domain entry points (`NivaraColumn<T>` → `ReverseGradTensor<T>` conversion). All AutoDiff ops assume non-null data. Null handling branches have been removed from hot paths (`AccumulateGradient`, `BroadcastGradient`, KL/sample ops, `AdamW`) for single-path SIMD execution.
 
 - **Null in input** → propagates to both forward result and gradient masks (mask OR semantics)
-- **Null in gradient** → `AccumulateGradient` skips the position entirely (no zeroing)
-- **Null in SGD** → if parameter is null → stays null; if gradient is null → no update at that position (parameter unchanged)
+- **Null in gradient** → `AccumulateGradient` adds via `TensorPrimitives.Add` (no special null-merge logic)
+- **Null in SGD** → null positions skip update (parameter unchanged)
 - **Null in MatMul** → position-level null: if any contributing element is null, the corresponding output position is null
 - **Null in Adam/AdamW** → null positions skip momentum buffer accumulation; buffers are zeroed for that position
 
@@ -645,7 +645,7 @@ All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Each has a `Forward(
 | `MSELoss<T>` | `Σ(pred - target)²` | Mean Squared Error (sum reduction) |
 | `L1Loss<T>` | `Σ\|pred - target\|` | Mean Absolute Error (sum reduction) |
 | `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability |
-| `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed |
+| `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed. `Forward(logits, targets, reduceToMean)` divides by element count when true. Backward uses fused `sigmoid(x) - z` via custom OpNode (fixes subgradient error at x=0). |
 | `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + one-hot targets |
 | `Softmax<T>` | dim-aware softmax | Wrapper around `ReverseGradOperations.Softmax` |
 | `LogSoftmax<T>` | dim-aware log-softmax | Wrapper around `ReverseGradOperations.LogSoftmax` |

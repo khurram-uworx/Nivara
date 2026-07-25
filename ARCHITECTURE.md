@@ -849,7 +849,9 @@ DataFrame → ReverseGradTensor<T> → Computation Graph (GradNode DAG)
 - **Training** (`Training/`) — `TrainingLoop`, `DataParallelTrainer`
 - **Serialization** (`Serialization/`) — `ModelSerializer` (JSON save/load)
 
-**Null handling:** Gradients inherit Nivara's explicit null-mask semantics — null positions produce zero gradients, and optimizers skip null positions during update.
+**Null handling:** Per [ADR-001](docs/adr/001-autodiff-nonnullable-domain.md), AutoDiff is a non-nullable domain — null boundary enforced at `NivaraColumn<T>` → `ReverseGradTensor<T>` conversion. Null-handling branches have been removed from hot paths (`AccumulateGradient`, `BroadcastGradient`, KL/sample ops, `AdamW`) for single-path SIMD execution via `TensorPrimitives`.
+
+**BCE backward fix:** `BCEWithLogitsLoss` backward was rewritten from a multi-op decomposition (Relu + Abs + SoftPlus) to a single fused `OpNode<T>` computing `sigmoid(x) - z` directly. The original decomposition produced incorrect gradients at x=0 where Relu and Abs subgradients are both 0. Forward values unchanged. `LeakyRelu` default slope corrected from 0 to 0.01.
 
 ---
 

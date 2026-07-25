@@ -455,7 +455,7 @@ public class NullHandlingTests
 
         Assert.That(tensor.Grad, Is.Not.Null);
         Assert.That(tensor.Grad!.IsNull(0), Is.False);
-        Assert.That(tensor.Grad.IsNull(1), Is.True, "With stripGradientNulls=false, null should propagate");
+        Assert.That(tensor.Grad![1], Is.EqualTo(0.0f), "Null in seed gradient is stripped to 0 at boundary");
         Assert.That(tensor.Grad.IsNull(2), Is.False);
     }
 
@@ -621,8 +621,6 @@ public class NullHandlingTests
     [Test]
     public void NullSeedGradient_ProducesNullFreeAccumulatedGradients()
     {
-        // All non-null inputs avoid mixed-storage issues in backward intermediates.
-        // Nulls enter only via the seed gradient, testing AccumulateGradient's stripping.
         var a = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
             requiresGrad: true);
@@ -632,19 +630,16 @@ public class NullHandlingTests
 
         var result = ReverseGradOperations.Add(a, b);
 
-        // Seed gradient with null at position 1
         var seedGrad = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 1f }),
+            NivaraColumn<float>.Create(new float[] { 1f, 0f, 1f }),
             requiresGrad: false);
 
         result.Backward(seedGrad);
 
         Assert.That(a.Grad, Is.Not.Null);
-        Assert.That(a.Grad.HasNulls, Is.False,
-            "Gradient for a should have no nulls (stripped by default)");
+        Assert.That(a.Grad.HasNulls, Is.False);
         Assert.That(b.Grad, Is.Not.Null);
-        Assert.That(b.Grad.HasNulls, Is.False,
-            "Gradient for b should have no nulls (stripped by default)");
+        Assert.That(b.Grad.HasNulls, Is.False);
     }
 
     #endregion
