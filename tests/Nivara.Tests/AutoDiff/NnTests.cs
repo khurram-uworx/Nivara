@@ -2321,4 +2321,97 @@ public class NnTests
         for (int i = 0; i < Math.Min(100, output.Length); i++)
             Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
     }
+
+    [Test]
+    public void MultiheadAttention_ShapeCorrect()
+    {
+        using var mha = new MultiheadAttention<float>(embedDim: 64, numHeads: 8);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[10 * 64]),
+            requiresGrad: false);
+        input.Reshape(10, 64);
+
+        var output = mha.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 10, 64 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void MultiheadAttention_Causal_ShapeCorrect()
+    {
+        using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4, causal: true);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[8 * 32]),
+            requiresGrad: false);
+        input.Reshape(8, 32);
+
+        var output = mha.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 8, 32 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void MultiheadAttention_Backward_GradientFlows()
+    {
+        using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[6 * 32].Select(_ => 0.1f).ToArray()),
+            requiresGrad: true);
+        input.Reshape(6, 32);
+
+        var output = mha.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Repeat(1f, output.Length).ToArray()),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < input.Grad!.Length; i++)
+        {
+            Assert.That(float.IsNaN(input.Grad[i]), Is.False);
+            Assert.That(float.IsInfinity(input.Grad[i]), Is.False);
+        }
+
+        foreach (var p in mha.Parameters())
+        {
+            Assert.That(p.Value.Grad, Is.Not.Null);
+            for (int i = 0; i < p.Value.Grad!.Length; i++)
+            {
+                Assert.That(float.IsNaN(p.Value.Grad[i]), Is.False);
+                Assert.That(float.IsInfinity(p.Value.Grad[i]), Is.False);
+            }
+        }
+    }
+
+    [Test]
+    public void MultiheadAttention_CrossAttention_ShapeCorrect()
+    {
+        using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        var query = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[5 * 32]),
+            requiresGrad: false);
+        query.Reshape(5, 32);
+        var kv = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[8 * 32]),
+            requiresGrad: false);
+        kv.Reshape(8, 32);
+
+        var output = mha.Forward(query, kv, kv);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 5, 32 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void MultiheadAttention_InvalidEmbedDim_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new MultiheadAttention<float>(embedDim: 33, numHeads: 8));
+    }
 }
