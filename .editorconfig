@@ -97,3 +97,28 @@ csharp_style_conditional_delegate_call = true:suggestion
 
 # Modifier preferences
 csharp_preferred_modifier_order = public,private,protected,internal,static,extern,new,virtual,abstract,sealed,override,readonly,unsafe,volatile,async:suggestion
+
+# Naming rules - Private fields should be camelCase without underscore prefix
+dotnet_naming_rule.private_fields_should_be_camel_case.severity = suggestion
+dotnet_naming_rule.private_fields_should_be_camel_case.symbols = private_fields
+dotnet_naming_rule.private_fields_should_be_camel_case.style = camel_case_underscore_style
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+
+dotnet_naming_style.camel_case_underscore_style.required_prefix =
+dotnet_naming_style.camel_case_underscore_style.capitalization = camel_case
+
+# Brace preferences - omit braces from single-line if/else bodies
+csharp_prefer_braces = false:suggestion
+
+# Nullable reference types - enable warnings
+dotnet_diagnostic.CS8600.severity = warning  # Converting null literal or possible null value to non-nullable type
+dotnet_diagnostic.CS8601.severity = warning  # Possible null reference assignment
+dotnet_diagnostic.CS8602.severity = warning  # Dereference of a possibly null reference
+dotnet_diagnostic.CS8603.severity = warning  # Possible null reference return
+dotnet_diagnostic.CS8604.severity = warning  # Possible null reference argument
+
+# Remove unused parameters and private members
+dotnet_diagnostic.IDE0060.severity = suggestion  # Remove unused parameters
+dotnet_diagnostic.IDE0051.severity = suggestion  # Remove unused private member
