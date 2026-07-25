@@ -183,19 +183,9 @@ MultiheadAttention<T> : Module<T>
 - **ConvTranspose2d**: No grouped convolution support yet (Conv2d has it).
 - **ConvInputGrad1x1**: No bounds checking (safe when output spatial ≤ input spatial, which holds for stride=1 padding=0). If non-standard padding is needed, falls back to generic path.
 
-## Completed Features
-
-| Feature | Status | Tests | Files |
-|---------|--------|-------|-------|
-| LayerNorm | Complete | 6 | `LayerNorm.cs`, `LayerNormKernel.cs` |
-| Grouped Conv2d | Complete | 6 | `Conv2d.cs` (groups param, gather/scatter) |
-| Standalone MultiheadAttention | Complete | 5 | `MultiheadAttention.cs` |
-| ConvInputGrad3x3 bounds fix | Complete | existing | `Conv2d.cs` (proper bounds checks) |
-
 ## Deferred Features
 
 | Feature | Depends On | Notes |
 |---------|-----------|-------|
 | ConvVAE | Conv2d + VAE | Trivial composition once above exist |
-| Residual wrapper | None | `Sequential` + manual add already works |
 | Depthwise separable conv | Grouped Conv2d (done) | Depthwise = groups=inChannels; pointwise = 1×1 conv |
