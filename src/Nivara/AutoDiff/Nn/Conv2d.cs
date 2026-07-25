@@ -178,6 +178,12 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         int n, int c, int h, int w, int kW, int stride, int padding,
         int oH, int oW, int patchSize, int totalPatches, int outChannels)
     {
+        if (kW == 1 && stride == 1 && padding == 0)
+        {
+            ConvForward1x1(inputData, weightSpan, biasSpan, outputData, n, c, h, w, oH, oW, outChannels);
+            return;
+        }
+
         int tileSize = Math.Min(ComputeTileCapacity(patchSize), totalPatches);
         int positionsPerBatch = oH * oW;
 
@@ -189,19 +195,15 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
             for (int tileStart = 0; tileStart < totalPatches; tileStart += tileSize)
             {
                 int tileLen = Math.Min(tileSize, totalPatches - tileStart);
+                var locs = Im2Col.BuildPatchLocations(positionsPerBatch, oW, tileStart, tileLen);
 
-                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, padding, padding, oH, oW, tileStart, tileLen, n);
+                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, padding, padding, oH, oW, tileStart, tileLen, locs);
 
                 for (int t = 0; t < tileLen; t++)
                 {
-                    int globalIdx = tileStart + t;
-                    int batch = globalIdx / positionsPerBatch;
-                    int spatialIdx = globalIdx % positionsPerBatch;
-                    int oh = spatialIdx / oW;
-                    int ow = spatialIdx % oW;
-
+                    var loc = locs[t];
                     var patchSpan = scratch.Slice(t * patchSize, patchSize);
-                    int outBase = (batch * outChannels) * positionsPerBatch + spatialIdx;
+                    int outBase = (loc.Batch * outChannels) * positionsPerBatch + loc.OH * oW + loc.OW;
 
                     for (int oc = 0; oc < outChannels; oc++)
                     {
@@ -222,6 +224,53 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         }
     }
 
+    static void ConvForward1x1(
+        ReadOnlySpan<T> inputData, ReadOnlySpan<T> weightSpan, ReadOnlySpan<T> biasSpan, T[] outputData,
+        int n, int c, int h, int w, int oH, int oW, int outChannels)
+    {
+        int spatialIn = h * w;
+        int spatialOut = oH * oW;
+        int patchSize = c;
+
+        var patchBuf = ArrayPool<T>.Shared.Rent(patchSize);
+        try
+        {
+            var patch = patchBuf.AsSpan(0, patchSize);
+
+            for (int batch = 0; batch < n; batch++)
+            {
+                int inBase = batch * c * spatialIn;
+                int outBase = batch * outChannels * spatialOut;
+
+                for (int oh = 0; oh < oH; oh++)
+                {
+                    int inRowBase = inBase + oh * w;
+                    int outRowBase = outBase + oh * oW;
+
+                    for (int ow = 0; ow < oW; ow++)
+                    {
+                        int inPixel = inRowBase + ow;
+                        int outPos = outRowBase + ow;
+
+                        for (int ic = 0; ic < c; ic++)
+                            patch[ic] = inputData[inPixel + ic * spatialIn];
+
+                        for (int oc = 0; oc < outChannels; oc++)
+                        {
+                            T dot = TensorPrimitives.Dot(patch, weightSpan.Slice(oc * c, c));
+                            if (biasSpan.Length > 0) dot += biasSpan[oc];
+                            outputData[outPos + oc * spatialOut] = dot;
+                        }
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(patchBuf, clearArray: true);
+        }
+    }
+
     static void ConvWeightGradKernel(
         ReadOnlySpan<T> inputData, T[] gradOutData, T[] weightGrad,
         int n, int c, int h, int w, int oH, int oW,
@@ -238,17 +287,15 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
             for (int tileStart = 0; tileStart < totalPatches; tileStart += tileSize)
             {
                 int tileLen = Math.Min(tileSize, totalPatches - tileStart);
+                var locs = Im2Col.BuildPatchLocations(positionsPerBatch, oW, tileStart, tileLen);
 
-                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, padding, padding, oH, oW, tileStart, tileLen, n);
+                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, padding, padding, oH, oW, tileStart, tileLen, locs);
 
                 for (int t = 0; t < tileLen; t++)
                 {
-                    int globalIdx = tileStart + t;
-                    int batch = globalIdx / positionsPerBatch;
-                    int spatialIdx = globalIdx % positionsPerBatch;
-
+                    var loc = locs[t];
                     var patchSpan = scratch.Slice(t * patchSize, patchSize);
-                    int gradBase = (batch * outChannels) * positionsPerBatch + spatialIdx;
+                    int gradBase = (loc.Batch * outChannels) * positionsPerBatch + loc.OH * oW + loc.OW;
 
                     for (int oc = 0; oc < outChannels; oc++)
                     {

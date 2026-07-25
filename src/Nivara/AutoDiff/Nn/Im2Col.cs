@@ -11,6 +11,33 @@ namespace Nivara.AutoDiff.Nn;
 /// </summary>
 internal static class Im2Col
 {
+    internal readonly struct PatchLocation
+    {
+        public readonly int Batch;
+        public readonly int OH;
+        public readonly int OW;
+
+        public PatchLocation(int batch, int oh, int ow)
+        {
+            Batch = batch;
+            OH = oh;
+            OW = ow;
+        }
+    }
+
+    internal static PatchLocation[] BuildPatchLocations(int positionsPerBatch, int outW, int tileStart, int tileLen)
+    {
+        var locs = new PatchLocation[tileLen];
+        for (int t = 0; t < tileLen; t++)
+        {
+            int globalIdx = tileStart + t;
+            int batch = globalIdx / positionsPerBatch;
+            int spatial = globalIdx % positionsPerBatch;
+            locs[t] = new PatchLocation(batch, spatial / outW, spatial % outW);
+        }
+        return locs;
+    }
+
     /// <summary>
     /// Dispatches to the optimal Im2Col kernel based on kernel size.
     /// Builds patches for output positions [tileStart, tileStart+tileLen) only.
@@ -26,21 +53,21 @@ internal static class Im2Col
         int padH, int padW,
         int outH, int outW,
         int tileStart, int tileLen,
-        int batchCount) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, INumber<T>
     {
         if (kernelH == 1 && kernelW == 1 && strideH == 1 && strideW == 1 && padH == 0 && padW == 0)
         {
-            Im2ColTile1x1(input, output, channels, height, width, outH, outW, tileStart, tileLen, batchCount);
+            Im2ColTile1x1(input, output, channels, height, width, outH, outW, tileStart, tileLen, locs);
             return;
         }
 
         if (kernelH == 3 && kernelW == 3)
         {
-            Im2ColTile3x3(input, output, channels, height, width, strideH, strideW, padH, padW, outH, outW, tileStart, tileLen, batchCount);
+            Im2ColTile3x3(input, output, channels, height, width, strideH, strideW, padH, padW, outH, outW, tileStart, tileLen, locs);
             return;
         }
 
-        Im2ColTileGeneric(input, output, channels, height, width, kernelH, kernelW, strideH, strideW, padH, padW, outH, outW, tileStart, tileLen, batchCount);
+        Im2ColTileGeneric(input, output, channels, height, width, kernelH, kernelW, strideH, strideW, padH, padW, outH, outW, tileStart, tileLen, locs);
     }
 
     /// <summary>
@@ -58,7 +85,9 @@ internal static class Im2Col
         int batchCount) where T : struct, INumber<T>
     {
         int totalPatches = batchCount * outH * outW;
-        Im2ColTile(input, output, channels, height, width, kernelH, kernelW, strideH, strideW, padH, padW, outH, outW, 0, totalPatches, batchCount);
+        int positionsPerBatch = outH * outW;
+        var locs = BuildPatchLocations(positionsPerBatch, outW, 0, totalPatches);
+        Im2ColTile(input, output, channels, height, width, kernelH, kernelW, strideH, strideW, padH, padW, outH, outW, 0, totalPatches, locs);
     }
 
     public static void Im2ColTileGeneric<T>(
@@ -69,22 +98,16 @@ internal static class Im2Col
         int padH, int padW,
         int outH, int outW,
         int tileStart, int tileLen,
-        int batchCount) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, INumber<T>
     {
         int patchSize = channels * kernelH * kernelW;
-        int positionsPerBatch = outH * outW;
 
         for (int t = 0; t < tileLen; t++)
         {
-            int globalIdx = tileStart + t;
-            int batch = globalIdx / positionsPerBatch;
-            int spatialIdx = globalIdx % positionsPerBatch;
-            int oh = spatialIdx / outW;
-            int ow = spatialIdx % outW;
-
-            int inBase = batch * channels * height * width;
-            int baseH = oh * strideH - padH;
-            int baseW = ow * strideW - padW;
+            var loc = locs[t];
+            int inBase = loc.Batch * channels * height * width;
+            int baseH = loc.OH * strideH - padH;
+            int baseW = loc.OW * strideW - padW;
             int outRow = t * patchSize;
 
             CopyPatch(input, output, inBase, outRow, channels, height, width, kernelH, kernelW, baseH, baseW);
@@ -96,20 +119,13 @@ internal static class Im2Col
         int channels, int height, int width,
         int outH, int outW,
         int tileStart, int tileLen,
-        int batchCount) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, INumber<T>
     {
-        int positionsPerBatch = outH * outW;
-
         for (int t = 0; t < tileLen; t++)
         {
-            int globalIdx = tileStart + t;
-            int batch = globalIdx / positionsPerBatch;
-            int spatialIdx = globalIdx % positionsPerBatch;
-            int oh = spatialIdx / outW;
-            int ow = spatialIdx % outW;
-
-            int inBase = batch * channels * height * width;
-            int srcPixel = inBase + oh * width + ow;
+            var loc = locs[t];
+            int inBase = loc.Batch * channels * height * width;
+            int srcPixel = inBase + loc.OH * width + loc.OW;
             int dstIdx = t * channels;
 
             for (int ic = 0; ic < channels; ic++)
@@ -124,10 +140,9 @@ internal static class Im2Col
         int padH, int padW,
         int outH, int outW,
         int tileStart, int tileLen,
-        int batchCount) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, INumber<T>
     {
         int patchSize = channels * 9;
-        int positionsPerBatch = outH * outW;
 
         int interiorStartH = (padH + strideH - 1) / strideH;
         int interiorEndH = Math.Min(outH, (height - 3 + padH) / strideH + 1);
@@ -136,19 +151,14 @@ internal static class Im2Col
 
         for (int t = 0; t < tileLen; t++)
         {
-            int globalIdx = tileStart + t;
-            int batch = globalIdx / positionsPerBatch;
-            int spatialIdx = globalIdx % positionsPerBatch;
-            int oh = spatialIdx / outW;
-            int ow = spatialIdx % outW;
-
-            int inBase = batch * channels * height * width;
-            int baseH = oh * strideH - padH;
-            int baseW = ow * strideW - padW;
+            var loc = locs[t];
+            int inBase = loc.Batch * channels * height * width;
+            int baseH = loc.OH * strideH - padH;
+            int baseW = loc.OW * strideW - padW;
             int outRow = t * patchSize;
 
-            bool interior = oh >= interiorStartH && oh < interiorEndH
-                         && ow >= interiorStartW && ow < interiorEndW;
+            bool interior = loc.OH >= interiorStartH && loc.OH < interiorEndH
+                         && loc.OW >= interiorStartW && loc.OW < interiorEndW;
 
             if (interior)
                 CopyPatch3x3Interior(input, output, inBase, outRow, channels, height, width, baseH, baseW);
