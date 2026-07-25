@@ -91,7 +91,7 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
 
     public IReadOnlyList<Module<T>> NamedModules() => modules.AsReadOnly();
 
-    public Dictionary<string, ReverseGradTensor<T>> StateDict()
+    public virtual Dictionary<string, ReverseGradTensor<T>> StateDict()
     {
         var state = new Dictionary<string, ReverseGradTensor<T>>();
 
@@ -101,7 +101,7 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
         return state;
     }
 
-    public void LoadStateDict(
+    public virtual void LoadStateDict(
         IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict,
         bool strict = false)
     {

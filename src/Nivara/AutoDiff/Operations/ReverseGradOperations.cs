@@ -2257,6 +2257,128 @@ public static class ReverseGradOperations
         }
     }
 
+    public static ReverseGradTensor<T> BroadcastMultiply<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> scale) where T : struct, INumber<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (scale == null) throw new ArgumentNullException(nameof(scale));
+        if (input.Rank < 2) throw new ArgumentException($"Input must be at least 2D [batch, channels, ...], got {input.Rank}D");
+        if (scale.Rank != 1) throw new ArgumentException($"Scale must be 1D [channels], got {scale.Rank}D");
+
+        int c = input.shape[1];
+        if (scale.Length != c)
+            throw new ArgumentException($"Scale length ({scale.Length}) must match input channel dimension ({c})");
+
+        var inputData = new T[input.Length];
+        input.Data.CopyTo(inputData, T.Zero);
+        var scaleData = new T[c];
+        scale.Data.CopyTo(scaleData, T.Zero);
+
+        int channelStride = 1;
+        for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
+
+        var outputData = new T[input.Length];
+        for (int idx = 0; idx < input.Length; idx++)
+        {
+            int ch = (idx / channelStride) % c;
+            outputData[idx] = inputData[idx] * scaleData[ch];
+        }
+
+        var result = NivaraColumn<T>.Create(outputData);
+        var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(input, scale), input.shape);
+
+        if (GradientUtils.ShouldTrackGrad(input, scale))
+        {
+            var gradFn = new OpNode<T>("BroadcastMultiply", new object[] { input, scale }, (typedGradOutput, sgn) =>
+            {
+                var gradData = new T[input.Length];
+                typedGradOutput.CopyTo(gradData, T.Zero);
+
+                if (GradientUtils.ShouldTrackGrad(input))
+                {
+                    var inputGrad = new T[input.Length];
+                    for (int idx = 0; idx < input.Length; idx++)
+                    {
+                        int ch = (idx / channelStride) % c;
+                        inputGrad[idx] = gradData[idx] * scaleData[ch];
+                    }
+                    AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad), sgn);
+                }
+                if (scale.RequiresGrad)
+                {
+                    var scaleGrad = new T[c];
+                    for (int idx = 0; idx < input.Length; idx++)
+                    {
+                        int ch = (idx / channelStride) % c;
+                        scaleGrad[ch] += gradData[idx] * inputData[idx];
+                    }
+                    AccumulateGradient(scale, NivaraColumn<T>.Create(scaleGrad), sgn);
+                }
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    public static ReverseGradTensor<T> BroadcastAdd<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> bias) where T : struct, INumber<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (bias == null) throw new ArgumentNullException(nameof(bias));
+        if (input.Rank < 2) throw new ArgumentException($"Input must be at least 2D [batch, channels, ...], got {input.Rank}D");
+        if (bias.Rank != 1) throw new ArgumentException($"Bias must be 1D [channels], got {bias.Rank}D");
+
+        int c = input.shape[1];
+        if (bias.Length != c)
+            throw new ArgumentException($"Bias length ({bias.Length}) must match input channel dimension ({c})");
+
+        var inputData = new T[input.Length];
+        input.Data.CopyTo(inputData, T.Zero);
+        var biasData = new T[c];
+        bias.Data.CopyTo(biasData, T.Zero);
+
+        int channelStride = 1;
+        for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
+
+        var outputData = new T[input.Length];
+        for (int idx = 0; idx < input.Length; idx++)
+        {
+            int ch = (idx / channelStride) % c;
+            outputData[idx] = inputData[idx] + biasData[ch];
+        }
+
+        var result = NivaraColumn<T>.Create(outputData);
+        var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(input, bias), input.shape);
+
+        if (GradientUtils.ShouldTrackGrad(input, bias))
+        {
+            var gradFn = new OpNode<T>("BroadcastAdd", new object[] { input, bias }, (typedGradOutput, sgn) =>
+            {
+                var gradData = new T[input.Length];
+                typedGradOutput.CopyTo(gradData, T.Zero);
+
+                if (GradientUtils.ShouldTrackGrad(input))
+                {
+                    AccumulateGradient(input, typedGradOutput, sgn);
+                }
+                if (bias.RequiresGrad)
+                {
+                    var biasGrad = new T[c];
+                    for (int idx = 0; idx < input.Length; idx++)
+                    {
+                        int ch = (idx / channelStride) % c;
+                        biasGrad[ch] += gradData[idx];
+                    }
+                    AccumulateGradient(bias, NivaraColumn<T>.Create(biasGrad), sgn);
+                }
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
     private static int[] PropagateShape<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
     {
         return a.shape;
