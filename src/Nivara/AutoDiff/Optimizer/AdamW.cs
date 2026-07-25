@@ -1,4 +1,3 @@
-using Nivara.Helpers;
 using System.Buffers;
 using System.Numerics;
 
@@ -38,80 +37,28 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
         var beta2T = T.CreateChecked(beta2);
         var epsT = T.CreateChecked(eps);
 
-        if (!data.HasNulls && !grad.HasNulls)
+        data.TryGetSpan(out var dataSpan);
+        grad.TryGetSpan(out var gradSpan);
+
+        for (int i = 0; i < n; i++)
         {
-            data.TryGetSpan(out var dataSpan);
-            grad.TryGetSpan(out var gradSpan);
-
-            for (int i = 0; i < n; i++)
-            {
-                expAvg[i] = beta1T * expAvg[i] + (T.One - beta1T) * gradSpan[i];
-                expAvgSq[i] = beta2T * expAvgSq[i] + (T.One - beta2T) * gradSpan[i] * gradSpan[i];
-            }
-
-            for (int i = 0; i < n; i++)
-            {
-                var mHat = expAvg[i] / biasCorr1;
-                var vHat = expAvgSq[i] / biasCorr2;
-                var denom = T.CreateChecked(Math.Sqrt(double.CreateChecked(vHat))) + epsT;
-
-                resultBuf[i] = dataSpan[i] - lr * mHat / denom;
-
-                if (wd != T.Zero)
-                    resultBuf[i] -= lr * wd * dataSpan[i];
-            }
-
-            return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf.AsSpan(0, n)), requiresGrad: true, tensor.shape);
+            expAvg[i] = beta1T * expAvg[i] + (T.One - beta1T) * gradSpan[i];
+            expAvgSq[i] = beta2T * expAvgSq[i] + (T.One - beta2T) * gradSpan[i] * gradSpan[i];
         }
 
-        var dataBuf = ArrayPool<T>.Shared.Rent(n);
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var pooledResult = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-
-        try
+        for (int i = 0; i < n; i++)
         {
-            data.CopyTo(dataBuf.AsSpan(0, n), T.Zero);
-            grad.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            var hasNulls = NivaraColumnUtility.MergeNullMasks(data, grad, nullMask.AsSpan(0, n));
+            var mHat = expAvg[i] / biasCorr1;
+            var vHat = expAvgSq[i] / biasCorr2;
+            var denom = T.CreateChecked(Math.Sqrt(double.CreateChecked(vHat))) + epsT;
 
-            for (int i = 0; i < n; i++)
-            {
-                if (nullMask[i])
-                {
-                    expAvg[i] = T.Zero;
-                    expAvgSq[i] = T.Zero;
-                    pooledResult[i] = dataBuf[i];
-                }
-                else
-                {
-                    expAvg[i] = beta1T * expAvg[i] + (T.One - beta1T) * gradBuf[i];
-                    expAvgSq[i] = beta2T * expAvgSq[i] + (T.One - beta2T) * gradBuf[i] * gradBuf[i];
+            resultBuf[i] = dataSpan[i] - lr * mHat / denom;
 
-                    var mHat = expAvg[i] / biasCorr1;
-                    var vHat = expAvgSq[i] / biasCorr2;
-                    var denom = T.CreateChecked(Math.Sqrt(double.CreateChecked(vHat))) + epsT;
-
-                    pooledResult[i] = dataBuf[i] - lr * mHat / denom;
-
-                    if (wd != T.Zero)
-                        pooledResult[i] -= lr * wd * dataBuf[i];
-                }
-            }
-
-            var resultColumn = hasNulls
-                ? NivaraColumn<T>.CreateFromSpans(pooledResult.AsSpan(0, n), nullMask.AsSpan(0, n))
-                : NivaraColumn<T>.Create(pooledResult.AsSpan(0, n));
-
-            return new ReverseGradTensor<T>(resultColumn, requiresGrad: true, tensor.shape);
+            if (wd != T.Zero)
+                resultBuf[i] -= lr * wd * dataSpan[i];
         }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(dataBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(pooledResult, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-        }
+
+        return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf.AsSpan(0, n)), requiresGrad: true, tensor.shape);
     }
 
     public override void Step()

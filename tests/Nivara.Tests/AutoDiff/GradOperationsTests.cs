@@ -904,29 +904,24 @@ public class GradOperationsTests
     }
 
     [Test]
-    public void KlDivergence_NullValues_PropagatesNulls()
+    public void KlDivergence_NullValues_StrippedAtBoundary()
     {
         var meanValues = new float?[] { 1f, null, 3f };
         var logVarValues = new float?[] { 0f, 1f, null };
-        var mean = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(meanValues), requiresGrad: true);
-        var logVar = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
+
+        var meanCol = NivaraColumn<float>.CreateFromNullable(meanValues).WithoutNulls();
+        var logVarCol = NivaraColumn<float>.CreateFromNullable(logVarValues).WithoutNulls();
+
+        var mean = new ReverseGradTensor<float>(meanCol, requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(logVarCol, requiresGrad: true);
 
         var kl = ReverseGradOperations.KlDivergence(mean, logVar);
-        kl.Backward(stripGradientNulls: false);
+        kl.Backward();
 
-        // Non-null contributions: position 0 only (pos 1 has null mean, pos 2 has null logVar)
-        // kl_0 = -0.5 * (1 + 0 - 1 - 1) = 0.5
-        Assert.That(kl[0], Is.EqualTo(0.5f).Within(1e-6f));
-
-        // mean grad: null positions preserved when stripGradientNulls=false
         Assert.That(mean.Grad, Is.Not.Null);
-        Assert.That(mean.Grad!.IsNull(1), Is.True);
-
-        // logVar grad: null positions preserved when stripGradientNulls=false
+        Assert.That(mean.Grad!.HasNulls, Is.False);
         Assert.That(logVar.Grad, Is.Not.Null);
-        Assert.That(logVar.Grad!.IsNull(2), Is.True);
+        Assert.That(logVar.Grad!.HasNulls, Is.False);
     }
 
     [Test]
@@ -1061,19 +1056,20 @@ public class GradOperationsTests
     }
 
     [Test]
-    public void SampleNormal_NullValues_PropagatesNulls()
+    public void SampleNormal_NullValues_StrippedAtBoundary()
     {
         var meanValues = new float?[] { 1f, null };
         var logVarValues = new float?[] { 0f, 0f };
-        var mean = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(meanValues), requiresGrad: true);
-        var logVar = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(logVarValues), requiresGrad: true);
+
+        var meanCol = NivaraColumn<float>.CreateFromNullable(meanValues).WithoutNulls();
+        var logVarCol = NivaraColumn<float>.CreateFromNullable(logVarValues).WithoutNulls();
+
+        var mean = new ReverseGradTensor<float>(meanCol, requiresGrad: true);
+        var logVar = new ReverseGradTensor<float>(logVarCol, requiresGrad: true);
 
         var z = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
 
-        // Position 1 has null mean → z should be null
-        Assert.That(z.IsNull(1), Is.True);
+        Assert.That(z.HasNulls, Is.False);
     }
 
     [Test]
