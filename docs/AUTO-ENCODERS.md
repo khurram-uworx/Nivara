@@ -1,14 +1,18 @@
 # VAE Foundation — Plan & Progress
 
-## Context: TENSORS.md positioning
+## Context
 
-Nivara is positioned as a **typed, immutable, null-aware DataFrame/query layer for .NET** — not as an AutoDiff framework. The AutoDiff subsystem exists as an internal/experimental component. VAE work extends AutoDiff with two small, well-scoped operations while **avoiding frame-level tensor wrappers** (Dot, CosineSimilarity, etc. remain deprecated candidates).
+Nivara is positioned as a **typed, immutable, null-aware DataFrame/query layer for .NET** — not as an AutoDiff framework. The AutoDiff subsystem exists as an internal component in `src/Nivara/AutoDiff/`. VAE work extends AutoDiff with well-scoped operations while **avoiding frame-level tensor wrappers** (Dot, CosineSimilarity, etc. remain deprecated candidates).
+
+**Key architectural decisions:**
+- AutoDiff stays in core Nivara (not moving to Extensions)
+- AutoDiff is a **non-nullable domain** per ADR-001 — null boundary enforced at `NivaraColumn<T>` → `ReverseGradTensor<T>` conversion; all AutoDiff ops assume non-null data
 
 ## Design decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Placement | `src/Nivara/AutoDiff/` (core) | AutoDiff already lives here; moving it is deferred work |
+| Placement | `src/Nivara/AutoDiff/` (core) | AutoDiff lives here permanently |
 | Encoder API | `VAE<T>` class with `Encode()` → `(Mu, LogVar)` tuple | C# value tuples are idiomatic; PyTorch-aligned pattern; does not fight `Module<T>.Forward` single-output contract |
 | Operation scope | Fused KlDivergence + SampleNormal | Single OpNode each for efficiency; backward closures capture needed intermediates |
 | Training integration | Existing `TrainingLoop<T>` + optimizer | No new training infrastructure needed |
@@ -35,7 +39,7 @@ VAE<T> : Module<T>
 
 ## Known limitations
 
-- **Null propagation through VAE**: `Linear.Forward` cannot mix tensor-backed parameters with nullable column inputs (storage type mismatch). Null inputs to `VAE.Encode()` or `VAE.Forward()` will fail. The individual VAE operations (`KlDivergence`, `SampleNormal`) handle nulls correctly — see their tests in `GradOperationsTests`.
+- **Null propagation through VAE**: `Linear.Forward` cannot mix tensor-backed parameters with nullable column inputs (storage type mismatch). Null inputs to `VAE.Encode()` or `VAE.Forward()` will fail. The individual VAE operations (`KlDivergence`, `SampleNormal`) handle nulls correctly — see their tests in `GradOperationsTests`. Per ADR-001, AutoDiff is non-nullable; this is a storage-layer boundary issue, not an AutoDiff issue.
 - **VAE training loop**: Standard `TrainingLoop<T>` expects a 2-arg loss `(predictions, targets) → scalar`. VAE's `ElboLoss` needs 4 args. VAE training uses manual loops (demonstrated in `VAE_Training_ReducesLoss`).
 
 ### Future (deferred)
@@ -45,4 +49,3 @@ VAE<T> : Module<T>
 | Conditional VAE | Add condition tensor to `Encode(x, condition)` |
 | Conv encoder/decoder | No Conv layers exist yet in Nn |
 | BatchNorm | Separate effort, not VAE-specific |
-| Moving AutoDiff to Extensions | Strategic decision, not tactical |
