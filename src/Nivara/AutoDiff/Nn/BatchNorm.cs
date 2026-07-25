@@ -1,6 +1,7 @@
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
+using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -80,150 +81,141 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
         int c = input.Shape[1];
         if (c != _numFeatures) throw new ArgumentException($"Expected {_numFeatures} channels, got {c}");
 
-        if (IsTraining)
-            return ForwardTrain(input, n, c);
-        else
-            return ForwardEval(input, n, c);
-    }
+        var gamma = _affine && _weight != null
+            ? GetParamSpan(_weight.Tensor)
+            : ReadOnlySpan<T>.Empty;
+        var beta = _affine && _bias != null
+            ? GetParamSpan(_bias.Tensor)
+            : ReadOnlySpan<T>.Empty;
 
-    ReverseGradTensor<T> ForwardTrain(ReverseGradTensor<T> input, int n, int c)
-    {
-        var mean = ComputeMean(input, n, c);
-        var var = ComputeVariance(input, mean, n, c);
+        bool useRunningStats = !IsTraining;
 
-        if (_trackRunningStats && _runningMean != null && _runningVar != null && _numBatchesTracked != null)
-            UpdateRunningStats(mean, var);
-
-        var normalized = Normalize(input, mean, var, n, c);
-        return ApplyAffine(normalized, n, c);
-    }
-
-    ReverseGradTensor<T> ForwardEval(ReverseGradTensor<T> input, int n, int c)
-    {
-        var mean = _runningMean!;
-        var var = _runningVar!;
-        var normalized = Normalize(input, mean, var, n, c);
-        return ApplyAffine(normalized, n, c);
-    }
-
-    ReverseGradTensor<T> ComputeMean(ReverseGradTensor<T> input, int n, int c)
-    {
-        var inputData = new T[n * c];
-        input.Data.CopyTo(inputData, T.Zero);
-
-        var meanData = new T[c];
-        for (int j = 0; j < c; j++)
+        if (useRunningStats)
         {
-            T sum = T.Zero;
-            for (int i = 0; i < n; i++)
-                sum += inputData[i * c + j];
-            meanData[j] = sum / T.CreateChecked(n);
-        }
+            var evalResult = BatchNormKernel<T>.Forward(
+                GetInputSpan(input), n, c, 1,
+                gamma, beta, _eps, _affine);
 
-        var meanTensor = ReverseGradTensor<T>.FromArray(meanData, requiresGrad: false);
-        meanTensor.Reshape(1, c);
-        return meanTensor;
-    }
+            var evalTensor = new ReverseGradTensor<T>(
+                NivaraColumn<T>.Create(evalResult.Output),
+                input.RequiresGrad, input.Shape);
 
-    ReverseGradTensor<T> ComputeVariance(ReverseGradTensor<T> input, ReverseGradTensor<T> mean, int n, int c)
-    {
-        var inputData = new T[n * c];
-        input.Data.CopyTo(inputData, T.Zero);
-        var meanData = new T[c];
-        mean.Data.CopyTo(meanData, T.Zero);
-
-        var varData = new T[c];
-        for (int j = 0; j < c; j++)
-        {
-            T sum = T.Zero;
-            for (int i = 0; i < n; i++)
+            if (input.RequiresGrad)
             {
-                T diff = inputData[i * c + j] - meanData[j];
-                sum += diff * diff;
+                var savedXHat = evalResult.XHat;
+                var savedInvStd = evalResult.InvStd;
+                var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
+                int savedN = n, savedC = c;
+
+                var gradFn = new OpNode<T>("BatchNorm1dEval", new object[] { input }, (typedGradOutput, sgn) =>
+                {
+                    var gradOutData = new T[typedGradOutput.Length];
+                    typedGradOutput.CopyTo(gradOutData, default(T)!);
+
+                    var gradInputData = BatchNormKernel<T>.BackwardInput(
+                        gradOutData, savedXHat, savedGamma, savedInvStd,
+                        savedN, savedC, 1, savedGamma.Length > 0);
+
+                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData), sgn);
+                });
+
+                ComputationGraph.AddNode(evalTensor, gradFn);
             }
-            varData[j] = sum / T.CreateChecked(n);
+
+            return evalTensor;
         }
 
-        var varTensor = ReverseGradTensor<T>.FromArray(varData, requiresGrad: false);
-        varTensor.Reshape(1, c);
-        return varTensor;
+        var inputData = GetInputSpan(input);
+        var result = BatchNormKernel<T>.Forward(inputData, n, c, 1, gamma, beta, _eps, _affine);
+
+        if (_trackRunningStats)
+            UpdateRunningStatsDirect(result.Mean, result.InvStd, n * 1);
+
+        var resultTensor = new ReverseGradTensor<T>(
+            NivaraColumn<T>.Create(result.Output),
+            input.RequiresGrad, input.Shape);
+
+        if (input.RequiresGrad)
+        {
+            var savedXHat = result.XHat;
+            var savedInvStd = result.InvStd;
+            var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
+            bool affine = _affine;
+            int savedN = n, savedC = c;
+
+            var gradFn = new OpNode<T>("BatchNorm1dTrain", new object[] { input }, (typedGradOutput, sgn) =>
+            {
+                var gradOutData = new T[typedGradOutput.Length];
+                typedGradOutput.CopyTo(gradOutData, default(T)!);
+
+                var gradInputData = BatchNormKernel<T>.BackwardInput(
+                    gradOutData, savedXHat, savedGamma, savedInvStd,
+                    savedN, savedC, 1, affine);
+
+                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData), sgn);
+
+                if (affine)
+                {
+                    var gradGammaData = BatchNormKernel<T>.BackwardWeight(
+                        gradOutData, savedXHat, savedN, savedC, 1);
+                    var gradBetaData = BatchNormKernel<T>.BackwardBias(
+                        gradOutData, savedN, savedC, 1);
+
+                    if (_weight != null)
+                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData), sgn);
+                    if (_bias != null)
+                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData), sgn);
+                }
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
     }
 
-    ReverseGradTensor<T> Normalize(ReverseGradTensor<T> input, ReverseGradTensor<T> mean, ReverseGradTensor<T> var, int n, int c)
-    {
-        var meanExpanded = ExpandParam(mean, n, c);
-        var varExpanded = ExpandParam(var, n, c);
-
-        var diff = ReverseGradOperations.Subtract(input, meanExpanded);
-        var epsTensor = GradientUtils.Constant(CreateEpsArray(n * c));
-        var denom = ReverseGradOperations.Add(varExpanded, epsTensor);
-        var std = ReverseGradOperations.Pow(denom, 0.5);
-        var normalized = ReverseGradOperations.Divide(diff, std);
-        return normalized;
-    }
-
-    ReverseGradTensor<T> ApplyAffine(ReverseGradTensor<T> normalized, int n, int c)
-    {
-        if (!_affine || _weight == null || _bias == null)
-            return normalized;
-
-        var scaled = ReverseGradOperations.BroadcastMultiply(normalized, _weight.Tensor);
-        var result = ReverseGradOperations.BroadcastAdd(scaled, _bias.Tensor);
-        return result;
-    }
-
-    ReverseGradTensor<T> ExpandParam(ReverseGradTensor<T> param, int n, int c)
-    {
-        var expanded = new T[n * c];
-        var paramData = new T[c];
-        param.Data.CopyTo(paramData, T.Zero);
-
-        for (int i = 0; i < n; i++)
-            for (int j = 0; j < c; j++)
-                expanded[i * c + j] = paramData[j];
-
-        var expandedTensor = ReverseGradTensor<T>.FromArray(expanded, requiresGrad: false);
-        expandedTensor.Reshape(n, c);
-        return expandedTensor;
-    }
-
-    void UpdateRunningStats(ReverseGradTensor<T> batchMean, ReverseGradTensor<T> batchVar)
+    void UpdateRunningStatsDirect(T[] batchMean, T[] batchInvStd, int channelTotal)
     {
         if (_runningMean == null || _runningVar == null || _numBatchesTracked == null)
             return;
 
+        var rmData = new T[_numFeatures];
+        _runningMean.Data.CopyTo(rmData, T.Zero);
+        var rvData = new T[_numFeatures];
+        _runningVar.Data.CopyTo(rvData, T.Zero);
+
         var momentum = _momentum;
         var oneMinusMomentum = T.One - momentum;
 
-        var omArr = new T[_numFeatures];
-        var mArr = new T[_numFeatures];
         for (int i = 0; i < _numFeatures; i++)
         {
-            omArr[i] = oneMinusMomentum;
-            mArr[i] = momentum;
+            T variance = T.One / (batchInvStd[i] * batchInvStd[i]) - _eps;
+            rmData[i] = rmData[i] * oneMinusMomentum + batchMean[i] * momentum;
+            rvData[i] = rvData[i] * oneMinusMomentum + variance * momentum;
         }
 
-        var newRunningMean = ReverseGradOperations.Add(
-            ReverseGradOperations.Multiply(_runningMean, GradientUtils.Constant(omArr)),
-            ReverseGradOperations.Multiply(batchMean, GradientUtils.Constant(mArr)));
+        _runningMean = ReverseGradTensor<T>.FromArray(rmData, requiresGrad: false);
+        _runningVar = ReverseGradTensor<T>.FromArray(rvData, requiresGrad: false);
 
-        var newRunningVar = ReverseGradOperations.Add(
-            ReverseGradOperations.Multiply(_runningVar, GradientUtils.Constant(omArr)),
-            ReverseGradOperations.Multiply(batchVar, GradientUtils.Constant(mArr)));
-
-        var newCount = ReverseGradOperations.Add(
-            _numBatchesTracked,
-            GradientUtils.Constant(new T[] { T.One }));
-
-        _runningMean = newRunningMean;
-        _runningVar = newRunningVar;
-        _numBatchesTracked = newCount;
+        var count = new T[] { _numBatchesTracked[0] + T.One };
+        _numBatchesTracked = ReverseGradTensor<T>.FromArray(count, requiresGrad: false);
     }
 
-    T[] CreateEpsArray(int len)
+    static ReadOnlySpan<T> GetInputSpan(ReverseGradTensor<T> tensor)
     {
-        var arr = new T[len];
-        for (int i = 0; i < len; i++) arr[i] = _eps;
+        if (tensor.Data.TryGetSpan(out var span))
+            return span;
+        var arr = new T[tensor.Length];
+        tensor.Data.CopyTo(arr, T.Zero);
+        return arr;
+    }
+
+    static ReadOnlySpan<T> GetParamSpan(ReverseGradTensor<T> tensor)
+    {
+        if (tensor.Data.TryGetSpan(out var span))
+            return span;
+        var arr = new T[tensor.Length];
+        tensor.Data.CopyTo(arr, T.Zero);
         return arr;
     }
 
@@ -324,181 +316,109 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
         int n = input.Shape[0];
         int c = input.Shape[1];
         if (c != _numFeatures) throw new ArgumentException($"Expected {_numFeatures} channels, got {c}");
-
         int h = input.Shape[2];
         int w = input.Shape[3];
-
-        if (IsTraining)
-            return ForwardTrain(input, n, c, h, w);
-        else
-            return ForwardEval(input, n, c, h, w);
-    }
-
-    ReverseGradTensor<T> ForwardTrain(ReverseGradTensor<T> input, int n, int c, int h, int w)
-    {
-        var mean = ComputeMean(input, n, c, h, w);
-        var var = ComputeVariance(input, mean, n, c, h, w);
-
-        if (_trackRunningStats && _runningMean != null && _runningVar != null && _numBatchesTracked != null)
-            UpdateRunningStats(mean, var);
-
-        var normalized = Normalize(input, mean, var, n, c, h, w);
-        return ApplyAffine(normalized, n, c, h, w);
-    }
-
-    ReverseGradTensor<T> ForwardEval(ReverseGradTensor<T> input, int n, int c, int h, int w)
-    {
-        var mean = _runningMean!;
-        var var = _runningVar!;
-        var normalized = Normalize(input, mean, var, n, c, h, w);
-        return ApplyAffine(normalized, n, c, h, w);
-    }
-
-    ReverseGradTensor<T> ComputeMean(ReverseGradTensor<T> input, int n, int c, int h, int w)
-    {
-        var inputData = new T[n * c * h * w];
-        input.Data.CopyTo(inputData, T.Zero);
-
-        var meanData = new T[c];
         int hw = h * w;
-        for (int j = 0; j < c; j++)
+
+        var gamma = _affine && _weight != null
+            ? GetParamSpan(_weight.Tensor)
+            : ReadOnlySpan<T>.Empty;
+        var beta = _affine && _bias != null
+            ? GetParamSpan(_bias.Tensor)
+            : ReadOnlySpan<T>.Empty;
+
+        var inputData = GetInputSpan(input);
+
+        var result = BatchNormKernel<T>.Forward(inputData, n, c, hw, gamma, beta, _eps, _affine);
+
+        if (IsTraining && _trackRunningStats)
+            UpdateRunningStatsDirect(result.Mean, result.InvStd, n * hw);
+
+        var resultTensor = new ReverseGradTensor<T>(
+            NivaraColumn<T>.Create(result.Output),
+            input.RequiresGrad, input.Shape);
+
+        if (input.RequiresGrad)
         {
-            T sum = T.Zero;
-            for (int i = 0; i < n; i++)
+            var savedXHat = result.XHat;
+            var savedInvStd = result.InvStd;
+            var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
+            bool affine = _affine;
+            int savedN = n, savedC = c;
+
+            var gradFn = new OpNode<T>("BatchNorm2d", new object[] { input }, (typedGradOutput, sgn) =>
             {
-                for (int k = 0; k < h; k++)
+                var gradOutData = new T[typedGradOutput.Length];
+                typedGradOutput.CopyTo(gradOutData, default(T)!);
+
+                var gradInputData = BatchNormKernel<T>.BackwardInput(
+                    gradOutData, savedXHat, savedGamma, savedInvStd,
+                    savedN, savedC, hw, affine);
+
+                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData), sgn);
+
+                if (affine)
                 {
-                    for (int l = 0; l < w; l++)
-                    {
-                        int idx = ((i * c + j) * h + k) * w + l;
-                        sum += inputData[idx];
-                    }
+                    var gradGammaData = BatchNormKernel<T>.BackwardWeight(
+                        gradOutData, savedXHat, savedN, savedC, hw);
+                    var gradBetaData = BatchNormKernel<T>.BackwardBias(
+                        gradOutData, savedN, savedC, hw);
+
+                    if (_weight != null)
+                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData), sgn);
+                    if (_bias != null)
+                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData), sgn);
                 }
-            }
-            meanData[j] = sum / T.CreateChecked(n * hw);
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
         }
 
-        var meanTensor = ReverseGradTensor<T>.FromArray(meanData, requiresGrad: false);
-        meanTensor.Reshape(1, c, 1, 1);
-        return meanTensor;
+        return resultTensor;
     }
 
-    ReverseGradTensor<T> ComputeVariance(ReverseGradTensor<T> input, ReverseGradTensor<T> mean, int n, int c, int h, int w)
-    {
-        var inputData = new T[n * c * h * w];
-        input.Data.CopyTo(inputData, T.Zero);
-        var meanData = new T[c];
-        mean.Data.CopyTo(meanData, T.Zero);
-
-        var varData = new T[c];
-        int hw = h * w;
-        for (int j = 0; j < c; j++)
-        {
-            T sum = T.Zero;
-            for (int i = 0; i < n; i++)
-            {
-                for (int k = 0; k < h; k++)
-                {
-                    for (int l = 0; l < w; l++)
-                    {
-                        int idx = ((i * c + j) * h + k) * w + l;
-                        T diff = inputData[idx] - meanData[j];
-                        sum += diff * diff;
-                    }
-                }
-            }
-            varData[j] = sum / T.CreateChecked(n * hw);
-        }
-
-        var varTensor = ReverseGradTensor<T>.FromArray(varData, requiresGrad: false);
-        varTensor.Reshape(1, c, 1, 1);
-        return varTensor;
-    }
-
-    ReverseGradTensor<T> Normalize(ReverseGradTensor<T> input, ReverseGradTensor<T> mean, ReverseGradTensor<T> var, int n, int c, int h, int w)
-    {
-        var meanExpanded = ExpandParam(mean, n, c, h, w);
-        var varExpanded = ExpandParam(var, n, c, h, w);
-
-        var diff = ReverseGradOperations.Subtract(input, meanExpanded);
-        var epsTensor = GradientUtils.Constant(CreateEpsArray(n * c * h * w));
-        var denom = ReverseGradOperations.Add(varExpanded, epsTensor);
-        var std = ReverseGradOperations.Pow(denom, 0.5);
-        var normalized = ReverseGradOperations.Divide(diff, std);
-        return normalized;
-    }
-
-    ReverseGradTensor<T> ApplyAffine(ReverseGradTensor<T> normalized, int n, int c, int h, int w)
-    {
-        if (!_affine || _weight == null || _bias == null)
-            return normalized;
-
-        var scaled = ReverseGradOperations.BroadcastMultiply(normalized, _weight.Tensor);
-        var result = ReverseGradOperations.BroadcastAdd(scaled, _bias.Tensor);
-        return result;
-    }
-
-    ReverseGradTensor<T> ExpandParam(ReverseGradTensor<T> param, int n, int c, int h, int w)
-    {
-        var expanded = new T[n * c * h * w];
-        var paramData = new T[c];
-        param.Data.CopyTo(paramData, T.Zero);
-
-        for (int i = 0; i < n; i++)
-            for (int j = 0; j < c; j++)
-                for (int k = 0; k < h; k++)
-                    for (int l = 0; l < w; l++)
-                        expanded[((i * c + j) * h + k) * w + l] = paramData[j];
-
-        var expandedTensor = ReverseGradTensor<T>.FromArray(expanded, requiresGrad: false);
-        expandedTensor.Reshape(n, c, h, w);
-        return expandedTensor;
-    }
-
-    void UpdateRunningStats(ReverseGradTensor<T> batchMean, ReverseGradTensor<T> batchVar)
+    void UpdateRunningStatsDirect(T[] batchMean, T[] batchInvStd, int channelTotal)
     {
         if (_runningMean == null || _runningVar == null || _numBatchesTracked == null)
             return;
 
+        var rmData = new T[_numFeatures];
+        _runningMean.Data.CopyTo(rmData, T.Zero);
+        var rvData = new T[_numFeatures];
+        _runningVar.Data.CopyTo(rvData, T.Zero);
+
         var momentum = _momentum;
         var oneMinusMomentum = T.One - momentum;
 
-        var meanFlat = new T[_numFeatures];
-        var varFlat = new T[_numFeatures];
-        batchMean.Data.CopyTo(meanFlat, T.Zero);
-        batchVar.Data.CopyTo(varFlat, T.Zero);
-        var meanFlatTensor = ReverseGradTensor<T>.FromArray(meanFlat, requiresGrad: false);
-        var varFlatTensor = ReverseGradTensor<T>.FromArray(varFlat, requiresGrad: false);
-
-        var omArr = new T[_numFeatures];
-        var mArr = new T[_numFeatures];
         for (int i = 0; i < _numFeatures; i++)
         {
-            omArr[i] = oneMinusMomentum;
-            mArr[i] = momentum;
+            T variance = T.One / (batchInvStd[i] * batchInvStd[i]) - _eps;
+            rmData[i] = rmData[i] * oneMinusMomentum + batchMean[i] * momentum;
+            rvData[i] = rvData[i] * oneMinusMomentum + variance * momentum;
         }
 
-        var newRunningMean = ReverseGradOperations.Add(
-            ReverseGradOperations.Multiply(_runningMean, GradientUtils.Constant(omArr)),
-            ReverseGradOperations.Multiply(meanFlatTensor, GradientUtils.Constant(mArr)));
+        _runningMean = ReverseGradTensor<T>.FromArray(rmData, requiresGrad: false);
+        _runningVar = ReverseGradTensor<T>.FromArray(rvData, requiresGrad: false);
 
-        var newRunningVar = ReverseGradOperations.Add(
-            ReverseGradOperations.Multiply(_runningVar, GradientUtils.Constant(omArr)),
-            ReverseGradOperations.Multiply(varFlatTensor, GradientUtils.Constant(mArr)));
-
-        var newCount = ReverseGradOperations.Add(
-            _numBatchesTracked,
-            GradientUtils.Constant(new T[] { T.One }));
-
-        _runningMean = newRunningMean;
-        _runningVar = newRunningVar;
-        _numBatchesTracked = newCount;
+        var count = new T[] { _numBatchesTracked[0] + T.One };
+        _numBatchesTracked = ReverseGradTensor<T>.FromArray(count, requiresGrad: false);
     }
 
-    T[] CreateEpsArray(int len)
+    static ReadOnlySpan<T> GetInputSpan(ReverseGradTensor<T> tensor)
     {
-        var arr = new T[len];
-        for (int i = 0; i < len; i++) arr[i] = _eps;
+        if (tensor.Data.TryGetSpan(out var span))
+            return span;
+        var arr = new T[tensor.Length];
+        tensor.Data.CopyTo(arr, T.Zero);
+        return arr;
+    }
+
+    static ReadOnlySpan<T> GetParamSpan(ReverseGradTensor<T> tensor)
+    {
+        if (tensor.Data.TryGetSpan(out var span))
+            return span;
+        var arr = new T[tensor.Length];
+        tensor.Data.CopyTo(arr, T.Zero);
         return arr;
     }
 
