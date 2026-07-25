@@ -309,4 +309,23 @@ public class BackwardPassTests
         Assert.That(input.Grad![1], Is.EqualTo(2.0f).Within(1e-6f));
         Assert.That(input.Grad![2], Is.EqualTo(0.0f).Within(1e-6f));
     }
+
+    [Test]
+    public void AccumulateGradient_MultipleBackward_SumsGradients()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 3f, 4f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: false);
+
+        var y1 = ReverseGradOperations.Sum(ReverseGradOperations.Multiply(a, b));
+        y1.Backward();
+        Assert.That(a.Grad![0], Is.EqualTo(1f).Within(1e-6f));
+        Assert.That(a.Grad[1], Is.EqualTo(2f).Within(1e-6f));
+
+        var y2 = ReverseGradOperations.Sum(ReverseGradOperations.Multiply(a, b));
+        y2.Backward();
+        Assert.That(a.Grad[0], Is.EqualTo(2f).Within(1e-6f));
+        Assert.That(a.Grad[1], Is.EqualTo(4f).Within(1e-6f));
+    }
 }

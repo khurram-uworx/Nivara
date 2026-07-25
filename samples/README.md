@@ -64,4 +64,15 @@ Key characteristics:
 - `ModelSerializer` bridges training output to inference input
 - Ollama optional — pass `--ollama` to include LLM agent
 
+## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
+
+A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.
+
+Key characteristics:
+- `Module<T>` subclass with `Linear<T>`, `Dropout<T>`, `Activation.LeakyRelu<T>` — individual layer fields
+- Manual training loop with `GradientUtils.Grad()` — demonstrates explicit autograd scope control
+- `SampleNormal` (reparameterization trick), `KlDivergence`, `BCEWithLogitsLoss` (fused backward)
+- Latent space exploration — generation, interpolation between encoded patterns, per-dimension walks
+- Drives core library improvements: fused BCE backward (correct gradient at x=0), ADR-001 null cleanup
+
 

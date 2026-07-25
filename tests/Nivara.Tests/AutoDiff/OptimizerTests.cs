@@ -121,6 +121,31 @@ public class OptimizerTests
     }
 
     [Test]
+    public void AdamW_MultipleElements_BackwardFlowUpdatesAll()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f, 4f }, requiresGrad: true);
+
+        var adamw = new AdamW<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamw.AddParameterGroup(param, 0.01f, weightDecay: 0.01f);
+
+        var loss = ReverseGradOperations.Sum(param.Tensor);
+        loss.Backward();
+
+        var oldValues = new float[4];
+        for (int i = 0; i < 4; i++)
+            oldValues[i] = param.Tensor[i];
+
+        adamw.Step();
+
+        for (int i = 0; i < 4; i++)
+        {
+            Assert.That(param.Tensor[i], Is.Not.EqualTo(oldValues[i]));
+            Assert.That(float.IsNaN(param.Tensor[i]), Is.False);
+            Assert.That(float.IsInfinity(param.Tensor[i]), Is.False);
+        }
+    }
+
+    [Test]
     public void Optimizer_ParameterGroup_DifferentLearningRates()
     {
         var param1 = new Parameter<float>("p1", new float[] { 1f }, requiresGrad: true);

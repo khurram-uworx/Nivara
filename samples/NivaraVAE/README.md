@@ -9,7 +9,7 @@ A sample project demonstrating Nivara's autograd encoder–decoder architecture.
 NivaraVAE trains a variational autoencoder on synthetic binary grid patterns. It showcases:
 
 - **Reverse-mode autograd** with a manual training loop (`GradientUtils.Grad()`, `loss.Backward()`, `optimizer.Step()`)
-- **`Module<T>` with `Sequential<T>`** — encoder/decoder composed from `Linear<T>`, `Dropout<T>`, and activation layers
+- **`Module<T>` with individual `Linear<T>` layers** — encoder/decoder composed from `Linear<T>`, `Dropout<T>`, and activation layers
 - **VAE-specific operations** — `SampleNormal` (reparameterization trick), `KlDivergence` (ELBO loss), `BCEWithLogitsLoss` (reconstruction)
 - **`TensorDataset<T>`** with same-column-as-both-features-and-labels (autoencoding pattern)
 - **`ModelSerializer.Save`/`Load`** for checkpoint persistence
@@ -96,21 +96,21 @@ Generates and displays 8 example patterns from the dataset as ASCII art, showing
 PatternDataset (synthetic 2D patterns on a grid)
     |
     v
-TensorDataset<T> + DataLoader<T>  (batched, shuffled, autoencoding: input = target)
+Manual batching  (shuffled index array, BuildBatch for features/targets)
     |
     v
 VaeModel<T>  (Module<T> subclass)
-    ├── Encoder: Sequential<Linear → LeakyReLU → Dropout → Linear → LeakyReLU → Dropout>
+    ├── Encoder: Linear → LeakyReLU → Dropout → Linear → LeakyReLU → Dropout
     ├── MuHead:  Linear
     ├── LogVarHead: Linear
     ├── Reparameterize: SampleNormal(mu, logVar)
-    └── Decoder: Sequential<Linear → LeakyReLU → Dropout → Linear → Sigmoid>
+    └── Decoder: Linear → LeakyReLU → Dropout → Linear (raw logits, no Sigmoid)
     |
     v
-BCEWithLogitsLoss<T> + KlDivergence (ELBO loss)
+BCEWithLogitsLoss<T> + KlDivergence (ELBO loss — logits, not probabilities)
     |
     v
-AdamW<T>  (manual training loop with GradientUtils.Grad())
+Adam<T>  (manual training loop with GradientUtils.Grad())
     |
     v
 ModelSerializer.Save / Load  (checkpointing)
@@ -132,9 +132,9 @@ Reparameterize:  z = mu + exp(logVar * 0.5) * ε
 
 Decoder:
   Linear(latentDim, hiddenDim)  → LeakyReLU(0.01) → Dropout(0.2)
-  Linear(hiddenDim, patternSize²) → Sigmoid
+  Linear(hiddenDim, patternSize²) → (raw logits — BCEWithLogitsLoss applies sigmoid internally)
 
-Output: [batch, patternSize²]  (reconstructed binary probabilities)
+Output: [batch, patternSize²]  (raw logits, sigmoid applied by loss function)
 ```
 
 ### Loss
@@ -144,7 +144,7 @@ ELBO = BCEWithLogitsLoss(recon_logits, target) / batchSize + beta * KL(mu, logVa
 ```
 
 Where:
-- `BCEWithLogitsLoss<T>` computes numerically stable binary cross-entropy from logits, reduced to mean via division by batch size
+- `BCEWithLogitsLoss<T>` computes numerically stable binary cross-entropy from raw logits, reduced to mean via division by batch size
 - `KlDivergence(mu, logVar)` computes `-0.5 * sum(1 + logVar - mu² - exp(logVar))`
 - `beta` default 1.0, adjustable via CLI
 
@@ -154,13 +154,13 @@ Where:
 |---|---|---|---|---|
 | **Architecture type** | Autoregressive | Autoregressive | Feedforward MLP | **Feedforward encoder–decoder** |
 | **Module\<T\> inheritance** | No | Yes | Yes | **Yes** |
-| **Sequential\<T\>** | No | No | No | **Yes** (encoder + decoder) |
+| **Sequential\<T\>** | No | No | No | **No** (individual Linear\<T\> fields) |
 | **Dropout\<T\>** | No | Yes | No | **Yes** |
 | **TrainingLoop\<T\>** | No (raw) | No (raw) | Yes | **No (manual — demonstrates Grad() scope)** |
-| **DataLoader\<T\>** | No | Yes | Yes | **Yes** |
-| **TensorDataset\<T\>** | No | Yes | Yes | **Yes** (autoencoding: same cols as features + labels) |
+| **DataLoader\<T\>** | No | Yes | Yes | **No** (manual batching) |
+| **TensorDataset\<T\>** | No | Yes | Yes | **No** (manual batching from NivaraFrame) |
 | **Loss function** | Hand-rolled NLL | CrossEntropy | MSE | **BCEWithLogits + KlDivergence** |
-| **Optimizer** | Adam | Adam | AdamW | **AdamW** |
+| **Optimizer** | Adam | Adam | AdamW | **Adam** |
 | **ModelSerializer** | No | Yes | Yes | **Yes** |
 | **Latent space ops** | No | No | No | **Yes** (SampleNormal, KlDivergence) |
 | **Interactive modes** | Generate | Generate | Eval/REPL/UCI | **Generate, Interpolate, Latent Walk, Eval** |
@@ -174,19 +174,15 @@ Where:
 | API | Where | Purpose |
 |-----|-------|---------|
 | `Module<T>` | `VaeModel.cs` | Model base class with parameter registration |
-| `Sequential<T>` | `VaeModel.cs` | Encoder/decoder layer chains |
 | `Linear<T>` | `VaeModel.cs` | Fully connected layers (encoder, decoder, heads) |
 | `Dropout<T>` | `VaeModel.cs` | Regularization during training |
 | `Activation.LeakyRelu<T>` | `VaeModel.cs` | Non-linearity (negativeSlope: 0.01) |
-| `Activation.Sigmoid<T>` | `VaeModel.cs` | Decoder output squashing to [0,1] |
 | `BCEWithLogitsLoss<T>` | `Program.cs` | Binary cross-entropy from logits |
 | `ReverseGradOperations.KlDivergence<T>` | `Program.cs` | KL divergence for VAE regularization |
 | `ReverseGradOperations.SampleNormal<T>` | `VaeModel.cs` | Reparameterization trick |
-| `AdamW<T>` | `Program.cs` | Optimizer with decoupled weight decay |
+| `Adam<T>` | `Program.cs` | Optimizer with adaptive learning rates |
 | `GradientUtils.Grad()` | `Program.cs` | Enables reverse-mode autograd scope |
 | `GradientUtils.ClipGradNorm<T>` | `Program.cs` | Global gradient norm clipping |
-| `TensorDataset<T>` | `Program.cs` | Frame-backed dataset (autoencoding) |
-| `DataLoader<T>` | `Program.cs` | Batched, shuffled data loading |
 | `ModelSerializer.Save/Load` | `Program.cs` | JSON model persistence |
 | `NivaraFrame` / `NivaraColumn<T>` | `PatternDataset.cs` | DataFrame-backed pattern storage |
 | `TensorPrimitives` | `PatternDataset.cs` | SIMD-accelerated pattern generation |
@@ -213,17 +209,19 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 
 | Gap | Problem | Resolution |
 |-----|---------|------------|
-| **`Activation.LeakyRelu` slope default** | `LeakyRelu<T>(input, negativeSlope: default)` where `T` is `float` produces slope=0 (equivalent to ReLU), not 0.01 as intended. `default(float)` is 0. | Changed default parameter handling: when slope is `default(T)`, use `T.CreateChecked(0.01f)` instead. File: `src/Nivara/AutoDiff/Nn/Activation.cs`. |
+| **`Activation.LeakyRelu` slope default** | `LeakyRelu<T>(input, negativeSlope: default)` where `T` is `float` produces slope=0 (equivalent to ReLU), not 0.01 as intended. `default(float)` is 0. | Changed default parameter handling: when slope is `T.Zero`, use `T.CreateChecked(0.01f)` instead. File: `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`. |
 | **`BCEWithLogitsLoss` returns SUM** | Loss scales with batch size, requiring LR tuning per batch size. Not suitable for batched training without manual normalization. | Added `Forward(logits, targets, bool reduceToMean)` overload that divides by element count when `reduceToMean: true`. File: `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs`. |
 | **ADR-001: null handling in VAE hot paths** | `KlDivergence`, `SampleNormal`, `AccumulateGradient`, and `AdamW` contained ~200 lines of dead null-handling branches (AutoDiff is non-nullable per ADR-001). | Removed null branches from: `ApplyKlElementWise`, `ApplyKlMeanGradient`, `ApplyKlLogVarGradient`, `ApplySampleNormalForward`, `ApplySampleNormalLogVarGradient`, `AccumulateGradient`, `AdamW.applyAdamW`. Single SIMD path via `TensorPrimitives`. Files: `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`, `src/Nivara/AutoDiff/Optimizer/AdamW.cs`. |
 | **`TensorPrimitives` SIMD in KL/sample ops** | After null cleanup, the freed code paths were replaced with direct `TensorPrimitives.Exp`, `.Multiply`, `.Add`, `.Subtract` calls for SIMD acceleration. | Replaced scalar loops with `TensorPrimitives` spans in `ApplyKlElementWise`, `ApplySampleNormalForward`, and gradient helpers. |
+| **`BCEWithLogitsLoss` backward gradient at x=0** | Forward decomposed into `Relu(x) - x*z + log(1+exp(-|x|))`. At x=0, Relu and Abs subgradients are both 0, producing gradient -1.0 instead of the correct `sigmoid(0) - z = -0.5`. | Replaced primitive-ops decomposition with fused backward that computes `sigmoid(x) - z` directly via a single `OpNode<T>` custom backward. Forward values unchanged. File: `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs`. |
 
 ### Core library additions from this example
 
 | New API | Location | Purpose |
 |---------|----------|---------|
 | `BCEWithLogitsLoss<T>.Forward(logits, targets, reduceToMean)` | `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs` | Mean-reduced BCE loss for batched training |
-| `Activation.LeakyRelu` default slope fix | `src/Nivara/AutoDiff/Nn/Activation.cs` | Correct 0.01 default instead of 0 |
+| `BCEWithLogitsLoss<T>` fused backward | `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs` | Correct gradient `sigmoid(x) - z` via custom `OpNode<T>`, fixing subgradient bug at x=0 |
+| `Activation.LeakyRelu` default slope fix | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | Correct 0.01 default instead of 0 |
 
 ### Core library performance fixes driven by this example
 
@@ -232,12 +230,13 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 | **ADR-001 null cleanup (VAE paths)** | Removed ~200 lines of null-handling branches from `KlDivergence`, `SampleNormal`, `AccumulateGradient`, and `AdamW` internal helpers. Single code path per operation. | Eliminates branch mispredictions on hot training paths. All VAE operations now have single (null-free) SIMD-accelerated paths. |
 | **TensorPrimitives in KL/sample ops** | After null branch removal, `ApplyKlElementWise` uses `TensorPrimitives.Multiply`, `.Exp`, `.Add`, `.Subtract` on raw spans. `ApplySampleNormalForward` uses `TensorPrimitives.Multiply`, `.Exp`, `.Add`. | SIMD-vectorized on AVX2/AVX512 hardware. Estimated 2-4x speedup for KL divergence and reparameterization on large batches. |
 | **AccumulateGradient simplification** | Reduced to single `TensorPrimitives.Add` call — no null-merge logic, no `WithoutNulls()` copy. | Hottest path in backward pass; every gradient accumulation benefits. |
+| **Fused BCE backward** | `BCEWithLogitsLoss` backward replaced Relu/Abs decomposition with single custom `OpNode<T>` computing `sigmoid(x) - z` directly. Eliminates subgradient error at x=0 where Relu and Abs both return gradient 0. | Correct gradient everywhere. Fewer graph nodes in backward — ~5 fewer OpNodes per BCE call. |
 
 ## Performance
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Training (10 epochs, 5K patterns, 8x8) | ~3-5s | Manual loop, AdamW, batch size 64 |
+| Training (10 epochs, 5K patterns, 8x8) | ~3-5s | Manual loop, Adam, batch size 64 |
 | Training (10 epochs, 5K patterns, 16x16) | ~8-12s | 4x more pixels, same architecture width |
 | Pattern generation (1000 samples) | <100ms | Synthetic data, no I/O |
 | Inference (encode + decode) | <50ms | Forward pass only, no grad tracking |
@@ -246,7 +245,7 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 
 - **Linear-only architecture** — no convolutional layers. The VAE ignores spatial structure in patterns. A `Conv2d`/`ConvTranspose2d` module family would produce sharper reconstructions.
 - **No learning rate scheduling** — fixed LR throughout training. Cosine annealing or warmup would improve convergence.
-- **No optimizer state serialization** — `ModelSerializer` saves model weights only, not AdamW moment buffers. Continued training after load restarts moments from scratch.
+- **No optimizer state serialization** — `ModelSerializer` saves model weights only, not Adam moment buffers. Continued training after load restarts moments from scratch.
 - **Small patterns** — 8x8 and 16x16 grids only. Larger patterns would benefit from convolutional architecture.
 - **No quantitative evaluation metrics** — no FID, no reconstruction accuracy percentage. Visual inspection only.
 
