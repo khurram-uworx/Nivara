@@ -1090,7 +1090,7 @@ When training in a loop, zero out gradients before the next pass:
 tensors.BatchZeroGrad();
 ```
 
-> For module-based models (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, model serialization, and data-parallel training, see [AUTODIFF.md](docs/AUTODIFF.md) and the Act 7b / Act 8 examples in [EXAMPLES.md](EXAMPLES.md).
+> For module-based models (`Linear`, `Sequential`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, model serialization, and data-parallel training, see [AUTODIFF.md](docs/AUTODIFF.md) and the Act 7b / Act 8 examples in [EXAMPLES.md](EXAMPLES.md). The `samples/` directory includes character-level GPT, a neural chess evaluator, a hybrid Nivara+LLM agent workflow, a VAE for synthetic pattern generation, and PyTorch parity benchmarks.
 
 Module models expose `StateDict()` and `LoadStateDict()` for in-memory
 save/restore, transfer learning, and partial loading. Use
