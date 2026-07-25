@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
@@ -6,6 +7,9 @@ namespace Nivara.AutoDiff.Nn.Functional;
 public sealed class BCEWithLogitsLoss<T> where T : struct, INumber<T>
 {
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> logits, ReverseGradTensor<T> targets)
+        => Forward(logits, targets, reduceToMean: false);
+
+    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> logits, ReverseGradTensor<T> targets, bool reduceToMean)
     {
         if (logits == null) throw new ArgumentNullException(nameof(logits));
         if (targets == null) throw new ArgumentNullException(nameof(targets));
@@ -24,6 +28,12 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, INumber<T>
         var loss = ReverseGradOperations.Add(
             ReverseGradOperations.Subtract(maxX, ReverseGradOperations.Multiply(logits, targets)),
             log1pExp);
-        return ReverseGradOperations.Sum(loss);
+        var sumLoss = ReverseGradOperations.Sum(loss);
+
+        if (!reduceToMean)
+            return sumLoss;
+
+        var lengthTensor = GradientUtils.Full(1, T.CreateChecked(logits.Length));
+        return ReverseGradOperations.Divide(sumLoss, lengthTensor);
     }
 }

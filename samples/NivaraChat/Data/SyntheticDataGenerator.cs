@@ -109,7 +109,10 @@ public static class SyntheticDataGenerator
                 var (original, entities) = GenerateEntitySentence(rng);
                 var entityDict = new Dictionary<string, List<string>>
                 {
-                    ["person"] = [], ["org"] = [], ["date"] = [], ["location"] = []
+                    ["person"] = [],
+                    ["org"] = [],
+                    ["date"] = [],
+                    ["location"] = []
                 };
                 var tokens = original.Split(' ');
                 var wordToEntity = BuildEntityLookup();

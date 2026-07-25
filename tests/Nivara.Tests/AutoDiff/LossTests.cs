@@ -116,6 +116,24 @@ public class LossTests
     }
 
     [Test]
+    public void BCEWithLogitsLoss_ReduceToMean_ReturnsMeanOfElementLosses()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0f, 0f, 0f, 0f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }), requiresGrad: false);
+
+        var bceLogits = new BCEWithLogitsLoss<float>();
+        var sumLoss = bceLogits.Forward(logits, targets, reduceToMean: false);
+        var meanLoss = bceLogits.Forward(logits, targets, reduceToMean: true);
+
+        // sum = 4 * log(2) = 2.7726, mean = log(2) = 0.6931
+        Assert.That(sumLoss[0], Is.EqualTo(4f * 0.693147f).Within(1e-4f));
+        Assert.That(meanLoss[0], Is.EqualTo(0.693147f).Within(1e-4f));
+        Assert.That(meanLoss[0], Is.EqualTo(sumLoss[0] / 4f).Within(1e-5f));
+    }
+
+    [Test]
     public void CrossEntropyLoss_Forward_OneHotTargets()
     {
         var logits = new ReverseGradTensor<float>(
