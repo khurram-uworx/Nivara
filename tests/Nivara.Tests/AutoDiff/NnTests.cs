@@ -2414,4 +2414,390 @@ public class NnTests
     {
         Assert.Throws<ArgumentException>(() => new MultiheadAttention<float>(embedDim: 33, numHeads: 8));
     }
+
+    [Test]
+    public void ConvVAE_Forward_ShapeCorrect()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 1,
+            encoderChannels: [32, 64],
+            latentChannels: 8,
+            spatialSize: 28,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 1 * 28 * 28]),
+            requiresGrad: false);
+        input.Reshape(2, 1, 28, 28);
+
+        var output = cvae.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 1, 28, 28 }));
+        for (int i = 0; i < Math.Min(100, output.Length); i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void ConvVAE_Encode_ShapeCorrect()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 3,
+            encoderChannels: [32, 64],
+            latentChannels: 16,
+            spatialSize: 32,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 3 * 32 * 32]),
+            requiresGrad: false);
+        input.Reshape(1, 3, 32, 32);
+
+        var (mu, logVar) = cvae.Encode(input);
+
+        Assert.That(mu.Shape, Is.EqualTo(new[] { 1, 16, 8, 8 }));
+        Assert.That(logVar.Shape, Is.EqualTo(new[] { 1, 16, 8, 8 }));
+    }
+
+    [Test]
+    public void ConvVAE_Decode_RoundTrip()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 1,
+            encoderChannels: [32],
+            latentChannels: 8,
+            spatialSize: 16,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1);
+
+        var z = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 8 * 8 * 8]),
+            requiresGrad: false);
+        z.Reshape(1, 8, 8, 8);
+
+        var output = cvae.Decode(z);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 1, 16, 16 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void ConvVAE_ElboLoss_ComputesCorrectly()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 1,
+            encoderChannels: [16],
+            latentChannels: 4,
+            spatialSize: 8,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1);
+
+        var recon = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 1 * 8 * 8]),
+            requiresGrad: false);
+        recon.Reshape(1, 1, 8, 8);
+
+        var original = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 1 * 8 * 8]),
+            requiresGrad: false);
+        original.Reshape(1, 1, 8, 8);
+
+        var mu = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 4 * 4 * 4]),
+            requiresGrad: false);
+        mu.Reshape(1, 4, 4, 4);
+
+        var logVar = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 4 * 4 * 4]),
+            requiresGrad: false);
+        logVar.Reshape(1, 4, 4, 4);
+
+        var loss = cvae.ElboLoss(recon, original, mu, logVar);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        Assert.That(float.IsNaN(loss[0]), Is.False);
+        Assert.That(float.IsInfinity(loss[0]), Is.False);
+    }
+
+    [Test]
+    public void ConvVAE_Backward_GradientFlows()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 1,
+            encoderChannels: [16],
+            latentChannels: 4,
+            spatialSize: 8,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1);
+        cvae.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 1 * 8 * 8].Select(_ => 0.1f).ToArray()),
+            requiresGrad: true);
+        input.Reshape(1, 1, 8, 8);
+
+        var (mu, logVar) = cvae.Encode(input);
+        var z = cvae.Reparameterize(mu, logVar);
+        var recon = cvae.Decode(z);
+        var loss = cvae.ElboLoss(recon, input, mu, logVar);
+
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1.0f }),
+            requiresGrad: false);
+        gradOutput.Reshape(1);
+
+        loss.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < input.Grad!.Length; i++)
+        {
+            Assert.That(float.IsNaN(input.Grad[i]), Is.False);
+            Assert.That(float.IsInfinity(input.Grad[i]), Is.False);
+        }
+    }
+
+    [Test]
+    public void ConvVAE_EndToEnd_ReducesLoss()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 1,
+            encoderChannels: [16],
+            latentChannels: 4,
+            spatialSize: 8,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1);
+        cvae.Train();
+
+        var optimizer = new Adam<float>();
+        optimizer.AddParameterGroup(cvae.GetParameters().Values, 0.001f);
+        var rng = new Random(42);
+
+        var target = new float[1 * 1 * 8 * 8];
+        for (int i = 0; i < target.Length; i++)
+            target[i] = (float)(Math.Sin(i * 0.1) * 0.5 + 0.5);
+
+        var firstLoss = float.MaxValue;
+
+        for (int epoch = 0; epoch < 5; epoch++)
+        {
+            var inputData = new float[1 * 1 * 8 * 8];
+            target.CopyTo(inputData, 0);
+
+            var input = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create(inputData),
+                requiresGrad: true);
+            input.Reshape(1, 1, 8, 8);
+
+            var (mu, logVar) = cvae.Encode(input);
+            var z = cvae.Reparameterize(mu, logVar);
+            var recon = cvae.Decode(z);
+            var loss = cvae.ElboLoss(recon, input, mu, logVar);
+
+            if (epoch == 0) firstLoss = loss[0];
+
+            var gradOutput = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create(new float[] { 1.0f }),
+                requiresGrad: false);
+            gradOutput.Reshape(1);
+            loss.Backward(gradOutput);
+            optimizer.Step();
+            optimizer.ZeroGrad();
+        }
+
+        var finalInput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(target),
+            requiresGrad: true);
+        finalInput.Reshape(1, 1, 8, 8);
+
+        var (fMu, fLogVar) = cvae.Encode(finalInput);
+        var fZ = cvae.Reparameterize(fMu, fLogVar);
+        var fRecon = cvae.Decode(fZ);
+        var finalLoss = cvae.ElboLoss(fRecon, finalInput, fMu, fLogVar);
+
+        Assert.That(finalLoss[0], Is.LessThan(firstLoss));
+    }
+
+    [Test]
+    public void ConvVAE_InvalidArgs_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => new ConvVAE<float>(1, [], 8, 8));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ConvVAE<float>(1, [16], -1, 8));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new ConvVAE<float>(1, [16], 8, 0));
+    }
+
+    [Test]
+    public void ConvVAE_3Channel_RGB()
+    {
+        using var cvae = new ConvVAE<float>(
+            inputChannels: 3,
+            encoderChannels: [32, 64],
+            latentChannels: 8,
+            spatialSize: 32,
+            kernelSize: 4,
+            stride: 2,
+            padding: 1);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 3 * 32 * 32]),
+            requiresGrad: false);
+        input.Reshape(1, 3, 32, 32);
+
+        var output = cvae.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 3, 32, 32 }));
+        for (int i = 0; i < Math.Min(100, output.Length); i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void DepthwiseSeparableConv2d_Forward_ShapeCorrect()
+    {
+        using var dsc = new DepthwiseSeparableConv2d<float>(
+            inChannels: 3,
+            outChannels: 16,
+            kernelSize: 3,
+            padding: 1);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 3 * 8 * 8]),
+            requiresGrad: false);
+        input.Reshape(1, 3, 8, 8);
+
+        var output = dsc.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 16, 8, 8 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void DepthwiseSeparableConv2d_WithStride()
+    {
+        using var dsc = new DepthwiseSeparableConv2d<float>(
+            inChannels: 16,
+            outChannels: 32,
+            kernelSize: 3,
+            stride: 2,
+            padding: 1);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 16 * 16 * 16]),
+            requiresGrad: false);
+        input.Reshape(2, 16, 16, 16);
+
+        var output = dsc.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 32, 8, 8 }));
+        for (int i = 0; i < Math.Min(100, output.Length); i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void DepthwiseSeparableConv2d_Backward_GradientFlows()
+    {
+        using var dsc = new DepthwiseSeparableConv2d<float>(
+            inChannels: 4,
+            outChannels: 8,
+            kernelSize: 3,
+            padding: 1);
+        dsc.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 4 * 6 * 6].Select(_ => 0.1f).ToArray()),
+            requiresGrad: true);
+        input.Reshape(1, 4, 6, 6);
+
+        var output = dsc.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Repeat(1f, output.Length).ToArray()),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < input.Grad!.Length; i++)
+        {
+            Assert.That(float.IsNaN(input.Grad[i]), Is.False);
+            Assert.That(float.IsInfinity(input.Grad[i]), Is.False);
+        }
+
+        foreach (var p in dsc.GetParameters().Values)
+        {
+            Assert.That(p.Tensor.Grad, Is.Not.Null);
+            for (int i = 0; i < p.Tensor.Grad!.Length; i++)
+            {
+                Assert.That(float.IsNaN(p.Tensor.Grad[i]), Is.False);
+                Assert.That(float.IsInfinity(p.Tensor.Grad[i]), Is.False);
+            }
+        }
+    }
+
+    [Test]
+    public void DepthwiseSeparableConv2d_NoBias()
+    {
+        using var dsc = new DepthwiseSeparableConv2d<float>(
+            inChannels: 3,
+            outChannels: 16,
+            kernelSize: 3,
+            padding: 1,
+            useBias: false);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 3 * 8 * 8]),
+            requiresGrad: false);
+        input.Reshape(1, 3, 8, 8);
+
+        var output = dsc.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 16, 8, 8 }));
+    }
+
+    [Test]
+    public void DepthwiseSeparableConv2d_EquivalentToManualComposition()
+    {
+        var rng = new Random(42);
+
+        using var dsc = new DepthwiseSeparableConv2d<float>(
+            inChannels: 4,
+            outChannels: 8,
+            kernelSize: 3,
+            padding: 1);
+
+        using var depthwise = new Conv2d<float>(4, 4, 3, padding: 1, bias: false, groups: 4);
+        using var pointwise = new Conv2d<float>(4, 8, 1, bias: true);
+
+        var inputData = new float[1 * 4 * 6 * 6];
+        for (int i = 0; i < inputData.Length; i++)
+            inputData[i] = (float)(rng.NextDouble() * 2 - 1);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(inputData),
+            requiresGrad: false);
+        input.Reshape(1, 4, 6, 6);
+
+        var outputDSC = dsc.Forward(input);
+
+        var h = depthwise.Forward(input);
+        h = Activation.Relu(h);
+        var outputManual = pointwise.Forward(h);
+
+        Assert.That(outputDSC.Shape, Is.EqualTo(outputManual.Shape));
+
+        var dscData = new float[outputDSC.Length];
+        var manualData = new float[outputManual.Length];
+        outputDSC.Data.CopyTo(dscData, default(float)!);
+        outputManual.Data.CopyTo(manualData, default(float)!);
+
+        for (int i = 0; i < dscData.Length; i++)
+            Assert.That(dscData[i], Is.EqualTo(manualData[i]).Within(1e-5f));
+    }
 }

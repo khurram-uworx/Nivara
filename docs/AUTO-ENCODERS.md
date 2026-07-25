@@ -87,6 +87,40 @@ VAE<T> : Module<T>
 
 - **7 tests**: encode shape, null condition handling, forward end-to-end, elbo loss, decode with condition, backward gradients, invalid ctor throws
 
+### ConvVAE
+
+**File:** `ConvVAE.cs`
+
+Fully convolutional VAE with 1×1 Conv2d heads for spatial latent representations. Uses `Conv2d` encoder (stride downsampling), `ConvTranspose2d` decoder (stride upsampling), and `Conv2d(1×1)` for mu/logvar projection.
+
+```
+ConvVAE<T> : Module<T>
+├── Forward(x) → recon
+├── Encode(x) → (Mu, LogVar)       [both spatial, e.g. B×C'×H'×W']
+├── Reparameterize(mu, logVar) → z  [spatial reparameterization trick]
+├── Decode(z) → recon               [ConvTranspose stack]
+└── ElboLoss(recon, x, mu, logVar) → scalar  [MSE + KL divergence]
+```
+
+- Configurable encoder channel list, latent channels, kernel/stride/padding
+- 1×1 Conv heads preserve spatial structure in latent space
+- **8 tests**: forward shape, encode shape, decode round-trip, elbo loss, backward gradient flow, end-to-end loss reduction, invalid args, RGB forward
+
+### DepthwiseSeparableConv2d
+
+**File:** `DepthwiseSeparableConv2d.cs`
+
+Efficient depthwise separable convolution (MobileNet-style): depthwise conv (`groups=inChannels`) + pointwise 1×1 conv. Reuses existing `Conv2d` grouped kernel and `ConvForward1x1`.
+
+```
+DepthwiseSeparableConv2d<T> : Module<T>
+└── Forward(input) → Conv2d(groups=inChannels) → ReLU → Conv2d(1×1)
+```
+
+- Configurable inChannels, outChannels, kernelSize, stride, padding, useBias
+- All kernels use existing TensorPrimitives-backed Conv2d paths
+- **5 tests**: forward shape, stride, backward gradients, no-bias, equivalence with manual composition
+
 ### LayerNorm
 
 **Files:** `LayerNorm.cs`, `LayerNormKernel.cs`
@@ -169,12 +203,14 @@ MultiheadAttention<T> : Module<T>
 | Conv2d | 18 | Shapes, padding, stride, bias, backward, backward with stride+padding, multi-batch, 1×1, large channels, grouped (6 tests), dispose |
 | ConvTranspose2d | 8 | Shapes, padding, stride, backward, backward with stride, bias, large channels, dispose |
 | Conditional VAE | 7 | Encode, decode, forward, elbo, backward, null condition |
+| ConvVAE | 8 | Forward, encode, decode, elbo, backward, end-to-end loss reduction, invalid args, RGB |
 | LayerNorm | 6 | 2D/4D forward, backward, affine=false, normalized output, dispose |
 | MultiheadAttention | 5 | Self-attention, causal, backward, cross-attention, validation |
+| DepthwiseSeparableConv2d | 5 | Forward, stride, backward, no-basis, manual equivalence |
 | BroadcastMultiply | 6 | 2D/4D forward, input backward, scale backward, both-grad, mismatch throws |
 | BroadcastAdd | 5 | 2D/4D forward, input backward, bias backward, mismatch throws |
-| **Total (NN effort)** | **69** | |
-| **Full suite** | **1909** | All passing |
+| **Total (NN effort)** | **82** | |
+| **Full suite** | **1922** | All passing |
 
 ## Known Limitations
 
@@ -182,10 +218,3 @@ MultiheadAttention<T> : Module<T>
 - **VAE training loop**: Standard `TrainingLoop<T>` expects 2-arg loss. VAE's `ElboLoss` needs 4 args. VAE training uses manual loops (demonstrated in `VAE_Training_ReducesLoss`).
 - **ConvTranspose2d**: No grouped convolution support yet (Conv2d has it).
 - **ConvInputGrad1x1**: No bounds checking (safe when output spatial ≤ input spatial, which holds for stride=1 padding=0). If non-standard padding is needed, falls back to generic path.
-
-## Deferred Features
-
-| Feature | Depends On | Notes |
-|---------|-----------|-------|
-| ConvVAE | Conv2d + VAE | Trivial composition once above exist |
-| Depthwise separable conv | Grouped Conv2d (done) | Depthwise = groups=inChannels; pointwise = 1×1 conv |
