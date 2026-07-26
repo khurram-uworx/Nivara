@@ -35,38 +35,88 @@ if (options.ShowPatterns)
     return;
 }
 
-var model = new VaeModel<float>(dataset.NumPixels, options.HiddenDim, options.LatentDim, options.Dropout);
-var optimizer = new Adam<float>(options.LearningRate);
-optimizer.AddParameterGroup(model.GetParameters().Values);
+if (options.Mode == "conv")
+    RunConvMode(options, dataset);
+else
+    RunLinearMode(options, dataset);
 
-if (options.LoadPath != null && File.Exists(options.LoadPath))
+static void RunLinearMode(Options options, PatternDataset dataset)
 {
-    ModelSerializer.Load(model, options.LoadPath);
-    Console.WriteLine($"Loaded model from {options.LoadPath}");
+    var model = new VaeModel<float>(dataset.NumPixels, options.HiddenDim, options.LatentDim, options.Dropout);
+    var optimizer = new Adam<float>(options.LearningRate);
+    optimizer.AddParameterGroup(model.GetParameters().Values);
+
+    if (options.LoadPath != null && File.Exists(options.LoadPath))
+    {
+        ModelSerializer.Load(model, options.LoadPath);
+        Console.WriteLine($"Loaded model from {options.LoadPath}");
+    }
+
+    if (options.Epochs > 0)
+        TrainLinear(model, optimizer, dataset, options);
+
+    if (options.GenerateCount is int gc)
+        GenerateLinear(model, gc, options.LatentDim, options.PatternSize, options.Seed);
+
+    if (options.InterpolateCount is int ic)
+        InterpolateLinear(model, dataset, ic, options.PatternSize);
+
+    if (options.LatentWalk)
+        LatentWalkLinear(model, options.LatentDim, options.PatternSize);
+
+    if (options.Eval)
+        EvaluateLinear(model, dataset, options);
+
+    if (options.SavePath != null && (options.Epochs > 0 || options.GenerateCount != null))
+    {
+        ModelSerializer.Save(model, options.SavePath);
+        Console.WriteLine($"Saved model to {options.SavePath}");
+    }
 }
 
-if (options.Epochs > 0)
-    Train(model, optimizer, dataset, options);
-
-if (options.GenerateCount is int gc)
-    Generate(model, gc, options.LatentDim, options.PatternSize, options.Seed);
-
-if (options.InterpolateCount is int ic)
-    Interpolate(model, dataset, ic, options.PatternSize);
-
-if (options.LatentWalk)
-    LatentWalk(model, options.LatentDim, options.PatternSize);
-
-if (options.Eval)
-    Evaluate(model, dataset, options);
-
-if (options.SavePath != null && (options.Epochs > 0 || options.GenerateCount != null))
+static void RunConvMode(Options options, PatternDataset dataset)
 {
-    ModelSerializer.Save(model, options.SavePath);
-    Console.WriteLine($"Saved model to {options.SavePath}");
+    int ps = options.PatternSize;
+    var convModel = new ConvVAE<float>(
+        inputChannels: 1,
+        encoderChannels: [32, 64],
+        latentChannels: options.LatentDim,
+        spatialSize: ps,
+        kernelSize: 4,
+        stride: 2,
+        padding: 1);
+    var optimizer = new Adam<float>(options.LearningRate);
+    optimizer.AddParameterGroup(convModel.GetParameters().Values);
+
+    if (options.LoadPath != null && File.Exists(options.LoadPath))
+    {
+        ModelSerializer.Load(convModel, options.LoadPath);
+        Console.WriteLine($"Loaded conv model from {options.LoadPath}");
+    }
+
+    if (options.Epochs > 0)
+        TrainConv(convModel, optimizer, dataset, options);
+
+    if (options.GenerateCount is int gc)
+        GenerateConv(convModel, gc, options.LatentDim, ps, options.Seed);
+
+    if (options.InterpolateCount is int ic)
+        InterpolateConv(convModel, dataset, ic, ps);
+
+    if (options.LatentWalk)
+        LatentWalkConv(convModel, options.LatentDim, ps);
+
+    if (options.Eval)
+        EvaluateConv(convModel, dataset, options);
+
+    if (options.SavePath != null && (options.Epochs > 0 || options.GenerateCount != null))
+    {
+        ModelSerializer.Save(convModel, options.SavePath);
+        Console.WriteLine($"Saved conv model to {options.SavePath}");
+    }
 }
 
-static void Train(VaeModel<float> model, Adam<float> optimizer, PatternDataset dataset, Options opts)
+static void TrainLinear(VaeModel<float> model, Adam<float> optimizer, PatternDataset dataset, Options opts)
 {
     int numPixels = dataset.NumPixels;
     int batchSize = Math.Min(opts.BatchSize, dataset.Count);
@@ -128,7 +178,7 @@ static void Train(VaeModel<float> model, Adam<float> optimizer, PatternDataset d
     }
 }
 
-static void Generate(VaeModel<float> model, int count, int latentDim, int patternSize, int seed)
+static void GenerateLinear(VaeModel<float> model, int count, int latentDim, int patternSize, int seed)
 {
     model.Eval();
     Console.WriteLine($"\n--- Generated Patterns (n={count}) ---");
@@ -145,7 +195,7 @@ static void Generate(VaeModel<float> model, int count, int latentDim, int patter
     }
 }
 
-static void Interpolate(VaeModel<float> model, PatternDataset dataset, int count, int patternSize)
+static void InterpolateLinear(VaeModel<float> model, PatternDataset dataset, int count, int patternSize)
 {
     model.Eval();
     int numPixels = dataset.NumPixels;
@@ -187,7 +237,7 @@ static void Interpolate(VaeModel<float> model, PatternDataset dataset, int count
     }
 }
 
-static void LatentWalk(VaeModel<float> model, int latentDim, int patternSize)
+static void LatentWalkLinear(VaeModel<float> model, int latentDim, int patternSize)
 {
     model.Eval();
     int numPixels = patternSize * patternSize;
@@ -210,7 +260,7 @@ static void LatentWalk(VaeModel<float> model, int latentDim, int patternSize)
     }
 }
 
-static void Evaluate(VaeModel<float> model, PatternDataset dataset, Options opts)
+static void EvaluateLinear(VaeModel<float> model, PatternDataset dataset, Options opts)
 {
     model.Eval();
     int numPixels = dataset.NumPixels;
@@ -316,6 +366,212 @@ static float[] SampleStandardNormal(int n, int? seed = null)
     return result;
 }
 
+static void TrainConv(ConvVAE<float> model, Adam<float> optimizer, PatternDataset dataset, Options opts)
+{
+    int numPixels = dataset.NumPixels;
+    int ps = opts.PatternSize;
+    int batchSize = Math.Min(opts.BatchSize, dataset.Count);
+    var rng = new Random(opts.Seed);
+    var indices = new int[dataset.Count];
+
+    Console.WriteLine($"Training ConvVAE: {opts.Epochs} epochs, batch size {batchSize}, lr {opts.LearningRate}");
+
+    for (int epoch = 1; epoch <= opts.Epochs; epoch++)
+    {
+        model.Train();
+        double epochLoss = 0;
+        int batchCount = 0;
+
+        for (int i = 0; i < dataset.Count; i++)
+            indices[i] = i;
+        Shuffle(indices, rng);
+
+        for (int start = 0; start < dataset.Count; start += batchSize)
+        {
+            int end = Math.Min(start + batchSize, dataset.Count);
+            int size = end - start;
+
+            var inputData = new float[size * numPixels];
+            for (int i = 0; i < size; i++)
+            {
+                var pattern = dataset.GetPattern(indices[start + i]);
+                Array.Copy(pattern, 0, inputData, i * numPixels, numPixels);
+            }
+            var input = ReverseGradTensor<float>.FromMatrix(inputData, size, numPixels, requiresGrad: true);
+            input.Reshape(size, 1, ps, ps);
+
+            float lossVal;
+            using (GradientUtils.Grad())
+            {
+                var recon = model.Forward(input);
+                var (mu, logVar) = model.Encode(input);
+                var reconFlat = ReverseGradTensor<float>.FromArray(ExtractPixels4D(recon, numPixels * size), requiresGrad: false);
+                reconFlat.Reshape(size, numPixels);
+                var inputFlat = ReverseGradTensor<float>.FromArray(ExtractPixels4D(input, numPixels * size), requiresGrad: false);
+                inputFlat.Reshape(size, numPixels);
+                var kl = ReverseGradOperations.KlDivergence(mu, logVar);
+                var klMean = ReverseGradOperations.Divide(kl, new ReverseGradTensor<float>(
+                    NivaraColumn<float>.Create(new float[] { (float)size }), requiresGrad: false));
+                var bceLoss = new BCEWithLogitsLoss<float>();
+                var reconLoss = bceLoss.Forward(reconFlat, inputFlat, reduceToMean: true);
+                var loss = ReverseGradOperations.Add(reconLoss, ReverseGradOperations.Multiply(klMean,
+                    new ReverseGradTensor<float>(
+                        NivaraColumn<float>.Create(new float[] { opts.Beta }), requiresGrad: false)));
+
+                loss.Backward();
+                GradientUtils.ClipGradNorm(model.Parameters().Values, 1.0);
+                optimizer.Step();
+                optimizer.ZeroGrad();
+                lossVal = loss[0];
+            }
+
+            epochLoss += lossVal;
+            batchCount++;
+        }
+
+        double avgLoss = epochLoss / batchCount;
+        Console.WriteLine($"  Epoch {epoch}/{opts.Epochs}  loss={avgLoss:F4}");
+    }
+}
+
+static void GenerateConv(ConvVAE<float> model, int count, int latentDim, int patternSize, int seed)
+{
+    model.Eval();
+    int ps = patternSize;
+    int numPixels = ps * ps;
+    Console.WriteLine($"\n--- Generated Patterns (ConvVAE, n={count}) ---");
+
+    var rng = new Random(seed);
+    for (int i = 0; i < count; i++)
+    {
+        var zData = SampleStandardNormal(latentDim, rng.Next());
+        var z = ReverseGradTensor<float>.FromMatrix(zData, 1, latentDim, requiresGrad: false);
+        z.Reshape(1, latentDim, 1, 1);
+        var decoded = model.Decode(z);
+        var pixels = ExtractPixels4D(decoded, numPixels);
+        Console.WriteLine($"\nSample {i + 1}:");
+        Console.WriteLine(PatternDataset.RenderPattern(pixels, ps));
+    }
+}
+
+static void InterpolateConv(ConvVAE<float> model, PatternDataset dataset, int count, int patternSize)
+{
+    model.Eval();
+    int ps = patternSize;
+    int numPixels = ps * ps;
+    Console.WriteLine($"\n--- Interpolations (ConvVAE, n={count}) ---");
+
+    var rng = new Random(42);
+    for (int i = 0; i < count; i++)
+    {
+        int idx1 = rng.Next(dataset.Count);
+        int idx2 = rng.Next(dataset.Count);
+
+        var p1 = dataset.GetPattern(idx1);
+        var p2 = dataset.GetPattern(idx2);
+
+        var t1 = ReverseGradTensor<float>.FromMatrix(p1, 1, numPixels, requiresGrad: false);
+        t1.Reshape(1, 1, ps, ps);
+        var t2 = ReverseGradTensor<float>.FromMatrix(p2, 1, numPixels, requiresGrad: false);
+        t2.Reshape(1, 1, ps, ps);
+
+        var (mu1, _) = model.Encode(t1);
+        var (mu2, _) = model.Encode(t2);
+
+        Console.WriteLine($"\nInterpolation {i + 1}: sample {idx1} -> sample {idx2}");
+        Console.WriteLine("From:");
+        Console.WriteLine(PatternDataset.RenderPattern(p1, ps));
+
+        var alphas = new float[] { 0.0f, 0.25f, 0.5f, 0.75f, 1.0f };
+        foreach (var alpha in alphas)
+        {
+            var mu1Data = new float[mu1.Length];
+            var mu2Data = new float[mu2.Length];
+            mu1.Data.CopyTo(mu1Data, default(float)!);
+            mu2.Data.CopyTo(mu2Data, default(float)!);
+
+            var zData = new float[mu1.Length];
+            for (int j = 0; j < zData.Length; j++)
+                zData[j] = alpha * mu1Data[j] + (1 - alpha) * mu2Data[j];
+
+            var z = ReverseGradTensor<float>.FromMatrix(zData, 1, zData.Length, requiresGrad: false);
+            z.Reshape(mu1.Shape);
+            var decoded = model.Decode(z);
+            var pixels = ExtractPixels4D(decoded, numPixels);
+            Console.WriteLine($"  alpha={alpha:F2}: {PatternDataset.RenderPattern(pixels, ps)}");
+        }
+    }
+}
+
+static void LatentWalkConv(ConvVAE<float> model, int latentDim, int patternSize)
+{
+    model.Eval();
+    int ps = patternSize;
+    int numPixels = ps * ps;
+    Console.WriteLine($"\n--- Latent Walk (ConvVAE, dim={latentDim}) ---");
+
+    var steps = new float[] { -3f, -2f, -1f, 0f, 1f, 2f, 3f };
+
+    for (int d = 0; d < latentDim; d++)
+    {
+        Console.WriteLine($"\nDimension {d}:");
+        foreach (var val in steps)
+        {
+            var zData = new float[latentDim];
+            zData[d] = val;
+            var z = ReverseGradTensor<float>.FromMatrix(zData, 1, latentDim, requiresGrad: false);
+            z.Reshape(1, latentDim, 1, 1);
+            var decoded = model.Decode(z);
+            var pixels = ExtractPixels4D(decoded, numPixels);
+            Console.WriteLine($"  {val:+0.0;-0.0}: {PatternDataset.RenderPattern(pixels, ps)}");
+        }
+    }
+}
+
+static void EvaluateConv(ConvVAE<float> model, PatternDataset dataset, Options opts)
+{
+    model.Eval();
+    int numPixels = dataset.NumPixels;
+    int ps = opts.PatternSize;
+    int testSize = Math.Max(1, (int)(dataset.Count * 0.2));
+    var bceLoss = new BCEWithLogitsLoss<float>();
+
+    var rng = new Random(opts.Seed);
+    var indices = new int[dataset.Count];
+    for (int i = 0; i < dataset.Count; i++)
+        indices[i] = i;
+    Shuffle(indices, rng);
+
+    double totalLoss = 0;
+    for (int i = 0; i < testSize; i++)
+    {
+        var pattern = dataset.GetPattern(indices[i]);
+        var input = ReverseGradTensor<float>.FromMatrix(pattern, 1, numPixels, requiresGrad: false);
+        input.Reshape(1, 1, ps, ps);
+
+        var recon = model.Forward(input);
+        var reconFlat = ReverseGradTensor<float>.FromArray(ExtractPixels4D(recon, numPixels), requiresGrad: false);
+        reconFlat.Reshape(1, numPixels);
+        var inputFlat = ReverseGradTensor<float>.FromArray(pattern, requiresGrad: false);
+        inputFlat.Reshape(1, numPixels);
+        var bce = bceLoss.Forward(reconFlat, inputFlat, reduceToMean: true);
+        totalLoss += bce[0];
+    }
+
+    model.Train();
+    Console.WriteLine($"\n--- Evaluation ({testSize} samples, ConvVAE) ---");
+    Console.WriteLine($"  Mean BCE loss: {totalLoss / testSize:F4}");
+}
+
+static float[] ExtractPixels4D(ReverseGradTensor<float> tensor, int count)
+{
+    var pixels = new float[count];
+    var data = new float[tensor.Length];
+    tensor.Data.CopyTo(data, default(float)!);
+    Array.Copy(data, pixels, Math.Min(count, data.Length));
+    return pixels;
+}
+
 sealed class Options
 {
     public int Epochs { get; init; } = 10;
@@ -338,6 +594,7 @@ sealed class Options
     public bool ShowPatterns { get; init; }
     public bool Eval { get; init; }
     public bool Help { get; init; }
+    public string Mode { get; init; } = "linear";
 
     public static Options Parse(string[] args)
     {
@@ -345,6 +602,7 @@ sealed class Options
         int patternSize = 8, numPatterns = 5000, seed = 42;
         float lr = 0.001f, beta = 1.0f, dropout = 0.2f;
         string? savePath = null, loadPath = null, saveDataPath = null, loadDataPath = null;
+        string mode = "linear";
         int? genCount = null, interpCount = null;
         bool latentWalk = false, showPatterns = false, eval = false, help = false;
 
@@ -362,6 +620,7 @@ sealed class Options
                 case "--seed" or "-s": seed = int.Parse(args[++i]); break;
                 case "--beta": beta = float.Parse(args[++i]); break;
                 case "--dropout": dropout = float.Parse(args[++i]); break;
+                case "--mode": mode = args[++i].ToLowerInvariant(); break;
                 case "--save": savePath = args[++i]; break;
                 case "--load": loadPath = args[++i]; break;
                 case "--save-data": saveDataPath = args[++i]; break;
@@ -384,6 +643,7 @@ sealed class Options
             Epochs = epochs, LatentDim = latentDim, HiddenDim = hiddenDim,
             BatchSize = batchSize, LearningRate = lr, PatternSize = patternSize,
             NumPatterns = numPatterns, Seed = seed, Beta = beta, Dropout = dropout,
+            Mode = mode,
             SavePath = savePath, LoadPath = loadPath, SaveDataPath = saveDataPath, LoadDataPath = loadDataPath, GenerateCount = genCount,
             InterpolateCount = interpCount, LatentWalk = latentWalk,
             ShowPatterns = showPatterns, Eval = eval, Help = help
@@ -407,6 +667,7 @@ sealed class Options
             Model:
               --latent-dim, -l <n>    Latent space dimension (default: 8)
               --hidden-dim <n>        Hidden layer dimension (default: 128)
+              --mode <linear|conv>    Model architecture (default: linear)
 
             Data:
               --pattern-size, -p <n>  Grid size per pattern (default: 8)
