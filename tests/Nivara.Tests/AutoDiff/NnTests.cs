@@ -2459,6 +2459,115 @@ public class NnTests
     }
 
     [Test]
+    public void Conv2d_AsymmetricPadding_OutputShapeCorrect()
+    {
+        using var conv = new Conv2d<float>(1, 1, kernelSize: 3, stride: 2,
+            paddingTop: 1, paddingBottom: 0, paddingLeft: 1, paddingRight: 0, bias: false);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 1 * 7 * 7]),
+            requiresGrad: false);
+        input.Reshape(1, 1, 7, 7);
+
+        var output = conv.Forward(input);
+
+        int expectedH = (7 + 1 + 0 - 3) / 2 + 1;
+        int expectedW = (7 + 1 + 0 - 3) / 2 + 1;
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 1, expectedH, expectedW }));
+    }
+
+    [Test]
+    public void Conv2d_AsymmetricPadding_ForwardCorrect()
+    {
+        using var conv = new Conv2d<float>(1, 1, kernelSize: 3, stride: 2,
+            paddingTop: 1, paddingBottom: 0, paddingLeft: 1, paddingRight: 0, bias: false);
+        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(
+            new float[9].Select(_ => 1f).ToArray(), 1, 9, requiresGrad: false);
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Range(0, 49).Select(i => (float)i).ToArray()),
+            requiresGrad: false);
+        input.Reshape(1, 1, 7, 7);
+
+        var output = conv.Forward(input);
+
+        int expectedH = (7 + 1 + 0 - 3) / 2 + 1;
+        int expectedW = (7 + 1 + 0 - 3) / 2 + 1;
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 1, expectedH, expectedW }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void Conv2d_AsymmetricPadding_Backward_GradientFlows()
+    {
+        using var conv = new Conv2d<float>(2, 3, kernelSize: 3, stride: 2,
+            paddingTop: 1, paddingBottom: 0, paddingLeft: 1, paddingRight: 0, bias: true);
+        conv.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 2 * 7 * 7]),
+            requiresGrad: true);
+        input.Reshape(1, 2, 7, 7);
+
+        var output = conv.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[output.Length]),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(1 * 2 * 7 * 7));
+        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.WeightParam.Tensor.Grad!.Length, Is.EqualTo(3 * 2 * 3 * 3));
+        Assert.That(conv.BiasParam!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.BiasParam.Tensor.Grad!.Length, Is.EqualTo(3));
+        for (int i = 0; i < input.Grad.Length; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
+    }
+
+    [Test]
+    public void Conv2d_AsymmetricPadding_Grouped_Backward_GradientFlows()
+    {
+        using var conv = new Conv2d<float>(4, 4, kernelSize: 3, stride: 2,
+            paddingTop: 1, paddingBottom: 0, paddingLeft: 1, paddingRight: 0, bias: false, groups: 2);
+        conv.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 4 * 8 * 8]),
+            requiresGrad: true);
+        input.Reshape(1, 4, 8, 8);
+
+        var output = conv.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[output.Length]),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(1 * 4 * 8 * 8));
+        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
+        for (int i = 0; i < input.Grad.Length; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
+    }
+
+    [Test]
+    public void Conv2d_AsymmetricPadding_ConstructorRejectsNegativeValues()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new Conv2d<float>(1, 1, 3, 1, paddingTop: -1, paddingBottom: 0, paddingLeft: 0, paddingRight: 0, bias: false));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new Conv2d<float>(1, 1, 3, 1, paddingTop: 0, paddingBottom: -1, paddingLeft: 0, paddingRight: 0, bias: false));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new Conv2d<float>(1, 1, 3, 1, paddingTop: 0, paddingBottom: 0, paddingLeft: -1, paddingRight: 0, bias: false));
+        Assert.Throws<ArgumentOutOfRangeException>(() =>
+            new Conv2d<float>(1, 1, 3, 1, paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: -1, bias: false));
+    }
+
+    [Test]
     public void MultiheadAttention_ShapeCorrect()
     {
         using var mha = new MultiheadAttention<float>(embedDim: 64, numHeads: 8);
