@@ -844,7 +844,7 @@ DataFrame → ReverseGradTensor<T> → Computation Graph (GradNode DAG)
 **Key components:**
 - **`ReverseGradTensor<T>`** / **`ForwardGradTensor<T>`** — autograd tensors for reverse and forward modes
 - **`ReverseGradOperations`** / **`ForwardGradOperations`** — static factories of all differentiable operations
-- **Module system** (`Nn/`) — `Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `TransformerBlock`, `TextClassifierModel`, `TokenClassifierModel`, `TextTokenizer`, `Sampler`
+- **Module system** (`Nn/`) — `Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d`, `Conv2d`, `ConvTranspose2d`, `BatchNorm1d`, `BatchNorm2d`, `LayerNorm`, `DepthwiseSeparableConv2d`, `TransformerBlock`, `MultiheadAttention`, `ConvVAE`, `TextClassifierModel`, `TokenClassifierModel`, `TextTokenizer`, `Sampler`
 - **Optimizers** (`Optimizer/`) — `SGD`, `Adam`, `AdamW`
 - **Training** (`Training/`) — `TrainingLoop`, `DataParallelTrainer`
 - **Serialization** (`Serialization/`) — `ModelSerializer` (JSON save/load)
@@ -852,6 +852,32 @@ DataFrame → ReverseGradTensor<T> → Computation Graph (GradNode DAG)
 **Null handling:** Per [ADR-001](docs/adr/001-autodiff-nonnullable-domain.md), AutoDiff is a non-nullable domain — null boundary enforced at `NivaraColumn<T>` → `ReverseGradTensor<T>` conversion. Null-handling branches have been removed from hot paths (`AccumulateGradient`, `BroadcastGradient`, KL/sample ops, `AdamW`) for single-path SIMD execution via `TensorPrimitives`.
 
 **BCE backward fix:** `BCEWithLogitsLoss` backward was rewritten from a multi-op decomposition (Relu + Abs + SoftPlus) to a single fused `OpNode<T>` computing `sigmoid(x) - z` directly. The original decomposition produced incorrect gradients at x=0 where Relu and Abs subgradients are both 0. Forward values unchanged. `LeakyRelu` default slope corrected from 0 to 0.01.
+
+### Convolution Kernel Strategy
+
+Nivara's convolution layers use specialized kernels optimized for common cases while maintaining full autograd correctness.
+
+#### Conv2d: Tiled im2col → Dot
+
+The `Conv2d<T>` kernel follows a tiled im2col pipeline: gather input patches into contiguous buffers, then use `TensorPrimitives.Dot` per output channel. Key optimizations:
+
+- **PatchLocation lookup table**: `PatchLocation` struct precomputes `(Batch, OH, OW)` per-tile, eliminating 4 integer divisions per position from all hot loops
+- **ConvForward1x1**: bypasses im2col entirely for 1×1 kernels (stride=1, padding=0). Gathers input channels into pooled buffer, then `Dot` per output channel
+- **InputGrad specializations**: `InputGrad1x1` (direct MultiplyAdd), `InputGrad3x3` (bounds-checked 9-tap scatter), `InputGradGeneric` (nested loops) — eliminates im2col for the backward input path
+- **Zero-copy via TryGetSpan**: eliminates tensor copy when storage is contiguous
+- **Grouped convolution**: `groups` parameter splits input/output channels. For `groups=1` (common path), zero overhead — full buffers passed directly. For `groups>1`, gather/scatter per group with NCHW layout
+
+#### Conv1d: 1D im2col → Dot
+
+The `Conv1d<T>` kernel mirrors Conv2d's approach in 1D: `Conv1dForwardKernel` gathers patches, `TensorPrimitives.Dot` per output channel. Weight and bias gradients follow the same pattern. Kaiming-Uniform initialization.
+
+#### ConvTranspose2d: Direct Scatter
+
+`ConvTranspose2d<T>` uses a direct scatter kernel (`Col2ImForward`) rather than im2col. The forward pass scatters input values across the output grid, while backward uses `ConvTransposeInputGradKernel` (scatter with stride check) and `ConvTransposeWeightGradKernel` (reduction over spatial dimensions). No grouped convolution support.
+
+#### BatchNorm/LayerNorm: Fused Span Kernels
+
+`BatchNormKernel<T>` and `LayerNormKernel<T>` use `TensorPrimitives` for forward and backward — single `OpNode` per call with no expanded tensors. LayerNorm uses `TensorPrimitives.Dot` for SIMD-accelerated sum-of-squares. Both accept `Span<T>`/`ReadOnlySpan<T>` for composability with grouped slicing.
 
 ---
 

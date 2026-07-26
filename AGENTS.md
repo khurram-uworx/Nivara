@@ -69,6 +69,16 @@ Where to look (implementation map)
   - `src/Nivara/AutoDiff/Optimizer/Adam.cs` — Adam optimizer with bias correction and null-skip
   - `src/Nivara/AutoDiff/Optimizer/AdamW.cs` — AdamW optimizer with decoupled weight decay
   - `src/Nivara/AutoDiff/Nn/` — module system (Linear, Sequential, Parameter, activations)
+  - `src/Nivara/AutoDiff/Nn/Conv1d.cs` — 1D convolution (im2col → TensorPrimitives.Dot kernel)
+  - `src/Nivara/AutoDiff/Nn/Conv2d.cs` — 2D convolution (tiled im2col, grouped conv, 1×1 fast path) and ConvTranspose2d
+  - `src/Nivara/AutoDiff/Nn/BatchNorm.cs` — BatchNorm1d and BatchNorm2d (fused span kernel)
+  - `src/Nivara/AutoDiff/Nn/BatchNormKernel.cs` — fused BatchNorm kernel implementation
+  - `src/Nivara/AutoDiff/Nn/LayerNorm.cs` — LayerNorm module
+  - `src/Nivara/AutoDiff/Nn/LayerNormKernel.cs` — LayerNorm kernel (TensorPrimitives.Dot SIMD)
+  - `src/Nivara/AutoDiff/Nn/DepthwiseSeparableConv2d.cs` — MobileNet-style depthwise separable conv
+  - `src/Nivara/AutoDiff/Nn/ConvVAE.cs` — Fully convolutional VAE
+  - `src/Nivara/AutoDiff/Nn/TransformerBlock.cs` — Pre-norm transformer block (NormType enum: RMSNorm/LayerNorm)
+  - `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs` — Standalone self/cross-attention module
   - `src/Nivara/AutoDiff/Training/` — TrainingLoop, DataParallelTrainer, batch management
   - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load and state-dict JSON wrappers
 
@@ -292,9 +302,13 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets.
 - **NivaraSeries TopKDescending**: added in Phase 3 on `NivaraSeries<T>` (not `NivaraFrame`), returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
 - ✓ **NivaraFrame RowNorms**: batch `Vector<T>` kernel implemented in `TensorsHelper.RowNorms` — single-pass SIMD square-accumulate per row with `TensorPrimitives.Norm` fallback. ColumnNorms uses per-column `TensorPrimitives.Norm` (no batch needed).
-- **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1216 tests passing.
+- **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1948 tests passing.
 - ✓ **AutoDiff P0–P6 complete**: reverse-mode autograd, NN module system, full optimizer family (SGD, Adam, AdamW), training loops, data-parallel training, model serialization — all implemented in core `src/Nivara/AutoDiff/`
 - ✓ **BCEWithLogitsLoss fused backward**: replaced multi-op decomposition (Relu + Abs + SoftPlus) with single `OpNode<T>` computing `sigmoid(x) - z` directly. Fixes subgradient error at x=0 where Relu and Abs both return 0. `reduceToMean` overload added. `LeakyRelu` default slope corrected from 0 to 0.01. ADR-001 null cleanup removed ~200 lines of dead null branches from AccumulateGradient, KL/sample ops, and AdamW.
+- **ConvTranspose2d**: no grouped convolution support; grouped transpose would require new kernel paths.
+- **ConvTranspose2d**: direct scatter produces zero-padded interior positions (stride > 1); test verified numerically correct but may look unexpected.
+- **BatchNorm2d**: uses generic per-element kernel (not the fused `BatchNormKernel<T>` span path); functionally correct but slightly slower than optimal.
+- **PerRowLayerNorm**: delegates to `LayerNormKernel` with per-row slicing instead of a fused multi-row kernel; functionally correct but not optimal for large row counts.
 
 ---
 

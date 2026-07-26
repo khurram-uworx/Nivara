@@ -73,14 +73,15 @@ ComputationGraph                      ← Graph traversal engine
 
 ReverseGradOperations                 ← Reverse-mode forward+backward ops (static methods)
 ├── Element-wise: Add, Subtract, Multiply, Divide, Clip, Pow
-├── Matrix: MatMul, Transpose, Slice, Concat, Gather
+├── Matrix: MatMul, Transpose, TransposeAxes, Slice, Concat, Gather
 ├── Reductions: Sum, Mean, MeanPool
-├── Normalization: RMSNorm, PerRowRMSNorm
+├── Normalization: RMSNorm, PerRowRMSNorm, PerRowLayerNorm
 ├── Activations: Relu, LeakyRelu, Sigmoid, Tanh
 ├── Unary: Negate, Abs, Exp, Log
 ├── Regularization: Dropout
 ├── Embedding: SparseEmbeddingBag
 ├── Probability: Softmax, LogSoftmax, KlDivergence, SampleNormal
+├── Broadcast: BroadcastMultiply, BroadcastAdd
 └── ...vectorized via TensorPrimitives where available
 
 ForwardGradOperations                 ← Forward-mode JVP ops (static methods, mirrors ReverseGradOperations)
@@ -103,10 +104,20 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 ├── Dropout<T>                        ← Inverted dropout with train/eval toggle
 ├── Embedding<T>                      ← Lookup embedding (token IDs → vectors)
 ├── SparseEmbedding<T>                ← Sparse embedding bag (fixed-width active features)
+├── Conv1d<T>                         ← 1D convolution: im2col → TensorPrimitives.Dot kernel
+├── Conv2d<T>                         ← 2D convolution: tiled im2col → Dot, grouped conv, 1×1 fast path
+├── ConvTranspose2d<T>                ← 2D transposed convolution: scatter kernel
+├── BatchNorm1d<T>                    ← 1D batch normalization (train/eval modes, running stats)
+├── BatchNorm2d<T>                    ← 2D batch normalization (same pattern as 1D)
+├── LayerNorm<T>                      ← Layer normalization (TensorPrimitives.Dot kernel)
+├── DepthwiseSeparableConv2d<T>       ← MobileNet-style: depthwise conv + pointwise 1×1
 ├── TextClassifierModel<T>            ← Embedding → MeanPool → FC → ReLU → FC (pre-built)
 ├── TokenClassifierModel<T>           ← Embedding → FC → ReLU → FC per-token (pre-built)
 ├── VAE<T>                            ← Variational Autoencoder (encoder → reparameterize → decoder)
+├── ConvVAE<T>                        ← Fully convolutional VAE (Conv2d encoder, 1×1 Conv heads)
 ├── TransformerBlock<T>               ← Multi-head causal self-attention + GELU MLP (pre-norm)
+│   └── NormType enum: RMSNorm (default) | LayerNorm
+├── MultiheadAttention<T>             ← Standalone Q/K/V/O attention (self-attention + cross-attention)
 ├── Sampler<T>                        ← Temperature/top-k categorical sampling
 ├── TextTokenizer                     ← Vocabulary builder with special tokens
 └── Initializers/                     ← Kaiming, Xavier, Uniform, Normal, PyTorchDefault
@@ -290,6 +301,7 @@ Static graph traversal engine:
 |----|---------|---------------|--------------|
 | `MatMul(a, b)` | `a @ b` | `∂/∂a = grad @ bᵀ`, `∂/∂b = aᵀ @ grad` | Both tensors rank 2; `a.Cols == b.Rows` |
 | `Transpose(a)` | `aᵀ` | `∂/∂a = gradᵀ` | Rank 2 |
+| `TransposeAxes(a, axis1, axis2)` | Swap two axes | `∂/∂a = TransposeAxes(grad, axis1, axis2)` | Rank 2-3 |
 | `Slice(a, start, length)` | `a[start:start+length]` | Gradient scattered back to original positions | start + length ≤ a.Length |
 | `Concat(tensors, axis)` | Join along axis | Gradient split back to original tensors | All non-axis dims must match |
 | `Gather(source, indices, axis)` | Select indices along axis | Scattered back via `SegmentSum` | indices valid for source shape |
@@ -310,6 +322,7 @@ MatMul is implemented in `ReverseGradOperations.MatMul` via `NivaraColumn<T>.Mat
 |----|---------|---------------|-------|
 | `RMSNorm(a, eps)` | `a / √(mean(a²) + eps)` | Custom backward with saved input | Row-level normalization |
 | `PerRowRMSNorm(a, rows, cols, eps)` | Per-row RMS normalization | Custom backward with saved input | Used by TransformerBlock |
+| `PerRowLayerNorm(a, rows, cols, eps)` | Per-row standard LayerNorm (mean + variance) | Delegates to LayerNormKernel.Backward | Used by TransformerBlock with NormType.LayerNorm |
 
 ### Activations
 
@@ -556,17 +569,183 @@ Variational Autoencoder with encoder → reparameterization trick → decoder.
 
 ```csharp
 public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
-// new TransformerBlock<T>(nEmbd, nHead, dropout: 0.0, maxSeqLen: 256, initStd: 0.02)
+// new TransformerBlock<T>(embedDim, numHeads, hiddenDim, dropout: 0.0, residualDropout: 0.0, normType: NormType.RMSNorm)
 ```
 
-Pre-norm transformer block: `RMSNorm → Multi-Head Causal Self-Attention → Residual → RMSNorm → GELU MLP → Residual`.
+Pre-norm transformer block with configurable normalization:
 
-- Q/K/V/O projections + 2-layer MLP (4× expansion)
-- Causal mask for autoregressive generation
-- Optional attention and residual dropout
-- `nEmbd` must be divisible by `nHead`
+```
+NormType { RMSNorm, LayerNorm }
+PerRowRMSNorm(x) → TensorPrimitives-backed per-row normalization (no mean centering)
+PerRowLayerNorm(x) → LayerNormKernel.Forward with affine=false (mean + variance normalization)
+```
 
-### Sampler\<T\>
+- Multi-head self-attention (Q/K/V/O projections, scaled dot-product, output projection)
+- Configurable normalization: `RMSNorm` (default, fused per-row `TensorPrimitives.Dot`) or `LayerNorm` (delegates to `LayerNormKernel<T>` with affine=false)
+- GELU FFN (fc1 → GELU → fc2)
+- Residual connections with optional attention and residual dropout
+- `embedDim` must be divisible by `numHeads`
+
+### Conv1d\<T\>
+
+```csharp
+public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
+// new Conv1d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
+```
+
+1D convolution with standalone im2col-based kernel and full autograd support.
+
+```
+Forward:   Conv1dForwardKernel (im2col) → Dot per output channel
+InputGrad: Conv1dInputGradKernel (scatter-add of weight × gradOut patches)
+WeightGrad: Conv1dWeightGradKernel (im2col + Dot per output channel)
+BiasGrad:  TensorPrimitives.Sum over batch and length per output channel
+```
+
+- Input shape: `[N, C, L]`, output: `[N, outChannels, oL]` where `oL = (L + 2*padding - kernelSize) / stride + 1`
+- Kaiming-Uniform initialization: `U(-√(6/fanIn), √(6/fanIn))`
+- All kernel methods accept `Span<T>`/`ReadOnlySpan<T>` for composability
+
+### Conv2d\<T\>
+
+```csharp
+public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
+// new Conv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, groups: 1, bias: true)
+```
+
+2D convolution with tiled im2col → `TensorPrimitives.Dot` per output channel.
+
+```
+Forward:   Im2ColTile → Dot per output channel (groups=1: direct, groups>1: gather/scatter)
+InputGrad: InputGrad1x1 | InputGrad3x3 | InputGradGeneric
+WeightGrad: Im2ColTile → MultiplyAdd per output channel
+BiasGrad:  TensorPrimitives.Sum per channel
+```
+
+Key optimizations:
+- **PatchLocation lookup table**: precomputes `(Batch, OH, OW)` per-tile, eliminates 4 integer divisions per position
+- **ConvForward1x1**: bypasses im2col entirely for 1×1 kernels (stride=1, padding=0)
+- **InputGrad specializations**: `InputGrad1x1` (direct MultiplyAdd), `InputGrad3x3` (bounds-checked 9-tap scatter), `InputGradGeneric` (nested loops)
+- **Zero-copy via TryGetSpan**: eliminates tensor copy when storage is contiguous
+- **Grouped convolution**: `groups` parameter splits input/output channels into independent groups. For `groups=1` (common path), zero overhead
+
+### ConvTranspose2d\<T\>
+
+```csharp
+public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
+// new ConvTranspose2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
+```
+
+2D transposed convolution using direct scatter kernel (not im2col-based).
+
+```
+Forward:     Col2ImForward (scatter) + bias
+InputGrad:   ConvTransposeInputGradKernel (scatter with stride check)
+WeightGrad:  ConvTransposeWeightGradKernel (reduction over ih, iw)
+```
+
+- No grouped convolution support (Conv2d has it)
+- Used by ConvVAE decoder for stride-upsampling
+
+### BatchNorm1d\<T\> / BatchNorm2d\<T\>
+
+```csharp
+public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
+// new BatchNorm1d<T>(numFeatures, eps: 1e-5, momentum: 0.1, affine: true)
+
+public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
+// new BatchNorm2d<T>(numFeatures, eps: 1e-5, momentum: 0.1, affine: true)
+```
+
+Fused span-based kernel with `TensorPrimitives` — single `OpNode` per call.
+
+```
+BatchNormKernel<T>
+├── Forward(input, n, c, hw, gamma, beta, eps, affine) → (Output, XHat, InvStd, Mean)
+├── BackwardInput(gradOut, xHat, gamma, invStd, n, c, hw) → gradInput
+├── BackwardWeight(gradOut, xHat, n, c, hw) → gradGamma
+└── BackwardBias(gradOut, n, c, hw) → gradBeta
+```
+
+- Train mode: computes batch statistics, updates running stats via direct span arithmetic
+- Eval mode: uses cached running mean/var
+- StateDict/LoadStateDict includes `running_mean`, `running_var`, `num_batches_tracked`
+
+### LayerNorm\<T\>
+
+```csharp
+public sealed class LayerNorm<T> : Module<T> where T : struct, INumber<T>
+// new LayerNorm<T>(normalizedShape, eps: 1e-5, affine: true)
+```
+
+Span-based kernel with `TensorPrimitives`. Normalizes over the last dimension per instance (no running stats, unlike BatchNorm). Uses `TensorPrimitives.Dot` for SIMD-accelerated sum-of-squares computation.
+
+```
+LayerNormKernel<T>
+├── Forward(input, rows, normalizedShape, gamma, beta, eps, affine) → (Output, Mean, InvStd, XHat)
+│   └── Uses TensorPrimitives.Dot for sum-of-squares (SIMD-accelerated)
+├── BackwardInput(gradOut, xHat, gamma, invStd, rows, normalizedShape, affine) → gradInput
+├── BackwardWeight(gradOut, xHat, rows, normalizedShape) → gradGamma
+└── BackwardBias(gradOut, rows, normalizedShape) → gradBeta
+```
+
+### DepthwiseSeparableConv2d\<T\>
+
+```csharp
+public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, INumber<T>
+// new DepthwiseSeparableConv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
+```
+
+Efficient depthwise separable convolution (MobileNet-style): depthwise conv (`groups=inChannels`) + pointwise 1×1 conv. Reuses existing `Conv2d` grouped kernel and `ConvForward1x1`.
+
+```
+DepthwiseSeparableConv2d<T> : Module<T>
+└── Forward(input) → Conv2d(groups=inChannels) → ReLU → Conv2d(1×1)
+```
+
+### ConvVAE\<T\>
+
+```csharp
+public sealed class ConvVAE<T> : Module<T> where T : struct, INumber<T>
+// new ConvVAE<T>(inputChannels, encoderChannels, latentChannels, spatialSize, kernelSize, stride, padding)
+```
+
+Fully convolutional VAE with 1×1 Conv2d heads for spatial latent representations.
+
+```
+ConvVAE<T> : Module<T>
+├── Forward(x) → recon
+├── Encode(x) → (Mu, LogVar)       [both spatial, e.g. B×C'×H'×W']
+├── Reparameterize(mu, logVar) → z  [spatial reparameterization trick]
+├── Decode(z) → recon               [ConvTranspose stack]
+└── ElboLoss(recon, x, mu, logVar) → scalar  [MSE + KL divergence]
+```
+
+- Configurable encoder channel list, latent channels, kernel/stride/padding
+- 1×1 Conv heads preserve spatial structure in latent space
+
+### Conditional VAE
+
+```csharp
+// VAE<T> with conditionDim parameter
+// new VAE<T>(inputDim, latentDim, hiddenDim, decoderHiddenDim?, conditionDim: 0, ...)
+```
+
+Extended `VAE<T>` with optional conditioning. Encoder/decoder accept condition tensor via `Concat`.
+
+```
+VAE<T> : Module<T>
+├── Forward(x) → recon
+├── Forward(x, condition) → recon
+├── Encode(x) → (Mu, LogVar)
+├── Encode(x, condition) → (Mu, LogVar)
+├── Reparameterize(mu, logVar) → z
+├── Decode(z) → recon
+├── Decode(z, condition) → recon
+└── ElboLoss(recon, x, mu, logVar, lossType) → scalar
+```
+
+### MultiheadAttention\<T\>
 
 ```csharp
 public sealed class Sampler<T> where T : struct, INumber<T>
@@ -1354,7 +1533,16 @@ var prediction = loaded.Forward(testInput);
 | `TextClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TextClassifierModel.cs` |
 | `TokenClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TokenClassifierModel.cs` |
 | `VAE<T>` | `src/Nivara/AutoDiff/Nn/VAE.cs` |
+| `ConvVAE<T>` | `src/Nivara/AutoDiff/Nn/ConvVAE.cs` |
+| `Conv1d<T>` | `src/Nivara/AutoDiff/Nn/Conv1d.cs` |
+| `Conv2d<T>` / `ConvTranspose2d<T>` | `src/Nivara/AutoDiff/Nn/Conv2d.cs` |
+| `BatchNorm1d<T>` / `BatchNorm2d<T>` | `src/Nivara/AutoDiff/Nn/BatchNorm.cs` |
+| `BatchNormKernel<T>` | `src/Nivara/AutoDiff/Nn/BatchNormKernel.cs` |
+| `LayerNorm<T>` | `src/Nivara/AutoDiff/Nn/LayerNorm.cs` |
+| `LayerNormKernel<T>` | `src/Nivara/AutoDiff/Nn/LayerNormKernel.cs` |
+| `DepthwiseSeparableConv2d<T>` | `src/Nivara/AutoDiff/Nn/DepthwiseSeparableConv2d.cs` |
 | `TransformerBlock<T>` | `src/Nivara/AutoDiff/Nn/TransformerBlock.cs` |
+| `MultiheadAttention<T>` | `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs` |
 | `Sampler<T>` | `src/Nivara/AutoDiff/Nn/Sampler.cs` |
 | `TextTokenizer` | `src/Nivara/AutoDiff/Nn/TextTokenizer.cs` |
 | Initializers (7) | `src/Nivara/AutoDiff/Nn/Initializers/*.cs` |
