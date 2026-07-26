@@ -63,32 +63,25 @@ internal static class LayerNormKernel<T> where T : struct, INumber<T>
                 var diffSpan = diff.AsSpan(0, normalizedShape);
                 TensorPrimitives.Add(row, -m, diffSpan);
 
-                T sumSq = T.Zero;
-                for (int j = 0; j < normalizedShape; j++)
-                    sumSq += diffSpan[j] * diffSpan[j];
+                T sumSq = T.CreateChecked(double.CreateChecked(TensorPrimitives.Dot(diffSpan, diffSpan)));
 
                 T variance = sumSq / T.CreateChecked(normalizedShape);
                 invStd[r] = T.One / T.CreateChecked(Math.Sqrt(double.CreateChecked(variance + eps)));
 
                 T inv = invStd[r];
+                var outputSlice = output.AsSpan(offset, normalizedShape);
+                var xHatSlice = xHat.AsSpan(offset, normalizedShape);
                 if (affine)
                 {
                     TensorPrimitives.Multiply(diffSpan, inv, diffSpan);
-                    for (int j = 0; j < normalizedShape; j++)
-                    {
-                        T val = diffSpan[j] * gamma[j] + beta[j];
-                        output[offset + j] = val;
-                        xHat[offset + j] = diffSpan[j];
-                    }
+                    TensorPrimitives.Multiply(diffSpan, gamma, outputSlice);
+                    TensorPrimitives.Add(outputSlice, beta, outputSlice);
+                    diffSpan.CopyTo(xHatSlice);
                 }
                 else
                 {
-                    for (int j = 0; j < normalizedShape; j++)
-                    {
-                        T val = diffSpan[j] * inv;
-                        output[offset + j] = val;
-                        xHat[offset + j] = val;
-                    }
+                    TensorPrimitives.Multiply(diffSpan, inv, outputSlice);
+                    outputSlice.CopyTo(xHatSlice);
                 }
             }
             finally
@@ -125,7 +118,7 @@ internal static class LayerNormKernel<T> where T : struct, INumber<T>
             T sumDY = T.Zero;
             T sumDYXHat = T.Zero;
 
-            if (normalizedShape >= 4 && typeof(T) == typeof(float))
+            if (normalizedShape >= 4 && (typeof(T) == typeof(float) || typeof(T) == typeof(double)))
             {
                 sumDY = T.CreateChecked(double.CreateChecked(TensorPrimitives.Sum(dy)));
                 var product = ArrayPool<T>.Shared.Rent(normalizedShape);
@@ -182,7 +175,7 @@ internal static class LayerNormKernel<T> where T : struct, INumber<T>
             var dy = gradOutput.Slice(offset, normalizedShape);
             var xh = xHat.Slice(offset, normalizedShape);
 
-            if (normalizedShape >= 4 && typeof(T) == typeof(float))
+            if (normalizedShape >= 4 && (typeof(T) == typeof(float) || typeof(T) == typeof(double)))
             {
                 var product = ArrayPool<T>.Shared.Rent(normalizedShape);
                 try
@@ -217,17 +210,8 @@ internal static class LayerNormKernel<T> where T : struct, INumber<T>
             int offset = r * normalizedShape;
             var dy = gradOutput.Slice(offset, normalizedShape);
 
-            if (normalizedShape >= 4 && typeof(T) == typeof(float))
-            {
-                var sum = T.CreateChecked(double.CreateChecked(TensorPrimitives.Sum(dy)));
-                for (int j = 0; j < normalizedShape; j++)
-                    gradBeta[j] += dy[j];
-            }
-            else
-            {
-                for (int j = 0; j < normalizedShape; j++)
-                    gradBeta[j] += dy[j];
-            }
+            for (int j = 0; j < normalizedShape; j++)
+                gradBeta[j] += dy[j];
         }
 
         return gradBeta;
