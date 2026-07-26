@@ -237,6 +237,11 @@ internal sealed class MobileNetV2 : Module<float>
         return model;
     }
 
+    public static int CountParameters(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        return tensors.Values.Sum(v => v.Data.Length);
+    }
+
     static void LoadStem(StemBlock stem, Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         LoadConv(stem.firstConv,

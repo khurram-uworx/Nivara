@@ -150,6 +150,11 @@ internal sealed class ResNet18 : Module<float>
         linear.LoadStateDict(dict);
     }
 
+    public static int CountParameters(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        return tensors.Values.Sum(v => v.Data.Length);
+    }
+
     static void LoadBasicBlock(Module<float> block, string prefix,
         Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
