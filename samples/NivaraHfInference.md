@@ -1,10 +1,22 @@
 # NivaraHfInference — Implementation Plan
 
-**Status:** Planned
+**Status:** In Progress
 **Created:** 2026-07-26
+**Updated:** 2026-07-26 — decisions taken, implementation started
 **Goal:** Load pre-trained HuggingFace models (MobileNetV2, ResNet-18) and run image classification inference using Nivara's AutoDiff engine.
 
 > This is a temporary implementation plan. It will be removed once the sample is complete.
+
+---
+
+## Decisions Taken
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| **SafeTensors reader** | Custom zero-dependency loader | Format is simple (8-byte header size + JSON header + raw data). Avoids external dependency. |
+| **BF16 support** | Reject non-F32 tensors | BF16 native support is coming in .NET 11. Focus on F32 models now; add BF16 when .NET 11 ships. |
+| **TF-style padding** | Add asymmetric padding to `Conv2d<T>` core | MobileNetV2 HuggingFace weights require it. Real-world gap that improves the core library. |
+| **Image I/O** | `System.Drawing` | Lightweight, no native dependency overhead like SkiaSharp. |
 
 ---
 
@@ -16,8 +28,8 @@ Load pre-trained vision models from HuggingFace Hub, read their SafeTensors weig
 
 | Model | HuggingFace ID | Parameters | Weight Size | Core Ops Needed |
 |-------|---------------|------------|-------------|-----------------|
-| **MobileNetV2** | `google/mobilenet_v2_1.0_224` | ~3.4M | ~13.4MB | All exist ✓ |
-| **ResNet-18** | `microsoft/resnet-18` | ~11.7M | ~44MB | MaxPool2d, AdaptiveAvgPool2d (new) |
+| **MobileNetV2** | `google/mobilenet_v2_1.0_224` | ~3.4M | ~13.4MB | Conv2d (TF padding), AdaptiveAvgPool2d |
+| **ResNet-18** | `microsoft/resnet-18` | ~11.7M | ~44MB | MaxPool2d, AdaptiveAvgPool2d |
 
 This is an **inference-only** sample — no training, no gradient computation, no backpropagation. It validates that Nivara's module system can represent real-world architectures and produce correct outputs.
 
@@ -29,15 +41,15 @@ This is an **inference-only** sample — no training, no gradient computation, n
 
 | HuggingFace Component | Nivara Module | Status |
 |----------------------|---------------|--------|
-| `nn.Conv2d` | `Conv2d<T>` | ✓ Exists |
+| `nn.Conv2d` | `Conv2d<T>` | ✓ Exists (needs TF asymmetric padding) |
 | `nn.BatchNorm2d` | `BatchNorm2d<T>` | ✓ Exists |
 | `nn.ReLU6` | `Clip(Relu(x), 0, 6)` | ✓ Composable from existing ops |
-| `nn.AdaptiveAvgPool2d(1)` | Global mean pool (manual) | ✓ Composable |
+| `nn.AdaptiveAvgPool2d(1)` | `AdaptiveAvgPool2d<T>` | ⚠ New — must add to core |
 | `nn.Linear` | `Linear<T>` | ✓ Exists |
 | `nn.Dropout` | `Dropout<T>` | ✓ Exists |
 | Depthwise Separable Conv | `DepthwiseSeparableConv2d<T>` | ✓ Exists |
 
-**No new core operations required.** All building blocks exist.
+**Core changes needed:** TF-style asymmetric padding on `Conv2d<T>`, new `AdaptiveAvgPool2d<T>`.
 
 ### Architecture
 
@@ -270,18 +282,24 @@ public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, INumber<T
 
 ## Implementation Steps
 
-### Phase 1: Core Library — MaxPool2d + AdaptiveAvgPool2d
+### Phase 0: Core Library — Conv2d TF Padding + MaxPool2d + AdaptiveAvgPool2d
 
-**Priority:** High (required for ResNet-18)
+**Priority:** High (required for both models)
 
-1. Implement `MaxPool2d<T>` with configurable kernel, stride, padding
-2. Implement `AdaptiveAvgPool2d<T>` with target output size
-3. Add unit tests for both (shape validation, gradient correctness, edge cases)
-4. Document in `docs/AUTODIFF.md`
+1. Extend `Conv2d<T>` with `paddingTop`/`paddingLeft` parameters for TF-style asymmetric padding (backward compatible — single `padding` parameter still works)
+2. Implement `MaxPool2d<T>` with configurable kernel, stride, padding
+3. Implement `AdaptiveAvgPool2d<T>` with target output size
+4. Add unit tests for all three (shape validation, gradient correctness, edge cases)
+5. Document in `docs/AUTODIFF.md`
 
-### Phase 2: SafeTensors Loader
+### Phase 2: SafeTensors Loader (Custom, Zero-Dependency)
 
 **File:** `SafeTensorsLoader.cs`
+
+Custom reader — no external NuGet dependency. The SafeTensors format is simple:
+- 8 bytes: header size (uint64 LE)
+- N bytes: JSON UTF-8 header (tensor metadata with dtype, shape, data_offsets)
+- Remaining bytes: raw tensor data buffer
 
 ```csharp
 public static class SafeTensorsLoader
@@ -292,17 +310,18 @@ public static class SafeTensorsLoader
     // Read from byte array
     public static Dictionary<string, (float[] Data, long[] Shape)> Read(byte[] bytes);
     
-    // Validate dtype is F32
+    // Validate dtype is F32 — reject all others
     private static void ValidateDtype(string dtype, string tensorName);
     
-    // Convert raw bytes to float array
+    // Convert raw bytes to float array via MemoryMarshal.Cast<byte, float>
     private static float[] BytesToFloats(ReadOnlySpan<byte> bytes);
 }
 ```
 
 Key decisions:
-- **Reject non-F32 tensors** with helpful message: "Tensor '{name}' has dtype '{dtype}'. Nivara currently supports F32 only. BF16 support is planned for .NET 11."
-- **Use `MemoryMarshal.Cast<byte, float>`** for zero-copy conversion when possible
+- **Reject non-F32 tensors** with helpful message: "Tensor '{name}' has dtype '{dtype}'. Nivara currently supports F32 only. BF16 support is coming with .NET 11."
+- **Use `MemoryMarshal.Cast<byte, float>`** for zero-copy conversion when alignment permits
+- **Zero external dependencies** — parse JSON header with `System.Text.Json` (already in BCL)
 
 ### Phase 3: MobileNetV2 Module
 
@@ -352,7 +371,7 @@ public sealed class ResNet18 : Module<float>
 
 **File:** `ImagePreprocessor.cs`
 
-Use SkiaSharp for image loading, resize, normalization. Both models use the same ImageNet normalization:
+Use `System.Drawing` for image loading and resize. Both models use the same ImageNet normalization:
 - mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
 - Resize to 224×224, convert HWC→CHW
 
@@ -383,16 +402,16 @@ var model = options.ModelName switch
 ## Project Structure
 
 ```
-samples/NivaraHfInference/
-├── README.md                    # Sample documentation
-├── NivaraHfInference.csproj     # Console app, net10.0
+samples/NivaraInference/
+├── README.md                    # Sample documentation (already exists)
+├── NivaraInference.csproj       # Console app, net10.0
 ├── Program.cs                   # Entry point, CLI parsing, inference pipeline
-├── SafeTensorsLoader.cs         # SafeTensors file reader
+├── SafeTensorsLoader.cs         # Custom SafeTensors file reader (zero-dependency)
 ├── MobileNetV2.cs               # MobileNetV2 Module<float>
 ├── InvertedResidualBlock.cs     # InvertedResidualBlock helper
 ├── ResNet18.cs                  # ResNet18 Module<float>
 ├── BasicBlock.cs                # ResNet BasicBlock helper
-├── ImagePreprocessor.cs         # SkiaSharp image loading + normalization
+├── ImagePreprocessor.cs         # System.Drawing image loading + normalization
 └── imagenet_labels.txt          # ImageNet class labels
 ```
 
@@ -412,18 +431,12 @@ samples/NivaraHfInference/
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
   </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Lokad.SafeTensors" Version="0.1.0" />
-    <PackageReference Include="SkiaSharp" Version="2.88.*" />
-  </ItemGroup>
 </Project>
 ```
 
 | Package | Purpose | Why external |
 |---------|---------|--------------|
-| `Lokad.SafeTensors` | Read .safetensors files | No SafeTensors support in core |
-| `SkiaSharp` | Image loading, resize, format conversion | No image I/O in core |
+| *(none)* | Custom SafeTensors loader + System.Drawing for images | Zero external dependencies beyond Nivara core |
 
 ---
 
@@ -431,22 +444,22 @@ samples/NivaraHfInference/
 
 ```bash
 # Interactive wizard (no args)
-dotnet run --project samples/NivaraHfInference
+dotnet run --project samples/NivaraInference
 
 # MobileNetV2 inference (default)
-dotnet run --project samples/NivaraHfInference -- --image test.jpg
+dotnet run --project samples/NivaraInference -- --image test.jpg
 
 # ResNet-18 inference
-dotnet run --project samples/NivaraHfInference -- --model resnet18 --image test.jpg
+dotnet run --project samples/NivaraInference -- --model resnet18 --image test.jpg
 
 # Specify model file directly
-dotnet run --project samples/NivaraHfInference -- --model mobilenet --model-path model.safetensors --image test.jpg
+dotnet run --project samples/NivaraInference -- --model mobilenet --model-path model.safetensors --image test.jpg
 
 # Show top-K predictions
-dotnet run --project samples/NivaraHfInference -- --model resnet18 --image test.jpg --top-k 10
+dotnet run --project samples/NivaraInference -- --model resnet18 --image test.jpg --top-k 10
 
 # Download model from HuggingFace
-dotnet run --project samples/NivaraHfInference -- --download --model resnet18 --image test.jpg
+dotnet run --project samples/NivaraInference -- --download --model resnet18 --image test.jpg
 ```
 
 | Option | Default | Description |
@@ -503,14 +516,11 @@ Inference time: 65ms
 
 ---
 
-## Risk: TensorFlow Padding (MobileNetV2)
+## Risk: TensorFlow Padding (MobileNetV2) — RESOLVED
 
-The default HuggingFace MobileNetV2 (`google/mobilenet_v2_1.0_224`) uses `tf_padding=True`, which means convolution layers use **TensorFlow-style asymmetric padding**. Nivara's `Conv2d<T>` uses symmetric padding only.
+The default HuggingFace MobileNetV2 (`google/mobilenet_v2_1.0_224`) uses `tf_padding=True`, which means convolution layers use **TensorFlow-style asymmetric padding** (e.g., `pad_left=1, pad_right=0` for stride=2).
 
-**Mitigations:**
-1. Use a model variant with `tf_padding=False` if available
-2. Implement asymmetric padding at the sample level
-3. Add asymmetric padding support to `Conv2d` (core library change)
+**Resolution:** Extended `Conv2d<T>` with `paddingTop/paddingLeft` parameters. When only `padding` is specified, behavior is symmetric (backward compatible). Im2Col already accepts separate `padH`/`padW` — the change propagates asymmetric values through.
 
 **ResNet-18 has no such issue** — it uses standard symmetric padding.
 
@@ -549,7 +559,5 @@ This sample directly showcases Nivara v1.1 capabilities:
 - [MobileNetV2 on HuggingFace](https://huggingface.co/google/mobilenet_v2_1.0_224)
 - [ResNet-18 on HuggingFace](https://huggingface.co/microsoft/resnet-18)
 - [ResNet-18 config](https://huggingface.co/docs/transformers/en/model_doc/resnet)
-- [Lokad.SafeTensors NuGet](https://www.nuget.org/packages/Lokad.SafeTensors)
-- [SkiaSharp NuGet](https://www.nuget.org/packages/SkiaSharp)
 - [Nivara AutoDiff docs](../../docs/AUTODIFF.md)
 - [SafeTensors research](../../docs/SAFETENSORS.md)
