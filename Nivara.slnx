@@ -9,6 +9,10 @@
     <Project Path="samples/NivaraChat/NivaraChat.csproj" />
     <Project Path="samples/NivaraChess/NivaraChess.csproj" />
     <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
+    <Project Path="samples/NivaraClassifier/NivaraClassifier.csproj" />
+    <Project Path="samples/NivaraGpt/NivaraGpt.csproj" />
+    <Project Path="samples/NivaraTimeSeries/NivaraTimeSeries.csproj" />
+    <Project Path="samples/NivaraVAE/NivaraVAE.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />

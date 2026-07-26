@@ -31,7 +31,7 @@ internal static class BatchNormKernel<T> where T : struct, INumber<T>
         var output = new T[input.Length];
         var mean = new T[c];
         var invStd = new T[c];
-        var xHat = affine ? new T[input.Length] : [];
+        var xHat = new T[input.Length];
 
         for (int ch = 0; ch < c; ch++)
         {
@@ -113,7 +113,7 @@ internal static class BatchNormKernel<T> where T : struct, INumber<T>
                     for (int j = 0; j < planeSize; j++)
                     {
                         T normalized = (inPlane[j] - m) * inv;
-                        if (affine) xHat[offset + j] = normalized;
+                        xHat[offset + j] = normalized;
                         outPlane[j] = normalized * g + b;
                     }
                 }

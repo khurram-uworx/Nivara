@@ -305,6 +305,9 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1948 tests passing.
 - ✓ **AutoDiff P0–P6 complete**: reverse-mode autograd, NN module system, full optimizer family (SGD, Adam, AdamW), training loops, data-parallel training, model serialization — all implemented in core `src/Nivara/AutoDiff/`
 - ✓ **BCEWithLogitsLoss fused backward**: replaced multi-op decomposition (Relu + Abs + SoftPlus) with single `OpNode<T>` computing `sigmoid(x) - z` directly. Fixes subgradient error at x=0 where Relu and Abs both return 0. `reduceToMean` overload added. `LeakyRelu` default slope corrected from 0 to 0.01. ADR-001 null cleanup removed ~200 lines of dead null branches from AccumulateGradient, KL/sample ops, and AdamW.
+- ✓ **BatchNorm1d 3D input**: accepts `[B, C, L]` in addition to `[N, C]`; normalizes each L position independently for Conv1d pipelines. Previously rejected 3D input with a rank error.
+- ✓ **BatchNormKernel xHat fix**: `xHat` is now always populated regardless of `affine` flag. Previously, `BackwardInput` read uninitialized data when `affine=false`, producing incorrect gradients.
+- ✓ **MSELoss reduceToMean**: `Forward(predictions, targets, reduceToMean: true)` divides sum-of-squares by element count, matching PyTorch's default `reduction='mean'`.
 - **ConvTranspose2d**: no grouped convolution support; grouped transpose would require new kernel paths.
 - **ConvTranspose2d**: direct scatter produces zero-padded interior positions (stride > 1); test verified numerically correct but may look unexpected.
 - **BatchNorm2d**: uses generic per-element kernel (not the fused `BatchNormKernel<T>` span path); functionally correct but slightly slower than optimal.
@@ -317,7 +320,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
 - **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
-- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `Adam<T>`, `AdamW<T>`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer`
+- **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `Adam<T>`, `AdamW<T>`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer`, `MSELoss<T>(reduceToMean)`
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)

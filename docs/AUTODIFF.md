@@ -124,7 +124,7 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 
 Loss Functions (Nn.Functional)
 ───────────────────────────────
-MSELoss<T>                            ← Σ(pred - target)²
+MSELoss<T>                            ← Σ(pred - target)²; reduceToMean overload available
 L1Loss<T>                             ← Σ|pred - target|
 BCELoss<T>                            ← -(y·log(p) + (1-y)·log(1-p))
 BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable); fused backward via single OpNode; reduceToMean overload
@@ -667,6 +667,8 @@ BatchNormKernel<T>
 └── BackwardBias(gradOut, n, c, hw) → gradBeta
 ```
 
+`BatchNorm1d<T>` accepts both 2D `[N, C]` and 3D `[B, C, L]` input. The 3D path normalizes each of the L positions independently (per-channel statistics across the batch and length dimensions), enabling direct use in Conv1d pipelines where intermediate activations have shape `[B, C, L]`.
+
 - Train mode: computes batch statistics, updates running stats via direct span arithmetic
 - Eval mode: uses cached running mean/var
 - StateDict/LoadStateDict includes `running_mean`, `running_var`, `num_batches_tracked`
@@ -821,7 +823,7 @@ All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Each has a `Forward(
 
 | Loss | Forward Formula | Notes |
 |------|----------------|-------|
-| `MSELoss<T>` | `Σ(pred - target)²` | Mean Squared Error (sum reduction) |
+| `MSELoss<T>` | `Σ(pred - target)²` | Mean Squared Error. `Forward(predictions, targets, reduceToMean: true)` divides by element count. |
 | `L1Loss<T>` | `Σ\|pred - target\|` | Mean Absolute Error (sum reduction) |
 | `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability |
 | `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed. `Forward(logits, targets, reduceToMean)` divides by element count when true. Backward uses fused `sigmoid(x) - z` via custom OpNode (fixes subgradient error at x=0). |
@@ -942,7 +944,7 @@ optimizer.AddParameterGroup(model.GetParameters().Values);
 
 var loop = new TrainingLoop<float>(
     model, loader,
-    (pred, target) => new MSELoss<float>().Forward(pred, target),
+    (pred, target) => new MSELoss<float>().Forward(pred, target, reduceToMean: true),
     optimizer,
     epochs: 20);
 

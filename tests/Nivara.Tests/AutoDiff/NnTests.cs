@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
@@ -1041,6 +1042,141 @@ public class NnTests
             Assert.That(bn.Bias.Tensor.Grad, Is.Not.Null);
             Assert.That(bn.Bias.Tensor.Grad!.Length, Is.EqualTo(3));
         }
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_Forward_ShapeCorrect()
+    {
+        using var bn = new BatchNorm1d<float>(4);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 4 * 8]), // B=2, C=4, L=8
+            requiresGrad: false);
+        input.Reshape(2, 4, 8);
+
+        var output = bn.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(3));
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 4, 8 }));
+        Assert.That(output.Length, Is.EqualTo(64));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_NormalizesPerChannel()
+    {
+        using var bn = new BatchNorm1d<float>(2, trackRunningStats: false, affine: false);
+        bn.Eval();
+
+        var data = new float[]
+        {
+            1, 2, 3, 4,  10, 20, 30, 40,
+            1, 2, 3, 4,  10, 20, 30, 40,
+        };
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(data), requiresGrad: false);
+        input.Reshape(2, 2, 4);
+
+        var output = bn.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(3));
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 2, 4 }));
+
+        for (int ch = 0; ch < 2; ch++)
+        {
+            float sum = 0;
+            for (int b = 0; b < 2; b++)
+                for (int l = 0; l < 4; l++)
+                    sum += output[b * 2 * 4 + ch * 4 + l];
+            float mean = sum / 8;
+            Assert.That(mean, Is.EqualTo(0f).Within(1e-5f),
+                $"Channel {ch} should have mean 0 across B*L=8 elements");
+        }
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_TrainMode_UpdatesRunningStats()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        bn.Train();
+
+        var data = new float[]
+        {
+            1, 2, 3, 4, 5,  6, 7, 8, 9, 10,  11, 12, 13, 14, 15,
+            2, 3, 4, 5, 6,  7, 8, 9, 10, 11,  12, 13, 14, 15, 16,
+        };
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(data), requiresGrad: false);
+        input.Reshape(2, 3, 5);
+
+        var runningMeanBefore = new float[3];
+        bn.RunningMean.Data.CopyTo(runningMeanBefore, 0f);
+
+        bn.Forward(input);
+
+        var runningMeanAfter = new float[3];
+        bn.RunningMean.Data.CopyTo(runningMeanAfter, 0f);
+
+        bool meanChanged = false;
+        for (int i = 0; i < 3; i++)
+            if (Math.Abs(runningMeanAfter[i] - runningMeanBefore[i]) > 1e-6f) meanChanged = true;
+
+        Assert.That(meanChanged, Is.True, "Running mean should update in train mode for 3D input");
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_Backward_GradientsFlow()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 4]), // B=2, C=3, L=4
+            requiresGrad: true);
+        input.Reshape(2, 3, 4);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 4]),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 4);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(24));
+        for (int i = 0; i < input.Grad.Length; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
+
+        if (bn.Weight != null)
+        {
+            Assert.That(bn.Weight.Tensor.Grad, Is.Not.Null);
+            Assert.That(bn.Weight.Tensor.Grad!.Length, Is.EqualTo(3));
+        }
+        if (bn.Bias != null)
+        {
+            Assert.That(bn.Bias.Tensor.Grad, Is.Not.Null);
+            Assert.That(bn.Bias.Tensor.Grad!.Length, Is.EqualTo(3));
+        }
+    }
+
+    [Test]
+    public void BatchNorm1d_2DInput_RejectsInvalidRanks()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        var input1d = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[3]),
+            requiresGrad: false);
+        input1d.Reshape(3);
+
+        Assert.Throws<ArgumentException>(() => bn.Forward(input1d));
+
+        var input4d = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[24]),
+            requiresGrad: false);
+        input4d.Reshape(2, 3, 2, 2);
+
+        Assert.Throws<ArgumentException>(() => bn.Forward(input4d));
     }
 
     [Test]
@@ -3188,6 +3324,254 @@ public class NnTests
         for (int i = 0; i < input.Length; i++)
             Assert.That(simdResult.Output[i], Is.EqualTo(scalarOutput[i]).Within(1e-5f),
                 $"Mismatch at index {i}: SIMD={simdResult.Output[i]}, scalar={scalarOutput[i]}");
+    }
+
+    #endregion
+
+    #region MSELoss
+
+    [Test]
+    public void MSELoss_SumReduction_ReturnsSumOfSquaredDifferences()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
+            requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }),
+            requiresGrad: false);
+
+        var loss = new MSELoss<float>().Forward(predictions, targets);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        float expected = 0f + 1f + 4f;
+        Assert.That(loss[0], Is.EqualTo(expected).Within(1e-5f));
+    }
+
+    [Test]
+    public void MSELoss_MeanReduction_ReturnsMeanOfSquaredDifferences()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
+            requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }),
+            requiresGrad: false);
+
+        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        float expected = (0f + 1f + 4f) / 3f;
+        Assert.That(loss[0], Is.EqualTo(expected).Within(1e-5f));
+    }
+
+    [Test]
+    public void MSELoss_MeanReduction_Backward_GradientsScaled()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 4f }),
+            requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f }),
+            requiresGrad: false);
+
+        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+        loss.Backward();
+
+        Assert.That(predictions.Grad, Is.Not.Null);
+        Assert.That(predictions.Grad!.Length, Is.EqualTo(2));
+        float gradScale = 1f / 2f;
+        Assert.That(predictions.Grad[0], Is.EqualTo(2f * 1f * gradScale).Within(1e-5f));
+        Assert.That(predictions.Grad[1], Is.EqualTo(2f * 3f * gradScale).Within(1e-5f));
+    }
+
+    [Test]
+    public void MSELoss_PerfectPrediction_ZeroLoss()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var data = new float[] { 1f, 2f, 3f };
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(data), requiresGrad: false);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create((float[])data.Clone()), requiresGrad: false);
+
+        var sumLoss = new MSELoss<float>().Forward(predictions, targets);
+        var meanLoss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+
+        Assert.That(sumLoss[0], Is.EqualTo(0f).Within(1e-6f));
+        Assert.That(meanLoss[0], Is.EqualTo(0f).Within(1e-6f));
+    }
+
+    #endregion
+
+    #region BatchNorm Regression Tests (xHat bug + 3D edge cases)
+
+    [Test]
+    public void BatchNorm1d_AffineFalse_Backward_GradientsFlow()
+    {
+        using var bn = new BatchNorm1d<float>(3, affine: false);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 }),
+            requiresGrad: true);
+        input.Reshape(2, 3, 2);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.5f, 1.2f, -0.3f, 0.8f, 1.5f, -0.7f, 0.1f, 0.9f, -1.0f, 0.4f, 0.6f, -0.2f }),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(12));
+        for (int i = 0; i < 12; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False,
+                $"Gradient[{i}] should be finite, was {input.Grad[i]}");
+
+        bool hasNonZeroGrad = false;
+        for (int i = 0; i < 12; i++)
+            if (Math.Abs(input.Grad[i]) > 1e-6f) { hasNonZeroGrad = true; break; }
+        Assert.That(hasNonZeroGrad, Is.True, "Input gradients should be non-zero when affine=false (xHat must contain normalized values)");
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_EvalMode_Backward_GradientsFlow()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        bn.Train();
+        var trainInput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 4]),
+            requiresGrad: false);
+        trainInput.Reshape(2, 3, 4);
+        bn.Forward(trainInput);
+
+        bn.Eval();
+        var evalInput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 4]),
+            requiresGrad: true);
+        evalInput.Reshape(2, 3, 4);
+
+        var output = bn.Forward(evalInput);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 4]),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 4);
+
+        output.Backward(gradOutput);
+
+        Assert.That(evalInput.Grad, Is.Not.Null);
+        Assert.That(evalInput.Grad!.Length, Is.EqualTo(24));
+        for (int i = 0; i < 24; i++)
+            Assert.That(float.IsNaN(evalInput.Grad[i]) || float.IsInfinity(evalInput.Grad[i]), Is.False);
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_SmallPlaneSize_ScalarPath_Backward()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 2]), // B=2, C=3, L=2 (planeSize=2 < 4, forces scalar path)
+            requiresGrad: true);
+        input.Reshape(2, 3, 2);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.3f, -0.5f, 1.1f, 0.2f, -0.8f, 0.6f, 0.9f, -0.1f, 0.4f, 0.7f, -0.3f, 0.5f }),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(12));
+        for (int i = 0; i < 12; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_SmallPlaneSize_AffineFalse_ScalarPath_Backward()
+    {
+        using var bn = new BatchNorm1d<float>(3, affine: false);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 2]), // B=2, C=3, L=2 (planeSize=2, scalar path + affine=false)
+            requiresGrad: true);
+        input.Reshape(2, 3, 2);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.7f, -0.4f, 1.3f, -0.1f, 0.5f, 0.9f, -0.6f, 0.2f, 0.8f, -0.3f, 1.1f, -0.5f }),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(12));
+        for (int i = 0; i < 12; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False,
+                $"Gradient[{i}] should be finite on scalar path with affine=false, was {input.Grad[i]}");
+
+        bool hasNonZeroGrad = false;
+        for (int i = 0; i < 12; i++)
+            if (Math.Abs(input.Grad[i]) > 1e-6f) { hasNonZeroGrad = true; break; }
+        Assert.That(hasNonZeroGrad, Is.True, "Gradients should be non-zero: xHat must contain normalized values even on scalar path with affine=false");
+    }
+
+    [Test]
+    public void BatchNorm2d_AffineFalse_Backward_GradientsFlow()
+    {
+        using var bn = new BatchNorm2d<float>(3, affine: false);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 2 * 2]),
+            requiresGrad: true);
+        input.Reshape(2, 3, 2, 2);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.4f, -0.8f, 1.2f, 0.1f, -0.5f, 0.7f, 0.3f, -0.9f, 0.6f, 1.0f, -0.2f, 0.5f, -0.3f, 0.8f, 0.1f, -0.6f, 0.9f, -0.4f, 1.1f, -0.7f, 0.2f, 0.5f, -0.1f, 0.3f }),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 2, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(24));
+        for (int i = 0; i < 24; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
+
+        bool hasNonZeroGrad = false;
+        for (int i = 0; i < 24; i++)
+            if (Math.Abs(input.Grad[i]) > 1e-6f) { hasNonZeroGrad = true; break; }
+        Assert.That(hasNonZeroGrad, Is.True, "BatchNorm2d affine=false backward should produce non-zero gradients");
+    }
+
+    [Test]
+    public void MSELoss_MeanReduction_BatchInput_CorrectValue()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4 }),
+            requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1, 1, 1, 1 }),
+            requiresGrad: false);
+
+        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        float expected = (0f + 1f + 4f + 9f) / 4f;
+        Assert.That(loss[0], Is.EqualTo(expected).Within(1e-5f));
     }
 
     #endregion

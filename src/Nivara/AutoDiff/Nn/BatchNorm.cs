@@ -1,7 +1,5 @@
 using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Utilities;
 using System.Numerics;
-using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -75,10 +73,12 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
-        if (input.Rank != 2) throw new ArgumentException($"BatchNorm1d expects 2D input [N, C], got {input.Rank}D");
+        if (input.Rank != 2 && input.Rank != 3)
+            throw new ArgumentException($"BatchNorm1d expects 2D [N, C] or 3D [B, C, L] input, got {input.Rank}D");
 
         int n = input.Shape[0];
         int c = input.Shape[1];
+        int planeSize = input.Rank == 3 ? input.Shape[2] : 1;
         if (c != _numFeatures) throw new ArgumentException($"Expected {_numFeatures} channels, got {c}");
 
         var gamma = _affine && _weight != null
@@ -93,7 +93,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
         if (useRunningStats)
         {
             var evalResult = BatchNormKernel<T>.Forward(
-                GetInputSpan(input), n, c, 1,
+                GetInputSpan(input), n, c, planeSize,
                 gamma, beta, _eps, _affine);
 
             var evalTensor = new ReverseGradTensor<T>(
@@ -105,7 +105,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
                 var savedXHat = evalResult.XHat;
                 var savedInvStd = evalResult.InvStd;
                 var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
-                int savedN = n, savedC = c;
+                int savedN = n, savedC = c, savedPlaneSize = planeSize;
 
                 var gradFn = new OpNode<T>("BatchNorm1dEval", new object[] { input }, (typedGradOutput, sgn) =>
                 {
@@ -114,7 +114,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
 
                     var gradInputData = BatchNormKernel<T>.BackwardInput(
                         gradOutData, savedXHat, savedGamma, savedInvStd,
-                        savedN, savedC, 1, savedGamma.Length > 0);
+                        savedN, savedC, savedPlaneSize, savedGamma.Length > 0);
 
                     ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
                 });
@@ -126,10 +126,10 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
         }
 
         var inputData = GetInputSpan(input);
-        var result = BatchNormKernel<T>.Forward(inputData, n, c, 1, gamma, beta, _eps, _affine);
+        var result = BatchNormKernel<T>.Forward(inputData, n, c, planeSize, gamma, beta, _eps, _affine);
 
         if (_trackRunningStats)
-            UpdateRunningStatsDirect(result.Mean, result.InvStd, n * 1);
+            UpdateRunningStatsDirect(result.Mean, result.InvStd, n * planeSize);
 
         var resultTensor = new ReverseGradTensor<T>(
             NivaraColumn<T>.Create(result.Output),
@@ -141,7 +141,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
             var savedInvStd = result.InvStd;
             var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
             bool affine = _affine;
-            int savedN = n, savedC = c;
+            int savedN = n, savedC = c, savedPlaneSize = planeSize;
 
             var gradFn = new OpNode<T>("BatchNorm1dTrain", new object[] { input }, (typedGradOutput, sgn) =>
             {
@@ -150,16 +150,16 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
 
                 var gradInputData = BatchNormKernel<T>.BackwardInput(
                     gradOutData, savedXHat, savedGamma, savedInvStd,
-                    savedN, savedC, 1, affine);
+                    savedN, savedC, savedPlaneSize, affine);
 
                 ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
 
                 if (affine)
                 {
                     var gradGammaData = BatchNormKernel<T>.BackwardWeight(
-                        gradOutData, savedXHat, savedN, savedC, 1);
+                        gradOutData, savedXHat, savedN, savedC, savedPlaneSize);
                     var gradBetaData = BatchNormKernel<T>.BackwardBias(
-                        gradOutData, savedN, savedC, 1);
+                        gradOutData, savedN, savedC, savedPlaneSize);
 
                     if (_weight != null)
                         ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
