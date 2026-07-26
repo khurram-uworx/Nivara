@@ -1,11 +1,11 @@
 # NivaraHfInference — Implementation Plan
 
-**Status:** In Progress
+**Status:** Complete
 **Created:** 2026-07-26
-**Updated:** 2026-07-26 — decisions taken, implementation started
+**Updated:** 2026-07-26 — all phases complete, forward inference verified
 **Goal:** Load pre-trained HuggingFace models (MobileNetV2, ResNet-18) and run image classification inference using Nivara's AutoDiff engine.
 
-> This is a temporary implementation plan. It will be removed once the sample is complete.
+> This plan is complete. The sample is implemented in `samples/NivaraInference/`.
 
 ---
 
