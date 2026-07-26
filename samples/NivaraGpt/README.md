@@ -56,6 +56,7 @@ dotnet run --project samples/NivaraGpt -- --block-size 16 --n-embd 16 --n-head 4
 | `--temperature <float>` | 0.8 | Sampling temperature |
 | `--top-k <int>` | 0 | Top-k sampling (0 = disabled) |
 | `--no-dropout` | off | Disable all dropout |
+| `--norm-type <type>` | `rmsnorm` | Normalization strategy: `rmsnorm` (RMSNorm, faster) or `layernorm` (standard LayerNorm with mean+variance) |
 | `--save <path>` | — | Save trained model to JSON |
 | `--load <path>` | — | Load model from JSON |
 | `--seed <int>` | 42 | RNG seed |
@@ -69,7 +70,7 @@ NivaraGptModel<T> : Module<T>
 ├── Dropout<T> (embedding dropout)
 ├── Embedding<T> posEmb          [blockSize, nEmbd]
 ├── TransformerBlock<T> × nLayer
-│   ├── Pre-LN: RMSNorm
+│   ├── Pre-LN: RMSNorm (or LayerNorm with --norm-type layernorm)
 │   ├── Multi-Head Self-Attention (with causal mask)
 │   │   ├── Linear Q, K, V projections
 │   │   ├── Batched scaled dot-product attention
@@ -87,6 +88,18 @@ NivaraGptModel<T> : Module<T>
     ├── Weight tying: MatMul(x, Transpose(tokenEmb.Weight)) — default
     └── Separate Linear lm_head — when --no-weight-tying
 ```
+
+### Normalization comparison (`--norm-type`)
+
+| Metric | RMSNorm (default) | LayerNorm |
+|--------|---------|-----------|
+| Mean centering | No | Yes |
+| Params | 0 (pre-norm, no gamma/beta) | 0 (pre-norm, no gamma/beta) |
+| Forward cost | `Dot` + `Multiply` per row | `Sum` + `Dot` + scale per row |
+| Backward cost | 1 reduction (sumGradX) | 2 reductions (sumDY, sumDYXHat) |
+| Training speed | Slightly faster | Slightly slower |
+
+Both normalization strategies are differentiable and integrate with the autograd graph. Use `--norm-type layernorm` to compare convergence behavior empirically.
 
 ### Batched causal attention
 
@@ -169,7 +182,7 @@ for (int pos = 0; pos < blockSize; pos++) {
 | `Linear<T>` | `TransformerBlock` (core) | Attention projections and MLP |
 | `Activation.Relu` | `TransformerBlock` (core) | Squared ReLU activation |
 | `Dropout<T>` | `NivaraGptModel.cs` | Embedding, attention, and residual dropout |
-| `RMSNorm` | `TransformerBlock` (core) | Pre-LayerNorm normalization |
+| `RMSNorm` / `LayerNorm` | `TransformerBlock` (core) | Pre-LayerNorm normalization (`--norm-type` selects) |
 | `CrossEntropyLoss<T>` | `Program.cs` | Integer-label classification loss |
 | `Adam<T>` | `Program.cs` | Optimizer |
 | `TrainingLoop<T>` | `Program.cs` | Training orchestration |

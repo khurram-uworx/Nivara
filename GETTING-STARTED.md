@@ -1133,6 +1133,70 @@ var output = block.Forward(inputTensor);
 
 Architecture per block: `RMSNorm → Multi-Head Causal Attention → Residual → RMSNorm → Gated MLP (ReLU²) → Residual`.
 
+### Convolution Layers
+
+Nivara includes 1D and 2D convolution layers with full autograd support, using `TensorPrimitives`-backed kernels:
+
+```csharp
+using Nivara.AutoDiff.Nn;
+
+// 1D convolution: [batch, inChannels, length] → [batch, outChannels, outLength]
+var conv1d = new Conv1d<float>(inChannels: 64, outChannels: 128, kernelSize: 3, stride: 1, padding: 1);
+var output1d = conv1d.Forward(inputTensor);  // [B, 128, L]
+
+// 2D convolution: [batch, inChannels, H, W] → [batch, outChannels, H', W']
+var conv2d = new Conv2d<float>(inChannels: 3, outChannels: 16, kernelSize: 3, stride: 1, padding: 1);
+var output2d = conv2d.Forward(inputTensor);  // [B, 16, H, W]
+
+// Grouped convolution (depthwise)
+var depthwise = new Conv2d<float>(inChannels: 64, outChannels: 64, kernelSize: 3, groups: 64);
+
+// Transposed convolution (decoder upsampling)
+var deconv = new ConvTranspose2d<float>(inChannels: 32, outChannels: 16, kernelSize: 4, stride: 2, padding: 1);
+var upsampled = deconv.Forward(latentTensor);  // [B, 16, H*2, W*2]
+
+// Depthwise separable convolution (MobileNet-style)
+var separable = new DepthwiseSeparableConv2d<float>(inChannels: 64, outChannels: 128, kernelSize: 3);
+```
+
+### Normalization Layers
+
+```csharp
+// Batch normalization (train/eval modes, running statistics)
+var bn1d = new BatchNorm1d<float>(numFeatures: 128);
+var bn2d = new BatchNorm2d<float>(numFeatures: 64);
+
+// Layer normalization (no running stats, normalizes over last dimension)
+var ln = new LayerNorm<float>(normalizedShape: 128);
+```
+
+### Variational Autoencoders
+
+```csharp
+// Standard VAE (MLP-based)
+var vae = new VAE<float>(inputDim: 784, latentDim: 32, hiddenDim: 256);
+var (recon, mu, logVar) = vae.EncodeDecode(input);
+
+// Convolutional VAE (spatial latent representations)
+var convVae = new ConvVAE<float>(
+    inputChannels: 1,
+    encoderChannels: new[] { 32, 64 },
+    latentChannels: 16,
+    spatialSize: 28,
+    kernelSize: 3, stride: 2, padding: 1);
+var recon = convVae.Forward(imageTensor);
+```
+
+### Attention
+
+```csharp
+// Standalone multi-head attention (self-attention or cross-attention)
+var mha = new MultiheadAttention<float>(embedDim: 128, numHeads: 4);
+var selfAttn = mha.Forward(input);                          // self-attention
+var crossAttn = mha.Forward(query, key, value);             // cross-attention
+var causalAttn = mha.Forward(input, causal: true);          // with causal mask
+```
+
 ### NLP Models
 
 Two ready-to-use differentiable NLP models are included:

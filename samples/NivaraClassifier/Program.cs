@@ -55,6 +55,7 @@ void RunTraining(Options opt)
 
     var tokenizer = TextTokenizer.FromDocuments(allTexts, maxVocabSize: opt.MaxVocab);
     Console.WriteLine($"Vocabulary size: {tokenizer.VocabSize}");
+    Console.WriteLine($"Mode: {opt.Mode}");
 
     int trainCount = (int)(allTexts.Length * 0.8);
     var trainTexts = allTexts.AsSpan(0, trainCount).ToArray();
@@ -76,8 +77,22 @@ void RunTraining(Options opt)
         Array.Copy(encoded, 0, testTokens, i * opt.MaxSeqLen, opt.MaxSeqLen);
     }
 
-    using var model = new TextClassifierModel<double>(
-        tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+    Module<double> model;
+    Func<int[], int[]> predict;
+    if (opt.Mode == "conv")
+    {
+        var conv = new ConvTextClassifierModel<double>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        model = conv;
+        predict = conv.Predict;
+    }
+    else
+    {
+        var linear = new TextClassifierModel<double>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        model = linear;
+        predict = linear.Predict;
+    }
 
     using var optimizer = new Adam<double>(learningRate: 0.001);
     var allParams = model.GetParameters().Values;
@@ -91,7 +106,7 @@ void RunTraining(Options opt)
     var trainLoader = new DataLoader<double>(trainDataset, opt.BatchSize, shuffle: true, seed: opt.Seed);
 
     Console.WriteLine($"\nTraining: {trainCount} samples, {testLabels.Length} test");
-    Console.WriteLine($"Model: {tokenizer.VocabSize} vocab → {opt.EmbeddingDim} embed → {opt.HiddenDim} hidden → 2 classes\n");
+    Console.WriteLine($"Model: {tokenizer.VocabSize} vocab → {opt.EmbeddingDim} embed → {opt.HiddenDim} hidden → 2 classes ({opt.Mode})\n");
 
     var trainLoop = new TrainingLoop<double>(
         model, trainLoader,
@@ -112,7 +127,7 @@ void RunTraining(Options opt)
     for (int i = 0; i < testLabels.Length; i++)
     {
         var encoded = tokenizer.Encode(testTexts[i], fixedLength: opt.MaxSeqLen);
-        var preds = model.Predict(encoded);
+        var preds = predict(encoded);
         if (preds[0] == testLabels[i]) correct++;
     }
 
@@ -150,9 +165,21 @@ void RunPrediction(Options opt)
     }
 
     var tokenizer = TextTokenizer.Load(vocabPath);
-    using var model = new TextClassifierModel<double>(
-        tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
-    ModelSerializer.Load(model, modelPath);
+    Func<int[], int[]> predict;
+    if (opt.Mode == "conv")
+    {
+        var conv = new ConvTextClassifierModel<double>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        ModelSerializer.Load(conv, modelPath);
+        predict = conv.Predict;
+    }
+    else
+    {
+        var linear = new TextClassifierModel<double>(
+            tokenizer.VocabSize, opt.EmbeddingDim, opt.HiddenDim, numClasses: 2, opt.MaxSeqLen);
+        ModelSerializer.Load(linear, modelPath);
+        predict = linear.Predict;
+    }
 
     Console.WriteLine("Nivara Text Classifier — Interactive Prediction");
     Console.WriteLine("Type a sentence (empty line to quit):\n");
@@ -164,7 +191,7 @@ void RunPrediction(Options opt)
         if (string.IsNullOrWhiteSpace(line)) break;
 
         var encoded = tokenizer.Encode(line, fixedLength: opt.MaxSeqLen);
-        var preds = model.Predict(encoded);
+        var preds = predict(encoded);
         string label = preds[0] == 1 ? "POSITIVE" : "NEGATIVE";
         Console.WriteLine($"  → {label}\n");
     }
@@ -207,6 +234,7 @@ sealed class Options
     public int NumSamples { get; set; } = 1000;
     public double LearningRate { get; set; } = 0.001;
     public int Seed { get; set; } = 42;
+    public string Mode { get; set; } = "linear";
     public bool Help { get; set; }
 
     public static Options Parse(string[] args)
@@ -256,6 +284,9 @@ sealed class Options
                 case "--seed":
                     o.Seed = ReadInt(args, ref i, args[i]);
                     break;
+                case "--mode":
+                    o.Mode = ReadString(args, ref i, args[i]);
+                    break;
                 case "--help":
                 case "-h":
                     o.Help = true;
@@ -296,6 +327,7 @@ sealed class Options
               --num-samples <n>       Samples to generate (default: 1000)
               --lr <rate>             Learning rate (default: 0.001)
               --seed <n>              Random seed (default: 42)
+              --mode <mode>           Model mode: linear or conv (default: linear)
               --help, -h              Show this help
             """);
     }

@@ -24,7 +24,8 @@ public sealed class NivaraGptModel<T> : Module<T> where T : struct, INumber<T>
 
     public NivaraGptModel(
         int vocabSize, int nEmbd, int nLayer, int blockSize, int nHead,
-        double dropout = 0.1, bool weightTying = true, double initStd = 0.02)
+        double dropout = 0.1, bool weightTying = true, double initStd = 0.02,
+        NormType normType = NormType.RMSNorm)
     {
         if (nEmbd % nHead != 0)
             throw new ArgumentException($"nEmbd ({nEmbd}) must be divisible by nHead ({nHead}).");
@@ -42,7 +43,7 @@ public sealed class NivaraGptModel<T> : Module<T> where T : struct, INumber<T>
 
         blocks = new TransformerBlock<T>[nLayer];
         for (int i = 0; i < nLayer; i++)
-            blocks[i] = new TransformerBlock<T>(nEmbd, nHead, dropout, blockSize, initStd);
+            blocks[i] = new TransformerBlock<T>(nEmbd, nHead, dropout, blockSize, initStd, normType);
 
         finalDropout = dropout > 0.0 ? new Dropout<T>(dropout) : null;
 

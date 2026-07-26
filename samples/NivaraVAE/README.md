@@ -68,9 +68,24 @@ dotnet run --project samples/NivaraVAE -- --show-patterns
 | `--latent-walk` | — | Walk each latent dimension one at a time |
 | `--show-patterns` | — | Display example patterns from the dataset |
 | `--eval` | — | Evaluate reconstruction on test set |
+| `--mode <linear\|conv>` | `linear` | Model architecture: `linear` uses `VaeModel<T>` (MLP), `conv` uses `ConvVAE<T>` (Conv2d encoder/decoder) |
 | `--help`, `-h` | — | Show CLI help |
 
 ## Modes of use
+
+### Model architecture (`--mode linear|conv`)
+
+**`--mode linear` (default):** MLP-based VAE. See VaeModel layout below.
+
+**`--mode conv`:** Convolutional VAE using `ConvVAE<T>` from the core library. Input is reshaped to `[B, 1, patternSize, patternSize]` (single-channel grayscale). The encoder uses Conv2d with stride downsampling, and the decoder uses ConvTranspose2d with stride upsampling. This mode demonstrates the full Conv2d/ConvTranspose2d pipeline and produces sharper pattern reconstructions due to the spatial inductive bias.
+
+```
+--mode conv architecture:
+  Encoder: Conv2d(1→32, k=4, s=2, p=1) → Conv2d(32→64, k=4, s=2, p=1) → flatten
+  Latent:  mu + logVar (reparameterization trick)
+  Decoder: ConvTranspose2d → ConvTranspose2d → reshape to [B, 1, patternSize, patternSize]
+  Loss: BCEWithLogitsLoss(reconstruction) + beta * KL(mu, logVar)
+```
 
 ### Training (default)
 Trains the VAE on synthetic patterns. Prints per-epoch loss (ELBO = BCE reconstruction + beta * KL divergence), batch timing, and a generated sample after training.
@@ -173,8 +188,10 @@ Where:
 
 | API | Where | Purpose |
 |-----|-------|---------|
-| `Module<T>` | `VaeModel.cs` | Model base class with parameter registration |
+| `Module<T>` | `VaeModel.cs`, `ConvVAE<T>` (core) | Model base class with parameter registration |
 | `Linear<T>` | `VaeModel.cs` | Fully connected layers (encoder, decoder, heads) |
+| `Conv2d<T>` | `ConvVAE<T>` (core, `--mode conv`) | Convolutional encoder layers |
+| `ConvTranspose2d<T>` | `ConvVAE<T>` (core, `--mode conv`) | Transposed convolutional decoder layers |
 | `Dropout<T>` | `VaeModel.cs` | Regularization during training |
 | `Activation.LeakyRelu<T>` | `VaeModel.cs` | Non-linearity (negativeSlope: 0.01) |
 | `BCEWithLogitsLoss<T>` | `Program.cs` | Binary cross-entropy from logits |
@@ -243,7 +260,7 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 
 ## Limitations
 
-- **Linear-only architecture** — no convolutional layers. The VAE ignores spatial structure in patterns. A `Conv2d`/`ConvTranspose2d` module family would produce sharper reconstructions.
+- **Linear-only architecture** — no convolutional layers. Use `--mode conv` for the ConvVAE alternative that leverages spatial structure.
 - **No learning rate scheduling** — fixed LR throughout training. Cosine annealing or warmup would improve convergence.
 - **No optimizer state serialization** — `ModelSerializer` saves model weights only, not Adam moment buffers. Continued training after load restarts moments from scratch.
 - **Small patterns** — 8x8 and 16x16 grids only. Larger patterns would benefit from convolutional architecture.
@@ -251,7 +268,7 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 
 ## Future work
 
-1. **Conv2d / ConvTranspose2d modules** — the current Linear-only VAE ignores spatial structure. A convolutional VAE would be more realistic and reveal if Nivara's op set supports conv operations.
+1. **Conv2d / ConvTranspose2d modules** — done. `ConvVAE<T>` uses Conv2d encoder and ConvTranspose2d decoder. Accessible via `--mode conv`.
 2. **Conditional VAE (CVAE)** — condition on pattern type (circle vs stripe vs blob) by concatenating a one-hot encoding to the input.
 3. **Beta annealing** — schedule `beta` from 0 to 1 across epochs for better latent disentanglement.
 4. **Export latent vectors to NivaraFrame** — encode all patterns, store latent vectors in a frame, then query by cosine similarity. Would exercise `NivaraFrame.Dot<T>` / `CosineSimilarity<T>`.

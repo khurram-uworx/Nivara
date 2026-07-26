@@ -392,6 +392,168 @@ public class GradOperationsTests
         Assert.That(result.Shape, Is.EqualTo(new[] { 3, 2 }), "Transpose result shape should be [cols, rows]");
     }
 
+    [Test]
+    public void TransposeAxes_Rank2_SameAsTranspose()
+    {
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        a.Reshape(2, 3);
+
+        var result = ReverseGradOperations.TransposeAxes(a, 0, 1);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 3, 2 }));
+        Assert.That(result[0], Is.EqualTo(1.0f));
+        Assert.That(result[1], Is.EqualTo(4.0f));
+        Assert.That(result[2], Is.EqualTo(2.0f));
+        Assert.That(result[3], Is.EqualTo(5.0f));
+        Assert.That(result[4], Is.EqualTo(3.0f));
+        Assert.That(result[5], Is.EqualTo(6.0f));
+    }
+
+    [Test]
+    public void TransposeAxes_Rank3_Axis1Axis2_TransposesCorrectly()
+    {
+        // Input shape [1, 2, 3] -> [1, 3, 2]
+        // Data: [[[1,2,3],[4,5,6]]]
+        // After transpose axes 1,2: [[[1,4],[2,5],[3,6]]]
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        a.Reshape(1, 2, 3);
+
+        var result = ReverseGradOperations.TransposeAxes(a, 1, 2);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 1, 3, 2 }));
+        float[] vals = new float[result.Length];
+        result.Data.CopyTo(vals, default(float)!);
+        Assert.That(vals[0], Is.EqualTo(1.0f)); // [0,0,0]
+        Assert.That(vals[1], Is.EqualTo(4.0f)); // [0,1,0]
+        Assert.That(vals[2], Is.EqualTo(2.0f)); // [0,0,1]
+        Assert.That(vals[3], Is.EqualTo(5.0f)); // [0,1,1]
+        Assert.That(vals[4], Is.EqualTo(3.0f)); // [0,0,2]
+        Assert.That(vals[5], Is.EqualTo(6.0f)); // [0,1,2]
+    }
+
+    [Test]
+    public void TransposeAxes_Rank3_MultiBatch_TransposesCorrectly()
+    {
+        // [2, 2, 2] -> swap axes 1,2 -> [2, 2, 2]
+        // batch 0: [[1,2],[3,4]] -> [[1,3],[2,4]]
+        // batch 1: [[5,6],[7,8]] -> [[5,7],[6,8]]
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6, 7, 8 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        a.Reshape(2, 2, 2);
+
+        var result = ReverseGradOperations.TransposeAxes(a, 1, 2);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2, 2 }));
+        float[] vals = new float[result.Length];
+        result.Data.CopyTo(vals, default(float)!);
+        Assert.That(vals[0], Is.EqualTo(1.0f));
+        Assert.That(vals[1], Is.EqualTo(3.0f));
+        Assert.That(vals[2], Is.EqualTo(2.0f));
+        Assert.That(vals[3], Is.EqualTo(4.0f));
+        Assert.That(vals[4], Is.EqualTo(5.0f));
+        Assert.That(vals[5], Is.EqualTo(7.0f));
+        Assert.That(vals[6], Is.EqualTo(6.0f));
+        Assert.That(vals[7], Is.EqualTo(8.0f));
+    }
+
+    [Test]
+    public void TransposeAxes_Backward_Rank2_GradientsFlow()
+    {
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        a.Reshape(2, 2);
+
+        var result = ReverseGradOperations.TransposeAxes(a, 0, 1);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 10, 20, 30, 40 }),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 2);
+
+        result.Backward(gradOutput);
+
+        Assert.That(a.Grad, Is.Not.Null);
+        float[] gradVals = new float[a.Grad!.Length];
+        a.Grad.CopyTo(gradVals, default(float)!);
+        Assert.That(gradVals[0], Is.EqualTo(10.0f));
+        Assert.That(gradVals[1], Is.EqualTo(30.0f));
+        Assert.That(gradVals[2], Is.EqualTo(20.0f));
+        Assert.That(gradVals[3], Is.EqualTo(40.0f));
+    }
+
+    [Test]
+    public void TransposeAxes_Backward_Rank3_GradientsFlow()
+    {
+        // [1, 2, 2] input, swap axes 1,2 -> [1, 2, 2]
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        a.Reshape(1, 2, 2);
+
+        var result = ReverseGradOperations.TransposeAxes(a, 1, 2);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 10, 20, 30, 40 }),
+            requiresGrad: false);
+        gradOutput.Reshape(1, 2, 2);
+
+        result.Backward(gradOutput);
+
+        Assert.That(a.Grad, Is.Not.Null);
+        float[] gradVals = new float[a.Grad!.Length];
+        a.Grad.CopyTo(gradVals, default(float)!);
+        // TransposeAxes backward is the same operation (transpose of transpose)
+        Assert.That(gradVals[0], Is.EqualTo(10.0f));
+        Assert.That(gradVals[1], Is.EqualTo(30.0f));
+        Assert.That(gradVals[2], Is.EqualTo(20.0f));
+        Assert.That(gradVals[3], Is.EqualTo(40.0f));
+    }
+
+    [Test]
+    public void TransposeAxes_Roundtrip_RestoresOriginal()
+    {
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        a.Reshape(1, 2, 3);
+
+        var result = ReverseGradOperations.TransposeAxes(
+            ReverseGradOperations.TransposeAxes(a, 1, 2), 1, 2);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 1, 2, 3 }));
+        float[] vals = new float[result.Length];
+        result.Data.CopyTo(vals, default(float)!);
+        Assert.That(vals, Is.EqualTo(new float[] { 1, 2, 3, 4, 5, 6 }));
+    }
+
+    [Test]
+    public void TransposeAxes_InvalidRank_Throws()
+    {
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: false);
+        a.Reshape(4);
+
+        Assert.Throws<ArgumentException>(() => ReverseGradOperations.TransposeAxes(a, 0, 0));
+    }
+
+    [Test]
+    public void TransposeAxes_SameAxis_Throws()
+    {
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: false);
+        a.Reshape(2, 3);
+
+        Assert.Throws<ArgumentException>(() => ReverseGradOperations.TransposeAxes(a, 1, 1));
+    }
+
+    [Test]
+    public void TransposeAxes_OutOfRange_Throws()
+    {
+        var aData = NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4 });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: false);
+        a.Reshape(2, 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ReverseGradOperations.TransposeAxes(a, 0, 2));
+    }
+
     #endregion
 
     [Test]
