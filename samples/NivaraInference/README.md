@@ -36,6 +36,15 @@ dotnet run --project samples/NivaraInference -- resnet18
 dotnet run --project samples/NivaraInference -- mobilenet_v2 benchmark
 dotnet run --project samples/NivaraInference -- resnet18 benchmark
 
+# Compare: run forward pass on shared input, print logits for Python comparison
+# Requires samples/data/compare_input.bin (generate via: python Python/generate_input.py)
+dotnet run --project samples/NivaraInference -- mobilenet_v2 compare
+dotnet run --project samples/NivaraInference -- resnet18 compare
+
+# Diagnostics: step-by-step intermediate tensors saved to samples/data/diag/
+dotnet run --project samples/NivaraInference -- mobilenet_v2 compare_diag
+dotnet run --project samples/NivaraInference -- resnet18 compare_diag
+
 # Single image inference
 dotnet run --project samples/NivaraInference -- mobilenet_v2 path/to/image.jpg
 dotnet run --project samples/NivaraInference -- resnet18 path/to/image.jpg
@@ -46,8 +55,21 @@ dotnet run --project samples/NivaraInference -- resnet18 path/to/image.jpg
 ```bash
 cd samples/NivaraInference/Python
 pip install -r requirements.txt
+
+# Inference
 python mobilenet.py
 python resnet18.py
+
+# Compare: forward pass on shared input, outputs logits for C# comparison
+python mobilenet_compare.py
+python resnet18_compare.py
+
+# Diagnostics: step-by-step intermediates to samples/data/diag/
+python mobilenet_diag.py
+python resnet18_diag.py
+
+# Regenerate shared comparison input
+python generate_input.py
 ```
 
 ## Benchmark comparison
@@ -94,6 +116,16 @@ Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor
 ## Sample images
 
 Test images are in `samples/data/images/` — synthetic patterns at various resolutions used for benchmarking. Created by `Python/create_images.py`.
+
+## Comparison data
+
+Shared comparison fixtures live in `samples/data/`:
+
+| File | Created by | Purpose |
+|---|---|---|
+| `compare_input.bin` | `python Python/generate_input.py` | Deterministic `[1,3,224,224]` input for `compare`/`compare_diag` modes |
+| `mobilenet_v2/model.safetensors` | `hf download google/mobilenet_v2_1.0_224` | MobileNetV2 weights |
+| `resnet18/model.safetensors` | `hf download timm/resnet18.augreg_in1k` | ResNet-18 weights |
 
 ## Nivara core gaps exercised
 
