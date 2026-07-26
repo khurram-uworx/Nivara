@@ -72,7 +72,7 @@ public class SerializationTests
             ("label", NivaraColumn<float>.Create([10f, 20f, 30f, 40f])));
 
         using var model = new Linear<float>(2, 1);
-        var lossFn = new MSELoss<float>().Forward;
+        var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>().Forward(pred, tgt);
         var optimizer = new SGD<float>(0.01f);
         optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
 

@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
@@ -3323,6 +3324,84 @@ public class NnTests
         for (int i = 0; i < input.Length; i++)
             Assert.That(simdResult.Output[i], Is.EqualTo(scalarOutput[i]).Within(1e-5f),
                 $"Mismatch at index {i}: SIMD={simdResult.Output[i]}, scalar={scalarOutput[i]}");
+    }
+
+    #endregion
+
+    #region MSELoss
+
+    [Test]
+    public void MSELoss_SumReduction_ReturnsSumOfSquaredDifferences()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
+            requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }),
+            requiresGrad: false);
+
+        var loss = new MSELoss<float>().Forward(predictions, targets);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        float expected = 0f + 1f + 4f;
+        Assert.That(loss[0], Is.EqualTo(expected).Within(1e-5f));
+    }
+
+    [Test]
+    public void MSELoss_MeanReduction_ReturnsMeanOfSquaredDifferences()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
+            requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }),
+            requiresGrad: false);
+
+        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        float expected = (0f + 1f + 4f) / 3f;
+        Assert.That(loss[0], Is.EqualTo(expected).Within(1e-5f));
+    }
+
+    [Test]
+    public void MSELoss_MeanReduction_Backward_GradientsScaled()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 4f }),
+            requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f }),
+            requiresGrad: false);
+
+        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+        loss.Backward();
+
+        Assert.That(predictions.Grad, Is.Not.Null);
+        Assert.That(predictions.Grad!.Length, Is.EqualTo(2));
+        float gradScale = 1f / 2f;
+        Assert.That(predictions.Grad[0], Is.EqualTo(2f * 1f * gradScale).Within(1e-5f));
+        Assert.That(predictions.Grad[1], Is.EqualTo(2f * 3f * gradScale).Within(1e-5f));
+    }
+
+    [Test]
+    public void MSELoss_PerfectPrediction_ZeroLoss()
+    {
+        using var gradScope = GradientUtils.Grad();
+        var data = new float[] { 1f, 2f, 3f };
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(data), requiresGrad: false);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create((float[])data.Clone()), requiresGrad: false);
+
+        var sumLoss = new MSELoss<float>().Forward(predictions, targets);
+        var meanLoss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+
+        Assert.That(sumLoss[0], Is.EqualTo(0f).Within(1e-6f));
+        Assert.That(meanLoss[0], Is.EqualTo(0f).Within(1e-6f));
     }
 
     #endregion
