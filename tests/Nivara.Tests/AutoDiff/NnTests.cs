@@ -2568,6 +2568,119 @@ public class NnTests
     }
 
     [Test]
+    public void MaxPool2d_Forward_ShapeCorrect()
+    {
+        using var pool = new MaxPool2d<float>(kernelSize: 2, stride: 2);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 1 * 4 * 4]),
+            requiresGrad: false);
+        input.Reshape(1, 1, 4, 4);
+
+        var output = pool.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 1, 2, 2 }));
+    }
+
+    [Test]
+    public void MaxPool2d_Forward_WithPadding()
+    {
+        using var pool = new MaxPool2d<float>(kernelSize: 3, stride: 2, padding: 1);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Range(0, 16).Select(i => (float)i).ToArray()),
+            requiresGrad: false);
+        input.Reshape(1, 1, 4, 4);
+
+        var output = pool.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 1, 2, 2 }));
+        Assert.That(output[0], Is.EqualTo(5f));
+        Assert.That(output[1], Is.EqualTo(7f));
+        Assert.That(output[2], Is.EqualTo(13f));
+        Assert.That(output[3], Is.EqualTo(15f));
+    }
+
+    [Test]
+    public void MaxPool2d_Backward_GradientFlows()
+    {
+        using var pool = new MaxPool2d<float>(kernelSize: 2, stride: 2);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16 }),
+            requiresGrad: true);
+        input.Reshape(1, 1, 4, 4);
+
+        var output = pool.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1, 2, 3, 4 }),
+            requiresGrad: false);
+        gradOutput.Reshape(1, 1, 2, 2);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(16));
+        Assert.That(input.Grad[5], Is.EqualTo(1f), "max of top-left 2x2 block");
+        Assert.That(input.Grad[7], Is.EqualTo(2f), "max of top-right 2x2 block");
+        Assert.That(input.Grad[13], Is.EqualTo(3f), "max of bottom-left 2x2 block");
+        Assert.That(input.Grad[15], Is.EqualTo(4f), "max of bottom-right 2x2 block");
+        for (int i = 0; i < 16; i++)
+            if (i != 5 && i != 7 && i != 13 && i != 15)
+                Assert.That(input.Grad[i], Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void MaxPool2d_ConstructorRejectsInvalidArgs()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MaxPool2d<float>(kernelSize: 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MaxPool2d<float>(kernelSize: 3, padding: -1));
+    }
+
+    [Test]
+    public void AdaptiveAvgPool2d_GlobalAvgPool_FlattensTo1x1()
+    {
+        using var pool = new AdaptiveAvgPool2d<float>(outputSize: 1);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 3 * 7 * 7].Select(_ => 1f).ToArray()),
+            requiresGrad: false);
+        input.Reshape(1, 3, 7, 7);
+
+        var output = pool.Forward(input);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 1, 3, 1, 1 }));
+        for (int i = 0; i < 3; i++)
+            Assert.That(output[i], Is.EqualTo(1f));
+    }
+
+    [Test]
+    public void AdaptiveAvgPool2d_Backward_GradientFlows()
+    {
+        using var pool = new AdaptiveAvgPool2d<float>(outputSize: 1);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[1 * 2 * 4 * 4]),
+            requiresGrad: true);
+        input.Reshape(1, 2, 4, 4);
+
+        var output = pool.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1, 1 }),
+            requiresGrad: false);
+        gradOutput.Reshape(1, 2, 1, 1);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(1 * 2 * 4 * 4));
+        float expectedGrad = 1f / 16f;
+        for (int i = 0; i < input.Grad.Length; i++)
+            Assert.That(input.Grad[i], Is.EqualTo(expectedGrad).Within(1e-6f));
+    }
+
+    [Test]
+    public void AdaptiveAvgPool2d_ConstructorRejectsInvalidArgs()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => new AdaptiveAvgPool2d<float>(outputSize: 0));
+    }
+
+    [Test]
     public void MultiheadAttention_ShapeCorrect()
     {
         using var mha = new MultiheadAttention<float>(embedDim: 64, numHeads: 8);
