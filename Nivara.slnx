@@ -11,6 +11,7 @@
     <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
     <Project Path="samples/NivaraClassifier/NivaraClassifier.csproj" />
     <Project Path="samples/NivaraGpt/NivaraGpt.csproj" />
+    <Project Path="samples/NivaraInference/NivaraInference.csproj" />
     <Project Path="samples/NivaraTimeSeries/NivaraTimeSeries.csproj" />
     <Project Path="samples/NivaraVAE/NivaraVAE.csproj" />
   </Folder>
@@ -27,6 +28,7 @@
     <File Path="LICENSE.txt" />
     <File Path="README.md" />
   </Folder>
+  <Folder Name="/src/" />
   <Folder Name="/tests/">
     <Project Path="tests/Nivara.Tests/Nivara.Tests.csproj" />
   </Folder>
