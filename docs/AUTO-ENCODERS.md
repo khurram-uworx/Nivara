@@ -125,17 +125,18 @@ DepthwiseSeparableConv2d<T> : Module<T>
 
 **Files:** `LayerNorm.cs`, `LayerNormKernel.cs`
 
-Span-based kernel with `TensorPrimitives`. Normalizes over the last dimension per instance (no running stats, unlike BatchNorm).
+Span-based kernel with `TensorPrimitives`. Normalizes over the last dimension per instance (no running stats, unlike BatchNorm). Uses `TensorPrimitives.Dot` for SIMD-accelerated sum-of-squares computation in the forward kernel (verified to match scalar loop).
 
 ```
 LayerNormKernel<T>
 ├── Forward(input, rows, normalizedShape, gamma, beta, eps, affine) → (Output, Mean, InvStd, XHat)
+│   └── Uses TensorPrimitives.Dot for sum-of-squares (SIMD-accelerated)
 ├── BackwardInput(gradOut, xHat, gamma, invStd, rows, normalizedShape, affine) → gradInput
 ├── BackwardWeight(gradOut, xHat, rows, normalizedShape) → gradGamma
 └── BackwardBias(gradOut, rows, normalizedShape) → gradBeta
 ```
 
-- **Tests**: 6 tests — 2D forward, 4D forward, backward gradients, affine=false, normalized output, dispose
+- **7 tests**: 2D forward, 4D forward, backward gradients, affine=false, normalized output, dispose, Dot-vs-scalar correctness verification
 
 ### Dropout
 
@@ -149,9 +150,18 @@ Delegates to `ReverseGradOperations.Dropout`. Train mode: zeros out elements wit
 
 Full pre-norm transformer block with causal masking:
 - Multi-head self-attention (Q/K/V projections, scaled dot-product, output projection)
-- RMSNorm (fused per-row TensorPrimitives kernel)
+- Configurable normalization via `NormType` enum: `RMSNorm` (default, fused per-row `TensorPrimitives.Dot`) or `LayerNorm` (delegates to `LayerNormKernel<T>` with affine=false)
 - GELU FFN (fc1 → GELU → fc2)
 - Residual connections with optional dropout
+
+```
+NormType { RMSNorm, LayerNorm }
+PerRowRMSNorm(x) → TensorPrimitives-backed per-row normalization (no mean centering)
+PerRowLayerNorm(x) → LayerNormKernel.Forward with affine=false (mean + variance normalization)
+```
+
+- Constructor: `TransformerBlock<T>(embedDim, numHeads, hiddenDim, dropout, residualDropout, normType)`
+- **9 tests**: RMSNorm forward shape, LayerNorm forward shape, LayerNorm backward gradient flow, RMSNorm vs LayerNorm different outputs (in NnTests)
 
 ### MultiheadAttention
 
@@ -172,6 +182,43 @@ MultiheadAttention<T> : Module<T>
 ```
 
 - **5 tests**: self-attention shape, causal shape, backward gradient flow, cross-attention shape, invalid embedDim throws
+
+### Conv1d
+
+**File:** `Conv1d.cs`
+
+1D convolution with standalone im2col-based kernel and full autograd support.
+
+```
+Conv1d<T> : Module<T>
+├── Forward(input) → output              [N,C,L] → [N,outChannels,oL]
+├── Forward(input, bias) → output        [N,C,L] → [N,outChannels,oL]
+└── Backward(gradOutput) → (gradInput, gradWeight, gradBias)
+```
+
+Key implementation details:
+- **1D im2col**: `Conv1dForwardKernel` gathers patches into contiguous buffers, then `TensorPrimitives.Dot` per output channel
+- **Input grad**: `Conv1dInputGradKernel` — scatter-add of weight × gradOut patches back to input layout
+- **Weight grad**: `Conv1dWeightGradKernel` — im2col + Dot per output channel (same pattern as Conv2d)
+- **Bias grad**: `TensorPrimitives.Sum` over batch and length dimensions per output channel
+- **Kaiming init**: weight initialized with fan-in-based uniform distribution
+- Configurable `inChannels`, `outChannels`, `kernelSize`, `stride`, `padding`, `useBias`
+- **12 tests**: forward shape, stride, padding, no-padding reduces length, bias, backward gradients, no-bias backward, kernel-1=Linear-equivalence, multi-batch backward, invalid rank throws, invalid input channels throws, dispose
+
+### TransposeAxes
+
+**File:** `ReverseGradOperations.cs`
+
+Rank 2-3 tensor axis transposition with full autograd support. Used by ConvTextClassifierModel for NLC→NCL layout conversion (reshaping embeddings for Conv1d).
+
+```
+TransposeAxes<T>(input, axis1, axis2) → transposed
+```
+
+- Rank 2: swaps two axes (e.g., `[L, D]` → `[D, L]`)
+- Rank 3: swaps two axes (e.g., `[B, L, D]` → `[B, D, L]`)
+- Backward: transposes the same axes in reverse (transpose of transpose = identity)
+- **9 tests**: rank 2 correctness, rank 3 axis1-axis2, multi-batch rank 3, backward rank 2/3, roundtrip identity, invalid rank/same axis/out-of-range throws
 
 ### Broadcast Operations
 
@@ -202,15 +249,19 @@ MultiheadAttention<T> : Module<T>
 | BatchNorm2d | 7 | Same pattern as 1d |
 | Conv2d | 18 | Shapes, padding, stride, bias, backward, backward with stride+padding, multi-batch, 1×1, large channels, grouped (6 tests), dispose |
 | ConvTranspose2d | 8 | Shapes, padding, stride, backward, backward with stride, bias, large channels, dispose |
+| Conv1d | 12 | Forward shape, stride, padding, no-padding, bias, backward, no-bias backward, kernel-1=Linear, multi-batch, invalid rank, invalid channels, dispose |
 | Conditional VAE | 7 | Encode, decode, forward, elbo, backward, null condition |
 | ConvVAE | 8 | Forward, encode, decode, elbo, backward, end-to-end loss reduction, invalid args, RGB |
-| LayerNorm | 6 | 2D/4D forward, backward, affine=false, normalized output, dispose |
+| DepthwiseSeparableConv2d | 5 | Forward, stride, backward, no-bias, manual equivalence |
+| LayerNorm | 7 | 2D/4D forward, backward, affine=false, normalized output, dispose, Dot-vs-scalar verification |
+| TransformerBlock | 9 | RMSNorm/LayerNorm forward shape, LayerNorm backward, RMSNorm vs LayerNorm different outputs (includes NormType tests) |
 | MultiheadAttention | 5 | Self-attention, causal, backward, cross-attention, validation |
-| DepthwiseSeparableConv2d | 5 | Forward, stride, backward, no-basis, manual equivalence |
 | BroadcastMultiply | 6 | 2D/4D forward, input backward, scale backward, both-grad, mismatch throws |
 | BroadcastAdd | 5 | 2D/4D forward, input backward, bias backward, mismatch throws |
-| **Total (NN effort)** | **82** | |
-| **Full suite** | **1922** | All passing |
+| TransposeAxes | 9 | Rank 2/3 correctness, backward, roundtrip, validation |
+| ConvTextClassifier | 2 | Forward shape, backward gradient flow (inline architecture in NnTests) |
+| **Total (NN effort)** | **115** | |
+| **Full suite** | **1948** | All passing |
 
 ## Known Limitations
 
@@ -225,19 +276,19 @@ MultiheadAttention<T> : Module<T>
 
 | Sample | Current Architecture | New Blocks That Fit | Priority |
 |--------|---------------------|---------------------|----------|
-| **NivaraVAE** | Linear-only encoder/decoder (flat 64/256D) | **ConvVAE** (directly addresses Future Work #1), `DepthwiseSeparableConv2d` for efficient encoder | **HIGH** — explicitly requests Conv2d/ConvTranspose2d |
-| **NivaraGpt** | TransformerBlock (RMSNorm, causal self-attn) | `LayerNorm` (compare LN vs RMSNorm), standalone `MultiheadAttention`, `DepthwiseSeparableConv2d` for efficient projection | **MEDIUM** — good for ablation/comparison demo |
-| **NivaraChess** | SparseEmbedding (halfKP) → MLP | `Conv2d` (8×8 board as spatial input), `DepthwiseSeparableConv2d` for efficient piece-plane processing | **MEDIUM** — non-NLP spatial domain |
-| **NivaraClassifier** | Embedding → MeanPool → MLP | `DepthwiseSeparableConv1d` (if we add Conv1d) for n-gram features; `Conv2d` on token-position matrix | **LOW** — current design is intentionally simple |
-| **MicroGpt** | Per-position autoregressive | `MultiheadAttention` standalone (show cross-attn) | **LOW** — educational value only |
-| **NivaraChat** | TextClassifierModel/TokenClassifierModel | `DepthwiseSeparableConv2d` for efficient text CNN head | **LOW** — wrapper around core modules |
+| **NivaraVAE** | `--mode linear` (MLP) + **`--mode conv` (ConvVAE)** ✅ done | `DepthwiseSeparableConv2d` for efficient encoder | LOW — ConvVAE integrated |
+| **NivaraGpt** | TransformerBlock with **`--norm-type rmsnorm\|layernorm`** ✅ done | `DepthwiseSeparableConv2d` for efficient projection | LOW — LN/RMSNorm comparison integrated |
+| **NivaraChess** | SparseEmbedding (halfKP) → MLP | `Conv2d` (8×8 board as spatial input), `DepthwiseSeparableConv2d` for efficient piece-plane processing | MEDIUM — non-NLP spatial domain |
+| **NivaraClassifier** | `--mode linear` (Embedding → MeanPool → MLP) + **`--mode conv` (Conv1d TextCNN)** ✅ done | — | LOW — ConvTextClassifier integrated |
+| **MicroGpt** | Per-position autoregressive | `MultiheadAttention` standalone (show cross-attn) | LOW — educational value only |
+| **NivaraChat** | TextClassifierModel/TokenClassifierModel | `DepthwiseSeparableConv2d` for efficient text CNN head | LOW — wrapper around core modules |
 
-### Priority Order
+### Priority Order — All Complete ✅
 
-1. **NivaraVAE `--mode conv`** — Add ConvVAE mode; resolves documented gap (Future Work #1)
-2. **LayerNorm SIMD + NivaraGpt** — Accelerate LayerNorm kernel, demonstrate LN vs RMSNorm difference
-3. **Conv1d + NivaraClassifier `--mode conv`** — Add Conv1d module, show text CNN classifier
+1. **NivaraVAE `--mode conv`** ✅ — ConvVAE with stride-down Conv2d encoder + stride-up ConvTranspose2d decoder + 1×1 Conv heads
+2. **LayerNorm SIMD + NivaraGpt `--norm-type`** ✅ — `TensorPrimitives.Dot` optimized kernel, `NormType` enum (RMSNorm/LayerNorm), CLI flag
+3. **Conv1d + NivaraClassifier `--mode conv`** ✅ — 1D im2col kernel, multi-branch TextCNN (kernels 3,5,7) with TransposeAxes and Concat
 
 ### Deferred
 
-- `DepthwiseSeparableConv2d` usage in samples (after items 1-3 above)
+- `DepthwiseSeparableConv2d` usage in samples (e.g., NivaraChess for efficient board processing)
