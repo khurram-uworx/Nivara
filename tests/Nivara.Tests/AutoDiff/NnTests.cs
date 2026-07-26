@@ -2993,4 +2993,202 @@ public class NnTests
 
         Assert.Throws<ArgumentException>(() => conv.Forward(input));
     }
+
+    #region TransformerBlock NormType Tests
+
+    [Test]
+    public void TransformerBlock_RMSNorm_Forward_ShapeCorrect()
+    {
+        using var block = new TransformerBlock<float>(nEmbd: 32, nHead: 4, dropout: 0.0, maxSeqLen: 16, normType: NormType.RMSNorm);
+        var input = ReverseGradTensor<float>.FromArray(new float[16 * 32], requiresGrad: true);
+        input.Reshape(16, 32);
+
+        var output = block.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(2));
+        Assert.That(output.Shape[0], Is.EqualTo(16));
+        Assert.That(output.Shape[1], Is.EqualTo(32));
+    }
+
+    [Test]
+    public void TransformerBlock_LayerNorm_Forward_ShapeCorrect()
+    {
+        using var block = new TransformerBlock<float>(nEmbd: 32, nHead: 4, dropout: 0.0, maxSeqLen: 16, normType: NormType.LayerNorm);
+        var input = ReverseGradTensor<float>.FromArray(new float[16 * 32], requiresGrad: true);
+        input.Reshape(16, 32);
+
+        var output = block.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(2));
+        Assert.That(output.Shape[0], Is.EqualTo(16));
+        Assert.That(output.Shape[1], Is.EqualTo(32));
+    }
+
+    [Test]
+    public void TransformerBlock_LayerNorm_Backward_GradientFlows()
+    {
+        using var block = new TransformerBlock<float>(nEmbd: 16, nHead: 4, dropout: 0.0, maxSeqLen: 8, normType: NormType.LayerNorm);
+        var input = ReverseGradTensor<float>.FromArray(new float[8 * 16], requiresGrad: true);
+        input.Reshape(8, 16);
+
+        var output = block.Forward(input);
+        var loss = ReverseGradOperations.Sum(output);
+        loss.Backward();
+
+        Assert.That(input.Grad, Is.Not.Null);
+        float[] gradVals = new float[input.Grad!.Length];
+        input.Grad.CopyTo(gradVals, default(float)!);
+        Assert.That(gradVals.All(v => !float.IsNaN(v)), Is.True);
+    }
+
+    [Test]
+    public void TransformerBlock_RMSNorm_vs_LayerNorm_DifferentOutputs()
+    {
+        var data = new float[8 * 16];
+        var rng = new Random(42);
+        for (int i = 0; i < data.Length; i++)
+            data[i] = (float)(rng.NextDouble() * 2 - 1);
+
+        var layerNormResult = LayerNormKernel<float>.Forward(data, 8, 16,
+            ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
+            float.CreateChecked(1e-5), affine: false);
+
+        var rmsNormOutput = new float[data.Length];
+        for (int r = 0; r < 8; r++)
+        {
+            int offset = r * 16;
+            float sumSq = 0;
+            for (int j = 0; j < 16; j++)
+                sumSq += data[offset + j] * data[offset + j];
+            float rms = MathF.Sqrt(sumSq / 16 + 1e-5f);
+            for (int j = 0; j < 16; j++)
+                rmsNormOutput[offset + j] = data[offset + j] / rms;
+        }
+
+        bool allSame = true;
+        for (int i = 0; i < data.Length; i++)
+        {
+            if (Math.Abs(layerNormResult.Output[i] - rmsNormOutput[i]) > 1e-5f)
+            {
+                allSame = false;
+                break;
+            }
+        }
+        Assert.That(allSame, Is.False, "LayerNorm (mean-centering) and RMSNorm should produce different outputs");
+    }
+
+    #endregion
+
+    #region ConvTextClassifierModel Tests
+
+    [Test]
+    public void ConvTextClassifier_Forward_ShapeCorrect()
+    {
+        using var embedding = new Embedding<float>(100, 16);
+        using var conv1 = new Conv1d<float>(16, 64, kernelSize: 3, padding: 1);
+        using var conv2 = new Conv1d<float>(16, 64, kernelSize: 5, padding: 2);
+        using var conv3 = new Conv1d<float>(16, 64, kernelSize: 7, padding: 3);
+        using var fc1 = new Linear<float>(64 * 3 * 10, 32);
+        using var fc2 = new Linear<float>(32, 2);
+
+        var ids = new float[2 * 10];
+        for (int i = 0; i < ids.Length; i++) ids[i] = i % 50;
+        var input = ReverseGradTensor<float>.FromArray(ids, requiresGrad: false);
+        input.Reshape(2, 10);
+
+        var emb = embedding.Forward(input);
+        var ncl = ReverseGradOperations.TransposeAxes(emb, 1, 2);
+
+        var c1 = ReverseGradOperations.Relu(conv1.Forward(ncl));
+        var c2 = ReverseGradOperations.Relu(conv2.Forward(ncl));
+        var c3 = ReverseGradOperations.Relu(conv3.Forward(ncl));
+
+        int B = c1.shape[0];
+        c1.Reshape(B, c1.shape[1] * c1.shape[2]);
+        c2.Reshape(B, c2.shape[1] * c2.shape[2]);
+        c3.Reshape(B, c3.shape[1] * c3.shape[2]);
+
+        var cat = ReverseGradOperations.Concat([c1, c2, c3], axis: 1);
+        var h = ReverseGradOperations.Relu(fc1.Forward(cat));
+        var output = fc2.Forward(h);
+
+        Assert.That(output.Rank, Is.EqualTo(2));
+        Assert.That(output.Shape[0], Is.EqualTo(2));
+        Assert.That(output.Shape[1], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void ConvTextClassifier_Backward_GradientFlows()
+    {
+        using var embedding = new Embedding<float>(50, 8);
+        using var conv1 = new Conv1d<float>(8, 16, kernelSize: 3, padding: 1);
+        using var fc1 = new Linear<float>(16 * 8, 16);
+        using var fc2 = new Linear<float>(16, 3);
+
+        var ids = new float[1 * 8];
+        for (int i = 0; i < ids.Length; i++) ids[i] = i % 20;
+        var input = ReverseGradTensor<float>.FromArray(ids, requiresGrad: false);
+        input.Reshape(1, 8);
+
+        var emb = embedding.Forward(input);
+        var ncl = ReverseGradOperations.TransposeAxes(emb, 1, 2);
+        var c1 = ReverseGradOperations.Relu(conv1.Forward(ncl));
+        int B = c1.shape[0];
+        c1.Reshape(B, c1.shape[1] * c1.shape[2]);
+        var h = ReverseGradOperations.Relu(fc1.Forward(c1));
+        var output = fc2.Forward(h);
+
+        var loss = ReverseGradOperations.Sum(output);
+        loss.Backward();
+
+        Assert.That(input.Grad, Is.Null, "Input is token IDs, no grad expected");
+        foreach (var p in embedding.Parameters())
+            Assert.That(p.Value.Grad, Is.Not.Null, $"Gradient should flow to embedding param");
+    }
+
+    #endregion
+
+    #region LayerNorm Dot vs Scalar Verification
+
+    [Test]
+    public void LayerNormKernel_DotMatchesScalarLoop()
+    {
+        int rows = 4;
+        int cols = 32;
+        var input = new float[rows * cols];
+        var rng = new Random(123);
+        for (int i = 0; i < input.Length; i++)
+            input[i] = (float)(rng.NextDouble() * 2 - 1);
+
+        var simdResult = LayerNormKernel<float>.Forward(input, rows, cols,
+            ReadOnlySpan<float>.Empty, ReadOnlySpan<float>.Empty,
+            float.CreateChecked(1e-5), affine: false);
+
+        var scalarOutput = new float[rows * cols];
+        for (int r = 0; r < rows; r++)
+        {
+            int offset = r * cols;
+            float sum = 0;
+            for (int j = 0; j < cols; j++)
+                sum += input[offset + j];
+            float mean = sum / cols;
+
+            float sumSq = 0;
+            for (int j = 0; j < cols; j++)
+            {
+                float diff = input[offset + j] - mean;
+                sumSq += diff * diff;
+            }
+            float invStd = 1.0f / MathF.Sqrt(sumSq / cols + 1e-5f);
+
+            for (int j = 0; j < cols; j++)
+                scalarOutput[offset + j] = (input[offset + j] - mean) * invStd;
+        }
+
+        for (int i = 0; i < input.Length; i++)
+            Assert.That(simdResult.Output[i], Is.EqualTo(scalarOutput[i]).Within(1e-5f),
+                $"Mismatch at index {i}: SIMD={simdResult.Output[i]}, scalar={scalarOutput[i]}");
+    }
+
+    #endregion
 }

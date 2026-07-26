@@ -29,6 +29,7 @@ Key characteristics:
 - Batched full-sequence forward with upper-triangular causal mask (not per-position)
 - `Module<T>` subclass with `RegisterModules`/`RegisterParameters` — `StateDict()`, `LoadStateDict()`, `ModelSerializer` work out of the box
 - `TransformerBlock<T>` — reusable core library building block for multi-head attention + MLP
+- **`--norm-type rmsnorm|layernorm`** — configurable normalization: RMSNorm (default, faster) or standard LayerNorm with mean+variance
 - `CrossEntropyLoss<T>` with integer labels, `Dropout<T>`, `Sampler<T>`
 - **7x higher throughput** than MicroGpt (3,400 vs 460 tok/s) due to batched MatMul kernels and SIMD-accelerated TensorPrimitives
 
@@ -37,7 +38,8 @@ Key characteristics:
 A word-level text classifier that trains a sentiment model (positive/negative) using learned embeddings and an MLP head. Exercises the full autograd training pipeline with sequence data: synthetic data generation → tokenization → embedding → mean pool → MLP → cross-entropy loss → training → inference.
 
 Key characteristics:
-- `Embedding<T>` → `MeanPool` → `Linear(ReLU)` → `Linear` architecture
+- `Embedding<T>` → `MeanPool` → `Linear(ReLU)` → `Linear` architecture (default `--mode linear`)
+- **`--mode conv`**: Multi-branch TextCNN using `Conv1d<T>` with parallel kernel sizes (3, 5, 7) for n-gram feature extraction, demonstrating `TransposeAxes` and `Concat`
 - `ReverseGradOperations.MeanPool<T>` — new core autograd operation for `[B, L, D]` → `[B, D]` sequence reduction
 - Reusable `TextTokenizer` with vocab building, encode/decode, special tokens
 - Synthetic data generator — no external datasets required
@@ -69,6 +71,7 @@ Key characteristics:
 A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.
 
 Key characteristics:
+- **`--mode linear|conv`**: `linear` uses `VaeModel<T>` (MLP), `conv` uses `ConvVAE<T>` (Conv2d/ConvTranspose2d encoder/decoder)
 - `Module<T>` subclass with `Linear<T>`, `Dropout<T>`, `Activation.LeakyRelu<T>` — individual layer fields
 - Manual training loop with `GradientUtils.Grad()` — demonstrates explicit autograd scope control
 - `SampleNormal` (reparameterization trick), `KlDivergence`, `BCEWithLogitsLoss` (fused backward)

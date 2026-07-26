@@ -50,6 +50,7 @@ dotnet run --project samples/NivaraClassifier -- --command predict --load sample
 | `--num-samples <int>` | 1000 | Samples to generate |
 | `--lr <float>` | 0.001 | Learning rate |
 | `--seed <int>` | 42 | RNG seed |
+| `--mode <linear\|conv>` | `linear` | Model: `linear` = Embedding → MeanPool → MLP, `conv` = Embedding → Conv1d (kernels 3,5,7) → Concat → MLP |
 | `--help`, `-h` | — | Show CLI help |
 
 ## Modes of use
@@ -68,6 +69,7 @@ Interactive REPL: type sentences, get predicted sentiment. Requires a trained mo
 ```
 NivaraClassifier/
 ├── Program.cs                  # CLI entry, training loop, inference, wizard
+├── ConvTextClassifierModel.cs  # Multi-branch TextCNN (--mode conv)
 ├── DataGenerator.cs            # Synthetic sentiment CSV generator
 └── NivaraClassifier.csproj     # References Nivara core
 ```
@@ -75,6 +77,8 @@ NivaraClassifier/
 > **Note:** `TextClassifierModel<T>` and `TextTokenizer` were originally defined in this sample but have been promoted to core APIs in `Nivara.AutoDiff.Nn`. The sample now references them from the core library.
 
 ### Model architecture
+
+**`--mode linear` (default):**
 
 ```
 Input: [batch, seqLen] token IDs (integer)
@@ -91,6 +95,29 @@ Linear(embedDim → hiddenDim) → ReLU    → [batch, hiddenDim]
     ▼
 Linear(hiddenDim → numClasses)          → [batch, numClasses] logits
 ```
+
+**`--mode conv`:**
+
+Multi-branch TextCNN (Kim 2014 pattern) using three parallel Conv1d filters with different kernel sizes (3, 5, 7) for n-gram feature extraction:
+
+```
+Input: [batch, seqLen] token IDs
+    │
+    ▼
+Embedding(vocabSize, embedDim)          → [batch, seqLen, embedDim]
+    │ (reshape to [batch, embedDim, seqLen])
+    ├─→ Conv1d(embedDim, 64, k=3) → ReLU → [batch, 64, seqLen]
+    ├─→ Conv1d(embedDim, 64, k=5) → ReLU → [batch, 64, seqLen]
+    └─→ Conv1d(embedDim, 64, k=7) → ReLU → [batch, 64, seqLen]
+    │ (flatten each, concat)
+    ▼
+Concat → [batch, 64 × 3 × seqLen]
+    │
+    ▼
+Linear → ReLU → Dropout → Linear       → [batch, numClasses] logits
+```
+
+This architecture demonstrates `Conv1d<T>`, `TransposeAxes`, and `Concat` for text classification.
 
 ### TextTokenizer
 
@@ -119,11 +146,14 @@ Templates with positive/negative patterns, fill nouns and activities from pools,
 
 | API | Where | Purpose |
 |-----|-------|---------|
-| `Module<T>` | `TextClassifierModel.cs` | Model base class with parameter registration |
-| `Embedding<T>` | `TextClassifierModel.cs` | Learned word embeddings (first-class layer) |
-| `Linear<T>` | `TextClassifierModel.cs` | Fully connected layers |
-| `ReverseGradOperations.Relu` | `TextClassifierModel.cs` | Non-linearity |
-| `ReverseGradOperations.MeanPool` | `TextClassifierModel.cs` | Sequence pooling `[B,L,D]` → `[B,D]` |
+| `Module<T>` | `TextClassifierModel.cs`, `ConvTextClassifierModel.cs` | Model base class with parameter registration |
+| `Embedding<T>` | Both models | Learned word embeddings (first-class layer) |
+| `Conv1d<T>` | `ConvTextClassifierModel.cs` (`--mode conv`) | 1D convolution for n-gram feature extraction |
+| `Linear<T>` | Both models | Fully connected layers |
+| `ReverseGradOperations.Relu` | Both models | Non-linearity |
+| `ReverseGradOperations.MeanPool` | `TextClassifierModel.cs` (`--mode linear`) | Sequence pooling `[B,L,D]` → `[B,D]` |
+| `ReverseGradOperations.TransposeAxes` | `ConvTextClassifierModel.cs` (`--mode conv`) | Reshape embedding `[B,L,D]` → `[B,D,L]` for Conv1d |
+| `ReverseGradOperations.Concat` | `ConvTextClassifierModel.cs` (`--mode conv`) | Concatenate multi-branch conv outputs |
 | `CrossEntropyLoss<T>` | `Program.cs` | Classification loss with integer labels |
 | `Adam<T>` | `Program.cs` | Optimizer |
 | `TrainingLoop<T>` | `Program.cs` | Training orchestration |
