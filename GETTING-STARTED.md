@@ -1166,6 +1166,9 @@ var separable = new DepthwiseSeparableConv2d<float>(inChannels: 64, outChannels:
 var bn1d = new BatchNorm1d<float>(numFeatures: 128);
 var bn2d = new BatchNorm2d<float>(numFeatures: 64);
 
+// BatchNorm1d also accepts 3D [B, C, L] input for Conv1d pipelines
+var bn1d_3d = new BatchNorm1d<float>(numFeatures: 64);  // feed with tensor of shape [batch, channels, length]
+
 // Layer normalization (no running stats, normalizes over last dimension)
 var ln = new LayerNorm<float>(normalizedShape: 128);
 ```
