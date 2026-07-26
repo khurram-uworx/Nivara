@@ -67,6 +67,21 @@ Key characteristics:
 - `ModelSerializer` bridges training output to inference input
 - Ollama optional — pass `--ollama` to include LLM agent
 
+## [NivaraTimeSeries/README.md](NivaraTimeSeries/README.md) — Server Monitoring Anomaly Detection
+
+Trains a Conv1d-based Variational Autoencoder on synthetic server monitoring metrics (CPU, memory, disk I/O, network traffic), then detects anomalies by measuring reconstruction error against learned normal patterns. Demonstrates temporal feature extraction with `Conv1d<T>`, `BatchNorm1d<T>` with 3D `[B, C, L]` input, and practical anomaly detection — all pure C# with no external dependencies.
+
+Key characteristics:
+- **Conv1d encoder** — 3-layer convolutional feature extraction from multivariate time series
+- **`BatchNorm1d<T>`** — normalizes across batch and time dimensions (exercises the new 3D input support)
+- **`MSELoss<T>` with `reduceToMean`** — reconstruction loss for continuous-valued metrics
+- **`KlDivergence` + `SampleNormal`** — VAE latent regularization with reparameterization trick
+- **Threshold-based anomaly detection** — reconstruction error exceeds `mean + 2σ` threshold
+- **Synthetic data generation** — realistic diurnal patterns with injected anomalies (spikes, level shifts, trend changes)
+- **ASCII visualization** — Unicode block characters for metric rendering
+- **Model save/load** via `ModelSerializer`
+- Exposed 3 library gaps: BatchNorm1d 3D input rejection, xHat latent bug in BatchNormKernel, MSELoss lacking `reduceToMean`
+
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 
 A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards, corners, crosses). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.
