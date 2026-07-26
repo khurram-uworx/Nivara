@@ -262,6 +262,109 @@ public static class ReverseGradOperations
             $"AutoDiff=Transpose;Shape={rows}x{cols}->{cols}x{rows}");
     }
 
+    public static ReverseGradTensor<T> TransposeAxes<T>(ReverseGradTensor<T> a, int axis1, int axis2) where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (a.Rank < 2 || a.Rank > 3)
+            throw new ArgumentException($"TransposeAxes supports rank 2–3, got rank {a.Rank}", nameof(a));
+        if (axis1 < 0 || axis1 >= a.Rank) throw new ArgumentOutOfRangeException(nameof(axis1));
+        if (axis2 < 0 || axis2 >= a.Rank) throw new ArgumentOutOfRangeException(nameof(axis2));
+        if (axis1 == axis2) throw new ArgumentException("axis1 and axis2 must differ");
+
+        var srcDims = a.shape;
+        var dstDims = (int[])srcDims.Clone();
+        (dstDims[axis1], dstDims[axis2]) = (dstDims[axis2], dstDims[axis1]);
+        string note = $"AutoDiff=TransposeAxes;Shape={string.Join("x", srcDims)}->{string.Join("x", dstDims)}";
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffTransposeAxes",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
+            {
+                var srcData = new T[a.Length];
+                a.Data.CopyTo(srcData, default(T)!);
+                var dstData = new T[a.Length];
+
+                if (a.Rank == 2)
+                {
+                    int rows = srcDims[0], cols = srcDims[1];
+                    for (int r = 0; r < rows; r++)
+                        for (int c = 0; c < cols; c++)
+                        {
+                            int srcIdx = r * cols + c;
+                            int dstIdx = c * rows + r;
+                            dstData[dstIdx] = srcData[srcIdx];
+                        }
+                }
+                else
+                {
+                    int d0 = srcDims[0], d1 = srcDims[1], d2 = srcDims[2];
+                    int nd1 = dstDims[1], nd2 = dstDims[2];
+                    for (int i0 = 0; i0 < d0; i0++)
+                        for (int i1 = 0; i1 < d1; i1++)
+                            for (int i2 = 0; i2 < d2; i2++)
+                            {
+                                int srcIdx = i0 * d1 * d2 + i1 * d2 + i2;
+                                var indices = new[] { i0, i1, i2 };
+                                (indices[axis1], indices[axis2]) = (indices[axis2], indices[axis1]);
+                                int dstIdx = indices[0] * nd1 * nd2 + indices[1] * nd2 + indices[2];
+                                dstData[dstIdx] = srcData[srcIdx];
+                            }
+                }
+
+                var resultCol = NivaraColumn<T>.Create(dstData);
+                bool shouldTrack = GradientUtils.ShouldTrackGrad(a);
+                var resultTensor = new ReverseGradTensor<T>(resultCol, shouldTrack, dstDims);
+
+                if (shouldTrack)
+                {
+                    int capturedAxis1 = axis1, capturedAxis2 = axis2;
+                    int[] capturedDstDims = dstDims;
+                    var gradFn = new OpNode<T>("TransposeAxes", new object[] { a }, (typedGradOutput, sgn) =>
+                    {
+                        int gradLen = typedGradOutput.Length;
+                        var gSrc = new T[gradLen];
+                        typedGradOutput.CopyTo(gSrc, default(T)!);
+                        var gDst = new T[gradLen];
+
+                        if (capturedDstDims.Length == 2)
+                        {
+                            int rows = capturedDstDims[0], cols = capturedDstDims[1];
+                            for (int r = 0; r < rows; r++)
+                                for (int c = 0; c < cols; c++)
+                                {
+                                    int srcIdx = r * cols + c;
+                                    int dstIdx = c * rows + r;
+                                    gDst[dstIdx] = gSrc[srcIdx];
+                                }
+                        }
+                        else
+                        {
+                            int d0 = capturedDstDims[0], d1 = capturedDstDims[1], d2 = capturedDstDims[2];
+                            int od1 = srcDims[1], od2 = srcDims[2];
+                            for (int i0 = 0; i0 < d0; i0++)
+                                for (int i1 = 0; i1 < d1; i1++)
+                                    for (int i2 = 0; i2 < d2; i2++)
+                                    {
+                                        int srcIdx = i0 * d1 * d2 + i1 * d2 + i2;
+                                        var indices = new[] { i0, i1, i2 };
+                                        (indices[capturedAxis1], indices[capturedAxis2]) = (indices[capturedAxis2], indices[capturedAxis1]);
+                                        int dstIdx = indices[0] * od1 * od2 + indices[1] * od2 + indices[2];
+                                        gDst[dstIdx] = gSrc[srcIdx];
+                                    }
+                        }
+
+                        AccumulateGradient(a, NivaraColumn<T>.Create(gDst), sgn);
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            }, note);
+    }
+
     #endregion
 
     #region Reduction Operations
