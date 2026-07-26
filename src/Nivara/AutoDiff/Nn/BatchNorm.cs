@@ -90,11 +90,13 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
 
         bool useRunningStats = !IsTraining;
 
-        if (useRunningStats)
+        if (useRunningStats && _runningMean != null && _runningVar != null)
         {
-            var evalResult = BatchNormKernel<T>.Forward(
+            var rmSpan = GetParamSpan(_runningMean);
+            var rvSpan = GetParamSpan(_runningVar);
+            var evalResult = BatchNormKernel<T>.ForwardEval(
                 GetInputSpan(input), n, c, planeSize,
-                gamma, beta, _eps, _affine);
+                gamma, beta, rmSpan, rvSpan, _eps, _affine);
 
             var evalTensor = new ReverseGradTensor<T>(
                 NivaraColumn<T>.Create(evalResult.Output),
@@ -326,6 +328,46 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
         var beta = _affine && _bias != null
             ? GetParamSpan(_bias.Tensor)
             : ReadOnlySpan<T>.Empty;
+
+        bool useRunningStats = !IsTraining;
+
+        if (useRunningStats && _runningMean != null && _runningVar != null)
+        {
+            var rmSpan = GetParamSpan(_runningMean);
+            var rvSpan = GetParamSpan(_runningVar);
+            var evalResult = BatchNormKernel<T>.ForwardEval(
+                GetInputSpan(input), n, c, hw,
+                gamma, beta, rmSpan, rvSpan, _eps, _affine);
+
+            var evalTensor = new ReverseGradTensor<T>(
+                NivaraColumn<T>.Create(evalResult.Output),
+                input.RequiresGrad, input.Shape);
+
+            if (input.RequiresGrad)
+            {
+                var savedXHat = evalResult.XHat;
+                var savedInvStd = evalResult.InvStd;
+                var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
+                bool affine = _affine;
+                int savedN = n, savedC = c;
+
+                var gradFn = new OpNode<T>("BatchNorm2dEval", new object[] { input }, (typedGradOutput, sgn) =>
+                {
+                    var gradOutData = new T[typedGradOutput.Length];
+                    typedGradOutput.CopyTo(gradOutData, default(T)!);
+
+                    var gradInputData = BatchNormKernel<T>.BackwardInput(
+                        gradOutData, savedXHat, savedGamma, savedInvStd,
+                        savedN, savedC, hw, affine);
+
+                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
+                });
+
+                ComputationGraph.AddNode(evalTensor, gradFn);
+            }
+
+            return evalTensor;
+        }
 
         var inputData = GetInputSpan(input);
 

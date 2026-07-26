@@ -82,6 +82,26 @@ Key characteristics:
 - **Model save/load** via `ModelSerializer`
 - Exposed 4 library gaps: BatchNorm1d 3D input rejection, xHat latent allocation bug, xHat scalar path not written when affine=false, MSELoss lacking `reduceToMean`
 
+## [NivaraInference/README.md](NivaraInference/README.md) — HuggingFace Vision Model Inference
+
+Loads pre-trained HuggingFace vision models (MobileNetV2, ResNet-18) using a custom zero-dependency SafeTensors reader and runs forward inference entirely within Nivara's AutoDiff engine. No third-party ML framework dependencies.
+
+Key characteristics:
+- **Custom SafeTensors loader** — zero-dependency binary parser with MemoryMarshal.Cast for F32, skips non-F32 tensors
+- **MobileNetV2** — 16 inverted residual blocks, depthwise separable convolutions, ReLU6 activation, residual skip connections (3.4M params)
+- **ResNet-18** — BasicBlock with 3x3 convolutions, identity/1x1 shortcut, 7x7 stem with MaxPool2d (11.7M params)
+- Exercises `Conv2d<T>` (asymmetric padding, grouped conv, 1x1 fast path), `BatchNorm2d<T>` (running stats), `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `Linear<T>`, `Module<T>.LoadStateDict`
+- Models downloaded via `hf` CLI to `samples/data/`
+
+## [NivaraTorch-PLAN.md](NivaraTorch-PLAN.md) — Per-Layer PyTorch ↔ Nivara Comparison
+
+Formal A/B validation of every NN layer type. PyTorch generates reference tensors via `gen_reference.py`, Nivara reproduces them to machine precision across 18 test cases. Full-model logits match Python to 6+ decimal places for both MobileNetV2 and ResNet-18.
+
+Key characteristics:
+- **Per-layer fixtures** — 68 `.bin` files in `samples/data/torch-comparison/` covering Conv2d (5 configs), BatchNorm2d (6 configs), ReLU/ReLU6, MaxPool2d, AdaptiveAvgPool2d, Linear
+- **Full-model comparison** — `compare`/`compare_diag` modes in NivaraInference for step-by-step diagnostics
+- **`PyTorchReferenceTests.cs`** — 18 NUnit tests comparing C# output against PyTorch fixtures
+
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 
 A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards, corners, crosses). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.

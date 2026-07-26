@@ -15,7 +15,10 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     readonly int _outChannels;
     readonly int _kernelSize;
     readonly int _stride;
-    readonly int _padding;
+    readonly int _paddingTop;
+    readonly int _paddingBottom;
+    readonly int _paddingLeft;
+    readonly int _paddingRight;
     readonly int _groups;
     readonly bool _useBias;
 
@@ -26,7 +29,10 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     public int OutChannels => _outChannels;
     public int KernelSize => _kernelSize;
     public int Stride => _stride;
-    public int Padding => _padding;
+    public int PaddingTop => _paddingTop;
+    public int PaddingBottom => _paddingBottom;
+    public int PaddingLeft => _paddingLeft;
+    public int PaddingRight => _paddingRight;
     public int Groups => _groups;
     public Parameter<T> WeightParam => _weight;
     public Parameter<T>? BiasParam => _bias;
@@ -39,12 +45,30 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         int padding = 0,
         bool bias = true,
         int groups = 1)
+        : this(inChannels, outChannels, kernelSize, stride, padding, padding, padding, padding, bias, groups)
+    {
+    }
+
+    public Conv2d(
+        int inChannels,
+        int outChannels,
+        int kernelSize,
+        int stride,
+        int paddingTop,
+        int paddingBottom,
+        int paddingLeft,
+        int paddingRight,
+        bool bias,
+        int groups = 1)
     {
         if (inChannels <= 0) throw new ArgumentOutOfRangeException(nameof(inChannels));
         if (outChannels <= 0) throw new ArgumentOutOfRangeException(nameof(outChannels));
         if (kernelSize <= 0) throw new ArgumentOutOfRangeException(nameof(kernelSize));
         if (stride <= 0) throw new ArgumentOutOfRangeException(nameof(stride));
-        if (padding < 0) throw new ArgumentOutOfRangeException(nameof(padding));
+        if (paddingTop < 0) throw new ArgumentOutOfRangeException(nameof(paddingTop));
+        if (paddingBottom < 0) throw new ArgumentOutOfRangeException(nameof(paddingBottom));
+        if (paddingLeft < 0) throw new ArgumentOutOfRangeException(nameof(paddingLeft));
+        if (paddingRight < 0) throw new ArgumentOutOfRangeException(nameof(paddingRight));
         if (groups <= 0) throw new ArgumentOutOfRangeException(nameof(groups));
         if (inChannels % groups != 0) throw new ArgumentException($"inChannels ({inChannels}) must be divisible by groups ({groups})");
         if (outChannels % groups != 0) throw new ArgumentException($"outChannels ({outChannels}) must be divisible by groups ({groups})");
@@ -53,7 +77,10 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         _outChannels = outChannels;
         _kernelSize = kernelSize;
         _stride = stride;
-        _padding = padding;
+        _paddingTop = paddingTop;
+        _paddingBottom = paddingBottom;
+        _paddingLeft = paddingLeft;
+        _paddingRight = paddingRight;
         _groups = groups;
         _useBias = bias;
 
@@ -91,8 +118,8 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         int h = input.Shape[2];
         int w = input.Shape[3];
 
-        int oH = (h + 2 * _padding - _kernelSize) / _stride + 1;
-        int oW = (w + 2 * _padding - _kernelSize) / _stride + 1;
+        int oH = (h + _paddingTop + _paddingBottom - _kernelSize) / _stride + 1;
+        int oW = (w + _paddingLeft + _paddingRight - _kernelSize) / _stride + 1;
         if (oH <= 0 || oW <= 0)
             throw new ArgumentException($"Output dimensions are non-positive ({oH}x{oW}). Check input size, kernel, stride, and padding.");
 
@@ -121,7 +148,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
         if (_groups == 1)
         {
             ConvForwardKernel(inputSpan, weightSpan, biasSpan, outputData,
-                n, c, h, w, kW, _stride, _padding, oH, oW, patchSize, totalPatches, _outChannels);
+                n, c, h, w, kW, _stride, _paddingTop, _paddingLeft, oH, oW, patchSize, totalPatches, _outChannels);
         }
         else
         {
@@ -151,7 +178,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                     groupOutput.Clear();
 
                     ConvForwardKernel(groupInput, weightGroup, biasGroup, groupOutput,
-                        n, cPerGroup, h, w, kW, _stride, _padding, oH, oW, groupPatchSize, totalPatches, oPerGroup);
+                        n, cPerGroup, h, w, kW, _stride, _paddingTop, _paddingLeft, oH, oW, groupPatchSize, totalPatches, oPerGroup);
 
                     for (int b = 0; b < n; b++)
                         groupOutput.Slice(b * oPerGroup * spatialOut, oPerGroup * spatialOut)
@@ -189,7 +216,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                     {
                         var inputGrad = new T[n * c * h * w];
                         ConvInputGradKernel(gradOutData, capturedWeightData, inputGrad,
-                            n, c, h, w, oH, oW, kW, _stride, _padding, _outChannels, patchSize);
+                            n, c, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, _outChannels, patchSize);
                         ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                     }
 
@@ -197,7 +224,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                     {
                         var weightGrad = new T[_outChannels * patchSize];
                         ConvWeightGradKernel(capturedInputData, gradOutData, weightGrad,
-                            n, c, h, w, oH, oW, kW, _stride, _padding, _outChannels, patchSize, totalPatches);
+                            n, c, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, _outChannels, patchSize, totalPatches);
                         ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                     }
                 }
@@ -232,7 +259,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                                 groupInGrad.Clear();
 
                                 ConvInputGradKernel(groupOutGrad, weightGroup, groupInGrad,
-                                    n, cPerGroupLocal, h, w, oH, oW, kW, _stride, _padding, oPerGroupLocal, groupPatchSizeLocal);
+                                    n, cPerGroupLocal, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, oPerGroupLocal, groupPatchSizeLocal);
 
                                 for (int b = 0; b < n; b++)
                                     groupInGrad.Slice(b * cPerGroupLocal * spatialInLocal, cPerGroupLocal * spatialInLocal)
@@ -263,7 +290,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                                     var weightGradGroup = weightGrad.AsSpan(g * oPerGroupLocal * groupPatchSizeLocal, oPerGroupLocal * groupPatchSizeLocal);
 
                                     ConvWeightGradKernel(inputGroup, groupOutGrad, weightGradGroup,
-                                        n, cPerGroupLocal, h, w, oH, oW, kW, _stride, _padding, oPerGroupLocal, groupPatchSizeLocal, totalPatches);
+                                        n, cPerGroupLocal, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, oPerGroupLocal, groupPatchSizeLocal, totalPatches);
                                 }
                                 finally
                                 {
@@ -310,10 +337,10 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
 
     static void ConvForwardKernel(
         ReadOnlySpan<T> inputData, ReadOnlySpan<T> weightSpan, ReadOnlySpan<T> biasSpan, Span<T> outputData,
-        int n, int c, int h, int w, int kW, int stride, int padding,
+        int n, int c, int h, int w, int kW, int stride, int paddingTop, int paddingLeft,
         int oH, int oW, int patchSize, int totalPatches, int outChannels)
     {
-        if (kW == 1 && stride == 1 && padding == 0)
+        if (kW == 1 && stride == 1 && paddingTop == 0 && paddingLeft == 0)
         {
             ConvForward1x1(inputData, weightSpan, biasSpan, outputData, n, c, h, w, oH, oW, outChannels);
             return;
@@ -332,7 +359,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                 int tileLen = Math.Min(tileSize, totalPatches - tileStart);
                 var locs = Im2Col.BuildPatchLocations(positionsPerBatch, oW, tileStart, tileLen);
 
-                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, padding, padding, oH, oW, tileStart, tileLen, locs);
+                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, paddingTop, paddingLeft, oH, oW, tileStart, tileLen, locs);
 
                 for (int t = 0; t < tileLen; t++)
                 {
@@ -409,7 +436,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     static void ConvWeightGradKernel(
         ReadOnlySpan<T> inputData, ReadOnlySpan<T> gradOutData, Span<T> weightGrad,
         int n, int c, int h, int w, int oH, int oW,
-        int kW, int stride, int padding, int outChannels, int patchSize, int totalPatches)
+        int kW, int stride, int paddingTop, int paddingLeft, int outChannels, int patchSize, int totalPatches)
     {
         int tileSize = Math.Min(ComputeTileCapacity(patchSize), totalPatches);
         int positionsPerBatch = oH * oW;
@@ -424,7 +451,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                 int tileLen = Math.Min(tileSize, totalPatches - tileStart);
                 var locs = Im2Col.BuildPatchLocations(positionsPerBatch, oW, tileStart, tileLen);
 
-                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, padding, padding, oH, oW, tileStart, tileLen, locs);
+                Im2Col.Im2ColTile(inputData, scratch, c, h, w, kW, kW, stride, stride, paddingTop, paddingLeft, oH, oW, tileStart, tileLen, locs);
 
                 for (int t = 0; t < tileLen; t++)
                 {
@@ -452,22 +479,22 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     static void ConvInputGradKernel(
         ReadOnlySpan<T> gradOutData, ReadOnlySpan<T> weightData, Span<T> inputGrad,
         int n, int c, int h, int w, int oH, int oW,
-        int kW, int stride, int padding, int outChannels, int patchSize)
+        int kW, int stride, int paddingTop, int paddingLeft, int outChannels, int patchSize)
     {
-        if (kW == 1 && stride == 1 && padding == 0)
+        if (kW == 1 && stride == 1 && paddingTop == 0 && paddingLeft == 0)
         {
             ConvInputGrad1x1(gradOutData, weightData, inputGrad, n, c, h, w, oH, oW, outChannels);
             return;
         }
 
-        if (kW == 3 && stride == 1 && padding == 1)
+        if (kW == 3 && stride == 1 && paddingTop == 1 && paddingLeft == 1)
         {
             ConvInputGrad3x3(gradOutData, weightData, inputGrad, n, c, h, w, oH, oW, outChannels);
             return;
         }
 
         ConvInputGradGeneric(gradOutData, weightData, inputGrad,
-            n, c, h, w, oH, oW, kW, stride, padding, outChannels, patchSize);
+            n, c, h, w, oH, oW, kW, stride, paddingTop, paddingLeft, outChannels, patchSize);
     }
 
     static void ConvInputGrad1x1(
@@ -556,7 +583,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     static void ConvInputGradGeneric(
         ReadOnlySpan<T> gradOutData, ReadOnlySpan<T> weightData, Span<T> inputGrad,
         int n, int c, int h, int w, int oH, int oW,
-        int kW, int stride, int padding, int outChannels, int patchSize)
+        int kW, int stride, int paddingTop, int paddingLeft, int outChannels, int patchSize)
     {
         for (int batch = 0; batch < n; batch++)
         {
@@ -571,14 +598,14 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
 
                     for (int oh = 0; oh < oH; oh++)
                     {
-                        int baseIH = oh * stride - padding;
+                        int baseIH = oh * stride - paddingTop;
 
                         for (int ow = 0; ow < oW; ow++)
                         {
                             T g = gradOutData[gradChannelBase + oh * oW + ow];
                             if (g == T.Zero) continue;
 
-                            int baseIW = ow * stride - padding;
+                            int baseIW = ow * stride - paddingLeft;
 
                             for (int kh = 0; kh < kW; kh++)
                             {

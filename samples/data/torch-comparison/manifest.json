@@ -1,0 +1,456 @@
+{
+  "conv2d_3x3_s1_p1": {
+    "layer": "Conv2d",
+    "input_shape": [
+      1,
+      3,
+      7,
+      7
+    ],
+    "weight_shape": [
+      16,
+      3,
+      3,
+      3
+    ],
+    "bias_shape": [
+      16
+    ],
+    "output_shape": [
+      1,
+      16,
+      7,
+      7
+    ],
+    "params": {
+      "in_channels": 3,
+      "out_channels": 16,
+      "kernel_size": 3,
+      "stride": 1,
+      "padding": 1,
+      "groups": 1
+    }
+  },
+  "conv2d_1x1_s1_p0": {
+    "layer": "Conv2d",
+    "input_shape": [
+      1,
+      3,
+      7,
+      7
+    ],
+    "weight_shape": [
+      32,
+      3,
+      1,
+      1
+    ],
+    "bias_shape": [
+      32
+    ],
+    "output_shape": [
+      1,
+      32,
+      7,
+      7
+    ],
+    "params": {
+      "in_channels": 3,
+      "out_channels": 32,
+      "kernel_size": 1,
+      "stride": 1,
+      "padding": 0,
+      "groups": 1
+    }
+  },
+  "conv2d_depthwise": {
+    "layer": "Conv2d",
+    "input_shape": [
+      1,
+      16,
+      5,
+      5
+    ],
+    "weight_shape": [
+      16,
+      1,
+      3,
+      3
+    ],
+    "bias_shape": [
+      16
+    ],
+    "output_shape": [
+      1,
+      16,
+      5,
+      5
+    ],
+    "params": {
+      "in_channels": 16,
+      "out_channels": 16,
+      "kernel_size": 3,
+      "stride": 1,
+      "padding": 1,
+      "groups": 16
+    }
+  },
+  "conv2d_stride2": {
+    "layer": "Conv2d",
+    "input_shape": [
+      1,
+      3,
+      14,
+      14
+    ],
+    "weight_shape": [
+      32,
+      3,
+      3,
+      3
+    ],
+    "bias_shape": [
+      32
+    ],
+    "output_shape": [
+      1,
+      32,
+      7,
+      7
+    ],
+    "params": {
+      "in_channels": 3,
+      "out_channels": 32,
+      "kernel_size": 3,
+      "stride": 2,
+      "padding": 1,
+      "groups": 1
+    }
+  },
+  "conv2d_with_bias": {
+    "layer": "Conv2d",
+    "input_shape": [
+      1,
+      3,
+      4,
+      4
+    ],
+    "weight_shape": [
+      8,
+      3,
+      3,
+      3
+    ],
+    "bias_shape": [
+      8
+    ],
+    "output_shape": [
+      1,
+      8,
+      4,
+      4
+    ],
+    "params": {
+      "in_channels": 3,
+      "out_channels": 8,
+      "kernel_size": 3,
+      "stride": 1,
+      "padding": 1,
+      "groups": 1
+    }
+  },
+  "bn2d_16ch": {
+    "layer": "BatchNorm2d",
+    "input_shape": [
+      1,
+      16,
+      5,
+      5
+    ],
+    "gamma_shape": [
+      16
+    ],
+    "beta_shape": [
+      16
+    ],
+    "running_mean_shape": [
+      16
+    ],
+    "running_var_shape": [
+      16
+    ],
+    "output_shape": [
+      1,
+      16,
+      5,
+      5
+    ],
+    "params": {
+      "num_features": 16,
+      "eps": 1e-05
+    }
+  },
+  "bn2d_3ch": {
+    "layer": "BatchNorm2d",
+    "input_shape": [
+      1,
+      3,
+      7,
+      7
+    ],
+    "gamma_shape": [
+      3
+    ],
+    "beta_shape": [
+      3
+    ],
+    "running_mean_shape": [
+      3
+    ],
+    "running_var_shape": [
+      3
+    ],
+    "output_shape": [
+      1,
+      3,
+      7,
+      7
+    ],
+    "params": {
+      "num_features": 3,
+      "eps": 1e-05
+    }
+  },
+  "bn2d_batch4": {
+    "layer": "BatchNorm2d",
+    "input_shape": [
+      4,
+      16,
+      8,
+      8
+    ],
+    "gamma_shape": [
+      16
+    ],
+    "beta_shape": [
+      16
+    ],
+    "running_mean_shape": [
+      16
+    ],
+    "running_var_shape": [
+      16
+    ],
+    "output_shape": [
+      4,
+      16,
+      8,
+      8
+    ],
+    "params": {
+      "num_features": 16,
+      "eps": 1e-05
+    }
+  },
+  "bn2d_16ch_batch_stats": {
+    "layer": "BatchNorm2d",
+    "note": "batch_stats_only (no running stats) - the bug case",
+    "input_shape": [
+      1,
+      16,
+      5,
+      5
+    ],
+    "output_shape": [
+      1,
+      16,
+      5,
+      5
+    ]
+  },
+  "bn2d_3ch_batch_stats": {
+    "layer": "BatchNorm2d",
+    "note": "batch_stats_only (no running stats) - the bug case",
+    "input_shape": [
+      1,
+      3,
+      7,
+      7
+    ],
+    "output_shape": [
+      1,
+      3,
+      7,
+      7
+    ]
+  },
+  "bn2d_batch4_batch_stats": {
+    "layer": "BatchNorm2d",
+    "note": "batch_stats_only (no running stats) - the bug case",
+    "input_shape": [
+      4,
+      16,
+      8,
+      8
+    ],
+    "output_shape": [
+      4,
+      16,
+      8,
+      8
+    ]
+  },
+  "relu_1d": {
+    "layer": "ReLU/ReLU6",
+    "input_shape": [
+      32
+    ],
+    "relu_output_shape": [
+      32
+    ],
+    "relu6_output_shape": [
+      32
+    ]
+  },
+  "relu_4d": {
+    "layer": "ReLU/ReLU6",
+    "input_shape": [
+      1,
+      16,
+      8,
+      8
+    ],
+    "relu_output_shape": [
+      1,
+      16,
+      8,
+      8
+    ],
+    "relu6_output_shape": [
+      1,
+      16,
+      8,
+      8
+    ]
+  },
+  "maxpool_3x3_s2_p1": {
+    "layer": "MaxPool2d",
+    "input_shape": [
+      1,
+      16,
+      14,
+      14
+    ],
+    "output_shape": [
+      1,
+      16,
+      7,
+      7
+    ],
+    "params": {
+      "kernel_size": 3,
+      "stride": 2,
+      "padding": 1
+    }
+  },
+  "maxpool_2x2_s2_p0": {
+    "layer": "MaxPool2d",
+    "input_shape": [
+      1,
+      32,
+      28,
+      28
+    ],
+    "output_shape": [
+      1,
+      32,
+      14,
+      14
+    ],
+    "params": {
+      "kernel_size": 2,
+      "stride": 2,
+      "padding": 0
+    }
+  },
+  "adaptiveavgpool_1x1": {
+    "layer": "AdaptiveAvgPool2d",
+    "input_shape": [
+      1,
+      512,
+      7,
+      7
+    ],
+    "output_shape": [
+      1,
+      512,
+      1,
+      1
+    ],
+    "params": {
+      "output_size": 1
+    }
+  },
+  "adaptiveavgpool_1x1_sm": {
+    "layer": "AdaptiveAvgPool2d",
+    "input_shape": [
+      1,
+      32,
+      14,
+      14
+    ],
+    "output_shape": [
+      1,
+      32,
+      1,
+      1
+    ],
+    "params": {
+      "output_size": 1
+    }
+  },
+  "linear_128_64": {
+    "layer": "Linear",
+    "input_shape": [
+      1,
+      128
+    ],
+    "weight_shape": [
+      64,
+      128
+    ],
+    "bias_shape": [
+      64
+    ],
+    "output_shape": [
+      1,
+      64
+    ],
+    "params": {
+      "in_features": 128,
+      "out_features": 64
+    }
+  },
+  "linear_512_1000": {
+    "layer": "Linear",
+    "input_shape": [
+      1,
+      512
+    ],
+    "weight_shape": [
+      1000,
+      512
+    ],
+    "bias_shape": [
+      1000
+    ],
+    "output_shape": [
+      1,
+      1000
+    ],
+    "params": {
+      "in_features": 512,
+      "out_features": 1000
+    }
+  }
+}

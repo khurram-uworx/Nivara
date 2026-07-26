@@ -336,3 +336,5 @@ FodyWeavers.xsd
 samples/data/sentiment_data.csv
 samples/data/classifier.model*
 /samples/data/nivarachat
+samples/data/mobilenet_v2/
+samples/data/resnet18/
