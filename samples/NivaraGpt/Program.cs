@@ -27,6 +27,7 @@ int numSamples = 10;
 string? savePath = null;
 string? loadPath = null;
 string? dumpWeightsPath = null;
+string normTypeStr = "rmsnorm";
 bool help = false;
 
 for (int i = 0; i < args.Length; i++)
@@ -54,6 +55,7 @@ for (int i = 0; i < args.Length; i++)
         case "--save": savePath = args[++i]; break;
         case "--load": loadPath = args[++i]; break;
         case "--dump-weights": dumpWeightsPath = args[++i]; break;
+        case "--norm-type": normTypeStr = args[++i].ToLowerInvariant(); break;
         case "--help": help = true; break;
         case "-h": help = true; break;
     }
@@ -77,6 +79,7 @@ Options:
   --beta2 <float>         Adam beta2 (default: 0.95)
   --init-std <float>      Weight init std dev (default: 0.02)
   --no-weight-tying       Use separate lm_head instead of weight tying
+  --norm-type <type>      Normalization: rmsnorm (default) or layernorm
   --lr-decay              Linear LR decay to zero over epochs
   --temperature <float>   Sampling temperature (default: 0.8)
   --top-k <int>           Top-k sampling, 0 = disabled (default: 0)
@@ -109,7 +112,8 @@ Console.WriteLine($"vocab: {tokenizer.VocabSize}, docs: {docs.Count}");
 
 using var model = new NivaraGptModel<float>(
     tokenizer.VocabSize, nEmbd, nLayer, blockSize, nHead,
-    dropout: dropout, weightTying: weightTying, initStd: initStd);
+    dropout: dropout, weightTying: weightTying, initStd: initStd,
+    normType: normTypeStr == "layernorm" ? NormType.LayerNorm : NormType.RMSNorm);
 
 if (!string.IsNullOrWhiteSpace(loadPath))
 {
@@ -121,7 +125,7 @@ else
     int totalParams = 0;
     foreach (var p in model.GetParameters().Values)
         totalParams += p.Length;
-    Console.WriteLine($"model: {nLayer}L x {nEmbd}D, {nHead} heads, block={blockSize}, dropout={dropout}");
+    Console.WriteLine($"model: {nLayer}L x {nEmbd}D, {nHead} heads, block={blockSize}, norm={normTypeStr}, dropout={dropout}");
     Console.WriteLine($"params: {totalParams}");
 
     Train(model, tokenizer, docs, epochs, batchSize, learningRate, beta1, beta2, lrDecay, rngSeed, blockSize);

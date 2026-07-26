@@ -6,6 +6,8 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Nn;
 
+public enum NormType { RMSNorm, LayerNorm }
+
 public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
 {
     readonly int nEmbd;
@@ -25,8 +27,9 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
 
     readonly ReverseGradTensor<T> causalMask;
     readonly int maxSeqLen;
+    readonly NormType normType;
 
-    public TransformerBlock(int nEmbd, int nHead, double dropout = 0.0, int maxSeqLen = 256, double initStd = 0.02)
+    public TransformerBlock(int nEmbd, int nHead, double dropout = 0.0, int maxSeqLen = 256, double initStd = 0.02, NormType normType = NormType.RMSNorm)
     {
         if (nEmbd % nHead != 0)
             throw new ArgumentException($"nEmbd ({nEmbd}) must be divisible by nHead ({nHead}).");
@@ -36,6 +39,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
         headDim = nEmbd / nHead;
         attnScale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
         this.maxSeqLen = maxSeqLen;
+        this.normType = normType;
 
         var weightInit = new NormalInitializer<T>(T.Zero, T.CreateChecked(initStd));
         var zeroInit = new NormalInitializer<T>(T.Zero, T.Zero);
@@ -96,7 +100,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
         int D = input.shape.Length >= 2 ? input.shape[1] : nEmbd;
 
         var xResidual = input;
-        var xNorm = PerRowRMSNorm(input, L, D);
+        var xNorm = ApplyNorm(input, L, D);
 
         var Q = qProj.Forward(xNorm);
         var K = kProj.Forward(xNorm);
@@ -109,7 +113,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
         var x = ReverseGradOperations.Add(oDrop, xResidual);
 
         xResidual = x;
-        var xMLPNorm = PerRowRMSNorm(x, L, D);
+        var xMLPNorm = ApplyNorm(x, L, D);
 
         var mlp1 = mlpFc1.Forward(xMLPNorm);
         var relu = ReverseGradOperations.Relu(mlp1);
@@ -153,6 +157,48 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
         }
 
         return ReverseGradOperations.Concat(heads, axis: 1);
+    }
+
+    ReverseGradTensor<T> ApplyNorm(ReverseGradTensor<T> x, int rows, int cols)
+    {
+        return normType == NormType.RMSNorm
+            ? PerRowRMSNorm(x, rows, cols)
+            : PerRowLayerNorm(x, rows, cols);
+    }
+
+    static ReverseGradTensor<T> PerRowLayerNorm(ReverseGradTensor<T> x, int rows, int cols, double eps = 1e-5)
+    {
+        var srcData = new T[x.Length];
+        x.Data.CopyTo(srcData, default(T)!);
+
+        var result = LayerNormKernel<T>.Forward(
+            srcData, rows, cols,
+            ReadOnlySpan<T>.Empty, ReadOnlySpan<T>.Empty,
+            T.CreateChecked(eps), affine: false);
+
+        var resultCol = NivaraColumn<T>.Create(result.Output);
+        var outTensor = new ReverseGradTensor<T>(resultCol, x.RequiresGrad, x.Shape);
+
+        if (x.RequiresGrad)
+        {
+            var gradFn = new OpNode<T>("PerRowLayerNorm", [x], (typedGradOutput, sgn) =>
+            {
+                var gradOut = new T[typedGradOutput.Length];
+                typedGradOutput.CopyTo(gradOut.AsSpan(), default(T)!);
+
+                var gradInput = LayerNormKernel<T>.BackwardInput(
+                    gradOut, result.XHat,
+                    ReadOnlySpan<T>.Empty, result.InvStd,
+                    rows, cols, affine: false);
+
+                var gradCol = NivaraColumn<T>.Create(gradInput);
+                ReverseGradOperations.AccumulateGradient(x, gradCol, sgn);
+            });
+
+            ComputationGraph.AddNode(outTensor, gradFn);
+        }
+
+        return outTensor;
     }
 
     static ReverseGradTensor<T> PerRowRMSNorm(ReverseGradTensor<T> x, int rows, int cols, double eps = 1e-5)
