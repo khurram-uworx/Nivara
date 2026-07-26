@@ -1044,6 +1044,141 @@ public class NnTests
     }
 
     [Test]
+    public void BatchNorm1d_3DInput_Forward_ShapeCorrect()
+    {
+        using var bn = new BatchNorm1d<float>(4);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 4 * 8]), // B=2, C=4, L=8
+            requiresGrad: false);
+        input.Reshape(2, 4, 8);
+
+        var output = bn.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(3));
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 4, 8 }));
+        Assert.That(output.Length, Is.EqualTo(64));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_NormalizesPerChannel()
+    {
+        using var bn = new BatchNorm1d<float>(2, trackRunningStats: false, affine: false);
+        bn.Eval();
+
+        var data = new float[]
+        {
+            1, 2, 3, 4,  10, 20, 30, 40,
+            1, 2, 3, 4,  10, 20, 30, 40,
+        };
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(data), requiresGrad: false);
+        input.Reshape(2, 2, 4);
+
+        var output = bn.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(3));
+        Assert.That(output.Shape, Is.EqualTo(new[] { 2, 2, 4 }));
+
+        for (int ch = 0; ch < 2; ch++)
+        {
+            float sum = 0;
+            for (int b = 0; b < 2; b++)
+                for (int l = 0; l < 4; l++)
+                    sum += output[b * 2 * 4 + ch * 4 + l];
+            float mean = sum / 8;
+            Assert.That(mean, Is.EqualTo(0f).Within(1e-5f),
+                $"Channel {ch} should have mean 0 across B*L=8 elements");
+        }
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_TrainMode_UpdatesRunningStats()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        bn.Train();
+
+        var data = new float[]
+        {
+            1, 2, 3, 4, 5,  6, 7, 8, 9, 10,  11, 12, 13, 14, 15,
+            2, 3, 4, 5, 6,  7, 8, 9, 10, 11,  12, 13, 14, 15, 16,
+        };
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(data), requiresGrad: false);
+        input.Reshape(2, 3, 5);
+
+        var runningMeanBefore = new float[3];
+        bn.RunningMean.Data.CopyTo(runningMeanBefore, 0f);
+
+        bn.Forward(input);
+
+        var runningMeanAfter = new float[3];
+        bn.RunningMean.Data.CopyTo(runningMeanAfter, 0f);
+
+        bool meanChanged = false;
+        for (int i = 0; i < 3; i++)
+            if (Math.Abs(runningMeanAfter[i] - runningMeanBefore[i]) > 1e-6f) meanChanged = true;
+
+        Assert.That(meanChanged, Is.True, "Running mean should update in train mode for 3D input");
+    }
+
+    [Test]
+    public void BatchNorm1d_3DInput_Backward_GradientsFlow()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        bn.Train();
+
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 4]), // B=2, C=3, L=4
+            requiresGrad: true);
+        input.Reshape(2, 3, 4);
+
+        var output = bn.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[2 * 3 * 4]),
+            requiresGrad: false);
+        gradOutput.Reshape(2, 3, 4);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(24));
+        for (int i = 0; i < input.Grad.Length; i++)
+            Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
+
+        if (bn.Weight != null)
+        {
+            Assert.That(bn.Weight.Tensor.Grad, Is.Not.Null);
+            Assert.That(bn.Weight.Tensor.Grad!.Length, Is.EqualTo(3));
+        }
+        if (bn.Bias != null)
+        {
+            Assert.That(bn.Bias.Tensor.Grad, Is.Not.Null);
+            Assert.That(bn.Bias.Tensor.Grad!.Length, Is.EqualTo(3));
+        }
+    }
+
+    [Test]
+    public void BatchNorm1d_2DInput_RejectsInvalidRanks()
+    {
+        using var bn = new BatchNorm1d<float>(3);
+        var input1d = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[3]),
+            requiresGrad: false);
+        input1d.Reshape(3);
+
+        Assert.Throws<ArgumentException>(() => bn.Forward(input1d));
+
+        var input4d = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[24]),
+            requiresGrad: false);
+        input4d.Reshape(2, 3, 2, 2);
+
+        Assert.Throws<ArgumentException>(() => bn.Forward(input4d));
+    }
+
+    [Test]
     public void BatchNorm2d_Forward_ShapeCorrect()
     {
         using var bn = new BatchNorm2d<float>(3);

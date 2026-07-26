@@ -31,7 +31,7 @@ internal static class BatchNormKernel<T> where T : struct, INumber<T>
         var output = new T[input.Length];
         var mean = new T[c];
         var invStd = new T[c];
-        var xHat = affine ? new T[input.Length] : [];
+        var xHat = new T[input.Length];
 
         for (int ch = 0; ch < c; ch++)
         {
