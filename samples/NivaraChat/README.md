@@ -6,7 +6,7 @@ A sample project demonstrating Nivara-trained domain-specific models as first-cl
 
 ## What it does
 
-NivaraChat trains three small domain-specific models (sentiment classifier, entity extractor, output validator) and wires them into a workflow graph. Two execution paths are available:
+NivaraChat trains four small domain-specific models (sentiment classifier, entity extractor, workflow validator, agents validator) and wires them into a workflow graph. Two execution paths are available:
 
 - **`--workflow`** — classic executor-based graph with fan-out/fan-in topology
 - **`--agents` / `--interactive`** — each model wrapped as an `IChatClient` via `NivaraChatClient`, participating as `ChatClientAgent`s through `AsAIAgent()`
@@ -50,10 +50,11 @@ dotnet run --project samples/NivaraChat -- --interactive --ollama
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--train` | — | Mode: train all four models (overwrites existing) |
-| `--workflow` | (default) | Mode: executor-based workflow pipeline with fan-out/fan-in |
+| `--workflow` | — | Mode: executor-based workflow pipeline with fan-out/fan-in |
 | `--interactive` | — | Mode: agents pipeline with live interactive input |
 | `--agents` | — | Mode: same as `--interactive`, supports `--text` for single-shot |
-| `--ollama` | — | Flag: enable Ollama LLM agent (default URL: `http://localhost:11434`) |
+| `--text <message>` | — | Single-shot: run pipeline on one message and exit (works with `--workflow`, `--agents`, or `--interactive`) |
+| `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
 
 ## Modes of use
@@ -218,7 +219,7 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 | `Microsoft.Agents.AI.Workflows` | 1.15.0 | `Executor`, `WorkflowBuilder`, `InProcessExecution` |
 | `Microsoft.Agents.AI.Workflows.Generators` | 1.15.0 | Source generator for `[MessageHandler]` |
 | `Microsoft.Extensions.AI` | 10.8.1 | `IChatClient` abstraction |
-| `OllamaSharp` | 5.4.27 | `OllamaApiClient` implementing `IChatClient` |
+| `OllamaSharp` | 5.4.30 | `OllamaApiClient` implementing `IChatClient` |
 
 ## Library gaps this example resolved
 

@@ -1,17 +1,17 @@
 # NivaraVAE — Variational Autoencoder for Synthetic Pattern Generation
 
-A sample project demonstrating Nivara's autograd encoder–decoder architecture. Trains a VAE to learn latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards), then generates, interpolates, and walks the latent space.
+A sample project demonstrating Nivara's autograd encoder–decoder architecture. Trains a VAE to learn latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards, corners, crosses), then generates, interpolates, and walks the latent space.
 
 **Target audience:** ML practitioners exploring .NET-native generative models, developers evaluating Nivara for unsupervised learning.
 
 ## What it does
 
-NivaraVAE trains a variational autoencoder on synthetic binary grid patterns. It showcases:
+NivaraVAE trains a variational autoencoder on synthetic binary grid patterns (circles, stripes, blobs, checkerboards, corners, crosses). It showcases:
 
 - **Reverse-mode autograd** with a manual training loop (`GradientUtils.Grad()`, `loss.Backward()`, `optimizer.Step()`)
-- **`Module<T>` with individual `Linear<T>` layers** — encoder/decoder composed from `Linear<T>`, `Dropout<T>`, and activation layers
+- **`Module<T>` with individual `Linear<T>` layers** — encoder/decoder composed from `Linear<T>`, `Dropout<T>`, and activation layers (MLP mode)
+- **Conv2d / ConvTranspose2d pipeline** — convolutional encoder-decoder via `ConvVAE<T>` in `--mode conv`, using `Conv2d<T>` for stride downsampling and `ConvTranspose2d<T>` for stride upsampling
 - **VAE-specific operations** — `SampleNormal` (reparameterization trick), `KlDivergence` (ELBO loss), `BCEWithLogitsLoss` (reconstruction)
-- **`TensorDataset<T>`** with same-column-as-both-features-and-labels (autoencoding pattern)
 - **`ModelSerializer.Save`/`Load`** for checkpoint persistence
 - **Latent space exploration** — generation from noise, interpolation between encoded patterns, per-dimension latent walks
 
@@ -55,7 +55,7 @@ dotnet run --project samples/NivaraVAE -- --show-patterns
 | `--latent-dim <int>` | 8 | Latent space dimension |
 | `--hidden-dim <int>` | 128 | Hidden layer size |
 | `--batch-size <int>` | 64 | Batch size |
-| `--lr <float>` | 0.001 | Learning rate (AdamW) |
+| `--lr <float>` | 0.001 | Learning rate (Adam) |
 | `--pattern-size <int>` | 8 | Pattern grid size (NxN pixels) |
 | `--num-patterns <int>` | 5000 | Number of synthetic patterns |
 | `--seed <int>` | 42 | RNG seed |
@@ -63,6 +63,8 @@ dotnet run --project samples/NivaraVAE -- --show-patterns
 | `--dropout <float>` | 0.2 | Dropout probability |
 | `--save <path>` | — | Save trained model to JSON |
 | `--load <path>` | — | Load model from JSON |
+| `--save-data <path>` | — | Save generated pattern dataset to text file |
+| `--load-data <path>` | — | Load pattern dataset from text file (skip generation) |
 | `--generate <int>` | — | Generate N samples from random latent vectors |
 | `--interpolate <int>` | — | Interpolate between N random latent pairs |
 | `--latent-walk` | — | Walk each latent dimension one at a time |
@@ -77,13 +79,13 @@ dotnet run --project samples/NivaraVAE -- --show-patterns
 
 **`--mode linear` (default):** MLP-based VAE. See VaeModel layout below.
 
-**`--mode conv`:** Convolutional VAE using `ConvVAE<T>` from the core library. Input is reshaped to `[B, 1, patternSize, patternSize]` (single-channel grayscale). The encoder uses Conv2d with stride downsampling, and the decoder uses ConvTranspose2d with stride upsampling. This mode demonstrates the full Conv2d/ConvTranspose2d pipeline and produces sharper pattern reconstructions due to the spatial inductive bias.
+**`--mode conv`:** Convolutional VAE using `ConvVAE<T>` from the core library. Input is reshaped to `[B, 1, patternSize, patternSize]` (single-channel grayscale). The encoder uses Conv2d with stride downsampling and Relu activations (no Dropout), and the decoder uses ConvTranspose2d with stride upsampling and Relu activations. This mode demonstrates the full Conv2d/ConvTranspose2d pipeline and produces sharper pattern reconstructions due to the spatial inductive bias.
 
 ```
 --mode conv architecture:
-  Encoder: Conv2d(1→32, k=4, s=2, p=1) → Conv2d(32→64, k=4, s=2, p=1) → flatten
+  Encoder: Conv2d(1→32, k=4, s=2, p=1) → Relu → Conv2d(32→64, k=4, s=2, p=1) → Relu → flatten
   Latent:  mu + logVar (reparameterization trick)
-  Decoder: ConvTranspose2d → ConvTranspose2d → reshape to [B, 1, patternSize, patternSize]
+  Decoder: ConvTranspose2d → Relu → ConvTranspose2d → Relu → ConvTranspose2d → Relu → ConvTranspose2d(1x1) → reshape to [B, 1, patternSize, patternSize]
   Loss: BCEWithLogitsLoss(reconstruction) + beta * KL(mu, logVar)
 ```
 
@@ -114,7 +116,7 @@ PatternDataset (synthetic 2D patterns on a grid)
 Manual batching  (shuffled index array, BuildBatch for features/targets)
     |
     v
-VaeModel<T>  (Module<T> subclass)
+VaeModel<T>  (Module<T> subclass, --mode linear)
     ├── Encoder: Linear → LeakyReLU → Dropout → Linear → LeakyReLU → Dropout
     ├── MuHead:  Linear
     ├── LogVarHead: Linear
@@ -152,6 +154,30 @@ Decoder:
 Output: [batch, patternSize²]  (raw logits, sigmoid applied by loss function)
 ```
 
+### ConvVAE layout (`--mode conv`)
+
+```
+Input: [batch, 1, patternSize, patternSize]  (single-channel grayscale grid)
+
+Encoder:
+  Conv2d(1→32, kernel=4, stride=2, padding=1) → Relu
+  Conv2d(32→64, kernel=4, stride=2, padding=1) → Relu
+  Flatten
+
+Mu:      Conv2d(64→latentChannels, kernel=1)
+LogVar:  Conv2d(64→latentChannels, kernel=1)
+
+Reparameterize:  z = mu + exp(logVar * 0.5) * ε
+
+Decoder:
+  ConvTranspose2d(latentChannels→64, kernel=4, stride=2, padding=1) → Relu
+  ConvTranspose2d(64→32, kernel=4, stride=2, padding=1) → Relu
+  ConvTranspose2d(32→32, kernel=4, stride=2, padding=1) → Relu
+  ConvTranspose2d(32→1, kernel=1)  (reconstruction)
+
+Output: [batch, 1, patternSize, patternSize]
+```
+
 ### Loss
 
 ```
@@ -170,7 +196,9 @@ Where:
 | **Architecture type** | Autoregressive | Autoregressive | Feedforward MLP | **Feedforward encoder–decoder** |
 | **Module\<T\> inheritance** | No | Yes | Yes | **Yes** |
 | **Sequential\<T\>** | No | No | No | **No** (individual Linear\<T\> fields) |
-| **Dropout\<T\>** | No | Yes | No | **Yes** |
+| **Dropout\<T\>** | No | Yes | No | **Yes** (linear mode only) |
+| **Conv2d\<T\>** | No | No | No | **Yes** (`--mode conv` encoder) |
+| **ConvTranspose2d\<T\>** | No | No | No | **Yes** (`--mode conv` decoder) |
 | **TrainingLoop\<T\>** | No (raw) | No (raw) | Yes | **No (manual — demonstrates Grad() scope)** |
 | **DataLoader\<T\>** | No | Yes | Yes | **No** (manual batching) |
 | **TensorDataset\<T\>** | No | Yes | Yes | **No** (manual batching from NivaraFrame) |
@@ -193,7 +221,8 @@ Where:
 | `Conv2d<T>` | `ConvVAE<T>` (core, `--mode conv`) | Convolutional encoder layers |
 | `ConvTranspose2d<T>` | `ConvVAE<T>` (core, `--mode conv`) | Transposed convolutional decoder layers |
 | `Dropout<T>` | `VaeModel.cs` | Regularization during training |
-| `Activation.LeakyRelu<T>` | `VaeModel.cs` | Non-linearity (negativeSlope: 0.01) |
+| `Activation.LeakyRelu<T>` | `VaeModel.cs` | Non-linearity (negativeSlope: 0.01, linear mode) |
+| `Activation.Relu<T>` | `ConvVAE<T>` (core, `--mode conv`) | Non-linearity (conv mode — no Dropout) |
 | `BCEWithLogitsLoss<T>` | `Program.cs` | Binary cross-entropy from logits |
 | `ReverseGradOperations.KlDivergence<T>` | `Program.cs` | KL divergence for VAE regularization |
 | `ReverseGradOperations.SampleNormal<T>` | `VaeModel.cs` | Reparameterization trick |
@@ -209,7 +238,7 @@ Where:
 ```
 samples/NivaraVAE/
 ├── Program.cs           # Entry point, CLI parsing, training loop, generation modes
-├── VaeModel.cs          # VaeModel<T> : Module<T> with Sequential encoder/decoder
+├── VaeModel.cs          # VaeModel<T> : Module<T> with individual Linear/LeakyReLU/Dropout layers
 ├── PatternDataset.cs    # Synthetic pattern generation + NivaraFrame builder
 └── NivaraVAE.csproj     # Project file referencing Nivara core
 ```
@@ -260,7 +289,7 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 
 ## Limitations
 
-- **Linear-only architecture** — no convolutional layers. Use `--mode conv` for the ConvVAE alternative that leverages spatial structure.
+- **Default mode is MLP-only** — `--mode linear` uses flat fully-connected layers. Use `--mode conv` for the ConvVAE alternative that leverages spatial structure via Conv2d/ConvTranspose2d.
 - **No learning rate scheduling** — fixed LR throughout training. Cosine annealing or warmup would improve convergence.
 - **No optimizer state serialization** — `ModelSerializer` saves model weights only, not Adam moment buffers. Continued training after load restarts moments from scratch.
 - **Small patterns** — 8x8 and 16x16 grids only. Larger patterns would benefit from convolutional architecture.
@@ -268,8 +297,7 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 
 ## Future work
 
-1. **Conv2d / ConvTranspose2d modules** — done. `ConvVAE<T>` uses Conv2d encoder and ConvTranspose2d decoder. Accessible via `--mode conv`.
-2. **Conditional VAE (CVAE)** — condition on pattern type (circle vs stripe vs blob) by concatenating a one-hot encoding to the input.
-3. **Beta annealing** — schedule `beta` from 0 to 1 across epochs for better latent disentanglement.
-4. **Export latent vectors to NivaraFrame** — encode all patterns, store latent vectors in a frame, then query by cosine similarity. Would exercise `NivaraFrame.Dot<T>` / `CosineSimilarity<T>`.
-5. **MNIST integration** — replace synthetic patterns with MNIST digits for a more realistic benchmark.
+1. **Conditional VAE (CVAE)** — condition on pattern type (circle vs stripe vs blob) by concatenating a one-hot encoding to the input.
+2. **Beta annealing** — schedule `beta` from 0 to 1 across epochs for better latent disentanglement.
+3. **Export latent vectors to NivaraFrame** — encode all patterns, store latent vectors in a frame, then query by cosine similarity. Would exercise `NivaraFrame.Dot<T>` / `CosineSimilarity<T>`.
+4. **MNIST integration** — replace synthetic patterns with MNIST digits for a more realistic benchmark.

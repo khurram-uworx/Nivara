@@ -1,6 +1,6 @@
 # NivaraGpt — Character-Level Transformer (Nivara-Native)
 
-A miniature GPT language model implemented the **Nivara way** — using `Module<T>`, `TrainingLoop<T>`, `DataLoader<T>`, `TensorDataset<T>`, `ModelSerializer`, and batched causal attention. Same task as MicroGpt (character-level name generation on makemore/names.txt), but built on Nivara's high-level APIs instead of manual parameter management and per-position loops.
+A miniature GPT language model implemented the **Nivara way** — using `Module<T>`, `TransformerBlock<T>`, `CrossEntropyLoss<T>`, `Sampler<T>`, and batched causal attention. Same task as MicroGpt (character-level name generation on makemore/names.txt), but built on Nivara's neural network APIs instead of manual parameter management and per-position loops.
 
 **Target audience:** .NET developers evaluating Nivara for NLP/sequence modeling tasks.
 
@@ -9,7 +9,7 @@ A miniature GPT language model implemented the **Nivara way** — using `Module<
 NivaraGpt trains a character-level GPT to generate human names, character-by-character. It showcases:
 
 - **`Module<T>` subclass** with `RegisterModules`/`RegisterParameters` — `StateDict()`, `LoadStateDict()`, `ModelSerializer`, `Train()`/`Eval()` work out of the box
-- **`TrainingLoop<T>`** + **`DataLoader<T>`** + **`TensorDataset<T>`** — standard batched training pipeline
+- **Custom training loop** — random-window batching with Adam optimizer, optional LR decay
 - **Batched causal attention** — full-sequence forward with upper-triangular causal mask (not per-position)
 - **`TransformerBlock<T>`** — reusable core library building block for multi-head attention + MLP
 - **`CrossEntropyLoss<T>`** with integer labels — no manual one-hot + LogSoftmax + NLL
@@ -28,6 +28,9 @@ dotnet run --project samples/NivaraGpt -- --n-embd 32 --n-layer 2 --block-size 1
 
 # Train and save model
 dotnet run --project samples/NivaraGpt -- --save nivaragpt.json
+
+# Train and dump weight stats
+dotnet run --project samples/NivaraGpt -- --dump-weights weights.json
 
 # Generate from saved model
 dotnet run --project samples/NivaraGpt -- --load nivaragpt.json --samples 20
@@ -59,6 +62,8 @@ dotnet run --project samples/NivaraGpt -- --block-size 16 --n-embd 16 --n-head 4
 | `--norm-type <type>` | `rmsnorm` | Normalization strategy: `rmsnorm` (RMSNorm, faster) or `layernorm` (standard LayerNorm with mean+variance) |
 | `--save <path>` | — | Save trained model to JSON |
 | `--load <path>` | — | Load model from JSON |
+| `--dump-weights <path>` | — | Dump per-layer weight stats (mean, std, min, max, L2) to JSON |
+| `--samples <int>` | 10 | Number of generated samples |
 | `--seed <int>` | 42 | RNG seed |
 | `--help`, `-h` | — | Show help |
 
@@ -129,14 +134,11 @@ Input: [B, L] token IDs
 ```
 1. Download names.txt (~32K names)
 2. Build char-level vocabulary (BOS, EOS, unique chars)
-3. Encode all names → token sequences with BOS/EOS
-4. Build NivaraFrame with columns:
-   - "input_ids": flattened [total_samples × blockSize] int values
-   - "target_ids": shifted [total_samples × blockSize] int values
-5. TensorDataset<float>(frame, ["input_ids"], ["target_ids"])
-6. DataLoader<float>(dataset, batchSize, shuffle)
-7. TrainingLoop<float>(model, CrossEntropyLoss, Adam, epochs)
-8. Generate samples with temperature/top-k sampling
+3. Encode all names → flat token list with BOS/EOS separators
+4. For each batch: sample random start positions, extract `[batchSize × blockSize]` windows
+5. Create `ReverseGradTensor<float>` input/target from float arrays
+6. Forward → `CrossEntropyLoss.Forward(logits, intTargets)` → backward → `Adam.Step()`
+7. Generate samples with temperature/top-k sampling
 ```
 
 ### Dataset construction
@@ -180,14 +182,11 @@ for (int pos = 0; pos < blockSize; pos++) {
 | `Module<T>` | `NivaraGptModel.cs` | Model base class with parameter registration |
 | `Embedding<T>` | `NivaraGptModel.cs` | Token and position embeddings |
 | `Linear<T>` | `TransformerBlock` (core) | Attention projections and MLP |
-| `Activation.Relu` | `TransformerBlock` (core) | Squared ReLU activation |
+| `ReverseGradOperations.Relu` | `TransformerBlock` (core) | Squared ReLU activation (Relu + element-wise square) |
 | `Dropout<T>` | `NivaraGptModel.cs` | Embedding, attention, and residual dropout |
 | `RMSNorm` / `LayerNorm` | `TransformerBlock` (core) | Pre-LayerNorm normalization (`--norm-type` selects) |
 | `CrossEntropyLoss<T>` | `Program.cs` | Integer-label classification loss |
 | `Adam<T>` | `Program.cs` | Optimizer |
-| `TrainingLoop<T>` | `Program.cs` | Training orchestration |
-| `DataLoader<T>` | `Program.cs` | Batched data loading |
-| `TensorDataset<T>` | `Program.cs` | Frame-backed dataset |
 | `ModelSerializer.Save/Load` | `Program.cs` | JSON model persistence |
 | `Sampler<T>` | `Program.cs` | Temperature and top-k sampling |
 | `ReverseGradOperations.Concat` | `TransformerBlock` (core) | Differentiable head concatenation |
@@ -200,8 +199,8 @@ for (int pos = 0; pos < blockSize; pos++) {
 | Aspect | MicroGpt | NivaraGpt |
 |--------|----------|-----------|
 | Model base class | `IDisposable` with manual `List<Parameter<T>>` | `Module<T>` with `RegisterModules`/`RegisterParameters` |
-| Training loop | Manual (per-step, per-position) | `TrainingLoop<T>` with epochs and batches |
-| Data loading | Single random doc per step | `DataLoader<T>` with `TensorDataset<T>` and `NivaraFrame` |
+| Training loop | Manual (per-step, per-position) | Custom epoch loop with random-window batching |
+| Data loading | Single random doc per step | Random start positions within flattened token stream |
 | Attention | Per-position with KV cache | Batched full-sequence with causal mask |
 | Loss | Manual `LogSoftmax` + `MatMul(one_hot)` + `Negate` | `CrossEntropyLoss<T>` with integer labels |
 | Head concat | `PadRight`/`PadLeft` selection matrices | `ReverseGradOperations.Concat` |
@@ -230,7 +229,7 @@ for (int pos = 0; pos < blockSize; pos++) {
 | `SoftmaxList()` + manual NLL computation | `CrossEntropyLoss<T>` with integer labels | New overload on existing class |
 | Manual `List<Parameter<T>>` management | `Module<T>` inheritance | No change (already existed) |
 | Inline sampling code | `Sampler<T>` utility | New class in `AutoDiff/Nn/` |
-| Per-position forward/backward loop | Batched `TrainingLoop<T>` | No change (already existed) |
+| Per-position forward/backward loop | Batched forward with random-window sampling | Custom training loop (no library change needed) |
 | No save/load | `ModelSerializer.Save/Load` | No change (already existed) |
 | No dropout | `Dropout<T>` composed in model | No change (already existed) |
 
@@ -263,6 +262,7 @@ NivaraGpt processes **26x more data** per epoch and achieves **better loss**. Pe
 |------|---------|
 | `NivaraGptModel.cs` | GPT model: `Module<T>` subclass with embeddings, transformer blocks, lm_head |
 | `Program.cs` | CLI, data loading, training loop, generation, timing |
+| `Tokenizer.cs` | Character-level tokenizer with BOS/EOS tokens |
 | `NivaraGpt.csproj` | Project file referencing Nivara core |
 | `README.md` | This file |
 
