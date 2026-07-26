@@ -139,6 +139,7 @@ internal sealed class MobileNetV2 : Module<float>
             this.dwBn = dwBn;
             this.pwConv = pwConv;
             this.pwBn = pwBn;
+            RegisterModules(firstConv, firstBn, dwConv, dwBn, pwConv, pwBn);
         }
 
         public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> input)
@@ -185,6 +186,11 @@ internal sealed class MobileNetV2 : Module<float>
 
             projectConv = new Conv2d<float>(expandChannels, outChannels, 1, bias: false);
             projectBn = new BatchNorm2d<float>(outChannels);
+
+            if (hasExpansion)
+                RegisterModules(expandConv!, expandBn!, depthwiseConv, depthwiseBn, projectConv, projectBn);
+            else
+                RegisterModules(depthwiseConv, depthwiseBn, projectConv, projectBn);
         }
 
         public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> input)

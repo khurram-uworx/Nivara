@@ -101,6 +101,11 @@ internal sealed class ResNet18 : Module<float>
             {
                 downsampleConv = new Conv2d<float>(inChannels, outChannels, 1, stride: stride, bias: false);
                 downsampleBn = new BatchNorm2d<float>(outChannels);
+                RegisterModules(conv1, bn1, conv2, bn2, downsampleConv, downsampleBn);
+            }
+            else
+            {
+                RegisterModules(conv1, bn1, conv2, bn2);
             }
         }
 
@@ -123,13 +128,13 @@ internal sealed class ResNet18 : Module<float>
         }
     }
 
-    static void LoadConv(Module<float> conv, float[] data, int[] shape)
+    internal static void LoadConv(Module<float> conv, float[] data, int[] shape)
     {
         var tensor = ReverseGradTensor<float>.FromMatrix(data, shape[0], shape[1] * shape[2] * shape[3]);
         conv.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>> { ["Weight"] = tensor });
     }
 
-    static void LoadBn(BatchNorm2d<float> bn,
+    internal static void LoadBn(BatchNorm2d<float> bn,
         float[]? weight, float[]? bias, float[]? runningMean, float[]? runningVar)
     {
         var dict = new Dictionary<string, ReverseGradTensor<float>>();
@@ -140,7 +145,7 @@ internal sealed class ResNet18 : Module<float>
         if (dict.Count > 0) bn.LoadStateDict(dict);
     }
 
-    static void LoadLinear(Linear<float> linear, float[] weightData, int[] weightShape, float[]? biasData)
+    internal static void LoadLinear(Linear<float> linear, float[] weightData, int[] weightShape, float[]? biasData)
     {
         var dict = new Dictionary<string, ReverseGradTensor<float>>
         {
