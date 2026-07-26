@@ -381,6 +381,7 @@ static class InteractiveWizard
         double lr = AskDouble("Learning rate", 0.001);
         int hiddenDim = AskInt("Hidden dim", 64);
         int numSamples = AskInt("Num samples", 1000);
+        string mode = AskString("Model mode (linear/conv)", "linear");
 
         return new Options
         {
@@ -390,6 +391,7 @@ static class InteractiveWizard
             LearningRate = lr,
             HiddenDim = hiddenDim,
             NumSamples = numSamples,
+            Mode = mode,
             SavePath = AskString("Save model path", "classifier.model.json")
         };
     }

@@ -23,7 +23,7 @@ Key characteristics:
 
 ## [NivaraGpt/README.md](NivaraGpt/README.md) — Character-level Transformer (Nivara-Native)
 
-A miniature GPT language model built the **Nivara way** — using `Module<T>`, `TrainingLoop<T>`, `DataLoader<T>`, `TensorDataset<T>`, and batched causal attention. Same task as MicroGpt (character-level name generation on names.txt), but built on Nivara's high-level APIs.
+A miniature GPT language model built the **Nivara way** — using `Module<T>`, `TransformerBlock<T>`, `CrossEntropyLoss<T>`, `Sampler<T>`, and batched causal attention. Same task as MicroGpt (character-level name generation on names.txt), but built on Nivara's high-level APIs.
 
 Key characteristics:
 - Batched full-sequence forward with upper-triangular causal mask (not per-position)
@@ -59,7 +59,8 @@ Demonstrates Nivara-trained domain-specific models as first-class participants i
 
 Key characteristics:
 - Four trained models (sentiment, entity, workflow validator, agents validator) wired into a workflow graph
-- Two execution modes: `--workflow` (fan-out/fan-in executors) and `--agents` (sequential `IChatClient` → `AsAIAgent()` pipeline)
+- Two execution modes: `--workflow` (fan-out/fan-in executors) and `--agents`/`--interactive` (sequential `IChatClient` → `AsAIAgent()` pipeline with live input)
+- Single-shot mode: `--text <message>` runs the pipeline on one message and exits
 - `NivaraChatClient : IChatClient` wraps each model for Agent Framework participation
 - Hybrid deterministic (Nivara) + stochastic (LLM) pipeline
 - `TextClassifierModel<T>`, `TokenClassifierModel<T>`, `TextTokenizer` — core APIs exercised
@@ -68,7 +69,7 @@ Key characteristics:
 
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 
-A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.
+A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards, corners, crosses). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.
 
 Key characteristics:
 - **`--mode linear|conv`**: `linear` uses `VaeModel<T>` (MLP), `conv` uses `ConvVAE<T>` (Conv2d/ConvTranspose2d encoder/decoder)

@@ -146,21 +146,22 @@ Templates with positive/negative patterns, fill nouns and activities from pools,
 
 | API | Where | Purpose |
 |-----|-------|---------|
-| `Module<T>` | `TextClassifierModel.cs`, `ConvTextClassifierModel.cs` | Model base class with parameter registration |
-| `Embedding<T>` | Both models | Learned word embeddings (first-class layer) |
-| `Conv1d<T>` | `ConvTextClassifierModel.cs` (`--mode conv`) | 1D convolution for n-gram feature extraction |
-| `Linear<T>` | Both models | Fully connected layers |
-| `ReverseGradOperations.Relu` | Both models | Non-linearity |
-| `ReverseGradOperations.MeanPool` | `TextClassifierModel.cs` (`--mode linear`) | Sequence pooling `[B,L,D]` → `[B,D]` |
-| `ReverseGradOperations.TransposeAxes` | `ConvTextClassifierModel.cs` (`--mode conv`) | Reshape embedding `[B,L,D]` → `[B,D,L]` for Conv1d |
-| `ReverseGradOperations.Concat` | `ConvTextClassifierModel.cs` (`--mode conv`) | Concatenate multi-branch conv outputs |
+| `Module<T>` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Model base class with parameter registration |
+| `Embedding<T>` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Learned word embeddings (first-class layer) |
+| `Conv1d<T>` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | 1D convolution for n-gram feature extraction |
+| `Linear<T>` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Fully connected layers |
+| `Dropout<T>` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | Regularization between FC layers |
+| `ReverseGradOperations.Relu` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Non-linearity |
+| `ReverseGradOperations.MeanPool` | core (`TextClassifierModel<T>`) (`--mode linear`) | Sequence pooling `[B,L,D]` → `[B,D]` |
+| `ReverseGradOperations.TransposeAxes` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | Reshape embedding `[B,L,D]` → `[B,D,L]` for Conv1d |
+| `ReverseGradOperations.Concat` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | Concatenate multi-branch conv outputs |
 | `CrossEntropyLoss<T>` | `Program.cs` | Classification loss with integer labels |
 | `Adam<T>` | `Program.cs` | Optimizer |
 | `TrainingLoop<T>` | `Program.cs` | Training orchestration |
 | `DataLoader<T>` | `Program.cs` | Batched data loading |
 | `TensorDataset<T>` | `Program.cs` | Frame-backed dataset |
 | `ModelSerializer.Save/Load` | `Program.cs` | JSON model persistence |
-| `NivaraColumn<T>.Create` | `TextClassifierModel.cs` | Null-free tensor creation at AutoDiff boundary |
+| `NivaraColumn<T>.Create` | `Program.cs` (`BuildFrame`) | Null-free tensor creation at AutoDiff boundary |
 
 ## Requirements
 
