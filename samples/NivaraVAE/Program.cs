@@ -1,5 +1,3 @@
-using System.Buffers;
-using System.Numerics;
 using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
@@ -9,6 +7,7 @@ using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using NivaraVAE;
+using System.Buffers;
 
 var options = Options.Parse(args);
 
@@ -640,13 +639,27 @@ sealed class Options
 
         return new Options
         {
-            Epochs = epochs, LatentDim = latentDim, HiddenDim = hiddenDim,
-            BatchSize = batchSize, LearningRate = lr, PatternSize = patternSize,
-            NumPatterns = numPatterns, Seed = seed, Beta = beta, Dropout = dropout,
+            Epochs = epochs,
+            LatentDim = latentDim,
+            HiddenDim = hiddenDim,
+            BatchSize = batchSize,
+            LearningRate = lr,
+            PatternSize = patternSize,
+            NumPatterns = numPatterns,
+            Seed = seed,
+            Beta = beta,
+            Dropout = dropout,
             Mode = mode,
-            SavePath = savePath, LoadPath = loadPath, SaveDataPath = saveDataPath, LoadDataPath = loadDataPath, GenerateCount = genCount,
-            InterpolateCount = interpCount, LatentWalk = latentWalk,
-            ShowPatterns = showPatterns, Eval = eval, Help = help
+            SavePath = savePath,
+            LoadPath = loadPath,
+            SaveDataPath = saveDataPath,
+            LoadDataPath = loadDataPath,
+            GenerateCount = genCount,
+            InterpolateCount = interpCount,
+            LatentWalk = latentWalk,
+            ShowPatterns = showPatterns,
+            Eval = eval,
+            Help = help
         };
     }
 

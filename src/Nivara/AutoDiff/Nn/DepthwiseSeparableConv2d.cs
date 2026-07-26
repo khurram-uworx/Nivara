@@ -1,4 +1,3 @@
-using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;

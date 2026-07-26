@@ -1,7 +1,6 @@
-using System.Buffers;
-using System.Numerics;
-using System.Numerics.Tensors;
 using Nivara;
+using System.Buffers;
+using System.Numerics.Tensors;
 
 namespace NivaraTimeSeries;
 

@@ -1,4 +1,3 @@
-using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 
@@ -182,7 +181,7 @@ internal static class Im2Col
             int r1 = r0 + width;
             int r2 = r1 + width;
 
-            output[outRow + patchIdx]     = input[r0];
+            output[outRow + patchIdx] = input[r0];
             output[outRow + patchIdx + 1] = input[r0 + 1];
             output[outRow + patchIdx + 2] = input[r0 + 2];
             output[outRow + patchIdx + 3] = input[r1];

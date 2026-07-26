@@ -1,16 +1,13 @@
-using System.Buffers;
-using System.Diagnostics;
-using System.Numerics;
-using System.Numerics.Tensors;
-using Nivara;
 using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using NivaraTimeSeries;
+using System.Buffers;
+using System.Diagnostics;
+using System.Numerics.Tensors;
 
 var options = Options.Parse(args);
 
@@ -336,13 +333,13 @@ sealed class Options
         int numSamples = 5000, seed = 42;
         float lr = 0.001f, beta = 0.5f, dropout = 0.2f, anomalyRatio = 0.15f;
         string? savePath = null, loadPath = null, saveDataPath = null, loadDataPath = null;
-        bool detect = false, showMetrics = false, help = false;
+        bool detect = false, showMetrics = false, help = false, epochsExplicit = false;
 
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i].ToLowerInvariant())
             {
-                case "--epochs" or "-e": epochs = int.Parse(args[++i]); break;
+                case "--epochs" or "-e": epochs = int.Parse(args[++i]); epochsExplicit = true; break;
                 case "--window-size" or "-w": windowSize = int.Parse(args[++i]); break;
                 case "--latent-dim" or "-l": latentDim = int.Parse(args[++i]); break;
                 case "--hidden-dim": hiddenDim = int.Parse(args[++i]); break;
@@ -363,15 +360,29 @@ sealed class Options
             }
         }
 
+        if (!epochsExplicit && loadPath != null)
+            epochs = 0;
+
         return new Options
         {
-            Epochs = epochs, WindowSize = windowSize, LatentDim = latentDim,
-            HiddenDim = hiddenDim, BatchSize = batchSize, LearningRate = lr,
-            Beta = beta, Dropout = dropout, NumSamples = numSamples,
-            Seed = seed, AnomalyRatio = anomalyRatio,
-            SavePath = savePath, LoadPath = loadPath,
-            SaveDataPath = saveDataPath, LoadDataPath = loadDataPath,
-            Detect = detect, ShowMetrics = showMetrics, Help = help
+            Epochs = epochs,
+            WindowSize = windowSize,
+            LatentDim = latentDim,
+            HiddenDim = hiddenDim,
+            BatchSize = batchSize,
+            LearningRate = lr,
+            Beta = beta,
+            Dropout = dropout,
+            NumSamples = numSamples,
+            Seed = seed,
+            AnomalyRatio = anomalyRatio,
+            SavePath = savePath,
+            LoadPath = loadPath,
+            SaveDataPath = saveDataPath,
+            LoadDataPath = loadDataPath,
+            Detect = detect,
+            ShowMetrics = showMetrics,
+            Help = help
         };
     }
 

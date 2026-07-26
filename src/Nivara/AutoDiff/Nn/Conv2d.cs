@@ -1,9 +1,9 @@
-using System.Buffers;
-using System.Runtime.CompilerServices;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 
 namespace Nivara.AutoDiff.Nn;
 
