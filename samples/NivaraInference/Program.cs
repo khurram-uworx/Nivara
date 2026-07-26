@@ -1,6 +1,9 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Runtime.InteropServices;
+using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Operations;
 
 namespace NivaraInference;
 
@@ -16,10 +19,12 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18> [benchmark|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18> [benchmark|compare|compare_diag|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
+            Console.WriteLine("  compare           Run forward pass on shared input, print logits for Python comparison");
+            Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             return 1;
         }
@@ -41,12 +46,18 @@ class Program
         Console.WriteLine();
 
         bool benchmark = mode == "benchmark";
+        bool compare = mode == "compare";
+        bool compareDiag = mode == "compare_diag";
 
         switch (modelType)
         {
             case "mobilenet_v2":
+                if (compareDiag) return RunCompareDiag(tensors, "mobilenet_v2");
+                if (compare) return RunCompare(tensors, "mobilenet_v2");
                 return benchmark ? RunMobileNetV2Benchmark(tensors) : RunMobileNetV2Inference(tensors, mode);
             case "resnet18":
+                if (compareDiag) return RunCompareDiag(tensors, "resnet18");
+                if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
@@ -252,7 +263,7 @@ class Program
         PrintTopK(output);
     }
 
-    static Nivara.AutoDiff.ReverseGradTensor<float> CreateRandomInput(int n, int c, int h, int w)
+    static ReverseGradTensor<float> CreateRandomInput(int n, int c, int h, int w)
     {
         int total = n * c * h * w;
         var data = new float[total];
@@ -260,12 +271,12 @@ class Program
         for (int i = 0; i < total; i++)
             data[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
 
-        var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(data, n, c * h * w);
+        var input = ReverseGradTensor<float>.FromMatrix(data, n, c * h * w);
         input.Reshape(n, c, h, w);
         return input;
     }
 
-    static Nivara.AutoDiff.ReverseGradTensor<float> PreprocessImage(Bitmap img, int size)
+    static ReverseGradTensor<float> PreprocessImage(Bitmap img, int size)
     {
         using var resized = new Bitmap(img, new Size(size, size));
 
@@ -285,9 +296,302 @@ class Program
             }
         }
 
-        var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromMatrix(data, 1, 3 * size * size);
+        var input = ReverseGradTensor<float>.FromMatrix(data, 1, 3 * size * size);
         input.Reshape(1, 3, size, size);
         return input;
+    }
+
+    static int RunCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelType)
+    {
+        string inputPath = Path.Combine("samples", "data", "compare_input.bin");
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine($"Input file not found: {inputPath}");
+            Console.Error.WriteLine("Run: python samples/NivaraInference/Python/generate_input.py");
+            return 1;
+        }
+
+        Console.WriteLine($"Reading input from {inputPath}...");
+        var rawBytes = File.ReadAllBytes(inputPath);
+        float[] inputData = new float[rawBytes.Length / 4];
+        Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
+        Console.WriteLine($"  {inputData.Length} floats, mean={inputData.Average():F6}");
+
+        var input = ReverseGradTensor<float>.FromMatrix(inputData, 1, 3 * 224 * 224);
+        input.Reshape(1, 3, 224, 224);
+
+        Module<float> model = modelType switch
+        {
+            "mobilenet_v2" => MobileNetV2.LoadWeights(tensors),
+            "resnet18" => ResNet18.LoadWeights(tensors),
+            _ => throw new ArgumentException($"Unknown model: {modelType}")
+        };
+
+        Console.WriteLine("Running forward pass...");
+        var sw = Stopwatch.StartNew();
+        var output = model.Forward(input);
+        sw.Stop();
+        Console.WriteLine($"Forward pass: {sw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
+
+        int numClasses = output.Shape[^1];
+        var logits = new float[numClasses];
+        output.Data.TryGetSpan(out var outSpan);
+        if (!outSpan.IsEmpty)
+            outSpan.CopyTo(logits);
+
+        Console.WriteLine($"Raw logits (first 10):");
+        Console.Write("  [");
+        for (int i = 0; i < Math.Min(10, numClasses); i++)
+        {
+            Console.Write($"{logits[i]:F6}");
+            if (i < 9) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+
+        Console.WriteLine($"Logits stats: min={logits.Min():F6}, max={logits.Max():F6}, mean={logits.Average():F6}");
+
+        PrintTopK(output);
+
+        var logitsPath = Path.Combine("samples", "data", "compare_logits_cs.bin");
+        using (var fs = File.Create(logitsPath))
+            fs.Write(MemoryMarshal.AsBytes(logits.AsSpan()));
+        Console.WriteLine($"Saved logits to {logitsPath}");
+
+        return 0;
+    }
+
+    static int RunCompareDiag(Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelType)
+    {
+        string inputPath = Path.Combine("samples", "data", "compare_input.bin");
+        if (!File.Exists(inputPath))
+        {
+            Console.Error.WriteLine($"Input file not found: {inputPath}");
+            return 1;
+        }
+
+        string diagDir = Path.Combine("samples", "data", "diag");
+        Directory.CreateDirectory(diagDir);
+
+        Console.WriteLine($"Reading input from {inputPath}...");
+        var rawBytes = File.ReadAllBytes(inputPath);
+        float[] inputData = new float[rawBytes.Length / 4];
+        Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
+        Console.WriteLine($"  {inputData.Length} floats, mean={inputData.Average():F6}");
+
+        var input = ReverseGradTensor<float>.FromMatrix(inputData, 1, 3 * 224 * 224);
+        input.Reshape(1, 3, 224, 224);
+
+        if (modelType == "resnet18")
+            RunResNet18Diag(tensors, input, diagDir);
+        else if (modelType == "mobilenet_v2")
+            RunMobileNetV2Diag(tensors, input, diagDir);
+        else
+        {
+            Console.Error.WriteLine($"Unknown model type: {modelType}");
+            return 1;
+        }
+
+        Console.WriteLine($"Saved diagnostics to {diagDir}/");
+        return 0;
+    }
+
+    static void SaveDiag(string diagDir, string name, ReverseGradTensor<float> tensor)
+    {
+        int total = tensor.Length;
+        var data = new float[total];
+        tensor.Data.TryGetSpan(out var span);
+        if (!span.IsEmpty)
+            span.Slice(0, total).CopyTo(data);
+        else
+            tensor.Data.CopyTo(data, 0);
+
+        string path = Path.Combine(diagDir, $"{name}.bin");
+        using var fs = File.Create(path);
+        fs.Write(MemoryMarshal.AsBytes(data.AsSpan()));
+
+        double mean = data.Average();
+        float min = data.Min(), max = data.Max();
+        string shapeStr = string.Join("x", tensor.Shape);
+        Console.WriteLine($"  {name}: [{shapeStr}], mean={mean:F6}, min={min:F6}, max={max:F6}");
+        Console.Write($"    first9: [");
+        for (int i = 0; i < Math.Min(9, total); i++)
+        {
+            Console.Write($"{data[i]:F6}");
+            if (i < Math.Min(9, total) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+    }
+
+    static void RunResNet18Diag(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        ReverseGradTensor<float> input,
+        string diagDir)
+    {
+        Console.WriteLine("=== ResNet-18 Step-by-Step Diagnostics ===");
+        Console.WriteLine();
+
+        var stemConv = new Conv2d<float>(3, 64, 7, stride: 2, padding: 3, bias: false);
+        var stemBn = new BatchNorm2d<float>(64);
+        var stemPool = new MaxPool2d<float>(kernelSize: 3, stride: 2, padding: 1);
+
+        ResNet18.LoadConv(stemConv,
+            tensors["resnet.embedder.embedder.convolution.weight"].Data,
+            tensors["resnet.embedder.embedder.convolution.weight"].Shape);
+        ResNet18.LoadBn(stemBn,
+            tensors.TryGetValue("resnet.embedder.embedder.normalization.weight", out var sw0) ? sw0.Data : null,
+            tensors.TryGetValue("resnet.embedder.embedder.normalization.bias", out var sb0) ? sb0.Data : null,
+            tensors.TryGetValue("resnet.embedder.embedder.normalization.running_mean", out var sm0) ? sm0.Data : null,
+            tensors.TryGetValue("resnet.embedder.embedder.normalization.running_var", out var sv0) ? sv0.Data : null);
+        stemBn.Eval();
+
+        Console.WriteLine("--- Step 1: Stem Conv ---");
+        var x = stemConv.Forward(input);
+        SaveDiag(diagDir, "cs_step1_stem_conv", x);
+        Console.WriteLine();
+
+        Console.WriteLine("--- Step 2: Stem BN (eval) ---");
+        x = stemBn.Forward(x);
+        SaveDiag(diagDir, "cs_step2_stem_bn", x);
+        Console.WriteLine();
+
+        Console.WriteLine("--- Step 3: Stem ReLU ---");
+        x = ReverseGradOperations.Relu(x);
+        SaveDiag(diagDir, "cs_step3_stem_relu", x);
+        Console.WriteLine();
+
+        Console.WriteLine("--- Step 4: Stem Pool ---");
+        x = stemPool.Forward(x);
+        SaveDiag(diagDir, "cs_step4_stem_pool", x);
+        Console.WriteLine();
+
+        string[] stagePrefixes = [
+            "resnet.encoder.stages.0.layers.0",
+            "resnet.encoder.stages.0.layers.1",
+            "resnet.encoder.stages.1.layers.0",
+            "resnet.encoder.stages.1.layers.1",
+            "resnet.encoder.stages.2.layers.0",
+            "resnet.encoder.stages.2.layers.1",
+            "resnet.encoder.stages.3.layers.0",
+            "resnet.encoder.stages.3.layers.1",
+        ];
+        int[] inChannels = [64, 64, 64, 128, 128, 256, 256, 512];
+        int[] outChannels = [64, 64, 128, 128, 256, 256, 512, 512];
+        int[] strides = [1, 1, 2, 1, 2, 1, 2, 1];
+
+        for (int i = 0; i < 8; i++)
+        {
+            bool hasDownsample = inChannels[i] != outChannels[i] || strides[i] != 1;
+
+            var conv1 = new Conv2d<float>(inChannels[i], outChannels[i], 3, stride: strides[i], padding: 1, bias: false);
+            var bn1 = new BatchNorm2d<float>(outChannels[i]);
+            var conv2 = new Conv2d<float>(outChannels[i], outChannels[i], 3, padding: 1, bias: false);
+            var bn2 = new BatchNorm2d<float>(outChannels[i]);
+
+            Conv2d<float>? dsConv = null;
+            BatchNorm2d<float>? dsBn = null;
+            if (hasDownsample)
+            {
+                dsConv = new Conv2d<float>(inChannels[i], outChannels[i], 1, stride: strides[i], bias: false);
+                dsBn = new BatchNorm2d<float>(outChannels[i]);
+            }
+
+            ResNet18.LoadConv(conv1, tensors[$"{stagePrefixes[i]}.layer.0.convolution.weight"].Data,
+                tensors[$"{stagePrefixes[i]}.layer.0.convolution.weight"].Shape);
+            ResNet18.LoadBn(bn1,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.0.normalization.weight", out var w1) ? w1.Data : null,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.0.normalization.bias", out var b1) ? b1.Data : null,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.0.normalization.running_mean", out var m1) ? m1.Data : null,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.0.normalization.running_var", out var v1) ? v1.Data : null);
+
+            ResNet18.LoadConv(conv2, tensors[$"{stagePrefixes[i]}.layer.1.convolution.weight"].Data,
+                tensors[$"{stagePrefixes[i]}.layer.1.convolution.weight"].Shape);
+            ResNet18.LoadBn(bn2,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.1.normalization.weight", out var w2) ? w2.Data : null,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.1.normalization.bias", out var b2) ? b2.Data : null,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.1.normalization.running_mean", out var m2) ? m2.Data : null,
+                tensors.TryGetValue($"{stagePrefixes[i]}.layer.1.normalization.running_var", out var v2) ? v2.Data : null);
+
+            if (hasDownsample && dsConv != null && dsBn != null)
+            {
+                ResNet18.LoadConv(dsConv, tensors[$"{stagePrefixes[i]}.shortcut.convolution.weight"].Data,
+                    tensors[$"{stagePrefixes[i]}.shortcut.convolution.weight"].Shape);
+                ResNet18.LoadBn(dsBn,
+                    tensors.TryGetValue($"{stagePrefixes[i]}.shortcut.normalization.weight", out var sw) ? sw.Data : null,
+                    tensors.TryGetValue($"{stagePrefixes[i]}.shortcut.normalization.bias", out var sb) ? sb.Data : null,
+                    tensors.TryGetValue($"{stagePrefixes[i]}.shortcut.normalization.running_mean", out var sm) ? sm.Data : null,
+                    tensors.TryGetValue($"{stagePrefixes[i]}.shortcut.normalization.running_var", out var sv) ? sv.Data : null);
+            }
+
+            conv1.Eval(); bn1.Eval(); conv2.Eval(); bn2.Eval();
+            dsConv?.Eval(); dsBn?.Eval();
+
+            Console.WriteLine($"--- Stage {i / 2}, Block {i % 2} (conv1) ---");
+            var cx = conv1.Forward(x);
+            SaveDiag(diagDir, $"cs_stage{i}_conv1", cx);
+
+            Console.WriteLine($"--- Stage {i / 2}, Block {i % 2} (bn1) ---");
+            cx = bn1.Forward(cx);
+            SaveDiag(diagDir, $"cs_stage{i}_bn1", cx);
+
+            Console.WriteLine($"--- Stage {i / 2}, Block {i % 2} (relu1) ---");
+            cx = ReverseGradOperations.Relu(cx);
+            SaveDiag(diagDir, $"cs_stage{i}_relu1", cx);
+
+            Console.WriteLine($"--- Stage {i / 2}, Block {i % 2} (conv2) ---");
+            cx = conv2.Forward(cx);
+            SaveDiag(diagDir, $"cs_stage{i}_conv2", cx);
+
+            Console.WriteLine($"--- Stage {i / 2}, Block {i % 2} (bn2) ---");
+            cx = bn2.Forward(cx);
+            SaveDiag(diagDir, $"cs_stage{i}_bn2", cx);
+
+            var residual = hasDownsample && dsConv != null && dsBn != null
+                ? dsBn.Forward(dsConv.Forward(x))
+                : x;
+
+            Console.WriteLine($"--- Stage {i / 2}, Block {i % 2} (residual) ---");
+            SaveDiag(diagDir, $"cs_stage{i}_residual", residual);
+
+            cx = cx + residual;
+            cx = ReverseGradOperations.Relu(cx);
+            x = cx;
+
+            Console.WriteLine($"--- After stage {i} ---");
+            SaveDiag(diagDir, $"cs_step{5 + i}_stage{i / 2}{'a' + i % 2}", x);
+            Console.WriteLine();
+        }
+
+        var avgPool = new AdaptiveAvgPool2d<float>(1);
+        avgPool.Eval();
+        x = avgPool.Forward(x);
+        SaveDiag(diagDir, "cs_step9_avgpool", x);
+
+        int n = x.Shape[0], c = x.Shape[1];
+        x.Reshape(n, c);
+        SaveDiag(diagDir, "cs_step9b_flattened", x);
+
+        var fc = new Linear<float>(512, 1000, bias: true);
+        ResNet18.LoadLinear(fc,
+            tensors["classifier.1.weight"].Data,
+            tensors["classifier.1.weight"].Shape,
+            tensors.TryGetValue("classifier.1.bias", out var bias) ? bias.Data : null);
+        fc.Eval();
+        x = fc.Forward(x);
+        SaveDiag(diagDir, "cs_step10_logits", x);
+    }
+
+    static void RunMobileNetV2Diag(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        ReverseGradTensor<float> input,
+        string diagDir)
+    {
+        Console.WriteLine("=== MobileNetV2 Step-by-Step Diagnostics ===");
+        Console.WriteLine();
+
+        var model = MobileNetV2.LoadWeights(tensors);
+        var x = model.Forward(input);
+        SaveDiag(diagDir, "cs_final_logits", x);
     }
 
     static void PrintTopK(Nivara.AutoDiff.ReverseGradTensor<float> output, int k = 5)
