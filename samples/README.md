@@ -80,7 +80,7 @@ Key characteristics:
 - **Synthetic data generation** — realistic diurnal patterns with injected anomalies (spikes, level shifts, trend changes)
 - **ASCII visualization** — Unicode block characters for metric rendering
 - **Model save/load** via `ModelSerializer`
-- Exposed 3 library gaps: BatchNorm1d 3D input rejection, xHat latent bug in BatchNormKernel, MSELoss lacking `reduceToMean`
+- Exposed 4 library gaps: BatchNorm1d 3D input rejection, xHat latent allocation bug, xHat scalar path not written when affine=false, MSELoss lacking `reduceToMean`
 
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 
