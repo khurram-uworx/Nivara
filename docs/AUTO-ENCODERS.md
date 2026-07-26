@@ -218,3 +218,26 @@ MultiheadAttention<T> : Module<T>
 - **VAE training loop**: Standard `TrainingLoop<T>` expects 2-arg loss. VAE's `ElboLoss` needs 4 args. VAE training uses manual loops (demonstrated in `VAE_Training_ReducesLoss`).
 - **ConvTranspose2d**: No grouped convolution support yet (Conv2d has it).
 - **ConvInputGrad1x1**: No bounds checking (safe when output spatial ≤ input spatial, which holds for stride=1 padding=0). If non-standard padding is needed, falls back to generic path.
+
+## Sample Integration Assessment
+
+### Where New Building Blocks Fit
+
+| Sample | Current Architecture | New Blocks That Fit | Priority |
+|--------|---------------------|---------------------|----------|
+| **NivaraVAE** | Linear-only encoder/decoder (flat 64/256D) | **ConvVAE** (directly addresses Future Work #1), `DepthwiseSeparableConv2d` for efficient encoder | **HIGH** — explicitly requests Conv2d/ConvTranspose2d |
+| **NivaraGpt** | TransformerBlock (RMSNorm, causal self-attn) | `LayerNorm` (compare LN vs RMSNorm), standalone `MultiheadAttention`, `DepthwiseSeparableConv2d` for efficient projection | **MEDIUM** — good for ablation/comparison demo |
+| **NivaraChess** | SparseEmbedding (halfKP) → MLP | `Conv2d` (8×8 board as spatial input), `DepthwiseSeparableConv2d` for efficient piece-plane processing | **MEDIUM** — non-NLP spatial domain |
+| **NivaraClassifier** | Embedding → MeanPool → MLP | `DepthwiseSeparableConv1d` (if we add Conv1d) for n-gram features; `Conv2d` on token-position matrix | **LOW** — current design is intentionally simple |
+| **MicroGpt** | Per-position autoregressive | `MultiheadAttention` standalone (show cross-attn) | **LOW** — educational value only |
+| **NivaraChat** | TextClassifierModel/TokenClassifierModel | `DepthwiseSeparableConv2d` for efficient text CNN head | **LOW** — wrapper around core modules |
+
+### Priority Order
+
+1. **NivaraVAE `--mode conv`** — Add ConvVAE mode; resolves documented gap (Future Work #1)
+2. **LayerNorm SIMD + NivaraGpt** — Accelerate LayerNorm kernel, demonstrate LN vs RMSNorm difference
+3. **Conv1d + NivaraClassifier `--mode conv`** — Add Conv1d module, show text CNN classifier
+
+### Deferred
+
+- `DepthwiseSeparableConv2d` usage in samples (after items 1-3 above)

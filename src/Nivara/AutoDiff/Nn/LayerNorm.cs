@@ -87,7 +87,7 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, INumber<T>
                     gradOutData, savedXHat, savedGamma, savedInvStd,
                     savedRows, savedNormShape, affine);
 
-                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData), sgn);
+                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
 
                 if (affine)
                 {
@@ -97,9 +97,9 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, INumber<T>
                         gradOutData, savedRows, savedNormShape);
 
                     if (_weight != null)
-                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData), sgn);
+                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
                     if (_bias != null)
-                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData), sgn);
+                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
                 }
             });
 

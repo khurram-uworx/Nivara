@@ -190,7 +190,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                         var inputGrad = new T[n * c * h * w];
                         ConvInputGradKernel(gradOutData, capturedWeightData, inputGrad,
                             n, c, h, w, oH, oW, kW, _stride, _padding, _outChannels, patchSize);
-                        ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad), sgn);
+                        ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                     }
 
                     if (_weight.Tensor.RequiresGrad)
@@ -198,7 +198,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                         var weightGrad = new T[_outChannels * patchSize];
                         ConvWeightGradKernel(capturedInputData, gradOutData, weightGrad,
                             n, c, h, w, oH, oW, kW, _stride, _padding, _outChannels, patchSize, totalPatches);
-                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad), sgn);
+                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                     }
                 }
                 else
@@ -239,7 +239,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                                         .CopyTo(inputGrad.AsSpan((b * c + g * cPerGroupLocal) * spatialInLocal));
                             }
 
-                            ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad), sgn);
+                            ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                         }
 
                         if (_weight.Tensor.RequiresGrad)
@@ -271,7 +271,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                                 }
                             }
 
-                            ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad), sgn);
+                            ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                         }
                     }
                     finally
@@ -285,7 +285,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
                 {
                     var biasGrad = new T[_outChannels];
                     ConvBiasGradKernel(gradOutData, biasGrad, n, _outChannels, oH, oW);
-                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad));
                 }
             });
 
@@ -760,7 +760,7 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
                         gradOutData, capturedWeightData, inputGrad,
                         c, _outChannels, h, w, oH, oW,
                         kW, _stride, _padding, n);
-                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                 }
 
                 if (_weight.Tensor.RequiresGrad)
@@ -770,7 +770,7 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
                         capturedInputData, gradOutData, weightGrad,
                         c, _outChannels, h, w, oH, oW,
                         kW, _stride, _padding, n);
-                    ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                 }
 
                 if (_useBias && _bias != null && _bias.Tensor.RequiresGrad)
@@ -787,7 +787,7 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
                         }
                         biasGrad[oc] = sum;
                     }
-                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad));
                 }
             });
 

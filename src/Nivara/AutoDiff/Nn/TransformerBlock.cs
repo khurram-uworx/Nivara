@@ -192,7 +192,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
                     rows, cols, affine: false);
 
                 var gradCol = NivaraColumn<T>.Create(gradInput);
-                ReverseGradOperations.AccumulateGradient(x, gradCol, sgn);
+                ReverseGradOperations.AccumulateGradient(x, gradCol);
             });
 
             ComputationGraph.AddNode(outTensor, gradFn);
@@ -310,7 +310,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
                 }
 
                 var gradCol = NivaraColumn<T>.Create(gradResult);
-                ReverseGradOperations.AccumulateGradient(x, gradCol, sgn);
+                ReverseGradOperations.AccumulateGradient(x, gradCol);
             });
 
             ComputationGraph.AddNode(result, gradFn);

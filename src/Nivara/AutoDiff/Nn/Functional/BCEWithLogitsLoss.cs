@@ -49,14 +49,14 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, INumber<T>
                 var logitsGrad = new T[n];
                 for (int i = 0; i < n; i++)
                     logitsGrad[i] = (sigmoidX[i] - targetsData[i]) * grad[i];
-                ReverseGradOperations.AccumulateGradient(logits, NivaraColumn<T>.Create(logitsGrad), sgn);
+                ReverseGradOperations.AccumulateGradient(logits, NivaraColumn<T>.Create(logitsGrad));
 
                 if (trackTargets)
                 {
                     var targetsGrad = new T[n];
                     for (int i = 0; i < n; i++)
                         targetsGrad[i] = -logitsData[i] * grad[i];
-                    ReverseGradOperations.AccumulateGradient(targets, NivaraColumn<T>.Create(targetsGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(targets, NivaraColumn<T>.Create(targetsGrad));
                 }
             });
             ComputationGraph.AddNode(lossTensor, gradFn);

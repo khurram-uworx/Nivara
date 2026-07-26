@@ -116,7 +116,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
                         gradOutData, savedXHat, savedGamma, savedInvStd,
                         savedN, savedC, 1, savedGamma.Length > 0);
 
-                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData), sgn);
+                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
                 });
 
                 ComputationGraph.AddNode(evalTensor, gradFn);
@@ -152,7 +152,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
                     gradOutData, savedXHat, savedGamma, savedInvStd,
                     savedN, savedC, 1, affine);
 
-                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData), sgn);
+                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
 
                 if (affine)
                 {
@@ -162,9 +162,9 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
                         gradOutData, savedN, savedC, 1);
 
                     if (_weight != null)
-                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData), sgn);
+                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
                     if (_bias != null)
-                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData), sgn);
+                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
                 }
             });
 
@@ -355,7 +355,7 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
                     gradOutData, savedXHat, savedGamma, savedInvStd,
                     savedN, savedC, hw, affine);
 
-                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData), sgn);
+                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
 
                 if (affine)
                 {
@@ -365,9 +365,9 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
                         gradOutData, savedN, savedC, hw);
 
                     if (_weight != null)
-                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData), sgn);
+                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
                     if (_bias != null)
-                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData), sgn);
+                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
                 }
             });
 

@@ -130,7 +130,7 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
                     var inputGrad = new T[n * c * l];
                     Conv1dInputGradKernel(gradOutData, capturedWeightData, inputGrad,
                         n, c, l, _kernelSize, _stride, _padding, oL, _outChannels, patchSize);
-                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                 }
 
                 if (_weight.Tensor.RequiresGrad)
@@ -138,14 +138,14 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
                     var weightGrad = new T[_outChannels * patchSize];
                     Conv1dWeightGradKernel(capturedInputData, gradOutData, weightGrad,
                         n, c, l, _kernelSize, _stride, _padding, oL, _outChannels, patchSize, totalPatches);
-                    ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                 }
 
                 if (_useBias && _bias != null && _bias.Tensor.RequiresGrad)
                 {
                     var biasGrad = new T[_outChannels];
                     Conv1dBiasGradKernel(gradOutData, biasGrad, n, _outChannels, oL);
-                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad), sgn);
+                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad));
                 }
             });
 

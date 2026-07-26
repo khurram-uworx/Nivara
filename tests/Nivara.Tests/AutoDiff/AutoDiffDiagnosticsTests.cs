@@ -78,22 +78,19 @@ public class AutoDiffDiagnosticsTests
     }
 
     [Test]
-    public void SgdUpdate_RecordsAllocationDiagnosticsAndPreservesNullSkipSemantics()
+    public void SgdUpdate_RecordsAllocationDiagnosticsAndWeightDecay()
     {
         var tensor = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 3f }),
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }),
             requiresGrad: true);
-        tensor.Grad = NivaraColumn<float>.CreateFromNullable(new float?[] { 0.1f, 0.2f, null });
+        tensor.Grad = NivaraColumn<float>.Create(new float[] { 0.1f, 0.2f, 0.3f });
 
         var updated = SGD<float>.SgdUpdate(tensor, 0.5f, weightDecay: 0.1f);
 
         var op = AssertSingleOperation(DiagnosticsTracker.GetRecordedOperations(), "AutoDiffSgdUpdate");
-        Assert.That(op.HadNulls, Is.True);
         Assert.That(op.AllocatedBytes, Is.GreaterThanOrEqualTo(0));
         Assert.That(op.Elapsed, Is.GreaterThanOrEqualTo(TimeSpan.Zero));
         Assert.That(op.Notes, Does.Contain("WeightDecay=True"));
-        Assert.That(updated.IsNull(1), Is.True);
-        Assert.That(updated.IsNull(2), Is.True);
     }
 
     [Test]

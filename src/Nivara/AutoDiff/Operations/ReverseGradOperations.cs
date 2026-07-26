@@ -32,11 +32,11 @@ public static class ReverseGradOperations
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    AccumulateGradient(a, typedGradOutput, sgn);
+                    AccumulateGradient(a, typedGradOutput);
                 }
                 if (b.RequiresGrad)
                 {
-                    AccumulateGradient(b, typedGradOutput, sgn);
+                    AccumulateGradient(b, typedGradOutput);
                 }
             });
 
@@ -66,12 +66,12 @@ public static class ReverseGradOperations
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    AccumulateGradient(a, typedGradOutput, sgn);
+                    AccumulateGradient(a, typedGradOutput);
                 }
                 if (b.RequiresGrad)
                 {
                     var negatedGrad = typedGradOutput.Negate();
-                    AccumulateGradient(b, negatedGrad, sgn);
+                    AccumulateGradient(b, negatedGrad);
                 }
             });
 
@@ -102,12 +102,12 @@ public static class ReverseGradOperations
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
                     var aGrad = typedGradOutput * b.Data;
-                    AccumulateGradient(a, aGrad, sgn);
+                    AccumulateGradient(a, aGrad);
                 }
                 if (b.RequiresGrad)
                 {
                     var bGrad = typedGradOutput * a.Data;
-                    AccumulateGradient(b, bGrad, sgn);
+                    AccumulateGradient(b, bGrad);
                 }
             });
 
@@ -146,7 +146,7 @@ public static class ReverseGradOperations
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
                     var aGrad = typedGradOutput.Divide(b.Data);
-                    AccumulateGradient(a, aGrad, sgn);
+                    AccumulateGradient(a, aGrad);
                 }
                 if (b.RequiresGrad)
                 {
@@ -154,7 +154,7 @@ public static class ReverseGradOperations
                     var bGradPositive = quotient.Divide(b.Data);
                     var bGrad = bGradPositive.Negate();
                     var finalBGrad = bGrad * typedGradOutput;
-                    AccumulateGradient(b, finalBGrad, sgn);
+                    AccumulateGradient(b, finalBGrad);
                 }
             });
 
@@ -208,13 +208,13 @@ public static class ReverseGradOperations
                         {
                             var bTransposed = b.Data.Transpose(bRows, bCols);
                             var aGrad = typedGradOutput.MatMul(bTransposed, aRows, bCols, bRows);
-                            AccumulateGradient(a, aGrad, sgn);
+                            AccumulateGradient(a, aGrad);
                         }
                         if (b.RequiresGrad)
                         {
                             var aTransposed = a.Data.Transpose(aRows, aCols);
                             var bGrad = aTransposed.MatMul(typedGradOutput, aCols, aRows, bCols);
-                            AccumulateGradient(b, bGrad, sgn);
+                            AccumulateGradient(b, bGrad);
                         }
                     });
 
@@ -251,7 +251,7 @@ public static class ReverseGradOperations
                     var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput, sgn) =>
                     {
                         var aGrad = typedGradOutput.Transpose(cols, rows);
-                        AccumulateGradient(a, aGrad, sgn);
+                        AccumulateGradient(a, aGrad);
                     });
 
                     ComputationGraph.AddNode(resultTensor, gradFn);
@@ -355,7 +355,7 @@ public static class ReverseGradOperations
                                     }
                         }
 
-                        AccumulateGradient(a, NivaraColumn<T>.Create(gDst), sgn);
+                        AccumulateGradient(a, NivaraColumn<T>.Create(gDst));
                     });
 
                     ComputationGraph.AddNode(resultTensor, gradFn);
@@ -389,7 +389,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Sum", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -419,7 +419,7 @@ public static class ReverseGradOperations
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
                 var scaledGrad = aGrad.Divide(T.CreateChecked(a.Length));
-                AccumulateGradient(a, scaledGrad, sgn);
+                AccumulateGradient(a, scaledGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -489,7 +489,7 @@ public static class ReverseGradOperations
                 }
 
                 var gradCol = NivaraColumn<T>.Create(gradOut);
-                AccumulateGradient(a, gradCol, sgn);
+                AccumulateGradient(a, gradCol);
             });
 
             ComputationGraph.AddNode(result, gradFn);
@@ -521,7 +521,7 @@ public static class ReverseGradOperations
                     var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput, sgn) =>
                     {
                         var aGrad = a.Data.ReluGradient(typedGradOutput);
-                        AccumulateGradient(a, aGrad, sgn);
+                        AccumulateGradient(a, aGrad);
                     });
 
                     ComputationGraph.AddNode(resultTensor, gradFn);
@@ -551,7 +551,7 @@ public static class ReverseGradOperations
                     var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput, sgn) =>
                     {
                         var aGrad = result.SigmoidGradient(typedGradOutput);
-                        AccumulateGradient(a, aGrad, sgn);
+                        AccumulateGradient(a, aGrad);
                     });
 
                     ComputationGraph.AddNode(resultTensor, gradFn);
@@ -581,7 +581,7 @@ public static class ReverseGradOperations
                     var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput, sgn) =>
                     {
                         var aGrad = result.TanhGradient(typedGradOutput);
-                        AccumulateGradient(a, aGrad, sgn);
+                        AccumulateGradient(a, aGrad);
                     });
 
                     ComputationGraph.AddNode(resultTensor, gradFn);
@@ -604,7 +604,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Negate", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = typedGradOutput.Negate();
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -625,7 +625,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Abs", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = a.Data.AbsGradient(typedGradOutput);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -647,7 +647,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Clip", new object[] { a, min, max }, (typedGradOutput, sgn) =>
             {
                 var aGrad = a.Data.ClipGradient(typedGradOutput, min, max);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -672,7 +672,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("LeakyRelu", new object[] { a, negativeSlope }, (typedGradOutput, sgn) =>
             {
                 var aGrad = a.Data.LeakyReluGradient(typedGradOutput, negativeSlope);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -693,7 +693,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Exp", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = typedGradOutput * result;
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -714,7 +714,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Log", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = a.Data.LogGradient(typedGradOutput);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -736,7 +736,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Pow", new object[] { a, exponent }, (typedGradOutput, sgn) =>
             {
                 var aGrad = ApplyPowGradient(savedInput, typedGradOutput, exponent);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -837,7 +837,7 @@ public static class ReverseGradOperations
                         }
 
                         var gradCol = NivaraColumn<T>.Create(gradResult);
-                        AccumulateGradient(a, gradCol, sgn);
+                        AccumulateGradient(a, gradCol);
                     });
 
                     ComputationGraph.AddNode(result, gradFn);
@@ -926,7 +926,7 @@ public static class ReverseGradOperations
                                         gradSlice[j] = fullGrad[gradOffset + j];
 
                                     var gradCol = NivaraColumn<T>.Create(gradSlice);
-                                    AccumulateGradient(tensors[i], gradCol, sgn);
+                                    AccumulateGradient(tensors[i], gradCol);
                                 }
                                 gradOffset += savedLengths[i];
                             }
@@ -1020,7 +1020,7 @@ public static class ReverseGradOperations
                                                 srcSpan.Slice(r * outputCols + colOff, tCols).CopyTo(gradData.AsSpan(r * tCols));
                                             }
                                             var gradCol = NivaraColumn<T>.Create(gradData);
-                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                            AccumulateGradient(savedTensors[i], gradCol);
                                         }
                                         colOff += inputCols[i];
                                     }
@@ -1040,7 +1040,7 @@ public static class ReverseGradOperations
                                                 Array.Copy(srcArr, r * outputCols + colOff, gradData, r * tCols, tCols);
                                             }
                                             var gradCol = NivaraColumn<T>.Create(gradData);
-                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                            AccumulateGradient(savedTensors[i], gradCol);
                                         }
                                         colOff += inputCols[i];
                                     }
@@ -1063,7 +1063,7 @@ public static class ReverseGradOperations
                                                 srcSpan.Slice((rowOff + r) * outputCols, outputCols).CopyTo(gradData.AsSpan(r * outputCols));
                                             }
                                             var gradCol = NivaraColumn<T>.Create(gradData);
-                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                            AccumulateGradient(savedTensors[i], gradCol);
                                         }
                                         rowOff += inputRows[i];
                                     }
@@ -1083,7 +1083,7 @@ public static class ReverseGradOperations
                                                 Array.Copy(srcFull, (rowOff + r) * outputCols, gradData, r * outputCols, outputCols);
                                             }
                                             var gradCol = NivaraColumn<T>.Create(gradData);
-                                            AccumulateGradient(savedTensors[i], gradCol, sgn);
+                                            AccumulateGradient(savedTensors[i], gradCol);
                                         }
                                         rowOff += inputRows[i];
                                     }
@@ -1113,7 +1113,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Softmax", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = savedResult.SoftmaxGradient(typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -1134,7 +1134,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("LogSoftmax", new object[] { a }, (typedGradOutput, sgn) =>
             {
                 var aGrad = a.Data.LogSoftmaxGradient(typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
-                AccumulateGradient(a, aGrad, sgn);
+                AccumulateGradient(a, aGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -1164,7 +1164,7 @@ public static class ReverseGradOperations
                     var gradFn = new OpNode<T>("RMSNorm", new object[] { a, eps }, (typedGradOutput, sgn) =>
                     {
                         var aGrad = ApplyRMSNormGradient(savedInput, typedGradOutput, savedEps);
-                        AccumulateGradient(a, aGrad, sgn);
+                        AccumulateGradient(a, aGrad);
                     });
 
                     ComputationGraph.AddNode(resultTensor, gradFn);
@@ -1284,7 +1284,7 @@ public static class ReverseGradOperations
                         }
 
                         var gradCol = NivaraColumn<T>.Create(gradResult);
-                        AccumulateGradient(a, gradCol, sgn);
+                        AccumulateGradient(a, gradCol);
                     });
 
                     ComputationGraph.AddNode(result, gradFn);
@@ -1330,7 +1330,7 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Dropout", new object[] { input }, (typedGradOutput, sgn) =>
             {
                 var inputGrad = ApplyDropoutGradient(input.Data, typedGradOutput, savedMask, scale);
-                AccumulateGradient(input, inputGrad, sgn);
+                AccumulateGradient(input, inputGrad);
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -1499,7 +1499,7 @@ public static class ReverseGradOperations
                     }
                 }
 
-                AccumulateGradient(weight, NivaraColumn<T>.Create(weightGrad), stripGradientNulls);
+                AccumulateGradient(weight, NivaraColumn<T>.Create(weightGrad));
             });
 
             ComputationGraph.AddNode(result, gradFn);
@@ -1631,12 +1631,12 @@ public static class ReverseGradOperations
                                 }
                             }
                             var sourceGrad = NivaraColumn<T>.CreateFromSpans(gradBuf, sourceGradNullMask!);
-                            AccumulateGradient(source, sourceGrad, sgn);
+                            AccumulateGradient(source, sourceGrad);
                         }
                         else
                         {
                             var sourceGrad = NivaraColumn<T>.Create(gradBuf);
-                            AccumulateGradient(source, sourceGrad, sgn);
+                            AccumulateGradient(source, sourceGrad);
                         }
                     });
 
@@ -1677,13 +1677,13 @@ public static class ReverseGradOperations
                 {
                     var broadcast = BroadcastGradient(typedGradOutput, mean.Length);
                     var dMean = ApplyKlMeanGradient(mean.Data, broadcast);
-                    AccumulateGradient(mean, dMean, sgn);
+                    AccumulateGradient(mean, dMean);
                 }
                 if (logVar.RequiresGrad)
                 {
                     var broadcast = BroadcastGradient(typedGradOutput, logVar.Length);
                     var dLogVar = ApplyKlLogVarGradient(logVar.Data, broadcast);
-                    AccumulateGradient(logVar, dLogVar, sgn);
+                    AccumulateGradient(logVar, dLogVar);
                 }
             });
 
@@ -1719,12 +1719,12 @@ public static class ReverseGradOperations
             {
                 if (mean.RequiresGrad)
                 {
-                    AccumulateGradient(mean, typedGradOutput, sgn);
+                    AccumulateGradient(mean, typedGradOutput);
                 }
                 if (logVar.RequiresGrad)
                 {
                     var dLogVar = ApplySampleNormalLogVarGradient(logVar.Data, typedGradOutput, savedEpsilon);
-                    AccumulateGradient(logVar, dLogVar, sgn);
+                    AccumulateGradient(logVar, dLogVar);
                 }
             });
 
@@ -1738,7 +1738,7 @@ public static class ReverseGradOperations
 
     #region Helper Methods
 
-    internal static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient, bool stripGradientNulls = true) where T : struct, INumber<T>
+    internal static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient) where T : struct, INumber<T>
     {
         if (tensor.Grad == null)
         {
@@ -2404,7 +2404,7 @@ public static class ReverseGradOperations
                         int ch = (idx / channelStride) % c;
                         inputGrad[idx] = gradData[idx] * scaleData[ch];
                     }
-                    AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad), sgn);
+                    AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                 }
                 if (scale.RequiresGrad)
                 {
@@ -2414,7 +2414,7 @@ public static class ReverseGradOperations
                         int ch = (idx / channelStride) % c;
                         scaleGrad[ch] += gradData[idx] * inputData[idx];
                     }
-                    AccumulateGradient(scale, NivaraColumn<T>.Create(scaleGrad), sgn);
+                    AccumulateGradient(scale, NivaraColumn<T>.Create(scaleGrad));
                 }
             });
 
@@ -2462,7 +2462,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(input))
                 {
-                    AccumulateGradient(input, typedGradOutput, sgn);
+                    AccumulateGradient(input, typedGradOutput);
                 }
                 if (bias.RequiresGrad)
                 {
@@ -2472,7 +2472,7 @@ public static class ReverseGradOperations
                         int ch = (idx / channelStride) % c;
                         biasGrad[ch] += gradData[idx];
                     }
-                    AccumulateGradient(bias, NivaraColumn<T>.Create(biasGrad), sgn);
+                    AccumulateGradient(bias, NivaraColumn<T>.Create(biasGrad));
                 }
             });
 
