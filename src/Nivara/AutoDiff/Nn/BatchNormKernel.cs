@@ -113,7 +113,7 @@ internal static class BatchNormKernel<T> where T : struct, INumber<T>
                     for (int j = 0; j < planeSize; j++)
                     {
                         T normalized = (inPlane[j] - m) * inv;
-                        if (affine) xHat[offset + j] = normalized;
+                        xHat[offset + j] = normalized;
                         outPlane[j] = normalized * g + b;
                     }
                 }
