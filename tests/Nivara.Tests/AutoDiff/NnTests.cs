@@ -2800,4 +2800,197 @@ public class NnTests
         for (int i = 0; i < dscData.Length; i++)
             Assert.That(dscData[i], Is.EqualTo(manualData[i]).Within(1e-5f));
     }
+
+    [Test]
+    public void Conv1d_Forward_ShapeCorrect()
+    {
+        using var conv = new Conv1d<float>(inChannels: 3, outChannels: 16, kernelSize: 3, padding: 1);
+        var input = ReverseGradTensor<float>.FromArray(new float[2 * 3 * 10], requiresGrad: true);
+        input.Reshape(2, 3, 10);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(3));
+        Assert.That(output.Shape[0], Is.EqualTo(2));
+        Assert.That(output.Shape[1], Is.EqualTo(16));
+        Assert.That(output.Shape[2], Is.EqualTo(10));
+    }
+
+    [Test]
+    public void Conv1d_Forward_WithStride_ShapeCorrect()
+    {
+        using var conv = new Conv1d<float>(inChannels: 4, outChannels: 8, kernelSize: 3, stride: 2, padding: 1);
+        var input = ReverseGradTensor<float>.FromArray(new float[1 * 4 * 12], requiresGrad: true);
+        input.Reshape(1, 4, 12);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(3));
+        Assert.That(output.Shape[0], Is.EqualTo(1));
+        Assert.That(output.Shape[1], Is.EqualTo(8));
+        Assert.That(output.Shape[2], Is.EqualTo(6));
+    }
+
+    [Test]
+    public void Conv1d_Forward_WithPadding_ShapeCorrect()
+    {
+        using var conv = new Conv1d<float>(inChannels: 2, outChannels: 4, kernelSize: 5, padding: 2);
+        var input = ReverseGradTensor<float>.FromArray(new float[1 * 2 * 8], requiresGrad: true);
+        input.Reshape(1, 2, 8);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Shape[2], Is.EqualTo(8));
+    }
+
+    [Test]
+    public void Conv1d_Forward_NoPadding_ReducesLength()
+    {
+        using var conv = new Conv1d<float>(inChannels: 3, outChannels: 8, kernelSize: 3, padding: 0);
+        var input = ReverseGradTensor<float>.FromArray(new float[1 * 3 * 10], requiresGrad: true);
+        input.Reshape(1, 3, 10);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Shape[2], Is.EqualTo(8));
+    }
+
+    [Test]
+    public void Conv1d_Forward_WithBias_AddsBias()
+    {
+        using var conv = new Conv1d<float>(inChannels: 2, outChannels: 3, kernelSize: 1, bias: true);
+        var inputData = new float[] { 1, 2, 3, 4, 5, 6 };
+        var input = ReverseGradTensor<float>.FromArray(inputData, requiresGrad: true);
+        input.Reshape(1, 2, 3);
+
+        var output = conv.Forward(input);
+
+        Assert.That(output.Rank, Is.EqualTo(3));
+        Assert.That(output.Shape[2], Is.EqualTo(3));
+        float[] outVals = new float[output.Length];
+        output.Data.CopyTo(outVals, default(float)!);
+        Assert.That(outVals.Any(v => !float.IsNaN(v)), Is.True);
+    }
+
+    [Test]
+    public void Conv1d_Backward_GradientsFlow()
+    {
+        using var conv = new Conv1d<float>(inChannels: 3, outChannels: 8, kernelSize: 3, padding: 1);
+        var input = ReverseGradTensor<float>.FromArray(new float[1 * 3 * 8], requiresGrad: true);
+        input.Reshape(1, 3, 8);
+
+        var output = conv.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[output.Length]),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.BiasParam!.Tensor.Grad, Is.Not.Null);
+    }
+
+    [Test]
+    public void Conv1d_Backward_NoBias_NoBiasGradient()
+    {
+        using var conv = new Conv1d<float>(inChannels: 2, outChannels: 4, kernelSize: 3, bias: false);
+        var input = ReverseGradTensor<float>.FromArray(new float[1 * 2 * 6], requiresGrad: true);
+        input.Reshape(1, 2, 6);
+
+        var output = conv.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[output.Length]),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(conv.BiasParam, Is.Null);
+        Assert.That(input.Grad, Is.Not.Null);
+    }
+
+    [Test]
+    public void Conv1d_KernelSize1_MatchesLinearPerPosition()
+    {
+        int inC = 4, outC = 3, len = 5;
+        using var conv = new Conv1d<float>(inC, outC, kernelSize: 1, bias: false);
+
+        var inputData = new float[inC * len];
+        var rng = new Random(123);
+        for (int i = 0; i < inputData.Length; i++)
+            inputData[i] = (float)(rng.NextDouble() * 2 - 1);
+
+        var input = ReverseGradTensor<float>.FromArray(inputData, requiresGrad: false);
+        input.Reshape(1, inC, len);
+
+        var output = conv.Forward(input);
+        float[] outVals = new float[output.Length];
+        output.Data.CopyTo(outVals, default(float)!);
+
+        float[] weightData = new float[outC * inC];
+        conv.WeightParam.Tensor.Data.CopyTo(weightData, default(float)!);
+
+        for (int pos = 0; pos < len; pos++)
+        {
+            for (int oc = 0; oc < outC; oc++)
+            {
+                float expected = 0;
+                for (int ic = 0; ic < inC; ic++)
+                    expected += weightData[oc * inC + ic] * inputData[ic * len + pos];
+                Assert.That(outVals[oc * len + pos], Is.EqualTo(expected).Within(1e-5f));
+            }
+        }
+    }
+
+    [Test]
+    public void Conv1d_Dispose_DisposesParameters()
+    {
+        var conv = new Conv1d<float>(inChannels: 3, outChannels: 8, kernelSize: 3);
+        conv.Dispose();
+
+        Assert.Throws<ObjectDisposedException>(() => _ = conv.WeightParam.Tensor.Length);
+    }
+
+    [Test]
+    public void Conv1d_Backward_MultiBatch()
+    {
+        using var conv = new Conv1d<float>(inChannels: 2, outChannels: 4, kernelSize: 3, padding: 1);
+        var input = ReverseGradTensor<float>.FromArray(new float[4 * 2 * 8], requiresGrad: true);
+        input.Reshape(4, 2, 8);
+
+        var output = conv.Forward(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[output.Length]),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        float[] gradVals = new float[input.Grad!.Length];
+        input.Grad.CopyTo(gradVals, default(float)!);
+        Assert.That(gradVals.All(v => !float.IsNaN(v)), Is.True);
+    }
+
+    [Test]
+    public void Conv1d_InvalidInputRank_Throws()
+    {
+        using var conv = new Conv1d<float>(inChannels: 3, outChannels: 8, kernelSize: 3);
+        var input = ReverseGradTensor<float>.FromArray(new float[3 * 8], requiresGrad: false);
+        input.Reshape(3, 8);
+
+        Assert.Throws<ArgumentException>(() => conv.Forward(input));
+    }
+
+    [Test]
+    public void Conv1d_InvalidInputChannels_Throws()
+    {
+        using var conv = new Conv1d<float>(inChannels: 3, outChannels: 8, kernelSize: 3);
+        var input = ReverseGradTensor<float>.FromArray(new float[1 * 5 * 10], requiresGrad: false);
+        input.Reshape(1, 5, 10);
+
+        Assert.Throws<ArgumentException>(() => conv.Forward(input));
+    }
 }
