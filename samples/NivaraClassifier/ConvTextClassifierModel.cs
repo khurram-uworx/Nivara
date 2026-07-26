@@ -50,10 +50,10 @@ public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, INu
         var c2 = ReverseGradOperations.Relu(conv2.Forward(ncl));
         var c3 = ReverseGradOperations.Relu(conv3.Forward(ncl));
 
-        int B = c1.shape[0];
-        int c1Flat = c1.shape[1] * c1.shape[2];
-        int c2Flat = c2.shape[1] * c2.shape[2];
-        int c3Flat = c3.shape[1] * c3.shape[2];
+        int B = c1.Shape[0];
+        int c1Flat = c1.Shape[1] * c1.Shape[2];
+        int c2Flat = c2.Shape[1] * c2.Shape[2];
+        int c3Flat = c3.Shape[1] * c3.Shape[2];
 
         c1.Reshape(B, c1Flat);
         c2.Reshape(B, c2Flat);
