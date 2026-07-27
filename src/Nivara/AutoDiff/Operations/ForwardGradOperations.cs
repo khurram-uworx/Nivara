@@ -312,6 +312,21 @@ public static class ForwardGradOperations
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
     }
 
+    public static ForwardGradTensor<T> Gelu<T>(ForwardGradTensor<T> a)
+        where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var primal = a.Data.Gelu();
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            tangent = a.Data.GeluGradient(a.Tangent);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
     /// <summary>
     /// Applies the Sigmoid activation: σ(x) = 1 / (1 + e⁻ˣ).
     /// JVP: t_out = σ(a) * (1 - σ(a)) * t_a = result * (1 - result) * t_a

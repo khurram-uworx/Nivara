@@ -991,6 +991,96 @@ public static class NivaraTensorExtensions
         }
     }
 
+    public static NivaraColumn<T> Gelu<T>(this NivaraColumn<T> column) where T : struct, INumber<T>
+    {
+        int n = column.Length;
+        if (!column.HasNulls)
+        {
+            column.TryGetSpan(out var span);
+            var result = new T[n];
+            GeluKernel(span, result);
+            return NivaraColumn<T>.Create(result);
+        }
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            column.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            column.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+            GeluKernel(inputBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    public static NivaraColumn<T> GeluGradient<T>(this NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+        if (!input.HasNulls && !gradOutput.HasNulls)
+        {
+            input.TryGetSpan(out var inSpan);
+            gradOutput.TryGetSpan(out var gradSpan);
+            var result = new T[n];
+            GeluGradientKernel(inSpan, gradSpan, result);
+            return NivaraColumn<T>.Create(result);
+        }
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            NivaraColumnUtility.MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
+            GeluGradientKernel(inputBuf.AsSpan(0, n), gradBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    private static void GeluKernel<T>(ReadOnlySpan<T> x, Span<T> result) where T : struct, INumber<T>
+    {
+        const double sqrt2OverPi = 0.7978845608028654;
+        const double coeff = 0.044715;
+        for (int i = 0; i < x.Length; i++)
+        {
+            double val = double.CreateChecked(x[i]);
+            double inner = sqrt2OverPi * (val + coeff * val * val * val);
+            double tanhVal = Math.Tanh(inner);
+            result[i] = T.CreateChecked(0.5 * val * (1.0 + tanhVal));
+        }
+    }
+
+    private static void GeluGradientKernel<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> gradOutput, Span<T> result) where T : struct, INumber<T>
+    {
+        const double sqrt2OverPi = 0.7978845608028654;
+        const double coeff = 0.044715;
+        for (int i = 0; i < x.Length; i++)
+        {
+            double val = double.CreateChecked(x[i]);
+            double inner = sqrt2OverPi * (val + coeff * val * val * val);
+            double tanhVal = Math.Tanh(inner);
+            double sech2 = 1.0 - tanhVal * tanhVal;
+            double dInnerDx = sqrt2OverPi * (1.0 + 3.0 * coeff * val * val);
+            double dGeluDx = 0.5 * (1.0 + tanhVal) + 0.5 * val * sech2 * dInnerDx;
+            result[i] = T.CreateChecked(dGeluDx * double.CreateChecked(gradOutput[i]));
+        }
+    }
+
     public static NivaraColumn<T> LeakyReluGradient<T>(this NivaraColumn<T> input, NivaraColumn<T> gradOutput, T negativeSlope) where T : struct, INumber<T>
     {
         int n = input.Length;
