@@ -11,6 +11,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
     <PackageReference Include="System.Drawing.Common" Version="10.0.*" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="1.0.*" />
   </ItemGroup>
 
 </Project>

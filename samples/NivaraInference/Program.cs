@@ -19,7 +19,7 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18> [benchmark|compare|compare_diag|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm> [benchmark|similarity|compare|compare_diag|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
@@ -59,6 +59,9 @@ class Program
                 if (compareDiag) return RunCompareDiag(tensors, "resnet18");
                 if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
+            case "minilm":
+                bool similarity = mode == "similarity";
+                return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? RunMiniLMBenchmark(tensors) : RunMiniLMInference(tensors);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -614,5 +617,176 @@ class Program
             int idx = topIndices[i];
             Console.WriteLine($"  #{i + 1}: class {idx,5}  score={scores[idx]:F6}");
         }
+    }
+
+    static int RunMiniLMInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Inference ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine();
+
+        int seqLen = 8;
+        var tokenIds = new float[seqLen];
+        for (int i = 0; i < seqLen; i++) tokenIds[i] = i;
+        var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
+        input.Reshape(seqLen);
+
+        Console.WriteLine($"Input: [{string.Join(", ", tokenIds.Select(x => (int)x))}] (seqLen={seqLen})");
+
+        var fwdSw = Stopwatch.StartNew();
+        var output = model.Forward(input);
+        fwdSw.Stop();
+
+        var outputData = new float[output.Length];
+        output.Data.TryGetSpan(out var outSpan);
+        if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
+
+        Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output shape: [{output.Shape[^1]}]");
+        Console.WriteLine($"Output stats: min={outputData.Min():F6}, max={outputData.Max():F6}, mean={outputData.Average():F6}");
+        Console.Write("Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, outputData.Length); i++)
+        {
+            Console.Write($"{outputData[i]:F6}");
+            if (i < Math.Min(10, outputData.Length) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+
+        float norm = 0f;
+        foreach (var v in outputData) norm += v * v;
+        norm = MathF.Sqrt(norm);
+        Console.WriteLine($"L2 norm: {norm:F6} (should be ~1.0 for normalized embeddings)");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int RunMiniLMBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Benchmark ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+
+        int seqLen = 128;
+        var tokenIds = new float[seqLen];
+        for (int i = 0; i < seqLen; i++) tokenIds[i] = i % 100;
+        var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
+        input.Reshape(seqLen);
+
+        Console.WriteLine($"Input: seqLen={seqLen}");
+        Console.WriteLine();
+
+        Console.WriteLine("Warmup (3 passes)...");
+        for (int i = 0; i < 3; i++)
+            model.Forward(input);
+
+        Console.WriteLine("Benchmarking (10 passes)...");
+        var times = new List<long>();
+        for (int i = 0; i < 10; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            model.Forward(input);
+            sw.Stop();
+            times.Add(sw.ElapsedMilliseconds);
+        }
+
+        double avg = times.Average();
+        double min = times.Min();
+        double max = times.Max();
+        Console.WriteLine($"  Average: {avg:F1} ms");
+        Console.WriteLine($"  Min:     {min} ms");
+        Console.WriteLine($"  Max:     {max} ms");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int RunMiniLMSimilarity(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Cosine Similarity Demo ===");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+
+        var sentences = new[]
+        {
+            "This is a cat.",
+            "This is a dog.",
+            "I love programming.",
+            "The weather is nice today.",
+            "I love coding."
+        };
+
+        Console.WriteLine($"Sentences ({sentences.Length}):");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.WriteLine($"  [{i}] {sentences[i]}");
+        Console.WriteLine();
+
+        var embeddings = new float[sentences.Length][];
+        for (int s = 0; s < sentences.Length; s++)
+        {
+            int seqLen = 8;
+            var tokenIds = new float[seqLen];
+            for (int i = 0; i < seqLen; i++) tokenIds[i] = i;
+            var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
+            input.Reshape(seqLen);
+
+            var output = model.Forward(input);
+            var outputData = new float[output.Length];
+            output.Data.TryGetSpan(out var outSpan);
+            if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
+            embeddings[s] = outputData;
+        }
+
+        Console.WriteLine("Cosine Similarity Matrix:");
+        Console.Write("       ");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.Write($"  [{i}]   ");
+        Console.WriteLine();
+
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            Console.Write($"  [{i}]  ");
+            for (int j = 0; j < sentences.Length; j++)
+            {
+                float sim = CosineSimilarity(embeddings[i], embeddings[j]);
+                Console.Write($"{sim,7:F4} ");
+            }
+            Console.WriteLine();
+        }
+        Console.WriteLine();
+        Console.WriteLine("(Note: using synthetic token IDs, not real tokenization)");
+        Console.WriteLine("(Similarities are random until tokenizer is connected)");
+
+        return 0;
+    }
+
+    static float CosineSimilarity(float[] a, float[] b)
+    {
+        float dot = 0f, normA = 0f, normB = 0f;
+        int len = Math.Min(a.Length, b.Length);
+        for (int i = 0; i < len; i++)
+        {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        float denom = MathF.Sqrt(normA) * MathF.Sqrt(normB);
+        return denom > 1e-12f ? dot / denom : 0f;
     }
 }
