@@ -95,7 +95,7 @@ python samples/NivaraTorch/generate_fraud_data.py
 #### Step 2 — Train the PyTorch reference model
 
 ```powershell
-python samples/pytorch/train_fraud_pytorch.py
+python samples/NivaraTorch/train_fraud_pytorch.py
 ```
 
 **Output files in `samples/data/` (shared inputs for Nivara):**
@@ -105,7 +105,7 @@ python samples/pytorch/train_fraud_pytorch.py
 | `norm_params.json` | Z-score means/stds from PyTorch |
 | `initial_weights.json` | Seeded initial weights (Nivara loads this) |
 
-**Output files in `samples/pytorch/` (training results):**
+**Output files in `samples/data/` (training results):**
 
 | File | Contents |
 |------|----------|
@@ -126,7 +126,7 @@ batch=32, 50 epochs). Nivara's `TrainingLoop` handles gradient tracking
 internally, so the sample's inference pass after training runs without a
 computation graph.
 
-**Output files in `samples/pytorch/`:**
+**Output files in `samples/data/`:**
 
 | File | Contents |
 |------|----------|
@@ -217,7 +217,7 @@ compares its results against the PyTorch reference.
 #### Step 1 — Generate PyTorch reference JVPs
 
 ```powershell
-python samples/pytorch/forward_parity_pytorch.py
+python samples/NivaraTorch/forward_parity_pytorch.py
 ```
 
 **Output file:**
