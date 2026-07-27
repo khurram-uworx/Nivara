@@ -89,9 +89,6 @@ public static class CrossFrameworkFraudNet
     static string DataDir => Path.GetFullPath(
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "data"));
 
-    static string OutDir => Path.GetFullPath(
-        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "samples", "pytorch"));
-
     static readonly string[] FeatureCols =
         ["amount", "hour", "distance", "prev_attempts",
          "country_change", "device_new", "amount_ratio", "velocity"];
@@ -143,17 +140,17 @@ public static class CrossFrameworkFraudNet
         Console.WriteLine();
 
         // ── Save trained model (Nivara native format) ──────────
-        var nivaraPath = Path.Combine(OutDir, "nivara_trained_model.json");
+        var nivaraPath = Path.Combine(DataDir, "nivara_trained_model.json");
         ModelSerializer.Save(model, nivaraPath);
         Console.WriteLine($"Saved Nivara model to {nivaraPath}");
 
         // ── Save trained weights (interchange JSON) ────────────
-        SaveWeightsToJson(model, Path.Combine(OutDir, "trained_weights_nivara.json"));
+        SaveWeightsToJson(model, Path.Combine(DataDir, "trained_weights_nivara.json"));
 
         // ── Save epoch losses ──────────────────────────────────
         var losses = result.Epochs.Select(e => double.CreateChecked(e.Loss)).ToList();
         var lossesJson = JsonSerializer.Serialize(losses, new JsonSerializerOptions { WriteIndented = true });
-        File.WriteAllText(Path.Combine(OutDir, "epoch_losses_nivara.json"), lossesJson);
+        File.WriteAllText(Path.Combine(DataDir, "epoch_losses_nivara.json"), lossesJson);
 
         // ── Inference on test set ──────────────────────────────
         model.Eval();
@@ -174,7 +171,7 @@ public static class CrossFrameworkFraudNet
         var lines = new List<string> { "logit,prob" };
         for (int i = 0; i < logitArr.Length; i++)
             lines.Add($"{logitArr[i]:F6},{probArr[i]:F6}");
-        File.WriteAllLines(Path.Combine(OutDir, "test_preds_nivara.csv"), lines);
+        File.WriteAllLines(Path.Combine(DataDir, "test_preds_nivara.csv"), lines);
 
         Console.WriteLine("Saved test predictions to test_preds_nivara.csv");
         Console.WriteLine($"First 5 logits: {string.Join(", ", logitArr.Take(5).Select(x => $"{x:F4}"))}");

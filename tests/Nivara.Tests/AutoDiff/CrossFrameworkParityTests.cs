@@ -10,13 +10,12 @@ public class CrossFrameworkParityTests
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
     static string DataDir => Path.Combine(RepoRoot, "samples", "data");
-    static string OutDir => Path.Combine(RepoRoot, "samples", "pytorch");
 
     [Test]
     public void LossCurves_AreWithinOnePercentRelativeDifference()
     {
-        var pytPath = Path.Combine(OutDir, "epoch_losses_pytorch.json");
-        var nivPath = Path.Combine(OutDir, "epoch_losses_nivara.json");
+        var pytPath = Path.Combine(DataDir, "epoch_losses_pytorch.json");
+        var nivPath = Path.Combine(DataDir, "epoch_losses_nivara.json");
 
         if (!File.Exists(pytPath) || !File.Exists(nivPath))
             Assert.Ignore(
@@ -44,8 +43,8 @@ public class CrossFrameworkParityTests
     [Test]
     public void LossCurves_ShowConvergenceInBothFrameworks()
     {
-        var pytPath = Path.Combine(OutDir, "epoch_losses_pytorch.json");
-        var nivPath = Path.Combine(OutDir, "epoch_losses_nivara.json");
+        var pytPath = Path.Combine(DataDir, "epoch_losses_pytorch.json");
+        var nivPath = Path.Combine(DataDir, "epoch_losses_nivara.json");
 
         if (!File.Exists(pytPath) || !File.Exists(nivPath))
             Assert.Ignore(
@@ -64,8 +63,8 @@ public class CrossFrameworkParityTests
     [Test]
     public void PredictionAgreement_IsAbove80Percent()
     {
-        var pytPath = Path.Combine(OutDir, "test_preds_pytorch.csv");
-        var nivPath = Path.Combine(OutDir, "test_preds_nivara.csv");
+        var pytPath = Path.Combine(DataDir, "test_preds_pytorch.csv");
+        var nivPath = Path.Combine(DataDir, "test_preds_nivara.csv");
 
         if (!File.Exists(pytPath) || !File.Exists(nivPath))
             Assert.Ignore(

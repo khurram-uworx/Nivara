@@ -587,4 +587,64 @@ internal static class Im2Col
             }
         }
     }
+
+    // ── 1D Im2Col for Conv1d ────────────────────────────────────────────────
+
+    internal static PatchLocation[] BuildPatchLocations1D(int positionsPerBatch, int tileStart, int tileLen)
+    {
+        var locs = new PatchLocation[tileLen];
+        for (int t = 0; t < tileLen; t++)
+        {
+            int globalIdx = tileStart + t;
+            int batch = globalIdx / positionsPerBatch;
+            int oPos = globalIdx % positionsPerBatch;
+            locs[t] = new PatchLocation(batch, oPos, 0);
+        }
+        return locs;
+    }
+
+    public static void Im2Col1DTile<T>(
+        ReadOnlySpan<T> input,
+        Span<T> output,
+        int channels, int length,
+        int kernelSize,
+        int stride, int padding,
+        int outLength,
+        int tileStart, int tileLen,
+        PatchLocation[] locs) where T : struct, INumber<T>
+    {
+        int patchSize = channels * kernelSize;
+
+        for (int t = 0; t < tileLen; t++)
+        {
+            var loc = locs[t];
+            int inBase = loc.Batch * channels * length;
+            int basePos = loc.OH * stride - padding;
+            int outRow = t * patchSize;
+
+            CopyPatch1D(input, output, inBase, outRow, channels, length, kernelSize, basePos);
+        }
+    }
+
+    static void CopyPatch1D<T>(
+        ReadOnlySpan<T> input, Span<T> output,
+        int inBase, int outRow,
+        int channels, int length, int kernelSize,
+        int basePos) where T : struct, INumber<T>
+    {
+        int patchIdx = 0;
+
+        for (int ic = 0; ic < channels; ic++)
+        {
+            int cOff = inBase + ic * length;
+
+            for (int kh = 0; kh < kernelSize; kh++)
+            {
+                int pos = basePos + kh;
+                output[outRow + patchIdx++] = (uint)pos < (uint)length
+                    ? input[cOff + pos]
+                    : T.Zero;
+            }
+        }
+    }
 }

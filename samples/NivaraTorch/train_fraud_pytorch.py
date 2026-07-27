@@ -16,7 +16,7 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
-OUT_DIR = os.path.dirname(os.path.abspath(__file__))
+OUT_DIR = DATA_DIR
 
 FEATURE_COLS = [
     "amount", "hour", "distance", "prev_attempts",
