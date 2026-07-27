@@ -1,9 +1,4 @@
-using System.Text.Json;
 using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
-using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
 namespace Nivara.Tests.NivaraTorch;
