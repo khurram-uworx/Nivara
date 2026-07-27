@@ -60,21 +60,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
             RegisterModules(attnDropout, residualDropout);
         }
 
-        causalMask = CreateCausalMask(maxSeqLen);
-    }
-
-    ReverseGradTensor<T> CreateCausalMask(int maxLen)
-    {
-        var maskData = new T[maxLen * maxLen];
-        for (int i = 0; i < maxLen; i++)
-            for (int j = 0; j < maxLen; j++)
-                if (j > i)
-                    maskData[i * maxLen + j] = T.CreateChecked(double.NegativeInfinity);
-
-        var col = NivaraColumn<T>.Create(maskData);
-        var tensor = new ReverseGradTensor<T>(col, requiresGrad: false);
-        tensor.Reshape(maxLen, maxLen);
-        return tensor;
+        causalMask = ModuleHelpers<T>.CreateCausalMask(maxSeqLen);
     }
 
     ReverseGradTensor<T> CausalMaskSlice(int L)
@@ -129,34 +115,12 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
     ReverseGradTensor<T> MultiHeadAttention(ReverseGradTensor<T> Q, ReverseGradTensor<T> K,
         ReverseGradTensor<T> V, int L)
     {
-        var heads = new ReverseGradTensor<T>[nHead];
-
         var scaleTensor = GradientUtils.Full(L * L, attnScale);
         scaleTensor.Reshape(L, L);
 
-        var causalMask = CausalMaskSlice(L);
+        var mask = CausalMaskSlice(L);
 
-        for (int h = 0; h < nHead; h++)
-        {
-            int hs = h * headDim;
-
-            var Q_h = ReverseGradOperations.Slice(Q, hs, headDim);
-            var K_h = ReverseGradOperations.Slice(K, hs, headDim);
-            var V_h = ReverseGradOperations.Slice(V, hs, headDim);
-
-            var K_h_T = ReverseGradOperations.Transpose(K_h);
-            var scores = ReverseGradOperations.MatMul(Q_h, K_h_T);
-
-            scores = ReverseGradOperations.Multiply(scores, scaleTensor);
-
-            scores = ReverseGradOperations.Add(scores, causalMask);
-
-            var weights = ReverseGradOperations.Softmax(scores);
-
-            heads[h] = ReverseGradOperations.MatMul(weights, V_h);
-        }
-
-        return ReverseGradOperations.Concat(heads, axis: 1);
+        return ModuleHelpers<T>.MultiHeadAttention(Q, K, V, nHead, headDim, scaleTensor, mask);
     }
 
     ReverseGradTensor<T> ApplyNorm(ReverseGradTensor<T> x, int rows, int cols)

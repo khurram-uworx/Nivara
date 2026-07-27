@@ -1,7 +1,6 @@
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
-using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -32,7 +31,7 @@ public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, INumber<T
 
         ReadOnlySpan<T> inputSpan = input.Data.TryGetSpan(out var iSpan)
             ? iSpan
-            : CopyToTemp(input.Data, n * c * h * w);
+            : ModuleHelpers<T>.CopyToTemp(input.Data, n * c * h * w);
 
         AdaptiveAvgForwardKernel(inputSpan, outputData, n, c, h, w, outH, outW);
 
@@ -60,12 +59,7 @@ public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, INumber<T
         return resultTensor;
     }
 
-    static T[] CopyToTemp(NivaraColumn<T> column, int length)
-    {
-        var arr = new T[length];
-        column.CopyTo(arr, T.Zero);
-        return arr;
-    }
+
 
     static void AdaptiveAvgForwardKernel(
         ReadOnlySpan<T> input, Span<T> output,

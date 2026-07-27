@@ -159,6 +159,118 @@
       "groups": 1
     }
   },
+  "conv1d_k3": {
+    "layer": "Conv1d",
+    "input_shape": [
+      1,
+      8,
+      16
+    ],
+    "weight_shape": [
+      8,
+      8,
+      3
+    ],
+    "bias_shape": [
+      8
+    ],
+    "output_shape": [
+      1,
+      8,
+      16
+    ],
+    "params": {
+      "in_channels": 8,
+      "out_channels": 8,
+      "kernel_size": 3,
+      "stride": 1,
+      "padding": 1
+    }
+  },
+  "conv1d_k5": {
+    "layer": "Conv1d",
+    "input_shape": [
+      1,
+      8,
+      16
+    ],
+    "weight_shape": [
+      16,
+      8,
+      5
+    ],
+    "bias_shape": [
+      16
+    ],
+    "output_shape": [
+      1,
+      16,
+      16
+    ],
+    "params": {
+      "in_channels": 8,
+      "out_channels": 16,
+      "kernel_size": 5,
+      "stride": 1,
+      "padding": 2
+    }
+  },
+  "conv1d_k7": {
+    "layer": "Conv1d",
+    "input_shape": [
+      1,
+      4,
+      32
+    ],
+    "weight_shape": [
+      8,
+      4,
+      7
+    ],
+    "bias_shape": [
+      8
+    ],
+    "output_shape": [
+      1,
+      8,
+      32
+    ],
+    "params": {
+      "in_channels": 4,
+      "out_channels": 8,
+      "kernel_size": 7,
+      "stride": 1,
+      "padding": 3
+    }
+  },
+  "conv1d_s2": {
+    "layer": "Conv1d",
+    "input_shape": [
+      1,
+      8,
+      16
+    ],
+    "weight_shape": [
+      16,
+      8,
+      3
+    ],
+    "bias_shape": [
+      16
+    ],
+    "output_shape": [
+      1,
+      16,
+      8
+    ],
+    "params": {
+      "in_channels": 8,
+      "out_channels": 16,
+      "kernel_size": 3,
+      "stride": 2,
+      "padding": 1
+    }
+  },
   "bn2d_16ch": {
     "layer": "BatchNorm2d",
     "input_shape": [
@@ -300,6 +412,62 @@
       8
     ]
   },
+  "bn1d_2d": {
+    "layer": "BatchNorm1d",
+    "input_shape": [
+      4,
+      16
+    ],
+    "gamma_shape": [
+      16
+    ],
+    "beta_shape": [
+      16
+    ],
+    "running_mean_shape": [
+      16
+    ],
+    "running_var_shape": [
+      16
+    ],
+    "output_shape": [
+      4,
+      16
+    ],
+    "params": {
+      "num_features": 16,
+      "eps": 1e-05
+    }
+  },
+  "bn1d_3d": {
+    "layer": "BatchNorm1d",
+    "input_shape": [
+      2,
+      8,
+      20
+    ],
+    "gamma_shape": [
+      8
+    ],
+    "beta_shape": [
+      8
+    ],
+    "running_mean_shape": [
+      8
+    ],
+    "running_var_shape": [
+      8
+    ],
+    "output_shape": [
+      2,
+      8,
+      20
+    ],
+    "params": {
+      "num_features": 8,
+      "eps": 1e-05
+    }
+  },
   "relu_1d": {
     "layer": "ReLU/ReLU6",
     "input_shape": [
@@ -331,6 +499,84 @@
       16,
       8,
       8
+    ]
+  },
+  "leaky_relu_1d": {
+    "layer": "LeakyReLU",
+    "input_shape": [
+      32
+    ],
+    "output_shape": [
+      32
+    ],
+    "params": {
+      "negative_slope": 0.01
+    }
+  },
+  "leaky_relu_4d": {
+    "layer": "LeakyReLU",
+    "input_shape": [
+      1,
+      8,
+      4,
+      4
+    ],
+    "output_shape": [
+      1,
+      8,
+      4,
+      4
+    ],
+    "params": {
+      "negative_slope": 0.01
+    }
+  },
+  "sigmoid_1d": {
+    "layer": "Sigmoid",
+    "input_shape": [
+      32
+    ],
+    "output_shape": [
+      32
+    ]
+  },
+  "sigmoid_4d": {
+    "layer": "Sigmoid",
+    "input_shape": [
+      1,
+      8,
+      4,
+      4
+    ],
+    "output_shape": [
+      1,
+      8,
+      4,
+      4
+    ]
+  },
+  "tanh_1d": {
+    "layer": "Tanh",
+    "input_shape": [
+      32
+    ],
+    "output_shape": [
+      32
+    ]
+  },
+  "tanh_4d": {
+    "layer": "Tanh",
+    "input_shape": [
+      1,
+      8,
+      4,
+      4
+    ],
+    "output_shape": [
+      1,
+      8,
+      4,
+      4
     ]
   },
   "maxpool_3x3_s2_p1": {
@@ -452,5 +698,233 @@
       "in_features": 512,
       "out_features": 1000
     }
+  },
+  "emb_single": {
+    "layer": "Embedding",
+    "input_shape": [
+      1
+    ],
+    "weight_shape": [
+      100,
+      16
+    ],
+    "output_shape": [
+      16
+    ],
+    "params": {
+      "num_embeddings": 100,
+      "embedding_dim": 16
+    }
+  },
+  "emb_batch": {
+    "layer": "Embedding",
+    "input_shape": [
+      4
+    ],
+    "weight_shape": [
+      100,
+      16
+    ],
+    "output_shape": [
+      4,
+      16
+    ],
+    "params": {
+      "num_embeddings": 100,
+      "embedding_dim": 16
+    }
+  },
+  "dropout_eval": {
+    "layer": "Dropout",
+    "input_shape": [
+      4,
+      32
+    ],
+    "output_shape": [
+      4,
+      32
+    ],
+    "params": {
+      "p": 0.5,
+      "training": false
+    }
+  },
+  "rmsnorm_2d": {
+    "layer": "RMSNorm",
+    "input_shape": [
+      4,
+      32
+    ],
+    "output_shape": [
+      4,
+      32
+    ],
+    "params": {
+      "eps": 1e-05
+    }
+  },
+  "rmsnorm_3d": {
+    "layer": "RMSNorm",
+    "input_shape": [
+      2,
+      4,
+      32
+    ],
+    "output_shape": [
+      2,
+      4,
+      32
+    ],
+    "params": {
+      "eps": 1e-05
+    }
+  },
+  "layernorm_2d": {
+    "layer": "LayerNorm",
+    "input_shape": [
+      4,
+      32
+    ],
+    "gamma_shape": [
+      32
+    ],
+    "beta_shape": [
+      32
+    ],
+    "output_shape": [
+      4,
+      32
+    ],
+    "params": {
+      "normalized_shape": 32,
+      "eps": 1e-05
+    }
+  },
+  "layernorm_3d": {
+    "layer": "LayerNorm",
+    "input_shape": [
+      2,
+      4,
+      32
+    ],
+    "gamma_shape": [
+      32
+    ],
+    "beta_shape": [
+      32
+    ],
+    "output_shape": [
+      2,
+      4,
+      32
+    ],
+    "params": {
+      "normalized_shape": 32,
+      "eps": 1e-05
+    }
+  },
+  "softmax": {
+    "layer": "Softmax",
+    "input_shape": [
+      4,
+      10
+    ],
+    "output_shape": [
+      4,
+      10
+    ],
+    "params": {
+      "dim": 1
+    }
+  },
+  "log_softmax": {
+    "layer": "LogSoftmax",
+    "input_shape": [
+      4,
+      10
+    ],
+    "output_shape": [
+      4,
+      10
+    ],
+    "params": {
+      "dim": 1
+    }
+  },
+  "matmul": {
+    "layer": "MatMul",
+    "a_shape": [
+      4,
+      8
+    ],
+    "b_shape": [
+      8,
+      16
+    ],
+    "output_shape": [
+      4,
+      16
+    ]
+  },
+  "bce_with_logits": {
+    "layer": "BCEWithLogitsLoss",
+    "input_shape": [
+      4,
+      10
+    ],
+    "target_shape": [
+      4,
+      10
+    ],
+    "sum_output_shape": [
+      1
+    ],
+    "mean_output_shape": [
+      1
+    ]
+  },
+  "cross_entropy": {
+    "layer": "CrossEntropyLoss",
+    "input_shape": [
+      4,
+      10
+    ],
+    "target_shape": [
+      4
+    ],
+    "output_shape": [
+      1
+    ]
+  },
+  "mse_loss": {
+    "layer": "MSELoss",
+    "pred_shape": [
+      4,
+      10
+    ],
+    "target_shape": [
+      4,
+      10
+    ],
+    "sum_output_shape": [
+      1
+    ],
+    "mean_output_shape": [
+      1
+    ]
+  },
+  "l1_loss": {
+    "layer": "L1Loss",
+    "pred_shape": [
+      4,
+      10
+    ],
+    "target_shape": [
+      4,
+      10
+    ],
+    "output_shape": [
+      1
+    ]
   }
 }

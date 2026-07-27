@@ -87,18 +87,18 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
 
         ReadOnlySpan<T> inputSpan = input.Data.TryGetSpan(out var iSpan)
             ? iSpan
-            : CopyToTemp(input.Data, n * c * l);
+            : ModuleHelpers<T>.CopyToTemp(input.Data, n * c * l);
 
         ReadOnlySpan<T> weightSpan = _weight.Tensor.Data.TryGetSpan(out var wSpan)
             ? wSpan
-            : CopyToTemp(_weight.Tensor.Data, _outChannels * patchSize);
+            : ModuleHelpers<T>.CopyToTemp(_weight.Tensor.Data, _outChannels * patchSize);
 
         ReadOnlySpan<T> biasSpan = ReadOnlySpan<T>.Empty;
         if (_useBias && _bias != null)
         {
             biasSpan = _bias.Tensor.Data.TryGetSpan(out var bSpan)
                 ? bSpan
-                : CopyToTemp(_bias.Tensor.Data, _outChannels);
+                : ModuleHelpers<T>.CopyToTemp(_bias.Tensor.Data, _outChannels);
         }
 
         var outputData = new T[n * _outChannels * oL];
@@ -154,12 +154,7 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
         return resultTensor;
     }
 
-    static T[] CopyToTemp(NivaraColumn<T> column, int length)
-    {
-        var arr = new T[length];
-        column.CopyTo(arr, T.Zero);
-        return arr;
-    }
+
 
     static void Conv1dForwardKernel(
         ReadOnlySpan<T> inputData, ReadOnlySpan<T> weightSpan, ReadOnlySpan<T> biasSpan, Span<T> outputData,

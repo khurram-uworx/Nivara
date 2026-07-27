@@ -93,14 +93,15 @@ Key characteristics:
 - Exercises `Conv2d<T>` (asymmetric padding, grouped conv, 1x1 fast path), `BatchNorm2d<T>` (running stats), `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `Linear<T>`, `Module<T>.LoadStateDict`
 - Models downloaded via `hf` CLI to `samples/data/`
 
-## [NivaraTorch-PLAN.md](NivaraTorch-PLAN.md) — Per-Layer PyTorch ↔ Nivara Comparison
+## [NivaraTorch/README.md](NivaraTorch/README.md) — Per-Layer PyTorch ↔ Nivara Comparison
 
-Formal A/B validation of every NN layer type. PyTorch generates reference tensors via `gen_reference.py`, Nivara reproduces them to machine precision across 18 test cases. Full-model logits match Python to 6+ decimal places for both MobileNetV2 and ResNet-18.
+Formal A/B validation of every NN layer type. PyTorch generates reference tensors via `gen_reference.py`, Nivara reproduces them to machine precision across 45 test cases covering Conv2d, Conv1d, BatchNorm, ReLU, LeakyRelu, Sigmoid, Tanh, MaxPool, AdaptiveAvgPool, Linear, Embedding, Dropout, RMSNorm, LayerNorm, Softmax, LogSoftmax, MatMul, and all loss functions (BCE, CrossEntropy, MSE, L1). Full-model logits match Python to 6+ decimal places for both MobileNetV2 and ResNet-18.
 
 Key characteristics:
-- **Per-layer fixtures** — 68 `.bin` files in `samples/data/torch-comparison/` covering Conv2d (5 configs), BatchNorm2d (6 configs), ReLU/ReLU6, MaxPool2d, AdaptiveAvgPool2d, Linear
-- **Full-model comparison** — `compare`/`compare_diag` modes in NivaraInference for step-by-step diagnostics
-- **`PyTorchReferenceTests.cs`** — 18 NUnit tests comparing C# output against PyTorch fixtures
+- **45 PyTorch reference fixtures** — float32 binary files in `samples/data/torch-comparison/`
+- **Per-layer NUnit tests** — `tests/Nivara.Tests/NivaraTorch/` organized by layer type
+- **Fixture generator** — `gen_reference.py` with deterministic seed=42, covers every NN layer type used across all samples
+- Documents weight layout differences (Conv1d `[out,k,in]` vs PyTorch `[out,in,k]`) and normalization scope (`RMSNorm` global vs `PerRowRMSNorm` per-row)
 
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 

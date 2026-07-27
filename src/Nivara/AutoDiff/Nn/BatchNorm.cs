@@ -178,48 +178,19 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
 
     void UpdateRunningStatsDirect(T[] batchMean, T[] batchInvStd, int channelTotal)
     {
-        if (_runningMean == null || _runningVar == null || _numBatchesTracked == null)
-            return;
-
-        var rmData = new T[_numFeatures];
-        _runningMean.Data.CopyTo(rmData, T.Zero);
-        var rvData = new T[_numFeatures];
-        _runningVar.Data.CopyTo(rvData, T.Zero);
-
-        var momentum = _momentum;
-        var oneMinusMomentum = T.One - momentum;
-
-        for (int i = 0; i < _numFeatures; i++)
-        {
-            T variance = T.One / (batchInvStd[i] * batchInvStd[i]) - _eps;
-            rmData[i] = rmData[i] * oneMinusMomentum + batchMean[i] * momentum;
-            rvData[i] = rvData[i] * oneMinusMomentum + variance * momentum;
-        }
-
-        _runningMean = ReverseGradTensor<T>.FromArray(rmData, requiresGrad: false);
-        _runningVar = ReverseGradTensor<T>.FromArray(rvData, requiresGrad: false);
-
-        var count = new T[] { _numBatchesTracked[0] + T.One };
-        _numBatchesTracked = ReverseGradTensor<T>.FromArray(count, requiresGrad: false);
+        var result = ModuleHelpers<T>.UpdateRunningStats(
+            _runningMean, _runningVar, _numBatchesTracked,
+            batchMean, batchInvStd, _numFeatures, _momentum, _eps);
+        _runningMean = result.runningMean;
+        _runningVar = result.runningVar;
+        _numBatchesTracked = result.numBatchesTracked;
     }
 
     static ReadOnlySpan<T> GetInputSpan(ReverseGradTensor<T> tensor)
-    {
-        if (tensor.Data.TryGetSpan(out var span))
-            return span;
-        var arr = new T[tensor.Length];
-        tensor.Data.CopyTo(arr, T.Zero);
-        return arr;
-    }
+        => ModuleHelpers<T>.GetSpan(tensor);
 
     static ReadOnlySpan<T> GetParamSpan(ReverseGradTensor<T> tensor)
-    {
-        if (tensor.Data.TryGetSpan(out var span))
-            return span;
-        var arr = new T[tensor.Length];
-        tensor.Data.CopyTo(arr, T.Zero);
-        return arr;
-    }
+        => ModuleHelpers<T>.GetSpan(tensor);
 
     public override Dictionary<string, ReverseGradTensor<T>> StateDict()
     {
@@ -421,48 +392,19 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
 
     void UpdateRunningStatsDirect(T[] batchMean, T[] batchInvStd, int channelTotal)
     {
-        if (_runningMean == null || _runningVar == null || _numBatchesTracked == null)
-            return;
-
-        var rmData = new T[_numFeatures];
-        _runningMean.Data.CopyTo(rmData, T.Zero);
-        var rvData = new T[_numFeatures];
-        _runningVar.Data.CopyTo(rvData, T.Zero);
-
-        var momentum = _momentum;
-        var oneMinusMomentum = T.One - momentum;
-
-        for (int i = 0; i < _numFeatures; i++)
-        {
-            T variance = T.One / (batchInvStd[i] * batchInvStd[i]) - _eps;
-            rmData[i] = rmData[i] * oneMinusMomentum + batchMean[i] * momentum;
-            rvData[i] = rvData[i] * oneMinusMomentum + variance * momentum;
-        }
-
-        _runningMean = ReverseGradTensor<T>.FromArray(rmData, requiresGrad: false);
-        _runningVar = ReverseGradTensor<T>.FromArray(rvData, requiresGrad: false);
-
-        var count = new T[] { _numBatchesTracked[0] + T.One };
-        _numBatchesTracked = ReverseGradTensor<T>.FromArray(count, requiresGrad: false);
+        var result = ModuleHelpers<T>.UpdateRunningStats(
+            _runningMean, _runningVar, _numBatchesTracked,
+            batchMean, batchInvStd, _numFeatures, _momentum, _eps);
+        _runningMean = result.runningMean;
+        _runningVar = result.runningVar;
+        _numBatchesTracked = result.numBatchesTracked;
     }
 
     static ReadOnlySpan<T> GetInputSpan(ReverseGradTensor<T> tensor)
-    {
-        if (tensor.Data.TryGetSpan(out var span))
-            return span;
-        var arr = new T[tensor.Length];
-        tensor.Data.CopyTo(arr, T.Zero);
-        return arr;
-    }
+        => ModuleHelpers<T>.GetSpan(tensor);
 
     static ReadOnlySpan<T> GetParamSpan(ReverseGradTensor<T> tensor)
-    {
-        if (tensor.Data.TryGetSpan(out var span))
-            return span;
-        var arr = new T[tensor.Length];
-        tensor.Data.CopyTo(arr, T.Zero);
-        return arr;
-    }
+        => ModuleHelpers<T>.GetSpan(tensor);
 
     public override Dictionary<string, ReverseGradTensor<T>> StateDict()
     {

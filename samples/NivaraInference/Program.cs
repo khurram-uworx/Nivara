@@ -1,9 +1,9 @@
-using System.Diagnostics;
-using System.Drawing;
-using System.Runtime.InteropServices;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using System.Diagnostics;
+using System.Drawing;
+using System.Runtime.InteropServices;
 
 namespace NivaraInference;
 

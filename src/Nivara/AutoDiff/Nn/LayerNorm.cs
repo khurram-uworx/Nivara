@@ -109,20 +109,8 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, INumber<T>
     }
 
     static ReadOnlySpan<T> GetInputSpan(ReverseGradTensor<T> tensor)
-    {
-        if (tensor.Data.TryGetSpan(out var span))
-            return span;
-        var arr = new T[tensor.Length];
-        tensor.Data.CopyTo(arr, T.Zero);
-        return arr;
-    }
+        => ModuleHelpers<T>.GetSpan(tensor);
 
     static ReadOnlySpan<T> GetParamSpan(ReverseGradTensor<T> tensor)
-    {
-        if (tensor.Data.TryGetSpan(out var span))
-            return span;
-        var arr = new T[tensor.Length];
-        tensor.Data.CopyTo(arr, T.Zero);
-        return arr;
-    }
+        => ModuleHelpers<T>.GetSpan(tensor);
 }
