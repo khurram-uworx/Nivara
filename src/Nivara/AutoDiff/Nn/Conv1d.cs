@@ -1,12 +1,16 @@
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 
 namespace Nivara.AutoDiff.Nn;
 
 public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
 {
+    const int TargetL1Bytes = 32 * 1024;
+
     readonly int _inChannels;
     readonly int _outChannels;
     readonly int _kernelSize;
@@ -154,42 +158,97 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
         return resultTensor;
     }
 
-
+    static int ComputeTileCapacity(int patchSize)
+    {
+        int bytesPerElement = Unsafe.SizeOf<T>();
+        return Math.Max(1, TargetL1Bytes / (patchSize * bytesPerElement));
+    }
 
     static void Conv1dForwardKernel(
         ReadOnlySpan<T> inputData, ReadOnlySpan<T> weightSpan, ReadOnlySpan<T> biasSpan, Span<T> outputData,
         int n, int c, int l, int kL, int stride, int padding,
         int oL, int patchSize, int totalPatches, int outChannels)
     {
-        for (int patch = 0; patch < totalPatches; patch++)
+        if (kL == 1 && stride == 1 && padding == 0)
         {
-            int batch = patch / oL;
-            int oPos = patch % oL;
-            int inStart = oPos * stride - padding;
-            int outBase = batch * outChannels * oL + oPos;
+            Conv1dForward1x1(inputData, weightSpan, biasSpan, outputData, n, c, l, oL, outChannels);
+            return;
+        }
 
-            for (int oc = 0; oc < outChannels; oc++)
+        int tileSize = Math.Min(ComputeTileCapacity(patchSize), totalPatches);
+
+        var scratchBuf = ArrayPool<T>.Shared.Rent(tileSize * patchSize);
+        try
+        {
+            var scratch = scratchBuf.AsSpan(0, tileSize * patchSize);
+
+            for (int tileStart = 0; tileStart < totalPatches; tileStart += tileSize)
             {
-                var weightSlice = weightSpan.Slice(oc * patchSize, patchSize);
-                T dot = T.Zero;
+                int tileLen = Math.Min(tileSize, totalPatches - tileStart);
+                var locs = Im2Col.BuildPatchLocations1D(oL, tileStart, tileLen);
 
-                for (int kh = 0; kh < kL; kh++)
+                Im2Col.Im2Col1DTile(inputData, scratch, c, l, kL, stride, padding, oL, tileStart, tileLen, locs);
+
+                for (int t = 0; t < tileLen; t++)
                 {
-                    int inPos = inStart + kh;
-                    if ((uint)inPos >= (uint)l) continue;
+                    var loc = locs[t];
+                    var patchSpan = scratch.Slice(t * patchSize, patchSize);
+                    int outBase = loc.Batch * outChannels * oL + loc.OH;
 
-                    int inputBase = batch * c * l + inPos;
-                    int wBase = kh * c;
+                    for (int oc = 0; oc < outChannels; oc++)
+                    {
+                        var weightSlice = weightSpan.Slice(oc * patchSize, patchSize);
+                        T dot = TensorPrimitives.Dot(patchSpan, weightSlice);
 
-                    for (int ch = 0; ch < c; ch++)
-                        dot += inputData[inputBase + ch * l] * weightSlice[wBase + ch];
+                        if (biasSpan.Length > 0)
+                            dot += biasSpan[oc];
+
+                        outputData[outBase + oc * oL] = dot;
+                    }
                 }
-
-                if (biasSpan.Length > 0)
-                    dot += biasSpan[oc];
-
-                outputData[outBase + oc * oL] = dot;
             }
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(scratchBuf, clearArray: true);
+        }
+    }
+
+    static void Conv1dForward1x1(
+        ReadOnlySpan<T> inputData, ReadOnlySpan<T> weightSpan, ReadOnlySpan<T> biasSpan, Span<T> outputData,
+        int n, int c, int l, int oL, int outChannels)
+    {
+        int patchSize = c;
+
+        var patchBuf = ArrayPool<T>.Shared.Rent(patchSize);
+        try
+        {
+            var patch = patchBuf.AsSpan(0, patchSize);
+
+            for (int batch = 0; batch < n; batch++)
+            {
+                int inBase = batch * c * l;
+                int outBase = batch * outChannels * oL;
+
+                for (int pos = 0; pos < oL; pos++)
+                {
+                    int inPixel = inBase + pos;
+
+                    for (int ic = 0; ic < c; ic++)
+                        patch[ic] = inputData[inPixel + ic * l];
+
+                    for (int oc = 0; oc < outChannels; oc++)
+                    {
+                        T dot = TensorPrimitives.Dot(patch, weightSpan.Slice(oc * patchSize, patchSize));
+                        if (biasSpan.Length > 0) dot += biasSpan[oc];
+                        outputData[outBase + oc * oL + pos] = dot;
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(patchBuf, clearArray: true);
         }
     }
 
@@ -216,10 +275,9 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
                         if ((uint)inPos >= (uint)l) continue;
 
                         int inputBase = batch * c * l + inPos;
-                        int wBase = kh * c;
 
                         for (int ch = 0; ch < c; ch++)
-                            inputGrad[inputBase + ch * l] += g * weightData[weightBase + wBase + ch];
+                            inputGrad[inputBase + ch * l] += g * weightData[weightBase + ch * kL + kh];
                     }
                 }
             }
@@ -231,31 +289,40 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
         int n, int c, int l, int kL, int stride, int padding,
         int oL, int outChannels, int patchSize, int totalPatches)
     {
-        for (int batch = 0; batch < n; batch++)
+        int tileSize = Math.Min(ComputeTileCapacity(patchSize), totalPatches);
+
+        var scratchBuf = ArrayPool<T>.Shared.Rent(tileSize * patchSize);
+        try
         {
-            for (int oc = 0; oc < outChannels; oc++)
+            var scratch = scratchBuf.AsSpan(0, tileSize * patchSize);
+
+            for (int tileStart = 0; tileStart < totalPatches; tileStart += tileSize)
             {
-                for (int oPos = 0; oPos < oL; oPos++)
+                int tileLen = Math.Min(tileSize, totalPatches - tileStart);
+                var locs = Im2Col.BuildPatchLocations1D(oL, tileStart, tileLen);
+
+                Im2Col.Im2Col1DTile(inputData, scratch, c, l, kL, stride, padding, oL, tileStart, tileLen, locs);
+
+                for (int t = 0; t < tileLen; t++)
                 {
-                    T g = gradOutData[batch * outChannels * oL + oc * oL + oPos];
-                    if (g == T.Zero) continue;
+                    var loc = locs[t];
+                    var patchSpan = scratch.Slice(t * patchSize, patchSize);
+                    int gradBase = loc.Batch * outChannels * oL + loc.OH;
 
-                    int inStart = oPos * stride - padding;
-                    int weightBase = oc * patchSize;
-
-                    for (int kh = 0; kh < kL; kh++)
+                    for (int oc = 0; oc < outChannels; oc++)
                     {
-                        int inPos = inStart + kh;
-                        if ((uint)inPos >= (uint)l) continue;
+                        T g = gradOutData[gradBase + oc * oL];
+                        if (g == T.Zero) continue;
 
-                        int inputBase = batch * c * l + inPos;
-                        int wBase = kh * c;
-
-                        for (int ch = 0; ch < c; ch++)
-                            weightGrad[weightBase + wBase + ch] += g * inputData[inputBase + ch * l];
+                        var wSlice = weightGrad.Slice(oc * patchSize, patchSize);
+                        TensorPrimitives.MultiplyAdd(patchSpan, g, wSlice, wSlice);
                     }
                 }
             }
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(scratchBuf, clearArray: true);
         }
     }
 
