@@ -593,12 +593,12 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
 // new Conv1d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
 ```
 
-1D convolution with standalone im2col-based kernel and full autograd support.
+1D convolution with tiled im2col-based kernel and full autograd support. Weight layout is PyTorch-compatible `[outChannels, inChannels, kernelSize]`.
 
 ```
-Forward:   Conv1dForwardKernel (im2col) → Dot per output channel
+Forward:   Im2Col1DTile → TensorPrimitives.Dot per output channel (1×1 fast path skips im2col)
 InputGrad: Conv1dInputGradKernel (scatter-add of weight × gradOut patches)
-WeightGrad: Conv1dWeightGradKernel (im2col + Dot per output channel)
+WeightGrad: Im2Col1DTile → TensorPrimitives.MultiplyAdd per output channel
 BiasGrad:  TensorPrimitives.Sum over batch and length per output channel
 ```
 

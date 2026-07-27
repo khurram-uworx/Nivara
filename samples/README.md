@@ -23,7 +23,7 @@ Key characteristics:
 - **45 PyTorch reference fixtures** — float32 binary files in `samples/data/torch-comparison/`
 - **Per-layer NUnit tests** — `tests/Nivara.Tests/NivaraTorch/` organized by layer type
 - **Fixture generator** — `gen_reference.py` with deterministic seed=42, covers every NN layer type used across all samples
-- Documents weight layout differences (Conv1d `[out,k,in]` vs PyTorch `[out,in,k]`) and normalization scope (`RMSNorm` global vs `PerRowRMSNorm` per-row)
+- Documents normalization scope (`RMSNorm` global vs `PerRowRMSNorm` per-row). Conv1d weight layout matches PyTorch.
 
 ## [MicroGpt/README.md](MicroGpt/README.md) — Character-level Transformer on Nivara AutoDiff
 

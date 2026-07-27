@@ -869,7 +869,7 @@ The `Conv2d<T>` kernel follows a tiled im2col pipeline: gather input patches int
 
 #### Conv1d: 1D im2col → Dot
 
-The `Conv1d<T>` kernel mirrors Conv2d's approach in 1D: `Conv1dForwardKernel` gathers patches, `TensorPrimitives.Dot` per output channel. Weight and bias gradients follow the same pattern. Kaiming-Uniform initialization.
+The `Conv1d<T>` kernel mirrors Conv2d's approach in 1D: tiled `Im2Col1DTile` materializes contiguous channel-major patches, `TensorPrimitives.Dot` per output channel. Specialized `Conv1dForward1x1` path skips im2col for 1×1 kernels. Weight grad uses im2col + `TensorPrimitives.MultiplyAdd`; input grad is a direct scatter loop. Weight layout is PyTorch-compatible `[outChannels, inChannels, kernelSize]`. Kaiming-Uniform initialization.
 
 #### ConvTranspose2d: Direct Scatter
 

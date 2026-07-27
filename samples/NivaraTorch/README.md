@@ -380,7 +380,6 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 
 ### Layout notes
 
-- **Conv1d weight layout**: PyTorch stores `[outChannels, inChannels, kernelSize]`. Nivara's kernel expects `[outChannels, kernelSize, inChannels]`. Tests transpose the fixture weight when loading.
 - **RMSNorm**: `ReverseGradOperations.RMSNorm` normalizes over the entire flattened tensor. For per-row normalization (matching PyTorch), use `ReverseGradOperations.PerRowRMSNorm`.
 
 ### How to run tests
