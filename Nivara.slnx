@@ -24,11 +24,9 @@
     <File Path="EXAMPLES.md" />
     <File Path="GETTING-STARTED.md" />
     <File Path="GUIDELINES.md" />
-    <File Path="docs/IDEA.md" />
     <File Path="LICENSE.txt" />
     <File Path="README.md" />
   </Folder>
-  <Folder Name="/src/" />
   <Folder Name="/tests/">
     <Project Path="tests/Nivara.Tests/Nivara.Tests.csproj" />
   </Folder>
