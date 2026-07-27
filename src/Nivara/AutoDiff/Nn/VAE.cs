@@ -96,11 +96,7 @@ public sealed class VAE<T> : Module<T> where T : struct, INumber<T>
     }
 
     public ReverseGradTensor<T> Reparameterize(ReverseGradTensor<T> mu, ReverseGradTensor<T> logVar, int? seed = null)
-    {
-        if (!IsTraining)
-            return mu;
-        return ReverseGradOperations.SampleNormal(mu, logVar, seed);
-    }
+        => ModuleHelpers<T>.Reparameterize(mu, logVar, IsTraining, seed);
 
     public ReverseGradTensor<T> Decode(ReverseGradTensor<T> z)
     {

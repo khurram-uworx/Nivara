@@ -106,50 +106,12 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, INumber<
     {
         bool useCausal = overrideCausal ?? _causal;
         int kvLen = K.shape[0];
-        var heads = new ReverseGradTensor<T>[_numHeads];
 
         var scaleTensor = GradientUtils.Full(qLen * kvLen, _attnScale);
         scaleTensor.Reshape(qLen, kvLen);
 
-        ReverseGradTensor<T>? mask = null;
-        if (useCausal)
-            mask = CreateCausalMask(qLen);
+        ReverseGradTensor<T>? mask = useCausal ? ModuleHelpers<T>.CreateCausalMask(qLen) : null;
 
-        for (int h = 0; h < _numHeads; h++)
-        {
-            int hs = h * _headDim;
-
-            var Q_h = ReverseGradOperations.Slice(Q, hs, _headDim);
-            var K_h = ReverseGradOperations.Slice(K, hs, _headDim);
-            var V_h = ReverseGradOperations.Slice(V, hs, _headDim);
-
-            var K_h_T = ReverseGradOperations.Transpose(K_h);
-            var scores = ReverseGradOperations.MatMul(Q_h, K_h_T);
-
-            scores = ReverseGradOperations.Multiply(scores, scaleTensor);
-
-            if (mask != null)
-                scores = ReverseGradOperations.Add(scores, mask);
-
-            var weights = ReverseGradOperations.Softmax(scores);
-
-            heads[h] = ReverseGradOperations.MatMul(weights, V_h);
-        }
-
-        return ReverseGradOperations.Concat(heads, axis: 1);
-    }
-
-    ReverseGradTensor<T> CreateCausalMask(int L)
-    {
-        var maskData = new T[L * L];
-        for (int i = 0; i < L; i++)
-            for (int j = 0; j < L; j++)
-                if (j > i)
-                    maskData[i * L + j] = T.CreateChecked(double.NegativeInfinity);
-
-        var col = NivaraColumn<T>.Create(maskData);
-        var tensor = new ReverseGradTensor<T>(col, requiresGrad: false);
-        tensor.Reshape(L, L);
-        return tensor;
+        return ModuleHelpers<T>.MultiHeadAttention(Q, K, V, _numHeads, _headDim, scaleTensor, mask);
     }
 }
