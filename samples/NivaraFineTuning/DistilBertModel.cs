@@ -28,6 +28,36 @@ public sealed record DistilBertConfig
         VocabSize = VocabSize,
         LayerNormEps = Eps,
     };
+
+    public static DistilBertConfig FromJson(string json)
+    {
+        var config = new DistilBertConfig();
+        var props = typeof(DistilBertConfig).GetProperties();
+        foreach (var prop in props)
+        {
+            var key = SnakeKey(prop.Name);
+            var idx = json.IndexOf($"\"{key}\"", StringComparison.OrdinalIgnoreCase);
+            if (idx < 0) continue;
+            var colonIdx = json.IndexOf(':', idx);
+            var endIdx = json.IndexOfAny([',', '}'], colonIdx);
+            var valStr = json.Substring(colonIdx + 1, endIdx - colonIdx - 1).Trim();
+            if (prop.PropertyType == typeof(int) && int.TryParse(valStr, out int intVal))
+                prop.SetValue(config, intVal);
+            else if (prop.PropertyType == typeof(float) && float.TryParse(valStr, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float floatVal))
+                prop.SetValue(config, floatVal);
+        }
+        return config;
+    }
+
+    static string SnakeKey(string pascal)
+    {
+        if (pascal == "NLayers") return "n_layers";
+        if (pascal == "NHeads") return "n_heads";
+        if (pascal == "MaxPosition") return "max_position_embeddings";
+        if (pascal == "HiddenDim") return "hidden_dim";
+        if (pascal == "VocabSize") return "vocab_size";
+        return pascal.ToLowerInvariant();
+    }
 }
 
 public sealed class DistilBertForSequenceClassification<T> : Module<T> where T : struct, INumber<T>
