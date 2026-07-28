@@ -93,6 +93,63 @@ internal sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber
         return oProj.Forward(MultiHeadAttention(Q, K, V, mask));
     }
 
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        var Q = qProj.Forward(input);
+        var K = kProj.Forward(input);
+        var V = vProj.Forward(input);
+
+        var mask = BuildBlockDiagonalMask(attentionMask, batchSize, seqLen);
+        return oProj.Forward(MultiHeadAttention(Q, K, V, mask));
+    }
+
+    static ReverseGradTensor<T> BuildBlockDiagonalMask(
+        ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        int N = batchSize * seqLen;
+        var maskData = new T[N * N];
+        var negInf = T.CreateChecked(double.NegativeInfinity);
+
+        for (int b = 0; b < batchSize; b++)
+        {
+            int offset = b * seqLen;
+
+            for (int j = 0; j < seqLen; j++)
+            {
+                int colIdx = offset + j;
+                if (attentionMask.Data[colIdx] == T.Zero)
+                {
+                    for (int i = 0; i < seqLen; i++)
+                    {
+                        int row = offset + i;
+                        maskData[row * N + colIdx] = negInf;
+                    }
+                }
+            }
+
+            for (int other = 0; other < batchSize; other++)
+            {
+                if (other == b) continue;
+                int otherOffset = other * seqLen;
+                for (int i = 0; i < seqLen; i++)
+                {
+                    int row = offset + i;
+                    for (int j = 0; j < seqLen; j++)
+                    {
+                        int otherCol = otherOffset + j;
+                        maskData[row * N + otherCol] = negInf;
+                    }
+                }
+            }
+        }
+
+        var maskCol = NivaraColumn<T>.Create(maskData);
+        var tensor = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
+        tensor.Reshape(N, N);
+        return tensor;
+    }
+
     ReverseGradTensor<T> MultiHeadAttention(
         ReverseGradTensor<T> Q, ReverseGradTensor<T> K, ReverseGradTensor<T> V,
         ReverseGradTensor<T>? mask)
@@ -173,6 +230,21 @@ internal sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
         h2 = ReverseGradOperations.Add(h2, h);
         return h2;
     }
+
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        var h = ln1.Forward(input);
+        h = attn.ForwardBatched(h, attentionMask, batchSize, seqLen);
+        h = ReverseGradOperations.Add(h, input);
+
+        var h2 = ln2.Forward(h);
+        h2 = fc1.Forward(h2);
+        h2 = ReverseGradOperations.Gelu(h2);
+        h2 = fc2.Forward(h2);
+        h2 = ReverseGradOperations.Add(h2, h);
+        return h2;
+    }
 }
 
 internal sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
@@ -232,6 +304,27 @@ internal sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
 
         foreach (var layer in layers)
             hidden = layer.ForwardWithMask(hidden, paddingMask);
+
+        return hidden;
+    }
+
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        var posIds = new T[batchSize * seqLen];
+        for (int b = 0; b < batchSize; b++)
+            for (int i = 0; i < seqLen; i++)
+                posIds[b * seqLen + i] = T.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        posEmbInput.Reshape(batchSize * seqLen);
+
+        var wordEmb = wordEmbed.Forward(input);
+        var posEmb = posEmbed.Forward(posEmbInput);
+        var hidden = ReverseGradOperations.Add(wordEmb, posEmb);
+        hidden = embedLn.Forward(hidden);
+
+        foreach (var layer in layers)
+            hidden = layer.ForwardBatched(hidden, attentionMask, batchSize, seqLen);
 
         return hidden;
     }
