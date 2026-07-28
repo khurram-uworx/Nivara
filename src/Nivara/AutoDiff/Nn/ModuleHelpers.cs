@@ -23,15 +23,20 @@ internal static class ModuleHelpers<T> where T : struct, INumber<T>
 
     internal static ReverseGradTensor<T> CreateCausalMask(int L)
     {
-        var maskData = new T[L * L];
-        for (int i = 0; i < L; i++)
-            for (int j = 0; j < L; j++)
+        return CreateCausalMask(L, L);
+    }
+
+    internal static ReverseGradTensor<T> CreateCausalMask(int qLen, int kvLen)
+    {
+        var maskData = new T[qLen * kvLen];
+        for (int i = 0; i < qLen; i++)
+            for (int j = 0; j < kvLen; j++)
                 if (j > i)
-                    maskData[i * L + j] = T.CreateChecked(double.NegativeInfinity);
+                    maskData[i * kvLen + j] = T.CreateChecked(double.NegativeInfinity);
 
         var col = NivaraColumn<T>.Create(maskData);
         var tensor = new ReverseGradTensor<T>(col, requiresGrad: false);
-        tensor.Reshape(L, L);
+        tensor.Reshape(qLen, kvLen);
         return tensor;
     }
 
