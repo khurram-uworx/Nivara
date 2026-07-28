@@ -3,7 +3,7 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
-namespace NivaraInference;
+namespace Nivara.Samples;
 
 public sealed record BertConfig
 {

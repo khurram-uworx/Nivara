@@ -3,9 +3,9 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 
-namespace NivaraInference;
+namespace Nivara.Samples;
 
-internal static class SafeTensorsLoader
+public static class SafeTensorsLoader
 {
     public static Dictionary<string, (float[] Data, int[] Shape)> Read(string path)
     {
