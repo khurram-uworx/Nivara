@@ -356,6 +356,12 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
         return L2Normalize(clsToken, config.HiddenSize);
     }
 
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        return encoder.ForwardBatched(input, attentionMask, batchSize, seqLen);
+    }
+
     static ReverseGradTensor<T> ExtractRow(ReverseGradTensor<T> matrix, int row, int cols)
     {
         int offset = row * cols;
