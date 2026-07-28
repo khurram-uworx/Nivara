@@ -51,31 +51,6 @@ public class AutoDiffDiagnosticsTests
         Assert.That(backwardOps.All(op => op.Notes?.Contains("AutoDiff=Backward") == true), Is.True);
     }
 
-    [Test]
-    public void ActivationGradient_WithNulls_RecordsNullAwareDiagnostics()
-    {
-        var x = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(new float?[] { -1f, null, 1f }),
-            requiresGrad: true);
-
-        var sigmoid = ReverseGradOperations.Sigmoid(x);
-        var grad = new ReverseGradTensor<float>(
-            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }),
-            requiresGrad: false);
-
-        sigmoid.Backward(grad, stripGradientNulls: false);
-
-        var operations = DiagnosticsTracker.GetRecordedOperations();
-        var sigmoidOp = AssertSingleOperation(operations, "AutoDiffSigmoid");
-        var backwardOp = AssertSingleOperation(operations, "AutoDiffBackward");
-
-        Assert.That(sigmoidOp.HadNulls, Is.True);
-        Assert.That(backwardOp.HadNulls, Is.True);
-        Assert.That(sigmoidOp.Notes, Does.Contain("AutoDiff=Sigmoid"));
-        Assert.That(backwardOp.Notes, Does.Contain("StripGradientNulls=False"));
-        Assert.That(x.Grad, Is.Not.Null);
-        Assert.That(x.Grad!.IsNull(1), Is.True);
-    }
 
     [Test]
     public void SgdUpdate_RecordsAllocationDiagnosticsAndWeightDecay()

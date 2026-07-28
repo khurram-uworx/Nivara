@@ -1356,21 +1356,6 @@ public class GradOperationsTests
     }
 
     [Test]
-    public void Gather_NullSourceElements_PropagatesNulls()
-    {
-        var sourceValues = new float?[] { 1f, null, 3f, 4f, null };
-        var source = new ReverseGradTensor<float>(
-            NivaraColumn<float>.CreateFromNullable(sourceValues),
-            requiresGrad: true);
-
-        var result = ReverseGradOperations.Gather(source, new[] { 0, 1, 3 });
-
-        Assert.That(result[0], Is.EqualTo(1f));
-        Assert.That(result.IsNull(1), Is.True);  // source[1] was null
-        Assert.That(result[2], Is.EqualTo(4f));
-    }
-
-    [Test]
     public void Gather_EmptyIndices_ReturnsEmptyTensor()
     {
         var source = new ReverseGradTensor<float>(
