@@ -1,4 +1,5 @@
 using Nivara.Samples;
+using NivaraFineTuning;
 
 var modelPath = FindPath("distilbert-base-uncased");
 var dataPath = FindPath("sst2");
@@ -21,6 +22,7 @@ Console.WriteLine($"Data:  {dataPath}");
 var dataset = Sst2Dataset.Load(dataPath);
 Console.WriteLine($"Train examples: {dataset.Train.Count}");
 Console.WriteLine($"Dev examples:   {dataset.Dev.Count}");
+return 0;
 
 static string? FindPath(string name)
 {

@@ -42,12 +42,12 @@ public sealed record BertConfig
     }
 }
 
-internal sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber<T>
 {
-    internal readonly Linear<T> qProj;
-    internal readonly Linear<T> kProj;
-    internal readonly Linear<T> vProj;
-    internal readonly Linear<T> oProj;
+    public readonly Linear<T> qProj;
+    public readonly Linear<T> kProj;
+    public readonly Linear<T> vProj;
+    public readonly Linear<T> oProj;
     readonly int _numHeads;
     readonly int _headDim;
     readonly T _scale;
@@ -185,13 +185,13 @@ internal sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber
     }
 }
 
-internal sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
 {
-    internal readonly LayerNorm<T> ln1;
-    internal readonly BertSelfAttention<T> attn;
-    internal readonly LayerNorm<T> ln2;
-    internal readonly Linear<T> fc1;
-    internal readonly Linear<T> fc2;
+    public readonly LayerNorm<T> ln1;
+    public readonly BertSelfAttention<T> attn;
+    public readonly LayerNorm<T> ln2;
+    public readonly Linear<T> fc1;
+    public readonly Linear<T> fc2;
 
     public BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps)
     {
@@ -247,12 +247,12 @@ internal sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
     }
 }
 
-internal sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
 {
-    internal readonly Embedding<T> wordEmbed;
-    internal readonly Embedding<T> posEmbed;
-    internal readonly LayerNorm<T> embedLn;
-    internal readonly BertLayer<T>[] layers;
+    public readonly Embedding<T> wordEmbed;
+    public readonly Embedding<T> posEmbed;
+    public readonly LayerNorm<T> embedLn;
+    public readonly BertLayer<T>[] layers;
 
     public BertEncoder(BertConfig config)
     {
