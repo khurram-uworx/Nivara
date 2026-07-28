@@ -636,14 +636,17 @@ class Program
         Console.WriteLine($"Parameters: {totalParams:N0}");
         Console.WriteLine();
 
-        int seqLen = 8;
-        var tokenIds = new float[seqLen];
-        for (int i = 0; i < seqLen; i++) tokenIds[i] = i;
-        var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
-        input.Reshape(seqLen);
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var input = MiniLMTokenizer.Tokenize(tokenizer, text, maxLen: 128);
 
-        Console.WriteLine($"Input: [{string.Join(", ", tokenIds.Select(x => (int)x))}] (seqLen={seqLen})");
+        Console.WriteLine($"Input text: \"{text}\"");
+        var inputData = new float[input.Length];
+        input.Data.TryGetSpan(out var inSpan);
+        if (!inSpan.IsEmpty) inSpan.CopyTo(inputData);
+        Console.WriteLine($"Input tokens (first 10): [{string.Join(", ", inputData.Take(10).Select(x => (int)x))}] (seqLen={input.Length})");
 
+        model.Eval();
         var fwdSw = Stopwatch.StartNew();
         var output = model.Forward(input);
         fwdSw.Stop();
@@ -681,13 +684,12 @@ class Program
         var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
         var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
 
-        int seqLen = 128;
-        var tokenIds = new float[seqLen];
-        for (int i = 0; i < seqLen; i++) tokenIds[i] = i % 100;
-        var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
-        input.Reshape(seqLen);
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the MiniLM model inference across multiple tokens for benchmarking purposes.";
+        var input = MiniLMTokenizer.Tokenize(tokenizer, text, maxLen: 128);
 
-        Console.WriteLine($"Input: seqLen={seqLen}");
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: {input.Length}");
         Console.WriteLine();
 
         Console.WriteLine("Warmup (3 passes)...");
@@ -737,14 +739,11 @@ class Program
             Console.WriteLine($"  [{i}] {sentences[i]}");
         Console.WriteLine();
 
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
         var embeddings = new float[sentences.Length][];
         for (int s = 0; s < sentences.Length; s++)
         {
-            int seqLen = 8;
-            var tokenIds = new float[seqLen];
-            for (int i = 0; i < seqLen; i++) tokenIds[i] = i;
-            var input = Nivara.AutoDiff.ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
-            input.Reshape(seqLen);
+            var input = MiniLMTokenizer.Tokenize(tokenizer, sentences[s], maxLen: 128);
 
             var output = model.Forward(input);
             var outputData = new float[output.Length];
@@ -770,8 +769,6 @@ class Program
             Console.WriteLine();
         }
         Console.WriteLine();
-        Console.WriteLine("(Note: using synthetic token IDs, not real tokenization)");
-        Console.WriteLine("(Similarities are random until tokenizer is connected)");
 
         return 0;
     }

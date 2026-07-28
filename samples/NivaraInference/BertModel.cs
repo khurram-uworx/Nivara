@@ -49,36 +49,83 @@ internal sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber
     internal readonly Linear<T> kProj;
     internal readonly Linear<T> vProj;
     internal readonly Linear<T> oProj;
-    internal readonly MultiheadAttention<T> attn;
+    readonly int _numHeads;
+    readonly int _headDim;
+    readonly T _scale;
 
     public BertSelfAttention(int embedDim, int numHeads)
     {
-        qProj = new Linear<T>(embedDim, embedDim, bias: true);
-        kProj = new Linear<T>(embedDim, embedDim, bias: true);
-        vProj = new Linear<T>(embedDim, embedDim, bias: true);
-        oProj = new Linear<T>(embedDim, embedDim, bias: true);
-        attn = new MultiheadAttention<T>(embedDim, numHeads, causal: false);
-        RegisterModules(qProj, kProj, vProj, oProj, attn);
+        qProj = new Linear<T>(embedDim, embedDim);
+        kProj = new Linear<T>(embedDim, embedDim);
+        vProj = new Linear<T>(embedDim, embedDim);
+        oProj = new Linear<T>(embedDim, embedDim);
+        _numHeads = numHeads;
+        _headDim = embedDim / numHeads;
+        _scale = T.CreateChecked(1.0 / Math.Sqrt(_headDim));
+        RegisterModules(qProj, kProj, vProj, oProj);
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
-        var q = qProj.Forward(input);
-        var k = kProj.Forward(input);
-        var v = vProj.Forward(input);
-        var attnOut = attn.Forward(q, k, v);
-        return oProj.Forward(attnOut);
+        var Q = qProj.Forward(input);
+        var K = kProj.Forward(input);
+        var V = vProj.Forward(input);
+        return oProj.Forward(MultiHeadAttention(Q, K, V, null));
     }
 
     public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
     {
-        var q = qProj.Forward(input);
-        var k = kProj.Forward(input);
-        var v = vProj.Forward(input);
-        var attnOut = paddingMask != null
-            ? attn.Forward(q, k, v, paddingMask: paddingMask)
-            : attn.Forward(q, k, v);
-        return oProj.Forward(attnOut);
+        var Q = qProj.Forward(input);
+        var K = kProj.Forward(input);
+        var V = vProj.Forward(input);
+
+        ReverseGradTensor<T>? mask = null;
+        if (paddingMask != null)
+        {
+            int L = Q.Shape[0];
+            var maskData = new T[L * L];
+            for (int j = 0; j < paddingMask.Length && j < L; j++)
+                if (paddingMask.Data[j] is T pv && float.CreateChecked(pv) < 0.5f)
+                    for (int i = 0; i < L; i++)
+                        maskData[i * L + j] = T.CreateChecked(float.NegativeInfinity);
+            mask = ReverseGradTensor<T>.FromMatrix(maskData, L, L, requiresGrad: false);
+        }
+
+        return oProj.Forward(MultiHeadAttention(Q, K, V, mask));
+    }
+
+    ReverseGradTensor<T> MultiHeadAttention(
+        ReverseGradTensor<T> Q, ReverseGradTensor<T> K, ReverseGradTensor<T> V,
+        ReverseGradTensor<T>? mask)
+    {
+        int L = Q.Shape[0];
+        var scaleData = new T[L * L];
+        Array.Fill(scaleData, _scale);
+        var scaleTensor = ReverseGradTensor<T>.FromArray(scaleData, requiresGrad: false);
+        scaleTensor.Reshape(L, L);
+
+        var heads = new ReverseGradTensor<T>[_numHeads];
+
+        for (int h = 0; h < _numHeads; h++)
+        {
+            int hs = h * _headDim;
+
+            var Q_h = ReverseGradOperations.Slice(Q, hs, _headDim);
+            var K_h = ReverseGradOperations.Slice(K, hs, _headDim);
+            var V_h = ReverseGradOperations.Slice(V, hs, _headDim);
+
+            var K_h_T = ReverseGradOperations.Transpose(K_h);
+            var scores = ReverseGradOperations.MatMul(Q_h, K_h_T);
+            scores = ReverseGradOperations.Multiply(scores, scaleTensor);
+
+            if (mask != null)
+                scores = ReverseGradOperations.Add(scores, mask);
+
+            var weights = ReverseGradOperations.Softmax(scores);
+            heads[h] = ReverseGradOperations.MatMul(weights, V_h);
+        }
+
+        return ReverseGradOperations.Concat(heads, axis: 1);
     }
 }
 
@@ -206,17 +253,33 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         var hidden = encoder.Forward(input);
-        var clsToken = ReverseGradOperations.Slice(hidden, 0, 1);
-        clsToken.Reshape(config.HiddenSize);
+        var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
         return L2Normalize(clsToken, config.HiddenSize);
     }
 
     public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
     {
         var hidden = encoder.ForwardWithMask(input, paddingMask);
-        var clsToken = ReverseGradOperations.Slice(hidden, 0, 1);
-        clsToken.Reshape(config.HiddenSize);
+        var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
         return L2Normalize(clsToken, config.HiddenSize);
+    }
+
+    static ReverseGradTensor<T> ExtractRow(ReverseGradTensor<T> matrix, int row, int cols)
+    {
+        int offset = row * cols;
+        var data = new T[cols];
+        matrix.Data.TryGetSpan(out var span);
+        if (!span.IsEmpty)
+            span.Slice(offset, cols).CopyTo(data);
+        else
+        {
+            var full = new T[matrix.Length];
+            matrix.Data.CopyTo(full, default(T)!);
+            Array.Copy(full, offset, data, 0, cols);
+        }
+        var result = ReverseGradTensor<T>.FromArray(data, requiresGrad: false);
+        result.Reshape(cols);
+        return result;
     }
 
     static ReverseGradTensor<T> L2Normalize(ReverseGradTensor<T> vec, int hiddenSize)
@@ -295,5 +358,45 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
         if (tensors.TryGetValue($"{prefix}.bias", out var b))
             dict["Bias"] = ReverseGradTensor<float>.FromArray(b.Data);
         if (dict.Count > 0) ln.LoadStateDict(dict);
+    }
+}
+
+public static class MiniLMTokenizer
+{
+    public static Microsoft.ML.Tokenizers.BertTokenizer Load(string vocabPath)
+    {
+        return Microsoft.ML.Tokenizers.BertTokenizer.Create(vocabPath);
+    }
+
+    public static (float[] TokenIds, float[] AttentionMask, int SeqLen) Encode(
+        Microsoft.ML.Tokenizers.BertTokenizer tokenizer,
+        string text,
+        int maxLen = 128)
+    {
+        var ids = tokenizer.EncodeToIds(text, addSpecialTokens: true);
+        int seqLen = Math.Min(ids.Count, maxLen);
+        var tokenIds = new float[maxLen];
+        var attentionMask = new float[maxLen];
+
+        for (int i = 0; i < seqLen; i++)
+        {
+            tokenIds[i] = ids[i];
+            attentionMask[i] = 1f;
+        }
+        for (int i = seqLen; i < maxLen; i++)
+            tokenIds[i] = tokenizer.PaddingTokenId;
+
+        return (tokenIds, attentionMask, seqLen);
+    }
+
+    public static ReverseGradTensor<float> Tokenize(
+        Microsoft.ML.Tokenizers.BertTokenizer tokenizer,
+        string text,
+        int maxLen = 128)
+    {
+        var (tokenIds, _, _) = Encode(tokenizer, text, maxLen);
+        var input = ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
+        input.Reshape(tokenIds.Length);
+        return input;
     }
 }

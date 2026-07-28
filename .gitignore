@@ -325,6 +325,8 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
+.mimocode
+
 # Memori logs
 /.memori/Log.*
 
@@ -332,14 +334,17 @@ FodyWeavers.xsd
 .codememory/
 .codememory.json
 
-.mimocode
 samples/data/sentiment_data.csv
 samples/data/classifier.model*
-/samples/data/nivarachat
-samples/data/mobilenet_v2/
-samples/data/resnet18/
+
 samples/data/compare_logits.bin
 samples/data/compare_logits_cs.bin
 samples/data/compare_mobilenet_logits.bin
 samples/data/compare_stem_conv.bin
+
 samples/data/diag/
+samples/data/nivarachat
+
+samples/data/mobilenet_v2/
+samples/data/resnet18/
+samples/data/minilm/
