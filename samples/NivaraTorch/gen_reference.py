@@ -346,6 +346,31 @@ def run():
         print(f"  {name}: input={inp_shape} output={out_np.shape}")
 
     # =========================================================================
+    # GELU tests
+    # =========================================================================
+    gelu_cases = [
+        ("gelu_1d", (32,)),
+        ("gelu_4d", (1, 8, 4, 4)),
+    ]
+
+    for name, inp_shape in gelu_cases:
+        inp = torch.randn(inp_shape, generator=rng)
+        out = F.gelu(inp)
+
+        inp_np = inp.numpy().astype(np.float32)
+        out_np = out.numpy().astype(np.float32)
+
+        inp_np.tofile(os.path.join(TEST_DIR, f"{name}_input.bin"))
+        out_np.tofile(os.path.join(TEST_DIR, f"{name}_output.bin"))
+
+        manifest[name] = {
+            "layer": "GELU",
+            "input_shape": list(inp_shape),
+            "output_shape": list(out_np.shape),
+        }
+        print(f"  {name}: input={inp_shape} output={out_np.shape}")
+
+    # =========================================================================
     # MaxPool2d tests
     # =========================================================================
     pool_cases = [
