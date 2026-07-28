@@ -12,15 +12,17 @@ Includes Python (PyTorch) reference implementations for direct performance compa
 
 ## Supported models
 
-| Model | Weight size | Tensors | Parameters | Output classes |
-|-------|-------------|---------|------------|----------------|
-| MobileNetV2 | 13.5 MB | 262 | 3.4M | 1001 |
-| ResNet-18 | 44.6 MB | 102 | 11.7M | 1000 |
+| Model | Weight size | Tensors | Parameters | Output |
+|-------|-------------|---------|------------|--------|
+| MobileNetV2 | 13.5 MB | 262 | 3.4M | 1001 classes |
+| ResNet-18 | 44.6 MB | 102 | 11.7M | 1000 classes |
+| MiniLM (L6-v2) | 91 MB | 96 | 22.7M | 384-dim embedding |
 
 Models are downloaded to `samples/data/` via HuggingFace CLI:
 ```bash
 hf download google/mobilenet_v2_1.0_224 --local-dir samples/data/mobilenet_v2
 hf download timm/resnet18.augreg_in1k --local-dir samples/data/resnet18
+hf download sentence-transformers/all-MiniLM-L6-v2 --local-dir samples/data/minilm
 ```
 
 ## Usage
@@ -28,26 +30,34 @@ hf download timm/resnet18.augreg_in1k --local-dir samples/data/resnet18
 ### C# (Nivara)
 
 ```bash
-# Random-data inference
+# Vision model: random-data inference
 dotnet run --project samples/NivaraInference -- mobilenet_v2
 dotnet run --project samples/NivaraInference -- resnet18
 
-# Benchmark: 10 passes on synthetic data + real images from samples/data/images/
+# Vision model: benchmark 10 passes on synthetic data + real images
 dotnet run --project samples/NivaraInference -- mobilenet_v2 benchmark
 dotnet run --project samples/NivaraInference -- resnet18 benchmark
 
-# Compare: run forward pass on shared input, print logits for Python comparison
-# Requires samples/data/compare_input.bin (generate via: python Python/generate_input.py)
+# Vision model: compare with Python reference
 dotnet run --project samples/NivaraInference -- mobilenet_v2 compare
 dotnet run --project samples/NivaraInference -- resnet18 compare
 
-# Diagnostics: step-by-step intermediate tensors saved to samples/data/diag/
+# Vision model: step-by-step diagnostics
 dotnet run --project samples/NivaraInference -- mobilenet_v2 compare_diag
 dotnet run --project samples/NivaraInference -- resnet18 compare_diag
 
-# Single image inference
+# Vision model: single image inference
 dotnet run --project samples/NivaraInference -- mobilenet_v2 path/to/image.jpg
 dotnet run --project samples/NivaraInference -- resnet18 path/to/image.jpg
+
+# MiniLM: tokenize + embed a sentence
+dotnet run --project samples/NivaraInference -- minilm
+
+# MiniLM: benchmark (10 passes)
+dotnet run --project samples/NivaraInference -- minilm benchmark
+
+# MiniLM: pairwise cosine similarity demo
+dotnet run --project samples/NivaraInference -- minilm similarity
 ```
 
 ### Python (PyTorch reference)
@@ -92,8 +102,7 @@ The ResNet-18 gap is smaller because it has fewer depthwise-separable convolutio
 Custom zero-dependency reader that parses the SafeTensors binary format directly:
 - Memory-mapped header parsing via `System.Text.Json`
 - Zero-copy tensor extraction using `MemoryMarshal.Cast<byte, float>`
-- Skips non-F32 tensors silently (e.g., I64 `num_batches_tracked`)
-- Throws `NotSupportedException` with guidance for BF16 tensors
+- Throws `NotSupportedException` for non-F32 tensors (e.g., F16, BF16) with clear guidance
 
 ### MobileNetV2
 
@@ -109,9 +118,22 @@ Custom zero-dependency reader that parses the SafeTensors binary format directly
 - 4 stages with channel progression: 64 → 128 → 256 → 512
 - Global average pooling → linear classifier
 
+### MiniLM (sentence-transformers/all-MiniLM-L6-v2)
+
+- 6-layer **pre-norm BERT** encoder with GELU activation (not ReLU²)
+- **Embedding lookup** via `ReverseGradOperations.Gather` — direct row indexing, no one-hot+MatMul waste
+- **Bidirectional self-attention** with optional padding mask support
+- **[CLS] token pooling** — extracts first token embedding from the output sequence
+- **L2 normalization** — output embedding normalized to unit length for cosine similarity
+- **384-dimensional output** sentence embeddings suitable for semantic similarity
+- Tokenization via **Microsoft.ML.Tokenizers.BertTokenizer** (sample-only dependency)
+- Exercises: `Embedding<T>` (Gather path), `LayerNorm<T>`, `GELU`, `MultiheadAttention<T>` (with padding mask), `Linear<T>`
+
 ### Weight loading
 
 Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor names to Nivara module parameters. No reflection or generic deserialization — explicit, type-safe loading.
+
+**MiniLM weight mapping** (96 tensors): HuggingFace safetensors keys like `encoder.layers.N.attention.self.query.weight` are mapped to Nivara `Linear<T>` weight/bias fields via explicit lookup in `MiniLMDistilled.LoadWeights`.
 
 ## Sample images
 
@@ -127,7 +149,7 @@ Shared comparison fixtures live in `samples/data/`:
 | `mobilenet_v2/model.safetensors` | `hf download google/mobilenet_v2_1.0_224` | MobileNetV2 weights |
 | `resnet18/model.safetensors` | `hf download timm/resnet18.augreg_in1k` | ResNet-18 weights |
 
-## Nivara core gaps exercised
+## Nivara core gaps exercised (vision models)
 
 - **Conv2d** with asymmetric padding, grouped convolutions, 1×1 fast path
 - **BatchNorm2d** with running statistics for inference mode
@@ -135,3 +157,14 @@ Shared comparison fixtures live in `samples/data/`:
 - **AdaptiveAvgPool2d** with gradient broadcast
 - **Linear** with matrix multiply + bias broadcast
 - **Module<T>** tree with `LoadStateDict` for parameter loading
+
+## Nivara core gaps exercised (MiniLM)
+
+- **Embedding<T>** Gather-based lookup (no one-hot+MatMul)
+- **LayerNorm<T>** with affine parameters and configurable epsilon
+- **GELU activation** — tanh approximation via `Activation.Gelu`
+- **MultiheadAttention<T>** bidirectional mode with optional padding mask
+- **Pre-norm transformer** architecture (LayerNorm before attention/FFN, not after)
+- **[CLS] token pooling** and **L2 normalization** for sentence embeddings
+- **`Microsoft.ML.Tokenizers`** integration for BERT tokenization
+- **`Module<T>.Eval()`** for inference mode (disables dropout, though MiniLM has none)
