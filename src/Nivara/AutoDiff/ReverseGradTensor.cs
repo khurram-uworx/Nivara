@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
@@ -43,6 +44,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     public ReverseGradTensor(NivaraColumn<T> data, bool requiresGrad = false)
         : base(data)
     {
+        Debug.Assert(data is null || !data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
         RequiresGrad = requiresGrad;
         GradFn = null;
     }
@@ -53,6 +55,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     internal ReverseGradTensor(NivaraColumn<T> data, bool requiresGrad, int[] shape)
         : base(data, shape)
     {
+        Debug.Assert(data is null || !data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
         RequiresGrad = requiresGrad;
         GradFn = null;
     }

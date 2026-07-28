@@ -130,7 +130,7 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, INumber<
 
         ReverseGradTensor<T>? mask = null;
         if (useCausal)
-            mask = ModuleHelpers<T>.CreateCausalMask(qLen);
+            mask = ModuleHelpers<T>.CreateCausalMask(qLen, kvLen);
         else if (paddingMask != null)
             mask = CreatePaddingMask(paddingMask, qLen, kvLen);
 

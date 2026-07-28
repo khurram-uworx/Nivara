@@ -17,7 +17,7 @@ Results show <0.04% loss-curve divergence and 1e-5 JVP tolerance.
 
 ### Per-Layer PyTorch ↔ Nivara Comparison
 
-Formal A/B validation of every NN layer type. PyTorch generates reference tensors via `gen_reference.py`, Nivara reproduces them to machine precision across 45 test cases covering Conv2d, Conv1d, BatchNorm, ReLU, LeakyRelu, Sigmoid, Tanh, MaxPool, AdaptiveAvgPool, Linear, Embedding, Dropout, RMSNorm, LayerNorm, Softmax, LogSoftmax, MatMul, and all loss functions (BCE, CrossEntropy, MSE, L1). Full-model logits match Python to 6+ decimal places for both MobileNetV2 and ResNet-18.
+Formal A/B validation of every NN layer type. PyTorch generates reference tensors via `gen_reference.py`, Nivara reproduces them to machine precision across 47 test cases covering Conv2d, Conv1d, BatchNorm, ReLU, LeakyRelu, Sigmoid, Tanh, MaxPool, AdaptiveAvgPool, Linear, Embedding, Dropout, RMSNorm, LayerNorm, Softmax, LogSoftmax, MatMul, GELU, and all loss functions (BCE, CrossEntropy, MSE, L1). Full-model logits match Python to 6+ decimal places for both MobileNetV2 and ResNet-18.
 
 Key characteristics:
 - **45 PyTorch reference fixtures** — float32 binary files in `samples/data/torch-comparison/`
@@ -97,13 +97,15 @@ Key characteristics:
 
 ## [NivaraInference/README.md](NivaraInference/README.md) — HuggingFace Vision Model Inference
 
-Loads pre-trained HuggingFace vision models (MobileNetV2, ResNet-18) using a custom zero-dependency SafeTensors reader and runs forward inference entirely within Nivara's AutoDiff engine. No third-party ML framework dependencies.
+Loads pre-trained HuggingFace models (MobileNetV2, ResNet-18, MiniLM-L6-v2) using a custom zero-dependency SafeTensors reader and runs forward inference entirely within Nivara's AutoDiff engine. No third-party ML framework dependencies.
 
 Key characteristics:
-- **Custom SafeTensors loader** — zero-dependency binary parser with MemoryMarshal.Cast for F32, skips non-F32 tensors
+- **Custom SafeTensors loader** — zero-dependency binary parser with MemoryMarshal.Cast for F32, throws on unsupported dtypes (F16, BF16)
 - **MobileNetV2** — 16 inverted residual blocks, depthwise separable convolutions, ReLU6 activation, residual skip connections (3.4M params)
 - **ResNet-18** — BasicBlock with 3x3 convolutions, identity/1x1 shortcut, 7x7 stem with MaxPool2d (11.7M params)
-- Exercises `Conv2d<T>` (asymmetric padding, grouped conv, 1x1 fast path), `BatchNorm2d<T>` (running stats), `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `Linear<T>`, `Module<T>.LoadStateDict`
+- **MiniLM-L6-v2** — 6-layer pre-norm BERT encoder with GELU activation, [CLS] pooling, L2 normalization (22.7M params, 384-dim embeddings)
+- Exercises vision: `Conv2d<T>`, `BatchNorm2d<T>`, `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `Linear<T>`
+- Exercises NLP: `Embedding<T>` (Gather), `LayerNorm<T>`, `GELU`, `MultiheadAttention<T>` (padding mask), `Linear<T>`
 - Models downloaded via `hf` CLI to `samples/data/`
 
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation

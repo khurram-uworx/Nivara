@@ -46,7 +46,7 @@ internal static class SafeTensorsLoader
             string name = property.Name;
 
             if (dtype != "F32")
-                continue;
+                ValidateDtype(dtype, name);
 
             var shapeArray = tensor.GetProperty("shape");
             var offsets = tensor.GetProperty("data_offsets");

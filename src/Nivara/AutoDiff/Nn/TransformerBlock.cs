@@ -102,9 +102,8 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
         var xMLPNorm = ApplyNorm(x, L, D);
 
         var mlp1 = mlpFc1.Forward(xMLPNorm);
-        var relu = ReverseGradOperations.Relu(mlp1);
-        var squared = ReverseGradOperations.Multiply(relu, relu);
-        var mlp2 = mlpFc2.Forward(squared);
+        var gelu = Activation.Gelu(mlp1);
+        var mlp2 = mlpFc2.Forward(gelu);
 
         var mlpDrop = residualDropout != null ? residualDropout.Forward(mlp2) : mlp2;
         x = ReverseGradOperations.Add(mlpDrop, xResidual);

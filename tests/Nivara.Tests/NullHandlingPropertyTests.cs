@@ -1,3 +1,4 @@
+using Nivara.Tensors;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -95,6 +96,51 @@ public class NullHandlingPropertyTests
                 }
             }
         }
+    }
+
+    [Test]
+    public void NullMaskMaintenance_ActivationOperation_GeluPropagatesNulls()
+    {
+        var testCases = new[]
+        {
+            new float?[] { 0f, null, 1f, null, -1f },
+            new float?[] { null, null, null },
+            new float?[] { 2f, -2f, 0.5f }
+        };
+
+        foreach (var values in testCases)
+        {
+            if (values.Length == 0) continue;
+
+            var column = NivaraColumn<float>.CreateFromNullable(values);
+
+            var result = column.Gelu();
+
+            for (int i = 0; i < values.Length; i++)
+            {
+                if (values[i] == null)
+                {
+                    Assert.That(result.IsNull(i), Is.True,
+                        $"Position {i} should be null after GELU");
+                }
+                else
+                {
+                    Assert.That(result.IsNull(i), Is.False,
+                        $"Position {i} should not be null after GELU");
+                    float expected = GeluTanhApprox(values[i]!.Value);
+                    Assert.That(result[i], Is.EqualTo(expected).Within(1e-6f),
+                        $"Position {i} should have correct GELU value");
+                }
+            }
+        }
+    }
+
+    static float GeluTanhApprox(float x)
+    {
+        const double sqrt2OverPi = 0.7978845608028654;
+        const double coeff = 0.044715;
+        double inner = sqrt2OverPi * (x + coeff * x * x * x);
+        return (float)(0.5 * x * (1.0 + Math.Tanh(inner)));
     }
 
     [Test]
