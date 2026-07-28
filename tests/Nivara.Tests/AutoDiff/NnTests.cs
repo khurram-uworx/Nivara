@@ -2774,6 +2774,86 @@ public class NnTests
     }
 
     [Test]
+    public void MultiheadAttention_PaddingMask_ShapeCorrect()
+    {
+        using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[6 * 32]),
+            requiresGrad: false);
+        input.Reshape(6, 32);
+
+        var paddingMask = ReverseGradTensor<float>.FromArray(
+            new float[] { 1f, 1f, 1f, 1f, 0f, 0f }, requiresGrad: false);
+
+        var output = mha.Forward(input, paddingMask);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 6, 32 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void MultiheadAttention_PaddingMask_BackwardFlows()
+    {
+        using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[4 * 32].Select(_ => 0.1f).ToArray()),
+            requiresGrad: true);
+        input.Reshape(4, 32);
+
+        var paddingMask = ReverseGradTensor<float>.FromArray(
+            new float[] { 1f, 1f, 0f, 0f }, requiresGrad: false);
+
+        var output = mha.Forward(input, paddingMask);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Repeat(1f, output.Length).ToArray()),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < input.Grad!.Length; i++)
+        {
+            Assert.That(float.IsNaN(input.Grad[i]), Is.False);
+            Assert.That(float.IsInfinity(input.Grad[i]), Is.False);
+        }
+
+        foreach (var p in mha.Parameters())
+        {
+            Assert.That(p.Value.Grad, Is.Not.Null);
+            for (int i = 0; i < p.Value.Grad!.Length; i++)
+            {
+                Assert.That(float.IsNaN(p.Value.Grad[i]), Is.False);
+                Assert.That(float.IsInfinity(p.Value.Grad[i]), Is.False);
+            }
+        }
+    }
+
+    [Test]
+    public void MultiheadAttention_CrossAttention_PaddingMask_ShapeCorrect()
+    {
+        using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        var query = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[4 * 32]),
+            requiresGrad: false);
+        query.Reshape(4, 32);
+        var kv = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[6 * 32]),
+            requiresGrad: false);
+        kv.Reshape(6, 32);
+
+        var paddingMask = ReverseGradTensor<float>.FromArray(
+            new float[] { 1f, 1f, 1f, 1f, 0f, 0f }, requiresGrad: false);
+
+        var output = mha.Forward(query, kv, kv, causal: false, paddingMask: paddingMask);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 4, 32 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
     public void ConvVAE_Forward_ShapeCorrect()
     {
         using var cvae = new ConvVAE<float>(

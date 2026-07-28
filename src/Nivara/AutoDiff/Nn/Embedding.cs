@@ -32,16 +32,6 @@ public sealed class Embedding<T> : Module<T> where T : struct, INumber<T>
         init.Initialize(weight);
     }
 
-    static ReverseGradTensor<T> OneHot(int index, int vocabSize)
-    {
-        var data = new T[vocabSize];
-        data[index] = T.One;
-        var col = NivaraColumn<T>.Create(data);
-        var tensor = new ReverseGradTensor<T>(col, requiresGrad: false);
-        tensor.Reshape(1, vocabSize);
-        return tensor;
-    }
-
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -49,17 +39,6 @@ public sealed class Embedding<T> : Module<T> where T : struct, INumber<T>
         if (input.Length == 0)
             throw new ArgumentException("Embedding.Forward input tensor is empty.", nameof(input));
 
-        if (input.Length == 1)
-        {
-            var tokenId = int.CreateChecked(input.Data[0]);
-            return Forward(tokenId);
-        }
-
-        return ForwardBatched(input);
-    }
-
-    ReverseGradTensor<T> ForwardBatched(ReverseGradTensor<T> input)
-    {
         int[] originalShape = input.Shape;
         int totalTokens = input.Length;
 
@@ -76,21 +55,10 @@ public sealed class Embedding<T> : Module<T> where T : struct, INumber<T>
                     $"must be in range [0, {numEmbeddings}).");
         }
 
-        int vocabSize = numEmbeddings;
-        int embedDim = embeddingDim;
-
-        var oneHotData = new T[totalTokens * vocabSize];
-        for (int i = 0; i < totalTokens; i++)
-            oneHotData[i * vocabSize + tokenIds[i]] = T.One;
-
-        var oneHotCol = NivaraColumn<T>.Create(oneHotData);
-        var oneHotTensor = new ReverseGradTensor<T>(oneHotCol, requiresGrad: false);
-        oneHotTensor.Reshape(totalTokens, vocabSize);
-
-        var result = ReverseGradOperations.MatMul(oneHotTensor, weight.Tensor);
+        var result = ReverseGradOperations.Gather(weight.Tensor, tokenIds);
 
         if (originalShape.Length > 1)
-            result.Reshape(originalShape.Append(embedDim).ToArray());
+            result.Reshape(originalShape.Append(embeddingDim).ToArray());
 
         return result;
     }
@@ -100,8 +68,6 @@ public sealed class Embedding<T> : Module<T> where T : struct, INumber<T>
         if (tokenId < 0 || tokenId >= numEmbeddings)
             throw new ArgumentOutOfRangeException(nameof(tokenId));
 
-        var oneHot = OneHot(tokenId, numEmbeddings);
-        var emb = ReverseGradOperations.MatMul(oneHot, weight.Tensor);
-        return emb;
+        return ReverseGradOperations.Gather(weight.Tensor, [tokenId]);
     }
 }

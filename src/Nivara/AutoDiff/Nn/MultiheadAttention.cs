@@ -74,11 +74,29 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, INumber<
         return _attnDropout != null ? _attnDropout.Forward(xProj) : xProj;
     }
 
+    public new ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T> paddingMask)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (input.Rank != 2) throw new ArgumentException($"MultiheadAttention expects 2D input [L, D], got {input.Rank}D");
+
+        int L = input.shape[0];
+
+        var Q = _qProj.Forward(input);
+        var K = _kProj.Forward(input);
+        var V = _vProj.Forward(input);
+
+        var xAttn = ComputeAttention(Q, K, V, L, paddingMask: paddingMask);
+        var xProj = _oProj.Forward(xAttn);
+
+        return _attnDropout != null ? _attnDropout.Forward(xProj) : xProj;
+    }
+
     public ReverseGradTensor<T> Forward(
         ReverseGradTensor<T> query,
         ReverseGradTensor<T> key,
         ReverseGradTensor<T> value,
-        bool causal = false)
+        bool causal = false,
+        ReverseGradTensor<T>? paddingMask = null)
     {
         if (query == null) throw new ArgumentNullException(nameof(query));
         if (key == null) throw new ArgumentNullException(nameof(key));
@@ -90,7 +108,7 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, INumber<
         var K = _kProj.Forward(key);
         var V = _vProj.Forward(value);
 
-        var xAttn = ComputeAttention(Q, K, V, L, causal);
+        var xAttn = ComputeAttention(Q, K, V, L, causal, paddingMask);
         var xProj = _oProj.Forward(xAttn);
 
         return _attnDropout != null ? _attnDropout.Forward(xProj) : xProj;
@@ -101,7 +119,8 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, INumber<
         ReverseGradTensor<T> K,
         ReverseGradTensor<T> V,
         int qLen,
-        bool? overrideCausal = null)
+        bool? overrideCausal = null,
+        ReverseGradTensor<T>? paddingMask = null)
     {
         bool useCausal = overrideCausal ?? _causal;
         int kvLen = K.shape[0];
@@ -109,8 +128,31 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, INumber<
         var scaleTensor = GradientUtils.Full(qLen * kvLen, _attnScale);
         scaleTensor.Reshape(qLen, kvLen);
 
-        ReverseGradTensor<T>? mask = useCausal ? ModuleHelpers<T>.CreateCausalMask(qLen) : null;
+        ReverseGradTensor<T>? mask = null;
+        if (useCausal)
+            mask = ModuleHelpers<T>.CreateCausalMask(qLen);
+        else if (paddingMask != null)
+            mask = CreatePaddingMask(paddingMask, qLen, kvLen);
 
         return ModuleHelpers<T>.MultiHeadAttention(Q, K, V, _numHeads, _headDim, scaleTensor, mask);
+    }
+
+    ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLen, int kvLen)
+    {
+        int maskLen = paddingMask.Length;
+        var maskData = new T[qLen * kvLen];
+        var negInf = T.CreateChecked(double.NegativeInfinity);
+        for (int j = 0; j < maskLen; j++)
+        {
+            if (paddingMask.Data[j] == T.Zero)
+            {
+                for (int i = 0; i < qLen; i++)
+                    maskData[i * kvLen + j] = negInf;
+            }
+        }
+        var col = NivaraColumn<T>.Create(maskData);
+        var tensor = new ReverseGradTensor<T>(col, requiresGrad: false);
+        tensor.Reshape(qLen, kvLen);
+        return tensor;
     }
 }

@@ -14,6 +14,9 @@ public static class Activation
     public static ReverseGradTensor<T> Tanh<T>(ReverseGradTensor<T> input) where T : struct, INumber<T>
         => ReverseGradOperations.Tanh(input);
 
+    public static ReverseGradTensor<T> Gelu<T>(ReverseGradTensor<T> input) where T : struct, INumber<T>
+        => ReverseGradOperations.Gelu(input);
+
     public static ReverseGradTensor<T> LeakyRelu<T>(ReverseGradTensor<T> input, T negativeSlope = default)
         where T : struct, INumber<T>
         => ReverseGradOperations.LeakyRelu(input, negativeSlope);

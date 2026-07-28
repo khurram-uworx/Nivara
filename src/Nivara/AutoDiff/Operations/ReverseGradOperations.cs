@@ -532,6 +532,36 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("Relu", a.Shape));
     }
 
+    public static ReverseGradTensor<T> Gelu<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffGelu",
+            a.Length,
+            a.Data.HasNulls,
+            () =>
+            {
+                var result = a.Data.Gelu();
+
+                var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(a), PropagateShape(a));
+
+                if (GradientUtils.ShouldTrackGrad(a))
+                {
+                    var gradFn = new OpNode<T>("Gelu", new object[] { a }, (typedGradOutput, sgn) =>
+                    {
+                        var aGrad = a.Data.GeluGradient(typedGradOutput);
+                        AccumulateGradient(a, aGrad);
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            AutoDiffDiagnostics.ShapeNote("Gelu", a.Shape));
+    }
+
     public static ReverseGradTensor<T> Sigmoid<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));

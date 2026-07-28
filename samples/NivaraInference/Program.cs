@@ -19,7 +19,7 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18> [benchmark|compare|compare_diag|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm> [benchmark|similarity|compare|compare_diag|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
@@ -59,6 +59,9 @@ class Program
                 if (compareDiag) return RunCompareDiag(tensors, "resnet18");
                 if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
+            case "minilm":
+                bool similarity = mode == "similarity";
+                return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? RunMiniLMBenchmark(tensors) : RunMiniLMInference(tensors);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -614,5 +617,173 @@ class Program
             int idx = topIndices[i];
             Console.WriteLine($"  #{i + 1}: class {idx,5}  score={scores[idx]:F6}");
         }
+    }
+
+    static int RunMiniLMInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Inference ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var input = MiniLMTokenizer.Tokenize(tokenizer, text, maxLen: 128);
+
+        Console.WriteLine($"Input text: \"{text}\"");
+        var inputData = new float[input.Length];
+        input.Data.TryGetSpan(out var inSpan);
+        if (!inSpan.IsEmpty) inSpan.CopyTo(inputData);
+        Console.WriteLine($"Input tokens (first 10): [{string.Join(", ", inputData.Take(10).Select(x => (int)x))}] (seqLen={input.Length})");
+
+        model.Eval();
+        var fwdSw = Stopwatch.StartNew();
+        var output = model.Forward(input);
+        fwdSw.Stop();
+
+        var outputData = new float[output.Length];
+        output.Data.TryGetSpan(out var outSpan);
+        if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
+
+        Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output shape: [{output.Shape[^1]}]");
+        Console.WriteLine($"Output stats: min={outputData.Min():F6}, max={outputData.Max():F6}, mean={outputData.Average():F6}");
+        Console.Write("Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, outputData.Length); i++)
+        {
+            Console.Write($"{outputData[i]:F6}");
+            if (i < Math.Min(10, outputData.Length) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+
+        float norm = 0f;
+        foreach (var v in outputData) norm += v * v;
+        norm = MathF.Sqrt(norm);
+        Console.WriteLine($"L2 norm: {norm:F6} (should be ~1.0 for normalized embeddings)");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int RunMiniLMBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Benchmark ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the MiniLM model inference across multiple tokens for benchmarking purposes.";
+        var input = MiniLMTokenizer.Tokenize(tokenizer, text, maxLen: 128);
+
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: {input.Length}");
+        Console.WriteLine();
+
+        Console.WriteLine("Warmup (3 passes)...");
+        for (int i = 0; i < 3; i++)
+            model.Forward(input);
+
+        Console.WriteLine("Benchmarking (10 passes)...");
+        var times = new List<long>();
+        for (int i = 0; i < 10; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            model.Forward(input);
+            sw.Stop();
+            times.Add(sw.ElapsedMilliseconds);
+        }
+
+        double avg = times.Average();
+        double min = times.Min();
+        double max = times.Max();
+        Console.WriteLine($"  Average: {avg:F1} ms");
+        Console.WriteLine($"  Min:     {min} ms");
+        Console.WriteLine($"  Max:     {max} ms");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int RunMiniLMSimilarity(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Cosine Similarity Demo ===");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+
+        var sentences = new[]
+        {
+            "This is a cat.",
+            "This is a dog.",
+            "I love programming.",
+            "The weather is nice today.",
+            "I love coding."
+        };
+
+        Console.WriteLine($"Sentences ({sentences.Length}):");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.WriteLine($"  [{i}] {sentences[i]}");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        var embeddings = new float[sentences.Length][];
+        for (int s = 0; s < sentences.Length; s++)
+        {
+            var input = MiniLMTokenizer.Tokenize(tokenizer, sentences[s], maxLen: 128);
+
+            var output = model.Forward(input);
+            var outputData = new float[output.Length];
+            output.Data.TryGetSpan(out var outSpan);
+            if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
+            embeddings[s] = outputData;
+        }
+
+        Console.WriteLine("Cosine Similarity Matrix:");
+        Console.Write("       ");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.Write($"  [{i}]   ");
+        Console.WriteLine();
+
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            Console.Write($"  [{i}]  ");
+            for (int j = 0; j < sentences.Length; j++)
+            {
+                float sim = CosineSimilarity(embeddings[i], embeddings[j]);
+                Console.Write($"{sim,7:F4} ");
+            }
+            Console.WriteLine();
+        }
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static float CosineSimilarity(float[] a, float[] b)
+    {
+        float dot = 0f, normA = 0f, normB = 0f;
+        int len = Math.Min(a.Length, b.Length);
+        for (int i = 0; i < len; i++)
+        {
+            dot += a[i] * b[i];
+            normA += a[i] * a[i];
+            normB += b[i] * b[i];
+        }
+        float denom = MathF.Sqrt(normA) * MathF.Sqrt(normB);
+        return denom > 1e-12f ? dot / denom : 0f;
     }
 }
