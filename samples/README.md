@@ -20,7 +20,7 @@ Results show <0.04% loss-curve divergence and 1e-5 JVP tolerance.
 Formal A/B validation of every NN layer type. PyTorch generates reference tensors via `gen_reference.py`, Nivara reproduces them to machine precision across 47 test cases covering Conv2d, Conv1d, BatchNorm, ReLU, LeakyRelu, Sigmoid, Tanh, MaxPool, AdaptiveAvgPool, Linear, Embedding, Dropout, RMSNorm, LayerNorm, Softmax, LogSoftmax, MatMul, GELU, and all loss functions (BCE, CrossEntropy, MSE, L1). Full-model logits match Python to 6+ decimal places for both MobileNetV2 and ResNet-18.
 
 Key characteristics:
-- **45 PyTorch reference fixtures** — float32 binary files in `samples/data/torch-comparison/`
+- **47 PyTorch reference fixtures** — float32 binary files in `samples/data/torch-comparison/`
 - **Per-layer NUnit tests** — `tests/Nivara.Tests/NivaraTorch/` organized by layer type
 - **Fixture generator** — `gen_reference.py` with deterministic seed=42, covers every NN layer type used across all samples
 - Documents normalization scope (`RMSNorm` global vs `PerRowRMSNorm` per-row). Conv1d weight layout matches PyTorch.

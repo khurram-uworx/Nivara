@@ -352,7 +352,7 @@ Formal A/B validation of every NN layer type in Nivara's AutoDiff engine. PyTorc
 
 ### Fixture data
 
-All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 45 test cases covering:
+All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 47 test cases covering:
 
 | Layer type | Configs | Notes |
 |---|---|---|
@@ -364,6 +364,7 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 | LeakyReLU | 2 | slope=0.01 |
 | Sigmoid | 2 | 1D and 4D |
 | Tanh | 2 | 1D and 4D |
+| GELU | 2 | Tanh approximation, 1D and 4D |
 | MaxPool2d | 2 | 3x3 stride 2, 2x2 stride 2 |
 | AdaptiveAvgPool2d | 2 | Large and small feature maps |
 | Linear | 2 | 128→64, 512→1000 |

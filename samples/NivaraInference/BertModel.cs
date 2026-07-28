@@ -2,7 +2,6 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
-using System.Numerics.Tensors;
 
 namespace NivaraInference;
 
