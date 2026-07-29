@@ -1,6 +1,7 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using System.Linq;
 using System.Numerics;
 
 namespace Nivara.Samples;
@@ -205,44 +206,44 @@ public sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
-        var h = ln1.Forward(input);
-        h = attn.Forward(h);
+        var h = attn.Forward(input);
         h = ReverseGradOperations.Add(h, input);
+        h = ln1.Forward(h);
 
-        var h2 = ln2.Forward(h);
-        h2 = fc1.Forward(h2);
+        var h2 = fc1.Forward(h);
         h2 = ReverseGradOperations.Gelu(h2);
         h2 = fc2.Forward(h2);
         h2 = ReverseGradOperations.Add(h2, h);
+        h2 = ln2.Forward(h2);
         return h2;
     }
 
     public ReverseGradTensor<T> ForwardWithMask(ReverseGradTensor<T> input, ReverseGradTensor<T>? paddingMask)
     {
-        var h = ln1.Forward(input);
-        h = attn.ForwardWithMask(h, paddingMask);
+        var h = attn.ForwardWithMask(input, paddingMask);
         h = ReverseGradOperations.Add(h, input);
+        h = ln1.Forward(h);
 
-        var h2 = ln2.Forward(h);
-        h2 = fc1.Forward(h2);
+        var h2 = fc1.Forward(h);
         h2 = ReverseGradOperations.Gelu(h2);
         h2 = fc2.Forward(h2);
         h2 = ReverseGradOperations.Add(h2, h);
+        h2 = ln2.Forward(h2);
         return h2;
     }
 
     public ReverseGradTensor<T> ForwardBatched(
         ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
     {
-        var h = ln1.Forward(input);
-        h = attn.ForwardBatched(h, attentionMask, batchSize, seqLen);
+        var h = attn.ForwardBatched(input, attentionMask, batchSize, seqLen);
         h = ReverseGradOperations.Add(h, input);
+        h = ln1.Forward(h);
 
-        var h2 = ln2.Forward(h);
-        h2 = fc1.Forward(h2);
+        var h2 = fc1.Forward(h);
         h2 = ReverseGradOperations.Gelu(h2);
         h2 = fc2.Forward(h2);
         h2 = ReverseGradOperations.Add(h2, h);
+        h2 = ln2.Forward(h2);
         return h2;
     }
 }
@@ -251,6 +252,7 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
 {
     public readonly Embedding<T> wordEmbed;
     public readonly Embedding<T> posEmbed;
+    public readonly Embedding<T> tokenTypeEmbed;
     public readonly LayerNorm<T> embedLn;
     public readonly BertLayer<T>[] layers;
 
@@ -258,12 +260,13 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
     {
         wordEmbed = new Embedding<T>(config.VocabSize, config.HiddenSize);
         posEmbed = new Embedding<T>(config.MaxPositionEmbeddings, config.HiddenSize);
+        tokenTypeEmbed = new Embedding<T>(2, config.HiddenSize);
         embedLn = new LayerNorm<T>(config.HiddenSize, config.LayerNormEps);
         layers = new BertLayer<T>[config.NumHiddenLayers];
         for (int i = 0; i < config.NumHiddenLayers; i++)
             layers[i] = new BertLayer<T>(config.HiddenSize, config.IntermediateSize, config.NumAttentionHeads, config.LayerNormEps);
 
-        RegisterModules(wordEmbed, posEmbed, embedLn);
+        RegisterModules(wordEmbed, posEmbed, tokenTypeEmbed, embedLn);
         foreach (var layer in layers)
             RegisterModules(layer);
     }
@@ -277,13 +280,19 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
         var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
+        var ttIds = new T[seqLen];
+        Array.Fill(ttIds, T.Zero);
+        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
+        ttInput.Reshape(seqLen);
+
         var wordEmb = wordEmbed.Forward(input);
         var posEmb = posEmbed.Forward(posEmbInput);
-        var hidden = ReverseGradOperations.Add(wordEmb, posEmb);
+        var ttEmb = tokenTypeEmbed.Forward(ttInput);
+        var hidden = ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, ttEmb));
         hidden = embedLn.Forward(hidden);
 
-        foreach (var layer in layers)
-            hidden = layer.Forward(hidden);
+        for (int i = 0; i < layers.Length; i++)
+            hidden = layers[i].Forward(hidden);
 
         return hidden;
     }
@@ -297,9 +306,15 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
         var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
+        var ttIds = new T[seqLen];
+        Array.Fill(ttIds, T.Zero);
+        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
+        ttInput.Reshape(seqLen);
+
         var wordEmb = wordEmbed.Forward(input);
         var posEmb = posEmbed.Forward(posEmbInput);
-        var hidden = ReverseGradOperations.Add(wordEmb, posEmb);
+        var ttEmb = tokenTypeEmbed.Forward(ttInput);
+        var hidden = ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, ttEmb));
         hidden = embedLn.Forward(hidden);
 
         foreach (var layer in layers)
@@ -318,9 +333,15 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
         var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(batchSize * seqLen);
 
+        var ttIds = new T[batchSize * seqLen];
+        Array.Fill(ttIds, T.Zero);
+        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
+        ttInput.Reshape(batchSize * seqLen);
+
         var wordEmb = wordEmbed.Forward(input);
         var posEmb = posEmbed.Forward(posEmbInput);
-        var hidden = ReverseGradOperations.Add(wordEmb, posEmb);
+        var ttEmb = tokenTypeEmbed.Forward(ttInput);
+        var hidden = ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, ttEmb));
         hidden = embedLn.Forward(hidden);
 
         foreach (var layer in layers)
@@ -332,8 +353,8 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
 
 public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
 {
-    internal readonly BertEncoder<T> encoder;
-    internal readonly BertConfig config;
+    public readonly BertEncoder<T> encoder;
+    public readonly BertConfig config;
 
     public MiniLMDistilled(BertConfig config)
     {
@@ -412,19 +433,20 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
 
         LoadEmbed(enc.wordEmbed, tensors, "embeddings.word_embeddings.weight");
         LoadEmbed(enc.posEmbed, tensors, "embeddings.position_embeddings.weight");
+        LoadEmbed(enc.tokenTypeEmbed, tensors, "embeddings.token_type_embeddings.weight");
         LoadLayerNorm(enc.embedLn, tensors, "embeddings.LayerNorm");
 
         for (int i = 0; i < config.NumHiddenLayers; i++)
         {
             var layer = enc.layers[i];
-            LoadLayerNorm(layer.ln1, tensors, $"encoder.layers.{i}.attention.output.LayerNorm");
-            LoadLinear(layer.attn.qProj, tensors, $"encoder.layers.{i}.attention.self.query");
-            LoadLinear(layer.attn.kProj, tensors, $"encoder.layers.{i}.attention.self.key");
-            LoadLinear(layer.attn.vProj, tensors, $"encoder.layers.{i}.attention.self.value");
-            LoadLinear(layer.attn.oProj, tensors, $"encoder.layers.{i}.attention.output.dense");
-            LoadLayerNorm(layer.ln2, tensors, $"encoder.layers.{i}.output.LayerNorm");
-            LoadLinear(layer.fc1, tensors, $"encoder.layers.{i}.intermediate.dense");
-            LoadLinear(layer.fc2, tensors, $"encoder.layers.{i}.output.dense");
+            LoadLayerNorm(layer.ln1, tensors, $"encoder.layer.{i}.attention.output.LayerNorm");
+            LoadLinear(layer.attn.qProj, tensors, $"encoder.layer.{i}.attention.self.query");
+            LoadLinear(layer.attn.kProj, tensors, $"encoder.layer.{i}.attention.self.key");
+            LoadLinear(layer.attn.vProj, tensors, $"encoder.layer.{i}.attention.self.value");
+            LoadLinear(layer.attn.oProj, tensors, $"encoder.layer.{i}.attention.output.dense");
+            LoadLayerNorm(layer.ln2, tensors, $"encoder.layer.{i}.output.LayerNorm");
+            LoadLinear(layer.fc1, tensors, $"encoder.layer.{i}.intermediate.dense");
+            LoadLinear(layer.fc2, tensors, $"encoder.layer.{i}.output.dense");
         }
 
         model.Eval();
@@ -496,5 +518,22 @@ public static class MiniLMTokenizer
         var input = ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
         input.Reshape(tokenIds.Length);
         return input;
+    }
+
+    public static (ReverseGradTensor<float> Input, ReverseGradTensor<float>? Mask) TokenizeWithMask(
+        Microsoft.ML.Tokenizers.BertTokenizer tokenizer,
+        string text,
+        int maxLen = 128)
+    {
+        var (tokenIds, attnMask, _) = Encode(tokenizer, text, maxLen);
+        var input = ReverseGradTensor<float>.FromArray(tokenIds, requiresGrad: false);
+        input.Reshape(tokenIds.Length);
+        ReverseGradTensor<float>? mask = null;
+        if (attnMask.Any(m => m < 0.5f))
+        {
+            mask = ReverseGradTensor<float>.FromArray(attnMask, requiresGrad: false);
+            mask.Reshape(attnMask.Length);
+        }
+        return (input, mask);
     }
 }
