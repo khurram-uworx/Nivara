@@ -109,7 +109,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
                 var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
                 int savedN = n, savedC = c, savedPlaneSize = planeSize;
 
-                var gradFn = new OpNode<T>("BatchNorm1dEval", new object[] { input }, (typedGradOutput, sgn) =>
+                var gradFn = new OpNode<T>("BatchNorm1dEval", new object[] { input }, (typedGradOutput) =>
                 {
                     var gradOutData = new T[typedGradOutput.Length];
                     typedGradOutput.CopyTo(gradOutData, default(T)!);
@@ -145,7 +145,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
             bool affine = _affine;
             int savedN = n, savedC = c, savedPlaneSize = planeSize;
 
-            var gradFn = new OpNode<T>("BatchNorm1dTrain", new object[] { input }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("BatchNorm1dTrain", new object[] { input }, (typedGradOutput) =>
             {
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);
@@ -322,7 +322,7 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
                 bool affine = _affine;
                 int savedN = n, savedC = c;
 
-                var gradFn = new OpNode<T>("BatchNorm2dEval", new object[] { input }, (typedGradOutput, sgn) =>
+                var gradFn = new OpNode<T>("BatchNorm2dEval", new object[] { input }, (typedGradOutput) =>
                 {
                     var gradOutData = new T[typedGradOutput.Length];
                     typedGradOutput.CopyTo(gradOutData, default(T)!);
@@ -359,7 +359,7 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
             bool affine = _affine;
             int savedN = n, savedC = c;
 
-            var gradFn = new OpNode<T>("BatchNorm2d", new object[] { input }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("BatchNorm2d", new object[] { input }, (typedGradOutput) =>
             {
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);

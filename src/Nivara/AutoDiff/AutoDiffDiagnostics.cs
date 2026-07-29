@@ -8,7 +8,6 @@ static class AutoDiffDiagnostics
     public static void Measure<T>(
         string operationType,
         int inputLength,
-        bool hadNulls,
         Action operation,
         string? notes = null)
         where T : struct, INumber<T>
@@ -22,14 +21,13 @@ static class AutoDiffDiagnostics
             KernelSelector.DetermineKernelType<T>(inputLength),
             inputLength,
             typeof(T),
-            hadNulls,
+            false,
             notes);
     }
 
     public static TResult Measure<T, TResult>(
         string operationType,
         int inputLength,
-        bool hadNulls,
         Func<TResult> operation,
         string? notes = null)
         where T : struct, INumber<T>
@@ -39,7 +37,7 @@ static class AutoDiffDiagnostics
             KernelSelector.DetermineKernelType<T>(inputLength),
             inputLength,
             typeof(T),
-            hadNulls,
+            false,
             operation,
             notes);
 

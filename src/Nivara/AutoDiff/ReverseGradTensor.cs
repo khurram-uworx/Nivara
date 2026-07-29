@@ -137,10 +137,9 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     /// Initiates backward pass computation from this tensor
     /// </summary>
     /// <param name="gradient">Optional gradient to use as starting point. If null, uses ones for scalar tensors</param>
-    /// <param name="stripGradientNulls">If true, null masks are stripped from gradients during accumulation (default: true). Set to false for null propagation in gradients.</param>
     /// <exception cref="InvalidOperationException">Thrown when called on non-scalar tensors without gradient, tensors that don't require gradients, or when computation graph has issues</exception>
     /// <exception cref="ArgumentException">Thrown when gradient shape doesn't match tensor shape</exception>
-    public void Backward(ReverseGradTensor<T>? gradient = null, bool stripGradientNulls = true)
+    public void Backward(ReverseGradTensor<T>? gradient = null)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -174,19 +173,17 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
 
         try
         {
-            var hadNulls = Data.HasNulls || (gradient?.Data.HasNulls ?? false);
             var notes =
                 $"AutoDiff=Backward;Shape=[{string.Join(", ", shape)}];Rank={Rank};" +
-                $"HasGradient={gradient != null};StripGradientNulls={stripGradientNulls}";
+                $"HasGradient={gradient != null}";
 
             AutoDiffDiagnostics.Measure<T>(
                 "AutoDiffBackward",
                 Length,
-                hadNulls,
                 () =>
                 {
                     var gradientData = gradient?.Data ?? NivaraColumn<T>.Create(new T[] { T.One });
-                    ComputationGraph.Backward(this, gradientData, stripGradientNulls);
+                    ComputationGraph.Backward(this, gradientData);
                 },
                 notes);
         }

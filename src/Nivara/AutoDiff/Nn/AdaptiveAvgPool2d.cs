@@ -42,7 +42,7 @@ public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, INumber<T
 
         if (shouldTrack)
         {
-            var gradFn = new OpNode<T>("AdaptiveAvgPool2d", [input], (gradOutput, sgn) =>
+            var gradFn = new OpNode<T>("AdaptiveAvgPool2d", [input], (gradOutput) =>
             {
                 var inputGrad = new T[n * c * h * w];
                 var gradOutData = new T[outputLen];

@@ -143,17 +143,7 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
         var values = new T[tensor.Length];
         tensor.Data.CopyTo(values, T.Zero);
 
-        NivaraColumn<T> data;
-        if (tensor.Data.HasNulls && tensor.Data.TryGetNullMask(out var mask))
-        {
-            var nullMask = new bool[tensor.Length];
-            mask.CopyTo(nullMask);
-            data = NivaraColumn<T>.CreateFromSpans(values, nullMask);
-        }
-        else
-        {
-            data = NivaraColumn<T>.Create(values);
-        }
+        var data = NivaraColumn<T>.Create(values);
 
         return new ReverseGradTensor<T>(
             data,

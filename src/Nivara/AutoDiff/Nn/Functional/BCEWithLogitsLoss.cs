@@ -38,7 +38,7 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, INumber<T>
         if (shouldTrack)
         {
             bool trackTargets = targets.RequiresGrad;
-            var gradFn = new OpNode<T>("BCEWithLogits", new object[] { logits, targets }, (gradOutput, sgn) =>
+            var gradFn = new OpNode<T>("BCEWithLogits", new object[] { logits, targets }, (gradOutput) =>
             {
                 var grad = new T[n];
                 gradOutput.CopyTo(grad.AsSpan(), default(T)!);

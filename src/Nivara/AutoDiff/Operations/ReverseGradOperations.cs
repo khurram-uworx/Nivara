@@ -28,7 +28,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Add", new object[] { a, b }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Add", new object[] { a, b }, (typedGradOutput) =>
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
@@ -62,7 +62,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Subtract", new object[] { a, b }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Subtract", new object[] { a, b }, (typedGradOutput) =>
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
@@ -97,7 +97,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Multiply", new object[] { a, b }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Multiply", new object[] { a, b }, (typedGradOutput) =>
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
@@ -141,7 +141,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Divide", new object[] { a, b }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Divide", new object[] { a, b }, (typedGradOutput) =>
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
@@ -192,7 +192,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffMatMul",
             a.Length + b.Length,
-            a.Data.HasNulls || b.Data.HasNulls,
+            
             () =>
             {
                 var result = a.Data.MatMul(b.Data, aRows, aCols, bCols);
@@ -202,7 +202,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a, b))
                 {
-                    var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, (typedGradOutput) =>
                     {
                         if (GradientUtils.ShouldTrackGrad(a))
                         {
@@ -238,7 +238,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffTranspose",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var result = a.Data.Transpose(rows, cols);
@@ -248,7 +248,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput) =>
                     {
                         var aGrad = typedGradOutput.Transpose(cols, rows);
                         AccumulateGradient(a, aGrad);
@@ -279,7 +279,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffTransposeAxes",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var srcData = new T[a.Length];
@@ -321,7 +321,7 @@ public static class ReverseGradOperations
                 {
                     int capturedAxis1 = axis1, capturedAxis2 = axis2;
                     int[] capturedDstDims = dstDims;
-                    var gradFn = new OpNode<T>("TransposeAxes", new object[] { a }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("TransposeAxes", new object[] { a }, (typedGradOutput) =>
                     {
                         int gradLen = typedGradOutput.Length;
                         var gSrc = new T[gradLen];
@@ -386,7 +386,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Sum", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Sum", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
                 AccumulateGradient(a, aGrad);
@@ -415,7 +415,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Mean", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Mean", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
                 var scaledGrad = aGrad.Divide(T.CreateChecked(a.Length));
@@ -471,7 +471,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("MeanPool", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("MeanPool", new object[] { a }, (typedGradOutput) =>
             {
                 var gradOut = new T[a.Length];
                 var gradSrc = new T[typedGradOutput.Length];
@@ -509,7 +509,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffRelu",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var result = a.Data.Relu();
@@ -518,7 +518,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput) =>
                     {
                         var aGrad = a.Data.ReluGradient(typedGradOutput);
                         AccumulateGradient(a, aGrad);
@@ -539,7 +539,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffGelu",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var result = a.Data.Gelu();
@@ -548,7 +548,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    var gradFn = new OpNode<T>("Gelu", new object[] { a }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("Gelu", new object[] { a }, (typedGradOutput) =>
                     {
                         var aGrad = a.Data.GeluGradient(typedGradOutput);
                         AccumulateGradient(a, aGrad);
@@ -569,7 +569,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffSigmoid",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var result = a.Data.Sigmoid();
@@ -578,7 +578,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput) =>
                     {
                         var aGrad = result.SigmoidGradient(typedGradOutput);
                         AccumulateGradient(a, aGrad);
@@ -599,7 +599,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffTanh",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var result = a.Data.Tanh();
@@ -608,7 +608,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput) =>
                     {
                         var aGrad = result.TanhGradient(typedGradOutput);
                         AccumulateGradient(a, aGrad);
@@ -631,7 +631,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Negate", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Negate", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = typedGradOutput.Negate();
                 AccumulateGradient(a, aGrad);
@@ -652,7 +652,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Abs", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Abs", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = a.Data.AbsGradient(typedGradOutput);
                 AccumulateGradient(a, aGrad);
@@ -674,7 +674,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Clip", new object[] { a, min, max }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Clip", new object[] { a, min, max }, (typedGradOutput) =>
             {
                 var aGrad = a.Data.ClipGradient(typedGradOutput, min, max);
                 AccumulateGradient(a, aGrad);
@@ -699,7 +699,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("LeakyRelu", new object[] { a, negativeSlope }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("LeakyRelu", new object[] { a, negativeSlope }, (typedGradOutput) =>
             {
                 var aGrad = a.Data.LeakyReluGradient(typedGradOutput, negativeSlope);
                 AccumulateGradient(a, aGrad);
@@ -720,7 +720,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Exp", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Exp", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = typedGradOutput * result;
                 AccumulateGradient(a, aGrad);
@@ -741,7 +741,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Log", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Log", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = a.Data.LogGradient(typedGradOutput);
                 AccumulateGradient(a, aGrad);
@@ -763,7 +763,7 @@ public static class ReverseGradOperations
         if (GradientUtils.ShouldTrackGrad(a))
         {
             var savedInput = a.Data;
-            var gradFn = new OpNode<T>("Pow", new object[] { a, exponent }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Pow", new object[] { a, exponent }, (typedGradOutput) =>
             {
                 var aGrad = ApplyPowGradient(savedInput, typedGradOutput, exponent);
                 AccumulateGradient(a, aGrad);
@@ -798,13 +798,11 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffSlice",
             length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 int resultLen = batchDim * length;
                 var resultValues = new T[resultLen];
-                bool[]? resultNullMask = a.HasNulls ? new bool[resultLen] : null;
-                bool anyResultNulls = false;
 
                 var srcData = new T[a.Length];
                 a.Data.CopyTo(srcData, default(T)!);
@@ -814,24 +812,9 @@ public static class ReverseGradOperations
                     int srcOffset = r * fullDim + start;
                     int dstOffset = r * length;
                     Array.Copy(srcData, srcOffset, resultValues, dstOffset, length);
-
-                    if (a.HasNulls && resultNullMask != null)
-                    {
-                        if (a.Data.TryGetNullMask(out var srcNull))
-                        {
-                            for (int i = 0; i < length; i++)
-                            {
-                                bool isNull = srcNull[srcOffset + i];
-                                resultNullMask[dstOffset + i] = isNull;
-                                anyResultNulls |= isNull;
-                            }
-                        }
-                    }
                 }
 
-                var resultCol = anyResultNulls
-                    ? NivaraColumn<T>.CreateFromSpans(resultValues, resultNullMask!)
-                    : NivaraColumn<T>.Create(resultValues);
+                var resultCol = NivaraColumn<T>.Create(resultValues);
 
                 var resultShape = batchDim == 1
                     ? new[] { length }
@@ -845,7 +828,7 @@ public static class ReverseGradOperations
                     var savedLength = length;
                     var savedFullDim = fullDim;
                     var savedBatchDim = batchDim;
-                    var gradFn = new OpNode<T>("Slice", [a], (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("Slice", [a], (typedGradOutput) =>
                     {
                         var gradData = new T[typedGradOutput.Length];
                         typedGradOutput.CopyTo(gradData, default(T)!);
@@ -921,7 +904,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffConcat",
             tensors.Sum(t => t.Length),
-            tensors.Any(t => t.Data.HasNulls),
+            
             () =>
             {
                 if (rank == 1)
@@ -942,7 +925,7 @@ public static class ReverseGradOperations
                     if (shouldTrack)
                     {
                         var savedLengths = inputLengths;
-                        var gradFn = new OpNode<T>("Concat", tensors, (typedGradOutput, sgn) =>
+                        var gradFn = new OpNode<T>("Concat", tensors, (typedGradOutput) =>
                         {
                             var fullGrad = new T[typedGradOutput.Length];
                             typedGradOutput.CopyTo(fullGrad.AsSpan(), default(T)!);
@@ -1031,7 +1014,7 @@ public static class ReverseGradOperations
 
                         var savedTensors = tensors;
                         var savedAxis = axis;
-                        var gradFn = new OpNode<T>("Concat", tensors, (typedGradOutput, sgn) =>
+                        var gradFn = new OpNode<T>("Concat", tensors, (typedGradOutput) =>
                         {
                             if (savedAxis == 1)
                             {
@@ -1140,7 +1123,7 @@ public static class ReverseGradOperations
         if (GradientUtils.ShouldTrackGrad(a))
         {
             var savedResult = result;
-            var gradFn = new OpNode<T>("Softmax", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Softmax", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = savedResult.SoftmaxGradient(typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
                 AccumulateGradient(a, aGrad);
@@ -1161,7 +1144,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("LogSoftmax", new object[] { a }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("LogSoftmax", new object[] { a }, (typedGradOutput) =>
             {
                 var aGrad = a.Data.LogSoftmaxGradient(typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
                 AccumulateGradient(a, aGrad);
@@ -1181,7 +1164,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffRMSNorm",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var result = ApplyRMSNorm(a.Data, eps);
@@ -1191,7 +1174,7 @@ public static class ReverseGradOperations
                 {
                     var savedInput = a.Data;
                     var savedEps = eps;
-                    var gradFn = new OpNode<T>("RMSNorm", new object[] { a, eps }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("RMSNorm", new object[] { a, eps }, (typedGradOutput) =>
                     {
                         var aGrad = ApplyRMSNormGradient(savedInput, typedGradOutput, savedEps);
                         AccumulateGradient(a, aGrad);
@@ -1213,7 +1196,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffPerRowRMSNorm",
             a.Length,
-            a.Data.HasNulls,
+            
             () =>
             {
                 var srcData = new T[a.Length];
@@ -1274,7 +1257,7 @@ public static class ReverseGradOperations
                     var savedInput = new T[a.Length];
                     a.Data.CopyTo(savedInput, default(T)!);
 
-                    var gradFn = new OpNode<T>("PerRowRMSNorm", [a], (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("PerRowRMSNorm", [a], (typedGradOutput) =>
                     {
                         var gradOut = new T[typedGradOutput.Length];
                         typedGradOutput.CopyTo(gradOut.AsSpan(), default(T)!);
@@ -1357,7 +1340,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(input))
         {
-            var gradFn = new OpNode<T>("Dropout", new object[] { input }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Dropout", new object[] { input }, (typedGradOutput) =>
             {
                 var inputGrad = ApplyDropoutGradient(input.Data, typedGradOutput, savedMask, scale);
                 AccumulateGradient(input, inputGrad);
@@ -1409,67 +1392,27 @@ public static class ReverseGradOperations
             parsedIndices[i] = index;
         }
 
-        bool weightHasNulls = weight.HasNulls;
         var resultValues = new T[batchSize * embeddingDim];
-        bool[]? resultNullMask = weightHasNulls ? new bool[resultValues.Length] : null;
-        bool anyResultNulls = false;
-
-        if (weightHasNulls)
+        var weightSpan = weight.Data.AsSpan();
+        for (int batch = 0; batch < batchSize; batch++)
         {
-            for (int batch = 0; batch < batchSize; batch++)
+            int indexBase = batch * maxActiveFeatures;
+            int outputBase = batch * embeddingDim;
+
+            for (int slot = 0; slot < maxActiveFeatures; slot++)
             {
-                int indexBase = batch * maxActiveFeatures;
-                int outputBase = batch * embeddingDim;
+                int index = parsedIndices[indexBase + slot];
+                if (index == paddingIndex)
+                    continue;
 
-                for (int slot = 0; slot < maxActiveFeatures; slot++)
-                {
-                    int index = parsedIndices[indexBase + slot];
-                    if (index == paddingIndex)
-                        continue;
-
-                    int weightBase = index * embeddingDim;
-                    for (int dim = 0; dim < embeddingDim; dim++)
-                    {
-                        int weightOffset = weightBase + dim;
-                        int outputOffset = outputBase + dim;
-
-                        if (weight.IsNull(weightOffset))
-                        {
-                            resultNullMask![outputOffset] = true;
-                            anyResultNulls = true;
-                            continue;
-                        }
-
-                        resultValues[outputOffset] += weight.Data[weightOffset];
-                    }
-                }
-            }
-        }
-        else
-        {
-            var weightSpan = weight.Data.AsSpan();
-            for (int batch = 0; batch < batchSize; batch++)
-            {
-                int indexBase = batch * maxActiveFeatures;
-                int outputBase = batch * embeddingDim;
-
-                for (int slot = 0; slot < maxActiveFeatures; slot++)
-                {
-                    int index = parsedIndices[indexBase + slot];
-                    if (index == paddingIndex)
-                        continue;
-
-                    int weightBase = index * embeddingDim;
-                    var src = weightSpan.Slice(weightBase, embeddingDim);
-                    var dst = resultValues.AsSpan().Slice(outputBase, embeddingDim);
-                    TensorPrimitives.Add(src, dst, dst);
-                }
+                int weightBase = index * embeddingDim;
+                var src = weightSpan.Slice(weightBase, embeddingDim);
+                var dst = resultValues.AsSpan().Slice(outputBase, embeddingDim);
+                TensorPrimitives.Add(src, dst, dst);
             }
         }
 
-        var resultColumn = anyResultNulls
-            ? NivaraColumn<T>.CreateFromSpans(resultValues, resultNullMask!)
-            : NivaraColumn<T>.Create(resultValues);
+        var resultColumn = NivaraColumn<T>.Create(resultValues);
 
         var result = new ReverseGradTensor<T>(
             resultColumn,
@@ -1479,53 +1422,25 @@ public static class ReverseGradOperations
         if (GradientUtils.ShouldTrackGrad(weight))
         {
             var savedIndices = parsedIndices;
-            var gradFn = new OpNode<T>("SparseEmbeddingBag", new object[] { weight }, (typedGradOutput, stripGradientNulls) =>
+            var gradFn = new OpNode<T>("SparseEmbeddingBag", new object[] { weight }, (typedGradOutput) =>
             {
                 var weightGrad = new T[weight.Length];
-                bool gradHasNulls = typedGradOutput.HasNulls;
-
-                if (!gradHasNulls)
+                var gradSpan = typedGradOutput.AsSpan();
+                for (int batch = 0; batch < batchSize; batch++)
                 {
-                    var gradSpan = typedGradOutput.AsSpan();
-                    for (int batch = 0; batch < batchSize; batch++)
+                    int indexBase = batch * maxActiveFeatures;
+                    int gradBase = batch * embeddingDim;
+
+                    for (int slot = 0; slot < maxActiveFeatures; slot++)
                     {
-                        int indexBase = batch * maxActiveFeatures;
-                        int gradBase = batch * embeddingDim;
+                        int index = savedIndices[indexBase + slot];
+                        if (index == paddingIndex)
+                            continue;
 
-                        for (int slot = 0; slot < maxActiveFeatures; slot++)
-                        {
-                            int index = savedIndices[indexBase + slot];
-                            if (index == paddingIndex)
-                                continue;
-
-                            int weightBase = index * embeddingDim;
-                            var src = gradSpan.Slice(gradBase, embeddingDim);
-                            var dst = weightGrad.AsSpan().Slice(weightBase, embeddingDim);
-                            TensorPrimitives.Add(src, dst, dst);
-                        }
-                    }
-                }
-                else
-                {
-                    for (int batch = 0; batch < batchSize; batch++)
-                    {
-                        int indexBase = batch * maxActiveFeatures;
-                        int gradBase = batch * embeddingDim;
-
-                        for (int slot = 0; slot < maxActiveFeatures; slot++)
-                        {
-                            int index = savedIndices[indexBase + slot];
-                            if (index == paddingIndex)
-                                continue;
-
-                            int weightBase = index * embeddingDim;
-                            for (int dim = 0; dim < embeddingDim; dim++)
-                            {
-                                int gradOffset = gradBase + dim;
-                                if (!typedGradOutput.IsNull(gradOffset))
-                                    weightGrad[weightBase + dim] += typedGradOutput[gradOffset];
-                            }
-                        }
+                        int weightBase = index * embeddingDim;
+                        var src = gradSpan.Slice(gradBase, embeddingDim);
+                        var dst = weightGrad.AsSpan().Slice(weightBase, embeddingDim);
+                        TensorPrimitives.Add(src, dst, dst);
                     }
                 }
 
@@ -1569,14 +1484,11 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffGather",
             indices.Length,
-            source.Data.HasNulls,
+            
             () =>
             {
-                bool sourceHasNulls = source.HasNulls;
                 int resultLen = indices.Length * stride;
-                bool anyResultNulls = false;
                 var resultValues = new T[resultLen];
-                bool[]? resultNullMask = sourceHasNulls ? new bool[resultLen] : null;
 
                 if (source.Data.TryGetSpan(out var span))
                 {
@@ -1594,20 +1506,11 @@ public static class ReverseGradOperations
                         int srcOffset = indices[i] * stride;
                         int dstOffset = i * stride;
                         for (int j = 0; j < stride; j++)
-                        {
                             resultValues[dstOffset + j] = source.Data[srcOffset + j];
-                            if (source.Data.IsNull(srcOffset + j))
-                            {
-                                resultNullMask![dstOffset + j] = true;
-                                anyResultNulls = true;
-                            }
-                        }
                     }
                 }
 
-                var resultCol = anyResultNulls
-                    ? NivaraColumn<T>.CreateFromSpans(resultValues, resultNullMask!)
-                    : NivaraColumn<T>.Create(resultValues);
+                var resultCol = NivaraColumn<T>.Create(resultValues);
 
                 var resultShape = new int[source.shape.Length];
                 resultShape[0] = indices.Length;
@@ -1619,67 +1522,28 @@ public static class ReverseGradOperations
                 if (GradientUtils.ShouldTrackGrad(source))
                 {
                     var savedIndices = indices;
-                    var savedSourceHasNulls = sourceHasNulls;
-                    var gradFn = new OpNode<T>("Gather", new object[] { source }, (typedGradOutput, sgn) =>
+                    var gradFn = new OpNode<T>("Gather", new object[] { source }, (typedGradOutput) =>
                     {
                         var gradBuf = ArrayPool<T>.Shared.Rent(source.Length);
                         Array.Clear(gradBuf, 0, source.Length);
-                        var sourceGradNullMask = savedSourceHasNulls ? ArrayPool<bool>.Shared.Rent(source.Length) : null;
-                        if (sourceGradNullMask != null)
-                            Array.Clear(sourceGradNullMask, 0, source.Length);
 
                         try
                         {
-                            bool gradHasNulls = typedGradOutput.HasNulls;
-                            if (!gradHasNulls && typedGradOutput.TryGetSpan(out var gradSpan))
+                            typedGradOutput.TryGetSpan(out var gradSpan);
+                            for (int i = 0; i < savedIndices.Length; i++)
                             {
-                                for (int i = 0; i < savedIndices.Length; i++)
-                                {
-                                    int dstOffset = savedIndices[i] * stride;
-                                    int srcOffset = i * stride;
-                                    for (int j = 0; j < stride; j++)
-                                        gradBuf[dstOffset + j] += gradSpan[srcOffset + j];
-                                }
-                            }
-                            else
-                            {
-                                for (int i = 0; i < savedIndices.Length; i++)
-                                {
-                                    int dstOffset = savedIndices[i] * stride;
-                                    int srcOffset = i * stride;
-                                    for (int j = 0; j < stride; j++)
-                                    {
-                                        if (!typedGradOutput.IsNull(srcOffset + j))
-                                            gradBuf[dstOffset + j] += typedGradOutput[srcOffset + j];
-                                    }
-                                }
+                                int dstOffset = savedIndices[i] * stride;
+                                int srcOffset = i * stride;
+                                for (int j = 0; j < stride; j++)
+                                    gradBuf[dstOffset + j] += gradSpan[srcOffset + j];
                             }
 
-                            if (savedSourceHasNulls && sourceGradNullMask != null)
-                            {
-                                for (int i = 0; i < savedIndices.Length; i++)
-                                {
-                                    int flatIdx = savedIndices[i] * stride;
-                                    for (int j = 0; j < stride; j++)
-                                    {
-                                        if (source.Data.IsNull(flatIdx + j))
-                                            sourceGradNullMask[flatIdx + j] = true;
-                                    }
-                                }
-                                var sourceGrad = NivaraColumn<T>.CreateFromSpans(gradBuf.AsSpan(0, source.Length), sourceGradNullMask.AsSpan(0, source.Length));
-                                AccumulateGradient(source, sourceGrad);
-                            }
-                            else
-                            {
-                                var sourceGrad = NivaraColumn<T>.Create(gradBuf.AsSpan(0, source.Length));
-                                AccumulateGradient(source, sourceGrad);
-                            }
+                            var sourceGrad = NivaraColumn<T>.Create(gradBuf.AsSpan(0, source.Length));
+                            AccumulateGradient(source, sourceGrad);
                         }
                         finally
                         {
                             ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-                            if (sourceGradNullMask != null)
-                                ArrayPool<bool>.Shared.Return(sourceGradNullMask, clearArray: true);
                         }
                     });
 
@@ -1714,7 +1578,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(mean, logVar))
         {
-            var gradFn = new OpNode<T>("KlDivergence", new object[] { mean, logVar }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("KlDivergence", new object[] { mean, logVar }, (typedGradOutput) =>
             {
                 if (mean.RequiresGrad)
                 {
@@ -1758,7 +1622,7 @@ public static class ReverseGradOperations
         if (GradientUtils.ShouldTrackGrad(mean, logVar))
         {
             var savedEpsilon = epsilonCol;
-            var gradFn = new OpNode<T>("SampleNormal", new object[] { mean, logVar }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("SampleNormal", new object[] { mean, logVar }, (typedGradOutput) =>
             {
                 if (mean.RequiresGrad)
                 {
@@ -1835,33 +1699,12 @@ public static class ReverseGradOperations
         where T : struct, INumber<T>
     {
         int n = input.Length;
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        input.TryGetSpan(out var span);
+        var result = new T[n];
+        for (int i = 0; i < n; i++)
+            result[i] = keepMask[i] ? span[i] * scale : T.Zero;
 
-        try
-        {
-            if (!input.HasNulls)
-            {
-                input.TryGetSpan(out var span);
-                for (int i = 0; i < n; i++)
-                    resultBuf[i] = keepMask[i] ? span[i] * scale : T.Zero;
-
-                return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-            }
-
-            input.CopyTo(resultBuf.AsSpan(0, n), T.Zero);
-            input.TryGetNullMask(out var inputMask);
-            for (int i = 0; i < n; i++)
-            {
-                if (!inputMask[i])
-                    resultBuf[i] = keepMask[i] ? resultBuf[i] * scale : T.Zero;
-            }
-
-            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), inputMask);
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-        }
+        return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplyDropoutGradient<T>(
@@ -1872,34 +1715,12 @@ public static class ReverseGradOperations
         where T : struct, INumber<T>
     {
         int n = input.Length;
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        gradOutput.TryGetSpan(out var gSpan);
+        var result = new T[n];
+        for (int i = 0; i < n; i++)
+            result[i] = keepMask[i] ? gSpan[i] * scale : T.Zero;
 
-        try
-        {
-            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            for (int i = 0; i < n; i++)
-                resultBuf[i] = keepMask[i] ? gradBuf[i] * scale : T.Zero;
-
-            if (!input.HasNulls && !gradOutput.HasNulls)
-                return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-
-            var nullMask = ArrayPool<bool>.Shared.Rent(n);
-            try
-            {
-                NivaraColumnUtility.MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
-                return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
-            }
-            finally
-            {
-                ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-            }
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-        }
+        return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar) where T : struct, INumber<T>
@@ -2095,320 +1916,163 @@ public static class ReverseGradOperations
     private static NivaraColumn<T> ApplyPow<T>(NivaraColumn<T> input, double exponent) where T : struct, INumber<T>
     {
         int n = input.Length;
-
-        if (!input.HasNulls)
+        input.TryGetSpan(out var span);
+        var result = new T[n];
+        if (typeof(T) == typeof(float))
         {
-            input.TryGetSpan(out var span);
-            var result = new T[n];
-            if (typeof(T) == typeof(float))
-            {
-                var s = MemoryMarshal.Cast<T, float>(span);
-                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-                TensorPrimitives.Pow(s, (float)exponent, r);
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var s = MemoryMarshal.Cast<T, double>(span);
-                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-                TensorPrimitives.Pow(s, exponent, r);
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                    result[i] = T.CreateChecked(Math.Pow(double.CreateChecked(span[i]), exponent));
-            }
-            return NivaraColumn<T>.Create(result);
+            var s = MemoryMarshal.Cast<T, float>(span);
+            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+            TensorPrimitives.Pow(s, (float)exponent, r);
         }
-
-        var buf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        try
+        else if (typeof(T) == typeof(double))
         {
-            input.CopyTo(buf.AsSpan(0, n), T.Zero);
-            input.TryGetNullMask(out var mask);
-            mask.CopyTo(nullMask.AsSpan(0, n));
+            var s = MemoryMarshal.Cast<T, double>(span);
+            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+            TensorPrimitives.Pow(s, exponent, r);
+        }
+        else
+        {
             for (int i = 0; i < n; i++)
-            {
-                if (nullMask[i]) continue;
-                buf[i] = T.CreateChecked(Math.Pow(double.CreateChecked(buf[i]), exponent));
-            }
-            return NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
+                result[i] = T.CreateChecked(Math.Pow(double.CreateChecked(span[i]), exponent));
         }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(buf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-        }
+        return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplyPowGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput, double exponent) where T : struct, INumber<T>
     {
         int n = input.Length;
-
-        if (!input.HasNulls && !gradOutput.HasNulls)
+        input.TryGetSpan(out var inSpan);
+        gradOutput.TryGetSpan(out var gSpan);
+        var result = new T[n];
+        if (typeof(T) == typeof(float))
         {
-            input.TryGetSpan(out var inSpan);
-            gradOutput.TryGetSpan(out var gSpan);
-            var result = new T[n];
-            if (typeof(T) == typeof(float))
-            {
-                var x = MemoryMarshal.Cast<T, float>(inSpan);
-                var g = MemoryMarshal.Cast<T, float>(gSpan);
-                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-                TensorPrimitives.Pow(x, (float)(exponent - 1.0), r);
-                TensorPrimitives.Multiply(r, (float)exponent, r);
-                TensorPrimitives.Multiply(r, g, r);
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var x = MemoryMarshal.Cast<T, double>(inSpan);
-                var g = MemoryMarshal.Cast<T, double>(gSpan);
-                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-                TensorPrimitives.Pow(x, exponent - 1.0, r);
-                TensorPrimitives.Multiply(r, exponent, r);
-                TensorPrimitives.Multiply(r, g, r);
-            }
-            else
-            {
-                for (int i = 0; i < n; i++)
-                {
-                    var x = double.CreateChecked(inSpan[i]);
-                    var g = double.CreateChecked(gSpan[i]);
-                    result[i] = T.CreateChecked(exponent * Math.Pow(x, exponent - 1.0) * g);
-                }
-            }
-            return NivaraColumn<T>.Create(result);
+            var x = MemoryMarshal.Cast<T, float>(inSpan);
+            var g = MemoryMarshal.Cast<T, float>(gSpan);
+            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+            TensorPrimitives.Pow(x, (float)(exponent - 1.0), r);
+            TensorPrimitives.Multiply(r, (float)exponent, r);
+            TensorPrimitives.Multiply(r, g, r);
         }
-
-        var buf = ArrayPool<T>.Shared.Rent(n);
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        try
+        else if (typeof(T) == typeof(double))
         {
-            input.CopyTo(buf.AsSpan(0, n), T.Zero);
-            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            NivaraColumnUtility.MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
+            var x = MemoryMarshal.Cast<T, double>(inSpan);
+            var g = MemoryMarshal.Cast<T, double>(gSpan);
+            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+            TensorPrimitives.Pow(x, exponent - 1.0, r);
+            TensorPrimitives.Multiply(r, exponent, r);
+            TensorPrimitives.Multiply(r, g, r);
+        }
+        else
+        {
             for (int i = 0; i < n; i++)
             {
-                if (nullMask[i]) continue;
-                resultBuf[i] = T.CreateChecked(
-                    exponent * Math.Pow(double.CreateChecked(buf[i]), exponent - 1.0) * double.CreateChecked(gradBuf[i]));
+                var x = double.CreateChecked(inSpan[i]);
+                var g = double.CreateChecked(gSpan[i]);
+                result[i] = T.CreateChecked(exponent * Math.Pow(x, exponent - 1.0) * g);
             }
-            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
         }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(buf, clearArray: true);
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-        }
+        return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplyRMSNorm<T>(NivaraColumn<T> input, double eps) where T : struct, INumber<T>
     {
         int n = input.Length;
-
-        if (!input.HasNulls)
+        input.TryGetSpan(out var span);
+        var result = new T[n];
+        if (typeof(T) == typeof(float))
         {
-            input.TryGetSpan(out var span);
-            var result = new T[n];
-            if (typeof(T) == typeof(float))
-            {
-                var s = MemoryMarshal.Cast<T, float>(span);
-                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-                double sumSq = 0;
-                for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
-                double rms = Math.Sqrt(sumSq / n + eps);
-                float invRms = (float)(1.0 / rms);
-                TensorPrimitives.Multiply(s, invRms, r);
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var s = MemoryMarshal.Cast<T, double>(span);
-                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-                double sumSq = 0;
-                for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
-                double rms = Math.Sqrt(sumSq / n + eps);
-                double invRms = 1.0 / rms;
-                TensorPrimitives.Multiply(s, invRms, r);
-            }
-            else
-            {
-                double sumSq = 0;
-                for (int i = 0; i < n; i++)
-                {
-                    var x = double.CreateChecked(span[i]);
-                    sumSq += x * x;
-                }
-                double rms = Math.Sqrt(sumSq / n + eps);
-                double invRms = 1.0 / rms;
-                for (int i = 0; i < n; i++)
-                    result[i] = T.CreateChecked(double.CreateChecked(span[i]) * invRms);
-            }
-            return NivaraColumn<T>.Create(result);
-        }
-
-        var buf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        try
-        {
-            input.CopyTo(buf.AsSpan(0, n), T.Zero);
-            input.TryGetNullMask(out var mask);
-            mask.CopyTo(nullMask.AsSpan(0, n));
-
+            var s = MemoryMarshal.Cast<T, float>(span);
+            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
             double sumSq = 0;
-            int validCount = 0;
-            for (int i = 0; i < n; i++)
-            {
-                if (!nullMask[i])
-                {
-                    var x = double.CreateChecked(buf[i]);
-                    sumSq += x * x;
-                    validCount++;
-                }
-            }
-
-            double rms = Math.Sqrt(sumSq / validCount + eps);
-            double invRms = 1.0 / rms;
-
-            for (int i = 0; i < n; i++)
-            {
-                if (!nullMask[i])
-                    buf[i] = T.CreateChecked(double.CreateChecked(buf[i]) * invRms);
-            }
-
-            return NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
+            for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
+            double rms = Math.Sqrt(sumSq / n + eps);
+            float invRms = (float)(1.0 / rms);
+            TensorPrimitives.Multiply(s, invRms, r);
         }
-        finally
+        else if (typeof(T) == typeof(double))
         {
-            ArrayPool<T>.Shared.Return(buf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+            var s = MemoryMarshal.Cast<T, double>(span);
+            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+            double sumSq = 0;
+            for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
+            double rms = Math.Sqrt(sumSq / n + eps);
+            double invRms = 1.0 / rms;
+            TensorPrimitives.Multiply(s, invRms, r);
         }
+        else
+        {
+            double sumSq = 0;
+            for (int i = 0; i < n; i++)
+            {
+                var x = double.CreateChecked(span[i]);
+                sumSq += x * x;
+            }
+            double rms = Math.Sqrt(sumSq / n + eps);
+            double invRms = 1.0 / rms;
+            for (int i = 0; i < n; i++)
+                result[i] = T.CreateChecked(double.CreateChecked(span[i]) * invRms);
+        }
+        return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplyRMSNormGradient<T>(
         NivaraColumn<T> input, NivaraColumn<T> gradOutput, double eps) where T : struct, INumber<T>
     {
         int n = input.Length;
+        input.TryGetSpan(out var inSpan);
+        gradOutput.TryGetSpan(out var gSpan);
+        var result = new T[n];
 
-        if (!input.HasNulls && !gradOutput.HasNulls)
+        double sumSq = 0;
+        for (int i = 0; i < n; i++)
         {
-            input.TryGetSpan(out var inSpan);
-            gradOutput.TryGetSpan(out var gSpan);
-            var result = new T[n];
+            var x = double.CreateChecked(inSpan[i]);
+            sumSq += x * x;
+        }
 
-            double sumSq = 0;
+        double rms = Math.Sqrt(sumSq / n + eps);
+        double rms3 = rms * rms * rms;
+
+        double sumGradX = 0;
+        for (int i = 0; i < n; i++)
+        {
+            var x = double.CreateChecked(inSpan[i]);
+            var g = double.CreateChecked(gSpan[i]);
+            sumGradX += g * x;
+        }
+
+        double scale = sumGradX / (n * rms3);
+
+        if (typeof(T) == typeof(float))
+        {
+            var x = MemoryMarshal.Cast<T, float>(inSpan);
+            var g = MemoryMarshal.Cast<T, float>(gSpan);
+            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
+            float invRms = (float)(1.0 / rms);
+            float s = (float)scale;
             for (int i = 0; i < n; i++)
-            {
-                var x = double.CreateChecked(inSpan[i]);
-                sumSq += x * x;
-            }
-
-            double rms = Math.Sqrt(sumSq / n + eps);
-            double rms3 = rms * rms * rms;
-
-            double sumGradX = 0;
+                r[i] = g[i] * invRms - x[i] * s;
+        }
+        else if (typeof(T) == typeof(double))
+        {
+            var x = MemoryMarshal.Cast<T, double>(inSpan);
+            var g = MemoryMarshal.Cast<T, double>(gSpan);
+            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
+            double invRms = 1.0 / rms;
+            for (int i = 0; i < n; i++)
+                r[i] = g[i] * invRms - x[i] * scale;
+        }
+        else
+        {
+            double invRms = 1.0 / rms;
             for (int i = 0; i < n; i++)
             {
                 var x = double.CreateChecked(inSpan[i]);
                 var g = double.CreateChecked(gSpan[i]);
-                sumGradX += g * x;
+                result[i] = T.CreateChecked(g * invRms - x * scale);
             }
-
-            double scale = sumGradX / (n * rms3);
-
-            if (typeof(T) == typeof(float))
-            {
-                var x = MemoryMarshal.Cast<T, float>(inSpan);
-                var g = MemoryMarshal.Cast<T, float>(gSpan);
-                var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-                float invRms = (float)(1.0 / rms);
-                float s = (float)scale;
-                for (int i = 0; i < n; i++)
-                    r[i] = g[i] * invRms - x[i] * s;
-            }
-            else if (typeof(T) == typeof(double))
-            {
-                var x = MemoryMarshal.Cast<T, double>(inSpan);
-                var g = MemoryMarshal.Cast<T, double>(gSpan);
-                var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-                double invRms = 1.0 / rms;
-                for (int i = 0; i < n; i++)
-                    r[i] = g[i] * invRms - x[i] * scale;
-            }
-            else
-            {
-                double invRms = 1.0 / rms;
-                for (int i = 0; i < n; i++)
-                {
-                    var x = double.CreateChecked(inSpan[i]);
-                    var g = double.CreateChecked(gSpan[i]);
-                    result[i] = T.CreateChecked(g * invRms - x * scale);
-                }
-            }
-            return NivaraColumn<T>.Create(result);
         }
-
-        var buf = ArrayPool<T>.Shared.Rent(n);
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-        try
-        {
-            input.CopyTo(buf.AsSpan(0, n), T.Zero);
-            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            NivaraColumnUtility.MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
-
-            double sumSq = 0;
-            int validCount = 0;
-            for (int i = 0; i < n; i++)
-            {
-                if (!nullMask[i])
-                {
-                    var x = double.CreateChecked(buf[i]);
-                    sumSq += x * x;
-                    validCount++;
-                }
-            }
-
-            double rms = Math.Sqrt(sumSq / validCount + eps);
-            double rms3 = rms * rms * rms;
-
-            double sumGradX = 0;
-            for (int i = 0; i < n; i++)
-            {
-                if (!nullMask[i])
-                {
-                    var x = double.CreateChecked(buf[i]);
-                    var g = double.CreateChecked(gradBuf[i]);
-                    sumGradX += g * x;
-                }
-            }
-
-            double scale = sumGradX / (validCount * rms3);
-            double invRms = 1.0 / rms;
-
-            for (int i = 0; i < n; i++)
-            {
-                if (!nullMask[i])
-                {
-                    var x = double.CreateChecked(buf[i]);
-                    var g = double.CreateChecked(gradBuf[i]);
-                    resultBuf[i] = T.CreateChecked(g * invRms - x * scale);
-                }
-            }
-
-            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(buf, clearArray: true);
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-        }
+        return NivaraColumn<T>.Create(result);
     }
 
     public static ReverseGradTensor<T> BroadcastMultiply<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> scale) where T : struct, INumber<T>
@@ -2442,7 +2106,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(input, scale))
         {
-            var gradFn = new OpNode<T>("BroadcastMultiply", new object[] { input, scale }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("BroadcastMultiply", new object[] { input, scale }, (typedGradOutput) =>
             {
                 var gradData = new T[input.Length];
                 typedGradOutput.CopyTo(gradData, T.Zero);
@@ -2506,7 +2170,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(input, bias))
         {
-            var gradFn = new OpNode<T>("BroadcastAdd", new object[] { input, bias }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("BroadcastAdd", new object[] { input, bias }, (typedGradOutput) =>
             {
                 var gradData = new T[input.Length];
                 typedGradOutput.CopyTo(gradData, T.Zero);

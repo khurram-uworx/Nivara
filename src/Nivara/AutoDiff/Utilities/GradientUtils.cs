@@ -1,5 +1,4 @@
 using Nivara;
-using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Text;
@@ -136,33 +135,10 @@ public static class GradientUtils
         int n = grad.Length;
         var minValue = -maxValue;
 
-        if (!grad.HasNulls)
-        {
-            grad.TryGetSpan(out var span);
-            var clipped = new T[n];
-            TensorPrimitives.Clamp(span, minValue, maxValue, clipped);
-            tensor.Grad = NivaraColumn<T>.Create(clipped);
-            return;
-        }
-
-        var buf = ArrayPool<T>.Shared.Rent(n);
-        var nullMask = ArrayPool<bool>.Shared.Rent(n);
-
-        try
-        {
-            grad.CopyTo(buf.AsSpan(0, n), T.Zero);
-            grad.TryGetNullMask(out var mask);
-            mask.CopyTo(nullMask.AsSpan(0, n));
-
-            TensorPrimitives.Clamp(buf.AsSpan(0, n), minValue, maxValue, buf.AsSpan(0, n));
-
-            tensor.Grad = NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(buf, clearArray: true);
-            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-        }
+        grad.TryGetSpan(out var span);
+        var clipped = new T[n];
+        TensorPrimitives.Clamp(span, minValue, maxValue, clipped);
+        tensor.Grad = NivaraColumn<T>.Create(clipped);
     }
 
     /// <summary>
@@ -183,59 +159,16 @@ public static class GradientUtils
         var grad = tensor.Grad;
         int n = grad.Length;
 
-        double normSquared;
-        if (!grad.HasNulls)
-        {
-            grad.TryGetSpan(out var span);
-            normSquared = double.CreateChecked(TensorPrimitives.SumOfSquares(span));
-        }
-        else
-        {
-            var buf = ArrayPool<T>.Shared.Rent(n);
-            try
-            {
-                grad.CopyTo(buf.AsSpan(0, n), T.Zero);
-                normSquared = double.CreateChecked(TensorPrimitives.SumOfSquares(buf.AsSpan(0, n)));
-            }
-            finally
-            {
-                ArrayPool<T>.Shared.Return(buf, clearArray: true);
-            }
-        }
-
+        grad.TryGetSpan(out var span);
+        double normSquared = double.CreateChecked(TensorPrimitives.SumOfSquares(span));
         var norm = Math.Sqrt(normSquared);
 
         if (norm > maxNorm)
         {
             var scale = T.CreateChecked(maxNorm / norm);
-
-            if (!grad.HasNulls)
-            {
-                grad.TryGetSpan(out var span);
-                var clipped = new T[n];
-                TensorPrimitives.Multiply(span, scale, clipped);
-                tensor.Grad = NivaraColumn<T>.Create(clipped);
-                return;
-            }
-
-            var buf = ArrayPool<T>.Shared.Rent(n);
-            var nullMask = ArrayPool<bool>.Shared.Rent(n);
-
-            try
-            {
-                grad.CopyTo(buf.AsSpan(0, n), T.Zero);
-                grad.TryGetNullMask(out var mask);
-                mask.CopyTo(nullMask.AsSpan(0, n));
-
-                TensorPrimitives.Multiply(buf.AsSpan(0, n), scale, buf.AsSpan(0, n));
-
-                tensor.Grad = NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
-            }
-            finally
-            {
-                ArrayPool<T>.Shared.Return(buf, clearArray: true);
-                ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-            }
+            var clipped = new T[n];
+            TensorPrimitives.Multiply(span, scale, clipped);
+            tensor.Grad = NivaraColumn<T>.Create(clipped);
         }
     }
 
@@ -258,25 +191,8 @@ public static class GradientUtils
         foreach (var tensor in tensorList)
         {
             var grad = tensor.Grad!;
-            if (!grad.HasNulls)
-            {
-                grad.TryGetSpan(out var span);
-                globalNormSquared += double.CreateChecked(TensorPrimitives.SumOfSquares(span));
-            }
-            else
-            {
-                int n = grad.Length;
-                var buf = ArrayPool<T>.Shared.Rent(n);
-                try
-                {
-                    grad.CopyTo(buf.AsSpan(0, n), T.Zero);
-                    globalNormSquared += double.CreateChecked(TensorPrimitives.SumOfSquares(buf.AsSpan(0, n)));
-                }
-                finally
-                {
-                    ArrayPool<T>.Shared.Return(buf, clearArray: true);
-                }
-            }
+            grad.TryGetSpan(out var span);
+            globalNormSquared += double.CreateChecked(TensorPrimitives.SumOfSquares(span));
         }
 
         var globalNorm = Math.Sqrt(globalNormSquared);
@@ -288,36 +204,10 @@ public static class GradientUtils
             foreach (var tensor in tensorList)
             {
                 var grad = tensor.Grad!;
-                int n = grad.Length;
-
-                if (!grad.HasNulls)
-                {
-                    grad.TryGetSpan(out var span);
-                    var clipped = new T[n];
-                    TensorPrimitives.Multiply(span, scale, clipped);
-                    tensor.Grad = NivaraColumn<T>.Create(clipped);
-                }
-                else
-                {
-                    var buf = ArrayPool<T>.Shared.Rent(n);
-                    var nullMask = ArrayPool<bool>.Shared.Rent(n);
-
-                    try
-                    {
-                        grad.CopyTo(buf.AsSpan(0, n), T.Zero);
-                        grad.TryGetNullMask(out var mask);
-                        mask.CopyTo(nullMask.AsSpan(0, n));
-
-                        TensorPrimitives.Multiply(buf.AsSpan(0, n), scale, buf.AsSpan(0, n));
-
-                        tensor.Grad = NivaraColumn<T>.CreateFromSpans(buf.AsSpan(0, n), nullMask.AsSpan(0, n));
-                    }
-                    finally
-                    {
-                        ArrayPool<T>.Shared.Return(buf, clearArray: true);
-                        ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
-                    }
-                }
+                grad.TryGetSpan(out var span);
+                var clipped = new T[grad.Length];
+                TensorPrimitives.Multiply(span, scale, clipped);
+                tensor.Grad = NivaraColumn<T>.Create(clipped);
             }
         }
     }
@@ -455,22 +345,8 @@ public static class GradientUtils
         var grad = tensor.Grad;
         int n = grad.Length;
 
-        if (!grad.HasNulls)
-        {
-            grad.TryGetSpan(out var span);
-            return Math.Sqrt(double.CreateChecked(TensorPrimitives.SumOfSquares(span)));
-        }
-
-        var buf = ArrayPool<T>.Shared.Rent(n);
-        try
-        {
-            grad.CopyTo(buf.AsSpan(0, n), T.Zero);
-            return Math.Sqrt(double.CreateChecked(TensorPrimitives.SumOfSquares(buf.AsSpan(0, n))));
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(buf, clearArray: true);
-        }
+        grad.TryGetSpan(out var span);
+        return Math.Sqrt(double.CreateChecked(TensorPrimitives.SumOfSquares(span)));
     }
 
     /// <summary>
@@ -486,26 +362,8 @@ public static class GradientUtils
         foreach (var tensor in tensors.Where(t => t != null && t.Grad != null))
         {
             var grad = tensor.Grad!;
-
-            if (!grad.HasNulls)
-            {
-                grad.TryGetSpan(out var span);
-                globalNormSquared += double.CreateChecked(TensorPrimitives.SumOfSquares(span));
-            }
-            else
-            {
-                int n = grad.Length;
-                var buf = ArrayPool<T>.Shared.Rent(n);
-                try
-                {
-                    grad.CopyTo(buf.AsSpan(0, n), T.Zero);
-                    globalNormSquared += double.CreateChecked(TensorPrimitives.SumOfSquares(buf.AsSpan(0, n)));
-                }
-                finally
-                {
-                    ArrayPool<T>.Shared.Return(buf, clearArray: true);
-                }
-            }
+            grad.TryGetSpan(out var span);
+            globalNormSquared += double.CreateChecked(TensorPrimitives.SumOfSquares(span));
         }
 
         return Math.Sqrt(globalNormSquared);
@@ -536,7 +394,6 @@ public static class GradientUtils
         sb.AppendLine($"  Requires Grad: {tensor.RequiresGrad}");
         sb.AppendLine($"  Has Gradient: {tensor.Grad != null}");
         sb.AppendLine($"  Is Leaf: {tensor.IsLeaf}");
-        sb.AppendLine($"  Has Nulls: {tensor.HasNulls}");
 
         if (tensor.Grad != null)
         {
