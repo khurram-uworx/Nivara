@@ -1777,12 +1777,20 @@ public static class ReverseGradOperations
         }
 
         int len = tensor.Grad.Length;
-        var gradData = new T[len];
-        gradient.CopyTo(gradData, default(T)!);
-        var result = new T[len];
-        tensor.Grad.CopyTo(result.AsSpan(), default(T)!);
-        TensorPrimitives.Add(result.AsSpan(), gradData.AsSpan(), result.AsSpan());
-        tensor.Grad = NivaraColumn<T>.Create(result);
+        var resultBuf = ArrayPool<T>.Shared.Rent(len);
+        var gradBuf = ArrayPool<T>.Shared.Rent(len);
+        try
+        {
+            tensor.Grad.CopyTo(resultBuf.AsSpan(0, len), default(T)!);
+            gradient.CopyTo(gradBuf.AsSpan(0, len), default(T)!);
+            TensorPrimitives.Add(resultBuf.AsSpan(0, len), gradBuf.AsSpan(0, len), resultBuf.AsSpan(0, len));
+            tensor.Grad = NivaraColumn<T>.Create(resultBuf.AsSpan(0, len));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+        }
     }
 
     private static NivaraColumn<T> BroadcastGradient<T>(NivaraColumn<T> scalarGrad, int targetLength) where T : struct, INumber<T>
