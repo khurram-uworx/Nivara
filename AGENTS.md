@@ -1,5 +1,7 @@
 # Guidance for AI-assisted coding
 
+**GitHub repo:** `https://github.com/khurram-uworx/Nivara` — use `--repo khurram-uworx/Nivara` for `gh` commands.
+
 ## Facts & Research
 
 - Nivara AutoDiff product direction updated: inference is the default/common path; reverse-mode training is opt-in via using (GradientUtils.Grad()). Do not implement NoGrad as the primary API. Built-in training loops should enter Grad() internally, while manual training examples/docs should wrap forward/loss/backward/optimizer code in Grad(). <!-- id=46e6ece9693740e49c42877dcc92abab entity=default type=fact ts=2026-06-14T14:10:17.7172876+00:00 v=1 tags=Nivara,AutoDiff,GradScope,inference-default -->

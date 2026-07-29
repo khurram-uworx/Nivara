@@ -60,7 +60,7 @@ public sealed class MaxPool2d<T> : Module<T> where T : struct, INumber<T>
         {
             var capturedArgmax = argmaxData;
 
-            var gradFn = new OpNode<T>("MaxPool2d", [input], (gradOutput, sgn) =>
+            var gradFn = new OpNode<T>("MaxPool2d", [input], (gradOutput) =>
             {
                 var inputGrad = new T[n * c * h * w];
                 var gradOutData = new T[n * c * oH * oW];

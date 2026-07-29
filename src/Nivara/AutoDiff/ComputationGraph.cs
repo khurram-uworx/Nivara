@@ -17,7 +17,7 @@ public sealed class ComputationGraph
         }
     }
 
-    internal static void Backward<T>(ReverseGradTensor<T> tensor, NivaraColumn<T>? gradient = null, bool stripGradientNulls = true) where T : struct, INumber<T>
+    internal static void Backward<T>(ReverseGradTensor<T> tensor, NivaraColumn<T>? gradient = null) where T : struct, INumber<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -52,7 +52,7 @@ public sealed class ComputationGraph
             if (outputGrad == null)
                 continue;
 
-            node.Apply(outputGrad, stripGradientNulls);
+            node.Apply(outputGrad);
         }
     }
 

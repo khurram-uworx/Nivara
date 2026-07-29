@@ -36,38 +36,11 @@ public static class TypeConverter
         var sourceData = source.Data;
         int n = sourceData.Length;
 
-        if (!sourceData.HasNulls)
-        {
-            sourceData.TryGetSpan(out var span);
-            var targetData = new TTarget[n];
-            for (int i = 0; i < n; i++)
-                targetData[i] = TTarget.CreateChecked(span[i]);
-            return new ReverseGradTensor<TTarget>(NivaraColumn<TTarget>.Create(targetData), resultRequiresGrad, source.shape);
-        }
-
-        var buf = System.Buffers.ArrayPool<TSource>.Shared.Rent(n);
-        var nullMask = new bool[n]; // allocated fresh, already zeroed
-        try
-        {
-            sourceData.CopyTo(buf.AsSpan(0, n), default);
-            sourceData.TryGetNullMask(out var mask);
-            mask.CopyTo(nullMask);
-
-            var targetData = new TTarget[n];
-            for (int i = 0; i < n; i++)
-            {
-                if (!nullMask[i])
-                    targetData[i] = TTarget.CreateChecked(buf[i]);
-            }
-
-            return new ReverseGradTensor<TTarget>(
-                NivaraColumn<TTarget>.CreateFromSpans(targetData, nullMask),
-                resultRequiresGrad, source.shape);
-        }
-        finally
-        {
-            System.Buffers.ArrayPool<TSource>.Shared.Return(buf, clearArray: true);
-        }
+        sourceData.TryGetSpan(out var span);
+        var targetData = new TTarget[n];
+        for (int i = 0; i < n; i++)
+            targetData[i] = TTarget.CreateChecked(span[i]);
+        return new ReverseGradTensor<TTarget>(NivaraColumn<TTarget>.Create(targetData), resultRequiresGrad, source.shape);
     }
 
     /// <summary>

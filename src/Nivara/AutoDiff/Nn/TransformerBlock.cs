@@ -144,7 +144,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
 
         if (x.RequiresGrad)
         {
-            var gradFn = new OpNode<T>("PerRowLayerNorm", [x], (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("PerRowLayerNorm", [x], (typedGradOutput) =>
             {
                 var gradOut = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOut.AsSpan(), default(T)!);
@@ -233,7 +233,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
             var savedInput = new T[x.Length];
             x.Data.CopyTo(savedInput, default(T)!);
 
-            var gradFn = new OpNode<T>("PerRowRMSNorm", [x], (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("PerRowRMSNorm", [x], (typedGradOutput) =>
             {
                 var gradOut = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOut.AsSpan(), default(T)!);

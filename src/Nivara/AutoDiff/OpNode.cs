@@ -6,12 +6,12 @@ sealed class OpNode<T> where T : struct, INumber<T>
 {
     public string OperationName { get; }
     public IReadOnlyList<object> Inputs { get; }
-    public Action<NivaraColumn<T>, bool> BackwardFunction { get; }
+    public Action<NivaraColumn<T>> BackwardFunction { get; }
 
     public OpNode(
         string operationName,
         IReadOnlyList<object> inputs,
-        Action<NivaraColumn<T>, bool> backwardFunction)
+        Action<NivaraColumn<T>> backwardFunction)
     {
         if (string.IsNullOrEmpty(operationName))
             throw new ArgumentException("Operation name cannot be null or empty", nameof(operationName));
@@ -21,14 +21,14 @@ sealed class OpNode<T> where T : struct, INumber<T>
         BackwardFunction = backwardFunction ?? throw new ArgumentNullException(nameof(backwardFunction));
     }
 
-    public void Apply(NivaraColumn<T> gradOutput, bool stripGradientNulls)
+    public void Apply(NivaraColumn<T> gradOutput)
     {
         if (gradOutput == null)
             throw new ArgumentNullException(nameof(gradOutput));
 
         try
         {
-            BackwardFunction(gradOutput, stripGradientNulls);
+            BackwardFunction(gradOutput);
         }
         catch (Exception ex)
         {

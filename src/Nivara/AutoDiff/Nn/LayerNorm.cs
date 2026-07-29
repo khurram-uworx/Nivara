@@ -77,7 +77,7 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, INumber<T>
             int savedRows = rows;
             int savedNormShape = _normalizedShape;
 
-            var gradFn = new OpNode<T>("LayerNorm", new object[] { input }, (typedGradOutput, sgn) =>
+            var gradFn = new OpNode<T>("LayerNorm", new object[] { input }, (typedGradOutput) =>
             {
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);

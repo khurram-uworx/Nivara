@@ -123,7 +123,7 @@ public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
             var capturedWeightData = weightSpan.ToArray();
             var capturedBiasData = biasSpan.Length > 0 ? biasSpan.ToArray() : null;
 
-            var gradFn = new OpNode<T>("Conv1d", new object[] { input, _weight.Tensor }, (gradOutput, sgn) =>
+            var gradFn = new OpNode<T>("Conv1d", new object[] { input, _weight.Tensor }, (gradOutput) =>
             {
                 var gradOutData = new T[n * _outChannels * oL];
                 gradOutput.CopyTo(gradOutData, T.Zero);
