@@ -44,9 +44,7 @@ public static class SafeTensorsLoader
             var tensor = property.Value;
             string dtype = tensor.GetProperty("dtype").GetString()!;
             string name = property.Name;
-
-            if (dtype != "F32")
-                ValidateDtype(dtype, name);
+            int elementSize = DtypeByteSize(dtype);
 
             var shapeArray = tensor.GetProperty("shape");
             var offsets = tensor.GetProperty("data_offsets");
@@ -62,13 +60,13 @@ public static class SafeTensorsLoader
             foreach (var d in shape)
                 elementCount *= d;
 
-            int expectedBytes = elementCount * Unsafe.SizeOf<float>();
+            int expectedBytes = elementCount * elementSize;
             if (byteLength != expectedBytes)
                 throw new InvalidDataException(
-                    $"Tensor '{name}': expected {expectedBytes} bytes ({elementCount} × 4), got {byteLength} bytes.");
+                    $"Tensor '{name}': expected {expectedBytes} bytes ({elementCount} × {elementSize}), got {byteLength} bytes.");
 
             ReadOnlySpan<byte> tensorBytes = dataBuffer.Slice(begin, byteLength);
-            float[] data = MemoryMarshal.Cast<byte, float>(tensorBytes).ToArray();
+            float[] data = DtypeToFloatArray(tensorBytes, dtype, name);
 
             result[name] = (data, shape);
         }
@@ -76,19 +74,61 @@ public static class SafeTensorsLoader
         return result;
     }
 
-    static void ValidateDtype(string dtype, string tensorName)
+    static int DtypeByteSize(string dtype) => dtype switch
     {
-        if (dtype == "F32")
-            return;
+        "F32" or "I32" => 4,
+        "F16" or "BF16" => 2,
+        "I64" => 8,
+        _ => throw new NotSupportedException($"Unsupported dtype '{dtype}'.")
+    };
 
-        string message = dtype switch
+    static float[] DtypeToFloatArray(ReadOnlySpan<byte> tensorBytes, string dtype, string name) => dtype switch
+    {
+        "F32" => MemoryMarshal.Cast<byte, float>(tensorBytes).ToArray(),
+        "I32" => ConvertI32(tensorBytes),
+        "I64" => ConvertI64(tensorBytes),
+        "F16" => ConvertF16(tensorBytes),
+        "BF16" => ConvertBF16(tensorBytes),
+        _ => throw new NotSupportedException($"Tensor '{name}' has unsupported dtype '{dtype}'. " +
+            "Supported dtypes: F32, I32, I64, F16, BF16.")
+    };
+
+    static float[] ConvertI32(ReadOnlySpan<byte> bytes)
+    {
+        var src = MemoryMarshal.Cast<byte, int>(bytes);
+        var result = new float[src.Length];
+        for (int i = 0; i < src.Length; i++)
+            result[i] = src[i];
+        return result;
+    }
+
+    static float[] ConvertI64(ReadOnlySpan<byte> bytes)
+    {
+        var src = MemoryMarshal.Cast<byte, long>(bytes);
+        var result = new float[src.Length];
+        for (int i = 0; i < src.Length; i++)
+            result[i] = src[i];
+        return result;
+    }
+
+    static float[] ConvertF16(ReadOnlySpan<byte> bytes)
+    {
+        var src = MemoryMarshal.Cast<byte, Half>(bytes);
+        var result = new float[src.Length];
+        for (int i = 0; i < src.Length; i++)
+            result[i] = (float)src[i];
+        return result;
+    }
+
+    static float[] ConvertBF16(ReadOnlySpan<byte> bytes)
+    {
+        var src = MemoryMarshal.Cast<byte, ushort>(bytes);
+        var result = new float[src.Length];
+        for (int i = 0; i < src.Length; i++)
         {
-            "BF16" => $"Tensor '{tensorName}' has dtype 'BF16'. Nivara currently supports F32 only. " +
-                      "BF16 support is coming with .NET 11.",
-            "F16" => $"Tensor '{tensorName}' has dtype 'F16'. Nivara currently supports F32 only.",
-            _ => $"Tensor '{tensorName}' has unsupported dtype '{dtype}'. Only F32 is supported."
-        };
-
-        throw new NotSupportedException(message);
+            uint bits = (uint)src[i] << 16;
+            result[i] = Unsafe.As<uint, float>(ref bits);
+        }
+        return result;
     }
 }
