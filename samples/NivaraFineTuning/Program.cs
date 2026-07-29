@@ -133,8 +133,9 @@ static class Program
         EnsureExists(Path.Combine(modelPath, "config.json"), "DistilBERT config.json");
         EnsureExists(Path.Combine(modelPath, "model.safetensors"), "DistilBERT model.safetensors");
         EnsureExists(Path.Combine(modelPath, "vocab.txt"), "DistilBERT vocab.txt");
-        EnsureExists(Path.Combine(dataPath, "train.tsv"), "SST-2 train.tsv");
-        EnsureExists(Path.Combine(dataPath, "dev.tsv"), "SST-2 dev.tsv");
+        var sst2Dir = Path.Combine(dataPath, "sst2");
+        EnsureExists(Path.Combine(sst2Dir, "train-00000-of-00001.parquet"), "SST-2 train.parquet");
+        EnsureExists(Path.Combine(sst2Dir, "validation-00000-of-00001.parquet"), "SST-2 dev.parquet");
 
         Console.WriteLine($"Loading DistilBERT config from {modelPath}...");
         var distilConfig = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelPath, "config.json")));
@@ -155,7 +156,7 @@ static class Program
         var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelPath, "vocab.txt"));
 
         Console.WriteLine($"Loading SST-2 dataset from {dataPath}...");
-        var dataset = Sst2Dataset.Load(dataPath);
+        var dataset = Sst2Dataset.LoadFromParquet(dataPath);
 
         Console.WriteLine("Tokenizing training set...");
         var trainTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Train, cli.MaxLen);
@@ -225,7 +226,8 @@ static class Program
         var modelPath = cli.ModelDir;
 
         EnsureExists(savePath, "Fine-tuned model");
-        EnsureExists(Path.Combine(dataPath, "dev.tsv"), "SST-2 dev.tsv");
+        var sst2Dir = Path.Combine(dataPath, "sst2");
+        EnsureExists(Path.Combine(sst2Dir, "validation-00000-of-00001.parquet"), "SST-2 dev.parquet");
         EnsureExists(Path.Combine(modelPath, "vocab.txt"), "DistilBERT vocab.txt");
 
         Console.WriteLine($"Loading fine-tuned model from {savePath}...");
@@ -239,7 +241,7 @@ static class Program
         var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelPath, "vocab.txt"));
 
         Console.WriteLine($"Loading SST-2 dev set from {dataPath}...");
-        var dataset = Sst2Dataset.Load(dataPath);
+        var dataset = Sst2Dataset.LoadFromParquet(dataPath);
 
         var lossFn = new CrossEntropyLoss<float>();
         var (loss, acc) = Evaluate(model, lossFn, tokenizer, dataset.Dev, cli.MaxLen, cli.BatchSize);

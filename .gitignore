@@ -348,3 +348,4 @@ samples/data/nivarachat
 samples/data/mobilenet_v2/
 samples/data/resnet18/
 samples/data/minilm/
+samples/data/sst2/

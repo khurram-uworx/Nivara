@@ -1,5 +1,6 @@
-using Nivara.Samples;
 using Microsoft.ML.Tokenizers;
+using Nivara.IO;
+using Nivara.Samples;
 
 namespace NivaraFineTuning;
 
@@ -65,6 +66,33 @@ public sealed class Sst2Dataset
                 };
             })
             .ToList();
+    }
+
+    public static Sst2Dataset LoadFromParquet(string dataDir)
+    {
+        var trainPath = Path.Combine(dataDir, "sst2", "train-00000-of-00001.parquet");
+        var devPath = Path.Combine(dataDir, "sst2", "validation-00000-of-00001.parquet");
+
+        if (!File.Exists(trainPath)) throw new FileNotFoundException($"SST-2 train parquet not found at {trainPath}");
+        if (!File.Exists(devPath)) throw new FileNotFoundException($"SST-2 dev parquet not found at {devPath}");
+
+        var train = ParseParquet(trainPath);
+        var dev = ParseParquet(devPath);
+
+        return new Sst2Dataset(train, dev);
+    }
+
+    static List<Sst2Example> ParseParquet(string path)
+    {
+        var frame = ParquetReader.ReadParquet(path);
+        var sentences = frame.GetColumn<string>("sentence");
+        var labels = frame.GetColumn<int>("label");
+
+        var results = new List<Sst2Example>(frame.RowCount);
+        for (int i = 0; i < frame.RowCount; i++)
+            results.Add(new Sst2Example { Sentence = sentences[i], Label = labels[i] });
+
+        return results;
     }
 
     public static List<TokenizedExample> Tokenize(
