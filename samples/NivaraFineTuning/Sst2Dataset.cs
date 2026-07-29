@@ -86,11 +86,11 @@ public sealed class Sst2Dataset
     {
         var frame = ParquetReader.ReadParquet(path);
         var sentences = frame.GetColumn<string>("sentence");
-        var labels = frame.GetColumn<int>("label");
+        var labelLongs = frame.GetColumn<long>("label");
 
         var results = new List<Sst2Example>(frame.RowCount);
         for (int i = 0; i < frame.RowCount; i++)
-            results.Add(new Sst2Example { Sentence = sentences[i], Label = labels[i] });
+            results.Add(new Sst2Example { Sentence = sentences[i], Label = (int)labelLongs[i] });
 
         return results;
     }
