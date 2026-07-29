@@ -21,6 +21,52 @@ internal static class ModuleHelpers<T> where T : struct, INumber<T>
         return arr;
     }
 
+    internal static ReverseGradTensor<T> CreateBlockDiagonalMask(
+        ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        int N = batchSize * seqLen;
+        var maskData = new T[N * N];
+        var negInf = T.CreateChecked(double.NegativeInfinity);
+
+        for (int b = 0; b < batchSize; b++)
+        {
+            int offset = b * seqLen;
+
+            for (int j = 0; j < seqLen; j++)
+            {
+                int colIdx = offset + j;
+                if (attentionMask.Data[colIdx] == T.Zero)
+                {
+                    for (int i = 0; i < seqLen; i++)
+                    {
+                        int row = offset + i;
+                        maskData[row * N + colIdx] = negInf;
+                    }
+                }
+            }
+
+            for (int other = 0; other < batchSize; other++)
+            {
+                if (other == b) continue;
+                int otherOffset = other * seqLen;
+                for (int i = 0; i < seqLen; i++)
+                {
+                    int row = offset + i;
+                    for (int j = 0; j < seqLen; j++)
+                    {
+                        int otherCol = otherOffset + j;
+                        maskData[row * N + otherCol] = negInf;
+                    }
+                }
+            }
+        }
+
+        var maskCol = NivaraColumn<T>.Create(maskData);
+        var tensor = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
+        tensor.Reshape(N, N);
+        return tensor;
+    }
+
     internal static ReverseGradTensor<T> CreateCausalMask(int L)
     {
         return CreateCausalMask(L, L);

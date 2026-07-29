@@ -3,7 +3,7 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
-namespace NivaraInference;
+namespace Nivara.Samples;
 
 public sealed record BertConfig
 {
@@ -42,12 +42,12 @@ public sealed record BertConfig
     }
 }
 
-internal sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber<T>
 {
-    internal readonly Linear<T> qProj;
-    internal readonly Linear<T> kProj;
-    internal readonly Linear<T> vProj;
-    internal readonly Linear<T> oProj;
+    public readonly Linear<T> qProj;
+    public readonly Linear<T> kProj;
+    public readonly Linear<T> vProj;
+    public readonly Linear<T> oProj;
     readonly int _numHeads;
     readonly int _headDim;
     readonly T _scale;
@@ -93,6 +93,63 @@ internal sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber
         return oProj.Forward(MultiHeadAttention(Q, K, V, mask));
     }
 
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        var Q = qProj.Forward(input);
+        var K = kProj.Forward(input);
+        var V = vProj.Forward(input);
+
+        var mask = BuildBlockDiagonalMask(attentionMask, batchSize, seqLen);
+        return oProj.Forward(MultiHeadAttention(Q, K, V, mask));
+    }
+
+    static ReverseGradTensor<T> BuildBlockDiagonalMask(
+        ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        int N = batchSize * seqLen;
+        var maskData = new T[N * N];
+        var negInf = T.CreateChecked(double.NegativeInfinity);
+
+        for (int b = 0; b < batchSize; b++)
+        {
+            int offset = b * seqLen;
+
+            for (int j = 0; j < seqLen; j++)
+            {
+                int colIdx = offset + j;
+                if (attentionMask.Data[colIdx] == T.Zero)
+                {
+                    for (int i = 0; i < seqLen; i++)
+                    {
+                        int row = offset + i;
+                        maskData[row * N + colIdx] = negInf;
+                    }
+                }
+            }
+
+            for (int other = 0; other < batchSize; other++)
+            {
+                if (other == b) continue;
+                int otherOffset = other * seqLen;
+                for (int i = 0; i < seqLen; i++)
+                {
+                    int row = offset + i;
+                    for (int j = 0; j < seqLen; j++)
+                    {
+                        int otherCol = otherOffset + j;
+                        maskData[row * N + otherCol] = negInf;
+                    }
+                }
+            }
+        }
+
+        var maskCol = NivaraColumn<T>.Create(maskData);
+        var tensor = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
+        tensor.Reshape(N, N);
+        return tensor;
+    }
+
     ReverseGradTensor<T> MultiHeadAttention(
         ReverseGradTensor<T> Q, ReverseGradTensor<T> K, ReverseGradTensor<T> V,
         ReverseGradTensor<T>? mask)
@@ -128,13 +185,13 @@ internal sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber
     }
 }
 
-internal sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
 {
-    internal readonly LayerNorm<T> ln1;
-    internal readonly BertSelfAttention<T> attn;
-    internal readonly LayerNorm<T> ln2;
-    internal readonly Linear<T> fc1;
-    internal readonly Linear<T> fc2;
+    public readonly LayerNorm<T> ln1;
+    public readonly BertSelfAttention<T> attn;
+    public readonly LayerNorm<T> ln2;
+    public readonly Linear<T> fc1;
+    public readonly Linear<T> fc2;
 
     public BertLayer(int hiddenSize, int intermediateSize, int numHeads, float eps)
     {
@@ -173,14 +230,29 @@ internal sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
         h2 = ReverseGradOperations.Add(h2, h);
         return h2;
     }
+
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        var h = ln1.Forward(input);
+        h = attn.ForwardBatched(h, attentionMask, batchSize, seqLen);
+        h = ReverseGradOperations.Add(h, input);
+
+        var h2 = ln2.Forward(h);
+        h2 = fc1.Forward(h2);
+        h2 = ReverseGradOperations.Gelu(h2);
+        h2 = fc2.Forward(h2);
+        h2 = ReverseGradOperations.Add(h2, h);
+        return h2;
+    }
 }
 
-internal sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
 {
-    internal readonly Embedding<T> wordEmbed;
-    internal readonly Embedding<T> posEmbed;
-    internal readonly LayerNorm<T> embedLn;
-    internal readonly BertLayer<T>[] layers;
+    public readonly Embedding<T> wordEmbed;
+    public readonly Embedding<T> posEmbed;
+    public readonly LayerNorm<T> embedLn;
+    public readonly BertLayer<T>[] layers;
 
     public BertEncoder(BertConfig config)
     {
@@ -235,6 +307,27 @@ internal sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
 
         return hidden;
     }
+
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        var posIds = new T[batchSize * seqLen];
+        for (int b = 0; b < batchSize; b++)
+            for (int i = 0; i < seqLen; i++)
+                posIds[b * seqLen + i] = T.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        posEmbInput.Reshape(batchSize * seqLen);
+
+        var wordEmb = wordEmbed.Forward(input);
+        var posEmb = posEmbed.Forward(posEmbInput);
+        var hidden = ReverseGradOperations.Add(wordEmb, posEmb);
+        hidden = embedLn.Forward(hidden);
+
+        foreach (var layer in layers)
+            hidden = layer.ForwardBatched(hidden, attentionMask, batchSize, seqLen);
+
+        return hidden;
+    }
 }
 
 public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
@@ -261,6 +354,12 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
         var hidden = encoder.ForwardWithMask(input, paddingMask);
         var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
         return L2Normalize(clsToken, config.HiddenSize);
+    }
+
+    public ReverseGradTensor<T> ForwardBatched(
+        ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        return encoder.ForwardBatched(input, attentionMask, batchSize, seqLen);
     }
 
     static ReverseGradTensor<T> ExtractRow(ReverseGradTensor<T> matrix, int row, int cols)

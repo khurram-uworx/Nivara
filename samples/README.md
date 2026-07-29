@@ -60,6 +60,20 @@ Key characteristics:
 - Interactive wizard, CLI commands (`generate`, `train`, `predict`), model save/load
 - **100% test accuracy** on synthetic data after 20 epochs (~1.5s)
 
+## [NivaraFineTuning/README.md](NivaraFineTuning/README.md) — DistilBERT Fine-Tuning on GLUE SST-2
+
+Fine-tunes a pre-trained DistilBERT model for binary sentiment classification on the GLUE SST-2 dataset — entirely in C#, no Python runtime required for inference.
+
+Key characteristics:
+- **DistilBERT encoder** — 6-layer pre-norm transformer with GELU activation, 12 attention heads, 768-dim hidden size (67M parameters)
+- **Batched block-diagonal attention** — flattens B sequences into `[B×L, D]` with attention mask isolating cross-sequence positions
+- **AdamW fine-tuning** — weight-decoupled optimizer with lr=2e-5, weight_decay=0.01, CrossEntropyLoss
+- **SafeTensors weight loading** — custom zero-dependency reader maps HuggingFace DistilBERT keys to module parameters
+- **Interactive prediction** — real-time sentiment analysis with confidence scores
+- **Parquet data pipeline** — SST-2 loaded via `Nivara.IO.ParquetReader` (Parquet.Net)
+- **Python reference** — `finetune_distilbert.py` for accuracy comparison
+- **3 CLI modes** — `train`, `eval`, `predict` with configurable hyperparameters
+
 ## [NivaraChess/README.md](NivaraChess/README.md) — Neural Chess Position Evaluator
 
 Trains a neural network to evaluate chess positions using Nivara's autograd engine. Demonstrates non-NLP use of the library: sparse embeddings (`SparseEmbedding<T>` for NNUE halfKP features), Stockfish knowledge distillation via UCI (`eval` command with `ucinewgame` sync), and `IEmbeddingGenerator<T>` integration.
