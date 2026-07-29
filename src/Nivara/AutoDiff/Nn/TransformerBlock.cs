@@ -1,8 +1,10 @@
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -240,35 +242,96 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
 
                 var gradResult = new T[rows * cols];
 
-                for (int i = 0; i < rows; i++)
+                if (typeof(T) == typeof(float))
                 {
-                    int baseIdx = i * cols;
-
-                    double sumSq = 0;
-                    for (int j = 0; j < cols; j++)
+                    var tempArr = ArrayPool<float>.Shared.Rent(cols);
+                    try
                     {
-                        double v = double.CreateChecked(savedInput[baseIdx + j]);
-                        sumSq += v * v;
+                        var tempF = tempArr.AsSpan(0, cols);
+                        for (int i = 0; i < rows; i++)
+                        {
+                            int baseIdx = i * cols;
+                            var sF = MemoryMarshal.Cast<T, float>(savedInput.AsSpan(baseIdx, cols));
+                            var gF = MemoryMarshal.Cast<T, float>(gradOut.AsSpan(baseIdx, cols));
+                            var dF = MemoryMarshal.Cast<T, float>(gradResult.AsSpan(baseIdx, cols));
+
+                            float sumSq = TensorPrimitives.Dot(sF, sF);
+                            float rms = MathF.Sqrt(sumSq / cols + (float)eps);
+                            float invRms = 1f / rms;
+                            float rms3 = rms * rms * rms;
+                            float sumGradX = TensorPrimitives.Dot(gF, sF);
+                            float scale = sumGradX / (cols * rms3);
+
+                            TensorPrimitives.Multiply(sF, -scale, tempF);
+                            TensorPrimitives.MultiplyAdd(gF, invRms, tempF, dF);
+                        }
                     }
-                    double rms = Math.Sqrt(sumSq / cols + eps);
-                    double invRms = 1.0 / rms;
-                    double rms3 = rms * rms * rms;
-
-                    double sumGradX = 0;
-                    for (int j = 0; j < cols; j++)
+                    finally
                     {
-                        double g = double.CreateChecked(gradOut[baseIdx + j]);
-                        double v = double.CreateChecked(savedInput[baseIdx + j]);
-                        sumGradX += g * v;
+                        ArrayPool<float>.Shared.Return(tempArr);
                     }
-
-                    double scale = sumGradX / (cols * rms3);
-
-                    for (int j = 0; j < cols; j++)
+                }
+                else if (typeof(T) == typeof(double))
+                {
+                    var tempArr = ArrayPool<double>.Shared.Rent(cols);
+                    try
                     {
-                        double g = double.CreateChecked(gradOut[baseIdx + j]);
-                        double v = double.CreateChecked(savedInput[baseIdx + j]);
-                        gradResult[baseIdx + j] = T.CreateChecked(g * invRms - v * scale);
+                        var tempD = tempArr.AsSpan(0, cols);
+                        for (int i = 0; i < rows; i++)
+                        {
+                            int baseIdx = i * cols;
+                            var sD = MemoryMarshal.Cast<T, double>(savedInput.AsSpan(baseIdx, cols));
+                            var gD = MemoryMarshal.Cast<T, double>(gradOut.AsSpan(baseIdx, cols));
+                            var dD = MemoryMarshal.Cast<T, double>(gradResult.AsSpan(baseIdx, cols));
+
+                            double sumSq = TensorPrimitives.Dot(sD, sD);
+                            double rms = Math.Sqrt(sumSq / cols + eps);
+                            double invRms = 1.0 / rms;
+                            double rms3 = rms * rms * rms;
+                            double sumGradX = TensorPrimitives.Dot(gD, sD);
+                            double scale = sumGradX / (cols * rms3);
+
+                            TensorPrimitives.Multiply(sD, -scale, tempD);
+                            TensorPrimitives.MultiplyAdd(gD, invRms, tempD, dD);
+                        }
+                    }
+                    finally
+                    {
+                        ArrayPool<double>.Shared.Return(tempArr);
+                    }
+                }
+                else
+                {
+                    for (int i = 0; i < rows; i++)
+                    {
+                        int baseIdx = i * cols;
+
+                        double sumSq = 0;
+                        for (int j = 0; j < cols; j++)
+                        {
+                            double v = double.CreateChecked(savedInput[baseIdx + j]);
+                            sumSq += v * v;
+                        }
+                        double rms = Math.Sqrt(sumSq / cols + eps);
+                        double invRms = 1.0 / rms;
+                        double rms3 = rms * rms * rms;
+
+                        double sumGradX = 0;
+                        for (int j = 0; j < cols; j++)
+                        {
+                            double g = double.CreateChecked(gradOut[baseIdx + j]);
+                            double v = double.CreateChecked(savedInput[baseIdx + j]);
+                            sumGradX += g * v;
+                        }
+
+                        double scale = sumGradX / (cols * rms3);
+
+                        for (int j = 0; j < cols; j++)
+                        {
+                            double g = double.CreateChecked(gradOut[baseIdx + j]);
+                            double v = double.CreateChecked(savedInput[baseIdx + j]);
+                            gradResult[baseIdx + j] = T.CreateChecked(g * invRms - v * scale);
+                        }
                     }
                 }
 
