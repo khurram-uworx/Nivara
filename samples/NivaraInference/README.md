@@ -16,7 +16,7 @@ Includes Python (PyTorch) reference implementations for direct performance compa
 |-------|-------------|---------|------------|--------|
 | MobileNetV2 | 13.5 MB | 262 | 3.4M | 1001 classes |
 | ResNet-18 | 44.6 MB | 102 | 11.7M | 1000 classes |
-| MiniLM (L6-v2) | 91 MB | 96 | 22.7M | 384-dim embedding |
+| MiniLM (L6-v2) | 91 MB | 104 | 22.7M | 384-dim embedding |
 
 Models are downloaded to `samples/data/` via HuggingFace CLI:
 ```bash
@@ -88,12 +88,13 @@ Measured on the same machine (CPU-only, no GPU acceleration):
 
 | | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |---|---|---|---|
-| **MobileNetV2** | 38.5 ms | 3,278 ms | **~85x** |
-| **ResNet-18** | 46.4 ms | 814 ms | **~17x** |
+| **MobileNetV2** | 38.5 ms | 5,920 ms | **~154x** |
+| **ResNet-18** | 46.4 ms | 1,407 ms | **~30x** |
+| **MiniLM-L6 (128 tokens)** | 15.3 ms | 1,717 ms | **~112x** |
 
-Both use batch size 1, 224×224 input, ImageNet normalization. PyTorch uses MKL-optimized BLAS kernels; Nivara uses managed .NET tensor operations.
+Vision models use batch size 1, 224×224 input, ImageNet normalization. MiniLM uses 128-token input, batch 1. PyTorch uses MKL-optimized BLAS kernels; Nivara uses managed .NET tensor operations with AutoDiff graph building on every forward pass (there is no inference-only path yet).
 
-The ResNet-18 gap is smaller because it has fewer depthwise-separable convolutions (which require groups×spatial tensor manipulation in Nivara's current implementation). MobileNetV2 is dominated by depthwise convolutions — the primary bottleneck.
+The ResNet-18 gap is smaller because it has fewer depthwise-separable convolutions (which require groups×spatial tensor manipulation in Nivara's current implementation). MobileNetV2 is dominated by depthwise convolutions — the primary bottleneck. MiniLM's gap comes from AutoDiff graph construction overhead per inference pass (∼1.7s vs 15 ms for pure PyTorch inference).
 
 ## Architecture notes
 
@@ -120,7 +121,7 @@ Custom zero-dependency reader that parses the SafeTensors binary format directly
 
 ### MiniLM (sentence-transformers/all-MiniLM-L6-v2)
 
-- 6-layer **pre-norm BERT** encoder with GELU activation (not ReLU²)
+- 6-layer **Post-LN BERT** encoder with GELU activation (not ReLU²; LayerNorm after attention/FFN, matching HuggingFace)
 - **Embedding lookup** via `ReverseGradOperations.Gather` — direct row indexing, no one-hot+MatMul waste
 - **Bidirectional self-attention** with optional padding mask support
 - **[CLS] token pooling** — extracts first token embedding from the output sequence
@@ -164,7 +165,7 @@ Shared comparison fixtures live in `samples/data/`:
 - **LayerNorm<T>** with affine parameters and configurable epsilon
 - **GELU activation** — tanh approximation via `Activation.Gelu`
 - **MultiheadAttention<T>** bidirectional mode with optional padding mask
-- **Pre-norm transformer** architecture (LayerNorm before attention/FFN, not after)
+- **Post-LN transformer** architecture (LayerNorm after attention/FFN, matching HuggingFace BERT)
 - **[CLS] token pooling** and **L2 normalization** for sentence embeddings
 - **`Microsoft.ML.Tokenizers`** integration for BERT tokenization
 - **`Module<T>.Eval()`** for inference mode (disables dropout, though MiniLM has none)

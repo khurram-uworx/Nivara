@@ -61,6 +61,7 @@ class Program
                 if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
             case "minilm":
+                if (compare) return RunMiniLMCompare(tensors);
                 bool similarity = mode == "similarity";
                 return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? RunMiniLMBenchmark(tensors) : RunMiniLMInference(tensors);
             default:
@@ -639,7 +640,7 @@ class Program
 
         var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
         string text = "This is a test sentence.";
-        var input = MiniLMTokenizer.Tokenize(tokenizer, text, maxLen: 128);
+        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
 
         Console.WriteLine($"Input text: \"{text}\"");
         var inputData = new float[input.Length];
@@ -649,7 +650,7 @@ class Program
 
         model.Eval();
         var fwdSw = Stopwatch.StartNew();
-        var output = model.Forward(input);
+        var output = mask != null ? model.ForwardWithMask(input, mask) : model.Forward(input);
         fwdSw.Stop();
 
         var outputData = new float[output.Length];
@@ -676,6 +677,112 @@ class Program
         return 0;
     }
 
+    static int RunMiniLMCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Compare ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+
+        var sentences = new[]
+        {
+            "This is a cat.",
+            "This is a dog.",
+            "I love programming.",
+            "The weather is nice today.",
+            "I love coding."
+        };
+
+        Console.WriteLine($"Sentences ({sentences.Length}):");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.WriteLine($"  [{i}] {sentences[i]}");
+        Console.WriteLine();
+
+        model.Eval();
+
+        var embeddings = new float[sentences.Length][];
+        var fwdSw = Stopwatch.StartNew();
+        for (int s = 0; s < sentences.Length; s++)
+        {
+            var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, sentences[s], maxLen: 128);
+            var output = mask != null ? model.ForwardWithMask(input, mask) : model.Forward(input);
+            var outputData = new float[output.Length];
+            output.Data.TryGetSpan(out var outSpan);
+            if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
+            embeddings[s] = outputData;
+        }
+        fwdSw.Stop();
+
+        double avgMs = fwdSw.ElapsedMilliseconds / (double)sentences.Length;
+        Console.WriteLine($"Forward total: {fwdSw.ElapsedMilliseconds} ms across {sentences.Length} sentences ({avgMs:F1} ms/sentence)");
+        Console.WriteLine();
+
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            var emb = embeddings[i];
+            float norm = 0f;
+            foreach (var v in emb) norm += v * v;
+            norm = MathF.Sqrt(norm);
+
+            Console.WriteLine($"[{i}] {sentences[i]}");
+            Console.Write($"    first 10: [");
+            for (int j = 0; j < Math.Min(10, emb.Length); j++)
+            {
+                Console.Write($"{emb[j]:F6}");
+                if (j < Math.Min(10, emb.Length) - 1) Console.Write(", ");
+            }
+            Console.WriteLine("]");
+            Console.WriteLine($"    stats: min={emb.Min():F6}, max={emb.Max():F6}, mean={emb.Average():F6}, L2 norm={norm:F6}");
+            Console.WriteLine();
+        }
+
+        Console.WriteLine("Cosine Similarity Matrix:");
+        Console.Write("       ");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.Write($"  [{i}]   ");
+        Console.WriteLine();
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            Console.Write($"  [{i}]  ");
+            for (int j = 0; j < sentences.Length; j++)
+            {
+                float sim = CosineSimilarity(embeddings[i], embeddings[j]);
+                Console.Write($"{sim,7:F4} ");
+            }
+            Console.WriteLine();
+        }
+        Console.WriteLine();
+
+        var savePath = Path.Combine("samples", "data", "compare_minilm_embeddings_cs.bin");
+        using (var fs = File.Create(savePath))
+        {
+            int totalFloats = embeddings.Length * embeddings[0].Length;
+            byte[] raw = new byte[totalFloats * 4];
+            int offset = 0;
+            for (int i = 0; i < embeddings.Length; i++)
+            {
+                Buffer.BlockCopy(embeddings[i], 0, raw, offset, embeddings[i].Length * 4);
+                offset += embeddings[i].Length * 4;
+            }
+            fs.Write(raw);
+        }
+        Console.WriteLine($"Saved embeddings to {savePath}");
+
+        return 0;
+    }
+
     static int RunMiniLMBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
     {
         Console.WriteLine("=== MiniLM Benchmark ===");
@@ -687,7 +794,8 @@ class Program
 
         var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
         string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the MiniLM model inference across multiple tokens for benchmarking purposes.";
-        var input = MiniLMTokenizer.Tokenize(tokenizer, text, maxLen: 128);
+        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
+        Func<ReverseGradTensor<float>> forward = () => mask != null ? model.ForwardWithMask(input, mask) : model.Forward(input);
 
         Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
         Console.WriteLine($"Input tokens: {input.Length}");
@@ -695,14 +803,14 @@ class Program
 
         Console.WriteLine("Warmup (3 passes)...");
         for (int i = 0; i < 3; i++)
-            model.Forward(input);
+            forward();
 
         Console.WriteLine("Benchmarking (10 passes)...");
         var times = new List<long>();
         for (int i = 0; i < 10; i++)
         {
             var sw = Stopwatch.StartNew();
-            model.Forward(input);
+            forward();
             sw.Stop();
             times.Add(sw.ElapsedMilliseconds);
         }
@@ -744,9 +852,9 @@ class Program
         var embeddings = new float[sentences.Length][];
         for (int s = 0; s < sentences.Length; s++)
         {
-            var input = MiniLMTokenizer.Tokenize(tokenizer, sentences[s], maxLen: 128);
+            var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, sentences[s], maxLen: 128);
 
-            var output = model.Forward(input);
+            var output = mask != null ? model.ForwardWithMask(input, mask) : model.Forward(input);
             var outputData = new float[output.Length];
             output.Data.TryGetSpan(out var outSpan);
             if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
