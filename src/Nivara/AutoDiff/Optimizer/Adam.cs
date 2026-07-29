@@ -1,5 +1,7 @@
 using System.Buffers;
 using System.Numerics;
+using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Optimizer;
 
@@ -56,6 +58,34 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, INumber<T>
         data.TryGetSpan(out var dataSpan);
         grad.TryGetSpan(out var gradSpan);
 
+        if (typeof(T) == typeof(float))
+        {
+            ApplyAdam_Kernel_Float(
+                MemoryMarshal.Cast<T, float>(expAvg.AsSpan())[..n],
+                MemoryMarshal.Cast<T, float>(expAvgSq.AsSpan())[..n],
+                MemoryMarshal.Cast<T, float>(resultBuf.AsSpan())[..n],
+                MemoryMarshal.Cast<T, float>(dataSpan),
+                MemoryMarshal.Cast<T, float>(gradSpan),
+                n, (float)(object)lr!, (float)(object)wd!,
+                (float)(object)biasCorr1!, (float)(object)biasCorr2!,
+                (float)(object)beta1T!, (float)(object)beta2T!, (float)(object)epsT!);
+            return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf), requiresGrad: true, tensor.shape);
+        }
+
+        if (typeof(T) == typeof(double))
+        {
+            ApplyAdam_Kernel_Double(
+                MemoryMarshal.Cast<T, double>(expAvg.AsSpan())[..n],
+                MemoryMarshal.Cast<T, double>(expAvgSq.AsSpan())[..n],
+                MemoryMarshal.Cast<T, double>(resultBuf.AsSpan())[..n],
+                MemoryMarshal.Cast<T, double>(dataSpan),
+                MemoryMarshal.Cast<T, double>(gradSpan),
+                n, (double)(object)lr!, (double)(object)wd!,
+                (double)(object)biasCorr1!, (double)(object)biasCorr2!,
+                (double)(object)beta1T!, (double)(object)beta2T!, (double)(object)epsT!);
+            return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf), requiresGrad: true, tensor.shape);
+        }
+
         for (int i = 0; i < n; i++)
         {
             expAvg[i] = beta1T * expAvg[i] + (T.One - beta1T) * gradSpan[i];
@@ -73,6 +103,86 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, INumber<T>
         }
 
         return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf.AsSpan(0, n)), requiresGrad: true, tensor.shape);
+    }
+
+    static void ApplyAdam_Kernel_Float(
+        Span<float> expAvg, Span<float> expAvgSq, Span<float> resultBuf,
+        ReadOnlySpan<float> dataSpan, ReadOnlySpan<float> gradSpan,
+        int n, float lr, float wd, float biasCorr1, float biasCorr2,
+        float beta1T, float beta2T, float epsT)
+    {
+        float oneMinusBeta1 = 1f - beta1T;
+        float oneMinusBeta2 = 1f - beta2T;
+        var tempArr = ArrayPool<float>.Shared.Rent(n);
+        try
+        {
+            var temp = tempArr.AsSpan(0, n);
+
+            TensorPrimitives.Multiply(gradSpan, gradSpan, temp);
+            TensorPrimitives.Multiply(temp, oneMinusBeta2, temp);
+            TensorPrimitives.MultiplyAdd(expAvgSq, beta2T, temp, expAvgSq);
+
+            TensorPrimitives.Multiply(gradSpan, oneMinusBeta1, temp);
+            TensorPrimitives.MultiplyAdd(expAvg, beta1T, temp, expAvg);
+
+            TensorPrimitives.Divide(expAvg, biasCorr1, resultBuf);
+            TensorPrimitives.Divide(expAvgSq, biasCorr2, temp);
+            TensorPrimitives.Sqrt(temp, temp);
+            TensorPrimitives.Add(temp, epsT, temp);
+            TensorPrimitives.Divide(resultBuf, temp, resultBuf);
+            TensorPrimitives.Multiply(resultBuf, lr, resultBuf);
+            TensorPrimitives.Subtract(dataSpan, resultBuf, resultBuf);
+
+            if (wd != 0f)
+            {
+                TensorPrimitives.Multiply(dataSpan, lr * wd, temp);
+                TensorPrimitives.Subtract(resultBuf, temp, resultBuf);
+            }
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(tempArr);
+        }
+    }
+
+    static void ApplyAdam_Kernel_Double(
+        Span<double> expAvg, Span<double> expAvgSq, Span<double> resultBuf,
+        ReadOnlySpan<double> dataSpan, ReadOnlySpan<double> gradSpan,
+        int n, double lr, double wd, double biasCorr1, double biasCorr2,
+        double beta1T, double beta2T, double epsT)
+    {
+        double oneMinusBeta1 = 1.0 - beta1T;
+        double oneMinusBeta2 = 1.0 - beta2T;
+        var tempArr = ArrayPool<double>.Shared.Rent(n);
+        try
+        {
+            var temp = tempArr.AsSpan(0, n);
+
+            TensorPrimitives.Multiply(gradSpan, gradSpan, temp);
+            TensorPrimitives.Multiply(temp, oneMinusBeta2, temp);
+            TensorPrimitives.MultiplyAdd(expAvgSq, beta2T, temp, expAvgSq);
+
+            TensorPrimitives.Multiply(gradSpan, oneMinusBeta1, temp);
+            TensorPrimitives.MultiplyAdd(expAvg, beta1T, temp, expAvg);
+
+            TensorPrimitives.Divide(expAvg, biasCorr1, resultBuf);
+            TensorPrimitives.Divide(expAvgSq, biasCorr2, temp);
+            TensorPrimitives.Sqrt(temp, temp);
+            TensorPrimitives.Add(temp, epsT, temp);
+            TensorPrimitives.Divide(resultBuf, temp, resultBuf);
+            TensorPrimitives.Multiply(resultBuf, lr, resultBuf);
+            TensorPrimitives.Subtract(dataSpan, resultBuf, resultBuf);
+
+            if (wd != 0.0)
+            {
+                TensorPrimitives.Multiply(dataSpan, lr * wd, temp);
+                TensorPrimitives.Subtract(resultBuf, temp, resultBuf);
+            }
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(tempArr);
+        }
     }
 
     public override void Step()

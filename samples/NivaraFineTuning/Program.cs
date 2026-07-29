@@ -20,6 +20,7 @@ sealed record CliArgs
     public string DataDir { get; init; } = "";
     public string ModelDir { get; init; } = "";
     public string SavePath { get; init; } = "";
+    public int MaxExamples { get; init; }
 
     public static CliArgs Parse(string[] args)
     {
@@ -32,6 +33,7 @@ sealed record CliArgs
         float lr = 2e-5f;
         int batchSize = 4;
         int maxLen = 128;
+        int maxExamples = 0;
 
         for (int i = 0; i < args.Length; i++)
         {
@@ -51,6 +53,9 @@ sealed record CliArgs
                     break;
                 case "--max-len" when i + 1 < args.Length:
                     maxLen = int.Parse(args[++i]);
+                    break;
+                case "--max-examples" when i + 1 < args.Length:
+                    maxExamples = int.Parse(args[++i]);
                     break;
                 case "--data-dir" when i + 1 < args.Length:
                     dataDir = args[++i];
@@ -77,6 +82,7 @@ sealed record CliArgs
             Lr = lr,
             BatchSize = batchSize,
             MaxLen = maxLen,
+            MaxExamples = maxExamples,
             DataDir = dataDir,
             ModelDir = modelDir,
             SavePath = savePath
@@ -97,6 +103,7 @@ Options:
   --lr            Learning rate (default: 2e-5)
   --batch-size    Batch size for training/eval (default: 4)
   --max-len       Maximum sequence length (default: 128)
+  --max-examples  Limit training to first N examples (default: 0 = all)
   --data-dir      Path to SST-2 data directory
   --model-dir     Path to DistilBERT model directory
   --save-path     Path to save/load fine-tuned model
@@ -159,7 +166,13 @@ static class Program
         var dataset = Sst2Dataset.LoadFromParquet(dataPath);
 
         Console.WriteLine("Tokenizing training set...");
-        var trainTokenized = Sst2Dataset.Tokenize(tokenizer, dataset.Train, cli.MaxLen);
+        var trainData = dataset.Train;
+        if (cli.MaxExamples > 0 && cli.MaxExamples < trainData.Count)
+        {
+            trainData = trainData.Take(cli.MaxExamples).ToList();
+            Console.WriteLine($"  (limited to {cli.MaxExamples} examples by --max-examples)");
+        }
+        var trainTokenized = Sst2Dataset.Tokenize(tokenizer, trainData, cli.MaxLen);
         Console.WriteLine($"  {trainTokenized.Count} examples, seqLen={cli.MaxLen}");
 
         Console.WriteLine("Tokenizing dev set...");
@@ -180,6 +193,7 @@ static class Program
             model.Train();
             float epochLoss = 0f;
             int batchCount = 0;
+            var batchSw = System.Diagnostics.Stopwatch.StartNew();
 
             var trainBatches = Sst2Dataset.CreateBatches(trainTokenized, cli.BatchSize, shuffle: true).ToList();
             int totalTrainBatches = trainBatches.Count;
@@ -201,8 +215,8 @@ static class Program
                 }
 
                 batchCount++;
-                if (batchCount % 50 == 0 || batchCount == totalTrainBatches)
-                    Console.WriteLine($"  Batch {batchCount}/{totalTrainBatches} - loss: {epochLoss / batchCount:F4}");
+                Console.WriteLine($"  Batch {batchCount}/{totalTrainBatches} [{batchSw.Elapsed.TotalSeconds:F1}s] - loss: {epochLoss / batchCount:F4}");
+                batchSw.Restart();
             }
 
             float avgTrainLoss = epochLoss / batchCount;

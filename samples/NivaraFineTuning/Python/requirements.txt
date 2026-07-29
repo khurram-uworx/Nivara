@@ -1,7 +1,10 @@
 # Nivara Fine-Tuning Sample - Python Scripts
 # These scripts download model weights and datasets used by the C# fine-tuning sample.
+# Also used for performance comparison benchmarks.
 torch>=2.0.0
 transformers>=4.30.0
 datasets>=2.12.0
 safetensors>=0.3.0
 numpy>=1.24.0
+pandas>=2.0.0
+pyarrow>=12.0.0

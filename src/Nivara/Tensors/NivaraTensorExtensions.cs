@@ -1054,6 +1054,16 @@ public static class NivaraTensorExtensions
 
     private static void GeluKernel<T>(ReadOnlySpan<T> x, Span<T> result) where T : struct, INumber<T>
     {
+        if (typeof(T) == typeof(float))
+        {
+            GeluKernel_Float(MemoryMarshal.Cast<T, float>(x), MemoryMarshal.Cast<T, float>(result));
+            return;
+        }
+        if (typeof(T) == typeof(double))
+        {
+            GeluKernel_Double(MemoryMarshal.Cast<T, double>(x), MemoryMarshal.Cast<T, double>(result));
+            return;
+        }
         const double sqrt2OverPi = 0.7978845608028654;
         const double coeff = 0.044715;
         for (int i = 0; i < x.Length; i++)
@@ -1065,8 +1075,76 @@ public static class NivaraTensorExtensions
         }
     }
 
+    private static void GeluKernel_Float(ReadOnlySpan<float> x, Span<float> result)
+    {
+        float sqrt2OverPi = 0.7978845608028654f;
+        float coeff = 0.044715f;
+        float half = 0.5f;
+        float one = 1f;
+        int n = x.Length;
+        var x3Arr = ArrayPool<float>.Shared.Rent(n);
+        var innerArr = ArrayPool<float>.Shared.Rent(n);
+        try
+        {
+            var x3 = x3Arr.AsSpan(0, n);
+            var inner = innerArr.AsSpan(0, n);
+            TensorPrimitives.Multiply(x, x, x3);
+            TensorPrimitives.Multiply(x3, x, x3);
+            TensorPrimitives.MultiplyAdd(x3, coeff, x, inner);
+            TensorPrimitives.Multiply(inner, sqrt2OverPi, inner);
+            TensorPrimitives.Tanh(inner, result);
+            TensorPrimitives.Add(result, one, result);
+            TensorPrimitives.Multiply(x, half, inner);
+            TensorPrimitives.Multiply(inner, result, result);
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(x3Arr);
+            ArrayPool<float>.Shared.Return(innerArr);
+        }
+    }
+
+    private static void GeluKernel_Double(ReadOnlySpan<double> x, Span<double> result)
+    {
+        double sqrt2OverPi = 0.7978845608028654;
+        double coeff = 0.044715;
+        double half = 0.5;
+        double one = 1.0;
+        int n = x.Length;
+        var x3Arr = ArrayPool<double>.Shared.Rent(n);
+        var innerArr = ArrayPool<double>.Shared.Rent(n);
+        try
+        {
+            var x3 = x3Arr.AsSpan(0, n);
+            var inner = innerArr.AsSpan(0, n);
+            TensorPrimitives.Multiply(x, x, x3);
+            TensorPrimitives.Multiply(x3, x, x3);
+            TensorPrimitives.MultiplyAdd(x3, coeff, x, inner);
+            TensorPrimitives.Multiply(inner, sqrt2OverPi, inner);
+            TensorPrimitives.Tanh(inner, result);
+            TensorPrimitives.Add(result, one, result);
+            TensorPrimitives.Multiply(x, half, inner);
+            TensorPrimitives.Multiply(inner, result, result);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(x3Arr);
+            ArrayPool<double>.Shared.Return(innerArr);
+        }
+    }
+
     private static void GeluGradientKernel<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> gradOutput, Span<T> result) where T : struct, INumber<T>
     {
+        if (typeof(T) == typeof(float))
+        {
+            GeluGradientKernel_Float(MemoryMarshal.Cast<T, float>(x), MemoryMarshal.Cast<T, float>(gradOutput), MemoryMarshal.Cast<T, float>(result));
+            return;
+        }
+        if (typeof(T) == typeof(double))
+        {
+            GeluGradientKernel_Double(MemoryMarshal.Cast<T, double>(x), MemoryMarshal.Cast<T, double>(gradOutput), MemoryMarshal.Cast<T, double>(result));
+            return;
+        }
         const double sqrt2OverPi = 0.7978845608028654;
         const double coeff = 0.044715;
         for (int i = 0; i < x.Length; i++)
@@ -1078,6 +1156,106 @@ public static class NivaraTensorExtensions
             double dInnerDx = sqrt2OverPi * (1.0 + 3.0 * coeff * val * val);
             double dGeluDx = 0.5 * (1.0 + tanhVal) + 0.5 * val * sech2 * dInnerDx;
             result[i] = T.CreateChecked(dGeluDx * double.CreateChecked(gradOutput[i]));
+        }
+    }
+
+    private static void GeluGradientKernel_Float(ReadOnlySpan<float> x, ReadOnlySpan<float> gradOutput, Span<float> result)
+    {
+        float sqrt2OverPi = 0.7978845608028654f;
+        float coeff = 0.044715f;
+        float half = 0.5f;
+        float one = 1f;
+        float threeCoeff = 3f * coeff;
+        int n = x.Length;
+        var buf1Arr = ArrayPool<float>.Shared.Rent(n);
+        var buf2Arr = ArrayPool<float>.Shared.Rent(n);
+        var buf3Arr = ArrayPool<float>.Shared.Rent(n);
+        try
+        {
+            var buf1 = buf1Arr.AsSpan(0, n);
+            var buf2 = buf2Arr.AsSpan(0, n);
+            var buf3 = buf3Arr.AsSpan(0, n);
+
+            TensorPrimitives.Multiply(x, x, buf1);
+            TensorPrimitives.Multiply(buf1, x, buf2);
+
+            TensorPrimitives.MultiplyAdd(buf2, coeff, x, buf3);
+            TensorPrimitives.Multiply(buf3, sqrt2OverPi, buf3);
+
+            TensorPrimitives.Tanh(buf3, result);
+
+            TensorPrimitives.Multiply(result, result, buf3);
+            TensorPrimitives.Subtract(one, buf3, buf3);
+
+            TensorPrimitives.Multiply(buf1, threeCoeff, buf1);
+            TensorPrimitives.Add(buf1, one, buf1);
+            TensorPrimitives.Multiply(buf1, sqrt2OverPi, buf1);
+
+            TensorPrimitives.Multiply(x, buf3, buf2);
+            TensorPrimitives.Multiply(buf2, buf1, buf2);
+            TensorPrimitives.Multiply(buf2, half, buf2);
+
+            TensorPrimitives.Add(result, one, buf3);
+            TensorPrimitives.Multiply(buf3, half, buf3);
+
+            TensorPrimitives.Add(buf3, buf2, buf1);
+            TensorPrimitives.Multiply(buf1, gradOutput, result);
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(buf1Arr);
+            ArrayPool<float>.Shared.Return(buf2Arr);
+            ArrayPool<float>.Shared.Return(buf3Arr);
+        }
+    }
+
+    private static void GeluGradientKernel_Double(ReadOnlySpan<double> x, ReadOnlySpan<double> gradOutput, Span<double> result)
+    {
+        double sqrt2OverPi = 0.7978845608028654;
+        double coeff = 0.044715;
+        double half = 0.5;
+        double one = 1.0;
+        double threeCoeff = 3.0 * coeff;
+        int n = x.Length;
+        var buf1Arr = ArrayPool<double>.Shared.Rent(n);
+        var buf2Arr = ArrayPool<double>.Shared.Rent(n);
+        var buf3Arr = ArrayPool<double>.Shared.Rent(n);
+        try
+        {
+            var buf1 = buf1Arr.AsSpan(0, n);
+            var buf2 = buf2Arr.AsSpan(0, n);
+            var buf3 = buf3Arr.AsSpan(0, n);
+
+            TensorPrimitives.Multiply(x, x, buf1);
+            TensorPrimitives.Multiply(buf1, x, buf2);
+
+            TensorPrimitives.MultiplyAdd(buf2, coeff, x, buf3);
+            TensorPrimitives.Multiply(buf3, sqrt2OverPi, buf3);
+
+            TensorPrimitives.Tanh(buf3, result);
+
+            TensorPrimitives.Multiply(result, result, buf3);
+            TensorPrimitives.Subtract(one, buf3, buf3);
+
+            TensorPrimitives.Multiply(buf1, threeCoeff, buf1);
+            TensorPrimitives.Add(buf1, one, buf1);
+            TensorPrimitives.Multiply(buf1, sqrt2OverPi, buf1);
+
+            TensorPrimitives.Multiply(x, buf3, buf2);
+            TensorPrimitives.Multiply(buf2, buf1, buf2);
+            TensorPrimitives.Multiply(buf2, half, buf2);
+
+            TensorPrimitives.Add(result, one, buf3);
+            TensorPrimitives.Multiply(buf3, half, buf3);
+
+            TensorPrimitives.Add(buf3, buf2, buf1);
+            TensorPrimitives.Multiply(buf1, gradOutput, result);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(buf1Arr);
+            ArrayPool<double>.Shared.Return(buf2Arr);
+            ArrayPool<double>.Shared.Return(buf3Arr);
         }
     }
 
