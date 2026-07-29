@@ -1231,7 +1231,6 @@ public class GradOperationsTests
 
         var z = ReverseGradOperations.SampleNormal(mean, logVar, seed: 42);
 
-        Assert.That(z.HasNulls, Is.False);
     }
 
     [Test]

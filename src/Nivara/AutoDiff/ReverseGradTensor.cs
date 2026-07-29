@@ -173,7 +173,6 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
 
         try
         {
-            var hadNulls = Data.HasNulls || (gradient?.Data.HasNulls ?? false);
             var notes =
                 $"AutoDiff=Backward;Shape=[{string.Join(", ", shape)}];Rank={Rank};" +
                 $"HasGradient={gradient != null}";
@@ -181,7 +180,6 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
             AutoDiffDiagnostics.Measure<T>(
                 "AutoDiffBackward",
                 Length,
-                hadNulls,
                 () =>
                 {
                     var gradientData = gradient?.Data ?? NivaraColumn<T>.Create(new T[] { T.One });

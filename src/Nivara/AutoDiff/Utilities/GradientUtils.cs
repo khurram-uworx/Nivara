@@ -394,7 +394,6 @@ public static class GradientUtils
         sb.AppendLine($"  Requires Grad: {tensor.RequiresGrad}");
         sb.AppendLine($"  Has Gradient: {tensor.Grad != null}");
         sb.AppendLine($"  Is Leaf: {tensor.IsLeaf}");
-        sb.AppendLine($"  Has Nulls: {tensor.HasNulls}");
 
         if (tensor.Grad != null)
         {

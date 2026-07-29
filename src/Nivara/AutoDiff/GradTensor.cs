@@ -26,11 +26,6 @@ public class GradTensor<T> : IDisposable where T : struct, INumber<T>
     public int Length => Data.Length;
 
     /// <summary>
-    /// Gets a value indicating whether this tensor contains any null values
-    /// </summary>
-    public bool HasNulls => Data.HasNulls;
-
-    /// <summary>
     /// Gets the shape of the tensor as a read-only copy of dimension sizes.
     /// Default is 1D: [Length].
     /// Use <see cref="Reshape"/> to set matrix dimensions for MatMul/Transpose.
@@ -153,11 +148,6 @@ public class GradTensor<T> : IDisposable where T : struct, INumber<T>
     public Tensor<T> AsTensor()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-
-        if (HasNulls)
-        {
-            throw new InvalidOperationException("Cannot create tensor view from data with null values. Use ToColumn() or ToSeries() for null-aware operations.");
-        }
 
         var series = ToSeries();
         return series.ToTensor();

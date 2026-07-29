@@ -720,9 +720,6 @@ public class NnTests
 
         var (mu, logVar) = vae.Encode(data);
 
-        Assert.That(mu.HasNulls, Is.False);
-        Assert.That(logVar.HasNulls, Is.False);
-
         for (int i = 0; i < mu.Length; i++)
         {
             Assert.That(float.IsNaN(mu[i]) || float.IsInfinity(mu[i]), Is.False);

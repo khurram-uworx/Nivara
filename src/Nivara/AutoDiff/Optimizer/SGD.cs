@@ -52,7 +52,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffSgdUpdate",
             n,
-            data.HasNulls || grad.HasNulls,
+            
             () => ApplySgdUpdate(tensor, learningRate, weightDecay, data, grad, n),
             $"AutoDiff=SgdUpdate;Shape=[{string.Join(", ", tensor.Shape)}];WeightDecay={weightDecay != T.Zero}");
     }
