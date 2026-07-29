@@ -45,9 +45,9 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
         if (typeof(T) == typeof(float))
         {
             ApplyAdamW_Kernel_Float(
-                MemoryMarshal.Cast<T, float>(expAvg.AsSpan()),
-                MemoryMarshal.Cast<T, float>(expAvgSq.AsSpan()),
-                MemoryMarshal.Cast<T, float>(resultBuf.AsSpan()),
+                MemoryMarshal.Cast<T, float>(expAvg.AsSpan())[..n],
+                MemoryMarshal.Cast<T, float>(expAvgSq.AsSpan())[..n],
+                MemoryMarshal.Cast<T, float>(resultBuf.AsSpan())[..n],
                 MemoryMarshal.Cast<T, float>(dataSpan),
                 MemoryMarshal.Cast<T, float>(gradSpan),
                 n, (float)(object)lr!, (float)(object)wd!,
@@ -59,9 +59,9 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, INumber<T>
         if (typeof(T) == typeof(double))
         {
             ApplyAdamW_Kernel_Double(
-                MemoryMarshal.Cast<T, double>(expAvg.AsSpan()),
-                MemoryMarshal.Cast<T, double>(expAvgSq.AsSpan()),
-                MemoryMarshal.Cast<T, double>(resultBuf.AsSpan()),
+                MemoryMarshal.Cast<T, double>(expAvg.AsSpan())[..n],
+                MemoryMarshal.Cast<T, double>(expAvgSq.AsSpan())[..n],
+                MemoryMarshal.Cast<T, double>(resultBuf.AsSpan())[..n],
                 MemoryMarshal.Cast<T, double>(dataSpan),
                 MemoryMarshal.Cast<T, double>(gradSpan),
                 n, (double)(object)lr!, (double)(object)wd!,
