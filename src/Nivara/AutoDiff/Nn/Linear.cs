@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
+public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int inFeatures;
     readonly int outFeatures;

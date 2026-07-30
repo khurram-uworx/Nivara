@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Conv2d<T> _depthwise;
     readonly Conv2d<T> _pointwise;

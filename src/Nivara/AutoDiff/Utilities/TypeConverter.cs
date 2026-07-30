@@ -22,8 +22,8 @@ public static class TypeConverter
     public static ReverseGradTensor<TTarget> Convert<TSource, TTarget>(
         ReverseGradTensor<TSource> source,
         bool? requiresGrad = null)
-        where TSource : struct, INumber<TSource>
-        where TTarget : struct, INumber<TTarget>
+        where TSource : struct, IFloatingPointIeee754<TSource>
+        where TTarget : struct, IFloatingPointIeee754<TTarget>
     {
         if (source == null)
             throw new ArgumentNullException(nameof(source));
@@ -47,8 +47,8 @@ public static class TypeConverter
     /// Converts a single value from one numeric type to another.
     /// </summary>
     private static TTarget ConvertValue<TSource, TTarget>(TSource value)
-        where TSource : struct, INumber<TSource>
-        where TTarget : struct, INumber<TTarget>
+        where TSource : struct, IFloatingPointIeee754<TSource>
+        where TTarget : struct, IFloatingPointIeee754<TTarget>
     {
         var doubleValue = double.CreateChecked(value);
         return TTarget.CreateChecked(doubleValue);
@@ -58,7 +58,7 @@ public static class TypeConverter
     /// Converts a ReverseGradTensor to float (single-precision).
     /// </summary>
     public static ReverseGradTensor<float> ToFloat<T>(ReverseGradTensor<T> source, bool? requiresGrad = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         return Convert<T, float>(source, requiresGrad);
     }
@@ -67,7 +67,7 @@ public static class TypeConverter
     /// Converts a ReverseGradTensor to double (double-precision).
     /// </summary>
     public static ReverseGradTensor<double> ToDouble<T>(ReverseGradTensor<T> source, bool? requiresGrad = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         return Convert<T, double>(source, requiresGrad);
     }
@@ -78,8 +78,8 @@ public static class TypeConverter
     public static ReverseGradTensor<TTarget>? TryConvert<TSource, TTarget>(
         ReverseGradTensor<TSource> source,
         bool? requiresGrad = null)
-        where TSource : struct, INumber<TSource>
-        where TTarget : struct, INumber<TTarget>
+        where TSource : struct, IFloatingPointIeee754<TSource>
+        where TTarget : struct, IFloatingPointIeee754<TTarget>
     {
         try
         {
@@ -95,8 +95,8 @@ public static class TypeConverter
     /// Checks if conversion between two types is supported.
     /// </summary>
     public static bool CanConvert<TSource, TTarget>()
-        where TSource : struct, INumber<TSource>
-        where TTarget : struct, INumber<TTarget>
+        where TSource : struct, IFloatingPointIeee754<TSource>
+        where TTarget : struct, IFloatingPointIeee754<TTarget>
     {
         return TypeValidator.IsSupported<TSource>() && TypeValidator.IsSupported<TTarget>();
     }

@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
-public sealed class BCELoss<T> where T : struct, INumber<T>
+public sealed class BCELoss<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly T eps;
 

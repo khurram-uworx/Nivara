@@ -19,7 +19,7 @@ namespace MicroGpt;
 ///
 /// Weight tying: output projection reuses the token embedding matrix (wte).
 /// </summary>
-public class MicroGptModel<T> : IDisposable where T : struct, INumber<T>
+public class MicroGptModel<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     readonly int nEmbd;
     readonly int nLayer;

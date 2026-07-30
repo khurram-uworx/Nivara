@@ -5,7 +5,7 @@ using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Optimizer;
 
-public sealed class Adam<T> : Optimizer<T> where T : struct, INumber<T>
+public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly double beta1;
     readonly double beta2;

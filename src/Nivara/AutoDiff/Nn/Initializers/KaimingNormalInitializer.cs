@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Initializers;
 
-public sealed class KaimingNormalInitializer<T> : IInitializer<T> where T : struct, INumber<T>
+public sealed class KaimingNormalInitializer<T> : IInitializer<T> where T : struct, IFloatingPointIeee754<T>
 {
     public static readonly KaimingNormalInitializer<T> Instance = new();
 

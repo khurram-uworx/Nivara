@@ -4,7 +4,7 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Optimizer;
 
-public sealed class SGD<T> : Optimizer<T> where T : struct, INumber<T>
+public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee754<T>
 {
     static ReverseGradTensor<T> stepNoMomentum(ReverseGradTensor<T> tensor, T lr, T wd)
     {

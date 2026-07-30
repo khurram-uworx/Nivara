@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Optimizer;
 
-public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
+public abstract class Optimizer<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     protected readonly List<ParameterGroup> ParameterGroups = [];
     bool disposed;

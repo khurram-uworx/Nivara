@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
-public sealed class CrossEntropyLoss<T> where T : struct, INumber<T>
+public sealed class CrossEntropyLoss<T> where T : struct, IFloatingPointIeee754<T>
 {
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> logits, ReverseGradTensor<T> targets)
     {

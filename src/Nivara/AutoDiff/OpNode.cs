@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff;
 
-sealed class OpNode<T> where T : struct, INumber<T>
+sealed class OpNode<T> where T : struct, IFloatingPointIeee754<T>
 {
     public string OperationName { get; }
     public IReadOnlyList<object> Inputs { get; }

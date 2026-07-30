@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Training;
 
-public sealed class Batch<T> where T : struct, INumber<T>
+public sealed class Batch<T> where T : struct, IFloatingPointIeee754<T>
 {
     public ReverseGradTensor<T> Features { get; }
     public ReverseGradTensor<T> Labels { get; }

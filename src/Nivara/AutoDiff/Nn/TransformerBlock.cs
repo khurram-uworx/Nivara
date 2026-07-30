@@ -7,7 +7,7 @@ namespace Nivara.AutoDiff.Nn;
 
 public enum NormType { RMSNorm, LayerNorm }
 
-public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
+public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int nEmbd;
     readonly int nHead;

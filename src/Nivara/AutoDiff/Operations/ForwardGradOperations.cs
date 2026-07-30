@@ -3,7 +3,6 @@ using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Operations;
 
@@ -22,7 +21,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = t_a + t_b
     /// </summary>
     public static ForwardGradTensor<T> Add<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -52,7 +51,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = t_a - t_b
     /// </summary>
     public static ForwardGradTensor<T> Subtract<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -82,7 +81,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = t_a * b + a * t_b
     /// </summary>
     public static ForwardGradTensor<T> Multiply<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -112,7 +111,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = (t_a - result * t_b) / b
     /// </summary>
     public static ForwardGradTensor<T> Divide<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -154,7 +153,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = t_a @ B + A @ t_b
     /// </summary>
     public static ForwardGradTensor<T> MatMul<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -207,7 +206,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = Transpose(t_a)
     /// </summary>
     public static ForwardGradTensor<T> Transpose<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -237,7 +236,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = sum(t_a)  (scalar)
     /// </summary>
     public static ForwardGradTensor<T> Sum<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -265,7 +264,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = sum(t_a) / n  (scalar)
     /// </summary>
     public static ForwardGradTensor<T> Mean<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -298,7 +297,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = (a > 0) ? t_a : 0
     /// </summary>
     public static ForwardGradTensor<T> Relu<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -313,7 +312,7 @@ public static class ForwardGradOperations
     }
 
     public static ForwardGradTensor<T> Gelu<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -332,7 +331,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = σ(a) * (1 - σ(a)) * t_a = result * (1 - result) * t_a
     /// </summary>
     public static ForwardGradTensor<T> Sigmoid<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -351,7 +350,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = (1 - tanh²(a)) * t_a = (1 - result²) * t_a
     /// </summary>
     public static ForwardGradTensor<T> Tanh<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -370,7 +369,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = -t_a
     /// </summary>
     public static ForwardGradTensor<T> Negate<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -389,7 +388,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = sign(a) * t_a
     /// </summary>
     public static ForwardGradTensor<T> Abs<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -408,7 +407,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = (a in [min, max]) ? t_a : 0
     /// </summary>
     public static ForwardGradTensor<T> Clip<T>(ForwardGradTensor<T> a, T min, T max)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -427,7 +426,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = (a > 0) ? t_a : α * t_a
     /// </summary>
     public static ForwardGradTensor<T> LeakyRelu<T>(ForwardGradTensor<T> a, T negativeSlope = default)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -449,7 +448,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = e^a * t_a = result * t_a
     /// </summary>
     public static ForwardGradTensor<T> Exp<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -468,7 +467,7 @@ public static class ForwardGradOperations
     /// JVP: t_out = t_a / a
     /// </summary>
     public static ForwardGradTensor<T> Log<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -488,7 +487,7 @@ public static class ForwardGradOperations
     /// The Jacobian is symmetric, so SoftmaxGradient(result, t_a, dim) computes the JVP.
     /// </summary>
     public static ForwardGradTensor<T> Softmax<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -508,7 +507,7 @@ public static class ForwardGradOperations
     /// JVP: t_a - Σ(s * t_a) where s = softmax(a)
     /// </summary>
     public static ForwardGradTensor<T> LogSoftmax<T>(ForwardGradTensor<T> a)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -528,7 +527,7 @@ public static class ForwardGradOperations
     /// JVP: mask * t_a * scale  (same mask used in forward)
     /// </summary>
     public static ForwardGradTensor<T> Dropout<T>(ForwardGradTensor<T> input, double probability, bool isTraining)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (probability < 0.0 || probability >= 1.0)
@@ -551,7 +550,7 @@ public static class ForwardGradOperations
     /// JVP: same mask applied to tangent with scaling.
     /// </summary>
     internal static ForwardGradTensor<T> DropoutWithMask<T>(ForwardGradTensor<T> input, ReadOnlySpan<bool> keepMask, T scale)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (keepMask.Length != input.Length)
@@ -582,7 +581,7 @@ public static class ForwardGradOperations
     /// JVP: sum(mean * t_mean) + sum(0.5 * (exp(logVar) - 1) * t_logVar)
     /// </summary>
     public static ForwardGradTensor<T> KlDivergence<T>(ForwardGradTensor<T> mean, ForwardGradTensor<T> logVar)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (mean == null) throw new ArgumentNullException(nameof(mean));
         if (logVar == null) throw new ArgumentNullException(nameof(logVar));
@@ -626,7 +625,7 @@ public static class ForwardGradOperations
     /// JVP: t_z = t_mean + 0.5 * exp(0.5 * logVar) * ε * t_logVar
     /// </summary>
     public static ForwardGradTensor<T> SampleNormal<T>(ForwardGradTensor<T> mean, ForwardGradTensor<T> logVar, int? seed = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (mean == null) throw new ArgumentNullException(nameof(mean));
         if (logVar == null) throw new ArgumentNullException(nameof(logVar));
@@ -666,12 +665,12 @@ public static class ForwardGradOperations
 
     #region Helper Methods
 
-    private static int[] PropagateShape<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b) where T : struct, INumber<T>
+    private static int[] PropagateShape<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         return a.shape;
     }
 
-    private static int[] PropagateShape<T>(ForwardGradTensor<T> a) where T : struct, INumber<T>
+    private static int[] PropagateShape<T>(ForwardGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         return a.shape;
     }
@@ -682,7 +681,7 @@ public static class ForwardGradOperations
     }
 
     private static NivaraColumn<T> ApplyDropout<T>(NivaraColumn<T> input, ReadOnlySpan<bool> keepMask, T scale)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         var resultBuf = ArrayPool<T>.Shared.Rent(n);
@@ -706,7 +705,7 @@ public static class ForwardGradOperations
         NivaraColumn<T> tangent,
         ReadOnlySpan<bool> keepMask,
         T scale)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         var gradBuf = ArrayPool<T>.Shared.Rent(n);
@@ -728,96 +727,36 @@ public static class ForwardGradOperations
     }
 
     private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         int n = mean.Length;
-
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            var m2 = new float[n];
-            var expLv = new float[n];
-            var tmp = new float[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0f, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5f, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            var m2 = new double[n];
-            var expLv = new double[n];
-            var tmp = new double[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
-            }
-        }
+        var m2 = new T[n];
+        var expLv = new T[n];
+        var tmp = new T[n];
+        TensorPrimitives.Multiply(mSpan, mSpan, m2);
+        TensorPrimitives.Exp(lvSpan, expLv);
+        TensorPrimitives.Add(lvSpan, T.One, tmp);
+        TensorPrimitives.Subtract(tmp, m2, tmp);
+        TensorPrimitives.Subtract(tmp, expLv, tmp);
+        TensorPrimitives.Multiply(tmp, T.CreateChecked(-0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         int n = mean.Length;
-
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
-            }
-        }
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Add(result, mSpan, result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -825,50 +764,18 @@ public static class ForwardGradOperations
         NivaraColumn<T> logVar,
         NivaraColumn<T> tangent,
         NivaraColumn<T> epsilon)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
-        // ∂z/∂logVar = 0.5 * exp(0.5 * logVar) * ε
-        // JVP contribution: 0.5 * exp(0.5 * logVar) * ε * t_logVar
         int n = logVar.Length;
-
         logVar.TryGetSpan(out var lvSpan);
         tangent.TryGetSpan(out var gSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var t = double.CreateChecked(gSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * t);
-            }
-        }
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Multiply(result, gSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 

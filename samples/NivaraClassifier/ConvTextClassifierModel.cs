@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace NivaraClassifier;
 
-public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, INumber<T>
+public sealed class ConvTextClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Embedding<T> embedding;
     readonly Conv1d<T> conv1;

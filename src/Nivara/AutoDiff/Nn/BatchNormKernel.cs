@@ -4,7 +4,7 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Nn;
 
-internal static class BatchNormKernel<T> where T : struct, INumber<T>
+internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754<T>
 {
     internal readonly struct ForwardResult
     {

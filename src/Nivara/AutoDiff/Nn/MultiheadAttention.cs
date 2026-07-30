@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class MultiheadAttention<T> : Module<T> where T : struct, INumber<T>
+public sealed class MultiheadAttention<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int _embedDim;
     readonly int _numHeads;

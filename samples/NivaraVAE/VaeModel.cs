@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace NivaraVAE;
 
-public sealed class VaeModel<T> : Module<T> where T : struct, INumber<T>
+public sealed class VaeModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Linear<T> _enc1;
     readonly Linear<T> _enc2;

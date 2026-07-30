@@ -10,7 +10,7 @@ namespace Nivara.AutoDiff;
 /// computation graph or backward pass.
 /// </summary>
 /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, INumber<T>
+public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloatingPointIeee754<T>
 {
     /// <summary>
     /// Gets the tangent (directional derivative) data as a NivaraColumn&lt;T&gt;.

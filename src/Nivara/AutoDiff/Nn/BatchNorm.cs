@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
+public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int _numFeatures;
     readonly T _eps;
@@ -214,7 +214,7 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
     }
 }
 
-public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int _numFeatures;
     readonly T _eps;

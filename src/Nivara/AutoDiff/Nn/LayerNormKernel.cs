@@ -8,7 +8,7 @@ namespace Nivara.AutoDiff.Nn;
 /// Span-based LayerNorm kernel with TensorPrimitives.
 /// Normalizes over the last dimension (features) per instance.
 /// </summary>
-internal static class LayerNormKernel<T> where T : struct, INumber<T>
+internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754<T>
 {
     internal readonly struct ForwardResult
     {

@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Training;
 
-public sealed class DataParallelTrainingResult<T> where T : struct, INumber<T>
+public sealed class DataParallelTrainingResult<T> where T : struct, IFloatingPointIeee754<T>
 {
     public IReadOnlyList<DataParallelEpochResult<T>> Epochs { get; }
     public TimeSpan TotalElapsed { get; }
@@ -29,7 +29,7 @@ public sealed class DataParallelTrainingResult<T> where T : struct, INumber<T>
     }
 }
 
-public sealed class DataParallelEpochResult<T> where T : struct, INumber<T>
+public sealed class DataParallelEpochResult<T> where T : struct, IFloatingPointIeee754<T>
 {
     public int Epoch { get; init; }
     public T Loss { get; init; }

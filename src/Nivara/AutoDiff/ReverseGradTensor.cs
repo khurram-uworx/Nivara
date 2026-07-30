@@ -11,7 +11,7 @@ namespace Nivara.AutoDiff;
 /// computation graph tracking, backward pass, and accumulated gradient storage.
 /// </summary>
 /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumber<T>
+public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloatingPointIeee754<T>
 {
     /// <summary>
     /// Gets or sets the gradient data as a NivaraColumn&lt;T&gt;
@@ -233,7 +233,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
     /// <returns>A new ReverseGradTensor with the converted type</returns>
     /// <exception cref="AutoGradException">Thrown when conversion is not supported</exception>
     public ReverseGradTensor<TTarget> ConvertTo<TTarget>(bool? requiresGrad = null)
-        where TTarget : struct, INumber<TTarget>
+        where TTarget : struct, IFloatingPointIeee754<TTarget>
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return TypeConverter.Convert<T, TTarget>(this, requiresGrad);

@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
+public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     const int TargetL1Bytes = 32 * 1024;
 

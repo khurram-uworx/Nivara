@@ -43,7 +43,7 @@ public sealed record BertConfig
     }
 }
 
-public sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     public readonly Linear<T> qProj;
     public readonly Linear<T> kProj;
@@ -186,7 +186,7 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, INumber<T
     }
 }
 
-public sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     public readonly LayerNorm<T> ln1;
     public readonly BertSelfAttention<T> attn;
@@ -248,7 +248,7 @@ public sealed class BertLayer<T> : Module<T> where T : struct, INumber<T>
     }
 }
 
-public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
+public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     public readonly Embedding<T> wordEmbed;
     public readonly Embedding<T> posEmbed;
@@ -351,7 +351,7 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, INumber<T>
     }
 }
 
-public sealed class MiniLMDistilled<T> : Module<T> where T : struct, INumber<T>
+public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     public readonly BertEncoder<T> encoder;
     public readonly BertConfig config;

@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public abstract class Module<T> : IDisposable where T : struct, INumber<T>
+public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     readonly List<Module<T>> modules = [];
     readonly List<Parameter<T>> parameters = [];

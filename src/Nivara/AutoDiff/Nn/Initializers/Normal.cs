@@ -5,7 +5,7 @@ namespace Nivara.AutoDiff.Nn.Initializers;
 public static class Normal
 {
     public static void Init<T>(Dictionary<string, ReverseGradTensor<T>> parameters, T? mean = null, T? std = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (parameters == null) throw new ArgumentNullException(nameof(parameters));
 

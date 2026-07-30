@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class Sampler<T> where T : struct, INumber<T>
+public sealed class Sampler<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Random rng;
 

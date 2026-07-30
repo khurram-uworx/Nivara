@@ -5,7 +5,6 @@ using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Operations;
 
@@ -13,7 +12,7 @@ public static class ReverseGradOperations
 {
     #region Element-wise Operations
 
-    public static ReverseGradTensor<T> Add<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Add<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -47,7 +46,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Subtract<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Subtract<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -82,7 +81,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Multiply<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Multiply<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -118,7 +117,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Divide<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Divide<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -170,7 +169,7 @@ public static class ReverseGradOperations
     #region Matrix Operations
 
     public static ReverseGradTensor<T> MatMul<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (b == null) throw new ArgumentNullException(nameof(b));
@@ -227,7 +226,7 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.MatrixNote("MatMul", aRows, aCols, bCols));
     }
 
-    public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (a.Rank != 2)
@@ -263,7 +262,7 @@ public static class ReverseGradOperations
             $"AutoDiff=Transpose;Shape={rows}x{cols}->{cols}x{rows}");
     }
 
-    public static ReverseGradTensor<T> TransposeAxes<T>(ReverseGradTensor<T> a, int axis1, int axis2) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> TransposeAxes<T>(ReverseGradTensor<T> a, int axis1, int axis2) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (a.Rank < 2 || a.Rank > 3)
@@ -370,7 +369,7 @@ public static class ReverseGradOperations
 
     #region Reduction Operations
 
-    public static ReverseGradTensor<T> Sum<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Sum<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -399,7 +398,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Mean<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Mean<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -437,7 +436,7 @@ public static class ReverseGradOperations
     /// Backward: gradients are distributed equally to all positions in each pool window.
     /// </summary>
     public static ReverseGradTensor<T> MeanPool<T>(ReverseGradTensor<T> a, int poolSize, int embedDim)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (poolSize <= 0) throw new ArgumentOutOfRangeException(nameof(poolSize));
@@ -503,7 +502,7 @@ public static class ReverseGradOperations
 
     #region Activation Functions
 
-    public static ReverseGradTensor<T> Relu<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Relu<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -533,7 +532,7 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("Relu", a.Shape));
     }
 
-    public static ReverseGradTensor<T> Gelu<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Gelu<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -563,7 +562,7 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("Gelu", a.Shape));
     }
 
-    public static ReverseGradTensor<T> Sigmoid<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Sigmoid<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -593,7 +592,7 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("Sigmoid", a.Shape));
     }
 
-    public static ReverseGradTensor<T> Tanh<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Tanh<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -623,7 +622,7 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("Tanh", a.Shape));
     }
 
-    public static ReverseGradTensor<T> Negate<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Negate<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -644,7 +643,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Abs<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Abs<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -666,7 +665,7 @@ public static class ReverseGradOperations
     }
 
     public static ReverseGradTensor<T> Clip<T>(ReverseGradTensor<T> a, T min, T max)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -688,7 +687,7 @@ public static class ReverseGradOperations
     }
 
     public static ReverseGradTensor<T> LeakyRelu<T>(ReverseGradTensor<T> a, T negativeSlope = default)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -712,7 +711,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Exp<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Exp<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -733,7 +732,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Log<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Log<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -754,7 +753,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> Pow<T>(ReverseGradTensor<T> a, double exponent) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Pow<T>(ReverseGradTensor<T> a, double exponent) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -782,7 +781,7 @@ public static class ReverseGradOperations
     /// Gradient flows back to the original positions in the input.
     /// </summary>
     public static ReverseGradTensor<T> Slice<T>(ReverseGradTensor<T> a, int start, int length)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
         if (start < 0) throw new ArgumentOutOfRangeException(nameof(start));
@@ -863,7 +862,7 @@ public static class ReverseGradOperations
     }
 
     public static ReverseGradTensor<T> Concat<T>(ReverseGradTensor<T>[] tensors, int axis = 0)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null || tensors.Length == 0)
             throw new ArgumentException("At least one tensor is required for Concat.", nameof(tensors));
@@ -1114,7 +1113,7 @@ public static class ReverseGradOperations
             $"AutoDiff=Concat;Axis={axis};Count={tensors.Length}");
     }
 
-    public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -1136,7 +1135,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> LogSoftmax<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> LogSoftmax<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -1158,7 +1157,7 @@ public static class ReverseGradOperations
     }
 
     public static ReverseGradTensor<T> RMSNorm<T>(ReverseGradTensor<T> a, double eps = 1e-5)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -1190,7 +1189,7 @@ public static class ReverseGradOperations
     }
 
     public static ReverseGradTensor<T> PerRowRMSNorm<T>(ReverseGradTensor<T> a, int rows, int cols, double eps = 1e-5)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
@@ -1237,7 +1236,7 @@ public static class ReverseGradOperations
     }
 
     public static ReverseGradTensor<T> Dropout<T>(ReverseGradTensor<T> input, double probability, bool isTraining)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (probability < 0.0 || probability >= 1.0)
@@ -1256,7 +1255,7 @@ public static class ReverseGradOperations
     }
 
     internal static ReverseGradTensor<T> DropoutWithMask<T>(ReverseGradTensor<T> input, ReadOnlySpan<bool> keepMask, T scale)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (keepMask.Length != input.Length)
@@ -1294,7 +1293,7 @@ public static class ReverseGradOperations
         ReverseGradTensor<T> weight,
         ReverseGradTensor<T> indices,
         int paddingIndex = -1)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (weight == null) throw new ArgumentNullException(nameof(weight));
         if (indices == null) throw new ArgumentNullException(nameof(indices));
@@ -1387,7 +1386,7 @@ public static class ReverseGradOperations
     /// Backward scatters gradients back to source positions (supports duplicate indices via accumulation).
     /// </summary>
     public static ReverseGradTensor<T> Gather<T>(ReverseGradTensor<T> source, int[] indices, int axis = 0)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (source == null) throw new ArgumentNullException(nameof(source));
         if (indices == null) throw new ArgumentNullException(nameof(indices));
@@ -1488,7 +1487,7 @@ public static class ReverseGradOperations
     #region VAE Operations
 
     public static ReverseGradTensor<T> KlDivergence<T>(ReverseGradTensor<T> mean, ReverseGradTensor<T> logVar)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (mean == null) throw new ArgumentNullException(nameof(mean));
         if (logVar == null) throw new ArgumentNullException(nameof(logVar));
@@ -1529,7 +1528,7 @@ public static class ReverseGradOperations
     }
 
     public static ReverseGradTensor<T> SampleNormal<T>(ReverseGradTensor<T> mean, ReverseGradTensor<T> logVar, int? seed = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (mean == null) throw new ArgumentNullException(nameof(mean));
         if (logVar == null) throw new ArgumentNullException(nameof(logVar));
@@ -1573,7 +1572,7 @@ public static class ReverseGradOperations
 
     #region Helper Methods
 
-    internal static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient) where T : struct, INumber<T>
+    internal static void AccumulateGradient<T>(ReverseGradTensor<T> tensor, NivaraColumn<T> gradient) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor.Grad == null)
         {
@@ -1598,7 +1597,7 @@ public static class ReverseGradOperations
         }
     }
 
-    private static NivaraColumn<T> BroadcastGradient<T>(NivaraColumn<T> scalarGrad, int targetLength) where T : struct, INumber<T>
+    private static NivaraColumn<T> BroadcastGradient<T>(NivaraColumn<T> scalarGrad, int targetLength) where T : struct, IFloatingPointIeee754<T>
     {
         if (scalarGrad.Length != 1)
             throw new ArgumentException($"Expected scalar gradient with length 1, got {scalarGrad.Length}");
@@ -1624,7 +1623,7 @@ public static class ReverseGradOperations
     }
 
     private static NivaraColumn<T> ApplyDropout<T>(NivaraColumn<T> input, ReadOnlySpan<bool> keepMask, T scale)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         input.TryGetSpan(out var span);
@@ -1640,7 +1639,7 @@ public static class ReverseGradOperations
         NivaraColumn<T> gradOutput,
         ReadOnlySpan<bool> keepMask,
         T scale)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         gradOutput.TryGetSpan(out var gSpan);
@@ -1651,57 +1650,25 @@ public static class ReverseGradOperations
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar) where T : struct, IFloatingPointIeee754<T>
     {
         int n = mean.Length;
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            var m2 = new float[n];
-            var expLv = new float[n];
-            var tmp = new float[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0f, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5f, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            var m2 = new double[n];
-            var expLv = new double[n];
-            var tmp = new double[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
-            }
-        }
-
+        var m2 = new T[n];
+        var expLv = new T[n];
+        var tmp = new T[n];
+        TensorPrimitives.Multiply(mSpan, mSpan, m2);
+        TensorPrimitives.Exp(lvSpan, expLv);
+        TensorPrimitives.Add(lvSpan, T.One, tmp);
+        TensorPrimitives.Subtract(tmp, m2, tmp);
+        TensorPrimitives.Subtract(tmp, expLv, tmp);
+        TensorPrimitives.Multiply(tmp, T.CreateChecked(-0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplyKlMeanGradient<T>(NivaraColumn<T> mean, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplyKlMeanGradient<T>(NivaraColumn<T> mean, NivaraColumn<T> gradOutput) where T : struct, IFloatingPointIeee754<T>
     {
         int n = mean.Length;
         mean.TryGetSpan(out var mSpan);
@@ -1711,299 +1678,105 @@ public static class ReverseGradOperations
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplyKlLogVarGradient<T>(NivaraColumn<T> logVar, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplyKlLogVarGradient<T>(NivaraColumn<T> logVar, NivaraColumn<T> gradOutput) where T : struct, IFloatingPointIeee754<T>
     {
         int n = logVar.Length;
         logVar.TryGetSpan(out var lvSpan);
         gradOutput.TryGetSpan(out var gSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Exp(lv, d);
-            TensorPrimitives.Subtract(1.0f, d, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, -0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Exp(lv, d);
-            TensorPrimitives.Subtract(1.0, d, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, -0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 - Math.Exp(lv)) * g);
-            }
-        }
-
+        TensorPrimitives.Exp(lvSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(-1), result);
+        TensorPrimitives.Add(result, T.One, result);
+        TensorPrimitives.Multiply(result, gSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(-0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon) where T : struct, IFloatingPointIeee754<T>
     {
         int n = mean.Length;
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
-            }
-        }
-
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Add(result, mSpan, result);
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplySampleNormalLogVarGradient<T>(NivaraColumn<T> logVar, NivaraColumn<T> gradOutput, NivaraColumn<T> epsilon) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplySampleNormalLogVarGradient<T>(NivaraColumn<T> logVar, NivaraColumn<T> gradOutput, NivaraColumn<T> epsilon) where T : struct, IFloatingPointIeee754<T>
     {
         int n = logVar.Length;
         logVar.TryGetSpan(out var lvSpan);
         gradOutput.TryGetSpan(out var gSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * g);
-            }
-        }
-
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Multiply(result, gSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplyPow<T>(NivaraColumn<T> input, double exponent) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplyPow<T>(NivaraColumn<T> input, double exponent) where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         input.TryGetSpan(out var span);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var s = MemoryMarshal.Cast<T, float>(span);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Pow(s, (float)exponent, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var s = MemoryMarshal.Cast<T, double>(span);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Pow(s, exponent, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-                result[i] = T.CreateChecked(Math.Pow(double.CreateChecked(span[i]), exponent));
-        }
+        TensorPrimitives.Pow(span, T.CreateChecked(exponent), result);
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplyPowGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput, double exponent) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplyPowGradient<T>(NivaraColumn<T> input, NivaraColumn<T> gradOutput, double exponent) where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var x = MemoryMarshal.Cast<T, float>(inSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Pow(x, (float)(exponent - 1.0), r);
-            TensorPrimitives.Multiply(r, (float)exponent, r);
-            TensorPrimitives.Multiply(r, g, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var x = MemoryMarshal.Cast<T, double>(inSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Pow(x, exponent - 1.0, r);
-            TensorPrimitives.Multiply(r, exponent, r);
-            TensorPrimitives.Multiply(r, g, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var x = double.CreateChecked(inSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                result[i] = T.CreateChecked(exponent * Math.Pow(x, exponent - 1.0) * g);
-            }
-        }
+        TensorPrimitives.Pow(inSpan, T.CreateChecked(exponent - 1.0), result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(exponent), result);
+        TensorPrimitives.Multiply(result, gSpan, result);
         return NivaraColumn<T>.Create(result);
     }
 
-    private static NivaraColumn<T> ApplyRMSNorm<T>(NivaraColumn<T> input, double eps) where T : struct, INumber<T>
+    private static NivaraColumn<T> ApplyRMSNorm<T>(NivaraColumn<T> input, double eps) where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         input.TryGetSpan(out var span);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var s = MemoryMarshal.Cast<T, float>(span);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            double sumSq = 0;
-            for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
-            double rms = Math.Sqrt(sumSq / n + eps);
-            float invRms = (float)(1.0 / rms);
-            TensorPrimitives.Multiply(s, invRms, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var s = MemoryMarshal.Cast<T, double>(span);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            double sumSq = 0;
-            for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
-            double rms = Math.Sqrt(sumSq / n + eps);
-            double invRms = 1.0 / rms;
-            TensorPrimitives.Multiply(s, invRms, r);
-        }
-        else
-        {
-            double sumSq = 0;
-            for (int i = 0; i < n; i++)
-            {
-                var x = double.CreateChecked(span[i]);
-                sumSq += x * x;
-            }
-            double rms = Math.Sqrt(sumSq / n + eps);
-            double invRms = 1.0 / rms;
-            for (int i = 0; i < n; i++)
-                result[i] = T.CreateChecked(double.CreateChecked(span[i]) * invRms);
-        }
+        double sumSq = double.CreateChecked(TensorPrimitives.SumOfSquares(span));
+        double rms = Math.Sqrt(sumSq / n + eps);
+        T invRms = T.CreateChecked(1.0 / rms);
+        TensorPrimitives.Multiply(span, invRms, result);
         return NivaraColumn<T>.Create(result);
     }
 
     private static NivaraColumn<T> ApplyRMSNormGradient<T>(
-        NivaraColumn<T> input, NivaraColumn<T> gradOutput, double eps) where T : struct, INumber<T>
+        NivaraColumn<T> input, NivaraColumn<T> gradOutput, double eps) where T : struct, IFloatingPointIeee754<T>
     {
         int n = input.Length;
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gSpan);
         var result = new T[n];
 
-        double sumSq = 0;
-        for (int i = 0; i < n; i++)
-        {
-            var x = double.CreateChecked(inSpan[i]);
-            sumSq += x * x;
-        }
-
+        double sumSq = double.CreateChecked(TensorPrimitives.SumOfSquares(inSpan));
         double rms = Math.Sqrt(sumSq / n + eps);
         double rms3 = rms * rms * rms;
 
-        double sumGradX = 0;
+        T sumGradX = TensorPrimitives.Dot(gSpan, inSpan);
+        T scale = sumGradX / T.CreateChecked(n * rms3);
+        T invRms = T.CreateChecked(1.0 / rms);
+
         for (int i = 0; i < n; i++)
-        {
-            var x = double.CreateChecked(inSpan[i]);
-            var g = double.CreateChecked(gSpan[i]);
-            sumGradX += g * x;
-        }
+            result[i] = gSpan[i] * invRms - inSpan[i] * scale;
 
-        double scale = sumGradX / (n * rms3);
-
-        if (typeof(T) == typeof(float))
-        {
-            var x = MemoryMarshal.Cast<T, float>(inSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            float invRms = (float)(1.0 / rms);
-            float s = (float)scale;
-            for (int i = 0; i < n; i++)
-                r[i] = g[i] * invRms - x[i] * s;
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var x = MemoryMarshal.Cast<T, double>(inSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            double invRms = 1.0 / rms;
-            for (int i = 0; i < n; i++)
-                r[i] = g[i] * invRms - x[i] * scale;
-        }
-        else
-        {
-            double invRms = 1.0 / rms;
-            for (int i = 0; i < n; i++)
-            {
-                var x = double.CreateChecked(inSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                result[i] = T.CreateChecked(g * invRms - x * scale);
-            }
-        }
         return NivaraColumn<T>.Create(result);
     }
 
-    public static ReverseGradTensor<T> BroadcastMultiply<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> scale) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> BroadcastMultiply<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> scale) where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (scale == null) throw new ArgumentNullException(nameof(scale));
@@ -2067,7 +1840,7 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> BroadcastAdd<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> bias) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> BroadcastAdd<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> bias) where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (bias == null) throw new ArgumentNullException(nameof(bias));
@@ -2125,12 +1898,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    private static int[] PropagateShape<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, INumber<T>
+    private static int[] PropagateShape<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         return a.shape;
     }
 
-    private static int[] PropagateShape<T>(ReverseGradTensor<T> a) where T : struct, INumber<T>
+    private static int[] PropagateShape<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         return a.shape;
     }

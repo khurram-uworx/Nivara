@@ -5,7 +5,7 @@ namespace Nivara.AutoDiff.Nn.Initializers;
 public static class Uniform
 {
     public static void Init<T>(Dictionary<string, ReverseGradTensor<T>> parameters, T? lower = null, T? upper = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (parameters == null) throw new ArgumentNullException(nameof(parameters));
 

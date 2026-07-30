@@ -2,7 +2,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class Parameter<T> : IDisposable where T : struct, INumber<T>
+public sealed class Parameter<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     ReverseGradTensor<T> tensor;
     bool disposed;
