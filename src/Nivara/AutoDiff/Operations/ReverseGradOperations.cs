@@ -1657,47 +1657,15 @@ public static class ReverseGradOperations
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            var m2 = new float[n];
-            var expLv = new float[n];
-            var tmp = new float[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0f, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5f, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            var m2 = new double[n];
-            var expLv = new double[n];
-            var tmp = new double[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
-            }
-        }
-
+        var m2 = new T[n];
+        var expLv = new T[n];
+        var tmp = new T[n];
+        TensorPrimitives.Multiply(mSpan, mSpan, m2);
+        TensorPrimitives.Exp(lvSpan, expLv);
+        TensorPrimitives.Add(lvSpan, T.One, tmp);
+        TensorPrimitives.Subtract(tmp, m2, tmp);
+        TensorPrimitives.Subtract(tmp, expLv, tmp);
+        TensorPrimitives.Multiply(tmp, T.CreateChecked(-0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -1717,37 +1685,11 @@ public static class ReverseGradOperations
         logVar.TryGetSpan(out var lvSpan);
         gradOutput.TryGetSpan(out var gSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Exp(lv, d);
-            TensorPrimitives.Subtract(1.0f, d, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, -0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Exp(lv, d);
-            TensorPrimitives.Subtract(1.0, d, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, -0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 - Math.Exp(lv)) * g);
-            }
-        }
-
+        TensorPrimitives.Exp(lvSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(-1), result);
+        TensorPrimitives.Add(result, T.One, result);
+        TensorPrimitives.Multiply(result, gSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(-0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -1758,40 +1700,10 @@ public static class ReverseGradOperations
         logVar.TryGetSpan(out var lvSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
-            }
-        }
-
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Add(result, mSpan, result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -1802,42 +1714,11 @@ public static class ReverseGradOperations
         gradOutput.TryGetSpan(out var gSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-
-        if (typeof(T) == typeof(float))
-        {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * g);
-            }
-        }
-
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Multiply(result, gSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -1846,23 +1727,7 @@ public static class ReverseGradOperations
         int n = input.Length;
         input.TryGetSpan(out var span);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var s = MemoryMarshal.Cast<T, float>(span);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Pow(s, (float)exponent, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var s = MemoryMarshal.Cast<T, double>(span);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Pow(s, exponent, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-                result[i] = T.CreateChecked(Math.Pow(double.CreateChecked(span[i]), exponent));
-        }
+        TensorPrimitives.Pow(span, T.CreateChecked(exponent), result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -1872,33 +1737,9 @@ public static class ReverseGradOperations
         input.TryGetSpan(out var inSpan);
         gradOutput.TryGetSpan(out var gSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var x = MemoryMarshal.Cast<T, float>(inSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Pow(x, (float)(exponent - 1.0), r);
-            TensorPrimitives.Multiply(r, (float)exponent, r);
-            TensorPrimitives.Multiply(r, g, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var x = MemoryMarshal.Cast<T, double>(inSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Pow(x, exponent - 1.0, r);
-            TensorPrimitives.Multiply(r, exponent, r);
-            TensorPrimitives.Multiply(r, g, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var x = double.CreateChecked(inSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                result[i] = T.CreateChecked(exponent * Math.Pow(x, exponent - 1.0) * g);
-            }
-        }
+        TensorPrimitives.Pow(inSpan, T.CreateChecked(exponent - 1.0), result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(exponent), result);
+        TensorPrimitives.Multiply(result, gSpan, result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -1907,39 +1748,10 @@ public static class ReverseGradOperations
         int n = input.Length;
         input.TryGetSpan(out var span);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var s = MemoryMarshal.Cast<T, float>(span);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            double sumSq = 0;
-            for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
-            double rms = Math.Sqrt(sumSq / n + eps);
-            float invRms = (float)(1.0 / rms);
-            TensorPrimitives.Multiply(s, invRms, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var s = MemoryMarshal.Cast<T, double>(span);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            double sumSq = 0;
-            for (int i = 0; i < n; i++) sumSq += s[i] * s[i];
-            double rms = Math.Sqrt(sumSq / n + eps);
-            double invRms = 1.0 / rms;
-            TensorPrimitives.Multiply(s, invRms, r);
-        }
-        else
-        {
-            double sumSq = 0;
-            for (int i = 0; i < n; i++)
-            {
-                var x = double.CreateChecked(span[i]);
-                sumSq += x * x;
-            }
-            double rms = Math.Sqrt(sumSq / n + eps);
-            double invRms = 1.0 / rms;
-            for (int i = 0; i < n; i++)
-                result[i] = T.CreateChecked(double.CreateChecked(span[i]) * invRms);
-        }
+        double sumSq = double.CreateChecked(TensorPrimitives.SumOfSquares(span));
+        double rms = Math.Sqrt(sumSq / n + eps);
+        T invRms = T.CreateChecked(1.0 / rms);
+        TensorPrimitives.Multiply(span, invRms, result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -1951,55 +1763,17 @@ public static class ReverseGradOperations
         gradOutput.TryGetSpan(out var gSpan);
         var result = new T[n];
 
-        double sumSq = 0;
-        for (int i = 0; i < n; i++)
-        {
-            var x = double.CreateChecked(inSpan[i]);
-            sumSq += x * x;
-        }
-
+        double sumSq = double.CreateChecked(TensorPrimitives.SumOfSquares(inSpan));
         double rms = Math.Sqrt(sumSq / n + eps);
         double rms3 = rms * rms * rms;
 
-        double sumGradX = 0;
+        T sumGradX = TensorPrimitives.Dot(gSpan, inSpan);
+        T scale = sumGradX / T.CreateChecked(n * rms3);
+        T invRms = T.CreateChecked(1.0 / rms);
+
         for (int i = 0; i < n; i++)
-        {
-            var x = double.CreateChecked(inSpan[i]);
-            var g = double.CreateChecked(gSpan[i]);
-            sumGradX += g * x;
-        }
+            result[i] = gSpan[i] * invRms - inSpan[i] * scale;
 
-        double scale = sumGradX / (n * rms3);
-
-        if (typeof(T) == typeof(float))
-        {
-            var x = MemoryMarshal.Cast<T, float>(inSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            float invRms = (float)(1.0 / rms);
-            float s = (float)scale;
-            for (int i = 0; i < n; i++)
-                r[i] = g[i] * invRms - x[i] * s;
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var x = MemoryMarshal.Cast<T, double>(inSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            double invRms = 1.0 / rms;
-            for (int i = 0; i < n; i++)
-                r[i] = g[i] * invRms - x[i] * scale;
-        }
-        else
-        {
-            double invRms = 1.0 / rms;
-            for (int i = 0; i < n; i++)
-            {
-                var x = double.CreateChecked(inSpan[i]);
-                var g = double.CreateChecked(gSpan[i]);
-                result[i] = T.CreateChecked(g * invRms - x * scale);
-            }
-        }
         return NivaraColumn<T>.Create(result);
     }
 
