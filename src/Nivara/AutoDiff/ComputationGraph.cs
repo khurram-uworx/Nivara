@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Numerics;
+using Nivara.AutoDiff.Utilities;
 
 namespace Nivara.AutoDiff;
 
@@ -10,6 +12,10 @@ public sealed class ComputationGraph
             throw new ArgumentNullException(nameof(output));
         if (node == null)
             throw new ArgumentNullException(nameof(node));
+
+        Debug.Assert(GradientUtils.IsGradEnabled,
+            "OpNode created outside Grad() scope. Operations must use GradientUtils.ShouldTrackGrad() "
+            + "to gate graph construction during inference.");
 
         if (output.RequiresGrad)
         {
