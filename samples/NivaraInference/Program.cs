@@ -274,7 +274,7 @@ class Program
         var data = new float[total];
         var rng = new Random(42);
         for (int i = 0; i < total; i++)
-            data[i] = (float)(rng.NextDouble() * 2.0 - 1.0);
+            data[i] = rng.NextSingle() * 2f - 1f;
 
         var input = ReverseGradTensor<float>.FromMatrix(data, n, c * h * w);
         input.Reshape(n, c, h, w);

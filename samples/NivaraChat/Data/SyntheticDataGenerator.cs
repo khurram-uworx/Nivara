@@ -98,7 +98,7 @@ public static class SyntheticDataGenerator
     {
         var sentimentLabels = new[] { "Positive", "Negative", "Neutral" };
         var sentiment = Pick(rng, sentimentLabels);
-        float confidence = consistent ? (float)(0.7 + rng.NextDouble() * 0.3) : (float)(0.1 + rng.NextDouble() * 0.3);
+        float confidence = consistent ? 0.7f + rng.NextSingle() * 0.3f : 0.1f + rng.NextSingle() * 0.3f;
 
         string entityLine;
         if (consistent)
@@ -126,12 +126,12 @@ public static class SyntheticDataGenerator
                     }
                 }
                 var json = System.Text.Json.JsonSerializer.Serialize(entityDict);
-                float entityConf = (float)(0.7 + rng.NextDouble() * 0.3);
+                float entityConf = 0.7f + rng.NextSingle() * 0.3f;
                 entityLine = $"{json}\n(confidence: {entityConf:F2})";
             }
             else
             {
-                float entityConf = (float)(0.1 + rng.NextDouble() * 0.3);
+                float entityConf = 0.1f + rng.NextSingle() * 0.3f;
                 entityLine = $"Unable to extract entities (confidence: {entityConf:F2})\n{{\"person\":[],\"org\":[],\"date\":[],\"location\":[]}}";
             }
         }
