@@ -58,9 +58,9 @@ public sealed class MetricsGenerator
             for (int t = 0; t < WindowSize; t++)
             {
                 int globalT = baseT + t;
-                float noise3 = (float)(rng.NextDouble() * 6 - 3);
-                float noise5 = (float)(rng.NextDouble() * 10 - 5);
-                float noise2 = (float)(rng.NextDouble() * 4 - 2);
+                float noise3 = rng.NextSingle() * 6f - 3f;
+                float noise5 = rng.NextSingle() * 10f - 5f;
+                float noise2 = rng.NextSingle() * 4f - 2f;
 
                 cpu[t] = 50 + 20 * MathF.Sin(2 * MathF.PI * globalT / 96) + noise3;
                 mem[t] = 40 + 0.05f * globalT - 5 * MathF.Floor(globalT / 20f) + noise3;
@@ -77,7 +77,7 @@ public sealed class MetricsGenerator
                 {
                     case AnomalyType.Spike:
                         for (int t = anomalyStart; t < anomalyStart + anomalyLen && t < WindowSize; t++)
-                            cpu[t] = 95 + (float)(rng.NextDouble() * 4 - 2);
+                            cpu[t] = 95 + rng.NextSingle() * 4f - 2f;
                         break;
                     case AnomalyType.LevelShift:
                         for (int t = anomalyStart; t < WindowSize; t++)

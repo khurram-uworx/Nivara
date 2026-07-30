@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
@@ -17,6 +18,20 @@ public static class SafeTensorsLoader
     }
 
     public static Dictionary<string, (float[] Data, int[] Shape)> Read(byte[] bytes)
+        => Read<float>(bytes).ToDictionary(kvp => kvp.Key, kvp => (kvp.Value.Data, kvp.Value.Shape));
+
+    public static Dictionary<string, (T[] Data, int[] Shape)> Read<T>(string path)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        if (!File.Exists(path))
+            throw new FileNotFoundException($"SafeTensors file not found: {path}", path);
+
+        return Read<T>(File.ReadAllBytes(path));
+    }
+
+    public static Dictionary<string, (T[] Data, int[] Shape)> Read<T>(byte[] bytes)
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (bytes.Length < 8)
             throw new InvalidDataException("SafeTensors file is too small to contain a header.");
@@ -34,7 +49,7 @@ public static class SafeTensorsLoader
         using var doc = JsonDocument.Parse(headerJson);
 
         var root = doc.RootElement;
-        var result = new Dictionary<string, (float[] Data, int[] Shape)>(StringComparer.Ordinal);
+        var result = new Dictionary<string, (T[] Data, int[] Shape)>(StringComparer.Ordinal);
 
         foreach (var property in root.EnumerateObject())
         {
@@ -66,7 +81,7 @@ public static class SafeTensorsLoader
                     $"Tensor '{name}': expected {expectedBytes} bytes ({elementCount} × {elementSize}), got {byteLength} bytes.");
 
             ReadOnlySpan<byte> tensorBytes = dataBuffer.Slice(begin, byteLength);
-            float[] data = DtypeToFloatArray(tensorBytes, dtype, name);
+            T[] data = DtypeToArray<T>(tensorBytes, dtype, name);
 
             result[name] = (data, shape);
         }
@@ -82,52 +97,68 @@ public static class SafeTensorsLoader
         _ => throw new NotSupportedException($"Unsupported dtype '{dtype}'.")
     };
 
-    static float[] DtypeToFloatArray(ReadOnlySpan<byte> tensorBytes, string dtype, string name) => dtype switch
+    static T[] DtypeToArray<T>(ReadOnlySpan<byte> tensorBytes, string dtype, string name)
+        where T : struct, IFloatingPointIeee754<T> => dtype switch
     {
-        "F32" => MemoryMarshal.Cast<byte, float>(tensorBytes).ToArray(),
-        "I32" => ConvertI32(tensorBytes),
-        "I64" => ConvertI64(tensorBytes),
-        "F16" => ConvertF16(tensorBytes),
-        "BF16" => ConvertBF16(tensorBytes),
+        "F32" => ConvertF32<T>(tensorBytes),
+        "I32" => ConvertI32<T>(tensorBytes),
+        "I64" => ConvertI64<T>(tensorBytes),
+        "F16" => ConvertF16<T>(tensorBytes),
+        "BF16" => ConvertBF16<T>(tensorBytes),
         _ => throw new NotSupportedException($"Tensor '{name}' has unsupported dtype '{dtype}'. " +
             "Supported dtypes: F32, I32, I64, F16, BF16.")
     };
 
-    static float[] ConvertI32(ReadOnlySpan<byte> bytes)
+    static T[] ConvertF32<T>(ReadOnlySpan<byte> bytes)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var src = MemoryMarshal.Cast<byte, float>(bytes);
+        var result = new T[src.Length];
+        for (int i = 0; i < src.Length; i++)
+            result[i] = T.CreateChecked(src[i]);
+        return result;
+    }
+
+    static T[] ConvertI32<T>(ReadOnlySpan<byte> bytes)
+        where T : struct, IFloatingPointIeee754<T>
     {
         var src = MemoryMarshal.Cast<byte, int>(bytes);
-        var result = new float[src.Length];
+        var result = new T[src.Length];
         for (int i = 0; i < src.Length; i++)
-            result[i] = src[i];
+            result[i] = T.CreateChecked(src[i]);
         return result;
     }
 
-    static float[] ConvertI64(ReadOnlySpan<byte> bytes)
+    static T[] ConvertI64<T>(ReadOnlySpan<byte> bytes)
+        where T : struct, IFloatingPointIeee754<T>
     {
         var src = MemoryMarshal.Cast<byte, long>(bytes);
-        var result = new float[src.Length];
+        var result = new T[src.Length];
         for (int i = 0; i < src.Length; i++)
-            result[i] = src[i];
+            result[i] = T.CreateChecked(src[i]);
         return result;
     }
 
-    static float[] ConvertF16(ReadOnlySpan<byte> bytes)
+    static T[] ConvertF16<T>(ReadOnlySpan<byte> bytes)
+        where T : struct, IFloatingPointIeee754<T>
     {
         var src = MemoryMarshal.Cast<byte, Half>(bytes);
-        var result = new float[src.Length];
+        var result = new T[src.Length];
         for (int i = 0; i < src.Length; i++)
-            result[i] = (float)src[i];
+            result[i] = T.CreateChecked(src[i]);
         return result;
     }
 
-    static float[] ConvertBF16(ReadOnlySpan<byte> bytes)
+    static T[] ConvertBF16<T>(ReadOnlySpan<byte> bytes)
+        where T : struct, IFloatingPointIeee754<T>
     {
         var src = MemoryMarshal.Cast<byte, ushort>(bytes);
-        var result = new float[src.Length];
+        var result = new T[src.Length];
         for (int i = 0; i < src.Length; i++)
         {
             uint bits = (uint)src[i] << 16;
-            result[i] = Unsafe.As<uint, float>(ref bits);
+            float f = Unsafe.As<uint, float>(ref bits);
+            result[i] = T.CreateChecked(f);
         }
         return result;
     }
