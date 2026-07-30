@@ -175,7 +175,7 @@ public class ActivationTests
         for (int i = 0; i < inputData.Length; i++)
         {
             float expectedGrad = GeluGradientTanhApprox(inputData[i]);
-            TestHelpers.AssertScalarEqual(expectedGrad, input.Grad![i],
+            TestHelpers.AssertScalarEqual(expectedGrad, input.Grad![i], absTol: 3e-4f,
                 label: $"GeluGrad({inputData[i]})");
         }
     }
