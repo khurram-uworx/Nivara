@@ -2,9 +2,9 @@ using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
 using System.Numerics;
-using System.Runtime.CompilerServices;
 
 namespace NivaraFineTuning;
 
@@ -104,67 +104,71 @@ public sealed class DistilBertForSequenceClassification<T> : Module<T> where T :
         return ReverseGradOperations.Gather(encoded, indices, axis: 0);
     }
 
-    public void LoadWeights(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    public void LoadWeights<TWeight>(
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors)
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        if (typeof(T) != typeof(float))
-            return;
+        var enc = encoder;
 
-        var enc = Unsafe.As<BertEncoder<float>>(encoder);
-
-        LoadEmbed(enc.wordEmbed, tensors, "distilbert.embeddings.word_embeddings.weight");
-        LoadEmbed(enc.posEmbed, tensors, "distilbert.embeddings.position_embeddings.weight");
-        LoadLayerNorm(enc.embedLn, tensors, "distilbert.embeddings.LayerNorm");
+        LoadEmbed<TWeight>(enc.wordEmbed, tensors, "distilbert.embeddings.word_embeddings.weight");
+        LoadEmbed<TWeight>(enc.posEmbed, tensors, "distilbert.embeddings.position_embeddings.weight");
+        LoadLayerNorm<TWeight>(enc.embedLn, tensors, "distilbert.embeddings.LayerNorm");
 
         for (int i = 0; i < enc.layers.Length; i++)
         {
             var layer = enc.layers[i];
             var prefix = $"distilbert.transformer.layer.{i}";
-            LoadLinear(layer.attn.qProj, tensors, $"{prefix}.attention.q_lin");
-            LoadLinear(layer.attn.kProj, tensors, $"{prefix}.attention.k_lin");
-            LoadLinear(layer.attn.vProj, tensors, $"{prefix}.attention.v_lin");
-            LoadLinear(layer.attn.oProj, tensors, $"{prefix}.attention.out_lin");
-            LoadLayerNorm(layer.ln1, tensors, $"{prefix}.sa_layer_norm");
-            LoadLinear(layer.fc1, tensors, $"{prefix}.ffn.lin1");
-            LoadLinear(layer.fc2, tensors, $"{prefix}.ffn.lin2");
-            LoadLayerNorm(layer.ln2, tensors, $"{prefix}.output_layer_norm");
+            LoadLinear<TWeight>(layer.attn.qProj, tensors, $"{prefix}.attention.q_lin");
+            LoadLinear<TWeight>(layer.attn.kProj, tensors, $"{prefix}.attention.k_lin");
+            LoadLinear<TWeight>(layer.attn.vProj, tensors, $"{prefix}.attention.v_lin");
+            LoadLinear<TWeight>(layer.attn.oProj, tensors, $"{prefix}.attention.out_lin");
+            LoadLayerNorm<TWeight>(layer.ln1, tensors, $"{prefix}.sa_layer_norm");
+            LoadLinear<TWeight>(layer.fc1, tensors, $"{prefix}.ffn.lin1");
+            LoadLinear<TWeight>(layer.fc2, tensors, $"{prefix}.ffn.lin2");
+            LoadLayerNorm<TWeight>(layer.ln2, tensors, $"{prefix}.output_layer_norm");
         }
 
-        var preCls = Unsafe.As<Linear<float>>(preClassifier);
         if (tensors.ContainsKey("pre_classifier.weight") || tensors.ContainsKey("pre_classifier.bias"))
-            LoadLinear(preCls, tensors, "pre_classifier");
+            LoadLinear<TWeight>(preClassifier, tensors, "pre_classifier");
 
-        var cls = Unsafe.As<Linear<float>>(classifier);
         if (tensors.ContainsKey("classifier.weight") || tensors.ContainsKey("classifier.bias"))
-            LoadLinear(cls, tensors, "classifier");
+            LoadLinear<TWeight>(classifier, tensors, "classifier");
 
         Eval();
     }
 
-    static void LoadEmbed(Embedding<float> embed, Dictionary<string, (float[] Data, int[] Shape)> tensors, string key)
+    static void LoadEmbed<TWeight>(Embedding<T> embed, Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string key)
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
         if (!tensors.TryGetValue(key, out var t)) return;
-        var tensor = ReverseGradTensor<float>.FromMatrix(t.Data, t.Shape[0], t.Shape[1]);
-        embed.LoadStateDict(new Dictionary<string, ReverseGradTensor<float>> { ["Weight"] = tensor });
+        var tensor = TypeConverter.Convert<TWeight, T>(
+            ReverseGradTensor<TWeight>.FromMatrix(t.Data, t.Shape[0], t.Shape[1]));
+        embed.LoadStateDict(new Dictionary<string, ReverseGradTensor<T>> { ["Weight"] = tensor });
     }
 
-    static void LoadLinear(Linear<float> linear, Dictionary<string, (float[] Data, int[] Shape)> tensors, string prefix)
+    static void LoadLinear<TWeight>(Linear<T> linear, Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string prefix)
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        var dict = new Dictionary<string, ReverseGradTensor<float>>();
+        var dict = new Dictionary<string, ReverseGradTensor<T>>();
         if (tensors.TryGetValue($"{prefix}.weight", out var w))
-            dict["Weight"] = ReverseGradTensor<float>.FromMatrix(w.Data, w.Shape[0], w.Shape[1]);
+            dict["Weight"] = TypeConverter.Convert<TWeight, T>(
+                ReverseGradTensor<TWeight>.FromMatrix(w.Data, w.Shape[0], w.Shape[1]));
         if (tensors.TryGetValue($"{prefix}.bias", out var b))
-            dict["Bias"] = ReverseGradTensor<float>.FromMatrix(b.Data, 1, b.Shape[0]);
+            dict["Bias"] = TypeConverter.Convert<TWeight, T>(
+                ReverseGradTensor<TWeight>.FromMatrix(b.Data, 1, b.Shape[0]));
         if (dict.Count > 0) linear.LoadStateDict(dict);
     }
 
-    static void LoadLayerNorm(LayerNorm<float> ln, Dictionary<string, (float[] Data, int[] Shape)> tensors, string prefix)
+    static void LoadLayerNorm<TWeight>(LayerNorm<T> ln, Dictionary<string, (TWeight[] Data, int[] Shape)> tensors, string prefix)
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
-        var dict = new Dictionary<string, ReverseGradTensor<float>>();
+        var dict = new Dictionary<string, ReverseGradTensor<T>>();
         if (tensors.TryGetValue($"{prefix}.weight", out var w))
-            dict["Weight"] = ReverseGradTensor<float>.FromArray(w.Data);
+            dict["Weight"] = TypeConverter.Convert<TWeight, T>(
+                ReverseGradTensor<TWeight>.FromArray(w.Data));
         if (tensors.TryGetValue($"{prefix}.bias", out var b))
-            dict["Bias"] = ReverseGradTensor<float>.FromArray(b.Data);
+            dict["Bias"] = TypeConverter.Convert<TWeight, T>(
+                ReverseGradTensor<TWeight>.FromArray(b.Data));
         if (dict.Count > 0) ln.LoadStateDict(dict);
     }
 }
