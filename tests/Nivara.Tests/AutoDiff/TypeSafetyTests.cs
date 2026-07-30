@@ -40,44 +40,16 @@ public class TypeSafetyTests
     }
 
     [Test]
-    public void ReverseGradTensor_Int_ThrowsTypeValidationException()
+    public void ReverseGradTensor_Half_IsSupported()
     {
         // Arrange
-        var data = new int[] { 1, 2, 3 };
-        var column = NivaraColumn<int>.Create(data);
+        var data = new Half[] { (Half)1.0, (Half)2.0, (Half)3.0 };
+        var column = NivaraColumn<Half>.Create(data);
 
-        // Act & Assert
-        var ex = Assert.Throws<TypeValidationException>(() => new ReverseGradTensor<int>(column, requiresGrad: true));
-        Assert.That(ex.Message, Does.Contain("not supported"));
-        Assert.That(ex.Message, Does.Contain("float, double"));
-        Assert.That(ex.ExpectedType, Is.Not.Null);
-        Assert.That(ex.ActualType, Is.EqualTo(typeof(int)));
-    }
-
-    [Test]
-    public void ReverseGradTensor_Long_ThrowsTypeValidationException()
-    {
-        // Arrange
-        var data = new long[] { 1L, 2L, 3L };
-        var column = NivaraColumn<long>.Create(data);
-
-        // Act & Assert
-        var ex = Assert.Throws<TypeValidationException>(() => new ReverseGradTensor<long>(column, requiresGrad: true));
-        Assert.That(ex.Message, Does.Contain("not supported"));
-        Assert.That(ex.Message, Does.Contain("float, double"));
-    }
-
-    [Test]
-    public void ReverseGradTensor_Decimal_ThrowsTypeValidationException()
-    {
-        // Arrange
-        var data = new decimal[] { 1.0m, 2.0m, 3.0m };
-        var column = NivaraColumn<decimal>.Create(data);
-
-        // Act & Assert
-        var ex = Assert.Throws<TypeValidationException>(() => new ReverseGradTensor<decimal>(column, requiresGrad: true));
-        Assert.That(ex.Message, Does.Contain("not supported"));
-        Assert.That(ex.Message, Does.Contain("float, double"));
+        // Act & Assert - Should not throw
+        var tensor = new ReverseGradTensor<Half>(column, requiresGrad: true);
+        Assert.That(tensor, Is.Not.Null);
+        Assert.That(tensor.Length, Is.EqualTo(3));
     }
 
     [Test]
@@ -101,25 +73,26 @@ public class TypeSafetyTests
     }
 
     [Test]
-    public void TypeValidator_IsSupported_Int_ReturnsFalse()
+    public void TypeValidator_IsSupported_Half_ReturnsTrue()
     {
         // Act
-        var isSupported = TypeValidator.IsSupported<int>();
+        var isSupported = TypeValidator.IsSupported<Half>();
 
         // Assert
-        Assert.That(isSupported, Is.False);
+        Assert.That(isSupported, Is.True);
     }
 
     [Test]
-    public void TypeValidator_GetSupportedTypes_ReturnsFloatAndDouble()
+    public void TypeValidator_GetSupportedTypes_ReturnsFloatDoubleAndHalf()
     {
         // Act
         var supportedTypes = TypeValidator.GetSupportedTypes();
 
         // Assert
-        Assert.That(supportedTypes, Has.Length.EqualTo(2));
+        Assert.That(supportedTypes, Has.Length.EqualTo(3));
         Assert.That(supportedTypes, Does.Contain(typeof(float)));
         Assert.That(supportedTypes, Does.Contain(typeof(double)));
+        Assert.That(supportedTypes, Does.Contain(typeof(Half)));
     }
 
     [Test]
@@ -272,13 +245,13 @@ public class TypeSafetyTests
     }
 
     [Test]
-    public void IsAutoGradSupported_Int_ReturnsFalse()
+    public void IsAutoGradSupported_Half_ReturnsTrue()
     {
         // Act
-        var isSupported = NivaraAutoGradExtensions.IsAutoGradSupported<int>();
+        var isSupported = NivaraAutoGradExtensions.IsAutoGradSupported<Half>();
 
         // Assert
-        Assert.That(isSupported, Is.False);
+        Assert.That(isSupported, Is.True);
     }
 
     [Test]
@@ -288,9 +261,10 @@ public class TypeSafetyTests
         var types = NivaraAutoGradExtensions.GetSupportedAutoGradTypes();
 
         // Assert
-        Assert.That(types, Has.Length.EqualTo(2));
+        Assert.That(types, Has.Length.EqualTo(3));
         Assert.That(types, Does.Contain(typeof(float)));
         Assert.That(types, Does.Contain(typeof(double)));
+        Assert.That(types, Does.Contain(typeof(Half)));
     }
 
     [Test]

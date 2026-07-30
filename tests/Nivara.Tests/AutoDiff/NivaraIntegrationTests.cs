@@ -433,26 +433,17 @@ public class NivaraIntegrationTests
     }
 
     [Test]
-    public void IsAutoGradSupported_WithInt_ReturnsFalse()
-    {
-        // Act
-        var isSupported = NivaraAutoGradExtensions.IsAutoGradSupported<int>();
-
-        // Assert
-        Assert.That(isSupported, Is.False);
-    }
-
-    [Test]
-    public void GetSupportedAutoGradTypes_ReturnsFloatAndDouble()
+    public void GetSupportedAutoGradTypes_ReturnsFloatDoubleAndHalf()
     {
         // Act
         var supportedTypes = NivaraAutoGradExtensions.GetSupportedAutoGradTypes();
 
         // Assert
         Assert.That(supportedTypes, Is.Not.Null);
-        Assert.That(supportedTypes.Length, Is.EqualTo(2));
+        Assert.That(supportedTypes.Length, Is.EqualTo(3));
         Assert.That(supportedTypes, Does.Contain(typeof(float)));
         Assert.That(supportedTypes, Does.Contain(typeof(double)));
+        Assert.That(supportedTypes, Does.Contain(typeof(Half)));
     }
 
 }

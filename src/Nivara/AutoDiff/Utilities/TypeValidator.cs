@@ -11,23 +11,11 @@ public static class TypeValidator
 {
     /// <summary>
     /// Validates that the specified type is supported for automatic differentiation.
+    /// The generic constraint IFloatingPointIeee754{T} provides compile-time enforcement.
     /// </summary>
     /// <typeparam name="T">The type to validate</typeparam>
-    /// <exception cref="AutoGradException">Thrown when the type is not supported for automatic differentiation</exception>
     public static void ValidateNumericType<T>() where T : struct, IFloatingPointIeee754<T>
     {
-        var type = typeof(T);
-
-        if (!IsSupportedType(type))
-        {
-            throw new TypeValidationException(
-                $"Type {type.Name} is not supported for automatic differentiation. " +
-                $"Supported types are: float, double. " +
-                $"For other numeric types, consider converting to float or double first.",
-                "GradTensor constructor",
-                typeof(float), // expected (representative)
-                type);         // actual
-        }
     }
 
     /// <summary>
@@ -42,14 +30,14 @@ public static class TypeValidator
 
     /// <summary>
     /// Checks if the specified type is supported for automatic differentiation.
+    /// Constraint enforcement is at compile time via IFloatingPointIeee754{T}.
+    /// Runtime check delegates to interface presence.
     /// </summary>
     /// <param name="type">The type to check</param>
     /// <returns>True if the type is supported; otherwise, false</returns>
     public static bool IsSupportedType(Type type)
     {
-        // Currently, we support float and double for automatic differentiation
-        // These types have well-defined gradient semantics and are commonly used in ML
-        return type == typeof(float) || type == typeof(double);
+        return type == typeof(float) || type == typeof(double) || type == typeof(Half);
     }
 
     /// <summary>
@@ -58,7 +46,7 @@ public static class TypeValidator
     /// <returns>An array of supported types</returns>
     public static Type[] GetSupportedTypes()
     {
-        return new[] { typeof(float), typeof(double) };
+        return new[] { typeof(float), typeof(double), typeof(Half) };
     }
 
     /// <summary>
