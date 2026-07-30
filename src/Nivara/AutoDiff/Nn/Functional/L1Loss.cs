@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
-public sealed class L1Loss<T> where T : struct, INumber<T>
+public sealed class L1Loss<T> where T : struct, IFloatingPointIeee754<T>
 {
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> predictions, ReverseGradTensor<T> targets)
     {

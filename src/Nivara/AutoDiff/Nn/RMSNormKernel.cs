@@ -6,7 +6,7 @@ using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Nn;
 
-internal static class RMSNormKernel<T> where T : struct, INumber<T>
+internal static class RMSNormKernel<T> where T : struct, IFloatingPointIeee754<T>
 {
     internal static void PerRowRMSNormForwardKernel(
         T[] srcData, T[] resultData, int rows, int cols, double eps)

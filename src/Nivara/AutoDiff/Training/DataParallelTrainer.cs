@@ -7,7 +7,7 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Training;
 
-public class DataParallelTrainer<T> : IDisposable where T : struct, INumber<T>
+public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     readonly Module<T> _model;
     readonly DataLoader<T> _loader;

@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Training;
 
-public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, INumber<T>
+public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFloatingPointIeee754<T>
 {
     readonly TensorDataset<T> _dataset;
     readonly int _batchSize;

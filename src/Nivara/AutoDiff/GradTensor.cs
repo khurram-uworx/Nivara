@@ -10,7 +10,7 @@ namespace Nivara.AutoDiff;
 /// (reverse-mode, forward-mode, etc.).
 /// </summary>
 /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
-public class GradTensor<T> : IDisposable where T : struct, INumber<T>
+public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     internal bool disposed;
     internal int[] shape;

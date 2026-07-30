@@ -9,7 +9,7 @@ namespace Nivara.AutoDiff.Nn;
 /// Input shape is [batchSize, maxActiveFeatures]; output shape is [batchSize, embeddingDim].
 /// Entries equal to <see cref="PaddingIndex"/> are ignored.
 /// </summary>
-public sealed class SparseEmbedding<T> : Module<T> where T : struct, INumber<T>
+public sealed class SparseEmbedding<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int numEmbeddings;
     readonly int embeddingDim;

@@ -60,7 +60,7 @@ public sealed record DistilBertConfig
     }
 }
 
-public sealed class DistilBertForSequenceClassification<T> : Module<T> where T : struct, INumber<T>
+public sealed class DistilBertForSequenceClassification<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     internal readonly BertEncoder<T> encoder;
     internal readonly Linear<T> preClassifier;

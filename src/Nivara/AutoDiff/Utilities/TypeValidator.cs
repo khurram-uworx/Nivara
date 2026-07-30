@@ -14,7 +14,7 @@ public static class TypeValidator
     /// </summary>
     /// <typeparam name="T">The type to validate</typeparam>
     /// <exception cref="AutoGradException">Thrown when the type is not supported for automatic differentiation</exception>
-    public static void ValidateNumericType<T>() where T : struct, INumber<T>
+    public static void ValidateNumericType<T>() where T : struct, IFloatingPointIeee754<T>
     {
         var type = typeof(T);
 
@@ -35,7 +35,7 @@ public static class TypeValidator
     /// </summary>
     /// <typeparam name="T">The type to check</typeparam>
     /// <returns>True if the type is supported; otherwise, false</returns>
-    public static bool IsSupported<T>() where T : struct, INumber<T>
+    public static bool IsSupported<T>() where T : struct, IFloatingPointIeee754<T>
     {
         return IsSupportedType(typeof(T));
     }
@@ -68,8 +68,8 @@ public static class TypeValidator
     /// <typeparam name="U">The type of the second tensor</typeparam>
     /// <exception cref="AutoGradException">Thrown when types are incompatible</exception>
     public static void ValidateCompatibleTypes<T, U>()
-        where T : struct, INumber<T>
-        where U : struct, INumber<U>
+        where T : struct, IFloatingPointIeee754<T>
+        where U : struct, IFloatingPointIeee754<U>
     {
         if (typeof(T) != typeof(U))
         {

@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Training;
 
-public sealed class TensorDataset<T> where T : struct, INumber<T>
+public sealed class TensorDataset<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly NivaraFrame _frame;
     readonly string[] _featureColumns;

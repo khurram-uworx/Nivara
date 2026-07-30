@@ -14,7 +14,7 @@ public static class ModelSerializer
         WriteIndented = true
     };
 
-    public static void Save<T>(Module<T> model, string path) where T : struct, INumber<T>
+    public static void Save<T>(Module<T> model, string path) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -25,7 +25,7 @@ public static class ModelSerializer
     const string ExpectedModelFormat = "nivara-ss-v1";
     const string ExpectedCheckpointFormat = "nivara-ckpt-v1";
 
-    public static void Load<T>(Module<T> model, string path) where T : struct, INumber<T>
+    public static void Load<T>(Module<T> model, string path) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -37,7 +37,7 @@ public static class ModelSerializer
     }
 
     public static string StateDictToJson<T>(
-        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, INumber<T>
+        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(stateDict);
 
@@ -47,7 +47,7 @@ public static class ModelSerializer
 
     public static Dictionary<string, ReverseGradTensor<T>> JsonToStateDict<T>(
         string json,
-        bool requiresGrad = false) where T : struct, INumber<T>
+        bool requiresGrad = false) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
 
@@ -68,7 +68,7 @@ public static class ModelSerializer
     public static void SaveCheckpoint<T>(
         Module<T> model,
         EpochResult<T> epoch,
-        string path) where T : struct, INumber<T>
+        string path) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(epoch);
@@ -79,7 +79,7 @@ public static class ModelSerializer
         File.WriteAllText(path, json);
     }
 
-    public static Checkpoint<T> LoadCheckpoint<T>(string path) where T : struct, INumber<T>
+    public static Checkpoint<T> LoadCheckpoint<T>(string path) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -123,13 +123,13 @@ public static class ModelSerializer
         };
     }
 
-    static ModelFile BuildModelFile<T>(Module<T> model) where T : struct, INumber<T>
+    static ModelFile BuildModelFile<T>(Module<T> model) where T : struct, IFloatingPointIeee754<T>
     {
         return BuildModelFile(model.StateDict());
     }
 
     static ModelFile BuildModelFile<T>(
-        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, INumber<T>
+        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, IFloatingPointIeee754<T>
     {
         return new ModelFile
         {
@@ -140,7 +140,7 @@ public static class ModelSerializer
 
     static CheckpointFile BuildCheckpointFile<T>(
         Module<T> model,
-        EpochResult<T> epoch) where T : struct, INumber<T>
+        EpochResult<T> epoch) where T : struct, IFloatingPointIeee754<T>
     {
         var entries = BuildParameterEntries(model.StateDict());
 
@@ -154,7 +154,7 @@ public static class ModelSerializer
     }
 
     static Dictionary<string, ParameterEntry> BuildParameterEntries<T>(
-        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, INumber<T>
+        IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, IFloatingPointIeee754<T>
     {
         var entries = new Dictionary<string, ParameterEntry>();
 
@@ -191,7 +191,7 @@ public static class ModelSerializer
 
     static ReverseGradTensor<T> DeserializeTensor<T>(
         ParameterEntry entry,
-        bool requiresGrad) where T : struct, INumber<T>
+        bool requiresGrad) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(entry);
 

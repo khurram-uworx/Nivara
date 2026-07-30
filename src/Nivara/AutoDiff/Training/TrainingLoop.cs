@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Training;
 
-public sealed class TrainingResult<T> where T : struct, INumber<T>
+public sealed class TrainingResult<T> where T : struct, IFloatingPointIeee754<T>
 {
     public IReadOnlyList<EpochResult<T>> Epochs { get; }
     public TimeSpan TotalElapsed { get; }
@@ -31,7 +31,7 @@ public sealed class TrainingResult<T> where T : struct, INumber<T>
     }
 }
 
-public sealed class EpochResult<T> where T : struct, INumber<T>
+public sealed class EpochResult<T> where T : struct, IFloatingPointIeee754<T>
 {
     public int Epoch { get; }
     public T Loss { get; }
@@ -47,7 +47,7 @@ public sealed class EpochResult<T> where T : struct, INumber<T>
     }
 }
 
-public class TrainingLoop<T> : IDisposable where T : struct, INumber<T>
+public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     readonly Module<T> _model;
     readonly DataLoader<T> _loader;

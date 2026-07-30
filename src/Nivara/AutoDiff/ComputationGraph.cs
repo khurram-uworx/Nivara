@@ -4,7 +4,7 @@ namespace Nivara.AutoDiff;
 
 public sealed class ComputationGraph
 {
-    internal static void AddNode<T>(ReverseGradTensor<T> output, OpNode<T> node) where T : struct, INumber<T>
+    internal static void AddNode<T>(ReverseGradTensor<T> output, OpNode<T> node) where T : struct, IFloatingPointIeee754<T>
     {
         if (output == null)
             throw new ArgumentNullException(nameof(output));
@@ -17,7 +17,7 @@ public sealed class ComputationGraph
         }
     }
 
-    internal static void Backward<T>(ReverseGradTensor<T> tensor, NivaraColumn<T>? gradient = null) where T : struct, INumber<T>
+    internal static void Backward<T>(ReverseGradTensor<T> tensor, NivaraColumn<T>? gradient = null) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -56,7 +56,7 @@ public sealed class ComputationGraph
         }
     }
 
-    readonly struct BackwardPlan<T> where T : struct, INumber<T>
+    readonly struct BackwardPlan<T> where T : struct, IFloatingPointIeee754<T>
     {
         public readonly List<OpNode<T>> Nodes;
         public readonly Dictionary<OpNode<T>, ReverseGradTensor<T>> NodeToOutputMap;
@@ -68,7 +68,7 @@ public sealed class ComputationGraph
         }
     }
 
-    private static BackwardPlan<T> BuildBackwardPlan<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
+    private static BackwardPlan<T> BuildBackwardPlan<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
     {
         var visited = new HashSet<OpNode<T>>();
         var visiting = new HashSet<OpNode<T>>();
@@ -117,7 +117,7 @@ public sealed class ComputationGraph
         return new BackwardPlan<T>(result, nodeToOutput);
     }
 
-    internal static List<OpNode<T>> TopologicalSort<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
+    internal static List<OpNode<T>> TopologicalSort<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
     {
         if (root == null)
             throw new ArgumentNullException(nameof(root));
@@ -125,7 +125,7 @@ public sealed class ComputationGraph
         return BuildBackwardPlan(root).Nodes;
     }
 
-    internal static void ValidateGraph<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
+    internal static void ValidateGraph<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
     {
         if (root == null)
             throw new ArgumentNullException(nameof(root));
@@ -133,7 +133,7 @@ public sealed class ComputationGraph
         BuildBackwardPlan(root);
     }
 
-    public static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -162,7 +162,7 @@ public sealed class ComputationGraph
         ClearGradients(tensor);
     }
 
-    public static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> root) where T : struct, INumber<T>
+    public static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
     {
         if (root == null)
             throw new ArgumentNullException(nameof(root));

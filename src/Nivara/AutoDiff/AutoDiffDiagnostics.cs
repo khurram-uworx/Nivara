@@ -10,7 +10,7 @@ static class AutoDiffDiagnostics
         int inputLength,
         Action operation,
         string? notes = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(operation);
 
@@ -30,7 +30,7 @@ static class AutoDiffDiagnostics
         int inputLength,
         Func<TResult> operation,
         string? notes = null)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
 
         => DiagnosticsTracker.MeasureOperation(
             operationType,

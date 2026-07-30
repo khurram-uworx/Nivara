@@ -52,7 +52,7 @@ internal static class Im2Col
         int padH, int padW,
         int outH, int outW,
         int tileStart, int tileLen,
-        PatchLocation[] locs) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, IFloatingPointIeee754<T>
     {
         if (kernelH == 1 && kernelW == 1 && strideH == 1 && strideW == 1 && padH == 0 && padW == 0)
         {
@@ -81,7 +81,7 @@ internal static class Im2Col
         int strideH, int strideW,
         int padH, int padW,
         int outH, int outW,
-        int batchCount) where T : struct, INumber<T>
+        int batchCount) where T : struct, IFloatingPointIeee754<T>
     {
         int totalPatches = batchCount * outH * outW;
         int positionsPerBatch = outH * outW;
@@ -97,7 +97,7 @@ internal static class Im2Col
         int padH, int padW,
         int outH, int outW,
         int tileStart, int tileLen,
-        PatchLocation[] locs) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, IFloatingPointIeee754<T>
     {
         int patchSize = channels * kernelH * kernelW;
 
@@ -118,7 +118,7 @@ internal static class Im2Col
         int channels, int height, int width,
         int outH, int outW,
         int tileStart, int tileLen,
-        PatchLocation[] locs) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, IFloatingPointIeee754<T>
     {
         for (int t = 0; t < tileLen; t++)
         {
@@ -139,7 +139,7 @@ internal static class Im2Col
         int padH, int padW,
         int outH, int outW,
         int tileStart, int tileLen,
-        PatchLocation[] locs) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, IFloatingPointIeee754<T>
     {
         int patchSize = channels * 9;
 
@@ -170,7 +170,7 @@ internal static class Im2Col
         ReadOnlySpan<T> input, Span<T> output,
         int inBase, int outRow,
         int channels, int height, int width,
-        int baseH, int baseW) where T : struct, INumber<T>
+        int baseH, int baseW) where T : struct, IFloatingPointIeee754<T>
     {
         int patchIdx = 0;
 
@@ -198,7 +198,7 @@ internal static class Im2Col
         ReadOnlySpan<T> input, Span<T> output,
         int inBase, int outRow,
         int channels, int height, int width,
-        int baseH, int baseW) where T : struct, INumber<T>
+        int baseH, int baseW) where T : struct, IFloatingPointIeee754<T>
     {
         int patchIdx = 0;
 
@@ -227,7 +227,7 @@ internal static class Im2Col
         int inBase, int outRow,
         int channels, int height, int width,
         int kernelH, int kernelW,
-        int baseH, int baseW) where T : struct, INumber<T>
+        int baseH, int baseW) where T : struct, IFloatingPointIeee754<T>
     {
         int patchIdx = 0;
 
@@ -277,7 +277,7 @@ internal static class Im2Col
         int padH, int padW,
         int outH, int outW,
         int outChannels,
-        int batchCount) where T : struct, INumber<T>
+        int batchCount) where T : struct, IFloatingPointIeee754<T>
     {
         int patchSize = channels * kernelH * kernelW;
         int inputBatchStride = channels * height * width;
@@ -335,7 +335,7 @@ internal static class Im2Col
         int strideH, int strideW,
         int padH, int padW,
         int outH, int outW,
-        int batchCount) where T : struct, INumber<T>
+        int batchCount) where T : struct, IFloatingPointIeee754<T>
     {
         int patchSize = channels * kernelH * kernelW;
         int inputBatchStride = channels * height * width;
@@ -384,7 +384,7 @@ internal static class Im2Col
         ReadOnlySpan<T> gradOutputFlat,
         Span<T> weightGrad,
         int tileStart, int tileLen,
-        int patchSize, int outChannels) where T : struct, INumber<T>
+        int patchSize, int outChannels) where T : struct, IFloatingPointIeee754<T>
     {
         for (int t = 0; t < tileLen; t++)
         {
@@ -409,7 +409,7 @@ internal static class Im2Col
         int inChannels, int outChannels,
         int h, int w, int oH, int oW,
         int kW, int stride, int padding,
-        int batchCount) where T : struct, INumber<T>
+        int batchCount) where T : struct, IFloatingPointIeee754<T>
     {
         int inputBatchStride = inChannels * h * w;
         int outputBatchStride = outChannels * oH * oW;
@@ -472,7 +472,7 @@ internal static class Im2Col
         int inChannels, int outChannels,
         int h, int w, int oH, int oW,
         int kW, int stride, int padding,
-        int batchCount) where T : struct, INumber<T>
+        int batchCount) where T : struct, IFloatingPointIeee754<T>
     {
         int inputBatchStride = inChannels * h * w;
         int outputBatchStride = outChannels * oH * oW;
@@ -537,7 +537,7 @@ internal static class Im2Col
         int inChannels, int outChannels,
         int h, int w, int oH, int oW,
         int kW, int stride, int padding,
-        int batchCount) where T : struct, INumber<T>
+        int batchCount) where T : struct, IFloatingPointIeee754<T>
     {
         int inputBatchStride = inChannels * h * w;
         int outputBatchStride = outChannels * oH * oW;
@@ -611,7 +611,7 @@ internal static class Im2Col
         int stride, int padding,
         int outLength,
         int tileStart, int tileLen,
-        PatchLocation[] locs) where T : struct, INumber<T>
+        PatchLocation[] locs) where T : struct, IFloatingPointIeee754<T>
     {
         int patchSize = channels * kernelSize;
 
@@ -630,7 +630,7 @@ internal static class Im2Col
         ReadOnlySpan<T> input, Span<T> output,
         int inBase, int outRow,
         int channels, int length, int kernelSize,
-        int basePos) where T : struct, INumber<T>
+        int basePos) where T : struct, IFloatingPointIeee754<T>
     {
         int patchIdx = 0;
 

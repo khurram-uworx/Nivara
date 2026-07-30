@@ -6,7 +6,7 @@ using System.Numerics;
 
 namespace NivaraGpt;
 
-public sealed class NivaraGptModel<T> : Module<T> where T : struct, INumber<T>
+public sealed class NivaraGptModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int vocabSize;
     readonly int nEmbd;

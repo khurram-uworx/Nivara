@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-internal static class ModuleHelpers<T> where T : struct, INumber<T>
+internal static class ModuleHelpers<T> where T : struct, IFloatingPointIeee754<T>
 {
     internal static ReadOnlySpan<T> GetSpan(ReverseGradTensor<T> tensor)
     {

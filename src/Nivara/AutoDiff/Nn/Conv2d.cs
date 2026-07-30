@@ -7,7 +7,7 @@ using System.Runtime.CompilerServices;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     const int TargetL1Bytes = 32 * 1024;
 
@@ -640,7 +640,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
     }
 }
 
-public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int _inChannels;
     readonly int _outChannels;

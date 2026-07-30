@@ -14,7 +14,7 @@ public static class NivaraAutoGradExtensions
     /// Converts a NivaraColumn to a ReverseGradTensor with type validation.
     /// </summary>
     public static ReverseGradTensor<T> ToReverseGradTensor<T>(this NivaraColumn<T> column, bool requiresGrad = false)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (column == null)
             throw new ArgumentNullException(nameof(column));
@@ -26,7 +26,7 @@ public static class NivaraAutoGradExtensions
     /// Converts a NivaraSeries to a ReverseGradTensor with type validation.
     /// </summary>
     public static ReverseGradTensor<T> ToReverseGradTensor<T>(this NivaraSeries<T> series, bool requiresGrad = false)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (series == null)
             throw new ArgumentNullException(nameof(series));
@@ -37,7 +37,7 @@ public static class NivaraAutoGradExtensions
     /// <summary>
     /// Checks if a type is supported for automatic differentiation.
     /// </summary>
-    public static bool IsAutoGradSupported<T>() where T : struct, INumber<T>
+    public static bool IsAutoGradSupported<T>() where T : struct, IFloatingPointIeee754<T>
     {
         return TypeValidator.IsSupported<T>();
     }
@@ -56,7 +56,7 @@ public static class NivaraAutoGradExtensions
     public static Dictionary<string, ReverseGradTensor<T>> ToReverseGradTensors<T>(
         this NivaraFrame frame,
         string[] columnNames,
-        bool requiresGrad = false) where T : struct, INumber<T>
+        bool requiresGrad = false) where T : struct, IFloatingPointIeee754<T>
     {
         if (frame == null)
             throw new ArgumentNullException(nameof(frame));
@@ -122,7 +122,7 @@ public static class NivaraAutoGradExtensions
     /// Converts a ReverseGradTensor back to a NivaraColumn.
     /// </summary>
     public static NivaraColumn<T> ToColumn<T>(this ReverseGradTensor<T> gradTensor)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (gradTensor == null)
             throw new ArgumentNullException(nameof(gradTensor));
@@ -134,7 +134,7 @@ public static class NivaraAutoGradExtensions
     /// Converts a ReverseGradTensor back to a NivaraSeries.
     /// </summary>
     public static NivaraSeries<T> ToSeries<T>(this ReverseGradTensor<T> gradTensor)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (gradTensor == null)
             throw new ArgumentNullException(nameof(gradTensor));
@@ -147,7 +147,7 @@ public static class NivaraAutoGradExtensions
     /// </summary>
     public static void BatchBackward<T>(
         this Dictionary<string, ReverseGradTensor<T>> tensors,
-        ReverseGradTensor<T> loss) where T : struct, INumber<T>
+        ReverseGradTensor<T> loss) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -165,7 +165,7 @@ public static class NivaraAutoGradExtensions
     /// Zeros gradients for all tensors in a batch.
     /// </summary>
     public static void BatchZeroGrad<T>(
-        this Dictionary<string, ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
+        this Dictionary<string, ReverseGradTensor<T>> tensors) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -180,7 +180,7 @@ public static class NivaraAutoGradExtensions
     /// Converts a batch of ReverseGradTensors back to a NivaraFrame.
     /// </summary>
     public static NivaraFrame ToFrame<T>(
-        this Dictionary<string, ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
+        this Dictionary<string, ReverseGradTensor<T>> tensors) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -196,7 +196,7 @@ public static class NivaraAutoGradExtensions
     /// Extracts gradients from a batch of ReverseGradTensors and returns them as a NivaraFrame.
     /// </summary>
     public static NivaraFrame? ToGradientFrame<T>(
-        this Dictionary<string, ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
+        this Dictionary<string, ReverseGradTensor<T>> tensors) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));

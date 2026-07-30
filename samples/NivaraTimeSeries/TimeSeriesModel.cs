@@ -5,7 +5,7 @@ using System.Numerics;
 
 namespace NivaraTimeSeries;
 
-public sealed class TimeSeriesModel<T> : Module<T> where T : struct, INumber<T>
+public sealed class TimeSeriesModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Conv1d<T> _conv1;
     readonly Conv1d<T> _conv2;

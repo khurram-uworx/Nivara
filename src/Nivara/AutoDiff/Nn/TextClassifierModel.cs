@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber<T>
+public sealed class TextClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Embedding<T> embedding;
     readonly Linear<T> fc1;

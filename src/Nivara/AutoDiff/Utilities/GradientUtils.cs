@@ -30,7 +30,7 @@ public static class GradientUtils
     }
 
     internal static bool ShouldTrackGrad<T>(params ReverseGradTensor<T>[] tensors)
-        where T : struct, INumber<T>
+        where T : struct, IFloatingPointIeee754<T>
     {
         if (!IsGradEnabled)
             return false;
@@ -65,7 +65,7 @@ public static class GradientUtils
     /// <summary>
     /// Clears all gradients in the computation graph reachable from the specified tensor.
     /// </summary>
-    public static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -76,7 +76,7 @@ public static class GradientUtils
     /// <summary>
     /// Clears gradients for multiple tensors at once.
     /// </summary>
-    public static void ZeroGrad<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
+    public static void ZeroGrad<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -93,7 +93,7 @@ public static class GradientUtils
     /// <summary>
     /// Detaches a tensor from the computation graph, returning a new tensor without gradient tracking.
     /// </summary>
-    public static ReverseGradTensor<T> Detach<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Detach<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -104,7 +104,7 @@ public static class GradientUtils
     /// <summary>
     /// Detaches multiple tensors from the computation graph.
     /// </summary>
-    public static IEnumerable<ReverseGradTensor<T>> Detach<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
+    public static IEnumerable<ReverseGradTensor<T>> Detach<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -120,7 +120,7 @@ public static class GradientUtils
     /// Clips gradient values to prevent exploding gradients.
     /// Values are clipped to the range [-maxValue, maxValue].
     /// </summary>
-    public static void ClipGradValue<T>(ReverseGradTensor<T> tensor, T maxValue) where T : struct, INumber<T>
+    public static void ClipGradValue<T>(ReverseGradTensor<T> tensor, T maxValue) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -145,7 +145,7 @@ public static class GradientUtils
     /// Clips gradient norm to prevent exploding gradients.
     /// If the gradient norm exceeds maxNorm, the gradient is scaled down proportionally.
     /// </summary>
-    public static void ClipGradNorm<T>(ReverseGradTensor<T> tensor, double maxNorm) where T : struct, INumber<T>
+    public static void ClipGradNorm<T>(ReverseGradTensor<T> tensor, double maxNorm) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -175,7 +175,7 @@ public static class GradientUtils
     /// <summary>
     /// Clips gradients for multiple tensors by their global norm.
     /// </summary>
-    public static void ClipGradNorm<T>(IEnumerable<ReverseGradTensor<T>> tensors, double maxNorm) where T : struct, INumber<T>
+    public static void ClipGradNorm<T>(IEnumerable<ReverseGradTensor<T>> tensors, double maxNorm) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -219,7 +219,7 @@ public static class GradientUtils
     /// <summary>
     /// Creates a constant tensor that doesn't require gradients.
     /// </summary>
-    public static ReverseGradTensor<T> Constant<T>(T[] data) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Constant<T>(T[] data) where T : struct, IFloatingPointIeee754<T>
     {
         if (data == null)
             throw new ArgumentNullException(nameof(data));
@@ -230,7 +230,7 @@ public static class GradientUtils
     /// <summary>
     /// Creates a constant tensor from a NivaraColumn that doesn't require gradients.
     /// </summary>
-    public static ReverseGradTensor<T> Constant<T>(NivaraColumn<T> column) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Constant<T>(NivaraColumn<T> column) where T : struct, IFloatingPointIeee754<T>
     {
         if (column == null)
             throw new ArgumentNullException(nameof(column));
@@ -241,7 +241,7 @@ public static class GradientUtils
     /// <summary>
     /// Creates a constant tensor filled with zeros.
     /// </summary>
-    public static ReverseGradTensor<T> Zeros<T>(int length) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Zeros<T>(int length) where T : struct, IFloatingPointIeee754<T>
     {
         if (length <= 0)
             throw new ArgumentException("Length must be positive", nameof(length));
@@ -254,7 +254,7 @@ public static class GradientUtils
     /// <summary>
     /// Creates a constant tensor filled with ones.
     /// </summary>
-    public static ReverseGradTensor<T> Ones<T>(int length) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Ones<T>(int length) where T : struct, IFloatingPointIeee754<T>
     {
         if (length <= 0)
             throw new ArgumentException("Length must be positive", nameof(length));
@@ -267,7 +267,7 @@ public static class GradientUtils
     /// <summary>
     /// Creates a constant tensor filled with a specific value.
     /// </summary>
-    public static ReverseGradTensor<T> Full<T>(int length, T value) where T : struct, INumber<T>
+    public static ReverseGradTensor<T> Full<T>(int length, T value) where T : struct, IFloatingPointIeee754<T>
     {
         if (length <= 0)
             throw new ArgumentException("Length must be positive", nameof(length));
@@ -284,7 +284,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets diagnostic information about the computation graph rooted at the specified tensor.
     /// </summary>
-    public static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -295,7 +295,7 @@ public static class GradientUtils
     /// <summary>
     /// Prints a human-readable summary of the computation graph.
     /// </summary>
-    public static string PrintGraphSummary<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static string PrintGraphSummary<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -323,7 +323,7 @@ public static class GradientUtils
     /// <summary>
     /// Checks if a tensor has any gradients computed.
     /// </summary>
-    public static bool HasGradient<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static bool HasGradient<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -334,7 +334,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets the gradient norm (L2 norm) for a tensor.
     /// </summary>
-    public static double GetGradientNorm<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static double GetGradientNorm<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -352,7 +352,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets the global gradient norm across multiple tensors.
     /// </summary>
-    public static double GetGlobalGradientNorm<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, INumber<T>
+    public static double GetGlobalGradientNorm<T>(IEnumerable<ReverseGradTensor<T>> tensors) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensors == null)
             throw new ArgumentNullException(nameof(tensors));
@@ -372,7 +372,7 @@ public static class GradientUtils
     /// <summary>
     /// Validates that a tensor is ready for backward pass.
     /// </summary>
-    public static bool CanBackward<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static bool CanBackward<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -383,7 +383,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets a detailed description of a tensor for debugging purposes.
     /// </summary>
-    public static string DescribeTensor<T>(ReverseGradTensor<T> tensor) where T : struct, INumber<T>
+    public static string DescribeTensor<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
