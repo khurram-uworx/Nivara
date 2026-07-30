@@ -731,49 +731,18 @@ public static class ForwardGradOperations
         where T : struct, IFloatingPointIeee754<T>
     {
         int n = mean.Length;
-
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var r = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            var m2 = new float[n];
-            var expLv = new float[n];
-            var tmp = new float[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0f, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5f, r);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var r = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            var m2 = new double[n];
-            var expLv = new double[n];
-            var tmp = new double[n];
-            TensorPrimitives.Multiply(m, m, m2);
-            TensorPrimitives.Exp(lv, expLv);
-            TensorPrimitives.Add(lv, 1.0, tmp);
-            TensorPrimitives.Subtract(tmp, m2, tmp);
-            TensorPrimitives.Subtract(tmp, expLv, tmp);
-            TensorPrimitives.Multiply(tmp, -0.5, r);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                result[i] = T.CreateChecked(-0.5 * (1.0 + lv - m * m - Math.Exp(lv)));
-            }
-        }
+        var m2 = new T[n];
+        var expLv = new T[n];
+        var tmp = new T[n];
+        TensorPrimitives.Multiply(mSpan, mSpan, m2);
+        TensorPrimitives.Exp(lvSpan, expLv);
+        TensorPrimitives.Add(lvSpan, T.One, tmp);
+        TensorPrimitives.Subtract(tmp, m2, tmp);
+        TensorPrimitives.Subtract(tmp, expLv, tmp);
+        TensorPrimitives.Multiply(tmp, T.CreateChecked(-0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -781,43 +750,14 @@ public static class ForwardGradOperations
         where T : struct, IFloatingPointIeee754<T>
     {
         int n = mean.Length;
-
         mean.TryGetSpan(out var mSpan);
         logVar.TryGetSpan(out var lvSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var m = MemoryMarshal.Cast<T, float>(mSpan);
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var m = MemoryMarshal.Cast<T, double>(mSpan);
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Add(d, m, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var m = double.CreateChecked(mSpan[i]);
-                var lv = double.CreateChecked(lvSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(m + Math.Exp(0.5 * lv) * e);
-            }
-        }
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Add(result, mSpan, result);
         return NivaraColumn<T>.Create(result);
     }
 
@@ -827,48 +767,16 @@ public static class ForwardGradOperations
         NivaraColumn<T> epsilon)
         where T : struct, IFloatingPointIeee754<T>
     {
-        // ∂z/∂logVar = 0.5 * exp(0.5 * logVar) * ε
-        // JVP contribution: 0.5 * exp(0.5 * logVar) * ε * t_logVar
         int n = logVar.Length;
-
         logVar.TryGetSpan(out var lvSpan);
         tangent.TryGetSpan(out var gSpan);
         epsilon.TryGetSpan(out var eSpan);
         var result = new T[n];
-        if (typeof(T) == typeof(float))
-        {
-            var lv = MemoryMarshal.Cast<T, float>(lvSpan);
-            var g = MemoryMarshal.Cast<T, float>(gSpan);
-            var e = MemoryMarshal.Cast<T, float>(eSpan);
-            var d = MemoryMarshal.Cast<T, float>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5f, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5f, d);
-        }
-        else if (typeof(T) == typeof(double))
-        {
-            var lv = MemoryMarshal.Cast<T, double>(lvSpan);
-            var g = MemoryMarshal.Cast<T, double>(gSpan);
-            var e = MemoryMarshal.Cast<T, double>(eSpan);
-            var d = MemoryMarshal.Cast<T, double>(result.AsSpan());
-            TensorPrimitives.Multiply(lv, 0.5, d);
-            TensorPrimitives.Exp(d, d);
-            TensorPrimitives.Multiply(d, e, d);
-            TensorPrimitives.Multiply(d, g, d);
-            TensorPrimitives.Multiply(d, 0.5, d);
-        }
-        else
-        {
-            for (int i = 0; i < n; i++)
-            {
-                var lv = double.CreateChecked(lvSpan[i]);
-                var t = double.CreateChecked(gSpan[i]);
-                var e = double.CreateChecked(eSpan[i]);
-                result[i] = T.CreateChecked(0.5 * Math.Exp(0.5 * lv) * e * t);
-            }
-        }
+        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
+        TensorPrimitives.Exp(result, result);
+        TensorPrimitives.Multiply(result, eSpan, result);
+        TensorPrimitives.Multiply(result, gSpan, result);
+        TensorPrimitives.Multiply(result, T.CreateChecked(0.5), result);
         return NivaraColumn<T>.Create(result);
     }
 
