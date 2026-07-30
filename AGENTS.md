@@ -310,6 +310,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - ✓ **BatchNorm1d 3D input**: accepts `[B, C, L]` in addition to `[N, C]`; normalizes each L position independently for Conv1d pipelines. Previously rejected 3D input with a rank error.
 - ✓ **BatchNormKernel xHat fix**: `xHat` is now always populated regardless of `affine` flag. Previously, `BackwardInput` read uninitialized data when `affine=false`, producing incorrect gradients.
 - ✓ **MSELoss reduceToMean**: `Forward(predictions, targets, reduceToMean: true)` divides sum-of-squares by element count, matching PyTorch's default `reduction='mean'`.
+- ✓ **Inference-only path**: Slice/Concat/PerRowRMSNorm in `ReverseGradOperations` now use `GradientUtils.ShouldTrackGrad()` (not raw `RequiresGrad`), so graph nodes are never created outside `Grad()` scope. Regression guard added via `Debug.Assert` in `ComputationGraph.AddNode()`. Verification tests in `InferenceGraphTests.cs`. The product direction (inference-default) is now fully enforced in all operations.
 - **ConvTranspose2d**: no grouped convolution support; grouped transpose would require new kernel paths.
 - **ConvTranspose2d**: direct scatter produces zero-padded interior positions (stride > 1); test verified numerically correct but may look unexpected.
 - **BatchNorm2d**: uses generic per-element kernel (not the fused `BatchNormKernel<T>` span path); functionally correct but slightly slower than optimal.
