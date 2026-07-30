@@ -155,7 +155,7 @@ Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode
 | **ResNet-18** | 1×3×224×224 | 68 ms | 667 ms | **~10×** |
 | **MiniLM-L6** | 128 tokens | 58 ms | 429 ms | **~7×** |
 
-Nivara builds a full AutoDiff computation graph on every forward pass — there is no inference-only path yet. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. MiniLM is closest to parity since its attention operations map well to `TensorPrimitives` and `TensorsHelper` span-based kernels.
+AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. MiniLM is closest to parity since its attention operations map well to `TensorPrimitives` and `TensorsHelper` span-based kernels.
 
 ## Sample data
 

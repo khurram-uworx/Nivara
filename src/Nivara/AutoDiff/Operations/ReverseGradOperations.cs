@@ -886,9 +886,9 @@ public static class ReverseGradOperations
                     ? new[] { length }
                     : new[] { batchDim, length };
 
-                var result = new ReverseGradTensor<T>(resultCol, a.RequiresGrad, resultShape);
+                var result = new ReverseGradTensor<T>(resultCol, GradientUtils.ShouldTrackGrad(a), resultShape);
 
-                if (a.RequiresGrad)
+                if (GradientUtils.ShouldTrackGrad(a))
                 {
                     var savedStart = start;
                     var savedLength = length;
@@ -961,11 +961,7 @@ public static class ReverseGradOperations
         for (int i = 0; i < tensors.Length; i++)
             inputLengths[i] = tensors.Length == 1 ? tensors[i].Length : tensors[i].Length;
 
-        bool shouldTrack = false;
-        foreach (var t in tensors)
-        {
-            if (t.RequiresGrad) { shouldTrack = true; break; }
-        }
+        bool shouldTrack = GradientUtils.ShouldTrackGrad(tensors);
 
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffConcat",
@@ -1272,9 +1268,9 @@ public static class ReverseGradOperations
                 RMSNormKernel<T>.PerRowRMSNormForwardKernel(srcData, resultData, rows, cols, eps);
 
                 var resultCol = NivaraColumn<T>.Create(resultData);
-                var result = new ReverseGradTensor<T>(resultCol, a.RequiresGrad, a.Shape);
+                var result = new ReverseGradTensor<T>(resultCol, GradientUtils.ShouldTrackGrad(a), a.Shape);
 
-                if (a.RequiresGrad)
+                if (GradientUtils.ShouldTrackGrad(a))
                 {
                     var savedInput = new T[a.Length];
                     a.Data.CopyTo(savedInput, default(T)!);
