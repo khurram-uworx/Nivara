@@ -84,10 +84,13 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 - Ingest 2D tensors and labeled row vectors into schema-aware frames
 - Keep tensor math in `System.Numerics.Tensors`, not custom DataFrame APIs
 - Run lightweight reverse-mode AutoDiff when you need local training; inference is the default, manual training is explicit with `GradientUtils.Grad()`, and module state can be copied via `StateDict()` / `LoadStateDict()`
-- NLP and vision building blocks out of the box: `Embedding<T>`, `SparseEmbedding<T>`, `Conv1d<T>`, `Conv2d<T>`, `ConvTranspose2d<T>`, `BatchNorm1d<T>`, `BatchNorm2d<T>`, `LayerNorm<T>`, `DepthwiseSeparableConv2d<T>`, `TransformerBlock<T>`, `MultiheadAttention<T>`, `ConvVAE<T>`, `TextClassifierModel<T>`, `TokenClassifierModel<T>`, `TextTokenizer`, and `Sampler<T>` — all differentiable and composable with the existing module system
+- Broader type support with `IFloatingPointIeee754<T>` constraint — `Half`/F16 and BFloat16 now pass runtime validation alongside `float` and `double`
+- NLP and vision building blocks out of the box: `Embedding<T>`, `SparseEmbedding<T>`, `Conv1d<T>` (im2col-rewritten, PyTorch-compatible layout), `Conv2d<T>` (grouped conv, 1×1 fast path, PatchLocation lookup, InputGrad specializations), `ConvTranspose2d<T>`, `BatchNorm1d<T>` (now accepts 3D `[B,C,L]` input), `BatchNorm2d<T>`, `LayerNorm<T>` (SIMD via `TensorPrimitives.Dot`), `DepthwiseSeparableConv2d<T>`, `TransformerBlock<T>` (RMSNorm/LayerNorm + GELU), `MultiheadAttention<T>` (self/cross/causal), `ConvVAE<T>`, `VAE<T>` (optional conditioning), `TextClassifierModel<T>`, `TokenClassifierModel<T>`, `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `GELU`, `TextTokenizer`, and `Sampler<T>` — all differentiable and composable with the existing module system
 
 ### Performance
 - Vectorized execution where semantics are simple and measurable
+- SIMD-accelerated optimizer and normalization kernels (Adam, AdamW, PerRowRMSNorm backward, LayerNorm sum-of-squares via TensorPrimitives chains)
+- ArrayPool-backed buffer management in hot paths (AccumulateGradient, Gather backward, Adam/AdamW state)
 - Automatic storage backend selection for supported types
 - Scalar fallbacks that preserve explicit null semantics
 
@@ -115,7 +118,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 
 For detailed examples and tutorials, see [**GETTING-STARTED.md**](https://github.com/khurram-uworx/nivara/blob/main/GETTING-STARTED.md).
 
-For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory — including a character-level GPT trained on Nivara AutoDiff, a neural chess evaluator, a hybrid Nivara+LLM agent workflow, a variational autoencoder for synthetic pattern generation, and PyTorch parity benchmarks showing <0.04% loss-curve divergence.
+For comprehensive API documentation and advanced usage patterns, explore the [**samples/**](https://github.com/khurram-uworx/nivara/tree/main/samples) directory — including a character-level GPT trained on Nivara AutoDiff, a neural chess evaluator, a hybrid Nivara+LLM agent workflow, a variational autoencoder for synthetic pattern generation, a PyTorch parity benchmark suite showing <0.04% loss-curve divergence, a MiniLM inference pipeline, a DistilBERT fine-tuning pipeline for SST-2 (samples/NivaraFineTuning), a MobileNetV2/ResNet-18 inference pipeline (samples/NivaraInference), and a time-series anomaly detection sample (samples/NivaraTimeSeries).
 
 ---
 
@@ -144,7 +147,7 @@ Nivara currently supports:
 - **Apache Arrow**: Bidirectional conversion with zero-copy optimization support (via `Nivara.Extensions`)
 - **ML.NET Integration**: ML.NET conversion helpers for machine learning workflows (via `Nivara.Extensions`)
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics via `ExecutionEngine.LastDiagnostics`
-- **Automatic Differentiation**: Reverse-mode autodiff for `float` and `double` columns with inference by default, explicit manual training via `GradientUtils.Grad()`, plus a full training stack — module system (`Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d`, `Conv2d`, `ConvTranspose2d`, `BatchNorm1d`, `BatchNorm2d`, `LayerNorm`, `DepthwiseSeparableConv2d`, `TransformerBlock`, `MultiheadAttention`, `ConvVAE`, `TextClassifierModel`, `TokenClassifierModel`, `StateDict` / `LoadStateDict`), NLP utilities (`TextTokenizer`, `Sampler`), operations (`MeanPool`, `TransposeAxes`, `SparseEmbeddingBag`, `Gather`, `Softmax`, `LogSoftmax`, `Dropout`), optimizers (`SGD`, `Adam`, `AdamW`), training loops, data-parallel training, and model serialization (core)
+- **Automatic Differentiation**: Reverse-mode autodiff with inference by default, explicit manual training via `GradientUtils.Grad()`. Type constraint broadened to `IFloatingPointIeee754<T>` — `Half`/F16 and BFloat16 supported alongside `float`/`double`. Full training stack: module system (`Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d` (im2col + Dot, PyTorch-compatible layout), `Conv2d` (grouped conv, 1×1 fast path, PatchLocation, InputGrad specializations), `ConvTranspose2d`, `BatchNorm1d`/`2d` (fused span-kernel, 3D input support), `LayerNorm` (SIMD `TensorPrimitives.Dot`), `DepthwiseSeparableConv2d`, `TransformerBlock` (RMSNorm/LayerNorm + GELU), `MultiheadAttention`, `ConvVAE`, `VAE` (optional conditioning), `TextClassifierModel`, `TokenClassifierModel`, `MaxPool2d`, `AdaptiveAvgPool2d`), NLP utilities (`TextTokenizer`, `Sampler`), activations (`GELU`), operations (`MeanPool`, `TransposeAxes`, `SparseEmbeddingBag`, `Gather` with zero-copy forward, `Softmax`, `LogSoftmax`, `Dropout`), optimizers (`SGD`, `Adam`, `AdamW`) with SIMD-accelerated kernels, training loops, data-parallel training, model serialization, and 55 PyTorch-validated functional tests
 
 ---
 
