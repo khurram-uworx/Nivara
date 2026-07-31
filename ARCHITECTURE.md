@@ -843,11 +843,15 @@ DataFrame → ReverseGradTensor<T> → Computation Graph (GradNode DAG)
 
 **Key components:**
 - **`ReverseGradTensor<T>`** / **`ForwardGradTensor<T>`** — autograd tensors for reverse and forward modes
-- **`ReverseGradOperations`** / **`ForwardGradOperations`** — static factories of all differentiable operations
-- **Module system** (`Nn/`) — `Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d`, `Conv2d`, `ConvTranspose2d`, `BatchNorm1d`, `BatchNorm2d`, `LayerNorm`, `DepthwiseSeparableConv2d`, `TransformerBlock`, `MultiheadAttention`, `ConvVAE`, `TextClassifierModel`, `TokenClassifierModel`, `TextTokenizer`, `Sampler`
-- **Optimizers** (`Optimizer/`) — `SGD`, `Adam`, `AdamW`
+- **`ReverseGradOperations`** / **`ForwardGradOperations`** — static factories of all differentiable operations, fully span-ified (no `NivaraColumn.Data` access; `Span<T>` + `TensorPrimitives` directly)
+- **Module system** (`Nn/`) — `Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d`, `Conv2d`, `ConvTranspose2d`, `BatchNorm1d`, `BatchNorm2d`, `LayerNorm`, `DepthwiseSeparableConv2d`, `TransformerBlock`, `MultiheadAttention`, `ConvVAE`, `VAE` (optional conditioning), `TextClassifierModel`, `TokenClassifierModel`, `MaxPool2d`, `AdaptiveAvgPool2d`, `TextTokenizer`, `Sampler`
+- **Optimizers** (`Optimizer/`) — `SGD`, `Adam`, `AdamW`, all with `TensorPrimitives` SIMD chains and `ArrayPool`-backed state
 - **Training** (`Training/`) — `TrainingLoop`, `DataParallelTrainer`
-- **Serialization** (`Serialization/`) — `ModelSerializer` (JSON save/load)
+- **Serialization** (`Serialization/`) — `ModelSerializer` (JSON save/load), `StateDict()` / `LoadStateDict()`
+
+**Type constraint:** AutoDiff tensors and modules are constrained to `IFloatingPointIeee754<T>`, a narrower but more precise bound than the previous `INumber<T>`. This enables `Half`/F16 and BFloat16 runtime validation alongside `float`/`double`. The `TypeValidator` runtime gatekeeper was removed in favor of the compile-time constraint plus a single supported-type check.
+
+**Inference graph isolation:** Graph construction is strictly scoped to `GradientUtils.Grad()`. All operations call `GradientUtils.ShouldTrackGrad()` to decide whether to attach `OpNode` history; `ComputationGraph.AddNode()` has a `Debug.Assert` regression guard, and a dedicated test suite (`InferenceGraphTests`) verifies that plain forward calls never build a graph.
 
 **Null handling:** Per [ADR-001](docs/adr/001-autodiff-nonnullable-domain.md), AutoDiff is a non-nullable domain — null boundary enforced at `NivaraColumn<T>` → `ReverseGradTensor<T>` conversion. Null-handling branches have been removed from hot paths (`AccumulateGradient`, `BroadcastGradient`, KL/sample ops, `AdamW`) for single-path SIMD execution via `TensorPrimitives`.
 
@@ -878,6 +882,18 @@ The `Conv1d<T>` kernel mirrors Conv2d's approach in 1D: tiled `Im2Col1DTile` mat
 #### BatchNorm/LayerNorm: Fused Span Kernels
 
 `BatchNormKernel<T>` and `LayerNormKernel<T>` use `TensorPrimitives` for forward and backward — single `OpNode` per call with no expanded tensors. LayerNorm uses `TensorPrimitives.Dot` for SIMD-accelerated sum-of-squares. Both accept `Span<T>`/`ReadOnlySpan<T>` for composability with grouped slicing.
+
+#### RMSNormKernel: Shared Per-Row Normalization
+
+`RMSNormKernel<T>` consolidates the duplicated `PerRowRMSNorm` forward and backward logic into a single shared kernel used by `ReverseGradOperations.PerRowRMSNorm` and `TransformerBlock`. Its backward gradient is SIMD-accelerated via `TensorPrimitives.Dot`. `PerRowLayerNorm` delegates to `LayerNormKernel<T>`.
+
+### Cross-Framework Validation (NivaraTorch)
+
+Nivara's AutoDiff correctness is validated against PyTorch via the `NivaraTorch` test suite (`tests/Nivara.Tests/NivaraTorch/`) — **55 functional tests** asserting forward and backward values against tensors produced by `gen_reference.py`. Layer fixtures cover 21+ layer types (Linear, Conv1d/2d, BatchNorm1d/2d, LayerNorm, Embedding, TransformerBlock, MultiheadAttention, GELU, pooling, etc.) and are regenerated on demand from Python. A cross-framework parity exercise trained an identical 3-layer MLP in both frameworks and measured **<0.04% relative loss-curve divergence over 50 epochs** (see `samples/README.md`).
+
+### Model Interop (SafeTensors)
+
+The `SafeTensorsLoader` (in `samples/Nivara.Samples`) reads Hugging Face `.safetensors` weights with a generic, dtype-aware `Read<T>()` — supporting I32, I64, F16, BF16, and F32 storage converted to the target element type. It powers the `NivaraInference` (MobileNetV2 / ResNet-18) and `NivaraFineTuning` (DistilBERT / SST-2) samples.
 
 ---
 

@@ -75,8 +75,8 @@ ReverseGradOperations                 ← Reverse-mode forward+backward ops (sta
 ├── Element-wise: Add, Subtract, Multiply, Divide, Clip, Pow
 ├── Matrix: MatMul, Transpose, TransposeAxes, Slice, Concat, Gather
 ├── Reductions: Sum, Mean, MeanPool
-├── Normalization: RMSNorm, PerRowRMSNorm, PerRowLayerNorm
-├── Activations: Relu, LeakyRelu, Sigmoid, Tanh
+├── Normalization: RMSNorm, PerRowRMSNorm, PerRowLayerNorm (RMSNormKernel, LayerNormKernel)
+├── Activations: Relu, LeakyRelu, Sigmoid, Tanh, Gelu (tanh approximation)
 ├── Unary: Negate, Abs, Exp, Log
 ├── Regularization: Dropout
 ├── Embedding: SparseEmbeddingBag
@@ -107,13 +107,15 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 ├── Conv1d<T>                         ← 1D convolution: im2col → TensorPrimitives.Dot kernel
 ├── Conv2d<T>                         ← 2D convolution: tiled im2col → Dot, grouped conv, 1×1 fast path
 ├── ConvTranspose2d<T>                ← 2D transposed convolution: scatter kernel
-├── BatchNorm1d<T>                    ← 1D batch normalization (train/eval modes, running stats)
+├── BatchNorm1d<T>                    ← 1D batch normalization (train/eval modes, running stats; 2D [N,C] + 3D [B,C,L])
 ├── BatchNorm2d<T>                    ← 2D batch normalization (same pattern as 1D)
 ├── LayerNorm<T>                      ← Layer normalization (TensorPrimitives.Dot kernel)
 ├── DepthwiseSeparableConv2d<T>       ← MobileNet-style: depthwise conv + pointwise 1×1
+├── MaxPool2d<T>                      ← 2D max pooling
+├── AdaptiveAvgPool2d<T>              ← Adaptive average pooling (global pooling for classifier heads)
 ├── TextClassifierModel<T>            ← Embedding → MeanPool → FC → ReLU → FC (pre-built)
 ├── TokenClassifierModel<T>           ← Embedding → FC → ReLU → FC per-token (pre-built)
-├── VAE<T>                            ← Variational Autoencoder (encoder → reparameterize → decoder)
+├── VAE<T>                            ← Variational Autoencoder (encoder → reparameterize → decoder; optional conditioning)
 ├── ConvVAE<T>                        ← Fully convolutional VAE (Conv2d encoder, 1×1 Conv heads)
 ├── TransformerBlock<T>               ← Multi-head causal self-attention + GELU MLP (pre-norm)
 │   └── NormType enum: RMSNorm (default) | LayerNorm
@@ -165,12 +167,12 @@ NivaraAutoGradExtensions              ← NivaraColumn/NivaraSeries/NivaraFrame 
 
 ## Key Design Principles
 
-- **Only `float` and `double` are supported** — enforced at runtime by `TypeValidator.ValidateNumericType<T>()`. Other numeric types (int, long, etc.) throw `TypeValidationException`.
+- **`IFloatingPointIeee754<T>` type constraint** — `float`, `double`, and `Half` are supported, enforced at compile time by the generic constraint (and at runtime by `TypeValidator.IsSupportedType`). Other numeric types (int, long, etc.) do not satisfy the constraint.
 - **1D storage, shape metadata** — data is always stored as a flat `NivaraColumn<T>`. Shape is metadata (`int[] shape`) with `Reshape()` validation. Default shape is `[Length]`.
-- **Inference is the default** — normal `Forward` and `ReverseGradOperations` calls compute values without building a computation graph.
+- **Inference is the default** — normal `Forward` and `ReverseGradOperations` calls compute values without building a computation graph. `ComputationGraph.AddNode()` asserts graph construction only occurs inside `GradientUtils.Grad()` scope.
 - **Training is explicit** — wrap manual training code in `using (GradientUtils.Grad())`; inside that scope, operations check trainable inputs (`requiresGrad`) and attach `OpNode` history to results.
-- **Gradient accumulation** — `AccumulateGradient()` either sets or adds to `Grad` (supports fan-in from multiple paths).
-- **Explicit null-mask propagation** — Nivara's nullable semantics flow through gradients. Nulls propagate via mask OR; null positions in gradients are skipped during accumulation.
+- **Gradient accumulation** — `AccumulateGradient()` either sets or adds to `Grad` (supports fan-in from multiple paths). Uses `ArrayPool<T>.Shared` to minimize GC pressure.
+- **Non-nullable domain (ADR-001)** — AutoDiff operates on non-null data only. The null boundary is enforced at `NivaraColumn<T>` → `ReverseGradTensor<T>` conversion. All AutoDiff ops are span-ified (`Span<T>` + `TensorPrimitives`), with no null-mask branches on hot paths.
 - **IDisposable** — `GradTensor<T>`, `Parameter<T>`, `Module<T>`, `Optimizer<T>`, and `TrainingLoop<T>` all implement `IDisposable`.
 
 ---
@@ -182,7 +184,7 @@ NivaraAutoGradExtensions              ← NivaraColumn/NivaraSeries/NivaraFrame 
 The base tensor class holding data and shape metadata:
 
 ```csharp
-public class GradTensor<T> : IDisposable where T : struct, INumber<T>
+public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 ```
 
 | Member | Description |
@@ -206,7 +208,7 @@ Constructor validates the type via `TypeValidator.ValidateNumericType<T>()`.
 Extends `GradTensor<T>` with gradient tracking and backward pass:
 
 ```csharp
-public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumber<T>
+public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloatingPointIeee754<T>
 ```
 
 | Member | Description |
@@ -245,7 +247,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, INumb
 Represents a single operation in the computation graph:
 
 ```csharp
-sealed class OpNode<T> where T : struct, INumber<T>
+sealed class OpNode<T> where T : struct, IFloatingPointIeee754<T>
 {
     string OperationName { get; }           // "Add", "MatMul", "Relu", etc.
     IReadOnlyList<object> Inputs { get; }   // parent tensors
@@ -332,6 +334,7 @@ MatMul is implemented in `ReverseGradOperations.MatMul` via `NivaraColumn<T>.Mat
 | `LeakyRelu(a, slope)` | `max(a, 0) + slope * min(a, 0)` | `grad * (1 if a > 0 else slope)` | Default slope is 0.01 (not `default(T)` which is 0). Manual loop |
 | `Sigmoid(a)` | `σ(a) = 1/(1+e⁻ᵃ)` | `σ(a) * (1-σ(a)) * grad` | Manual loop via `Math.Exp` |
 | `Tanh(a)` | `tanh(a)` | `(1 - tanh²(a)) * grad` | Manual loop via `Math.Tanh` |
+| `Gelu(a)` | `0.5·a·(1 + tanh(√(2/π)·(a + 0.044715·a³)))` | `0.5·(1+erf(a/√2)) + a·φ(a)` via the tanh-approximation CDF/PDF | Manual `Math.Tanh` loop (forward + backward) |
 | `Negate(a)` | `-a` | `-grad` | `TensorPrimitives.Negate` |
 | `Abs(a)` | `\|a\|` | `sign(a) * grad` | `TensorPrimitives.Abs` for forward; manual loop for grad |
 | `Exp(a)` | `eᵃ` | `eᵃ * grad` | Manual loop via `Math.Exp` |
@@ -360,12 +363,9 @@ MatMul is implemented in `ReverseGradOperations.MatMul` via `NivaraColumn<T>.Mat
 
 ### Vectorization Strategy
 
-All operations follow a two-path approach:
+All AutoDiff operations are span-ified: they extract `ReadOnlySpan<T>` via `TryGetSpan()` and call `TensorPrimitives` kernels directly, then return `NivaraColumn<T>.Create(result)`. No `NivaraColumn.Data` access and no null-mask branches remain on hot paths (per ADR-001 non-nullable domain), so each operation is a single-path SIMD kernel.
 
-1. **No-null fast path**: Extract `ReadOnlySpan<T>` via `TryGetSpan()`, call `TensorPrimitives` kernel, return `NivaraColumn<T>.Create(result)`.
-2. **Null-aware fallback**: Rent buffers from `ArrayPool<T>.Shared`, call `CopyTo()` to fill buffers with `T.Zero` for null positions, run `TensorPrimitives` kernel, merge null masks via OR, return `NivaraColumn<T>.CreateFromSpans(result, nullMask)`.
-
-Operations that lack `TensorPrimitives` support (e.g., Sigmoid, Tanh, Exp, Log) use manual loops in both paths. MatMul uses `NivaraColumn<T>.MatMul()` with `TensorPrimitives.Dot` + `Parallel.For`; its null-aware result mask is propagated with row/column null summaries.
+Operations that lack `TensorPrimitives` support (e.g., Sigmoid, Tanh, Exp, Log) use manual span loops in the same single-path style. MatMul uses `NivaraColumn<T>.MatMul()` with `TensorPrimitives.Dot` + `Parallel.For`.
 
 ---
 
@@ -376,7 +376,7 @@ Nivara supports both reverse-mode (backpropagation) and forward-mode automatic d
 ### ForwardGradTensor\<T\>
 
 ```csharp
-public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, INumber<T>
+public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloatingPointIeee754<T>
 ```
 
 | Member | Description |
@@ -430,15 +430,11 @@ Reverse-mode is the default and is used by all training infrastructure (`Trainin
 
 ## Null Handling
 
-Nivara's explicit null-mask semantics flow through all gradient operations. Per [ADR-001](../adr/001-autodiff-nonnullable-domain.md), AutoDiff is a **non-nullable domain**: null boundary is enforced at domain entry points (`NivaraColumn<T>` → `ReverseGradTensor<T>` conversion). All AutoDiff ops assume non-null data. Null handling branches have been removed from hot paths (`AccumulateGradient`, `BroadcastGradient`, KL/sample ops, `AdamW`) for single-path SIMD execution.
+Per [ADR-001](../adr/001-autodiff-nonnullable-domain.md), AutoDiff is a **non-nullable domain**. The null boundary is enforced at domain entry points (`NivaraColumn<T>` → `ReverseGradTensor<T>` conversion): all AutoDiff ops assume non-null data, and `Debug.Assert` guards on the `ReverseGradTensor<T>` constructors and `ComputationGraph.AddNode()` enforce the boundary.
 
-- **Null in input** → propagates to both forward result and gradient masks (mask OR semantics)
-- **Null in gradient** → `AccumulateGradient` adds via `TensorPrimitives.Add` (no special null-merge logic)
-- **Null in SGD** → null positions skip update (parameter unchanged)
-- **Null in MatMul** → position-level null: if any contributing element is null, the corresponding output position is null
-- **Null in Adam/AdamW** → null positions skip momentum buffer accumulation; buffers are zeroed for that position
+Null-mask branches have been removed from all hot paths — `AccumulateGradient`, `BroadcastGradient`, KL/sample ops, `SGD`, `Adam`, and `AdamW` — so gradient accumulation and optimizer updates run as single-path `TensorPrimitives` kernels with no null-merge logic. The `MergeNullMasks` helper and per-position null semantics documented in earlier releases no longer exist.
 
-The `MergeNullMasks(a, b, destination)` helper performs the OR operation, handling cases where one or both inputs lack null masks.
+To use nullable DataFrame columns with AutoDiff, resolve nulls at the boundary first (`FillNull` / `DropNulls` / `WithoutNulls`).
 
 ---
 
@@ -447,7 +443,7 @@ The `MergeNullMasks(a, b, destination)` helper performs the OR operation, handli
 ### Parameter\<T\>
 
 ```csharp
-public sealed class Parameter<T> : IDisposable where T : struct, INumber<T>
+public sealed class Parameter<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 ```
 
 Wraps a `ReverseGradTensor<T>` with a name. Constructors accept array, size, or an existing tensor. `requiresGrad` defaults to `true`. Disposing a parameter disposes its current tensor; module-registered parameters are disposed by their owning module.
@@ -455,7 +451,7 @@ Wraps a `ReverseGradTensor<T>` with a name. Constructors accept array, size, or 
 ### Module\<T\>
 
 ```csharp
-public abstract class Module<T> : IDisposable where T : struct, INumber<T>
+public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 ```
 
 | Member | Description |
@@ -476,7 +472,7 @@ public abstract class Module<T> : IDisposable where T : struct, INumber<T>
 ### Linear\<T\>
 
 ```csharp
-public sealed class Linear<T> : Module<T> where T : struct, INumber<T>
+public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 ```
 
 `y = x @ Wᵀ + b` with shape `[batch, inFeatures] → [batch, outFeatures]`.
@@ -504,19 +500,19 @@ Inverted dropout — scales by `1/(1-p)` during training, identity during eval. 
 ### Embedding\<T\>
 
 ```csharp
-public sealed class Embedding<T> : Module<T> where T : struct, INumber<T>
+public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new Embedding<T>(numEmbeddings, embeddingDim)
 ```
 
 Lookup embedding: token IDs → dense vectors. Weight matrix shape `[numEmbeddings, embeddingDim]`, initialized with `Normal(0, 0.02)`.
 
-- `Forward(tokenIds)` — single token or batched input; converts IDs to one-hot, then MatMul with weight
+- `Forward(tokenIds)` — single token or batched input; uses a zero-copy `Gather` (replaces the old one-hot + MatMul path)
 - `Weight` / `WeightParam` — exposed for direct access
 
 ### SparseEmbedding\<T\>
 
 ```csharp
-public sealed class SparseEmbedding<T> : Module<T> where T : struct, INumber<T>
+public sealed class SparseEmbedding<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new SparseEmbedding<T>(numEmbeddings, embeddingDim, paddingIndex: -1)
 ```
 
@@ -525,7 +521,7 @@ Sparse embedding bag for fixed-width batches of active feature indices. Input sh
 ### TextClassifierModel\<T\>
 
 ```csharp
-public sealed class TextClassifierModel<T> : Module<T> where T : struct, INumber<T>
+public sealed class TextClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new TextClassifierModel<T>(vocabSize, embeddingDim, hiddenDim, numClasses, maxSeqLen)
 ```
 
@@ -537,7 +533,7 @@ Pre-built text classification pipeline: `Embedding → MeanPool → Linear(hidde
 ### TokenClassifierModel\<T\>
 
 ```csharp
-public sealed class TokenClassifierModel<T> : Module<T> where T : struct, INumber<T>
+public sealed class TokenClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new TokenClassifierModel<T>(vocabSize, embeddingDim, hiddenDim, numClasses, maxSeqLen)
 ```
 
@@ -549,7 +545,7 @@ Pre-built per-token classification pipeline: `Embedding → Linear(hidden) → R
 ### VAE\<T\>
 
 ```csharp
-public sealed class VAE<T> : Module<T> where T : struct, INumber<T>
+public sealed class VAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new VAE<T>(inputDim, latentDim, hiddenDim, decoderHiddenDim?, activation?, beta: 1.0f)
 ```
 
@@ -568,7 +564,7 @@ Variational Autoencoder with encoder → reparameterization trick → decoder.
 ### TransformerBlock\<T\>
 
 ```csharp
-public sealed class TransformerBlock<T> : Module<T> where T : struct, INumber<T>
+public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new TransformerBlock<T>(embedDim, numHeads, hiddenDim, dropout: 0.0, residualDropout: 0.0, normType: NormType.RMSNorm)
 ```
 
@@ -589,7 +585,7 @@ PerRowLayerNorm(x) → LayerNormKernel.Forward with affine=false (mean + varianc
 ### Conv1d\<T\>
 
 ```csharp
-public sealed class Conv1d<T> : Module<T> where T : struct, INumber<T>
+public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new Conv1d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
 ```
 
@@ -609,7 +605,7 @@ BiasGrad:  TensorPrimitives.Sum over batch and length per output channel
 ### Conv2d\<T\>
 
 ```csharp
-public sealed class Conv2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new Conv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, groups: 1, bias: true)
 ```
 
@@ -632,7 +628,7 @@ Key optimizations:
 ### ConvTranspose2d\<T\>
 
 ```csharp
-public sealed class ConvTranspose2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new ConvTranspose2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
 ```
 
@@ -650,10 +646,10 @@ WeightGrad:  ConvTransposeWeightGradKernel (reduction over ih, iw)
 ### BatchNorm1d\<T\> / BatchNorm2d\<T\>
 
 ```csharp
-public sealed class BatchNorm1d<T> : Module<T> where T : struct, INumber<T>
+public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new BatchNorm1d<T>(numFeatures, eps: 1e-5, momentum: 0.1, affine: true)
 
-public sealed class BatchNorm2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new BatchNorm2d<T>(numFeatures, eps: 1e-5, momentum: 0.1, affine: true)
 ```
 
@@ -676,7 +672,7 @@ BatchNormKernel<T>
 ### LayerNorm\<T\>
 
 ```csharp
-public sealed class LayerNorm<T> : Module<T> where T : struct, INumber<T>
+public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new LayerNorm<T>(normalizedShape, eps: 1e-5, affine: true)
 ```
 
@@ -694,7 +690,7 @@ LayerNormKernel<T>
 ### DepthwiseSeparableConv2d\<T\>
 
 ```csharp
-public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, INumber<T>
+public sealed class DepthwiseSeparableConv2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new DepthwiseSeparableConv2d<T>(inChannels, outChannels, kernelSize, stride: 1, padding: 0, bias: true)
 ```
 
@@ -708,7 +704,7 @@ DepthwiseSeparableConv2d<T> : Module<T>
 ### ConvVAE\<T\>
 
 ```csharp
-public sealed class ConvVAE<T> : Module<T> where T : struct, INumber<T>
+public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 // new ConvVAE<T>(inputChannels, encoderChannels, latentChannels, spatialSize, kernelSize, stride, padding)
 ```
 
@@ -750,7 +746,7 @@ VAE<T> : Module<T>
 ### MultiheadAttention\<T\>
 
 ```csharp
-public sealed class Sampler<T> where T : struct, INumber<T>
+public sealed class Sampler<T> where T : struct, IFloatingPointIeee754<T>
 // new Sampler<T>(seed?)
 ```
 
@@ -838,7 +834,7 @@ All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Each has a `Forward(
 ### Optimizer\<T\> (abstract base)
 
 ```csharp
-public abstract class Optimizer<T> : IDisposable where T : struct, INumber<T>
+public abstract class Optimizer<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 ```
 
 **Parameter groups** — optimizers can manage multiple groups with different learning rates and weight decays:
@@ -909,7 +905,7 @@ public sealed class AdamW<T> : Optimizer<T>
 ### TensorDataset\<T\>
 
 ```csharp
-public sealed class TensorDataset<T> where T : struct, INumber<T>
+public sealed class TensorDataset<T> where T : struct, IFloatingPointIeee754<T>
 ```
 
 Wraps a `NivaraFrame` with named feature and label columns. `GetBatch(indices)` returns a `Batch<T>` with shaped tensors (flat data reshaped to `[batchSize, numCols]`). Uses `ArrayPool<T>.Shared` for batch construction.
@@ -933,7 +929,7 @@ public sealed class Batch<T>
 ### TrainingLoop\<T\>
 
 ```csharp
-public class TrainingLoop<T> : IDisposable where T : struct, INumber<T>
+public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 ```
 
 Standard epoch-per-batch training loop:
@@ -961,7 +957,7 @@ result.PrintSummary();
 ### DataParallelTrainer\<T\>
 
 ```csharp
-public class DataParallelTrainer<T> : IDisposable where T : struct, INumber<T>
+public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 ```
 
 Multi-core training via `Parallel.For` over data chunks:
@@ -1049,7 +1045,7 @@ true)` additionally requires every model parameter to be present.
 ### Checkpoint\<T\>
 
 ```csharp
-public sealed class Checkpoint<T> where T : struct, INumber<T>
+public sealed class Checkpoint<T> where T : struct, IFloatingPointIeee754<T>
 {
     public int Epoch { get; init; }
     public double Loss { get; init; }
@@ -1138,10 +1134,10 @@ null participation, and operation-specific notes such as shape metadata.
 
 ### Supported Types
 
-Only **float** and **double** are supported for autograd. This is enforced at two levels:
+**float**, **double**, and **Half** are supported for autograd. Enforcement happens at two levels:
 
-1. **Generic constraint**: `where T : struct, INumber<T>` (wide, accepts int, long, etc.)
-2. **Runtime check**: `TypeValidator.ValidateNumericType<T>()` throws `TypeValidationException` for unsupported types
+1. **Generic constraint**: `where T : struct, IFloatingPointIeee754<T>` — a precise bound matching the supported numeric types exactly
+2. **Runtime check**: `TypeValidator.IsSupportedType(typeof(T))` returns true for `float`, `double`, and `Half`; the legacy `ValidateNumericType<T>()` gatekeeper was removed since the constraint now enforces the boundary at compile time
 
 ### Type Conversion (TypeConverter)
 
@@ -1153,7 +1149,7 @@ Only **float** and **double** are supported for autograd. This is enforced at tw
 | `TryConvert<TSource, TTarget>(...)` | Returns null on failure |
 | `CanConvert<TSource, TTarget>()` | Checks if both types are supported |
 
-Conversion preserves null masks and optionally overrides `requiresGrad`.
+Conversion preserves `requiresGrad` (unless overridden) and shape metadata.
 
 ---
 
@@ -1198,7 +1194,7 @@ tensors.BatchZeroGrad();        // Calls ZeroGrad() on all tensors
 
 ```csharp
 NivaraAutoGradExtensions.IsAutoGradSupported<T>();
-NivaraAutoGradExtensions.GetSupportedAutoGradTypes();  // [typeof(float), typeof(double)]
+NivaraAutoGradExtensions.GetSupportedAutoGradTypes();  // [typeof(float), typeof(double), typeof(Half)]
 ```
 
 ---
@@ -1466,26 +1462,26 @@ var backToFloat = doubleTensor.ToFloat(requiresGrad: false);
 // ReverseGradTensor<float> with values [1.5, 2.5], requiresGrad: false
 ```
 
-### 11. Null propagation in gradients
+### 11. Non-nullable boundary (ADR-001)
+
+AutoDiff is a non-nullable domain. Resolve nulls before crossing the
+`NivaraColumn<T>` → `ReverseGradTensor<T>` boundary (constructors assert on
+nulls via `Debug.Assert`):
 
 ```csharp
-var a = new ReverseGradTensor<float>(
-    NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f }),
-    requiresGrad: true);
-var b = new ReverseGradTensor<float>(
-    NivaraColumn<float>.CreateFromNullable(new float?[] { 10.0f, 20.0f, null }),
-    requiresGrad: true);
+var raw = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
 
-using (GradientUtils.Grad())
-{
-    var result = ReverseGradOperations.Add(a, b);  // [11, null, null] (mask OR)
-    var sum = ReverseGradOperations.Sum(result);   // 11 (nulls skipped in sum)
-    sum.Backward();
-}
+// Option 1: fill nulls with a sentinel value
+var filled = raw.FillNull(0.0f);
+var a = filled.ToReverseGradTensor(requiresGrad: true);  // [1.0, 0.0, 3.0]
 
-Console.WriteLine(a.Grad[0]);  // 1.0  (∂sum/∂a₀)
-Console.WriteLine(a.Grad[1]);  // null (output at position 1 is null, no gradient flows)
-Console.WriteLine(a.Grad[2]);  // 1.0  (but output is null, so this may be masked)
+// Option 2: drop null positions entirely
+var dropped = raw.DropNulls();
+var b = dropped.ToReverseGradTensor(requiresGrad: true);  // [1.0, 3.0]
+
+// Option 3: resolve nulls during DataFrame → tensor batch conversion
+var frame = NivaraFrame.Create(("x", raw));
+var tensors = frame.ToReverseGradTensors<float>(new[] { "x" }, requiresGrad: true);
 ```
 
 ### 12. Model serialization
@@ -1542,6 +1538,10 @@ var prediction = loaded.Forward(testInput);
 | `BatchNormKernel<T>` | `src/Nivara/AutoDiff/Nn/BatchNormKernel.cs` |
 | `LayerNorm<T>` | `src/Nivara/AutoDiff/Nn/LayerNorm.cs` |
 | `LayerNormKernel<T>` | `src/Nivara/AutoDiff/Nn/LayerNormKernel.cs` |
+| `RMSNormKernel<T>` | `src/Nivara/AutoDiff/Nn/RMSNormKernel.cs` |
+| `Gelu<T>` (tanh approximation; `ReverseGradOperations.Gelu` + `Activation.Gelu` wrapper) | `src/Nivara/AutoDiff/Nn/Activation.cs`, `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` |
+| `MaxPool2d<T>` | `src/Nivara/AutoDiff/Nn/MaxPool2d.cs` |
+| `AdaptiveAvgPool2d<T>` | `src/Nivara/AutoDiff/Nn/AdaptiveAvgPool2d.cs` |
 | `DepthwiseSeparableConv2d<T>` | `src/Nivara/AutoDiff/Nn/DepthwiseSeparableConv2d.cs` |
 | `TransformerBlock<T>` | `src/Nivara/AutoDiff/Nn/TransformerBlock.cs` |
 | `MultiheadAttention<T>` | `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs` |
