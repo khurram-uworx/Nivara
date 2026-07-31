@@ -1,0 +1,58 @@
+# Changelog
+
+All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
+
+## [1.1.0] - 2026-07-31
+
+### Automatic Differentiation (inference-default)
+
+- Reverse-mode graph construction is opt-in via `GradientUtils.Grad()`; inference is the default and records no graph nodes
+- Type constraint relaxed from `INumber<T>` to `IFloatingPointIeee754<T>` — `float`, `double`, `Half`/F16 and BFloat16 pass runtime validation
+- All differentiable operations span-ified over `TensorPrimitives` (no `NivaraColumn.Data` access)
+- ADR-001 non-nullable domain cleanup: null-mask infrastructure removed from AutoDiff ops and hot paths; `Debug.Assert` boundary guards in `ReverseGradTensor` and `ComputationGraph.AddNode`
+
+### NN Module System
+
+- `Conv1d<T>` — im2col + `TensorPrimitives.Dot` kernel, PyTorch-compatible weight layout
+- `Conv2d<T>` — tiled im2col, PatchLocation lookup, grouped convolution, 1x1 fast path, InputGrad specializations; `ConvTranspose2d<T>`
+- `BatchNorm1d<T>` (2D `[N,C]` and 3D `[B,C,L]` inputs) and `BatchNorm2d<T>` — fused span kernels
+- `LayerNorm<T>` (SIMD `TensorPrimitives.Dot`), `DepthwiseSeparableConv2d<T>`, `TransformerBlock<T>` (RMSNorm/LayerNorm + GELU), `MultiheadAttention<T>` (self/cross/causal, padding mask)
+- `ConvVAE<T>`, `VAE<T>` (optional conditioning), `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `GELU` activation
+- `RMSNormKernel<T>` consolidating duplicated per-row RMSNorm logic
+
+### Performance
+
+- SIMD-accelerated kernels via TensorPrimitives chains: Adam, AdamW, PerRowRMSNorm backward, LayerNorm sum-of-squares, GELU forward/backward
+- ArrayPool-backed buffer management in hot paths: `AccumulateGradient`, Gather backward, Adam/AdamW state
+- `Gather` zero-copy forward path + ArrayPool backward path; `Embedding` lookup via Gather (replaces one-hot + MatMul)
+
+### Training & Serialization
+
+- Optimizers `SGD`, `Adam`, `AdamW` with SIMD kernels; `BCEWithLogitsLoss` fused backward; `MSELoss` `reduceToMean`
+- `TrainingLoop<T>`, `DataParallelTrainer<T>`, `TensorDataset<T>`
+- `ModelSerializer` JSON/binary save-load; `StateDict()` / `LoadStateDict()` module state
+
+### Samples & Interop
+
+- `samples/NivaraInference` — MobileNetV2/ResNet-18 inference with `SafeTensorsLoader` (I32/I64/F16/BF16/F32 dtype-aware)
+- `samples/NivaraFineTuning` — DistilBERT fine-tuning on GLUE SST-2
+- `samples/NivaraTimeSeries` — time-series anomaly detection
+- `samples/NivaraTorch` — 55 PyTorch-validated functional tests across 21+ layer types (`gen_reference.py` fixtures)
+- Generic dtype-aware weight loading for `DistilBertModel`, `MiniLMDistilled`, `SafeTensorsLoader`
+
+### Documentation
+
+- README, GETTING-STARTED, ARCHITECTURE, docs/AUTODIFF updated for the inference-default AutoDiff direction and new modules
+
+## [1.0.0] - 2026-07-25
+
+- Initial stable release of the columnar DataFrame core: typed immutable columns/frames, LINQ-like query engine with lazy/eager/streaming/parallel strategies, tensor-accelerated kernels, explicit null masks, join/group-by/aggregation, CSV/JSON sources, Parquet/Arrow/ML.NET interop (Extensions), performance diagnostics and buffer pooling
+- Reverse-mode AutoDiff (initial), VAE/ConvVAE samples
+
+## [0.9.x] - 2026-05/06
+
+- Evolution of the core engine, query planning, null-mask semantics, and initial AutoDiff groundwork across multiple prerelease iterations published to NuGet
+
+## [0.6.0 - 0.8.0] - 2025/2026
+
+- Early development releases establishing the storage model (Tensor-backed and memory-backed), interfaces, and execution engine

@@ -7,7 +7,7 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
-    <PackageVersion>1.0.0</PackageVersion>
+    <PackageVersion>1.1.0</PackageVersion>
     <Description>I/O adapters, Parquet, Apache Arrow, and ML.NET integration for Nivara</Description>
     <PackageReleaseNotes>Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, automatic differentiation (reverse-mode AD for float/double columns), CsvHelper-based CSV parsing, lazy data source infrastructure.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>

@@ -7,9 +7,9 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara</PackageId>
-    <PackageVersion>1.0.0</PackageVersion>
+    <PackageVersion>1.1.0</PackageVersion>
     <Description>High-performance columnar DataFrame library for .NET</Description>
-    <PackageReleaseNotes>Core column/Frame APIs, LINQ-like query engine, tensor-accelerated arithmetic and comparisons, lazy/eager/streaming/parallel execution strategies, CSV/JSON data sources, row filtering/slicing/sorting, join operations (inner/left/right/full outer), GroupBy with vectorized aggregates, column transformations and projections, schema-aware query planning with predicate pushdown and operation fusion, explicit null mask semantics, performance diagnostics, buffer pooling.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.1.0: Automatic differentiation with inference by default (reverse-mode graph construction opt-in via GradientUtils.Grad()) and a full differentiable NN module system — Linear, Sequential, Embedding, SparseEmbedding, Conv1d (im2col, PyTorch-compatible layout), Conv2d (grouped conv, 1x1 fast path), ConvTranspose2d, BatchNorm1d/2d, LayerNorm, DepthwiseSeparableConv2d, TransformerBlock (RMSNorm/LayerNorm + GELU), MultiheadAttention, VAE/ConvVAE, MaxPool2d, AdaptiveAvgPool2d, GELU. Type constraint relaxed to IFloatingPointIeee754&lt;T&gt; (float/double/Half/BFloat16); all differentiable operations span-ified over TensorPrimitives; SIMD-accelerated Adam/AdamW/RMSNorm/LayerNorm/GELU kernels; ArrayPool-backed gradient accumulation. Training stack: SGD/Adam/AdamW optimizers, TrainingLoop, DataParallelTrainer, ModelSerializer (StateDict/LoadStateDict). 55 PyTorch-validated functional tests (NivaraTorch). Core columnar engine unchanged: LINQ-like query engine, tensor-accelerated arithmetic and comparisons, lazy/eager/streaming/parallel execution strategies, explicit null mask semantics, schema-aware query planning with predicate pushdown and operation fusion, performance diagnostics, buffer pooling.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
   </PropertyGroup>

@@ -281,7 +281,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - Lazy sources should validate structure/schema early, collect scan errors while traversing data, and throw during `Collect()` with source and operation context.
 
 ### Current Dependency Versions (Extensions only)
-- CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
+- CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.10
 - Treat these versions as a snapshot; check the relevant `.csproj` before API-sensitive work.
 
 ---
@@ -330,8 +330,8 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 ## Quick Reference
 
 - **Vectorizable types (confirmed)**: `int`, `float`, `double`, `long`, `short`, `byte`, `uint`, `ulong`, `ushort`, `sbyte`, `bool` (requires unmanaged constraint)
-- **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.8
-- **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.8
+- **Target framework**: .NET 10.0 with System.Numerics.Tensors 10.0.10
+- **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.10
 - **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `Adam<T>`, `AdamW<T>`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer`, `MSELoss<T>(reduceToMean)`, `Activation.Gelu`, `ReverseGradOperations.Gelu`
 - **AutoDiff type constraint**: `IFloatingPointIeee754<T>` (float, double, Half) — ADR-001 non-nullable domain
 - **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
