@@ -20,7 +20,7 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm> [benchmark|similarity|compare|compare_diag|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert> [benchmark|similarity|compare|compare_diag|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
@@ -64,6 +64,9 @@ class Program
                 if (compare) return RunMiniLMCompare(tensors);
                 bool similarity = mode == "similarity";
                 return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? RunMiniLMBenchmark(tensors) : RunMiniLMInference(tensors);
+            case "distilbert":
+                if (compare) return RunDistilBertCompare(tensors);
+                return benchmark ? RunDistilBertBenchmark(tensors) : RunDistilBertInference(tensors);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -822,6 +825,195 @@ class Program
         Console.WriteLine($"  Min:     {min} ms");
         Console.WriteLine($"  Max:     {max} ms");
         Console.WriteLine();
+
+        return 0;
+    }
+
+    static int RunDistilBertInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT Inference ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
+
+        var buildSw = Stopwatch.StartNew();
+        var encoder = DistilBertLoader.LoadEncoder(tensors, config.ToBertConfig());
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        double weightMb = tensors.Values.Sum(t => t.Data.Length * 4.0) / (1024.0 * 1024.0);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {weightMb:F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
+
+        Console.WriteLine($"Input text: \"{text}\"");
+        var inputData = new float[input.Length];
+        input.Data.TryGetSpan(out var inSpan);
+        if (!inSpan.IsEmpty) inSpan.CopyTo(inputData);
+        Console.WriteLine($"Input tokens (first 10): [{string.Join(", ", inputData.Take(10).Select(x => (int)x))}] (seqLen={input.Length})");
+
+        encoder.Eval();
+        var fwdSw = Stopwatch.StartNew();
+        var output = mask != null ? encoder.ForwardWithMask(input, mask) : encoder.Forward(input);
+        fwdSw.Stop();
+
+        var outputData = new float[output.Length];
+        output.Data.TryGetSpan(out var outSpan);
+        if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
+
+        Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
+        Console.WriteLine($"Output stats: min={outputData.Min():F6}, max={outputData.Max():F6}, mean={outputData.Average():F6}, std={StdDev(outputData):F6}");
+        Console.Write("Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, outputData.Length); i++)
+        {
+            Console.Write($"{outputData[i]:F6}");
+            if (i < Math.Min(10, outputData.Length) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+
+        return 0;
+    }
+
+    static int RunDistilBertBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT Benchmark ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        var buildSw = Stopwatch.StartNew();
+        var encoder = DistilBertLoader.LoadEncoder(tensors, config.ToBertConfig());
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        double weightMb = tensors.Values.Sum(t => t.Data.Length * 4.0) / (1024.0 * 1024.0);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {weightMb:F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the DistilBERT model inference across multiple tokens for benchmarking purposes.";
+        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
+        Func<ReverseGradTensor<float>> forward = () => mask != null ? encoder.ForwardWithMask(input, mask) : encoder.Forward(input);
+
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: {input.Length}");
+        Console.WriteLine();
+
+        Console.WriteLine("Warmup (3 passes)...");
+        for (int i = 0; i < 3; i++)
+            forward();
+
+        Console.WriteLine("Benchmarking (10 passes)...");
+        var times = new List<long>();
+        for (int i = 0; i < 10; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            forward();
+            sw.Stop();
+            times.Add(sw.ElapsedMilliseconds);
+        }
+
+        double avg = times.Average();
+        double min = times.Min();
+        double max = times.Max();
+        Console.WriteLine($"  Average: {avg:F1} ms");
+        Console.WriteLine($"  Min:     {min} ms");
+        Console.WriteLine($"  Max:     {max} ms");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static double StdDev(float[] data)
+    {
+        if (data.Length == 0) return 0;
+        double mean = data.Average();
+        double sumSq = 0;
+        foreach (var v in data)
+        {
+            double diff = v - mean;
+            sumSq += diff * diff;
+        }
+        return Math.Sqrt(sumSq / data.Length);
+    }
+
+    static int RunDistilBertCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        string refPath = Path.Combine("samples", "data", "distilbert", "last_hidden_state_py.bin");
+        if (!File.Exists(refPath))
+        {
+            Console.Error.WriteLine($"Reference file not found: {refPath}");
+            Console.Error.WriteLine("Run: python samples/NivaraInference/Python/distilbert_compare.py");
+            return 1;
+        }
+
+        Console.WriteLine("=== DistilBERT Compare ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        var encoder = DistilBertLoader.LoadEncoder(tensors, config.ToBertConfig());
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
+
+        encoder.Eval();
+        var output = mask != null ? encoder.ForwardWithMask(input, mask) : encoder.Forward(input);
+
+        var outputData = new float[output.Length];
+        output.Data.TryGetSpan(out var outSpan);
+        if (!outSpan.IsEmpty) outSpan.CopyTo(outputData);
+
+        var rawBytes = File.ReadAllBytes(refPath);
+        float[] refData = new float[rawBytes.Length / 4];
+        Buffer.BlockCopy(rawBytes, 0, refData, 0, rawBytes.Length);
+
+        int len = Math.Min(outputData.Length, refData.Length);
+        float maxAbs = 0f, sumAbs = 0f, dot = 0f, normA = 0f, normB = 0f;
+        for (int i = 0; i < len; i++)
+        {
+            float diff = MathF.Abs(outputData[i] - refData[i]);
+            if (diff > maxAbs) maxAbs = diff;
+            sumAbs += diff;
+            dot += outputData[i] * refData[i];
+            normA += outputData[i] * outputData[i];
+            normB += refData[i] * refData[i];
+        }
+
+        Console.WriteLine($"Input text: \"{text}\"");
+        Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
+        Console.WriteLine($"  C# stats: min={outputData.Min():F6}, max={outputData.Max():F6}, mean={outputData.Average():F6}, std={StdDev(outputData):F6}");
+        Console.WriteLine($"  Py stats: min={refData.Min():F6}, max={refData.Max():F6}, mean={refData.Average():F6}, std={StdDev(refData):F6}");
+        Console.WriteLine($"  max abs diff: {maxAbs:F6}");
+        Console.WriteLine($"  mean abs diff: {sumAbs / len:F8}");
+        Console.WriteLine($"  cosine similarity: {dot / (MathF.Sqrt(normA) * MathF.Sqrt(normB)):F8}");
+        Console.WriteLine();
+
+        Console.Write("C# Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, len); i++)
+        {
+            Console.Write($"{outputData[i]:F6}");
+            if (i < Math.Min(10, len) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
+        Console.Write("Py Output[:10]: [");
+        for (int i = 0; i < Math.Min(10, len); i++)
+        {
+            Console.Write($"{refData[i]:F6}");
+            if (i < Math.Min(10, len) - 1) Console.Write(", ");
+        }
+        Console.WriteLine("]");
 
         return 0;
     }
