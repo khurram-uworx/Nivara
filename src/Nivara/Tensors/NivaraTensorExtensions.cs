@@ -1259,6 +1259,251 @@ public static class NivaraTensorExtensions
         }
     }
 
+    public static NivaraColumn<T> GeluExact<T>(this NivaraColumn<T> column) where T : struct, INumber<T>
+    {
+        int n = column.Length;
+        if (!column.HasNulls)
+        {
+            column.TryGetSpan(out var span);
+            var result = new T[n];
+            GeluExactKernel(span, result);
+            return NivaraColumn<T>.Create(result);
+        }
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            column.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            column.TryGetNullMask(out var mask);
+            mask.CopyTo(nullMask.AsSpan(0, n));
+            GeluExactKernel(inputBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    public static NivaraColumn<T> GeluExactGradient<T>(this NivaraColumn<T> input, NivaraColumn<T> gradOutput) where T : struct, INumber<T>
+    {
+        int n = input.Length;
+        if (!input.HasNulls && !gradOutput.HasNulls)
+        {
+            input.TryGetSpan(out var inSpan);
+            gradOutput.TryGetSpan(out var gradSpan);
+            var result = new T[n];
+            GeluExactGradientKernel(inSpan, gradSpan, result);
+            return NivaraColumn<T>.Create(result);
+        }
+        var inputBuf = ArrayPool<T>.Shared.Rent(n);
+        var gradBuf = ArrayPool<T>.Shared.Rent(n);
+        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var nullMask = ArrayPool<bool>.Shared.Rent(n);
+        try
+        {
+            input.CopyTo(inputBuf.AsSpan(0, n), T.Zero);
+            gradOutput.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
+            NivaraColumnUtility.MergeNullMasks(input, gradOutput, nullMask.AsSpan(0, n));
+            GeluExactGradientKernel(inputBuf.AsSpan(0, n), gradBuf.AsSpan(0, n), resultBuf.AsSpan(0, n));
+            return NivaraColumn<T>.CreateFromSpans(resultBuf.AsSpan(0, n), nullMask.AsSpan(0, n));
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(inputBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
+            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            ArrayPool<bool>.Shared.Return(nullMask, clearArray: true);
+        }
+    }
+
+    internal static void GeluExactKernel<T>(ReadOnlySpan<T> x, Span<T> result) where T : struct, INumber<T>
+    {
+        if (typeof(T) == typeof(float))
+        {
+            GeluExactKernel_Float(MemoryMarshal.Cast<T, float>(x), MemoryMarshal.Cast<T, float>(result));
+            return;
+        }
+        if (typeof(T) == typeof(double))
+        {
+            GeluExactKernel_Double(MemoryMarshal.Cast<T, double>(x), MemoryMarshal.Cast<T, double>(result));
+            return;
+        }
+        const double invSqrt2 = 0.7071067811865475;
+        for (int i = 0; i < x.Length; i++)
+        {
+            double v = double.CreateChecked(x[i]);
+            result[i] = T.CreateChecked(0.5 * v * (1.0 + ErfScalar(v * invSqrt2)));
+        }
+    }
+
+    internal static void GeluExactGradientKernel<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> gradOutput, Span<T> result) where T : struct, INumber<T>
+    {
+        if (typeof(T) == typeof(float))
+        {
+            GeluExactGradientKernel_Float(MemoryMarshal.Cast<T, float>(x), MemoryMarshal.Cast<T, float>(gradOutput), MemoryMarshal.Cast<T, float>(result));
+            return;
+        }
+        if (typeof(T) == typeof(double))
+        {
+            GeluExactGradientKernel_Double(MemoryMarshal.Cast<T, double>(x), MemoryMarshal.Cast<T, double>(gradOutput), MemoryMarshal.Cast<T, double>(result));
+            return;
+        }
+        const double invSqrt2 = 0.7071067811865475;
+        const double invSqrt2Pi = 0.3989422804014327;
+        for (int i = 0; i < x.Length; i++)
+        {
+            double v = double.CreateChecked(x[i]);
+            double cdf = 0.5 * (1.0 + ErfScalar(v * invSqrt2));
+            double pdf = Math.Exp(-0.5 * v * v) * invSqrt2Pi;
+            result[i] = T.CreateChecked((cdf + v * pdf) * double.CreateChecked(gradOutput[i]));
+        }
+    }
+
+    private static void GeluExactKernel_Float(ReadOnlySpan<float> x, Span<float> result)
+    {
+        int n = x.Length;
+        int vec = Vector<float>.Count;
+        int vEnd = n - (n % vec);
+        var invSqrt2 = new Vector<float>(0.7071067811865475f);
+        var half = new Vector<float>(0.5f);
+        ref var xRef = ref MemoryMarshal.GetReference(x);
+        ref var rRef = ref MemoryMarshal.GetReference(result);
+        int i = 0;
+        for (; i < vEnd; i += vec)
+        {
+            var xv = Vector.LoadUnsafe(ref xRef, (nuint)i);
+            var erfv = ErfVector(xv * invSqrt2);
+            var onePlus = Vector<float>.One + erfv;
+            Vector.StoreUnsafe(xv * half * onePlus, ref rRef, (nuint)i);
+        }
+        for (; i < n; i++)
+        {
+            float v = x[i];
+            result[i] = v * 0.5f * (float)(1.0 + ErfScalar(v * 0.7071067811865475));
+        }
+    }
+
+    private static void GeluExactKernel_Double(ReadOnlySpan<double> x, Span<double> result)
+    {
+        int n = x.Length;
+        int vec = Vector<double>.Count;
+        int vEnd = n - (n % vec);
+        var invSqrt2 = new Vector<double>(0.7071067811865475);
+        var half = new Vector<double>(0.5);
+        ref var xRef = ref MemoryMarshal.GetReference(x);
+        ref var rRef = ref MemoryMarshal.GetReference(result);
+        int i = 0;
+        for (; i < vEnd; i += vec)
+        {
+            var xv = Vector.LoadUnsafe(ref xRef, (nuint)i);
+            var erfv = ErfVector(xv * invSqrt2);
+            var onePlus = Vector<double>.One + erfv;
+            Vector.StoreUnsafe(xv * half * onePlus, ref rRef, (nuint)i);
+        }
+        for (; i < n; i++)
+        {
+            double v = x[i];
+            result[i] = v * 0.5 * (1.0 + ErfScalar(v * 0.7071067811865475));
+        }
+    }
+
+    private static void GeluExactGradientKernel_Float(ReadOnlySpan<float> x, ReadOnlySpan<float> gradOutput, Span<float> result)
+    {
+        int n = x.Length;
+        int vec = Vector<float>.Count;
+        int vEnd = n - (n % vec);
+        var invSqrt2 = new Vector<float>(0.7071067811865475f);
+        var invSqrt2Pi = new Vector<float>(0.3989422804014327f);
+        var half = new Vector<float>(0.5f);
+        ref var xRef = ref MemoryMarshal.GetReference(x);
+        ref var gRef = ref MemoryMarshal.GetReference(gradOutput);
+        ref var rRef = ref MemoryMarshal.GetReference(result);
+        int i = 0;
+        for (; i < vEnd; i += vec)
+        {
+            var xv = Vector.LoadUnsafe(ref xRef, (nuint)i);
+            var gv = Vector.LoadUnsafe(ref gRef, (nuint)i);
+            var erfv = ErfVector(xv * invSqrt2);
+            var onePlus = Vector<float>.One + erfv;
+            var cdf = half * onePlus;
+            var pdf = Vector.Exp(-half * xv * xv) * invSqrt2Pi;
+            Vector.StoreUnsafe((cdf + xv * pdf) * gv, ref rRef, (nuint)i);
+        }
+        for (; i < n; i++)
+        {
+            float v = x[i];
+            double cdf = 0.5 * (1.0 + ErfScalar(v * 0.7071067811865475));
+            double pdf = Math.Exp(-0.5 * v * v) * 0.3989422804014327;
+            result[i] = (float)((cdf + v * pdf) * gradOutput[i]);
+        }
+    }
+
+    private static void GeluExactGradientKernel_Double(ReadOnlySpan<double> x, ReadOnlySpan<double> gradOutput, Span<double> result)
+    {
+        int n = x.Length;
+        int vec = Vector<double>.Count;
+        int vEnd = n - (n % vec);
+        var invSqrt2 = new Vector<double>(0.7071067811865475);
+        var invSqrt2Pi = new Vector<double>(0.3989422804014327);
+        var half = new Vector<double>(0.5);
+        ref var xRef = ref MemoryMarshal.GetReference(x);
+        ref var gRef = ref MemoryMarshal.GetReference(gradOutput);
+        ref var rRef = ref MemoryMarshal.GetReference(result);
+        int i = 0;
+        for (; i < vEnd; i += vec)
+        {
+            var xv = Vector.LoadUnsafe(ref xRef, (nuint)i);
+            var gv = Vector.LoadUnsafe(ref gRef, (nuint)i);
+            var erfv = ErfVector(xv * invSqrt2);
+            var onePlus = Vector<double>.One + erfv;
+            var cdf = half * onePlus;
+            var pdf = Vector.Exp(-half * xv * xv) * invSqrt2Pi;
+            Vector.StoreUnsafe((cdf + xv * pdf) * gv, ref rRef, (nuint)i);
+        }
+        for (; i < n; i++)
+        {
+            double v = x[i];
+            double cdf = 0.5 * (1.0 + ErfScalar(v * 0.7071067811865475));
+            double pdf = Math.Exp(-0.5 * v * v) * 0.3989422804014327;
+            result[i] = (cdf + v * pdf) * gradOutput[i];
+        }
+    }
+
+    private static Vector<float> ErfVector(Vector<float> z)
+    {
+        var az = Vector.Abs(z);
+        var t = Vector<float>.One / (Vector<float>.One + new Vector<float>(0.3275911f) * az);
+        var p = Vector.FusedMultiplyAdd(new Vector<float>(1.061405429f), t, new Vector<float>(-1.453152027f));
+        p = Vector.FusedMultiplyAdd(p, t, new Vector<float>(1.421413741f));
+        p = Vector.FusedMultiplyAdd(p, t, new Vector<float>(-0.284496736f));
+        p = Vector.FusedMultiplyAdd(p, t, new Vector<float>(0.254829592f));
+        var erfAbs = Vector<float>.One - p * t * Vector.Exp(-az * az);
+        return Vector.ConditionalSelect(Vector.LessThan(z, Vector<float>.Zero), -erfAbs, erfAbs);
+    }
+
+    private static Vector<double> ErfVector(Vector<double> z)
+    {
+        var az = Vector.Abs(z);
+        var t = Vector<double>.One / (Vector<double>.One + new Vector<double>(0.3275911) * az);
+        var p = Vector.FusedMultiplyAdd(new Vector<double>(1.061405429), t, new Vector<double>(-1.453152027));
+        p = Vector.FusedMultiplyAdd(p, t, new Vector<double>(1.421413741));
+        p = Vector.FusedMultiplyAdd(p, t, new Vector<double>(-0.284496736));
+        p = Vector.FusedMultiplyAdd(p, t, new Vector<double>(0.254829592));
+        var erfAbs = Vector<double>.One - p * t * Vector.Exp(-az * az);
+        return Vector.ConditionalSelect(Vector.LessThan(z, Vector<double>.Zero), -erfAbs, erfAbs);
+    }
+
+    static double ErfScalar(double x)
+    {
+        if (x < 0) return -ErfScalar(-x);
+        double t = 1.0 / (1.0 + 0.3275911 * x);
+        return 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.Exp(-x * x);
+    }
+
     public static NivaraColumn<T> LeakyReluGradient<T>(this NivaraColumn<T> input, NivaraColumn<T> gradOutput, T negativeSlope) where T : struct, INumber<T>
     {
         int n = input.Length;

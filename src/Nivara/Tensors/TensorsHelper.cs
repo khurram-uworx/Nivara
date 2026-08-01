@@ -116,40 +116,214 @@ static class TensorsHelper
     }
 
     /// <summary>
-    /// Core dense matmul on flat row-major spans — transpose(B) + Dot + Parallel.For.
-    /// Swap target for Tensor.MatrixMultiply.
+    /// Core dense matmul on flat row-major spans. Swap target for
+    /// <c>Tensor.MatrixMultiply</c>.
+    /// float/double use a transposed-B row kernel with
+    /// <see cref="TensorPrimitives.Dot"/> inner accumulation (BCL-tuned SIMD);
+    /// other vectorizable <c>INumber</c> types use a generic
+    /// <see cref="Vector{T}"/> path; the rest fall back to
+    /// <see cref="TensorPrimitives.Dot"/> scalar accumulation. Row parallelism is
+    /// gated by <see cref="ShouldParallelize"/> to avoid small-matmul overhead.
     /// </summary>
     public static void MultiplyCore<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
         int aRows, int aCols, int bCols)
         where T : struct, INumber<T>
     {
+        if (aRows < 0) throw new ArgumentOutOfRangeException(nameof(aRows), "Row count must be non-negative.");
+        if (aCols < 0) throw new ArgumentOutOfRangeException(nameof(aCols), "Column count must be non-negative.");
+        if (bCols < 0) throw new ArgumentOutOfRangeException(nameof(bCols), "Column count must be non-negative.");
+        if (a.Length < aRows * aCols)
+            throw new ArgumentException($"Input span length ({a.Length}) must be at least {aRows * aCols}", nameof(a));
+        if (b.Length < aCols * bCols)
+            throw new ArgumentException($"Input span length ({b.Length}) must be at least {aCols * bCols}", nameof(b));
+        if (result.Length < aRows * bCols)
+            throw new ArgumentException($"Result length ({result.Length}) must be at least {aRows * bCols}", nameof(result));
+
+        if (typeof(T) == typeof(float))
+        {
+            MultiplyCoreFloat(MemoryMarshal.Cast<T, float>(a), MemoryMarshal.Cast<T, float>(b),
+                result, aRows, aCols, bCols);
+            return;
+        }
+        if (typeof(T) == typeof(double))
+        {
+            MultiplyCoreDouble(MemoryMarshal.Cast<T, double>(a), MemoryMarshal.Cast<T, double>(b),
+                result, aRows, aCols, bCols);
+            return;
+        }
+        MultiplyCoreGeneric(a, b, result, aRows, aCols, bCols);
+    }
+
+    static bool ShouldParallelize(int aRows, int aCols, int bCols)
+        => aRows >= 4 && (long)aRows * aCols * bCols >= 2 << 20;
+
+    const int MultiplyRowTile = 8;
+
+    static void MultiplyCoreFloat<T>(ReadOnlySpan<float> a, ReadOnlySpan<float> b, T[] result,
+        int aRows, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        int aLen = a.Length, bLen = b.Length;
+        var aCopy = ArrayPool<float>.Shared.Rent(aLen);
+        var bT = ArrayPool<float>.Shared.Rent(bLen);
+        try
+        {
+            a.CopyTo(aCopy);
+            Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
+
+            bool parallel = ShouldParallelize(aRows, aCols, bCols);
+            if (parallel)
+                Parallel.For(0, aRows, i => MultiplyRowFloat(aCopy, bT, result, i, aCols, bCols));
+            else
+                for (int i = 0; i < aRows; i++)
+                    MultiplyRowFloat(aCopy, bT, result, i, aCols, bCols);
+        }
+        finally
+        {
+            ArrayPool<float>.Shared.Return(aCopy, clearArray: true);
+            ArrayPool<float>.Shared.Return(bT, clearArray: true);
+        }
+    }
+
+    static void MultiplyCoreDouble<T>(ReadOnlySpan<double> a, ReadOnlySpan<double> b, T[] result,
+        int aRows, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        int aLen = a.Length, bLen = b.Length;
+        var aCopy = ArrayPool<double>.Shared.Rent(aLen);
+        var bT = ArrayPool<double>.Shared.Rent(bLen);
+        try
+        {
+            a.CopyTo(aCopy);
+            Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
+
+            bool parallel = ShouldParallelize(aRows, aCols, bCols);
+            if (parallel)
+                Parallel.For(0, aRows, i => MultiplyRowDouble(aCopy, bT, result, i, aCols, bCols));
+            else
+                for (int i = 0; i < aRows; i++)
+                    MultiplyRowDouble(aCopy, bT, result, i, aCols, bCols);
+        }
+        finally
+        {
+            ArrayPool<double>.Shared.Return(aCopy, clearArray: true);
+            ArrayPool<double>.Shared.Return(bT, clearArray: true);
+        }
+    }
+
+    static void MultiplyCoreGeneric<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
+        int aRows, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
         int aLen = a.Length, bLen = b.Length;
         var aCopy = ArrayPool<T>.Shared.Rent(aLen);
-        var bCopy = ArrayPool<T>.Shared.Rent(bLen);
         var bT = ArrayPool<T>.Shared.Rent(bLen);
         try
         {
             a.CopyTo(aCopy);
-            b.CopyTo(bCopy);
-            Transpose(bCopy.AsSpan(0, bLen), bT.AsSpan(0, bLen), aCols, bCols);
+            Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
 
-            Parallel.For(0, aRows, i =>
+            int vec = Vector<T>.Count;
+            bool vectorized = Vector.IsHardwareAccelerated && vec > 1 && aCols >= vec;
+            bool parallel = ShouldParallelize(aRows, aCols, bCols);
+
+            if (vectorized)
             {
-                int aOff = i * aCols;
-                for (int j = 0; j < bCols; j++)
-                {
-                    int bOff = j * aCols;
-                    result[i * bCols + j] = TensorPrimitives.Dot(
-                        aCopy.AsSpan(aOff, aCols), bT.AsSpan(bOff, aCols));
-                }
-            });
+                if (parallel)
+                    Parallel.For(0, aRows, i => MultiplyRowVectorizedGeneric(aCopy, bT, result, i, aCols, bCols, vec));
+                else
+                    for (int i = 0; i < aRows; i++)
+                        MultiplyRowVectorizedGeneric(aCopy, bT, result, i, aCols, bCols, vec);
+            }
+            else
+            {
+                if (parallel)
+                    Parallel.For(0, aRows, i => MultiplyRowScalar(aCopy, bT, result, i, aCols, bCols));
+                else
+                    for (int i = 0; i < aRows; i++)
+                        MultiplyRowScalar(aCopy, bT, result, i, aCols, bCols);
+            }
         }
         finally
         {
             ArrayPool<T>.Shared.Return(aCopy, clearArray: true);
-            ArrayPool<T>.Shared.Return(bCopy, clearArray: true);
             ArrayPool<T>.Shared.Return(bT, clearArray: true);
         }
+    }
+
+    static void MultiplyRowFloat<T>(float[] aCopy, float[] bT, T[] result,
+        int i, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        int aOff = i * aCols;
+        int outOff = i * bCols;
+        var aSpan = aCopy.AsSpan(aOff, aCols);
+        for (int j = 0; j < bCols; j++)
+            result[outOff + j] = T.CreateChecked(TensorPrimitives.Dot(aSpan, bT.AsSpan(j * aCols, aCols)));
+    }
+
+    static void MultiplyRowDouble<T>(double[] aCopy, double[] bT, T[] result,
+        int i, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        int aOff = i * aCols;
+        int outOff = i * bCols;
+        var aSpan = aCopy.AsSpan(aOff, aCols);
+        for (int j = 0; j < bCols; j++)
+            result[outOff + j] = T.CreateChecked(TensorPrimitives.Dot(aSpan, bT.AsSpan(j * aCols, aCols)));
+    }
+
+    static void MultiplyRowScalar<T>(T[] aCopy, T[] bT, T[] result,
+        int i, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        int aOff = i * aCols;
+        int outOff = i * bCols;
+        for (int j = 0; j < bCols; j++)
+            result[outOff + j] = TensorPrimitives.Dot(aCopy.AsSpan(aOff, aCols), bT.AsSpan(j * aCols, aCols));
+    }
+
+    static void MultiplyRowVectorizedGeneric<T>(T[] aCopy, T[] bT, T[] result,
+        int i, int aCols, int bCols, int vec)
+        where T : struct, INumber<T>
+    {
+        int aOff = i * aCols;
+        int outOff = i * bCols;
+        int kVecEnd = aCols - (aCols % vec);
+
+        Span<Vector<T>> accs = stackalloc Vector<T>[MultiplyRowTile];
+        int j = 0;
+        for (; j + MultiplyRowTile <= bCols; j += MultiplyRowTile)
+        {
+            accs.Clear();
+            int k = 0;
+            for (; k < kVecEnd; k += vec)
+            {
+                var av = Vector.LoadUnsafe(ref aCopy[aOff + k]);
+                for (int t = 0; t < MultiplyRowTile; t++)
+                    accs[t] = Vector.Add(accs[t], Vector.Multiply(av, Vector.LoadUnsafe(ref bT[(j + t) * aCols + k])));
+            }
+            for (int t = 0; t < MultiplyRowTile; t++)
+                result[outOff + j + t] = Vector.Sum(accs[t]) + TailGeneric(aCopy, bT, aOff, j + t, k, aCols);
+        }
+        for (; j < bCols; j++)
+        {
+            var acc = Vector<T>.Zero;
+            int k = 0;
+            for (; k < kVecEnd; k += vec)
+                acc = Vector.Add(acc, Vector.Multiply(Vector.LoadUnsafe(ref aCopy[aOff + k]), Vector.LoadUnsafe(ref bT[j * aCols + k])));
+            result[outOff + j] = Vector.Sum(acc) + TailGeneric(aCopy, bT, aOff, j, k, aCols);
+        }
+    }
+
+    static T TailGeneric<T>(T[] aCopy, T[] bT, int aOff, int j, int k, int aCols)
+        where T : struct, INumber<T>
+    {
+        T sum = T.Zero;
+        int bOff = j * aCols;
+        for (; k < aCols; k++)
+            sum += aCopy[aOff + k] * bT[bOff + k];
+        return sum;
     }
 
     /// <summary>
