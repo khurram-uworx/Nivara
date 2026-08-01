@@ -302,6 +302,47 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.MatrixNote("MatMul", aRows, aCols, bCols));
     }
 
+    /// <summary>
+    /// Inference-only matmul where <paramref name="b"/> is already in the
+    /// transposed-B layout the core kernel consumes (b is [bCols, aCols]
+    /// row-major — i.e. the raw weight of a linear layer). Computes
+    /// a @ b^T with zero transposes and builds no gradient graph. Only call
+    /// outside <see cref="GradientUtils.Grad"/> scope.
+    /// </summary>
+    internal static ReverseGradTensor<T> MatMulTransposedB<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (b == null) throw new ArgumentNullException(nameof(b));
+        if (a.Rank != 2 || b.Rank != 2)
+            throw new ArgumentException("MatMulTransposedB requires rank-2 operands.");
+
+        var aRows = a.shape[0];
+        var aCols = a.shape[1];
+        var bCols = b.shape[0];
+        if (b.shape[1] != aCols)
+            throw new ArgumentException(
+                $"MatMulTransposedB dimension mismatch: a is {aRows}x{aCols}, b is {bCols}x{b.shape[1]}. " +
+                $"b's column count ({b.shape[1]}) must equal a's column count ({aCols}).");
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffMatMulTransposedB",
+            a.Length + b.Length,
+
+            () =>
+            {
+                a.Data.TryGetSpan(out var aSpan);
+                b.Data.TryGetSpan(out var bSpan);
+                var resultArr = new T[aRows * bCols];
+                TensorsHelper.MultiplyCore(aSpan, bSpan, resultArr, aRows, aCols, bCols, bTransposed: true);
+                return new ReverseGradTensor<T>(
+                    NivaraColumn<T>.Create(resultArr),
+                    requiresGrad: false,
+                    new[] { aRows, bCols });
+            },
+            AutoDiffDiagnostics.MatrixNote("MatMulTransposedB", aRows, aCols, bCols));
+    }
+
     public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));

@@ -126,7 +126,7 @@ static class TensorsHelper
     /// gated by <see cref="ShouldParallelize"/> to avoid small-matmul overhead.
     /// </summary>
     public static void MultiplyCore<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
-        int aRows, int aCols, int bCols)
+        int aRows, int aCols, int bCols, bool bTransposed = false)
         where T : struct, INumber<T>
     {
         if (aRows < 0) throw new ArgumentOutOfRangeException(nameof(aRows), "Row count must be non-negative.");
@@ -142,16 +142,16 @@ static class TensorsHelper
         if (typeof(T) == typeof(float))
         {
             MultiplyCoreFloat(MemoryMarshal.Cast<T, float>(a), MemoryMarshal.Cast<T, float>(b),
-                result, aRows, aCols, bCols);
+                result, aRows, aCols, bCols, bTransposed);
             return;
         }
         if (typeof(T) == typeof(double))
         {
             MultiplyCoreDouble(MemoryMarshal.Cast<T, double>(a), MemoryMarshal.Cast<T, double>(b),
-                result, aRows, aCols, bCols);
+                result, aRows, aCols, bCols, bTransposed);
             return;
         }
-        MultiplyCoreGeneric(a, b, result, aRows, aCols, bCols);
+        MultiplyCoreGeneric(a, b, result, aRows, aCols, bCols, bTransposed);
     }
 
     static bool ShouldParallelize(int aRows, int aCols, int bCols)
@@ -160,7 +160,7 @@ static class TensorsHelper
     const int MultiplyRowTile = 8;
 
     static void MultiplyCoreFloat<T>(ReadOnlySpan<float> a, ReadOnlySpan<float> b, T[] result,
-        int aRows, int aCols, int bCols)
+        int aRows, int aCols, int bCols, bool bTransposed)
         where T : struct, INumber<T>
     {
         int aLen = a.Length, bLen = b.Length;
@@ -169,7 +169,10 @@ static class TensorsHelper
         try
         {
             a.CopyTo(aCopy);
-            Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
+            if (bTransposed)
+                b.CopyTo(bT.AsSpan(0, bLen));
+            else
+                Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
 
             bool parallel = ShouldParallelize(aRows, aCols, bCols);
             if (parallel)
@@ -186,7 +189,7 @@ static class TensorsHelper
     }
 
     static void MultiplyCoreDouble<T>(ReadOnlySpan<double> a, ReadOnlySpan<double> b, T[] result,
-        int aRows, int aCols, int bCols)
+        int aRows, int aCols, int bCols, bool bTransposed)
         where T : struct, INumber<T>
     {
         int aLen = a.Length, bLen = b.Length;
@@ -195,7 +198,10 @@ static class TensorsHelper
         try
         {
             a.CopyTo(aCopy);
-            Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
+            if (bTransposed)
+                b.CopyTo(bT.AsSpan(0, bLen));
+            else
+                Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
 
             bool parallel = ShouldParallelize(aRows, aCols, bCols);
             if (parallel)
@@ -212,7 +218,7 @@ static class TensorsHelper
     }
 
     static void MultiplyCoreGeneric<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
-        int aRows, int aCols, int bCols)
+        int aRows, int aCols, int bCols, bool bTransposed)
         where T : struct, INumber<T>
     {
         int aLen = a.Length, bLen = b.Length;
@@ -221,7 +227,10 @@ static class TensorsHelper
         try
         {
             a.CopyTo(aCopy);
-            Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
+            if (bTransposed)
+                b.CopyTo(bT.AsSpan(0, bLen));
+            else
+                Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
 
             int vec = Vector<T>.Count;
             bool vectorized = Vector.IsHardwareAccelerated && vec > 1 && aCols >= vec;
