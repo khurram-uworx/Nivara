@@ -212,7 +212,7 @@ public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIee
         h = ln1.Forward(h);
 
         var h2 = fc1.Forward(h);
-        h2 = ReverseGradOperations.Gelu(h2);
+        h2 = ReverseGradOperations.GeluExact(h2);
         h2 = fc2.Forward(h2);
         h2 = ReverseGradOperations.Add(h2, h);
         h2 = ln2.Forward(h2);
@@ -226,7 +226,7 @@ public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIee
         h = ln1.Forward(h);
 
         var h2 = fc1.Forward(h);
-        h2 = ReverseGradOperations.Gelu(h2);
+        h2 = ReverseGradOperations.GeluExact(h2);
         h2 = fc2.Forward(h2);
         h2 = ReverseGradOperations.Add(h2, h);
         h2 = ln2.Forward(h2);
@@ -241,7 +241,7 @@ public sealed class BertLayer<T> : Module<T> where T : struct, IFloatingPointIee
         h = ln1.Forward(h);
 
         var h2 = fc1.Forward(h);
-        h2 = ReverseGradOperations.Gelu(h2);
+        h2 = ReverseGradOperations.GeluExact(h2);
         h2 = fc2.Forward(h2);
         h2 = ReverseGradOperations.Add(h2, h);
         h2 = ln2.Forward(h2);

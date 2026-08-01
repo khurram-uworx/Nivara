@@ -591,6 +591,51 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    public static ReverseGradTensor<T> GeluExact<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var aArr = new T[a.Length];
+        a.AsSpan().CopyTo(aArr.AsSpan());
+
+        var resultArr = new T[a.Length];
+        for (int i = 0; i < a.Length; i++)
+        {
+            double x = double.CreateChecked(aArr[i]);
+            resultArr[i] = T.CreateChecked(0.5 * x * (1.0 + Erf(x / Math.Sqrt(2.0))));
+        }
+
+        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
+
+        if (GradientUtils.ShouldTrackGrad(a))
+        {
+            var gradFn = new OpNode<T>("GeluExact", new object[] { a }, (typedGradOutput) =>
+            {
+                var gradArr = new T[a.Length];
+                for (int i = 0; i < a.Length; i++)
+                {
+                    double x = double.CreateChecked(aArr[i]);
+                    double cdf = 0.5 * (1.0 + Erf(x / Math.Sqrt(2.0)));
+                    double pdf = Math.Exp(-0.5 * x * x) / Math.Sqrt(2.0 * Math.PI);
+                    double grad = cdf + x * pdf;
+                    gradArr[i] = T.CreateChecked(grad * double.CreateChecked(typedGradOutput[i]));
+                }
+                AccumulateGradient(a, NivaraColumn<T>.Create(gradArr));
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    static double Erf(double x)
+    {
+        if (x < 0) return -Erf(-x);
+        double t = 1.0 / (1.0 + 0.3275911 * x);
+        return 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.Exp(-x * x);
+    }
+
     public static ReverseGradTensor<T> Sigmoid<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));

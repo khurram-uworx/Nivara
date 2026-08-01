@@ -100,6 +100,16 @@ public class ActivationTests
         return (float)(0.5 * x * (1.0 + Math.Tanh(inner)));
     }
 
+    static double Erf(double x)
+    {
+        if (x < 0) return -Erf(-x);
+        double t = 1.0 / (1.0 + 0.3275911 * x);
+        return 1.0 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.Exp(-x * x);
+    }
+
+    static float GeluExact(float x)
+        => (float)(0.5 * x * (1.0 + Erf(x / Math.Sqrt(2.0))));
+
     static float GeluGradientTanhApprox(float x)
     {
         const double sqrt2OverPi = 0.7978845608028654;
@@ -178,6 +188,73 @@ public class ActivationTests
             TestHelpers.AssertScalarEqual(expectedGrad, input.Grad![i], absTol: 3e-4f,
                 label: $"GeluGrad({inputData[i]})");
         }
+    }
+
+    [Test]
+    public void GeluExact_KnownValues_Correct()
+    {
+        var testValues = new float[] { 0f, 1f, -1f, 2f, -2f, 0.5f, -0.5f };
+        var input = ReverseGradTensor<float>.FromArray(testValues, requiresGrad: false);
+
+        var output = Activation.GeluExact(input);
+
+        Assert.That(output.Length, Is.EqualTo(7));
+        for (int i = 0; i < testValues.Length; i++)
+        {
+            float expected = GeluExact(testValues[i]);
+            TestHelpers.AssertScalarEqual(expected, output[i], label: $"GeluExact({testValues[i]})");
+        }
+    }
+
+    [Test]
+    public void GeluExact_GradientFlows()
+    {
+        var inputData = new float[] { -1f, 0f, 1f, 2f };
+        var input = ReverseGradTensor<float>.FromArray(inputData, requiresGrad: true);
+
+        var output = ReverseGradOperations.GeluExact(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Repeat(1f, output.Length).ToArray()),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < inputData.Length; i++)
+        {
+            double x = inputData[i];
+            double cdf = 0.5 * (1.0 + Erf(x / Math.Sqrt(2.0)));
+            double pdf = Math.Exp(-0.5 * x * x) / Math.Sqrt(2.0 * Math.PI);
+            float expectedGrad = (float)(cdf + x * pdf);
+            TestHelpers.AssertScalarEqual(expectedGrad, input.Grad![i], absTol: 1e-5f,
+                label: $"GeluExactGrad({inputData[i]})");
+        }
+    }
+
+    [Test]
+    public void GeluExact_1D_MatchesPyTorch()
+    {
+        var input = TestHelpers.LoadBin("gelu_exact_1d_input.bin");
+        var expected = TestHelpers.LoadBin("gelu_exact_1d_output.bin");
+
+        var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: false);
+        var output = Activation.GeluExact(inputTensor);
+
+        TestHelpers.AssertTensorEqual(expected, TestHelpers.ExtractOutput(output), label: "GeluExact_1D");
+    }
+
+    [Test]
+    public void GeluExact_4D_MatchesPyTorch()
+    {
+        var input = TestHelpers.LoadBin("gelu_exact_4d_input.bin");
+        var expected = TestHelpers.LoadBin("gelu_exact_4d_output.bin");
+
+        var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: false);
+        inputTensor.Reshape(1, 8, 4, 4);
+        var output = Activation.GeluExact(inputTensor);
+
+        TestHelpers.AssertTensorEqual(expected, TestHelpers.ExtractOutput(output), label: "GeluExact_4D");
     }
 
     [Test]

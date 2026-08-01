@@ -35,7 +35,7 @@ public sealed class DistilBertForSequenceClassification<T> : Module<T> where T :
         var encoded = encoder.ForwardBatched(inputIds, attentionMask, batchSize, seqLen);
         var clsTokens = ExtractClsTokens(encoded, batchSize, seqLen);
         var h = preClassifier.Forward(clsTokens);
-        h = ReverseGradOperations.Gelu(h);
+        h = ReverseGradOperations.GeluExact(h);
         var logits = classifier.Forward(h);
         return logits;
     }
