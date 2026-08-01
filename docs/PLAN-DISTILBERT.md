@@ -61,7 +61,7 @@ PLAN0 already moved `DistilBertConfig` and the encoder loader (`DistilBertLoader
 
 Task list follows `docs/TASKS-TEMPLATE.md`. Each task is sized for one coding agent.
 
-## Task 1: Download the fine-tuned SST-2 model weights
+## Task 1: ~~Download the fine-tuned SST-2 model weights~~ DONE (this round)
 
 ### Priority
 
@@ -90,7 +90,7 @@ Every other task depends on having the real weights, config, and vocabulary on d
 
 - `samples/data/distilbert_sst/*`
 
-## Task 2: Promote DistilBertForSequenceClassification to Nivara.Samples
+## Task 2: ~~Promote DistilBertForSequenceClassification to Nivara.Samples~~ DONE (this round)
 
 ### Priority
 
@@ -130,7 +130,7 @@ Move `DistilBertForSequenceClassification<T>` (the last remaining DistilBERT typ
 
 Implemented and verified in `docs/PLAN0.md` (PR #84): `BertEncoder<T>` has `includeTokenTypeEmbedding: bool = true`; DistilBERT passes `false`. No further work. The constructor change for `DistilBertForSequenceClassification<T>` (pass `false`) happens as part of Task 2's promotion.
 
-## Task 4: Add `distilbert_sst` model + CLI modes to NivaraInference
+## Task 4: ~~Add `distilbert_sst` model + CLI modes to NivaraInference~~ DONE (this round)
 
 ### Priority
 
@@ -174,7 +174,7 @@ This is the showcase deliverable: run the fine-tuned SST-2 model in pure .NET.
 - `samples/NivaraInference/DistilBertSst.cs` (new)
 - `samples/NivaraInference/Program.cs`
 
-## Task 5: PyTorch A/B reference + logits comparison
+## Task 5: ~~PyTorch A/B reference + logits comparison~~ DONE (this round)
 
 ### Priority
 
@@ -207,8 +207,9 @@ A/B parity is the gate before benchmarking and any later optimization.
 
 ### Acceptance criteria
 
-- Logits match PyTorch at float32-level (expect `max abs diff` ~1e-5, matching the base-encoder compare from PLAN0); sentiment (argmax) agrees on all demo sentences.
+- Logits match PyTorch at float32-level. Measured: `max abs logit diff 9.5e-7` (mean `2.7e-7`) — better than the expected ~1e-5; sentiment (argmax) agrees on all 8/8 demo sentences.
 - Comparison results (max abs diff, argmax agreement) recorded in `samples/NivaraInference/README.md`.
+- Head-activation divergence found and fixed: HF applies `nn.ReLU()` after `pre_classifier`; the port originally used `GeluExact`, producing logits off by ~0.05. Fixed + regression tests in `tests/Nivara.Tests/AutoDiff/DistilBertSequenceClassificationTests.cs`.
 
 ### Files likely involved
 
@@ -216,7 +217,7 @@ A/B parity is the gate before benchmarking and any later optimization.
 - `samples/NivaraInference/Python/distilbert_sst_predict.py` (new, optional)
 - `samples/data/compare_distilbert_sst_py.bin`, `samples/data/compare_distilbert_sst_cs.bin`
 
-## Task 6: DistilBERT latency perf test (mirror MiniLM)
+## Task 6: ~~DistilBERT latency perf test (mirror MiniLM)~~ DONE (this round)
 
 ### Priority
 
@@ -246,7 +247,7 @@ Regression coverage for inference latency alongside the existing MiniLM test.
 
 - `tests/Nivara.Tests/AutoDiff/PerfTests.cs`
 
-## Task 7: Benchmark + record baseline numbers
+## Task 7: ~~Benchmark + record baseline numbers~~ DONE (this round)
 
 ### Priority
 
@@ -275,7 +276,7 @@ Establishes the baseline to compare against future optimizations and PyTorch.
 
 - `samples/NivaraInference/README.md` (benchmark table)
 
-## Task 8: Update documentation
+## Task 8: ~~Update documentation~~ DONE (this round)
 
 ### Priority
 
