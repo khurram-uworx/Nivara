@@ -350,3 +350,4 @@ samples/data/resnet18/
 samples/data/minilm/
 samples/data/sst2/
 samples/data/distilbert/
+samples/data/distilbert_sst/
