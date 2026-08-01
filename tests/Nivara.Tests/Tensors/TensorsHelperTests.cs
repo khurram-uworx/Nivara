@@ -1,6 +1,7 @@
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Diagnostics;
+using System.Numerics;
 using System.Numerics.Tensors;
 
 namespace Nivara.Tests.Tensors;
@@ -185,6 +186,80 @@ public class TensorsHelperTests
             }
         }
     }
+
+    #region MultiplyCore
+
+    [Test]
+    public void MultiplyCore_Float_MultipleShapes_MatchesReference() => CheckMatMulShapes<float>(1e-4);
+
+    [Test]
+    public void MultiplyCore_Double_MultipleShapes_MatchesReference() => CheckMatMulShapes<double>(1e-10);
+
+    [Test]
+    public void MultiplyCore_Int_MultipleShapes_MatchesReference() => CheckMatMulShapes<int>(0.0);
+
+    static void CheckMatMulShapes<T>(double tolerance) where T : struct, INumber<T>
+    {
+        (int Rows, int Cols, int BCols)[] shapes =
+        [
+            (2, 1, 3),
+            (1, 5, 1),
+            (3, 7, 11),
+            (4, 8, 16),
+            (5, 6, 9),
+            (12, 20, 24),
+            (16, 64, 48),
+            (64, 128, 256)
+        ];
+        foreach (var (rows, cols, bCols) in shapes)
+            AssertMatMulMatchesReference<T>(rows, cols, bCols, tolerance);
+    }
+
+    static void AssertMatMulMatchesReference<T>(int aRows, int aCols, int bCols, double tolerance)
+        where T : struct, INumber<T>
+    {
+        var rng = new Random(12345 + aRows * 31 + aCols * 7 + bCols);
+        var a = new T[aRows * aCols];
+        var b = new T[aCols * bCols];
+        for (int i = 0; i < a.Length; i++)
+            a[i] = FillValue<T>(rng);
+        for (int i = 0; i < b.Length; i++)
+            b[i] = FillValue<T>(rng);
+
+        var result = new T[aRows * bCols];
+        var reference = new T[aRows * bCols];
+        TensorsHelper.MultiplyCore(a.AsSpan(), b.AsSpan(), result, aRows, aCols, bCols);
+        ReferenceMatMul(a, b, reference, aRows, aCols, bCols);
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            double diff = Math.Abs(double.CreateChecked(result[i]) - double.CreateChecked(reference[i]));
+            double magnitude = Math.Abs(double.CreateChecked(reference[i]));
+            Assert.That(diff, Is.LessThanOrEqualTo(tolerance * Math.Max(1.0, magnitude)),
+                $"Mismatch at index {i} for {typeof(T).Name} {aRows}x{aCols}@{aCols}x{bCols}: " +
+                $"kernel={result[i]}, reference={reference[i]}");
+        }
+    }
+
+    static T FillValue<T>(Random rng) where T : struct, INumber<T>
+        => typeof(T) == typeof(int) ? T.CreateChecked(rng.Next(0, 3)) : T.CreateChecked(rng.NextDouble() * 2 - 1.0);
+
+    static void ReferenceMatMul<T>(T[] a, T[] b, T[] result, int aRows, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        for (int i = 0; i < aRows; i++)
+        {
+            for (int j = 0; j < bCols; j++)
+            {
+                T sum = T.Zero;
+                for (int k = 0; k < aCols; k++)
+                    sum += a[i * aCols + k] * b[k * bCols + j];
+                result[i * bCols + j] = sum;
+            }
+        }
+    }
+
+    #endregion
 
     #region RowNorms
 
