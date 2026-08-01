@@ -604,6 +604,17 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Creates a column from an array owned by the caller without copying it.
+    /// The caller must not mutate the array after this call. Used on hot paths
+    /// (AutoDiff op results) to avoid the extra ToArray copy in <see cref="Create"/>.
+    /// </summary>
+    internal static NivaraColumn<T> CreateFromOwnedArray(T[] values)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        return new NivaraColumn<T>(ColumnStorageFactory.CreateFromOwnedArray<T>(values));
+    }
+
+    /// <summary>
     /// Creates a new column from the specified span of values.
     /// Automatically selects appropriate storage based on type characteristics.
     /// </summary>

@@ -138,7 +138,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
             ReadOnlySpan<T>.Empty, ReadOnlySpan<T>.Empty,
             T.CreateChecked(eps), affine: false);
 
-        var resultCol = NivaraColumn<T>.Create(result.Output);
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(result.Output);
         var outTensor = new ReverseGradTensor<T>(resultCol, x.RequiresGrad, x.Shape);
 
         if (x.RequiresGrad)

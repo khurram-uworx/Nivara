@@ -263,7 +263,7 @@ public static class ReverseGradOperations
                 b.Data.TryGetSpan(out var bSpan);
                 var resultArr = new T[aRows * bCols];
                 TensorsHelper.MultiplyCore(aSpan, bSpan, resultArr, aRows, aCols, bCols);
-                var result = NivaraColumn<T>.Create(resultArr);
+                var result = NivaraColumn<T>.CreateFromOwnedArray(resultArr);
 
                 var resultShape = new[] { aRows, bCols };
                 var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(a, b), resultShape);
@@ -336,7 +336,7 @@ public static class ReverseGradOperations
                 var resultArr = new T[aRows * bCols];
                 TensorsHelper.MultiplyCore(aSpan, bSpan, resultArr, aRows, aCols, bCols, bTransposed: true);
                 return new ReverseGradTensor<T>(
-                    NivaraColumn<T>.Create(resultArr),
+                    NivaraColumn<T>.CreateFromOwnedArray(resultArr),
                     requiresGrad: false,
                     new[] { aRows, bCols });
             },
@@ -363,7 +363,7 @@ public static class ReverseGradOperations
                 TensorsHelper.Transpose(aSpan, resultArr.AsSpan(), rows, cols);
 
                 var resultShape = new[] { cols, rows };
-                var resultTensor = new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultArr), GradientUtils.ShouldTrackGrad(a), resultShape);
+                var resultTensor = new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(resultArr), GradientUtils.ShouldTrackGrad(a), resultShape);
 
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
@@ -435,7 +435,7 @@ public static class ReverseGradOperations
                             }
                 }
 
-                var resultCol = NivaraColumn<T>.Create(dstData);
+                var resultCol = NivaraColumn<T>.CreateFromOwnedArray(dstData);
                 bool shouldTrack = GradientUtils.ShouldTrackGrad(a);
                 var resultTensor = new ReverseGradTensor<T>(resultCol, shouldTrack, dstDims);
 
@@ -2104,7 +2104,7 @@ public static class ReverseGradOperations
     static ReverseGradTensor<T> ResultTensor<T>(T[] data, ReverseGradTensor<T> shapeSrc, bool requiresGrad)
         where T : struct, IFloatingPointIeee754<T>
     {
-        return new ReverseGradTensor<T>(NivaraColumn<T>.Create(data), requiresGrad, shapeSrc.shape);
+        return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(data), requiresGrad, shapeSrc.shape);
     }
 
     private static int[] ScalarShape()
