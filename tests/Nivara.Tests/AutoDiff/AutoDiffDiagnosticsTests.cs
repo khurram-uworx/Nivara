@@ -16,6 +16,7 @@ public class AutoDiffDiagnosticsTests
     public void SetUp()
     {
         gradScope = GradientUtils.Grad();
+        AutoDiffDiagnostics.Enabled = true;
         DiagnosticsTracker.IsEnabled = true;
         DiagnosticsTracker.ClearRecordedOperations();
     }
@@ -23,6 +24,7 @@ public class AutoDiffDiagnosticsTests
     [TearDown]
     public void TearDown()
     {
+        AutoDiffDiagnostics.Enabled = false;
         DiagnosticsTracker.IsEnabled = false;
         DiagnosticsTracker.ClearRecordedOperations();
         gradScope?.Dispose();
@@ -90,6 +92,7 @@ public class AutoDiffDiagnosticsTests
     [Test]
     public void AutoDiffDiagnostics_WhenDisabled_DoNotRecordOperations()
     {
+        AutoDiffDiagnostics.Enabled = false;
         DiagnosticsTracker.IsEnabled = false;
         DiagnosticsTracker.ClearRecordedOperations();
 

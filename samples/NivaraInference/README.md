@@ -179,7 +179,7 @@ The 6-layer, 768-dim pre-trained encoder (the baby-step before the fine-tuned SS
 - **Weight mapping** from `distilbert.*` SafeTensors keys via `DistilBertLoader.LoadEncoderWeights`
 - **Verification**: `last_hidden_state` matches HuggingFace to `max abs diff 5e-6` (cosine 0.99999988)
 
-Nivara modules used: `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAttention<T>`, `ReverseGradOperations.GeluExact`, `ReverseGradOperations.Add`, `ReverseGradOperations.Softmax`, `ReverseGradOperations.MatMul`.
+Nivara modules used: `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAttention<T>` (fused `ReverseGradOperations.MultiHeadAttention`), `ReverseGradOperations.GeluExact`, `ReverseGradOperations.Add`.
 
 > **GELU note:** BERT-family models (MiniLM, DistilBERT) use the exact erf GELU (`GeluExact`). The tanh approximation (`ReverseGradOperations.Gelu`) matches HF `gelu_new`/GPT-2 and is retained for GPT-style `TransformerBlock`.
 
@@ -224,10 +224,10 @@ Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode
 | **MobileNetV2** | 1×3×224×224 | 115 ms | 2,254 ms | **~20×** |
 | **ResNet-18** | 1×3×224×224 | 68 ms | 641 ms | **~9×** |
 | **MiniLM-L6** | 128 tokens | 11 ms | 110 ms | **~10×** |
-| **DistilBERT** | 128 tokens | 31 ms | 236 ms | **~8×** |
+| **DistilBERT** | 128 tokens | 31 ms | 186 ms | **~6×** |
 | **DistilBERT SST-2** | 128 tokens | 31 ms | 232 ms | **~8×** |
 
-AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. The remaining transformer gap is dominated by the per-head `Slice`/`Transpose`/`MatMul`/`Softmax` attention loop, tracked as the fused multi-head attention follow-up (see issue #86).
+AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, cutting DistilBERT encoder inference from ~236 ms to ~186 ms.
 
 ## Sample data
 

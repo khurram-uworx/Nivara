@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Nn.Initializers;
+using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
@@ -125,16 +126,13 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, IFloatin
         bool useCausal = overrideCausal ?? _causal;
         int kvLen = K.shape[0];
 
-        var scaleTensor = GradientUtils.Full(qLen * kvLen, _attnScale);
-        scaleTensor.Reshape(qLen, kvLen);
-
         ReverseGradTensor<T>? mask = null;
         if (useCausal)
             mask = ModuleHelpers<T>.CreateCausalMask(qLen, kvLen);
         else if (paddingMask != null)
             mask = CreatePaddingMask(paddingMask, qLen, kvLen);
 
-        return ModuleHelpers<T>.MultiHeadAttention(Q, K, V, _numHeads, _headDim, scaleTensor, mask);
+        return ReverseGradOperations.MultiHeadAttention(Q, K, V, _numHeads, _attnScale, mask);
     }
 
     ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLen, int kvLen)

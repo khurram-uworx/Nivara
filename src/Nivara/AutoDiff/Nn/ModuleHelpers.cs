@@ -86,41 +86,6 @@ internal static class ModuleHelpers<T> where T : struct, IFloatingPointIeee754<T
         return tensor;
     }
 
-    internal static ReverseGradTensor<T> MultiHeadAttention(
-        ReverseGradTensor<T> Q,
-        ReverseGradTensor<T> K,
-        ReverseGradTensor<T> V,
-        int numHeads,
-        int headDim,
-        ReverseGradTensor<T> scaleTensor,
-        ReverseGradTensor<T>? mask)
-    {
-        var heads = new ReverseGradTensor<T>[numHeads];
-
-        for (int h = 0; h < numHeads; h++)
-        {
-            int hs = h * headDim;
-
-            var Q_h = ReverseGradOperations.Slice(Q, hs, headDim);
-            var K_h = ReverseGradOperations.Slice(K, hs, headDim);
-            var V_h = ReverseGradOperations.Slice(V, hs, headDim);
-
-            var K_h_T = ReverseGradOperations.Transpose(K_h);
-            var scores = ReverseGradOperations.MatMul(Q_h, K_h_T);
-
-            scores = ReverseGradOperations.Multiply(scores, scaleTensor);
-
-            if (mask != null)
-                scores = ReverseGradOperations.Add(scores, mask);
-
-            var weights = ReverseGradOperations.Softmax(scores);
-
-            heads[h] = ReverseGradOperations.MatMul(weights, V_h);
-        }
-
-        return ReverseGradOperations.Concat(heads, axis: 1);
-    }
-
     internal static (ReverseGradTensor<T>? runningMean, ReverseGradTensor<T>? runningVar, ReverseGradTensor<T>? numBatchesTracked)
         UpdateRunningStats(
             ReverseGradTensor<T>? runningMean,

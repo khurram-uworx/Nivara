@@ -1003,5 +1003,71 @@
       4,
       16
     ]
+  },
+  "attn_self_causal": {
+    "layer": "MultiHeadAttention",
+    "q_shape": [
+      4,
+      16
+    ],
+    "k_shape": [
+      4,
+      16
+    ],
+    "v_shape": [
+      4,
+      16
+    ],
+    "num_heads": 4,
+    "scale": 0.5,
+    "masked": true,
+    "output_shape": [
+      4,
+      16
+    ]
+  },
+  "attn_self": {
+    "layer": "MultiHeadAttention",
+    "q_shape": [
+      4,
+      16
+    ],
+    "k_shape": [
+      4,
+      16
+    ],
+    "v_shape": [
+      4,
+      16
+    ],
+    "num_heads": 4,
+    "scale": 0.5,
+    "masked": false,
+    "output_shape": [
+      4,
+      16
+    ]
+  },
+  "attn_cross": {
+    "layer": "MultiHeadAttention",
+    "q_shape": [
+      3,
+      8
+    ],
+    "k_shape": [
+      5,
+      8
+    ],
+    "v_shape": [
+      5,
+      8
+    ],
+    "num_heads": 2,
+    "scale": 0.5,
+    "masked": true,
+    "output_shape": [
+      3,
+      8
+    ]
   }
 }

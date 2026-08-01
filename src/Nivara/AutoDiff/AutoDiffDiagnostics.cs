@@ -5,6 +5,13 @@ namespace Nivara.AutoDiff;
 
 static class AutoDiffDiagnostics
 {
+    /// <summary>
+    /// Enables AutoDiff operation diagnostics. Disabled by default so the inference
+    /// hot path pays zero per-op lock acquisition; enable only when a diagnostics
+    /// session is explicitly requested.
+    /// </summary>
+    public static bool Enabled { get; set; }
+
     public static void Measure<T>(
         string operationType,
         int inputLength,
@@ -13,6 +20,12 @@ static class AutoDiffDiagnostics
         where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(operation);
+
+        if (!Enabled)
+        {
+            operation();
+            return;
+        }
 
         var measurement = DiagnosticsTracker.StartMeasurement();
         operation();
@@ -31,8 +44,13 @@ static class AutoDiffDiagnostics
         Func<TResult> operation,
         string? notes = null)
         where T : struct, IFloatingPointIeee754<T>
+    {
+        ArgumentNullException.ThrowIfNull(operation);
 
-        => DiagnosticsTracker.MeasureOperation(
+        if (!Enabled)
+            return operation();
+
+        return DiagnosticsTracker.MeasureOperation(
             operationType,
             KernelSelector.DetermineKernelType<T>(inputLength),
             inputLength,
@@ -40,6 +58,7 @@ static class AutoDiffDiagnostics
             false,
             operation,
             notes);
+    }
 
     public static string ShapeNote(string operation, ReadOnlySpan<int> shape)
         => $"AutoDiff={operation};Shape=[{string.Join(", ", shape.ToArray())}]";
