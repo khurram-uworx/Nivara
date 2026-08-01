@@ -197,6 +197,72 @@ public class PerfTests
         }
     }
 
+    [Test]
+    public void DistilBert_Inference_Latency()
+    {
+        string modelDir = Path.Combine(
+            TestContext.CurrentContext.TestDirectory,
+            "..", "..", "..", "..", "..",
+            "samples", "data", "distilbert_sst");
+
+        string safetensorsPath = Path.Combine(modelDir, "model.safetensors");
+        string configPath = Path.Combine(modelDir, "config.json");
+        string vocabPath = Path.Combine(modelDir, "vocab.txt");
+
+        if (!File.Exists(safetensorsPath) || !File.Exists(configPath) || !File.Exists(vocabPath))
+            Assert.Ignore("DistilBERT SST-2 weight files not found; skipping end-to-end latency benchmark.");
+
+        Dictionary<string, (float[] Data, int[] Shape)> tensors;
+        try
+        {
+            tensors = SafeTensorsLoader.Read(safetensorsPath);
+        }
+        catch (NotSupportedException ex)
+        {
+            Assert.Ignore($"Cannot load DistilBERT weights: {ex.Message}");
+            return;
+        }
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(configPath)).ToBertConfig();
+        var tokenizer = MiniLMTokenizer.Load(vocabPath);
+
+        // Inference-default path: no Grad() scope, exercises the leaf fast paths.
+        var model = new DistilBertForSequenceClassification<float>(config, numClasses: 2);
+        model.LoadWeights(tensors);
+
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer,
+            "This is a sample sentence for benchmarking DistilBERT SST-2 inference latency.", maxLen: 128);
+        var inputIds = GradientUtils.Constant(tokenIds);
+        var mask = GradientUtils.Constant(attnMask);
+
+        for (int i = 0; i < 3; i++)
+            model.Forward(inputIds, mask, 1, tokenIds.Length);
+
+        var times = new double[5];
+        for (int i = 0; i < 5; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            model.Forward(inputIds, mask, 1, tokenIds.Length);
+            sw.Stop();
+            times[i] = sw.ElapsedMilliseconds;
+        }
+
+        double avg = times.Average();
+        double min = times.Min();
+        double max = times.Max();
+
+        TestContext.Out.WriteLine(
+            $"DistilBERT SST-2 end-to-end latency (5 runs):\n" +
+            $"  Average: {avg:F1}ms\n" +
+            $"  Min:     {min}ms\n" +
+            $"  Max:     {max}ms");
+
+        var totalBytes = tensors.Sum(t => t.Value.Data.Length * 4L);
+        TestContext.Out.WriteLine(
+            $"  Model parameters: {tensors.Count} tensors, " +
+            $"{totalBytes / (1024.0 * 1024.0):F1}MB total weight data");
+    }
+
     static double MeasureBestOfFiveMs(Func<NivaraColumn<float>> func)
     {
         var best = double.MaxValue;
