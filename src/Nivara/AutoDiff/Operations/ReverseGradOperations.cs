@@ -590,6 +590,50 @@ public static class ReverseGradOperations
             $"AutoDiff=Transpose;Shape={rows}x{cols}->{cols}x{rows}");
     }
 
+    /// <summary>
+    /// Transpose with a caller-supplied destination buffer already holding
+    /// the transposed data. Produces the same graph semantics as
+    /// <see cref="Transpose{T}"/> (a single "Transpose" node whose backward
+    /// accumulates into <paramref name="a"/>) but skips the per-call transpose
+    /// copy — the buffer is a module-owned cache invalidated by the
+    /// parameter's version stamp. Requires grad tracking.
+    /// </summary>
+    internal static ReverseGradTensor<T> TransposeCached<T>(ReverseGradTensor<T> a, T[] transposedData)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (transposedData == null) throw new ArgumentNullException(nameof(transposedData));
+        if (a.Rank != 2)
+            throw new ArgumentException($"Transpose requires a matrix (rank 2), got rank {a.Rank}", nameof(a));
+
+        var rows = a.shape[0];
+        var cols = a.shape[1];
+        if (transposedData.Length != rows * cols)
+            throw new ArgumentException(
+                $"Transposed data length {transposedData.Length} does not match expected {rows * cols}.", nameof(transposedData));
+
+        var resultShape = new[] { cols, rows };
+        var resultTensor = new ReverseGradTensor<T>(
+            NivaraColumn<T>.CreateFromOwnedArray(transposedData),
+            GradientUtils.ShouldTrackGrad(a),
+            resultShape);
+
+        if (GradientUtils.ShouldTrackGrad(a))
+        {
+            var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput) =>
+            {
+                var gArr = new T[cols * rows];
+                typedGradOutput.TryGetSpan(out var gradSpan);
+                TensorsHelper.Transpose(gradSpan, gArr.AsSpan(), cols, rows);
+                AccumulateGradient(a, NivaraColumn<T>.Create(gArr));
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
     public static ReverseGradTensor<T> TransposeAxes<T>(ReverseGradTensor<T> a, int axis1, int axis2) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));

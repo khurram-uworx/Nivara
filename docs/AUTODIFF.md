@@ -483,6 +483,8 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
 - Registers weight (shape `[outFeatures, inFeatures]`) and optional bias (shape `[1, outFeatures]`) as parameters
 - Initializes weights with Kaiming-Uniform: `U(-√(6/fanIn), √(6/fanIn))`
 - Forward transposes weight, applies MatMul, then broadcasts bias via `ones @ bias`
+- Inference (outside `GradientUtils.Grad()`) passes the raw weight straight to the kernel's transposed-B matmul (`MatMulTransposedB`) — zero transposes
+- Training (inside `GradientUtils.Grad()`) reuses a version-stamped transposed-weight cache (issue #87): the `[in, out]` transpose buffer is computed once and invalidated only when `Parameter<T>.Version` changes (weight replaced by an optimizer `Step()` or invalidated via `Touch()`), eliminating the per-forward transpose allocation/copy across an epoch
 
 ### Sequential\<T\>
 
