@@ -44,15 +44,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - README, GETTING-STARTED, ARCHITECTURE, docs/AUTODIFF updated for the inference-default AutoDiff direction and new modules
 
-## [1.0.0] - 2026-07-25
+## [1.0.0]
 
 - Initial stable release of the columnar DataFrame core: typed immutable columns/frames, LINQ-like query engine with lazy/eager/streaming/parallel strategies, tensor-accelerated kernels, explicit null masks, join/group-by/aggregation, CSV/JSON sources, Parquet/Arrow/ML.NET interop (Extensions), performance diagnostics and buffer pooling
 - Reverse-mode AutoDiff (initial), VAE/ConvVAE samples
-
-## [0.9.x] - 2026-05/06
-
-- Evolution of the core engine, query planning, null-mask semantics, and initial AutoDiff groundwork across multiple prerelease iterations published to NuGet
-
-## [0.6.0 - 0.8.0] - 2025/2026
-
-- Early development releases establishing the storage model (Tensor-backed and memory-backed), interfaces, and execution engine

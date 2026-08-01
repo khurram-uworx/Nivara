@@ -158,4 +158,5 @@ Nivara currently supports:
 - [**AUTODIFF**](https://github.com/khurram-uworx/nivara/blob/main/docs/AUTODIFF.md) — automatic differentiation subsystem (operations, modules, optimizers, forward-mode AD, training)
 - [**CONTRIBUTING**](https://github.com/khurram-uworx/nivara/blob/main/CONTRIBUTING.md) — how to contribute to the project
 - [**GUIDELINES**](https://github.com/khurram-uworx/nivara/blob/main/GUIDELINES.md) — architectural rationale, lessons learned, and known gotchas
+- [**CHANGELOG**](https://github.com/khurram-uworx/nivara/blob/main/CHANGELOG.md) — Notable changes and release history
 
