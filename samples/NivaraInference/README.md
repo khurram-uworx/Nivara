@@ -1,6 +1,6 @@
 # Nivara HuggingFace Inference Sample
 
-Load pre-trained HuggingFace models (MobileNetV2, ResNet-18, MiniLM) into Nivara's zero-dependency tensor engine and run forward inference in pure managed .NET — no Python runtime, no CUDA, no third-party ML framework.
+Load pre-trained HuggingFace models (MobileNetV2, ResNet-18, MiniLM, DistilBERT) into Nivara's zero-dependency tensor engine and run forward inference in pure managed .NET — no Python runtime, no CUDA, no third-party ML framework.
 
 The same architecture is also implemented in PyTorch (`samples/NivaraInference/Python/`) for direct CPU performance comparison.
 
@@ -11,16 +11,19 @@ The same architecture is also implemented in PyTorch (`samples/NivaraInference/P
 hf download google/mobilenet_v2_1.0_224 --local-dir samples/data/mobilenet_v2
 hf download timm/resnet18.augreg_in1k --local-dir samples/data/resnet18
 hf download sentence-transformers/all-MiniLM-L6-v2 --local-dir samples/data/minilm
+# (distilbert-base-uncased already present under samples/data/distilbert)
 
 # Run inference
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2
 dotnet run --project samples/NivaraInference -c Release -- resnet18
 dotnet run --project samples/NivaraInference -c Release -- minilm
+dotnet run --project samples/NivaraInference -c Release -- distilbert
 
 # Benchmark (10 passes each)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
 dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 ```
 
 ## Supported models
@@ -30,6 +33,7 @@ dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 | MobileNetV2 | Vision (classification) | 13.5 MB | 262 | 3.4M | 1001 classes |
 | ResNet-18 | Vision (classification) | 44.6 MB | 102 | 11.7M | 1000 classes |
 | MiniLM (L6-v2) | Text (embedding) | 91 MB | 104 | 22.7M | 384-dim embedding |
+| DistilBERT (base-uncased) | Text (encoder) | 255.5 MB | 105 | 67.0M | `[seqLen, 768]` hidden states |
 
 ## Usage
 
@@ -68,6 +72,19 @@ dotnet run --project samples/NivaraInference -- minilm benchmark
 
 # Pairwise cosine similarity demo
 dotnet run --project samples/NivaraInference -- minilm similarity
+```
+
+**DistilBERT:**
+```bash
+# Forward a sentence through the base encoder (output: [128, 768] hidden states)
+dotnet run --project samples/NivaraInference -- distilbert
+
+# Benchmark (3 warmup + 10 timed passes)
+dotnet run --project samples/NivaraInference -- distilbert benchmark
+
+# Compare hidden states with a PyTorch reference (run the Python script first)
+python samples/NivaraInference/Python/distilbert_compare.py
+dotnet run --project samples/NivaraInference -- distilbert compare
 ```
 
 ### Python (PyTorch reference)
@@ -121,13 +138,27 @@ A 6-layer Post-LN BERT encoder producing 384-dimensional sentence embeddings:
 
 - **Embedding stack**: token + position + segment embeddings summed, then LayerNorm
 - **6× Post-LN BERT layers**: LayerNorm → Self-Attention → residual → LayerNorm → FFN → residual
-- **GELU activation** in the FFN intermediate (tanh approximation)
+- **GELU activation** in the FFN intermediate (exact erf)
 - **Bidirectional self-attention** with optional padding mask (via `MultiheadAttention<T>`)
 - **[CLS] token pooling** — extracts the first token's embedding from the output sequence
 - **L2 normalization** — output embedding normalized to unit length for cosine similarity
 - **Tokenization** via `Microsoft.ML.Tokenizers.BertTokenizer` (sample-only dependency)
 
-Nivara modules used: `Embedding<T>` (Gather path), `LayerNorm<T>`, `Linear<T>`, `MultiheadAttention<T>`, `ReverseGradOperations.Gelu`, `ReverseGradOperations.Add`.
+Nivara modules used: `Embedding<T>` (Gather path), `LayerNorm<T>`, `Linear<T>`, `MultiheadAttention<T>`, `ReverseGradOperations.GeluExact`, `ReverseGradOperations.Add`.
+
+### DistilBERT (distilbert-base-uncased)
+
+The 6-layer, 768-dim pre-trained encoder (the baby-step before the fine-tuned SST-2 showcase):
+
+- **Embedding stack**: word + position embeddings (no token-type embeddings) summed, then LayerNorm
+- **6× Post-LN DistilBERT layers**: self-attention → residual → `sa_layer_norm` → FFN (`lin1` → GELU → `lin2`) → residual → `output_layer_norm`
+- **GELU activation** in the FFN intermediate (exact erf)
+- **Weight mapping** from `distilbert.*` SafeTensors keys via `DistilBertLoader.LoadEncoderWeights`
+- **Verification**: `last_hidden_state` matches HuggingFace to `max abs diff 5e-6` (cosine 0.99999988)
+
+Nivara modules used: `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAttention<T>`, `ReverseGradOperations.GeluExact`, `ReverseGradOperations.Add`, `ReverseGradOperations.Softmax`, `ReverseGradOperations.MatMul`.
+
+> **GELU note:** BERT-family models (MiniLM, DistilBERT) use the exact erf GELU (`GeluExact`). The tanh approximation (`ReverseGradOperations.Gelu`) matches HF `gelu_new`/GPT-2 and is retained for GPT-style `TransformerBlock`.
 
 ### Weight loading
 
@@ -136,6 +167,7 @@ Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor
 - **MobileNetV2**: 262 tensors mapped to 262 module parameters (Conv2d weight/bias, BatchNorm running mean/var/weight/bias, Linear weight/bias)
 - **ResNet-18**: 102 tensors mapped to 102 module parameters
 - **MiniLM**: 96 tensors mapped from HuggingFace keys like `encoder.layers.N.attention.self.query.weight` to Nivara `Linear<T>` weight/bias fields
+- **DistilBERT**: 105 tensors mapped via `DistilBertLoader.LoadEncoderWeights` from `distilbert.embeddings.*` and `distilbert.transformer.layer.{0-5}.*` keys
 
 ## SafeTensors loader
 
@@ -190,7 +222,16 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `Embedding<T>` Gather-based lookup | Token/position/segment embeddings |
 | `LayerNorm<T>` with affine parameters | After embedding, after each attention and FFN |
 | `MultiheadAttention<T>` bidirectional mode, padding mask | 6 attention layers |
-| `ReverseGradOperations.Gelu` | FFN intermediate activation |
+| `ReverseGradOperations.GeluExact` | FFN intermediate activation (exact erf) |
 | `ReverseGradOperations.Add` (residual) | Every residual connection |
 | `Module<T>.Eval()` | Inference mode (disables dropout) |
 | `Microsoft.ML.Tokenizers` integration | BERT WordPiece tokenizer |
+
+### DistilBERT (text)
+
+| Capability | Where exercised |
+|---|---|
+| `Embedding<T>` without token-type embeddings | `includeTokenTypeEmbedding: false` |
+| `BertSelfAttention<T>` padding-mask path | 6 attention layers (768-dim, 12 heads) |
+| `ReverseGradOperations.GeluExact` | FFN intermediate activation (exact erf) |
+| `DistilBertLoader.LoadEncoderWeights` | `distilbert.*` SafeTensors weight mapping |

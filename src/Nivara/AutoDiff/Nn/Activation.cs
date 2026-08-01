@@ -17,6 +17,9 @@ public static class Activation
     public static ReverseGradTensor<T> Gelu<T>(ReverseGradTensor<T> input) where T : struct, IFloatingPointIeee754<T>
         => ReverseGradOperations.Gelu(input);
 
+    public static ReverseGradTensor<T> GeluExact<T>(ReverseGradTensor<T> input) where T : struct, IFloatingPointIeee754<T>
+        => ReverseGradOperations.GeluExact(input);
+
     public static ReverseGradTensor<T> LeakyRelu<T>(ReverseGradTensor<T> input, T negativeSlope = default)
         where T : struct, IFloatingPointIeee754<T>
         => ReverseGradOperations.LeakyRelu(input, negativeSlope);

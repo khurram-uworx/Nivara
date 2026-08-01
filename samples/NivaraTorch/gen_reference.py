@@ -347,6 +347,10 @@ def run():
 
     # =========================================================================
     # GELU tests
+    # "gelu_*" fixtures use the tanh approximation (PyTorch F.gelu approximate="tanh"),
+    # "gelu_exact_*" fixtures use the exact erf-based GELU (F.gelu default).
+    # The exact cases use a dedicated RNG so the main rng stream (and therefore all
+    # other fixtures) is unaffected.
     # =========================================================================
     gelu_cases = [
         ("gelu_1d", (32,)),
@@ -355,6 +359,29 @@ def run():
 
     for name, inp_shape in gelu_cases:
         inp = torch.randn(inp_shape, generator=rng)
+        out = F.gelu(inp, approximate="tanh")
+
+        inp_np = inp.numpy().astype(np.float32)
+        out_np = out.numpy().astype(np.float32)
+
+        inp_np.tofile(os.path.join(TEST_DIR, f"{name}_input.bin"))
+        out_np.tofile(os.path.join(TEST_DIR, f"{name}_output.bin"))
+
+        manifest[name] = {
+            "layer": "GELU (tanh)",
+            "input_shape": list(inp_shape),
+            "output_shape": list(out_np.shape),
+        }
+        print(f"  {name}: input={inp_shape} output={out_np.shape}")
+
+    gelu_exact_rng = torch.Generator().manual_seed(101)
+    gelu_exact_cases = [
+        ("gelu_exact_1d", (32,)),
+        ("gelu_exact_4d", (1, 8, 4, 4)),
+    ]
+
+    for name, inp_shape in gelu_exact_cases:
+        inp = torch.randn(inp_shape, generator=gelu_exact_rng)
         out = F.gelu(inp)
 
         inp_np = inp.numpy().astype(np.float32)
@@ -364,7 +391,7 @@ def run():
         out_np.tofile(os.path.join(TEST_DIR, f"{name}_output.bin"))
 
         manifest[name] = {
-            "layer": "GELU",
+            "layer": "GELU (exact)",
             "input_shape": list(inp_shape),
             "output_shape": list(out_np.shape),
         }
