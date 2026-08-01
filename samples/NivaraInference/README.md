@@ -188,12 +188,12 @@ Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode
 
 | Model | Input | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |-------|-------|---------------|-------------------|----------|
-| **MobileNetV2** | 1×3×224×224 | 115 ms | 2,471 ms | **~21×** |
-| **ResNet-18** | 1×3×224×224 | 68 ms | 667 ms | **~10×** |
-| **MiniLM-L6** | 128 tokens | 58 ms | 429 ms | **~7×** |
-| **DistilBERT** | 128 tokens | 105 ms | 1,484 ms | **~14×** |
+| **MobileNetV2** | 1×3×224×224 | 115 ms | 2,254 ms | **~20×** |
+| **ResNet-18** | 1×3×224×224 | 68 ms | 641 ms | **~9×** |
+| **MiniLM-L6** | 128 tokens | 58 ms | 225 ms | **~4×** |
+| **DistilBERT** | 128 tokens | 105 ms | 484 ms | **~5×** |
 
-AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. MiniLM is closest to parity since its attention operations map well to `TensorPrimitives` and `TensorsHelper` span-based kernels. DistilBERT (~14×) is slower than MiniLM (~7×) at the same 128-token input because it is a larger model (67.0M vs 22.7M params, 768-dim vs 384-dim) whose per-head `Slice`/`Transpose`/`MatMul`/`Softmax` attention loop and mask building dominate the forward pass — the same hot path identified for the follow-up fused multi-head attention optimization.
+AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. MiniLM and DistilBERT now sit at ~4–5× of PyTorch; the remaining gap is dominated by the per-head `Slice`/`Transpose`/`MatMul`/`Softmax` attention loop, tracked as the fused multi-head attention follow-up (see issue #86).
 
 ## Sample data
 
