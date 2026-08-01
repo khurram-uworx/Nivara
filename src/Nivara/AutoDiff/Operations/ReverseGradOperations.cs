@@ -657,20 +657,23 @@ public static class ReverseGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var aArr = new T[a.Length];
-        a.AsSpan().CopyTo(aArr.AsSpan());
+        bool trackGrad = GradientUtils.ShouldTrackGrad(a);
 
         var resultArr = new T[a.Length];
+        var source = a.AsSpan();
         for (int i = 0; i < a.Length; i++)
         {
-            double x = double.CreateChecked(aArr[i]);
+            double x = double.CreateChecked(source[i]);
             resultArr[i] = T.CreateChecked(0.5 * x * (1.0 + Math.Tanh(Math.Sqrt(2.0 / Math.PI) * (x + 0.044715 * x * x * x))));
         }
 
-        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
+        var resultTensor = ResultTensor(resultArr, a, trackGrad);
 
-        if (GradientUtils.ShouldTrackGrad(a))
+        if (trackGrad)
         {
+            var aArr = new T[a.Length];
+            a.AsSpan().CopyTo(aArr.AsSpan());
+
             var gradFn = new OpNode<T>("Gelu", new object[] { a }, (typedGradOutput) =>
             {
                 var gradArr = new T[a.Length];
@@ -695,16 +698,18 @@ public static class ReverseGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var aArr = new T[a.Length];
-        a.AsSpan().CopyTo(aArr.AsSpan());
+        bool trackGrad = GradientUtils.ShouldTrackGrad(a);
 
         var resultArr = new T[a.Length];
-        NivaraTensorExtensions.GeluExactKernel(aArr, resultArr);
+        NivaraTensorExtensions.GeluExactKernel(a.AsSpan(), resultArr);
 
-        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
+        var resultTensor = ResultTensor(resultArr, a, trackGrad);
 
-        if (GradientUtils.ShouldTrackGrad(a))
+        if (trackGrad)
         {
+            var aArr = new T[a.Length];
+            a.AsSpan().CopyTo(aArr.AsSpan());
+
             var gradFn = new OpNode<T>("GeluExact", new object[] { a }, (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gradSpan);
