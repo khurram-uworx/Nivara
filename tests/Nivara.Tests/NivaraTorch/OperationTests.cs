@@ -59,4 +59,42 @@ public class OperationTests
         Assert.That(output.Shape, Is.EqualTo(new[] { 4, 16 }));
         TestHelpers.AssertTensorEqual(expected, TestHelpers.ExtractOutput(output), label: "MatMul");
     }
+
+    [Test]
+    public void AddBias_MatchesPyTorch()
+    {
+        var a = TestHelpers.LoadBin("add_bias_a.bin");
+        var bias = TestHelpers.LoadBin("add_bias_b.bin");
+        var expected = TestHelpers.LoadBin("add_bias_output.bin");
+
+        var aTensor = ReverseGradTensor<float>.FromArray(a, requiresGrad: false);
+        aTensor.Reshape(4, 16);
+        var biasTensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
+
+        var output = ReverseGradOperations.AddBias(aTensor, biasTensor);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 4, 16 }));
+        TestHelpers.AssertTensorEqual(expected, TestHelpers.ExtractOutput(output), label: "AddBias");
+    }
+
+    [Test]
+    public void MatMulTransposedB_MatchesPyTorch()
+    {
+        gradScope?.Dispose();
+        gradScope = null;
+
+        var a = TestHelpers.LoadBin("matmul_transposed_b_a.bin");
+        var b = TestHelpers.LoadBin("matmul_transposed_b_b.bin");
+        var expected = TestHelpers.LoadBin("matmul_transposed_b_output.bin");
+
+        var aTensor = ReverseGradTensor<float>.FromArray(a, requiresGrad: false);
+        aTensor.Reshape(4, 8);
+        var bTensor = ReverseGradTensor<float>.FromArray(b, requiresGrad: false);
+        bTensor.Reshape(16, 8);
+
+        var output = ReverseGradOperations.MatMulTransposedB(aTensor, bTensor);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 4, 16 }));
+        TestHelpers.AssertTensorEqual(expected, TestHelpers.ExtractOutput(output), label: "MatMulTransposedB");
+    }
 }

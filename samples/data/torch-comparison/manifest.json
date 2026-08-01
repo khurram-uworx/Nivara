@@ -579,6 +579,54 @@
       4
     ]
   },
+  "gelu_1d": {
+    "layer": "GELU (tanh)",
+    "input_shape": [
+      32
+    ],
+    "output_shape": [
+      32
+    ]
+  },
+  "gelu_4d": {
+    "layer": "GELU (tanh)",
+    "input_shape": [
+      1,
+      8,
+      4,
+      4
+    ],
+    "output_shape": [
+      1,
+      8,
+      4,
+      4
+    ]
+  },
+  "gelu_exact_1d": {
+    "layer": "GELU (exact)",
+    "input_shape": [
+      32
+    ],
+    "output_shape": [
+      32
+    ]
+  },
+  "gelu_exact_4d": {
+    "layer": "GELU (exact)",
+    "input_shape": [
+      1,
+      8,
+      4,
+      4
+    ],
+    "output_shape": [
+      1,
+      8,
+      4,
+      4
+    ]
+  },
   "maxpool_3x3_s2_p1": {
     "layer": "MaxPool2d",
     "input_shape": [
@@ -925,6 +973,35 @@
     ],
     "output_shape": [
       1
+    ]
+  },
+  "add_bias": {
+    "layer": "AddBias",
+    "a_shape": [
+      4,
+      16
+    ],
+    "bias_shape": [
+      16
+    ],
+    "output_shape": [
+      4,
+      16
+    ]
+  },
+  "matmul_transposed_b": {
+    "layer": "MatMulTransposedB",
+    "a_shape": [
+      4,
+      8
+    ],
+    "b_shape": [
+      16,
+      8
+    ],
+    "output_shape": [
+      4,
+      16
     ]
   }
 }

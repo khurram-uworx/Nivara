@@ -352,7 +352,7 @@ Formal A/B validation of every NN layer type in Nivara's AutoDiff engine. PyTorc
 
 ### Fixture data
 
-All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 47 test cases covering:
+All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 51 test cases covering:
 
 | Layer type | Configs | Notes |
 |---|---|---|
@@ -374,6 +374,8 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 | LayerNorm | 2 | 2D and 3D |
 | Softmax / LogSoftmax | 2 | Over dim 1 |
 | MatMul | 1 | 4×8 @ 8×16 |
+| MatMulTransposedB | 1 | Inference `a @ b^T`, raw `[N, K]` weight layout |
+| AddBias | 1 | Row-broadcast bias addition (`a[i,j] + bias[j]`) |
 | BCEWithLogitsLoss | 2 | Sum and mean reduction |
 | CrossEntropyLoss | 1 | With integer targets |
 | MSELoss | 2 | Sum and mean reduction |
@@ -382,6 +384,7 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 ### Layout notes
 
 - **RMSNorm**: `ReverseGradOperations.RMSNorm` normalizes over the entire flattened tensor. For per-row normalization (matching PyTorch), use `ReverseGradOperations.PerRowRMSNorm`.
+- **MatMulTransposedB**: the transpose-free inference matmul (`a @ b^T`, raw `[N, K]` weight layout) used by `Linear.Forward` outside `Grad()`. It is `internal`; the test reaches it via `InternalsVisibleTo`.
 
 ### How to run tests
 

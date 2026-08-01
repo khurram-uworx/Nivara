@@ -767,6 +767,50 @@ def run():
     print(f"  l1_loss: pred={l1_pred.shape} sum={l1_out.item():.6f}")
 
     # =========================================================================
+    # AddBias tests (row-broadcast bias addition, linear bias op)
+    # Uses a dedicated RNG so the main stream (and every other fixture) is
+    # bit-stable. Computes a + b where b is broadcast across rows.
+    # =========================================================================
+    ops_rng = torch.Generator().manual_seed(202)
+
+    add_bias_a = torch.randn(4, 16, generator=ops_rng)
+    add_bias_b = torch.randn(16, generator=ops_rng)
+    add_bias_out = add_bias_a + add_bias_b
+
+    add_bias_a.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "add_bias_a.bin"))
+    add_bias_b.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "add_bias_b.bin"))
+    add_bias_out.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "add_bias_output.bin"))
+
+    manifest["add_bias"] = {
+        "layer": "AddBias",
+        "a_shape": list(add_bias_a.shape),
+        "bias_shape": list(add_bias_b.shape),
+        "output_shape": list(add_bias_out.shape),
+    }
+    print(f"  add_bias: a={add_bias_a.shape} bias={add_bias_b.shape} output={add_bias_out.shape}")
+
+    # =========================================================================
+    # MatMulTransposedB tests (inference a @ b^T, linear weight layout)
+    # b is saved in [N, K] row-major — the raw nn.Linear weight layout the
+    # kernel consumes without a transpose. Same dedicated RNG.
+    # =========================================================================
+    mmtb_a = torch.randn(4, 8, generator=ops_rng)
+    mmtb_b = torch.randn(16, 8, generator=ops_rng)
+    mmtb_out = torch.matmul(mmtb_a, mmtb_b.t())
+
+    mmtb_a.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "matmul_transposed_b_a.bin"))
+    mmtb_b.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "matmul_transposed_b_b.bin"))
+    mmtb_out.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "matmul_transposed_b_output.bin"))
+
+    manifest["matmul_transposed_b"] = {
+        "layer": "MatMulTransposedB",
+        "a_shape": list(mmtb_a.shape),
+        "b_shape": list(mmtb_b.shape),
+        "output_shape": list(mmtb_out.shape),
+    }
+    print(f"  matmul_transposed_b: a={mmtb_a.shape} b={mmtb_b.shape} output={mmtb_out.shape}")
+
+    # =========================================================================
     # Write manifest
     # =========================================================================
     manifest_path = os.path.join(TEST_DIR, "manifest.json")
