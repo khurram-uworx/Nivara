@@ -16,7 +16,7 @@ Reproducibility:
 
 Usage: python gen_reference.py
 """
-import os, json, struct, sys
+import os, json, struct, sys, math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -809,6 +809,75 @@ def run():
         "output_shape": list(mmtb_out.shape),
     }
     print(f"  matmul_transposed_b: a={mmtb_a.shape} b={mmtb_b.shape} output={mmtb_out.shape}")
+
+    # =========================================================================
+    # Fused multi-head attention tests (ReverseGradOperations.MultiHeadAttention)
+    # Dedicated RNG keeps the main stream bit-stable. scale = 1/sqrt(headDim).
+    # =========================================================================
+    attn_rng = torch.Generator().manual_seed(303)
+
+    def save_attn_case(name, q, k, v, scale, mask, dout, num_heads=4):
+        q = q.detach().requires_grad_(True)
+        k = k.detach().requires_grad_(True)
+        v = v.detach().requires_grad_(True)
+        d = q.shape[1]
+        head_dim = d // num_heads
+        heads = []
+        for h in range(num_heads):
+            qh = q[:, h * head_dim:(h + 1) * head_dim]
+            kh = k[:, h * head_dim:(h + 1) * head_dim]
+            vh = v[:, h * head_dim:(h + 1) * head_dim]
+            scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale
+            if mask is not None:
+                scores = scores + mask
+            p = torch.softmax(scores, dim=-1)
+            heads.append(torch.matmul(p, vh))
+        out = torch.cat(heads, dim=-1)
+        dq, dk, dv = torch.autograd.grad(out, (q, k, v), grad_outputs=dout)
+
+        q.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_q.bin"))
+        k.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_k.bin"))
+        v.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_v.bin"))
+        out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_output.bin"))
+        if mask is not None:
+            mask.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_mask.bin"))
+        dout.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dout.bin"))
+        dq.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dq.bin"))
+        dk.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dk.bin"))
+        dv.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dv.bin"))
+        manifest[name] = {
+            "layer": "MultiHeadAttention",
+            "q_shape": list(q.shape),
+            "k_shape": list(k.shape),
+            "v_shape": list(v.shape),
+            "num_heads": num_heads,
+            "scale": float(scale),
+            "masked": mask is not None,
+            "output_shape": list(out.shape),
+        }
+        print(f"  {name}: q={list(q.shape)} k={list(k.shape)} v={list(v.shape)} output={list(out.shape)}")
+
+    # Self-attention with a causal additive mask (qLen == kvLen == 4, D == 16).
+    attn_q = torch.randn(4, 16, generator=attn_rng)
+    attn_k = torch.randn(4, 16, generator=attn_rng)
+    attn_v = torch.randn(4, 16, generator=attn_rng)
+    attn_scale = 1.0 / math.sqrt(4)  # headDim = 16 / 4
+    attn_mask = torch.triu(torch.full((4, 4), float("-inf")), diagonal=1)
+    attn_dout = torch.randn(4, 16, generator=attn_rng)
+    save_attn_case("attn_self_causal", attn_q, attn_k, attn_v, attn_scale, attn_mask, attn_dout)
+
+    # Self-attention without a mask.
+    save_attn_case("attn_self", attn_q, attn_k, attn_v, attn_scale, None, attn_dout)
+
+    # Cross-attention (qLen != kvLen), last key/value is padding.
+    attn_cq = torch.randn(3, 8, generator=attn_rng)
+    attn_ck = torch.randn(5, 8, generator=attn_rng)
+    attn_cv = torch.randn(5, 8, generator=attn_rng)
+    attn_cscale = 1.0 / math.sqrt(4)  # headDim = 8 / 2
+    attn_cmask = torch.zeros(3, 5)
+    attn_cmask[:, 4] = float("-inf")
+    attn_cdout = torch.randn(3, 8, generator=attn_rng)
+    save_attn_case("attn_cross", attn_cq, attn_ck, attn_cv, attn_cscale, attn_cmask, attn_cdout, num_heads=2)
 
     # =========================================================================
     # Write manifest

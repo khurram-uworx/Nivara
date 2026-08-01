@@ -113,12 +113,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
     ReverseGradTensor<T> MultiHeadAttention(ReverseGradTensor<T> Q, ReverseGradTensor<T> K,
         ReverseGradTensor<T> V, int L)
     {
-        var scaleTensor = GradientUtils.Full(L * L, attnScale);
-        scaleTensor.Reshape(L, L);
-
-        var mask = CausalMaskSlice(L);
-
-        return ModuleHelpers<T>.MultiHeadAttention(Q, K, V, nHead, headDim, scaleTensor, mask);
+        return ReverseGradOperations.MultiHeadAttention(Q, K, V, nHead, attnScale, CausalMaskSlice(L));
     }
 
     ReverseGradTensor<T> ApplyNorm(ReverseGradTensor<T> x, int rows, int cols)

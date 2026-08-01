@@ -342,6 +342,214 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.MatrixNote("MatMulTransposedB", aRows, aCols, bCols));
     }
 
+    /// <summary>
+    /// Fused multi-head scaled dot-product attention as a single graph node.
+    ///
+    /// Computes, per head, softmax(scale * (Q_h @ K_h^T) + mask) @ V_h using
+    /// SIMD <see cref="TensorsHelper.MultiplyCore{T}"/> row kernels and a
+    /// transpose-free QK^T path (the transposed-B layout the kernel consumes
+    /// equals K's raw layout). The attention scale and the additive
+    /// padding/causal mask fold into the per-row score softmax over a single
+    /// [qLen, kvLen] pass — no separate Scale/Mask/Add nodes. In training one
+    /// backward VJP produces dQ, dK, dV, replacing the multi-node
+    /// Slice/Transpose/MatMul/Multiply/Add/Softmax/Concat chain.
+    ///
+    /// Query is [qLen, D]; key/value are [kvLen, D]; output is [qLen, D] with
+    /// D = numHeads * headDim. <paramref name="mask"/> is an optional
+    /// [qLen, kvLen] additive mask — use <c>T.NegativeInfinity</c> to suppress
+    /// positions (padding/causal).
+    /// </summary>
+    public static ReverseGradTensor<T> MultiHeadAttention<T>(
+        ReverseGradTensor<T> query,
+        ReverseGradTensor<T> key,
+        ReverseGradTensor<T> value,
+        int numHeads,
+        T scale,
+        ReverseGradTensor<T>? mask = null)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (query == null) throw new ArgumentNullException(nameof(query));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+        if (value == null) throw new ArgumentNullException(nameof(value));
+        if (numHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
+        if (query.Rank != 2)
+            throw new ArgumentException($"Query must be a matrix (rank 2), got rank {query.Rank}", nameof(query));
+        if (key.Rank != 2)
+            throw new ArgumentException($"Key must be a matrix (rank 2), got rank {key.Rank}", nameof(key));
+        if (value.Rank != 2)
+            throw new ArgumentException($"Value must be a matrix (rank 2), got rank {value.Rank}", nameof(value));
+
+        int qLen = query.shape[0];
+        int kvLen = key.shape[0];
+        int D = query.shape[1];
+        if (D % numHeads != 0)
+            throw new ArgumentException($"Query width ({D}) must be divisible by numHeads ({numHeads}).", nameof(query));
+        int headDim = D / numHeads;
+        if (key.shape[1] != D || value.shape[1] != D)
+            throw new ArgumentException($"Key/Value width must equal query width ({D}).");
+        if (key.shape[0] != value.shape[0])
+            throw new ArgumentException($"Key and Value row counts must match (got {key.shape[0]} vs {value.shape[0]}).");
+        if (mask != null && (mask.Rank != 2 || mask.shape[0] != qLen || mask.shape[1] != kvLen))
+            throw new ArgumentException($"Mask must be a {qLen}x{kvLen} additive matrix.");
+
+        bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
+        int scoreLen = qLen * kvLen;
+        int qHeadsLen = numHeads * qLen * headDim;
+        int kvHeadsLen = numHeads * kvLen * headDim;
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffMultiHeadAttention",
+            query.Length + key.Length + value.Length,
+
+            () =>
+            {
+                var qSpan = query.AsSpan();
+                var kSpan = key.AsSpan();
+                var vSpan = value.AsSpan();
+                var maskSpan = mask != null ? mask.AsSpan() : ReadOnlySpan<T>.Empty;
+
+                var qHeads = ArrayPool<T>.Shared.Rent(Math.Max(qHeadsLen, 1));
+                var kHeads = ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1));
+                var vHeads = ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1));
+                var scores = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                var outHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                try
+                {
+                    AttentionKernels<T>.PackHeads(qSpan, qHeads.AsSpan(0, qHeadsLen), qLen, numHeads, headDim);
+                    AttentionKernels<T>.PackHeads(kSpan, kHeads.AsSpan(0, kvHeadsLen), kvLen, numHeads, headDim);
+                    AttentionKernels<T>.PackHeads(vSpan, vHeads.AsSpan(0, kvHeadsLen), kvLen, numHeads, headDim);
+
+                    var output = new T[qLen * D];
+                    T[]? savedWeights = shouldTrack ? new T[numHeads * scoreLen] : null;
+
+                    for (int h = 0; h < numHeads; h++)
+                    {
+                        var qh = qHeads.AsSpan(h * qLen * headDim, qLen * headDim);
+                        var kh = kHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+                        var vh = vHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+
+                        TensorsHelper.MultiplyCore(qh, kh, scores, qLen, headDim, kvLen, bTransposed: true);
+                        var scoresSpan = scores.AsSpan(0, scoreLen);
+                        TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
+                        if (!maskSpan.IsEmpty)
+                            TensorPrimitives.Add(scoresSpan, maskSpan, scoresSpan);
+
+                        AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
+
+                        if (savedWeights != null)
+                            scoresSpan.CopyTo(savedWeights.AsSpan(h * scoreLen, scoreLen));
+
+                        TensorsHelper.MultiplyCore(scores, vh, outHead, qLen, kvLen, headDim);
+                        AttentionKernels<T>.ScatterHead(
+                            outHead.AsSpan(0, qLen * headDim), output.AsSpan(), qLen, D, h, headDim);
+                    }
+
+                    var result = new ReverseGradTensor<T>(
+                        NivaraColumn<T>.CreateFromOwnedArray(output), shouldTrack, new[] { qLen, D });
+
+                    if (shouldTrack)
+                    {
+                        var weights = savedWeights!;
+                        var inputs = mask != null
+                            ? new object[] { query, key, value, mask }
+                            : new object[] { query, key, value };
+
+                        var gradFn = new OpNode<T>("MultiHeadAttention", inputs, (typedGradOutput) =>
+                        {
+                            var dQ = new T[qLen * D];
+                            var dK = new T[kvLen * D];
+                            var dV = new T[kvLen * D];
+
+                            var qHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                            var kHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                            var vHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                            var dOHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                            var dQHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                            var dKHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                            var dVHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                            var dP = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                            var dPT = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                            var pT = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                            try
+                            {
+                                typedGradOutput.TryGetSpan(out var gradSpan);
+                                var bQSpan = query.AsSpan();
+                                var bKSpan = key.AsSpan();
+                                var bVSpan = value.AsSpan();
+
+                                for (int h = 0; h < numHeads; h++)
+                                {
+                                    var qhSpan = qHead.AsSpan(0, qLen * headDim);
+                                    var khSpan = kHead.AsSpan(0, kvLen * headDim);
+                                    var vhSpan = vHead.AsSpan(0, kvLen * headDim);
+                                    AttentionKernels<T>.GatherHead(bQSpan, qhSpan, qLen, D, h, headDim);
+                                    AttentionKernels<T>.GatherHead(bKSpan, khSpan, kvLen, D, h, headDim);
+                                    AttentionKernels<T>.GatherHead(bVSpan, vhSpan, kvLen, D, h, headDim);
+
+                                    var dOH = dOHead.AsSpan(0, qLen * headDim);
+                                    AttentionKernels<T>.GatherHead(gradSpan, dOH, qLen, D, h, headDim);
+
+                                    var pHead = weights.AsSpan(h * scoreLen, scoreLen);
+                                    var dPSpan = dP.AsSpan(0, scoreLen);
+
+                                    TensorsHelper.MultiplyCore(dOH, vhSpan, dP, qLen, headDim, kvLen, bTransposed: true);
+                                    AttentionKernels<T>.SoftmaxBackwardRows(pHead, dPSpan, qLen, kvLen);
+                                    TensorPrimitives.Multiply(dPSpan, scale, dPSpan);
+
+                                    var dQH = dQHead.AsSpan(0, qLen * headDim);
+                                    var dKH = dKHead.AsSpan(0, kvLen * headDim);
+                                    var dVH = dVHead.AsSpan(0, kvLen * headDim);
+
+                                    TensorsHelper.MultiplyCore(dP, khSpan, dQHead, qLen, kvLen, headDim);
+                                    TensorsHelper.Transpose(dPSpan, dPT.AsSpan(0, scoreLen), qLen, kvLen);
+                                    TensorsHelper.MultiplyCore(dPT, qhSpan, dKHead, kvLen, qLen, headDim);
+                                    TensorsHelper.Transpose(pHead, pT.AsSpan(0, scoreLen), qLen, kvLen);
+                                    TensorsHelper.MultiplyCore(pT, dOH, dVHead, kvLen, qLen, headDim);
+
+                                    AttentionKernels<T>.ScatterHead(dQH, dQ.AsSpan(), qLen, D, h, headDim);
+                                    AttentionKernels<T>.ScatterHead(dKH, dK.AsSpan(), kvLen, D, h, headDim);
+                                    AttentionKernels<T>.ScatterHead(dVH, dV.AsSpan(), kvLen, D, h, headDim);
+                                }
+
+                                if (query.RequiresGrad)
+                                    AccumulateGradient(query, NivaraColumn<T>.CreateFromOwnedArray(dQ));
+                                if (key.RequiresGrad)
+                                    AccumulateGradient(key, NivaraColumn<T>.CreateFromOwnedArray(dK));
+                                if (value.RequiresGrad)
+                                    AccumulateGradient(value, NivaraColumn<T>.CreateFromOwnedArray(dV));
+                            }
+                            finally
+                            {
+                                ArrayPool<T>.Shared.Return(qHead, clearArray: true);
+                                ArrayPool<T>.Shared.Return(kHead, clearArray: true);
+                                ArrayPool<T>.Shared.Return(vHead, clearArray: true);
+                                ArrayPool<T>.Shared.Return(dOHead, clearArray: true);
+                                ArrayPool<T>.Shared.Return(dQHead, clearArray: true);
+                                ArrayPool<T>.Shared.Return(dKHead, clearArray: true);
+                                ArrayPool<T>.Shared.Return(dVHead, clearArray: true);
+                                ArrayPool<T>.Shared.Return(dP, clearArray: true);
+                                ArrayPool<T>.Shared.Return(dPT, clearArray: true);
+                                ArrayPool<T>.Shared.Return(pT, clearArray: true);
+                            }
+                        });
+
+                        ComputationGraph.AddNode(result, gradFn);
+                    }
+
+                    return result;
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(qHeads, clearArray: true);
+                    ArrayPool<T>.Shared.Return(kHeads, clearArray: true);
+                    ArrayPool<T>.Shared.Return(vHeads, clearArray: true);
+                    ArrayPool<T>.Shared.Return(scores, clearArray: true);
+                    ArrayPool<T>.Shared.Return(outHead, clearArray: true);
+                }
+            },
+            AutoDiffDiagnostics.ShapeNote("MultiHeadAttention", [qLen, D]));
+    }
+
     public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));

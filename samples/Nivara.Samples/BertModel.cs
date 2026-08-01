@@ -49,7 +49,6 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
     public readonly Linear<T> vProj;
     public readonly Linear<T> oProj;
     readonly int _numHeads;
-    readonly int _headDim;
     readonly T _scale;
 
     public BertSelfAttention(int embedDim, int numHeads)
@@ -59,8 +58,7 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         vProj = new Linear<T>(embedDim, embedDim);
         oProj = new Linear<T>(embedDim, embedDim);
         _numHeads = numHeads;
-        _headDim = embedDim / numHeads;
-        _scale = T.CreateChecked(1.0 / Math.Sqrt(_headDim));
+        _scale = T.CreateChecked(1.0 / Math.Sqrt(embedDim / numHeads));
         RegisterModules(qProj, kProj, vProj, oProj);
     }
 
@@ -154,34 +152,7 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         ReverseGradTensor<T> Q, ReverseGradTensor<T> K, ReverseGradTensor<T> V,
         ReverseGradTensor<T>? mask)
     {
-        int L = Q.Shape[0];
-        var scaleData = new T[L * L];
-        Array.Fill(scaleData, _scale);
-        var scaleTensor = ReverseGradTensor<T>.FromArray(scaleData, requiresGrad: false);
-        scaleTensor.Reshape(L, L);
-
-        var heads = new ReverseGradTensor<T>[_numHeads];
-
-        for (int h = 0; h < _numHeads; h++)
-        {
-            int hs = h * _headDim;
-
-            var Q_h = ReverseGradOperations.Slice(Q, hs, _headDim);
-            var K_h = ReverseGradOperations.Slice(K, hs, _headDim);
-            var V_h = ReverseGradOperations.Slice(V, hs, _headDim);
-
-            var K_h_T = ReverseGradOperations.Transpose(K_h);
-            var scores = ReverseGradOperations.MatMul(Q_h, K_h_T);
-            scores = ReverseGradOperations.Multiply(scores, scaleTensor);
-
-            if (mask != null)
-                scores = ReverseGradOperations.Add(scores, mask);
-
-            var weights = ReverseGradOperations.Softmax(scores);
-            heads[h] = ReverseGradOperations.MatMul(weights, V_h);
-        }
-
-        return ReverseGradOperations.Concat(heads, axis: 1);
+        return ReverseGradOperations.MultiHeadAttention(Q, K, V, _numHeads, _scale, mask);
     }
 }
 
