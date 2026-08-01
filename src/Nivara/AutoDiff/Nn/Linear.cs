@@ -1,6 +1,5 @@
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
@@ -58,13 +57,7 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
         var output = ReverseGradOperations.MatMul(input, transposed);
 
         if (useBias && bias != null)
-        {
-            var biasTensor = bias.Tensor;
-            var ones = GradientUtils.Ones<T>(input.shape[0]);
-            ones.Reshape(ones.Length, 1);
-            var biasBroadcast = ReverseGradOperations.MatMul(ones, biasTensor);
-            output = ReverseGradOperations.Add(output, biasBroadcast);
-        }
+            output = ReverseGradOperations.AddBias(output, bias.Tensor);
 
         return output;
     }

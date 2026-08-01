@@ -43,6 +43,65 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Adds a bias vector to each row of a matrix: result[i,j] = a[i,j] + bias[j].
+    /// Avoids the Ones+MatMul broadcast used for linear layer biases.
+    /// </summary>
+    public static ReverseGradTensor<T> AddBias<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> bias)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (bias == null) throw new ArgumentNullException(nameof(bias));
+
+        if (a.Rank != 2)
+            throw new ArgumentException($"AddBias expects a matrix (rank 2) input, got rank {a.Rank}", nameof(a));
+
+        var rows = a.shape[0];
+        var cols = a.shape[1];
+        if (bias.Length != cols)
+            throw new ArgumentException($"AddBias bias length ({bias.Length}) must equal the input column count ({cols}).");
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffAddBias",
+            a.Length + bias.Length,
+
+            () =>
+            {
+                var aSpan = a.AsSpan();
+                var biasSpan = bias.AsSpan();
+                var resultArr = new T[a.Length];
+                for (int r = 0; r < rows; r++)
+                {
+                    var resultRow = resultArr.AsSpan(r * cols, cols);
+                    TensorPrimitives.Add(aSpan.Slice(r * cols, cols), biasSpan, resultRow);
+                }
+
+                var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a, bias));
+
+                if (GradientUtils.ShouldTrackGrad(a, bias))
+                {
+                    var gradFn = new OpNode<T>("AddBias", new object[] { a, bias }, (typedGradOutput) =>
+                    {
+                        typedGradOutput.TryGetSpan(out var gSpan);
+                        if (GradientUtils.ShouldTrackGrad(a))
+                            AccumulateGradient(a, typedGradOutput);
+                        if (bias.RequiresGrad)
+                        {
+                            var biasGrad = new T[cols];
+                            for (int r = 0; r < rows; r++)
+                                TensorPrimitives.Add(biasGrad, gSpan.Slice(r * cols, cols), biasGrad);
+                            AccumulateGradient(bias, NivaraColumn<T>.Create(biasGrad));
+                        }
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
+            },
+            AutoDiffDiagnostics.MatrixNote("AddBias", rows, cols, cols));
+    }
+
     public static ReverseGradTensor<T> Subtract<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
