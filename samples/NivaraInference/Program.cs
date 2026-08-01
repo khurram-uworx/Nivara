@@ -20,12 +20,13 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert> [benchmark|similarity|compare|compare_diag|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst> [benchmark|similarity|compare|compare_diag|predict|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
             Console.WriteLine("  compare           Run forward pass on shared input, print logits for Python comparison");
             Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
+            Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             return 1;
         }
@@ -67,6 +68,10 @@ class Program
             case "distilbert":
                 if (compare) return RunDistilBertCompare(tensors);
                 return benchmark ? RunDistilBertBenchmark(tensors) : RunDistilBertInference(tensors);
+            case "distilbert_sst":
+                if (compare) return RunDistilBertSstCompare(tensors);
+                if (mode == "predict") return RunDistilBertSstPredict(tensors);
+                return benchmark ? RunDistilBertSstBenchmark(tensors) : RunDistilBertSstInference(tensors);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -1014,6 +1019,157 @@ class Program
             if (i < Math.Min(10, len) - 1) Console.Write(", ");
         }
         Console.WriteLine("]");
+
+        return 0;
+    }
+
+    static int RunDistilBertSstInference(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Inference ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        Console.WriteLine($"Config: dim={config.Dim}, layers={config.NLayers}, heads={config.NHeads}, hidden={config.HiddenDim}");
+
+        var buildSw = Stopwatch.StartNew();
+        var model = DistilBertSst.Load(tensors, modelDir);
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = DistilBertSst.CountParameters(tensors);
+        double weightMb = DistilBertSst.WeightMb(tensors);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {weightMb:F1} MB");
+        Console.WriteLine();
+
+        string text = "This is a test sentence.";
+        Console.WriteLine($"Input text: \"{text}\"");
+
+        model.Eval();
+        var fwdSw = Stopwatch.StartNew();
+        var logits = DistilBertSst.PredictLogits(model, tokenizer, text, maxLen: 128);
+        fwdSw.Stop();
+        var (argMax, probs) = DistilBertSst.Softmax(logits);
+
+        Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
+        Console.WriteLine($"Logits: [{logits.Data[0]:F6}, {logits.Data[1]:F6}]");
+        Console.WriteLine($"Softmax: [NEGATIVE {probs[0] * 100:F1}%, POSITIVE {probs[1] * 100:F1}%]");
+        Console.WriteLine($"Sentiment: {DistilBertSst.Label(argMax)} ({probs[argMax] * 100:F1}%)");
+        Console.WriteLine();
+
+        return 0;
+    }
+
+    static int RunDistilBertSstPredict(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Interactive Sentiment ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var buildSw = Stopwatch.StartNew();
+        var model = DistilBertSst.Load(tensors, modelDir);
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+        Console.WriteLine();
+        Console.WriteLine("Type a movie review and press Enter (or 'quit' to exit).\n");
+
+        string? line;
+        while ((line = Console.ReadLine()) != null)
+        {
+            line = line.Trim();
+            if (string.IsNullOrEmpty(line) || line.Equals("quit", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            var sw = Stopwatch.StartNew();
+            var logits = DistilBertSst.PredictLogits(model, tokenizer, line, maxLen: 128);
+            var (argMax, probs) = DistilBertSst.Softmax(logits);
+            sw.Stop();
+
+            Console.WriteLine($"  Sentiment: {DistilBertSst.Label(argMax)} ({probs[argMax] * 100:F1}%)  [{sw.ElapsedMilliseconds} ms]");
+        }
+
+        return 0;
+    }
+
+    static int RunDistilBertSstCompare(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Compare ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        string csPath = DistilBertSst.LabelsPath;
+        string pyPath = Path.Combine("samples", "data", "compare_distilbert_sst_py.bin");
+
+        Console.WriteLine($"Sentences ({DistilBertSst.CompareSentences.Length}):");
+        for (int i = 0; i < DistilBertSst.CompareSentences.Length; i++)
+            Console.WriteLine($"  [{i}] {DistilBertSst.CompareSentences[i]}");
+        Console.WriteLine();
+
+        DistilBertSst.SaveCompareOutput(tensors, modelDir, csPath);
+        DistilBertSst.PrintCompareDiff(pyPath, csPath, DistilBertSst.CompareSentences.Length);
+
+        return 0;
+    }
+
+    static int RunDistilBertSstBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Benchmark ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var buildSw = Stopwatch.StartNew();
+        var model = DistilBertSst.Load(tensors, modelDir);
+        var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = DistilBertSst.CountParameters(tensors);
+        double weightMb = DistilBertSst.WeightMb(tensors);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {weightMb:F1} MB");
+        Console.WriteLine();
+
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the DistilBERT SST-2 model inference across multiple tokens for benchmarking purposes.";
+        Func<ReverseGradTensor<float>> forward = () => DistilBertSst.PredictLogits(model, tokenizer, text, maxLen: 128);
+
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: 128");
+        Console.WriteLine();
+
+        model.Eval();
+        Console.WriteLine("Warmup (3 passes)...");
+        for (int i = 0; i < 3; i++)
+            forward();
+
+        Console.WriteLine("Benchmarking (10 passes)...");
+        var times = new List<long>();
+        for (int i = 0; i < 10; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            forward();
+            sw.Stop();
+            times.Add(sw.ElapsedMilliseconds);
+        }
+
+        double avg = times.Average();
+        double min = times.Min();
+        double max = times.Max();
+        Console.WriteLine($"  Average: {avg:F1} ms");
+        Console.WriteLine($"  Min:     {min} ms");
+        Console.WriteLine($"  Max:     {max} ms");
+        Console.WriteLine();
+
+        var (argMax, probs) = DistilBertSst.Softmax(forward());
+        Console.WriteLine($"Last pass sentiment: {DistilBertSst.Label(argMax)} ({probs[argMax] * 100:F1}%)");
+        Console.WriteLine();
 
         return 0;
     }

@@ -1,6 +1,6 @@
 # Nivara HuggingFace Inference Sample
 
-Load pre-trained HuggingFace models (MobileNetV2, ResNet-18, MiniLM, DistilBERT) into Nivara's zero-dependency tensor engine and run forward inference in pure managed .NET — no Python runtime, no CUDA, no third-party ML framework.
+Load pre-trained HuggingFace models (MobileNetV2, ResNet-18, MiniLM, DistilBERT, DistilBERT SST-2) into Nivara's zero-dependency tensor engine and run forward inference in pure managed .NET — no Python runtime, no CUDA, no third-party ML framework.
 
 The same architecture is also implemented in PyTorch (`samples/NivaraInference/Python/`) for direct CPU performance comparison.
 
@@ -12,18 +12,21 @@ hf download google/mobilenet_v2_1.0_224 --local-dir samples/data/mobilenet_v2
 hf download timm/resnet18.augreg_in1k --local-dir samples/data/resnet18
 hf download sentence-transformers/all-MiniLM-L6-v2 --local-dir samples/data/minilm
 # (distilbert-base-uncased already present under samples/data/distilbert)
+hf download distilbert/distilbert-base-uncased-finetuned-sst-2-english config.json model.safetensors vocab.txt tokenizer_config.json --local-dir samples/data/distilbert_sst
 
 # Run inference
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2
 dotnet run --project samples/NivaraInference -c Release -- resnet18
 dotnet run --project samples/NivaraInference -c Release -- minilm
 dotnet run --project samples/NivaraInference -c Release -- distilbert
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst
 
 # Benchmark (10 passes each)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
 dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
 ```
 
 ## Supported models
@@ -34,6 +37,7 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 | ResNet-18 | Vision (classification) | 44.6 MB | 102 | 11.7M | 1000 classes |
 | MiniLM (L6-v2) | Text (embedding) | 91 MB | 104 | 22.7M | 384-dim embedding |
 | DistilBERT (base-uncased) | Text (encoder) | 255.5 MB | 105 | 67.0M | `[seqLen, 768]` hidden states |
+| DistilBERT SST-2 (fine-tuned) | Text (classification) | 255.4 MB | 104 | 66.9M | 2-class sentiment (`NEGATIVE`/`POSITIVE`) |
 
 ## Usage
 
@@ -87,6 +91,19 @@ python samples/NivaraInference/Python/distilbert_compare.py
 dotnet run --project samples/NivaraInference -- distilbert compare
 ```
 
+**DistilBERT SST-2 (sequence classification):**
+```bash
+# Interactive sentiment REPL over the fine-tuned SST-2 classifier
+dotnet run --project samples/NivaraInference -- distilbert_sst
+
+# Benchmark (3 warmup + 10 timed passes)
+dotnet run --project samples/NivaraInference -- distilbert_sst benchmark
+
+# Compare logits + softmax probs with a PyTorch reference (run the Python script first)
+python samples/NivaraInference/Python/distilbert_sst_compare.py
+dotnet run --project samples/NivaraInference -- distilbert_sst compare
+```
+
 ### Python (PyTorch reference)
 
 ```bash
@@ -106,6 +123,7 @@ python minilm_benchmark.py     # MiniLM CPU timing (same methodology as C#)
 python distilbert_benchmark.py # DistilBERT CPU timing (same methodology as C#)
 python minilm_compare.py       # MiniLM reference embeddings for C# comparison
 python distilbert_compare.py   # DistilBERT reference hidden states for C# comparison
+python distilbert_sst_compare.py # DistilBERT SST-2 reference logits for C# comparison
 
 python generate_input.py      # Regenerate shared comparison fixture
 ```
@@ -165,6 +183,20 @@ Nivara modules used: `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAtten
 
 > **GELU note:** BERT-family models (MiniLM, DistilBERT) use the exact erf GELU (`GeluExact`). The tanh approximation (`ReverseGradOperations.Gelu`) matches HF `gelu_new`/GPT-2 and is retained for GPT-style `TransformerBlock`.
 
+### DistilBERT SST-2 (distilbert-base-uncased-finetuned-sst-2-english)
+
+The fine-tuned sequence-classification showcase: the base encoder plus a classification head that outputs binary sentiment logits.
+
+- **Encoder**: identical to the base `distilbert` mode (word + position embeddings, 6 Post-LN layers, exact erf GELU)
+- **No token-type embeddings** (`includeTokenTypeEmbedding: false`) — DistilBERT never feeds segment ids
+- **Head**: `pre_classifier` (768→768) → **ReLU** → `classifier` (768→2). The HF architecture applies `nn.ReLU()` after `pre_classifier`; a naive port using `GeluExact` on the head produced logits off by ~0.05, so the head uses `ReverseGradOperations.Relu`
+- **Softmax + argmax** for the sentiment label and confidence
+- **Inference-default path**: `PredictLogits` runs outside any `Grad()` scope, producing leaf logits with no computation-graph overhead
+- **Padded-input contract**: `BertEncoder.ForwardBatched` requires input/attention-mask tensors of length `batchSize * seqLen`; `PredictLogits` passes the padded `[maxLen]` token ids (not the real token count)
+- **Verification**: `compare` matches HuggingFace to `max abs logit diff 9.5e-7`, `argmax agreement 8/8`
+
+Nivara modules used: `DistilBertForSequenceClassification<T>` (shared from `Nivara.Samples`), `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAttention<T>`, `ReverseGradOperations.GeluExact` (encoder FFN), `ReverseGradOperations.Relu` (head), `ReverseGradOperations.Softmax`, `ReverseGradOperations.MatMul`.
+
 ### Weight loading
 
 Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor names to Nivara module parameters. No reflection or generic deserialization — explicit, type-safe loading with full compile-time checking.
@@ -173,6 +205,7 @@ Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor
 - **ResNet-18**: 102 tensors mapped to 102 module parameters
 - **MiniLM**: 96 tensors mapped from HuggingFace keys like `encoder.layers.N.attention.self.query.weight` to Nivara `Linear<T>` weight/bias fields
 - **DistilBERT**: 105 tensors mapped via `DistilBertLoader.LoadEncoderWeights` from `distilbert.embeddings.*` and `distilbert.transformer.layer.{0-5}.*` keys
+- **DistilBERT SST-2**: 104 tensors — 102 encoder tensors via `DistilBertLoader.LoadEncoderWeights` + `pre_classifier.{weight,bias}` and `classifier.{weight,bias}` loaded via `DistilBertForSequenceClassification<T>.LoadWeights`
 
 ## SafeTensors loader
 
@@ -184,16 +217,17 @@ The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the
 
 ## Performance benchmarks
 
-Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode. PyTorch uses MKL-optimized kernels. Both use batch size 1 with 3-pass warmup + 10 timed passes.
+Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode. PyTorch uses MKL-optimized kernels. Both use batch size 1 with 3-pass warmup + 10 timed passes. Numbers vary with machine load; the table below was captured in a single session.
 
 | Model | Input | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |-------|-------|---------------|-------------------|----------|
 | **MobileNetV2** | 1×3×224×224 | 115 ms | 2,254 ms | **~20×** |
 | **ResNet-18** | 1×3×224×224 | 68 ms | 641 ms | **~9×** |
-| **MiniLM-L6** | 128 tokens | 58 ms | 225 ms | **~4×** |
-| **DistilBERT** | 128 tokens | 105 ms | 484 ms | **~5×** |
+| **MiniLM-L6** | 128 tokens | 11 ms | 110 ms | **~10×** |
+| **DistilBERT** | 128 tokens | 31 ms | 236 ms | **~8×** |
+| **DistilBERT SST-2** | 128 tokens | 31 ms | 232 ms | **~8×** |
 
-AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. MiniLM and DistilBERT now sit at ~4–5× of PyTorch; the remaining gap is dominated by the per-head `Slice`/`Transpose`/`MatMul`/`Softmax` attention loop, tracked as the fused multi-head attention follow-up (see issue #86).
+AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. The remaining transformer gap is dominated by the per-head `Slice`/`Transpose`/`MatMul`/`Softmax` attention loop, tracked as the fused multi-head attention follow-up (see issue #86).
 
 ## Sample data
 
@@ -208,6 +242,10 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `samples/data/distilbert/config.json` | DistilBERT config |
 | `samples/data/distilbert/vocab.txt` | DistilBERT wordpiece vocabulary |
 | `samples/data/distilbert/last_hidden_state_py.bin` | PyTorch reference hidden states (generated by `Python/distilbert_compare.py`) |
+| `samples/data/distilbert_sst/model.safetensors` | Fine-tuned DistilBERT SST-2 weights (~255.4 MB, 104 tensors) |
+| `samples/data/distilbert_sst/config.json` | DistilBERT SST-2 config (`dim=768`, `n_layers=6`, `n_heads=12`, 2 labels) |
+| `samples/data/distilbert_sst/vocab.txt` | DistilBERT wordpiece vocabulary |
+| `samples/data/compare_distilbert_sst_py.bin` | PyTorch reference logits + softmax probs (generated by `Python/distilbert_sst_compare.py`) |
 | `samples/data/compare_input.bin` | Shared `[1,3,224,224]` input for compare modes (generated by `Python/generate_input.py`) |
 | `samples/data/images/` | Synthetic test images at various resolutions (created by `Python/create_images.py`) |
 
@@ -245,3 +283,14 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `BertSelfAttention<T>` padding-mask path | 6 attention layers (768-dim, 12 heads) |
 | `ReverseGradOperations.GeluExact` | FFN intermediate activation (exact erf) |
 | `DistilBertLoader.LoadEncoderWeights` | `distilbert.*` SafeTensors weight mapping |
+
+### DistilBERT SST-2 (text classification)
+
+| Capability | Where exercised |
+|---|---|
+| `DistilBertForSequenceClassification<T>` | Shared classifier model (`pre_classifier` → ReLU → `classifier`) |
+| `ReverseGradOperations.Relu` | Classification-head activation (matches HF `nn.ReLU`) |
+| `GradientUtils.Constant` | Padded token-id / attention-mask input tensors |
+| `GradientUtils.Grad()`-free inference | Leaf logits, no computation graph overhead |
+| `MiniLMTokenizer.Encode` + `Microsoft.ML.Tokenizers.BertTokenizer` | WordPiece tokenization with `[CLS]`/`[SEP]` |
+| Softmax + argmax via tensor span | Sentiment label + confidence |

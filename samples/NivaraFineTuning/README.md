@@ -28,9 +28,11 @@ Input: [B×L] token IDs + [B×L] attention mask
   │   └─ ln2 → Linear(768→3072) → GELU → Linear(3072→768) → residual
   │
   ├─ Extract [CLS] tokens: gather positions [0, L, 2L, ...] → [B, 768]
-  ├─ preClassifier: Linear(768→768) → GELU
+  ├─ preClassifier: Linear(768→768) → ReLU
   └─ classifier:    Linear(768→numLabels) → [B, numLabels]
 ```
+
+The classification head uses **ReLU** (matching HF `DistilBertForSequenceClassification`, which applies `nn.ReLU()` after `pre_classifier`) via `ReverseGradOperations.Relu`. The shared `DistilBertForSequenceClassification<T>` (in `Nivara.Samples`) is used by both this sample and the `distilbert_sst` inference showcase.
 
 ### Batched attention
 
@@ -156,7 +158,8 @@ Uses identical hyperparameters (lr=2e-5, epochs=3, batch_size=4, max_len=128) wi
 | `Embedding<T>` | Token embedding (gather path) and position embedding |
 | `Linear<T>` | Q/K/V/O projections, FFN layers, pre-classifier, classifier head |
 | `LayerNorm<T>` | Pre-norm layer normalization with configurable epsilon |
-| `ReverseGradOperations.Gelu` | GELU activation in FFN and pre-classifier |
+| `ReverseGradOperations.GeluExact` | GELU activation in the encoder FFN intermediate (exact erf) |
+| `ReverseGradOperations.Relu` | Classification-head activation (matches HF `nn.ReLU`) |
 | `ReverseGradOperations.Gather` | [CLS] token extraction from batched encoder output |
 | `AdamW<T>` | Parameter-efficient fine-tuning with weight decay |
 | `CrossEntropyLoss<T>` | Multi-class classification loss with integer labels |
@@ -172,3 +175,5 @@ Uses identical hyperparameters (lr=2e-5, epochs=3, batch_size=4, max_len=128) wi
 - **DistilBERT weight mapping**: SafeTensors-to-module parameter mapping with HuggingFace snake_case key translation (`pre_classifier`, `sa_layer_norm`, `ffn.lin1/lin2`, etc.)
 - **Loading random-init heads gracefully**: `LoadWeights` checks for classifier/pre_classifier keys before loading, allowing random initialization when fine-tuning from scratch
 - **DistilBertConfig JSON parser**: Maps HuggingFace `snake_case` config keys to PascalCase C# properties via reflection-based parsing
+- **Shared model promotion**: `DistilBertForSequenceClassification<T>` + `DistilBertConfig` now live in `Nivara.Samples` and are shared by this sample and the `distilbert_sst` inference showcase (`samples/NivaraInference`)
+- **No token-type embeddings**: the classifier constructs its encoder with `includeTokenTypeEmbedding: false` (DistilBERT never feeds segment ids); the previous default added a random token-type embedding that degraded frozen-encoder parity
