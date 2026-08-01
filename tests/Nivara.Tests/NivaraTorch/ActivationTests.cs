@@ -110,6 +110,13 @@ public class ActivationTests
     static float GeluExact(float x)
         => (float)(0.5 * x * (1.0 + Erf(x / Math.Sqrt(2.0))));
 
+    static float GeluExactGradient(float x)
+    {
+        double cdf = 0.5 * (1.0 + Erf(x / Math.Sqrt(2.0)));
+        double pdf = Math.Exp(-0.5 * x * x) / Math.Sqrt(2.0 * Math.PI);
+        return (float)(cdf + x * pdf);
+    }
+
     static float GeluGradientTanhApprox(float x)
     {
         const double sqrt2OverPi = 0.7978845608028654;
@@ -230,6 +237,43 @@ public class ActivationTests
             TestHelpers.AssertScalarEqual(expectedGrad, input.Grad![i], absTol: 1e-5f,
                 label: $"GeluExactGrad({inputData[i]})");
         }
+    }
+
+    [Test]
+    public void GeluExact_VectorLength_MatchesReference()
+    {
+        var testValues = new float[33];
+        for (int i = 0; i < testValues.Length; i++)
+            testValues[i] = -4f + i * 0.25f;
+
+        var input = ReverseGradTensor<float>.FromArray(testValues, requiresGrad: false);
+        var output = Activation.GeluExact(input);
+
+        for (int i = 0; i < testValues.Length; i++)
+            TestHelpers.AssertScalarEqual(GeluExact(testValues[i]), output[i],
+                absTol: 2e-4f, label: $"GeluExact({testValues[i]})");
+    }
+
+    [Test]
+    public void GeluExactGradient_VectorLength_MatchesReference()
+    {
+        var testValues = new float[33];
+        for (int i = 0; i < testValues.Length; i++)
+            testValues[i] = -4f + i * 0.25f;
+
+        var input = ReverseGradTensor<float>.FromArray(testValues, requiresGrad: true);
+        var output = ReverseGradOperations.GeluExact(input);
+        var gradOutput = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(Enumerable.Repeat(1f, output.Length).ToArray()),
+            requiresGrad: false);
+        gradOutput.Reshape(output.Shape);
+
+        output.Backward(gradOutput);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        for (int i = 0; i < testValues.Length; i++)
+            TestHelpers.AssertScalarEqual(GeluExactGradient(testValues[i]), input.Grad![i],
+                absTol: 2e-4f, label: $"GeluExactGrad({testValues[i]})");
     }
 
     [Test]
