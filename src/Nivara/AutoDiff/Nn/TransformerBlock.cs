@@ -130,6 +130,17 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
 
     static ReverseGradTensor<T> PerRowLayerNorm(ReverseGradTensor<T> x, int rows, int cols, double eps = 1e-5)
     {
+        if (!x.RequiresGrad)
+        {
+            var output = LayerNormKernel<T>.ForwardInference(
+                ModuleHelpers<T>.GetSpan(x), rows, cols,
+                ReadOnlySpan<T>.Empty, ReadOnlySpan<T>.Empty,
+                T.CreateChecked(eps), affine: false);
+            return new ReverseGradTensor<T>(
+                NivaraColumn<T>.CreateFromOwnedArray(output),
+                false, x.Shape);
+        }
+
         var srcData = new T[x.Length];
         x.Data.CopyTo(srcData, default(T)!);
 
@@ -138,7 +149,7 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
             ReadOnlySpan<T>.Empty, ReadOnlySpan<T>.Empty,
             T.CreateChecked(eps), affine: false);
 
-        var resultCol = NivaraColumn<T>.Create(result.Output);
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(result.Output);
         var outTensor = new ReverseGradTensor<T>(resultCol, x.RequiresGrad, x.Shape);
 
         if (x.RequiresGrad)

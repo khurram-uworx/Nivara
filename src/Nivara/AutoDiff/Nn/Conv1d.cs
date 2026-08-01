@@ -112,9 +112,9 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
 
         var outShape = new[] { n, _outChannels, oL };
         var result = NivaraColumn<T>.Create(outputData);
-        bool shouldTrack = GradientUtils.ShouldTrackGrad(input, _weight.Tensor);
-        if (_useBias && _bias != null)
-            shouldTrack = shouldTrack || _bias.Tensor.RequiresGrad;
+        bool shouldTrack = _useBias && _bias != null
+            ? GradientUtils.ShouldTrackGrad(input, _weight.Tensor, _bias.Tensor)
+            : GradientUtils.ShouldTrackGrad(input, _weight.Tensor);
         var resultTensor = new ReverseGradTensor<T>(result, shouldTrack, outShape);
 
         if (shouldTrack)

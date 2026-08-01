@@ -62,6 +62,14 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
         var inputData = GetInputSpan(input);
         int rows = input.Length / _normalizedShape;
 
+        if (!input.RequiresGrad)
+        {
+            var output = LayerNormKernel<T>.ForwardInference(inputData, rows, _normalizedShape, gamma, beta, _eps, _affine);
+            return new ReverseGradTensor<T>(
+                NivaraColumn<T>.CreateFromOwnedArray(output),
+                false, input.Shape);
+        }
+
         var result = LayerNormKernel<T>.Forward(inputData, rows, _normalizedShape, gamma, beta, _eps, _affine);
 
         var resultTensor = new ReverseGradTensor<T>(

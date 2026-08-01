@@ -54,17 +54,12 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
         if (input == null) throw new ArgumentNullException(nameof(input));
 
         var w = weight.Tensor;
-        var transposed = ReverseGradOperations.Transpose(w);
-        var output = ReverseGradOperations.MatMul(input, transposed);
+        var output = GradientUtils.IsGradEnabled
+            ? ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(w))
+            : ReverseGradOperations.MatMulTransposedB(input, w);
 
         if (useBias && bias != null)
-        {
-            var biasTensor = bias.Tensor;
-            var ones = GradientUtils.Ones<T>(input.shape[0]);
-            ones.Reshape(ones.Length, 1);
-            var biasBroadcast = ReverseGradOperations.MatMul(ones, biasTensor);
-            output = ReverseGradOperations.Add(output, biasBroadcast);
-        }
+            output = ReverseGradOperations.AddBias(output, bias.Tensor);
 
         return output;
     }

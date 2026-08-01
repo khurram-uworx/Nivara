@@ -94,6 +94,42 @@ internal static class LayerNormKernel<T> where T : struct, IFloatingPointIeee754
     }
 
     /// <summary>
+    /// Inference-only forward: y = (x - mean) / sqrt(var + eps) * gamma + beta.
+    /// No mean/invStd/xHat saved state; the output array doubles as the diff workspace.
+    /// </summary>
+    internal static T[] ForwardInference(
+        ReadOnlySpan<T> input,
+        int rows, int normalizedShape,
+        ReadOnlySpan<T> gamma, ReadOnlySpan<T> beta,
+        T eps, bool affine)
+    {
+        var output = new T[input.Length];
+
+        for (int r = 0; r < rows; r++)
+        {
+            int offset = r * normalizedShape;
+            var row = input.Slice(offset, normalizedShape);
+
+            T mean = T.CreateChecked(double.CreateChecked(TensorPrimitives.Sum(row))) / T.CreateChecked(normalizedShape);
+
+            var outputSlice = output.AsSpan(offset, normalizedShape);
+            TensorPrimitives.Add(row, -mean, outputSlice);
+
+            T sumSq = T.CreateChecked(double.CreateChecked(TensorPrimitives.Dot(outputSlice, outputSlice)));
+            T invStd = T.One / T.CreateChecked(Math.Sqrt(double.CreateChecked((sumSq / T.CreateChecked(normalizedShape)) + eps)));
+
+            TensorPrimitives.Multiply(outputSlice, invStd, outputSlice);
+            if (affine)
+            {
+                TensorPrimitives.Multiply(outputSlice, gamma, outputSlice);
+                TensorPrimitives.Add(outputSlice, beta, outputSlice);
+            }
+        }
+
+        return output;
+    }
+
+    /// <summary>
     /// Backward: dx = gamma * invStd * (dy - mean(dy) - xHat * mean(dy * xHat))
     /// </summary>
     internal static T[] BackwardInput(
