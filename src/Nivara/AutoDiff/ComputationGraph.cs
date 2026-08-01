@@ -1,6 +1,6 @@
+using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
 using System.Numerics;
-using Nivara.AutoDiff.Utilities;
 
 namespace Nivara.AutoDiff;
 

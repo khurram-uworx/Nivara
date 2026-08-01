@@ -1,6 +1,5 @@
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Helpers;
 using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
@@ -256,7 +255,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffMatMul",
             a.Length + b.Length,
-            
+
             () =>
             {
                 a.Data.TryGetSpan(out var aSpan);
@@ -355,7 +354,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffTranspose",
             a.Length,
-            
+
             () =>
             {
                 a.Data.TryGetSpan(out var aSpan);
@@ -400,7 +399,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffTransposeAxes",
             a.Length,
-            
+
             () =>
             {
                 var srcData = new T[a.Length];
@@ -997,7 +996,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffSlice",
             length,
-            
+
             () =>
             {
                 int resultLen = batchDim * length;
@@ -1099,7 +1098,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffConcat",
             tensors.Sum(t => t.Length),
-            
+
             () =>
             {
                 if (rank == 1)
@@ -1359,7 +1358,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffRMSNorm",
             a.Length,
-            
+
             () =>
             {
                 var result = ApplyRMSNorm(a.Data, eps);
@@ -1391,7 +1390,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffPerRowRMSNorm",
             a.Length,
-            
+
             () =>
             {
                 var srcData = new T[a.Length];
@@ -1606,7 +1605,7 @@ public static class ReverseGradOperations
         return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
             "AutoDiffGather",
             indices.Length,
-            
+
             () =>
             {
                 int resultLen = indices.Length * stride;

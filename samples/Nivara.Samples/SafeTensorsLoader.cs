@@ -99,15 +99,15 @@ public static class SafeTensorsLoader
 
     static T[] DtypeToArray<T>(ReadOnlySpan<byte> tensorBytes, string dtype, string name)
         where T : struct, IFloatingPointIeee754<T> => dtype switch
-    {
-        "F32" => ConvertF32<T>(tensorBytes),
-        "I32" => ConvertI32<T>(tensorBytes),
-        "I64" => ConvertI64<T>(tensorBytes),
-        "F16" => ConvertF16<T>(tensorBytes),
-        "BF16" => ConvertBF16<T>(tensorBytes),
-        _ => throw new NotSupportedException($"Tensor '{name}' has unsupported dtype '{dtype}'. " +
-            "Supported dtypes: F32, I32, I64, F16, BF16.")
-    };
+        {
+            "F32" => ConvertF32<T>(tensorBytes),
+            "I32" => ConvertI32<T>(tensorBytes),
+            "I64" => ConvertI64<T>(tensorBytes),
+            "F16" => ConvertF16<T>(tensorBytes),
+            "BF16" => ConvertBF16<T>(tensorBytes),
+            _ => throw new NotSupportedException($"Tensor '{name}' has unsupported dtype '{dtype}'. " +
+                "Supported dtypes: F32, I32, I64, F16, BF16.")
+        };
 
     static T[] ConvertF32<T>(ReadOnlySpan<byte> bytes)
         where T : struct, IFloatingPointIeee754<T>

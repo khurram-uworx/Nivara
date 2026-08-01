@@ -1,7 +1,5 @@
 using Microsoft.ML.Tokenizers;
-using Nivara;
 using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
