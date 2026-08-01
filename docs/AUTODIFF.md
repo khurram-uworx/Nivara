@@ -73,7 +73,7 @@ ComputationGraph                      ← Graph traversal engine
 
 ReverseGradOperations                 ← Reverse-mode forward+backward ops (static methods)
 ├── Element-wise: Add, Subtract, Multiply, Divide, Clip, Pow
-├── Matrix: MatMul, Transpose, TransposeAxes, Slice, Concat, Gather
+├── Matrix: MatMul, Transpose, TransposeAxes, Slice, Concat, Gather, MultiHeadAttention (fused kernel)
 ├── Reductions: Sum, Mean, MeanPool
 ├── Normalization: RMSNorm, PerRowRMSNorm, PerRowLayerNorm (RMSNormKernel, LayerNormKernel)
 ├── Activations: Relu, LeakyRelu, Sigmoid, Tanh, Gelu (tanh approximation)
@@ -119,7 +119,7 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 ├── ConvVAE<T>                        ← Fully convolutional VAE (Conv2d encoder, 1×1 Conv heads)
 ├── TransformerBlock<T>               ← Multi-head causal self-attention + GELU MLP (pre-norm)
 │   └── NormType enum: RMSNorm (default) | LayerNorm
-├── MultiheadAttention<T>             ← Standalone Q/K/V/O attention (self-attention + cross-attention)
+├── MultiheadAttention<T>             ← Standalone Q/K/V/O attention (self/cross), delegates to fused ReverseGradOperations.MultiHeadAttention
 ├── Sampler<T>                        ← Temperature/top-k categorical sampling
 ├── TextTokenizer                     ← Vocabulary builder with special tokens
 └── Initializers/                     ← Kaiming, Xavier, Uniform, Normal, PyTorchDefault
@@ -307,8 +307,11 @@ Static graph traversal engine:
 | `Slice(a, start, length)` | `a[start:start+length]` | Gradient scattered back to original positions | start + length ≤ a.Length |
 | `Concat(tensors, axis)` | Join along axis | Gradient split back to original tensors | All non-axis dims must match |
 | `Gather(source, indices, axis)` | Select indices along axis | Scattered back via `SegmentSum` | indices valid for source shape |
+| `MultiHeadAttention(query, key, value, numHeads, scale, mask?)` | Packed per-head scaled dot-product attention | Single fused VJP producing dQ, dK, dV | `query/key/value` rank 2 `[len, dim]`; `mask` additive `[qLen, kvLen]` |
 
 MatMul is implemented in `ReverseGradOperations.MatMul` via `NivaraColumn<T>.MatMul()` (`src/Nivara/Tensors/NivaraTensorExtensions.cs`) using `TensorPrimitives.Dot` + `Parallel.For` for SIMD-accelerated forward and backward passes.
+
+`MultiHeadAttention` (issue #86) is a fused attention kernel in `src/Nivara/AutoDiff/Operations/AttentionKernels.cs`: heads are gathered into contiguous column groups once, QK^T/softmax/PV run per head over `TensorPrimitives` row kernels (`SoftmaxRows`, `SoftmaxBackwardRows`), and results are packed back via `ScatterHead`. It executes as a single `OpNode` producing dQ/dK/dV in one backward pass, replacing the per-head `Slice`/`Transpose`/`MatMul`/`Softmax` decomposition. Inference outside `GradientUtils.Grad()` runs the forward pass without building any graph nodes. `TransformerBlock`, `MultiheadAttention<T>`, and the `BertModel` sample all route through this kernel.
 
 ### Reductions
 
@@ -743,7 +746,7 @@ VAE<T> : Module<T>
 └── ElboLoss(recon, x, mu, logVar, lossType) → scalar
 ```
 
-### MultiheadAttention\<T\>
+### Sampler\<T\>
 
 ```csharp
 public sealed class Sampler<T> where T : struct, IFloatingPointIeee754<T>
