@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using System.Diagnostics;
 using System.Numerics;
 
 namespace Nivara.AutoDiff;
@@ -34,6 +35,7 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
     public ForwardGradTensor(NivaraColumn<T> data, NivaraColumn<T>? tangent = null)
         : base(data)
     {
+        Debug.Assert(!data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
         if (tangent != null && tangent.Length != data.Length)
             throw new ArgumentOutOfRangeException(nameof(tangent),
                 $"Tangent length ({tangent.Length}) must match data length ({data.Length})");
@@ -48,6 +50,7 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
     internal ForwardGradTensor(NivaraColumn<T> data, NivaraColumn<T>? tangent, int[] shape)
         : base(data, shape)
     {
+        Debug.Assert(!data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
         if (tangent != null && tangent.Length != data.Length)
             throw new ArgumentOutOfRangeException(nameof(tangent),
                 $"Tangent length ({tangent.Length}) must match data length ({data.Length})");

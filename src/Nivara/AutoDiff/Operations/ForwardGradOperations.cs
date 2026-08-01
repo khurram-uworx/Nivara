@@ -123,7 +123,7 @@ public static class ForwardGradOperations
 
         for (int i = 0; i < b.Length; i++)
         {
-            if (!b.IsNull(i) && b[i] == T.Zero)
+            if (b[i] == T.Zero)
             {
                 throw new DivideByZeroException($"Division by zero at index {i}");
             }
