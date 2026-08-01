@@ -3,9 +3,20 @@
 Saves raw float32 binary + JSON manifest for C# unit tests to compare against.
 Test fixtures go to samples/data/torch-comparison/.
 
+Reproducibility:
+  - Verified with Python 3.12, torch 2.13.0+cpu, numpy 1.26.
+  - Fixtures are RNG-derived. A single shared torch.Generator is seeded with
+    42 (see run()) and every random draw uses generator=rng. Weights are
+    created by nn.* modules, which consume from the global torch RNG, so
+    CPU-only execution is required for bit-stable output. Add a new draw to
+    the end of a case, never insert one mid-stream, or every subsequent
+    fixture changes and the C# manifest must be regenerated together.
+  - Regenerate after upgrading torch/numpy: run `python gen_reference.py` and
+    commit the full samples/data/torch-comparison/ tree as one unit.
+
 Usage: python gen_reference.py
 """
-import os, json, struct
+import os, json, struct, sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -25,6 +36,9 @@ def save_tensor(path, tensor):
 def run():
     os.makedirs(TEST_DIR, exist_ok=True)
     manifest = {}
+
+    print(f"torch {torch.__version__} | numpy {np.__version__} | python {sys.version.split()[0]}")
+    print(f"RNG seed: 42 (single shared torch.Generator)\n")
 
     # Deterministic RNG
     rng = torch.Generator()
