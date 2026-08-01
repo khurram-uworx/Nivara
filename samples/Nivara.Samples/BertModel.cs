@@ -253,23 +253,37 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
 {
     public readonly Embedding<T> wordEmbed;
     public readonly Embedding<T> posEmbed;
-    public readonly Embedding<T> tokenTypeEmbed;
+    public readonly Embedding<T>? tokenTypeEmbed;
     public readonly LayerNorm<T> embedLn;
     public readonly BertLayer<T>[] layers;
+    readonly bool _includeTokenTypeEmbedding;
 
-    public BertEncoder(BertConfig config)
+    public BertEncoder(BertConfig config, bool includeTokenTypeEmbedding = true)
     {
+        _includeTokenTypeEmbedding = includeTokenTypeEmbedding;
         wordEmbed = new Embedding<T>(config.VocabSize, config.HiddenSize);
         posEmbed = new Embedding<T>(config.MaxPositionEmbeddings, config.HiddenSize);
-        tokenTypeEmbed = new Embedding<T>(2, config.HiddenSize);
+        if (includeTokenTypeEmbedding)
+            tokenTypeEmbed = new Embedding<T>(2, config.HiddenSize);
         embedLn = new LayerNorm<T>(config.HiddenSize, config.LayerNormEps);
         layers = new BertLayer<T>[config.NumHiddenLayers];
         for (int i = 0; i < config.NumHiddenLayers; i++)
             layers[i] = new BertLayer<T>(config.HiddenSize, config.IntermediateSize, config.NumAttentionHeads, config.LayerNormEps);
 
-        RegisterModules(wordEmbed, posEmbed, tokenTypeEmbed, embedLn);
+        RegisterModules(wordEmbed, posEmbed, embedLn);
+        if (includeTokenTypeEmbedding)
+            RegisterModules(tokenTypeEmbed!);
         foreach (var layer in layers)
             RegisterModules(layer);
+    }
+
+    ReverseGradTensor<T> TokenTypeEmb(int len)
+    {
+        var ttIds = new T[len];
+        Array.Fill(ttIds, T.Zero);
+        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
+        ttInput.Reshape(len);
+        return tokenTypeEmbed!.Forward(ttInput);
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -281,15 +295,11 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
         var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
-        var ttIds = new T[seqLen];
-        Array.Fill(ttIds, T.Zero);
-        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
-        ttInput.Reshape(seqLen);
-
         var wordEmb = wordEmbed.Forward(input);
         var posEmb = posEmbed.Forward(posEmbInput);
-        var ttEmb = tokenTypeEmbed.Forward(ttInput);
-        var hidden = ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, ttEmb));
+        var hidden = _includeTokenTypeEmbedding
+            ? ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, TokenTypeEmb(seqLen)))
+            : ReverseGradOperations.Add(wordEmb, posEmb);
         hidden = embedLn.Forward(hidden);
 
         for (int i = 0; i < layers.Length; i++)
@@ -307,15 +317,11 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
         var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(seqLen);
 
-        var ttIds = new T[seqLen];
-        Array.Fill(ttIds, T.Zero);
-        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
-        ttInput.Reshape(seqLen);
-
         var wordEmb = wordEmbed.Forward(input);
         var posEmb = posEmbed.Forward(posEmbInput);
-        var ttEmb = tokenTypeEmbed.Forward(ttInput);
-        var hidden = ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, ttEmb));
+        var hidden = _includeTokenTypeEmbedding
+            ? ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, TokenTypeEmb(seqLen)))
+            : ReverseGradOperations.Add(wordEmb, posEmb);
         hidden = embedLn.Forward(hidden);
 
         foreach (var layer in layers)
@@ -334,15 +340,11 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
         var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
         posEmbInput.Reshape(batchSize * seqLen);
 
-        var ttIds = new T[batchSize * seqLen];
-        Array.Fill(ttIds, T.Zero);
-        var ttInput = ReverseGradTensor<T>.FromArray(ttIds, requiresGrad: false);
-        ttInput.Reshape(batchSize * seqLen);
-
         var wordEmb = wordEmbed.Forward(input);
         var posEmb = posEmbed.Forward(posEmbInput);
-        var ttEmb = tokenTypeEmbed.Forward(ttInput);
-        var hidden = ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, ttEmb));
+        var hidden = _includeTokenTypeEmbedding
+            ? ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, TokenTypeEmb(batchSize * seqLen)))
+            : ReverseGradOperations.Add(wordEmb, posEmb);
         hidden = embedLn.Forward(hidden);
 
         foreach (var layer in layers)
@@ -436,7 +438,8 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPo
 
         LoadEmbed(enc.wordEmbed, tensors, "embeddings.word_embeddings.weight");
         LoadEmbed(enc.posEmbed, tensors, "embeddings.position_embeddings.weight");
-        LoadEmbed(enc.tokenTypeEmbed, tensors, "embeddings.token_type_embeddings.weight");
+        if (enc.tokenTypeEmbed != null)
+            LoadEmbed(enc.tokenTypeEmbed, tensors, "embeddings.token_type_embeddings.weight");
         LoadLayerNorm(enc.embedLn, tensors, "embeddings.LayerNorm");
 
         for (int i = 0; i < config.NumHiddenLayers; i++)
