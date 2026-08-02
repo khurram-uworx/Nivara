@@ -1,5 +1,6 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
+using Nivara.Helpers;
 using Nivara.Operations;
 using Nivara.Query;
 
@@ -14,6 +15,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             Query.OperationType.Filter => true,
             Query.OperationType.Select => false,
             Query.OperationType.Sort => true,
+            Query.OperationType.SortByExpression => true,
             Query.OperationType.GroupBy => true,
             Query.OperationType.Join => true,
             Query.OperationType.Slice => true,
@@ -68,6 +70,8 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
 
         if (operation is IParallelSortOperation sortOp)
             return executeSortParallelSync(sortOp, input, ranges, maxDop, context.CancellationToken);
+        if (operation is SortByExpressionOperation expressionSortOp)
+            return executeExpressionSortParallelSync(expressionSortOp, input, ranges, maxDop, context.CancellationToken);
         if (operation is IParallelGroupByOperation groupByOp)
             return executeGroupByParallelSync(groupByOp, input, ranges, maxDop, context.CancellationToken);
         if (operation is IParallelJoinOperation joinOp)
@@ -121,6 +125,20 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             sortedColumns[kvp.Key] = SortOperation.ReorderColumn(kvp.Value, globalIndices);
 
         return sortedColumns;
+    }
+
+    IReadOnlyDictionary<string, IColumn> executeExpressionSortParallelSync(
+        SortByExpressionOperation operation,
+        IReadOnlyDictionary<string, IColumn> input,
+        List<(int Start, int Length)> ranges,
+        int maxDop,
+        CancellationToken cancellationToken)
+    {
+        var evaluator = new ExpressionEvaluator();
+        var (syntheticInput, sortKeys) = operation.MaterializeKeys(input, evaluator);
+        var sortOperation = new SortOperation(sortKeys, operation.IsStable);
+        var sorted = executeSortParallelSync(sortOperation, syntheticInput, ranges, maxDop, cancellationToken);
+        return SortByExpressionOperation.StripSyntheticKeys(sorted);
     }
 
     IReadOnlyDictionary<string, IColumn> executeFilterParallelSync(
@@ -316,6 +334,8 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
 
         if (operation is IParallelSortOperation sortOp)
             return await Task.Run(() => executeSortParallelSync(sortOp, input, ranges, maxDop, context.CancellationToken), context.CancellationToken).ConfigureAwait(false);
+        if (operation is SortByExpressionOperation expressionSortOp)
+            return await Task.Run(() => executeExpressionSortParallelSync(expressionSortOp, input, ranges, maxDop, context.CancellationToken), context.CancellationToken).ConfigureAwait(false);
         if (operation is IParallelGroupByOperation groupByOp)
             return executeGroupByParallelAsync(groupByOp, input, ranges, maxDop, context.CancellationToken);
         if (operation is IParallelJoinOperation joinOp)
@@ -641,6 +661,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
                     Query.OperationType.SelectRows => 300,
                     Query.OperationType.Distinct => 500,
                     Query.OperationType.Sort => 800,
+                    Query.OperationType.SortByExpression => 800,
                     Query.OperationType.GroupBy => 1000,
                     Query.OperationType.Join => 1500,
                     _ when operation.OperationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => 250,

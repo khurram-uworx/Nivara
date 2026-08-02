@@ -98,6 +98,9 @@ sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     public bool HasNulls => nullMask != null;
 
     /// <inheritdoc />
+    public bool ProvidesZeroCopySpanAccess => false;
+
+    /// <inheritdoc />
     public StorageType StorageType => StorageType.Tensor;
 
     /// <inheritdoc />
@@ -124,7 +127,18 @@ sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Creates a new storage containing a slice of this storage.
+    /// </summary>
+    /// <remarks>
+    /// Returns an <em>independent copy</em>: tensor slicing is not contiguous, so the data and
+    /// null mask are flattened and rebuilt via <see cref="GetFlattenedSpan"/>. Contrast with
+    /// <see cref="MemoryStorage{T}.Slice"/>, which returns a true zero-copy view.
+    /// </remarks>
+    /// <param name="start">The starting index of the slice</param>
+    /// <param name="length">The number of elements in the slice</param>
+    /// <returns>A new storage instance containing a copy of the requested range</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
     public IColumnStorage<T> Slice(int start, int length)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -141,7 +155,8 @@ sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
             return new TensorStorage<T>(ReadOnlySpan<T>.Empty);
         }
 
-        // Get data as span and slice it
+        // Get data as span and slice it. Tensor slicing is not contiguous, so the result is an
+        // independent copy (unlike MemoryStorage<T>.Slice which shares the underlying buffer).
         var slicedDataArray = GetFlattenedSpan().Slice(start, length).ToArray();
         var slicedData = Tensor.Create(slicedDataArray, [length]);
 
@@ -195,7 +210,8 @@ sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     }
 
     /// <summary>
-    /// Gets the data as a span, using a cached flattened buffer when available.
+    /// Gets the data as a span. Backed by a cached flattened buffer that is a <em>copy</em> of the
+    /// tensor data, not a zero-copy view. See <see cref="ProvidesZeroCopySpanAccess"/>.
     /// </summary>
     internal ReadOnlySpan<T> GetFlattenedSpan()
     {

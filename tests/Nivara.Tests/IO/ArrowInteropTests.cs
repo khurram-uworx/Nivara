@@ -1266,4 +1266,30 @@ public class ArrowInteropTests
     }
 
     #endregion
+
+    [Test]
+    public void ArrowConversionOptions_ExposesNoZeroCopyOption()
+    {
+        // Guardrail for TASKS-IMMEDIATELY.md Task 1/8: Nivara does not advertise
+        // zero-copy interop. This fails if a zero-copy member is ever re-added.
+        var zeroCopyMembers = typeof(ArrowConversionOptions)
+            .GetMembers(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Static)
+            .Where(m => m.Name.Contains("ZeroCopy", System.StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.That(zeroCopyMembers, Is.Empty, "ArrowConversionOptions must not expose any zero-copy member");
+    }
+
+    [Test]
+    public void ArrowInterop_ExposesNoZeroCopyMethod()
+    {
+        // Guardrail for TASKS-IMMEDIATELY.md Task 2/8: the placeholder zero-copy creators
+        // were removed; this fails if a zero-copy path is ever re-added.
+        var zeroCopyMethods = typeof(ArrowInterop)
+            .GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static)
+            .Where(m => m.Name.Contains("ZeroCopy", System.StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        Assert.That(zeroCopyMethods, Is.Empty, "ArrowInterop must not expose any zero-copy conversion method");
+    }
 }

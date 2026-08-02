@@ -68,23 +68,14 @@ public static class NivaraLinqExtensions
 
         var expression = keySelector(RowExpressionBuilder.Instance);
 
-        // At the moment, SortOperation expects a column name. 
-        // If the expression is a ColumnReference, we can extract the name.
+        // Direct column references sort via the column-name based SortOperation.
         if (expression is ColumnReference colRef)
         {
             return source.Sort(colRef.ColumnName, descending ? SortDirection.Descending : SortDirection.Ascending);
         }
 
-        // If it's not a direct column reference (e.g. calculated), existing Sort might not support it directly 
-        // unless we project it first. For now, assuming direct column reference or basic name resolution.
-        // If the expression has a name (e.g. from an alias or base impl), we try that.
-
-        if (!string.IsNullOrEmpty(expression.Name) && !expression.Name.Contains("(")) // Simplistic check for now
-        {
-            return source.Sort(expression.Name, descending ? SortDirection.Descending : SortDirection.Ascending);
-        }
-
-        throw new NotSupportedException("OrderBy currently supports only direct column references or named expressions. Complex expressions must be selected/computed first.");
+        // Computed keys are materialized into a column at execution time and sorted on.
+        return source.SortByExpression(expression, descending ? SortDirection.Descending : SortDirection.Ascending);
     }
 
     /// <summary>
@@ -96,6 +87,38 @@ public static class NivaraLinqExtensions
     public static QueryFrame OrderByDescending(this QueryFrame source, Func<RowExpressionBuilder, ColumnExpression> keySelector)
     {
         return source.OrderBy(keySelector, descending: true);
+    }
+
+    /// <summary>
+    /// Applies a stable secondary sort to the query frame using a lambda expression, merging into the
+    /// primary sort from a preceding <see cref="OrderBy(QueryFrame, Func{RowExpressionBuilder, ColumnExpression}, bool)"/>
+    /// so the ordering composes lexicographically (primary key first, then this secondary key). Computed
+    /// keys are supported. Without a preceding sort, acts as a primary sort.
+    /// </summary>
+    /// <param name="source">The source query frame</param>
+    /// <param name="keySelector">Function to select the secondary sort key</param>
+    /// <param name="descending">Whether to sort in descending order</param>
+    /// <returns>A sorted query frame</returns>
+    public static QueryFrame ThenBy(this QueryFrame source, Func<RowExpressionBuilder, ColumnExpression> keySelector, bool descending = false)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(keySelector);
+
+        var expression = keySelector(RowExpressionBuilder.Instance);
+        return source.ThenBy(expression, descending ? SortDirection.Descending : SortDirection.Ascending);
+    }
+
+    /// <summary>
+    /// Applies a stable secondary descending sort to the query frame using a lambda expression, merging
+    /// into the primary sort from a preceding <see cref="OrderBy(QueryFrame, Func{RowExpressionBuilder, ColumnExpression}, bool)"/>.
+    /// Computed keys are supported. Without a preceding sort, acts as a primary descending sort.
+    /// </summary>
+    /// <param name="source">The source query frame</param>
+    /// <param name="keySelector">Function to select the secondary sort key</param>
+    /// <returns>A sorted query frame</returns>
+    public static QueryFrame ThenByDescending(this QueryFrame source, Func<RowExpressionBuilder, ColumnExpression> keySelector)
+    {
+        return source.ThenBy(keySelector, descending: true);
     }
 
     /// <summary>

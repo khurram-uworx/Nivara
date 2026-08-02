@@ -303,7 +303,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 ## Known Issues & Follow-ups
 
 - **Parquet round-trip**: nullable value type null preservation may degrade — investigate (high priority).
-- **Zero-copy Arrow arrays**: placeholder implementation; real zero-copy requires exposing underlying buffer ownership.
+- **Zero-copy Arrow arrays**: removed from the public API (claims-integrity triage, see CHANGELOG); real zero-copy returns with `ARROW-ROADMAP` Phase D (issue #94).
 - **Column creation dynamic dispatch**: improve coverage for less common CLR types.
 - **Internal Span access**: consider adding `internal AsSpan()` methods to `NivaraColumn` for zero-copy tensor interop.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets.

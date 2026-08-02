@@ -83,6 +83,9 @@ sealed class MemoryStorage<T> : IColumnStorage<T>
     public bool HasNulls => nullMask.HasValue && nullMask.Value.Length > 0;
 
     /// <inheritdoc />
+    public bool ProvidesZeroCopySpanAccess => true;
+
+    /// <inheritdoc />
     public StorageType StorageType => StorageType.Memory;
 
     /// <inheritdoc />
@@ -109,7 +112,18 @@ sealed class MemoryStorage<T> : IColumnStorage<T>
         }
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// Creates a new storage containing a slice of this storage.
+    /// </summary>
+    /// <remarks>
+    /// Returns a true zero-copy view: <see cref="ReadOnlyMemory{T}.Slice"/> shares the underlying
+    /// buffer and null mask. Contrast with <see cref="TensorStorage{T}.Slice"/>, which returns an
+    /// independent copy.
+    /// </remarks>
+    /// <param name="start">The starting index of the slice</param>
+    /// <param name="length">The number of elements in the slice</param>
+    /// <returns>A new storage instance representing a zero-copy view of the requested range</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
     public IColumnStorage<T> Slice(int start, int length)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
