@@ -74,7 +74,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 - Explicit null handling using validity masks (no NaN semantics)
 
 ### Query Engine
-- Lazy query construction with true LINQ-like syntax (Where, Select, OrderBy)
+- Lazy query construction with true LINQ-like syntax (Where, Select, OrderBy/ThenBy)
 - Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
 - Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with integrated performance diagnostics
 

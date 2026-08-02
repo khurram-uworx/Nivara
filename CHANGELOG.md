@@ -8,6 +8,11 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - `ArrowConversionOptions.UseZeroCopy` removed — the option defaulted to `true` but every zero-copy interop path was a placeholder that silently copied. Nivara does not advertise unsupported capability; real zero-copy returns with ARROW-ROADMAP Phase D (adding real APIs then). See `docs/TASKS-IMMEDIATELY.md`.
 
+### Query Engine
+
+- `OrderBy`/`OrderByDescending` support computed sort keys (`OrderBy(x => x["A"] + x["B"])`) via a materialized-key `SortByExpressionOperation` — no longer throws `NotSupportedException`; null placement and direction match `Sort` semantics
+- `ThenBy`/`ThenByDescending` compose secondary sorts lexicographically with a preceding `OrderBy`/`Sort`: `NivaraFrame` string overloads and LINQ `QueryFrame` lambda overloads, both computed-key capable. Column-reference keys merge into the efficient multi-key `SortOperation`; computed keys merge into a multi-key `SortByExpressionOperation`. Without a preceding sort they act as a primary sort
+
 ## [1.1.0] - 2026-07-31
 
 ### Automatic Differentiation (inference-default)
