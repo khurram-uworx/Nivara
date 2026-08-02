@@ -297,4 +297,43 @@ public class ColumnExpressionTests
 
         Assert.That(expr.ResultType, Is.EqualTo(typeof(object)));
     }
+
+    [Test]
+    public void BinaryExpression_Validate_ResolvesResultTypeFromSchema()
+    {
+        var expr = new BinaryExpression(BinaryOperator.Add, new ColumnReference("Age"), new ColumnReference("Salary"));
+
+        expr.Validate(testSchema);
+
+        Assert.That(expr.ResultType, Is.EqualTo(typeof(double)));
+    }
+
+    [Test]
+    public void ScalarExpression_Validate_ResolvesResultTypeFromSchema()
+    {
+        var expr = new ScalarExpression(BinaryOperator.Add, new ColumnReference("Salary"), 5);
+
+        expr.Validate(testSchema);
+
+        Assert.That(expr.ResultType, Is.EqualTo(typeof(double)));
+    }
+
+    [Test]
+    public void ComparisonExpression_Validate_CompositeScalarOperand_DoesNotThrow()
+    {
+        var salary = new ColumnReference("Salary");
+        var expr = (salary + 5) > 90.0;
+
+        Assert.DoesNotThrow(() => expr.Validate(testSchema));
+    }
+
+    [Test]
+    public void SelectOperation_TransformSchema_ComputedScalarColumn_InfersPromotedType()
+    {
+        var select = new SelectOperation(new ColumnExpression[] { new ColumnReference("Salary") + 5 });
+
+        var result = select.TransformSchema(testSchema);
+
+        Assert.That(result.GetColumnType("(Salary + 5)"), Is.EqualTo(typeof(double)));
+    }
 }

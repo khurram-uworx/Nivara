@@ -447,6 +447,10 @@ public sealed class BinaryExpression : ColumnExpression
         Left.Validate(schema);
         Right.Validate(schema);
 
+        // Operand result types resolve against the schema during validation (untyped column
+        // references start as object), so recompute the promoted result type after they resolve.
+        ResultType = DetermineResultType(Left.ResultType, Right.ResultType);
+
         // Validate type compatibility for arithmetic operations
         if (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
             Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide)
@@ -653,6 +657,10 @@ public sealed class ScalarExpression : ColumnExpression
     public override void Validate(Schema schema)
     {
         Column.Validate(schema);
+
+        // The column's result type resolves against the schema during validation (an untyped
+        // column reference starts as object), so recompute our result type after it resolves.
+        ResultType = Column.ResultType;
 
         // Validate type compatibility for scalar operations
         if (Scalar != null && (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
