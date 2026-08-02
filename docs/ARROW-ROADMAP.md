@@ -20,7 +20,7 @@ Concretely, when this roadmap is done:
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/TensorStorage.cs:14`, `MemoryStorage.cs:13`), internal span access flattens to a copy (`TensorStorage.cs:207-210`), interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, `docs/TASKS-IMMEDIATELY.md`, so all conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:688-710`).
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/TensorStorage.cs:14`, `MemoryStorage.cs:13`), internal span access flattens to a copy (`TensorStorage.cs:207-210`), interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, recorded in `CHANGELOG.md`, so all conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:688-710`).
 
 ### Non-goals (explicit)
 
@@ -102,7 +102,7 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 ### Phase D — Real zero-copy, both directions *(credibility win)*
 
-**Motivation:** Every interop path copies today — the placeholder `UseZeroCopy` option was removed rather than kept lying (claims-integrity triage, `docs/TASKS-IMMEDIATELY.md` Tasks 1–2, issue #94), and even internal span access flattens. This phase adds the real zero-copy APIs back.
+**Motivation:** Every interop path copies today — the placeholder `UseZeroCopy` option was removed rather than kept lying (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94), and even internal span access flattens. This phase adds the real zero-copy APIs back.
 
 **Scope:**
 - Re-introduce the zero-copy interop path (the placeholder `TryCreateZeroCopy*Array` methods were removed) with real `MemoryMarshal`/buffer-handoff implementations: build Apache.Arrow arrays from existing `Memory<T>` (data buffer + validity bitmap) instead of builders+`Append`.

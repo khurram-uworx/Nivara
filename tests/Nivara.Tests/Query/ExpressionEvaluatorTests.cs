@@ -6,7 +6,7 @@ using NUnit.Framework;
 namespace Nivara.Tests.Query;
 
 /// <summary>
-/// Regression guardrails for claim honesty (docs/TASKS-IMMEDIATELY.md Task 8).
+/// Regression guardrails for claim honesty (claims-integrity triage).
 /// These tests fail if a corresponding honesty fix is reverted:
 /// - the typed expression-evaluator fast path is actually selected for same-type
 ///   numeric columns and its output matches boxed semantics, including nulls;

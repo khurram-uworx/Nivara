@@ -94,6 +94,26 @@ The `ColumnStorageFactory` automatically selects the optimal storage backend:
 
 This selection is **transparent** to users and happens at column creation time. It is an internal storage and execution choice, not a promise that Nivara owns tensor math APIs.
 
+### Storage Layout and Span Access
+
+```
+NivaraColumn<T> → IColumnStorage<T> → ColumnStorageFactory picks backend by IsVectorizable<T>:
+  non-vectorizable → MemoryStorage<T>  (Memory<T>, scalar)        → TryGetSpan/Slice = zero-copy VIEW  (ProvidesZeroCopySpanAccess = true)
+  vectorizable     → TensorStorage<T>  (Tensor<T>, SIMD)          → GetFlattenedSpan/Slice = cached COPY (ProvidesZeroCopySpanAccess = false)
+```
+
+Span-access semantics differ by backend, so callers must not assume slicing or
+`TryGetSpan` is cheap. Query them via `IColumnStorage<T>.ProvidesZeroCopySpanAccess`
+(`true` for `MemoryStorage<T>`, `false` for `TensorStorage<T>`):
+
+- **`MemoryStorage<T>`** — `AsSpan()`/`TryGetSpan` and `Slice` are true zero-copy
+  views over the backing `Memory<T>`; mutation of the returned span is visible in
+  storage.
+- **`TensorStorage<T>`** — `GetFlattenedSpan()` returns a cached flattened **copy**
+  (first access materializes via `FlattenTo`, later accesses reuse the cache) and
+  `Slice` returns an independent copy; tensor slicing is not contiguous, so no view
+  is returned. Nivara does not advertise zero-copy for the tensor-backed path.
+
 ### Null Representation Decision
 
 **Decision**: Use **explicit validity masks** to represent nulls instead of sentinel values.

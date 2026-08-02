@@ -17,7 +17,7 @@ sealed class ExpressionEvaluator
     /// <summary>
     /// Gets how many typed-kernel evaluations (same-element-type operands) were applied
     /// by the most recent operations on this instance. Used by guardrail tests to assert
-    /// the typed fast path is actually selected (see TASKS-IMMEDIATELY.md Task 8).
+    /// the typed fast path is actually selected (claims-integrity guardrail).
     /// </summary>
     internal int TypedPathEvaluationCount => typedPathEvaluationCount;
 

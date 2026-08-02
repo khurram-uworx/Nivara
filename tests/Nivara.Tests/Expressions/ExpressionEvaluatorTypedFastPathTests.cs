@@ -1,7 +1,6 @@
 using Nivara.Diagnostics;
 using Nivara.Execution;
 using Nivara.Expressions;
-using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Expressions;
