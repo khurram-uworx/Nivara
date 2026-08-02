@@ -1327,7 +1327,6 @@ var restoredSeries = arrowArray.FromArrowArray<int>();
 // Custom conversion options
 var arrowOptions = new ArrowConversionOptions
 {
-    UseZeroCopy = true,
     ValidateTypes = true,
     TimeZone = TimeZoneInfo.Utc
 };
