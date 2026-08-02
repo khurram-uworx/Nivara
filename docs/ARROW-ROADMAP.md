@@ -14,13 +14,13 @@ Concretely, when this roadmap is done:
 
 - A column has an explicit **physical layout** (`Flat<T>`, `VariableBinary`, `Dictionary`), decoupled from its logical type; strings are offset+data buffers, not reference arrays.
 - **Validity is a first-class bitmap** with a documented representation and a cheap bool↔bitmap conversion at the boundaries.
-- **Zero-copy actually works** — internally (slices/views share buffers) and at the interop boundary (Arrow arrays and tensors are built from existing `Memory<T>` buffers, and `UseZeroCopy = true` means what it says).
+- **Zero-copy actually works** — internally (slices/views share buffers) and at the interop boundary (Arrow arrays and tensors are built from existing `Memory<T>` buffers, exposed through real APIs — the placeholder `UseZeroCopy` option is gone, not kept lying).
 - **Columns are chunked** — a frame is chunk-aligned columns, so append/concat are cheap and streaming/record-batch boundaries are natural.
 - Arrow IPC and Parquet are the **zero-copy handoff** at the edges, not a conversion ritual.
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/TensorStorage.cs:14`, `MemoryStorage.cs:13`), internal span access flattens to a copy (`TensorStorage.cs:207-210`), interop zero-copy methods are placeholders that always return null (`src/Nivara.Extensions/IO/ArrowInterop.cs:977-1065`) while `UseZeroCopy` defaults to `true` (`ArrowConversionOptions.cs:18`), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:688-710`).
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/TensorStorage.cs:14`, `MemoryStorage.cs:13`), internal span access flattens to a copy (`TensorStorage.cs:207-210`), interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, `docs/TASKS-IMMEDIATELY.md`, so all conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:688-710`).
 
 ### Non-goals (explicit)
 
@@ -102,22 +102,22 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 ### Phase D — Real zero-copy, both directions *(credibility win)*
 
-**Motivation:** `UseZeroCopy = true` currently means nothing — every interop path copies, and even internal span access flattens. This phase makes the promise true or removes it.
+**Motivation:** Every interop path copies today — the placeholder `UseZeroCopy` option was removed rather than kept lying (claims-integrity triage, `docs/TASKS-IMMEDIATELY.md` Tasks 1–2, issue #94), and even internal span access flattens. This phase adds the real zero-copy APIs back.
 
 **Scope:**
-- Replace `TryCreateZeroCopy*Array` placeholders (`ArrowInterop.cs:977-1065`) with real `MemoryMarshal`/buffer-handoff implementations: build Apache.Arrow arrays from existing `Memory<T>` (data buffer + validity bitmap) instead of builders+`Append`.
+- Re-introduce the zero-copy interop path (the placeholder `TryCreateZeroCopy*Array` methods were removed) with real `MemoryMarshal`/buffer-handoff implementations: build Apache.Arrow arrays from existing `Memory<T>` (data buffer + validity bitmap) instead of builders+`Append`.
 - Make `TensorStorage.GetFlattenedSpan()` a true **view** where the layout permits (no per-access `FlattenTo` allocation); keep caching as an optimization, not a necessity.
-- Make `UseZeroCopy` honest: engage when the layout is compatible, throw/fail loudly when it cannot, **never silently copy while reporting zero-copy**.
+- Expose zero-copy through a dedicated option (e.g. a re-added `UseZeroCopy`) that engages only when the layout is compatible, throws/fails loudly when it cannot, and **never silently copies while reporting zero-copy**.
 - `MemoryMarshal.AsBytes` for unmanaged flat layouts ↔ Arrow buffers; `ReadOnlyMemory<T>` sharing into `Tensor<T>`/`TensorSpan<T>` where the BCL allows.
 
-**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs`, `src/Nivara.Extensions/IO/ArrowConversionOptions.cs`, `src/Nivara/Storage/TensorStorage.cs`, `src/Nivara/Tensors/TensorInteropExtensions.cs`.
+**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs`, `src/Nivara.Extensions/IO/ArrowConversionOptions.cs` (option re-added here), `src/Nivara/Storage/TensorStorage.cs`, `src/Nivara/Tensors/TensorInteropExtensions.cs`.
 
 **Dependencies:** Phases A–C (zero-copy needs chunked, layout-explicit, bitmap-validity columns).
 
 **Acceptance criteria:**
 - Interop benchmark shows zero-copy paths actually share buffers (no element-loop copies) for flat, null-free and bitmapped cases.
 - Round-trip tests confirm shared-buffer reads are consistent (immutability guarantees no mutation).
-- `UseZeroCopy = true` on an incompatible layout fails loudly (clear exception) rather than silently copying.
+- An explicit zero-copy request on an incompatible layout fails loudly (clear exception) rather than silently copying.
 
 **Risks:** Apache.Arrow's buffer APIs vs. `Tensor<T>` internal layout (nint dims, padding); memory-lifecycle safety of handing managed `Memory<T>` to native-bound arrays. Mitigation: pin/`MemoryManager<T>` ownership, keep owned-buffer semantics explicit (AGENTS.md zero-copy notes already flag this).
 
@@ -178,7 +178,7 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 **Why chunks first:** Phase A is the structural keystone — B (layout), C (bitmap validity), and D (zero-copy) all need a chunked, boundary-shaped column model to be natural. Without it, every other phase is bolted onto the wrong shape.
 
-**Credibility vs. polish:** Phase D (honest zero-copy) is the user-visible credibility win — it makes the documented `UseZeroCopy` option true. Phases B and C are the physics that make D cheap and correct. Phase E is the analytical payoff; F is the streaming payoff.
+**Credibility vs. polish:** Phase D (real zero-copy) is the user-visible credibility win — it re-introduces the zero-copy API the claims-integrity triage removed (issue #94). Phases B and C are the physics that make D cheap and correct. Phase E is the analytical payoff; F is the streaming payoff.
 
 **Cross-roadmap convergence:**
 
@@ -211,7 +211,7 @@ The vision at §0 holds, verified by:
 
 - Core columns are chunked with explicit layouts; strings use variable-binary buffers.
 - Validity has one canonical representation with parity tests and boundary conversion.
-- Zero-copy engages where the layout allows and fails loudly where it cannot; `UseZeroCopy = true` is honest.
+- Zero-copy engages where the layout allows and fails loudly where it cannot; the dedicated zero-copy option (re-added by Phase D) is honest.
 - Dictionary encoding exists for low-cardinality columns and accelerates groupby/join/sort.
 - Lazy scanning is record-batch-shaped and async-capable.
 - Full `dotnet build Nivara.slnx` + `dotnet test` green; no silently-copying zero-copy paths remain.

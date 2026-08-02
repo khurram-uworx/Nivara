@@ -371,36 +371,18 @@ public class ArrowInteropTests
     }
 
     [Test]
-    public void ToArrowTable_WithUseZeroCopyEnabled_AttemptsZeroCopy()
+    public void ToArrowTable_ProducesArrowTable()
     {
         // Arrange
         var data = new[] { 1, 2, 3, 4, 5 };
         var column = NivaraColumn<int>.Create(data);
         var frame = NivaraFrame.Create(("Numbers", column));
-        var options = new ArrowConversionOptions { UseZeroCopy = true };
+        var options = new ArrowConversionOptions();
 
         // Act
         var result = ArrowInterop.ToArrowTable(frame, options);
 
-        // Assert - Should still work (falls back to copying if zero-copy not possible)
-        Assert.That(result, Is.Not.Null);
-        Assert.That(result.ColumnCount, Is.EqualTo(1));
-        Assert.That(result.RowCount, Is.EqualTo(5));
-    }
-
-    [Test]
-    public void ToArrowTable_WithUseZeroCopyDisabled_UsesCopying()
-    {
-        // Arrange
-        var data = new[] { 1, 2, 3, 4, 5 };
-        var column = NivaraColumn<int>.Create(data);
-        var frame = NivaraFrame.Create(("Numbers", column));
-        var options = new ArrowConversionOptions { UseZeroCopy = false };
-
-        // Act
-        var result = ArrowInterop.ToArrowTable(frame, options);
-
-        // Assert - Should work with copying approach
+        // Assert
         Assert.That(result, Is.Not.Null);
         Assert.That(result.ColumnCount, Is.EqualTo(1));
         Assert.That(result.RowCount, Is.EqualTo(5));
@@ -413,7 +395,6 @@ public class ArrowInteropTests
         var options = new ArrowConversionOptions();
 
         // Assert
-        Assert.That(options.UseZeroCopy, Is.True, "UseZeroCopy should default to true");
         Assert.That(options.ValidateTypes, Is.True, "ValidateTypes should default to true");
         Assert.That(options.TimeZone, Is.EqualTo(TimeZoneInfo.Utc), "TimeZone should default to UTC");
         Assert.That(options.StringEncoding, Is.EqualTo(System.Text.Encoding.UTF8), "StringEncoding should default to UTF-8");
@@ -870,10 +851,8 @@ public class ArrowInteropTests
 
         var optionVariations = new[]
         {
-            new ArrowConversionOptions { UseZeroCopy = true, ValidateTypes = true },
-            new ArrowConversionOptions { UseZeroCopy = false, ValidateTypes = true },
-            new ArrowConversionOptions { UseZeroCopy = true, ValidateTypes = false },
-            new ArrowConversionOptions { UseZeroCopy = false, ValidateTypes = false },
+            new ArrowConversionOptions { ValidateTypes = true },
+            new ArrowConversionOptions { ValidateTypes = false },
             new ArrowConversionOptions { TimeZone = TimeZoneInfo.Utc },
             new ArrowConversionOptions { StringEncoding = System.Text.Encoding.UTF8 }
         };
@@ -886,7 +865,7 @@ public class ArrowInteropTests
 
             // Assert - Data should be preserved regardless of options
             Assert.That(roundTripFrame.ColumnCount, Is.EqualTo(testFrame.ColumnCount),
-                $"Frame structure should be preserved with options: UseZeroCopy={options.UseZeroCopy}, ValidateTypes={options.ValidateTypes}");
+                $"Frame structure should be preserved with options: ValidateTypes={options.ValidateTypes}, TimeZone={options.TimeZone.Id}");
 
             foreach (var columnName in testFrame.ColumnNames)
             {

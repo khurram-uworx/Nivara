@@ -332,8 +332,7 @@ public class ArrowParquetIntegrationTests
 
         var arrowOptions = new ArrowConversionOptions
         {
-            ValidateTypes = true,
-            UseZeroCopy = false // Force copying approach
+            ValidateTypes = true
         };
 
         try
