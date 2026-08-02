@@ -1,7 +1,7 @@
-using System.Numerics;
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Tensors;
+using System.Numerics;
 
 namespace Nivara.Helpers;
 
