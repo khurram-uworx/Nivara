@@ -1,6 +1,7 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Helpers;
+using Nivara.Operations;
 using Nivara.Query;
 using Nivara.Storage;
 using Nivara.Tensors;
@@ -423,6 +424,12 @@ public sealed class NivaraFrame : IFrame
     readonly IReadOnlyDictionary<string, IColumn> columns;
     readonly Schema schema;
     bool disposed;
+
+    /// <summary>
+    /// Gets the sort keys that produced this frame's row order, when it was produced by
+    /// <c>OrderBy</c> or <c>ThenBy</c>. Used to compose secondary sorts lexicographically.
+    /// </summary>
+    internal IReadOnlyList<SortKey>? SortKeys { get; set; }
 
     /// <summary>
     /// Initializes a new instance of NivaraFrame with the specified columns

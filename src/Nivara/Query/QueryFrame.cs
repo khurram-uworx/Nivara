@@ -324,6 +324,69 @@ public sealed class QueryFrame : IDisposable
     }
 
     /// <summary>
+    /// Appends a secondary sort key to the query, merging it into the preceding sort operation when
+    /// one is present so the ordering composes lexicographically (primary key first, then secondary).
+    /// When the preceding operation is not a sort, the key acts as a primary sort key.
+    /// </summary>
+    /// <param name="key">The secondary key expression</param>
+    /// <param name="direction">The sort direction</param>
+    /// <param name="nullOrdering">How to order null values</param>
+    /// <returns>A new QueryFrame with the secondary sort key added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when key is null</exception>
+    internal QueryFrame ThenBy(ColumnExpression key, SortDirection direction = SortDirection.Ascending,
+        NullOrdering nullOrdering = NullOrdering.NullsLast)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        ArgumentNullException.ThrowIfNull(key);
+
+        var newOperations = new List<IQueryOperation>(operations);
+
+        if (operations.Count > 0)
+        {
+            var last = operations[operations.Count - 1];
+
+            if (last is SortOperation sortOp)
+            {
+                if (key is ColumnReference colRef)
+                {
+                    var mergedKeys = sortOp.SortKeys
+                        .Concat(new[] { new SortKey(colRef.ColumnName, direction, nullOrdering) })
+                        .ToArray();
+                    newOperations[^1] = new SortOperation(mergedKeys, sortOp.IsStable);
+                }
+                else
+                {
+                    var mergedKeys = sortOp.SortKeys
+                        .Select(k => new SortExpressionKey(ColumnExpressions.Col(k.ColumnName), k.Direction, k.NullOrdering))
+                        .Concat(new[] { new SortExpressionKey(key, direction, nullOrdering) })
+                        .ToArray();
+                    newOperations[^1] = new SortByExpressionOperation(mergedKeys, sortOp.IsStable);
+                }
+
+                return new QueryFrame(source, newOperations);
+            }
+
+            if (last is SortByExpressionOperation sortExprOp)
+            {
+                var mergedKeys = sortExprOp.Keys
+                    .Concat(new[] { new SortExpressionKey(key, direction, nullOrdering) })
+                    .ToArray();
+                newOperations[^1] = new SortByExpressionOperation(mergedKeys, sortExprOp.IsStable);
+
+                return new QueryFrame(source, newOperations);
+            }
+        }
+
+        if (key is ColumnReference columnRef)
+            newOperations.Add(new SortOperation(columnRef.ColumnName, direction, nullOrdering));
+        else
+            newOperations.Add(new SortByExpressionOperation(key, direction, nullOrdering));
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
     /// Executes the query and returns a materialized NivaraFrame
     /// This is the execution barrier that triggers lazy query evaluation
     /// </summary>

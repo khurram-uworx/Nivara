@@ -90,6 +90,38 @@ public static class NivaraLinqExtensions
     }
 
     /// <summary>
+    /// Applies a stable secondary sort to the query frame using a lambda expression, merging into the
+    /// primary sort from a preceding <see cref="OrderBy(QueryFrame, Func{RowExpressionBuilder, ColumnExpression}, bool)"/>
+    /// so the ordering composes lexicographically (primary key first, then this secondary key). Computed
+    /// keys are supported. Without a preceding sort, acts as a primary sort.
+    /// </summary>
+    /// <param name="source">The source query frame</param>
+    /// <param name="keySelector">Function to select the secondary sort key</param>
+    /// <param name="descending">Whether to sort in descending order</param>
+    /// <returns>A sorted query frame</returns>
+    public static QueryFrame ThenBy(this QueryFrame source, Func<RowExpressionBuilder, ColumnExpression> keySelector, bool descending = false)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(keySelector);
+
+        var expression = keySelector(RowExpressionBuilder.Instance);
+        return source.ThenBy(expression, descending ? SortDirection.Descending : SortDirection.Ascending);
+    }
+
+    /// <summary>
+    /// Applies a stable secondary descending sort to the query frame using a lambda expression, merging
+    /// into the primary sort from a preceding <see cref="OrderBy(QueryFrame, Func{RowExpressionBuilder, ColumnExpression}, bool)"/>.
+    /// Computed keys are supported. Without a preceding sort, acts as a primary descending sort.
+    /// </summary>
+    /// <param name="source">The source query frame</param>
+    /// <param name="keySelector">Function to select the secondary sort key</param>
+    /// <returns>A sorted query frame</returns>
+    public static QueryFrame ThenByDescending(this QueryFrame source, Func<RowExpressionBuilder, ColumnExpression> keySelector)
+    {
+        return source.ThenBy(keySelector, descending: true);
+    }
+
+    /// <summary>
     /// Executes the query and returns a materialized NivaraFrame (Alias for Collect)
     /// </summary>
     /// <param name="source">The source query frame</param>

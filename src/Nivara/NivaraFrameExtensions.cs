@@ -1051,6 +1051,49 @@ public static class NivaraFrameExtensions
     }
 
     /// <summary>
+    /// Applies a stable secondary sort by a column, extending the primary sort from a preceding
+    /// <see cref="OrderBy(NivaraFrame, string, bool)"/> so the ordering composes lexicographically
+    /// (primary key first, then this secondary key). Without a preceding sort, acts as a primary sort.
+    /// </summary>
+    /// <param name="frame">The source DataFrame</param>
+    /// <param name="columnName">The name of the column to sort by</param>
+    /// <param name="ascending">Whether to sort in ascending order (default: true)</param>
+    /// <returns>A new DataFrame sorted by the specified column</returns>
+    /// <exception cref="ArgumentNullException">Thrown when frame is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columnName is null or whitespace</exception>
+    public static NivaraFrame ThenBy(this NivaraFrame frame, string columnName, bool ascending = true)
+    {
+        if (frame == null)
+            throw new ArgumentNullException(nameof(frame));
+        if (string.IsNullOrWhiteSpace(columnName))
+            throw new ArgumentException("Column name cannot be null or whitespace", nameof(columnName));
+
+        var direction = ascending ? SortDirection.Ascending : SortDirection.Descending;
+        var newKey = new SortKey(columnName, direction, NullOrdering.NullsLast);
+
+        var mergedKeys = frame.SortKeys is { } existing
+            ? existing.Concat(new[] { newKey }).ToArray()
+            : new[] { newKey };
+
+        return frame.Sort(mergedKeys);
+    }
+
+    /// <summary>
+    /// Applies a stable secondary descending sort by a column, extending the primary sort from a
+    /// preceding <see cref="OrderBy(NivaraFrame, string, bool)"/>. Without a preceding sort, acts as a
+    /// primary descending sort.
+    /// </summary>
+    /// <param name="frame">The source DataFrame</param>
+    /// <param name="columnName">The name of the column to sort by</param>
+    /// <returns>A new DataFrame sorted by the specified column</returns>
+    /// <exception cref="ArgumentNullException">Thrown when frame is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columnName is null or whitespace</exception>
+    public static NivaraFrame ThenByDescending(this NivaraFrame frame, string columnName)
+    {
+        return frame.ThenBy(columnName, ascending: false);
+    }
+
+    /// <summary>
     /// Groups the DataFrame by the specified columns
     /// </summary>
     /// <param name="frame">The source DataFrame</param>
@@ -1203,7 +1246,9 @@ public static class NivaraFrameExtensions
 
         // Convert result back to NivaraFrame
         var namedColumns = resultColumns.Select(kvp => (kvp.Key, kvp.Value));
-        return new NivaraFrame(namedColumns);
+        var result = new NivaraFrame(namedColumns);
+        result.SortKeys = sortKeys;
+        return result;
     }
 
     #endregion
