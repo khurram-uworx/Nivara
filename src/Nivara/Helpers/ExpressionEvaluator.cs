@@ -1,5 +1,7 @@
+using System.Numerics;
 using Nivara.Exceptions;
 using Nivara.Expressions;
+using Nivara.Tensors;
 
 namespace Nivara.Helpers;
 
@@ -100,6 +102,10 @@ sealed class ExpressionEvaluator
         var leftColumn = Evaluate(binary.Left, input);
         var rightColumn = Evaluate(binary.Right, input);
 
+        var typedResult = TryEvaluateTypedBinary(binary.Operator, leftColumn, rightColumn);
+        if (typedResult != null)
+            return typedResult;
+
         return binary.Operator switch
         {
             BinaryOperator.Add => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => AddValues(l, r)),
@@ -122,6 +128,10 @@ sealed class ExpressionEvaluator
     {
         var leftColumn = Evaluate(comparison.Left, input);
         var rightColumn = Evaluate(comparison.Right, input);
+
+        var typedResult = TryEvaluateTypedComparison(comparison.Operator, leftColumn, rightColumn);
+        if (typedResult != null)
+            return typedResult;
 
         return comparison.Operator switch
         {
@@ -146,6 +156,10 @@ sealed class ExpressionEvaluator
         var column = Evaluate(scalar.Column, input);
         var scalarColumn = CreateConstantColumn(scalar.Scalar, column.Length);
 
+        var typedResult = TryEvaluateTypedBinary(scalar.Operator, column, scalarColumn);
+        if (typedResult != null)
+            return typedResult;
+
         return scalar.Operator switch
         {
             BinaryOperator.Add => ApplyBinaryOperation(column, scalarColumn, (l, r) => AddValues(l, r)),
@@ -156,6 +170,104 @@ sealed class ExpressionEvaluator
             BinaryOperator.Or => ApplyBinaryOperation(column, scalarColumn, (l, r) => OrValues(l, r)),
             _ => throw new NotSupportedException($"Scalar operator {scalar.Operator} is not supported")
         };
+    }
+
+    /// <summary>
+    /// Attempts to evaluate a binary operation through typed column kernels, returning null when the
+    /// typed path is not applicable so callers can fall back to the boxed implementation.
+    /// </summary>
+    static IColumn? TryEvaluateTypedBinary(BinaryOperator op, IColumn left, IColumn right)
+    {
+        if (left.Length != right.Length || left.ElementType != right.ElementType)
+            return null;
+
+        return left.ElementType switch
+        {
+            Type t when t == typeof(int) => TryBinaryTyped<int>(op, left, right),
+            Type t when t == typeof(long) => TryBinaryTyped<long>(op, left, right),
+            Type t when t == typeof(float) => TryBinaryTyped<float>(op, left, right),
+            Type t when t == typeof(double) => TryBinaryTyped<double>(op, left, right),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Applies a binary operation to two typed columns of the same element type.
+    /// Falls back to null when the operation or element type is unsupported.
+    /// </summary>
+    static IColumn? TryBinaryTyped<T>(BinaryOperator op, IColumn left, IColumn right) where T : struct, INumber<T>
+    {
+        if (left is not NivaraColumn<T> l || right is not NivaraColumn<T> r)
+            return null;
+
+        try
+        {
+            return op switch
+            {
+                BinaryOperator.Add => l.Add(r),
+                BinaryOperator.Subtract => l.Subtract(r),
+                BinaryOperator.Multiply => l.Multiply(r),
+                BinaryOperator.Divide => l.Divide(r),
+                _ => null
+            };
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to evaluate a comparison operation through typed column kernels, returning null when the
+    /// typed path is not applicable so callers can fall back to the boxed implementation.
+    /// </summary>
+    static IColumn? TryEvaluateTypedComparison(ComparisonOperator op, IColumn left, IColumn right)
+    {
+        if (left.Length != right.Length || left.ElementType != right.ElementType)
+            return null;
+
+        return left.ElementType switch
+        {
+            Type t when t == typeof(int) => TryComparisonTyped<int>(op, left, right),
+            Type t when t == typeof(long) => TryComparisonTyped<long>(op, left, right),
+            Type t when t == typeof(short) => TryComparisonTyped<short>(op, left, right),
+            Type t when t == typeof(byte) => TryComparisonTyped<byte>(op, left, right),
+            Type t when t == typeof(float) => TryComparisonTyped<float>(op, left, right),
+            Type t when t == typeof(double) => TryComparisonTyped<double>(op, left, right),
+            Type t when t == typeof(string) => TryComparisonTyped<string>(op, left, right),
+            Type t when t == typeof(bool) => TryComparisonTyped<bool>(op, left, right),
+            Type t when t == typeof(decimal) => TryComparisonTyped<decimal>(op, left, right),
+            Type t when t == typeof(DateTime) => TryComparisonTyped<DateTime>(op, left, right),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Applies a comparison operation to two typed columns of the same element type.
+    /// Falls back to null when the operation or element type is unsupported.
+    /// </summary>
+    static IColumn? TryComparisonTyped<T>(ComparisonOperator op, IColumn left, IColumn right)
+    {
+        if (left is not NivaraColumn<T> l || right is not NivaraColumn<T> r)
+            return null;
+
+        try
+        {
+            return op switch
+            {
+                ComparisonOperator.Equal => l.Equals(r),
+                ComparisonOperator.NotEqual => l.Equals(r).Transform(v => !v),
+                ComparisonOperator.GreaterThan => l.GreaterThan(r),
+                ComparisonOperator.LessThan => l.LessThan(r),
+                ComparisonOperator.GreaterThanOrEqual => l.LessThan(r).Transform(v => !v),
+                ComparisonOperator.LessThanOrEqual => l.GreaterThan(r).Transform(v => !v),
+                _ => null
+            };
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
