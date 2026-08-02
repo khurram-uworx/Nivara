@@ -60,117 +60,6 @@ public sealed class NivaraFrame : IFrame
     }
 
     /// <summary>
-    /// Creates a new column containing only the values at the specified indices
-    /// </summary>
-    /// <param name="column">The source column</param>
-    /// <param name="indices">The indices of values to include</param>
-    /// <returns>A new column with filtered values</returns>
-    static IColumn createFilteredColumn(IColumn column, List<int> indices)
-    {
-        var elementType = column.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => createFilteredColumnTyped<int>(column, indices),
-            Type t when t == typeof(double) => createFilteredColumnTyped<double>(column, indices),
-            Type t when t == typeof(float) => createFilteredColumnTyped<float>(column, indices),
-            Type t when t == typeof(long) => createFilteredColumnTyped<long>(column, indices),
-            Type t when t == typeof(string) => createFilteredColumnTyped<string>(column, indices),
-            Type t when t == typeof(bool) => createFilteredColumnTyped<bool>(column, indices),
-            Type t when t == typeof(decimal) => createFilteredColumnTyped<decimal>(column, indices),
-            Type t when t == typeof(byte) => createFilteredColumnTyped<byte>(column, indices),
-            Type t when t == typeof(short) => createFilteredColumnTyped<short>(column, indices),
-            Type t when t == typeof(DateTime) => createFilteredColumnTyped<DateTime>(column, indices),
-            _ => createFilteredColumnGeneric(column, indices)
-        };
-    }
-
-    /// <summary>
-    /// Creates a filtered column for a specific type
-    /// </summary>
-    static IColumn createFilteredColumnTyped<T>(IColumn column, List<int> indices)
-    {
-        // Check if T is a value type to determine which creation method to use
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array and use CreateFromNullable
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var filteredArray = System.Array.CreateInstance(nullableType, indices.Count);
-
-            for (int i = 0; i < indices.Count; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                if (value != null)
-                {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    filteredArray.SetValue(nullableInstance, i);
-                }
-                // null values remain null in the array
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { filteredArray })!;
-        }
-        else
-        {
-            // For reference types, create regular array and use CreateForReferenceType
-            var filteredArray = new T[indices.Count];
-
-            for (int i = 0; i < indices.Count; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                filteredArray[i] = (T)value!; // Reference types can be null
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { filteredArray })!;
-        }
-    }
-
-    /// <summary>
-    /// Creates a filtered column for unknown types using object column
-    /// </summary>
-    static IColumn createFilteredColumnGeneric(IColumn column, List<int> indices)
-    {
-        var filteredArray = new object[indices.Count];
-
-        for (int i = 0; i < indices.Count; i++)
-        {
-            filteredArray[i] = column.GetValue(indices[i])!;
-        }
-
-        return NivaraColumn<object>.Create(filteredArray);
-    }
-
-    /// <summary>
-    /// Creates an empty column of the specified type
-    /// </summary>
-    /// <param name="elementType">The type of elements in the column</param>
-    /// <returns>An empty column of the specified type</returns>
-    static IColumn createEmptyColumn(Type elementType)
-    {
-        return elementType switch
-        {
-            Type t when t == typeof(int) => NivaraColumn<int>.Create(Array.Empty<int>()),
-            Type t when t == typeof(double) => NivaraColumn<double>.Create(Array.Empty<double>()),
-            Type t when t == typeof(float) => NivaraColumn<float>.Create(Array.Empty<float>()),
-            Type t when t == typeof(long) => NivaraColumn<long>.Create(Array.Empty<long>()),
-            Type t when t == typeof(string) => NivaraColumn<string>.CreateForReferenceType(Array.Empty<string>()),
-            Type t when t == typeof(bool) => NivaraColumn<bool>.Create(Array.Empty<bool>()),
-            Type t when t == typeof(decimal) => NivaraColumn<decimal>.Create(Array.Empty<decimal>()),
-            Type t when t == typeof(byte) => NivaraColumn<byte>.Create(Array.Empty<byte>()),
-            Type t when t == typeof(short) => NivaraColumn<short>.Create(Array.Empty<short>()),
-            Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.Create(Array.Empty<DateTime>()),
-            _ => NivaraColumn<object>.Create(Array.Empty<object>())
-        };
-    }
-
-    /// <summary>
     /// Slices a column using the column's built-in Slice method
     /// </summary>
     /// <param name="column">The column to slice</param>
@@ -190,95 +79,7 @@ public sealed class NivaraFrame : IFrame
 
         // Fallback: create filtered column using indices
         var indices = Enumerable.Range(start, length).ToList();
-        return createFilteredColumn(column, indices);
-    }
-
-    /// <summary>
-    /// Reorders a column using the specified indices
-    /// </summary>
-    /// <param name="column">The column to reorder</param>
-    /// <param name="indices">The indices specifying the new order</param>
-    /// <returns>A reordered column</returns>
-    static IColumn reorderColumn(IColumn column, int[] indices)
-    {
-        var elementType = column.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => reorderColumnTyped<int>(column, indices),
-            Type t when t == typeof(double) => reorderColumnTyped<double>(column, indices),
-            Type t when t == typeof(float) => reorderColumnTyped<float>(column, indices),
-            Type t when t == typeof(long) => reorderColumnTyped<long>(column, indices),
-            Type t when t == typeof(string) => reorderColumnTyped<string>(column, indices),
-            Type t when t == typeof(bool) => reorderColumnTyped<bool>(column, indices),
-            Type t when t == typeof(decimal) => reorderColumnTyped<decimal>(column, indices),
-            Type t when t == typeof(byte) => reorderColumnTyped<byte>(column, indices),
-            Type t when t == typeof(short) => reorderColumnTyped<short>(column, indices),
-            Type t when t == typeof(DateTime) => reorderColumnTyped<DateTime>(column, indices),
-            _ => reorderColumnGeneric(column, indices)
-        };
-    }
-
-    /// <summary>
-    /// Reorders a column for a specific type
-    /// </summary>
-    static IColumn reorderColumnTyped<T>(IColumn column, int[] indices)
-    {
-        // Check if T is a value type to determine which creation method to use
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array and use CreateFromNullable
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var reorderedArray = System.Array.CreateInstance(nullableType, indices.Length);
-
-            for (int i = 0; i < indices.Length; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                if (value != null)
-                {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    reorderedArray.SetValue(nullableInstance, i);
-                }
-                // null values remain null in the array
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { reorderedArray })!;
-        }
-        else
-        {
-            // For reference types, create regular array and use CreateForReferenceType
-            var reorderedArray = new T[indices.Length];
-
-            for (int i = 0; i < indices.Length; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                reorderedArray[i] = (T)value!; // Reference types can be null
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { reorderedArray })!;
-        }
-    }
-
-    /// <summary>
-    /// Reorders a column for unknown types using object column
-    /// </summary>
-    static IColumn reorderColumnGeneric(IColumn column, int[] indices)
-    {
-        var reorderedArray = new object[indices.Length];
-
-        for (int i = 0; i < indices.Length; i++)
-        {
-            reorderedArray[i] = column.GetValue(indices[i])!;
-        }
-
-        return NivaraColumn<object>.Create(reorderedArray);
+        return ColumnFilterHelper.CreateFilteredColumn(column, indices);
     }
 
     static int getTypeSize(Type type)
@@ -1177,7 +978,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -1187,7 +988,7 @@ public sealed class NivaraFrame : IFrame
         var filteredColumns = new List<(string Name, IColumn Column)>();
         foreach (var kvp in columns)
         {
-            var filteredColumn = createFilteredColumn(kvp.Value, filteredIndices);
+            var filteredColumn = ColumnFilterHelper.CreateFilteredColumn(kvp.Value, filteredIndices);
             filteredColumns.Add((kvp.Key, filteredColumn));
         }
 
@@ -1214,7 +1015,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -1254,7 +1055,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -1305,7 +1106,7 @@ public sealed class NivaraFrame : IFrame
             foreach (var columnName in ColumnNames)
             {
                 var originalColumn = columns[columnName];
-                var emptyColumn = createEmptyColumn(originalColumn.ElementType);
+                var emptyColumn = ColumnFilterHelper.CreateEmptyColumn(originalColumn.ElementType);
                 emptyColumns.Add((columnName, emptyColumn));
             }
             return new NivaraFrame(emptyColumns);
@@ -1363,7 +1164,7 @@ public sealed class NivaraFrame : IFrame
         var reorderedColumns = new List<(string Name, IColumn Column)>();
         foreach (var kvp in columns)
         {
-            var reorderedColumn = reorderColumn(kvp.Value, indices);
+            var reorderedColumn = ColumnFilterHelper.ReorderColumn(kvp.Value, indices);
             reorderedColumns.Add((kvp.Key, reorderedColumn));
         }
 

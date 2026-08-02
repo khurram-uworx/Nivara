@@ -257,4 +257,22 @@ public class ExpressionEvaluatorTests
         Assert.That(result.RowCount, Is.EqualTo(1), "null row must be excluded, keeping only the non-equal row");
         Assert.That(result.GetColumn("ID").GetValue(0), Is.Not.EqualTo(target));
     }
+
+    [Test]
+    public void Filter_GuidColumn_TypedAccessStillWorks()
+    {
+        // issue #104 regression: filtering must preserve the Guid element type so
+        // typed GetColumn<Guid> still works after a Where
+        var target = Guid.NewGuid();
+        var ids = NivaraColumn<Guid>.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid() });
+        using var frame = NivaraFrame.Create(("ID", ids));
+
+        using var result = frame.AsQueryFrame()
+            .Where(x => x["ID"] == (object)target)
+            .Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(1));
+        var filtered = result.GetColumn<Guid>("ID");
+        Assert.That(filtered[0], Is.EqualTo(target), "typed access must still work after filtering");
+    }
 }

@@ -1,5 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Execution;
+using Nivara.Helpers;
 using Nivara.Query;
 
 namespace Nivara;
@@ -303,155 +304,13 @@ sealed class ConcatenationOperation : IQueryOperation, IParallelConcatenationOpe
     /// Creates a column filled with null values of the specified type
     /// </summary>
     public IColumn CreateNullColumn(Type elementType, int length)
-    {
-        return elementType switch
-        {
-            Type t when t == typeof(int) => CreateNullColumnTyped<int>(length),
-            Type t when t == typeof(double) => CreateNullColumnTyped<double>(length),
-            Type t when t == typeof(float) => CreateNullColumnTyped<float>(length),
-            Type t when t == typeof(long) => CreateNullColumnTyped<long>(length),
-            Type t when t == typeof(string) => CreateNullColumnTyped<string>(length),
-            Type t when t == typeof(bool) => CreateNullColumnTyped<bool>(length),
-            Type t when t == typeof(decimal) => CreateNullColumnTyped<decimal>(length),
-            Type t when t == typeof(byte) => CreateNullColumnTyped<byte>(length),
-            Type t when t == typeof(short) => CreateNullColumnTyped<short>(length),
-            Type t when t == typeof(DateTime) => CreateNullColumnTyped<DateTime>(length),
-            _ => CreateNullColumnTyped<object>(length)
-        };
-    }
-
-    /// <summary>
-    /// Creates a typed null column
-    /// </summary>
-    static IColumn CreateNullColumnTyped<T>(int length)
-    {
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array filled with nulls
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var nullArray = System.Array.CreateInstance(nullableType, length);
-            // Array is already filled with nulls by default
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { nullArray })!;
-        }
-        else
-        {
-            // For reference types, create array filled with nulls
-            var nullArray = new T[length];
-            // Array is already filled with nulls by default
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { nullArray })!;
-        }
-    }
+        => ColumnFilterHelper.CreateNullColumn(elementType, length);
 
     /// <summary>
     /// Concatenates multiple columns of the same type
     /// </summary>
     public static IColumn ConcatenateColumns(List<IColumn> columns)
-    {
-        if (columns.Count == 1)
-            return columns[0];
-
-        var elementType = columns[0].ElementType;
-
-        // Validate all columns have the same type
-        foreach (var column in columns)
-            if (column.ElementType != elementType)
-                throw new ArgumentException(
-                    $"Cannot concatenate columns of different types: {elementType.Name} vs {column.ElementType.Name}");
-
-        return elementType switch
-        {
-            Type t when t == typeof(int) => ConcatenateColumnsTyped<int>(columns),
-            Type t when t == typeof(double) => ConcatenateColumnsTyped<double>(columns),
-            Type t when t == typeof(float) => ConcatenateColumnsTyped<float>(columns),
-            Type t when t == typeof(long) => ConcatenateColumnsTyped<long>(columns),
-            Type t when t == typeof(string) => ConcatenateColumnsTyped<string>(columns),
-            Type t when t == typeof(bool) => ConcatenateColumnsTyped<bool>(columns),
-            Type t when t == typeof(decimal) => ConcatenateColumnsTyped<decimal>(columns),
-            Type t when t == typeof(byte) => ConcatenateColumnsTyped<byte>(columns),
-            Type t when t == typeof(short) => ConcatenateColumnsTyped<short>(columns),
-            Type t when t == typeof(DateTime) => ConcatenateColumnsTyped<DateTime>(columns),
-            _ => ConcatenateColumnsGeneric(columns)
-        };
-    }
-
-    /// <summary>
-    /// Concatenates columns of a specific type
-    /// </summary>
-    public static IColumn ConcatenateColumnsTyped<T>(List<IColumn> columns)
-    {
-        var totalLength = columns.Sum(c => c.Length);
-
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var concatenatedArray = System.Array.CreateInstance(nullableType, totalLength);
-
-            int currentIndex = 0;
-            foreach (var column in columns)
-                for (int i = 0; i < column.Length; i++)
-                {
-                    var value = column.GetValue(i);
-                    if (value != null)
-                    {
-                        var nullableInstance = Activator.CreateInstance(nullableType, value);
-                        concatenatedArray.SetValue(nullableInstance, currentIndex);
-                    }
-                    currentIndex++;
-                }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { concatenatedArray })!;
-        }
-        else
-        {
-            // For reference types, create regular array
-            var concatenatedArray = new T[totalLength];
-
-            int currentIndex = 0;
-            foreach (var column in columns)
-                for (int i = 0; i < column.Length; i++)
-                {
-                    var value = column.GetValue(i);
-                    concatenatedArray[currentIndex] = (T)value!;
-                    currentIndex++;
-                }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { concatenatedArray })!;
-        }
-    }
-
-    /// <summary>
-    /// Concatenates columns of unknown type using object columns
-    /// </summary>
-    static IColumn ConcatenateColumnsGeneric(List<IColumn> columns)
-    {
-        var totalLength = columns.Sum(c => c.Length);
-        var concatenatedArray = new object[totalLength];
-
-        int currentIndex = 0;
-        foreach (var column in columns)
-            for (int i = 0; i < column.Length; i++)
-            {
-                concatenatedArray[currentIndex] = column.GetValue(i)!;
-                currentIndex++;
-            }
-
-        return NivaraColumn<object>.Create(concatenatedArray);
-    }
+        => ColumnFilterHelper.ConcatenateColumns(columns);
 
     /// <summary>
     /// Extracts schema from a column dictionary
