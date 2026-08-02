@@ -300,6 +300,30 @@ public sealed class QueryFrame : IDisposable
     }
 
     /// <summary>
+    /// Adds a sort operation to the query pipeline using a computed column expression as the sort key.
+    /// The expression is materialized into a column at execution time and every input column is
+    /// reordered by the resulting sort order.
+    /// </summary>
+    /// <param name="keyExpression">The key expression to sort by</param>
+    /// <param name="direction">The sort direction (ascending or descending)</param>
+    /// <param name="nullOrdering">How to order null values (nulls first or nulls last)</param>
+    /// <param name="stable">Whether to use stable sorting (preserves relative order of equal elements)</param>
+    /// <returns>A new QueryFrame with the sort operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when keyExpression is null</exception>
+    public QueryFrame SortByExpression(ColumnExpression keyExpression, SortDirection direction = SortDirection.Ascending,
+        NullOrdering nullOrdering = NullOrdering.NullsLast, bool stable = true)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        ArgumentNullException.ThrowIfNull(keyExpression);
+
+        var sortOperation = new SortByExpressionOperation(keyExpression, direction, nullOrdering, stable);
+        var newOperations = operations.Concat(new[] { sortOperation });
+
+        return new QueryFrame(source, newOperations);
+    }
+
+    /// <summary>
     /// Executes the query and returns a materialized NivaraFrame
     /// This is the execution barrier that triggers lazy query evaluation
     /// </summary>

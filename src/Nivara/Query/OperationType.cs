@@ -5,6 +5,7 @@ public static class OperationType
     public const string Filter = "Filter";
     public const string Select = "Select";
     public const string Sort = "Sort";
+    public const string SortByExpression = "SortByExpression";
     public const string GroupBy = "GroupBy";
     public const string Join = "Join";
     public const string Projection = "Projection";
