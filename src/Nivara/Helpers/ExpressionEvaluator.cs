@@ -414,15 +414,32 @@ sealed class ExpressionEvaluator
             throw new ArgumentException("Columns must have the same length for comparison operations");
 
         var resultArray = new bool[left.Length];
+        var nullMask = new bool[left.Length];
+        bool hasNulls = false;
 
         for (int i = 0; i < left.Length; i++)
         {
-            var leftValue = left.GetValue(i);
-            var rightValue = right.GetValue(i);
-            resultArray[i] = operation(leftValue, rightValue);
+            bool leftIsNull = left.IsNull(i);
+            bool rightIsNull = right.IsNull(i);
+
+            if (leftIsNull || rightIsNull)
+            {
+                // Null operands yield a masked false result (SQL-like semantics)
+                nullMask[i] = true;
+                resultArray[i] = false;
+                hasNulls = true;
+            }
+            else
+            {
+                var leftValue = left.GetValue(i);
+                var rightValue = right.GetValue(i);
+                resultArray[i] = operation(leftValue, rightValue);
+            }
         }
 
-        return NivaraColumn<bool>.Create(resultArray);
+        return hasNulls
+            ? NivaraColumn<bool>.CreateFromSpans(resultArray, nullMask)
+            : NivaraColumn<bool>.Create(resultArray);
     }
 
     // Arithmetic operation implementations

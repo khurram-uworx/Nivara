@@ -183,4 +183,78 @@ public class ExpressionEvaluatorTests
         Assert.That(result.GetColumn<int>("ID")[1], Is.EqualTo(2), "computed key 22 sorts second");
         Assert.That(result.GetColumn<int>("ID")[2], Is.EqualTo(3), "computed key 33 sorts last");
     }
+
+    [Test]
+    public void Evaluate_BoxedNullableGuidComparison_PropagatesNullMask()
+    {
+        // Guid is not a typed-fast-path element type, so this comparison must use the boxed fallback
+        var target = Guid.NewGuid();
+        var left = NivaraColumn<Guid>.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid(), target });
+        var right = NivaraColumn<Guid>.CreateFromNullable(new Guid?[] { null, Guid.NewGuid(), Guid.NewGuid(), target });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = left,
+            ["B"] = right
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") > ColumnExpressions.Col("B");
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(0), "Guid is not a typed-fast-path element type");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(1), "Guid comparison must use the boxed fallback");
+        Assert.That(result.HasNulls, Is.True, "boxed comparison must propagate a null mask");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = left.IsNull(i) || right.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+            {
+                var l = (Guid)left.GetValue(i)!;
+                var r = (Guid)right.GetValue(i)!;
+                Assert.That(result.GetValue(i), Is.EqualTo(l.CompareTo(r) > 0), $"value at {i} must match boxed comparison");
+            }
+        }
+    }
+
+    [Test]
+    public void Evaluate_BoxedNullableGuidEqualToLiteral_PropagatesNullMask()
+    {
+        // issue #103 regression: boxed comparison against a literal must produce SQL null semantics
+        var target = Guid.NewGuid();
+        var column = NivaraColumn<Guid>.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid(), target });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["ID"] = column
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("ID") == (object)target;
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(0), "Guid is not a typed-fast-path element type");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(1), "Guid == literal must use the boxed fallback");
+        Assert.That(result.HasNulls, Is.True, "boxed comparison must propagate a null mask");
+        Assert.That(result.IsNull(1), Is.True, "null row must be masked");
+        Assert.That(result.GetValue(0), Is.EqualTo(true), "matching value must compare equal");
+        Assert.That(result.GetValue(2), Is.EqualTo(false), "non-matching value must not compare equal");
+        Assert.That(result.GetValue(3), Is.EqualTo(true), "trailing matching value must compare equal");
+    }
+
+    [Test]
+    public void Filter_BoxedNullableGuidNotEqual_ExcludesNullRows()
+    {
+        // issue #103 regression: a boxed NotEqual filter excludes null rows (SQL null semantics)
+        var target = Guid.NewGuid();
+        var ids = NivaraColumn<Guid>.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid() });
+        using var frame = NivaraFrame.Create(("ID", ids));
+
+        using var result = frame.AsQueryFrame()
+            .Where(x => x["ID"] != (object)target)
+            .Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(1), "null row must be excluded, keeping only the non-equal row");
+        Assert.That(result.GetColumn("ID").GetValue(0), Is.Not.EqualTo(target));
+    }
 }

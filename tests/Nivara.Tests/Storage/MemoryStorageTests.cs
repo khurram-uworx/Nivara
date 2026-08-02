@@ -98,7 +98,7 @@ public class MemoryStorageTests
         var storage = new MemoryStorage<int>(Array.Empty<int>(), detectNulls: false);
 
         Assert.That(storage.Length, Is.EqualTo(0), "Empty storage should have zero length");
-        Assert.That(storage.IsVectorizable, Is.False, "MemoryStorage should not be vectorizable");
+        Assert.That(storage.IsVectorizable, Is.True, "MemoryStorage should reflect element type vectorizability");
         Assert.That(storage.HasNulls, Is.False, "Empty storage should not have nulls");
         Assert.That(storage.NullMask.Length, Is.EqualTo(0), "Empty storage should have empty null mask");
     }
@@ -153,7 +153,7 @@ public class MemoryStorageTests
         var storage = new MemoryStorage<int>(new[] { value }, detectNulls: false);
 
         Assert.That(storage.Length, Is.EqualTo(1), "Single element storage should have length 1");
-        Assert.That(storage.IsVectorizable, Is.False, "MemoryStorage should not be vectorizable");
+        Assert.That(storage.IsVectorizable, Is.True, "MemoryStorage should reflect element type vectorizability");
         Assert.That(storage[0], Is.EqualTo(value), "Single element should be retrievable");
         Assert.That(storage.HasNulls, Is.False, "Value type storage without null detection should not indicate nulls");
     }
@@ -404,6 +404,22 @@ public class MemoryStorageTests
 
         Assert.That(sliced.NullMask[0], Is.False,
             "MemoryStorage null-mask slice should share the underlying buffer");
+    }
+
+    [Test]
+    public void MemoryStorage_IsVectorizable_ReflectsElementType_NotBackend()
+    {
+        // Vectorizable element types must report true even in Memory-backed storage,
+        // so kernel dispatch depends on the element type (issue #102).
+        Assert.That(new MemoryStorage<int>(new[] { 1, 2, 3 }).IsVectorizable, Is.True);
+        Assert.That(new MemoryStorage<double>(new[] { 1.0, 2.0 }).IsVectorizable, Is.True);
+        Assert.That(new MemoryStorage<bool>(new[] { true, false }).IsVectorizable, Is.True);
+        Assert.That(new MemoryStorage<long>(new[] { 1L, 2L }).IsVectorizable, Is.True);
+
+        // Non-vectorizable element types stay false.
+        Assert.That(new MemoryStorage<string>(new[] { "a" }, detectNulls: true).IsVectorizable, Is.False);
+        Assert.That(new MemoryStorage<Guid>(new[] { Guid.Empty }).IsVectorizable, Is.False);
+        Assert.That(new MemoryStorage<decimal>(new[] { 1.0m }).IsVectorizable, Is.False);
     }
 
     #endregion
