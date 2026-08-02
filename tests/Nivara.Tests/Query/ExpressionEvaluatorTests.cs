@@ -1,0 +1,128 @@
+using Nivara.Expressions;
+using Nivara.Helpers;
+using Nivara.Linq;
+using NUnit.Framework;
+
+namespace Nivara.Tests.Query;
+
+/// <summary>
+/// Regression guardrails for claim honesty (docs/TASKS-IMMEDIATELY.md Task 8).
+/// These tests fail if a corresponding honesty fix is reverted:
+/// - the typed expression-evaluator fast path is actually selected for same-type
+///   numeric columns and its output matches boxed semantics, including nulls;
+/// - OrderBy on a computed key does not throw.
+/// </summary>
+[TestFixture]
+public class ExpressionEvaluatorTests
+{
+    [Test]
+    public void Evaluate_SameTypeNumericBinary_UsesTypedPath_AndMatchesBoxedReference()
+    {
+        // Arrange
+        var left = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
+        var right = NivaraColumn<double>.CreateFromNullable(new double?[] { 10.0, null, 30.0, 40.0 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = left,
+            ["B"] = right
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        // Act
+        var result = evaluator.Evaluate(expression, input);
+
+        // Assert
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1), "same-type double operands must use the typed fast path");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0), "typed path must not fall back to boxed for same-type operands");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = left.IsNull(i) || right.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo((double)left.GetValue(i)! + (double)right.GetValue(i)!),
+                    $"value at {i} must match boxed addition");
+        }
+    }
+
+    [Test]
+    public void Evaluate_SameTypeNumericComparison_UsesTypedPath_AndMatchesBoxedReference()
+    {
+        // Arrange
+        var left = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
+        var right = NivaraColumn<double>.CreateFromNullable(new double?[] { 10.0, null, 30.0, 40.0 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = left,
+            ["B"] = right
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") > ColumnExpressions.Col("B");
+
+        // Act
+        var result = evaluator.Evaluate(expression, input);
+
+        // Assert
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1), "same-type comparison must use the typed fast path");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = left.IsNull(i) || right.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo((double)left.GetValue(i)! > (double)right.GetValue(i)!),
+                    $"comparison value at {i} must match boxed semantics");
+        }
+    }
+
+    [Test]
+    public void Evaluate_MixedTypeNumeric_FallsBackToBoxedPath()
+    {
+        // Arrange
+        var doubles = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
+        var ints = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 30, 40 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = doubles,
+            ["B"] = ints
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        // Act
+        var result = evaluator.Evaluate(expression, input);
+
+        // Assert
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(0), "mixed element types must skip the typed path");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(1), "mixed element types must use the boxed fallback");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = doubles.IsNull(i) || ints.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo(Convert.ToDouble(doubles.GetValue(i)) + Convert.ToDouble(ints.GetValue(i))),
+                    $"value at {i} must match boxed Convert.ToDouble addition");
+        }
+    }
+
+    [Test]
+    public void OrderBy_OnComputedKey_DoesNotThrow()
+    {
+        // Arrange
+        var ids = NivaraColumn<int>.Create(new[] { 3, 1, 2 });
+        var vals = NivaraColumn<int>.Create(new[] { 30, 10, 20 });
+        using var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        // Act & Assert
+        using var result = frame.AsQueryFrame()
+            .OrderBy(x => x["Val"] + x["ID"])
+            .Collect();
+
+        Assert.That(result.RowCount, Is.EqualTo(3));
+        Assert.That(result.GetColumn<int>("ID")[0], Is.EqualTo(1), "computed key 11 sorts first");
+        Assert.That(result.GetColumn<int>("ID")[1], Is.EqualTo(2), "computed key 22 sorts second");
+        Assert.That(result.GetColumn<int>("ID")[2], Is.EqualTo(3), "computed key 33 sorts last");
+    }
+}

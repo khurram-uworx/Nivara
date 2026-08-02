@@ -10,6 +10,22 @@ namespace Nivara.Helpers;
 /// </summary>
 sealed class ExpressionEvaluator
 {
+    int typedPathEvaluationCount;
+    int boxedPathEvaluationCount;
+
+    /// <summary>
+    /// Gets how many typed-kernel evaluations (same-element-type operands) were applied
+    /// by the most recent operations on this instance. Used by guardrail tests to assert
+    /// the typed fast path is actually selected (see TASKS-IMMEDIATELY.md Task 8).
+    /// </summary>
+    internal int TypedPathEvaluationCount => typedPathEvaluationCount;
+
+    /// <summary>
+    /// Gets how many boxed (object?) evaluations were applied by the most recent operations
+    /// on this instance. Used by guardrail tests to assert fallback selection.
+    /// </summary>
+    internal int BoxedPathEvaluationCount => boxedPathEvaluationCount;
+
     /// <summary>
     /// Evaluates a column expression and returns the result column
     /// </summary>
@@ -104,8 +120,12 @@ sealed class ExpressionEvaluator
 
         var typedResult = TryEvaluateTypedBinary(binary.Operator, leftColumn, rightColumn);
         if (typedResult != null)
+        {
+            typedPathEvaluationCount++;
             return typedResult;
+        }
 
+        boxedPathEvaluationCount++;
         return binary.Operator switch
         {
             BinaryOperator.Add => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => AddValues(l, r)),
@@ -131,8 +151,12 @@ sealed class ExpressionEvaluator
 
         var typedResult = TryEvaluateTypedComparison(comparison.Operator, leftColumn, rightColumn);
         if (typedResult != null)
+        {
+            typedPathEvaluationCount++;
             return typedResult;
+        }
 
+        boxedPathEvaluationCount++;
         return comparison.Operator switch
         {
             ComparisonOperator.Equal => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => CompareEqual(l, r)),
@@ -158,8 +182,12 @@ sealed class ExpressionEvaluator
 
         var typedResult = TryEvaluateTypedBinary(scalar.Operator, column, scalarColumn);
         if (typedResult != null)
+        {
+            typedPathEvaluationCount++;
             return typedResult;
+        }
 
+        boxedPathEvaluationCount++;
         return scalar.Operator switch
         {
             BinaryOperator.Add => ApplyBinaryOperation(column, scalarColumn, (l, r) => AddValues(l, r)),
