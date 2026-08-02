@@ -15,7 +15,8 @@ static class NumericTensorKernels<T>
     where T :
         IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>,
         IMultiplyOperators<T, T, T>, IMultiplicativeIdentity<T, T>,
-        IEqualityOperators<T, T, bool>, IComparisonOperators<T, T, bool>
+        IEqualityOperators<T, T, bool>, IComparisonOperators<T, T, bool>,
+        INumber<T>
 {
     public static void Add(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
         => TensorPrimitives.Add(x, y, destination);
@@ -76,4 +77,13 @@ static class NumericTensorKernels<T>
             destination[i] = x[i] < y;
         }
     }
+
+    public static T Sum(ReadOnlySpan<T> values)
+        => TensorPrimitives.Sum(values);
+
+    public static T Min(ReadOnlySpan<T> values)
+        => TensorPrimitives.Min(values);
+
+    public static T Max(ReadOnlySpan<T> values)
+        => TensorPrimitives.Max(values);
 }

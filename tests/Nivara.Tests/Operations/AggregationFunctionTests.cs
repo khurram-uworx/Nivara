@@ -91,6 +91,24 @@ public class AggregationFunctionTests
         }
 
         [Test]
+        public void Apply_WithByteAndShortValues_ReturnsWidenedLongSum()
+        {
+            // Arrange
+            var byteColumn = NivaraColumn<byte>.Create(new byte[] { 200, 100 });
+            var shortColumn = NivaraColumn<short>.Create(new short[] { -100, 500 });
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            // Act
+            var byteResult = aggregation.Apply(byteColumn, indices);
+            var shortResult = aggregation.Apply(shortColumn, indices);
+
+            // Assert
+            Assert.That(byteResult, Is.EqualTo(300L));
+            Assert.That(shortResult, Is.EqualTo(400L));
+        }
+
+        [Test]
         public void Apply_WithDoubleValues_ReturnsCorrectSum()
         {
             // Arrange
@@ -231,6 +249,22 @@ public class AggregationFunctionTests
         }
 
         [Test]
+        public void Apply_WithDecimalValues_ReturnsMinimum()
+        {
+            // Arrange
+            var values = new[] { 5.5m, 2.2m, 8.8m, 1.1m, 9.9m };
+            var column = NivaraColumn<decimal>.Create(values);
+            var indices = new List<int> { 0, 1, 2, 3, 4 };
+            var aggregation = AggregationFunctions.Min();
+
+            // Act
+            var result = aggregation.Apply(column, indices);
+
+            // Assert
+            Assert.That(result, Is.EqualTo(1.1m));
+        }
+
+        [Test]
         public void Apply_WithNullValues_IgnoresNulls()
         {
             // Arrange
@@ -312,6 +346,22 @@ public class AggregationFunctionTests
 
             // Assert
             Assert.That(result, Is.EqualTo("zebra"));
+        }
+
+        [Test]
+        public void Apply_WithDecimalValues_ReturnsMaximum()
+        {
+            // Arrange
+            var values = new[] { 5.5m, 2.2m, 8.8m, 1.1m, 9.9m };
+            var column = NivaraColumn<decimal>.Create(values);
+            var indices = new List<int> { 0, 1, 2, 3, 4 };
+            var aggregation = AggregationFunctions.Max();
+
+            // Act
+            var result = aggregation.Apply(column, indices);
+
+            // Assert
+            Assert.That(result, Is.EqualTo(9.9m));
         }
     }
 

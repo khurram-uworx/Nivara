@@ -24,15 +24,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     static ReadOnlySpan<U> reinterpretReadOnly<U>(ReadOnlySpan<T> source)
         where U : unmanaged
-        => MemoryMarshal.CreateReadOnlySpan(ref Unsafe.As<T, U>(ref MemoryMarshal.GetReference(source)), source.Length);
+        => SpanReinterpret.ReadOnly<T, U>(source);
 
     static Span<U> reinterpretWritable<U>(Span<T> destination)
         where U : unmanaged
-        => MemoryMarshal.CreateSpan(ref Unsafe.As<T, U>(ref MemoryMarshal.GetReference(destination)), destination.Length);
+        => SpanReinterpret.Writable<T, U>(destination);
 
     static U reinterpretScalar<U>(T value)
         where U : unmanaged
-        => Unsafe.As<T, U>(ref value);
+        => SpanReinterpret.Scalar<T, U>(value);
 
     /// <summary>
     /// Helper method to perform vectorized multiplication using TensorPrimitives with runtime type dispatch

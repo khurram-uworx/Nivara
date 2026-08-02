@@ -1,4 +1,5 @@
 using Nivara.Extensions;
+using Nivara.Helpers;
 using System.Collections;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
@@ -55,43 +56,40 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Reinterprets a scalar of the runtime numeric element type back to <typeparamref name="T"/>.
+    /// Only valid when the runtime element type equals <typeparamref name="U"/>.
+    /// </summary>
+    static T reinterpretBack<U>(U value)
+        where U : unmanaged
+        => Unsafe.As<U, T>(ref value);
+
+    /// <summary>
     /// Helper method to perform vectorized sum using TensorPrimitives with runtime type dispatch
     /// </summary>
     static T sumTensorPrimitive(ReadOnlySpan<T> values)
     {
         var type = typeof(T);
 
-        // Use TensorPrimitives for supported types, fall back to scalar for others
-        if (type == typeof(float))
+        // Route every numeric primitive to a constrained generic kernel so integer types
+        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        if (type == typeof(float)) return reinterpretBack(NumericTensorKernels<float>.Sum(SpanReinterpret.ReadOnly<T, float>(values)));
+        if (type == typeof(double)) return reinterpretBack(NumericTensorKernels<double>.Sum(SpanReinterpret.ReadOnly<T, double>(values)));
+        if (type == typeof(int)) return reinterpretBack(NumericTensorKernels<int>.Sum(SpanReinterpret.ReadOnly<T, int>(values)));
+        if (type == typeof(long)) return reinterpretBack(NumericTensorKernels<long>.Sum(SpanReinterpret.ReadOnly<T, long>(values)));
+        if (type == typeof(short)) return reinterpretBack(NumericTensorKernels<short>.Sum(SpanReinterpret.ReadOnly<T, short>(values)));
+        if (type == typeof(ushort)) return reinterpretBack(NumericTensorKernels<ushort>.Sum(SpanReinterpret.ReadOnly<T, ushort>(values)));
+        if (type == typeof(uint)) return reinterpretBack(NumericTensorKernels<uint>.Sum(SpanReinterpret.ReadOnly<T, uint>(values)));
+        if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Sum(SpanReinterpret.ReadOnly<T, ulong>(values)));
+        if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Sum(SpanReinterpret.ReadOnly<T, byte>(values)));
+        if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Sum(SpanReinterpret.ReadOnly<T, sbyte>(values)));
+
+        // Fall back to scalar sum for other types
+        T result = default(T)!;
+        for (int i = 0; i < values.Length; i++)
         {
-            var floatValues = new float[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                floatValues[i] = (float)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Sum(floatValues.AsSpan());
-            return (T)(object)result;
+            result = (T)(object)((dynamic)result! + (dynamic)values[i]!)!;
         }
-        else if (type == typeof(double))
-        {
-            var doubleValues = new double[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                doubleValues[i] = (double)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Sum(doubleValues.AsSpan());
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fall back to scalar sum for other types
-            T result = default(T)!;
-            for (int i = 0; i < values.Length; i++)
-            {
-                result = (T)(object)((dynamic)result! + (dynamic)values[i]!)!;
-            }
-            return result;
-        }
+        return result;
     }
 
     /// <summary>
@@ -101,39 +99,28 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     {
         var type = typeof(T);
 
-        // Use TensorPrimitives for supported types, fall back to scalar for others
-        if (type == typeof(float))
+        // Route every numeric primitive to a constrained generic kernel so integer types
+        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        if (type == typeof(float)) return reinterpretBack(NumericTensorKernels<float>.Min(SpanReinterpret.ReadOnly<T, float>(values)));
+        if (type == typeof(double)) return reinterpretBack(NumericTensorKernels<double>.Min(SpanReinterpret.ReadOnly<T, double>(values)));
+        if (type == typeof(int)) return reinterpretBack(NumericTensorKernels<int>.Min(SpanReinterpret.ReadOnly<T, int>(values)));
+        if (type == typeof(long)) return reinterpretBack(NumericTensorKernels<long>.Min(SpanReinterpret.ReadOnly<T, long>(values)));
+        if (type == typeof(short)) return reinterpretBack(NumericTensorKernels<short>.Min(SpanReinterpret.ReadOnly<T, short>(values)));
+        if (type == typeof(ushort)) return reinterpretBack(NumericTensorKernels<ushort>.Min(SpanReinterpret.ReadOnly<T, ushort>(values)));
+        if (type == typeof(uint)) return reinterpretBack(NumericTensorKernels<uint>.Min(SpanReinterpret.ReadOnly<T, uint>(values)));
+        if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Min(SpanReinterpret.ReadOnly<T, ulong>(values)));
+        if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Min(SpanReinterpret.ReadOnly<T, byte>(values)));
+        if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Min(SpanReinterpret.ReadOnly<T, sbyte>(values)));
+
+        // Fall back to scalar min for other types
+        T result = values[0];
+        var comparer = Comparer<T>.Default;
+        for (int i = 1; i < values.Length; i++)
         {
-            var floatValues = new float[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                floatValues[i] = (float)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Min(floatValues.AsSpan());
-            return (T)(object)result;
+            if (comparer.Compare(values[i], result) < 0)
+                result = values[i];
         }
-        else if (type == typeof(double))
-        {
-            var doubleValues = new double[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                doubleValues[i] = (double)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Min(doubleValues.AsSpan());
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fall back to scalar min for other types
-            T result = values[0];
-            var comparer = Comparer<T>.Default;
-            for (int i = 1; i < values.Length; i++)
-            {
-                if (comparer.Compare(values[i], result) < 0)
-                    result = values[i];
-            }
-            return result;
-        }
+        return result;
     }
 
     /// <summary>
@@ -143,39 +130,28 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     {
         var type = typeof(T);
 
-        // Use TensorPrimitives for supported types, fall back to scalar for others
-        if (type == typeof(float))
+        // Route every numeric primitive to a constrained generic kernel so integer types
+        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        if (type == typeof(float)) return reinterpretBack(NumericTensorKernels<float>.Max(SpanReinterpret.ReadOnly<T, float>(values)));
+        if (type == typeof(double)) return reinterpretBack(NumericTensorKernels<double>.Max(SpanReinterpret.ReadOnly<T, double>(values)));
+        if (type == typeof(int)) return reinterpretBack(NumericTensorKernels<int>.Max(SpanReinterpret.ReadOnly<T, int>(values)));
+        if (type == typeof(long)) return reinterpretBack(NumericTensorKernels<long>.Max(SpanReinterpret.ReadOnly<T, long>(values)));
+        if (type == typeof(short)) return reinterpretBack(NumericTensorKernels<short>.Max(SpanReinterpret.ReadOnly<T, short>(values)));
+        if (type == typeof(ushort)) return reinterpretBack(NumericTensorKernels<ushort>.Max(SpanReinterpret.ReadOnly<T, ushort>(values)));
+        if (type == typeof(uint)) return reinterpretBack(NumericTensorKernels<uint>.Max(SpanReinterpret.ReadOnly<T, uint>(values)));
+        if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Max(SpanReinterpret.ReadOnly<T, ulong>(values)));
+        if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Max(SpanReinterpret.ReadOnly<T, byte>(values)));
+        if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Max(SpanReinterpret.ReadOnly<T, sbyte>(values)));
+
+        // Fall back to scalar max for other types
+        T result = values[0];
+        var comparer = Comparer<T>.Default;
+        for (int i = 1; i < values.Length; i++)
         {
-            var floatValues = new float[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                floatValues[i] = (float)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Max(floatValues.AsSpan());
-            return (T)(object)result;
+            if (comparer.Compare(values[i], result) > 0)
+                result = values[i];
         }
-        else if (type == typeof(double))
-        {
-            var doubleValues = new double[values.Length];
-            for (int i = 0; i < values.Length; i++)
-            {
-                doubleValues[i] = (double)(object)values[i]!;
-            }
-            var result = TensorPrimitives.Max(doubleValues.AsSpan());
-            return (T)(object)result;
-        }
-        else
-        {
-            // Fall back to scalar max for other types
-            T result = values[0];
-            var comparer = Comparer<T>.Default;
-            for (int i = 1; i < values.Length; i++)
-            {
-                if (comparer.Compare(values[i], result) > 0)
-                    result = values[i];
-            }
-            return result;
-        }
+        return result;
     }
 
     /// <summary>
