@@ -1,5 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Execution;
+using Nivara.Linq;
 using Nivara.Operations;
 using Nivara.Query;
 using NUnit.Framework;
@@ -646,6 +647,46 @@ public class ParallelExecutionStrategyTests
         using var result = strategy.Execute(plan, context);
 
         Assert.That(diagnostics.OperationTimings.Count, Is.EqualTo(4)); // ParallelExecution scope + SourceExecute + Filter + Sort
+    }
+
+    [Test]
+    public void SortByExpressionOperation_UnderParallelStrategy_MatchesLazyAndStripsSyntheticKeys()
+    {
+        var ids = NivaraColumn<int>.Create(Enumerable.Range(0, 1200).ToArray());
+        var vals = NivaraColumn<int>.Create(Enumerable.Range(0, 1200).Select(i => (i * 7919) % 1200).ToArray());
+        using var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        var plan = frame.AsQueryFrame().OrderBy(x => x["Val"] * 2 + x["ID"]).ToQueryPlan();
+
+        var engine = new ExecutionEngine();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        using var parallelResult = engine.Execute(plan,
+            new NivaraExecutionContext(ExecutionStrategy.Parallel) { ExecutionDiagnostics = diagnostics });
+        using var lazyResult = engine.Execute(plan, new NivaraExecutionContext(ExecutionStrategy.Lazy));
+
+        Assert.That(parallelResult.GetColumn<int>("ID").ToArray(), Is.EqualTo(lazyResult.GetColumn<int>("ID").ToArray()));
+        Assert.That(parallelResult.GetColumn<int>("Val").ToArray(), Is.EqualTo(lazyResult.GetColumn<int>("Val").ToArray()));
+        Assert.That(parallelResult.ColumnNames.Any(c => c.StartsWith("__nivara_sort_key_", StringComparison.Ordinal)), Is.False,
+            "synthetic key columns must be stripped from the result");
+        Assert.That(diagnostics.OperationTimings.Any(t => t.OperationType == OperationType.SortByExpression), Is.True,
+            "computed-key sort should record a SortByExpression operation timing");
+    }
+
+    [Test]
+    public void ThenBy_WithComputedSecondaryKey_UnderParallelStrategy_MatchesLazy()
+    {
+        var ids = NivaraColumn<int>.Create(Enumerable.Range(0, 1200).Select(i => i % 3).ToArray());
+        var vals = NivaraColumn<int>.Create(Enumerable.Range(0, 1200).Select(i => (i * 7919) % 1200).ToArray());
+        using var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        var plan = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"] * 2).ToQueryPlan();
+
+        var engine = new ExecutionEngine();
+        using var parallelResult = engine.Execute(plan, new NivaraExecutionContext(ExecutionStrategy.Parallel));
+        using var lazyResult = engine.Execute(plan, new NivaraExecutionContext(ExecutionStrategy.Lazy));
+
+        Assert.That(parallelResult.GetColumn<int>("ID").ToArray(), Is.EqualTo(lazyResult.GetColumn<int>("ID").ToArray()));
+        Assert.That(parallelResult.GetColumn<int>("Val").ToArray(), Is.EqualTo(lazyResult.GetColumn<int>("Val").ToArray()));
     }
 }
 

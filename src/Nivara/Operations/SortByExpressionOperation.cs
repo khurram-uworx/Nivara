@@ -150,33 +150,58 @@ sealed class SortByExpressionOperation : IQueryOperation
         try
         {
             var evaluator = new ExpressionEvaluator();
-
-            var synthetic = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kvp in input)
-                synthetic[kvp.Key] = kvp.Value;
-
-            var syntheticSortKeys = new SortKey[keys.Count];
-            for (int i = 0; i < keys.Count; i++)
-            {
-                var syntheticName = SyntheticKeyNamePrefix + i;
-                synthetic[syntheticName] = evaluator.Evaluate(keys[i].Key, input);
-                syntheticSortKeys[i] = new SortKey(syntheticName, keys[i].Direction, keys[i].NullOrdering);
-            }
-
+            var (syntheticInput, syntheticSortKeys) = MaterializeKeys(input, evaluator);
             var sortOperation = new SortOperation(syntheticSortKeys, stable);
-            var sorted = sortOperation.Execute(synthetic);
-
-            var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-            foreach (var kvp in sorted)
-                if (!kvp.Key.StartsWith(SyntheticKeyNamePrefix, StringComparison.OrdinalIgnoreCase))
-                    result[kvp.Key] = kvp.Value;
-
-            return result;
+            return StripSyntheticKeys(sortOperation.Execute(syntheticInput));
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
             throw new QueryExecutionException($"Sort operation failed: {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Evaluates the computed key expressions against the input columns, producing a copy of the
+    /// input with synthetic key columns added and the sort keys referencing them. Exposed for the
+    /// parallel execution strategy so it can materialize keys once, then reuse the chunked sort path.
+    /// </summary>
+    /// <param name="input">The input columns</param>
+    /// <param name="evaluator">The evaluator used to materialize the key expressions</param>
+    /// <returns>The synthetic input dictionary and the sort keys referencing the synthetic columns</returns>
+    internal (IReadOnlyDictionary<string, IColumn> SyntheticInput, IReadOnlyList<SortKey> SortKeys)
+        MaterializeKeys(IReadOnlyDictionary<string, IColumn> input, ExpressionEvaluator evaluator)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentNullException.ThrowIfNull(evaluator);
+
+        var synthetic = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in input)
+            synthetic[kvp.Key] = kvp.Value;
+
+        var syntheticSortKeys = new SortKey[keys.Count];
+        for (int i = 0; i < keys.Count; i++)
+        {
+            var syntheticName = SyntheticKeyNamePrefix + i;
+            synthetic[syntheticName] = evaluator.Evaluate(keys[i].Key, input);
+            syntheticSortKeys[i] = new SortKey(syntheticName, keys[i].Direction, keys[i].NullOrdering);
+        }
+
+        return (synthetic, syntheticSortKeys);
+    }
+
+    /// <summary>
+    /// Removes the synthetic key columns from a sorted result dictionary.
+    /// </summary>
+    /// <param name="sorted">The sorted columns, including synthetic key columns</param>
+    /// <returns>A dictionary without the synthetic key columns</returns>
+    internal static IReadOnlyDictionary<string, IColumn> StripSyntheticKeys(IReadOnlyDictionary<string, IColumn> sorted)
+    {
+        var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in sorted)
+            if (!kvp.Key.StartsWith(SyntheticKeyNamePrefix, StringComparison.OrdinalIgnoreCase))
+                result[kvp.Key] = kvp.Value;
+
+        return result;
     }
 
     /// <inheritdoc />
