@@ -1,3 +1,4 @@
+using Nivara.Operations;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -230,5 +231,90 @@ public class NivaraFrameSortingTests
         Assert.That(reordered.RowCount, Is.EqualTo(1));
         Assert.That(reordered.GetColumn<int>("Numbers").ToArray(), Is.EqualTo(new[] { 42 }));
         Assert.That(reordered.GetColumn<string>("Letters").ToArray(), Is.EqualTo(new[] { "answer" }));
+    }
+
+    [Test]
+    public void ThenBy_AfterOrderBy_SortsByPrimaryThenSecondary()
+    {
+        // Arrange
+        var names = NivaraColumn<string>.Create(new[] { "b", "a", "b", "a", "b" });
+        var ages = NivaraColumn<int>.Create(new[] { 30, 20, 10, 40, 25 });
+        var frame = NivaraFrame.Create(("Name", names), ("Age", ages));
+
+        // Act
+        var result = frame.OrderBy("Name").ThenBy("Age");
+
+        // Assert
+        // Name asc, then Age asc within each name: a20, a40, b10, b25, b30
+        Assert.That(result.GetColumn<string>("Name").ToArray(), Is.EqualTo(new[] { "a", "a", "b", "b", "b" }));
+        Assert.That(result.GetColumn<int>("Age").ToArray(), Is.EqualTo(new[] { 20, 40, 10, 25, 30 }));
+    }
+
+    [Test]
+    public void ThenByDescending_AfterOrderBy_SortsByPrimaryThenSecondaryDescending()
+    {
+        // Arrange
+        var names = NivaraColumn<string>.Create(new[] { "b", "a", "b", "a", "b" });
+        var ages = NivaraColumn<int>.Create(new[] { 30, 20, 10, 40, 25 });
+        var frame = NivaraFrame.Create(("Name", names), ("Age", ages));
+
+        // Act
+        var result = frame.OrderBy("Name").ThenByDescending("Age");
+
+        // Assert
+        // Name asc, then Age desc within each name: a40, a20, b30, b25, b10
+        Assert.That(result.GetColumn<string>("Name").ToArray(), Is.EqualTo(new[] { "a", "a", "b", "b", "b" }));
+        Assert.That(result.GetColumn<int>("Age").ToArray(), Is.EqualTo(new[] { 40, 20, 30, 25, 10 }));
+    }
+
+    [Test]
+    public void ThenBy_WithoutPriorOrderBy_SortsBySingleKey()
+    {
+        // Arrange
+        var values = NivaraColumn<int>.Create(new[] { 2, 1, 3 });
+        var frame = NivaraFrame.Create(("Val", values));
+
+        // Act
+        var result = frame.ThenBy("Val");
+
+        // Assert
+        Assert.That(result.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 1, 2, 3 }));
+    }
+
+    [Test]
+    public void ThenBy_AfterOrderBy_MatchesMultiKeySortKeyOrdering()
+    {
+        // Arrange
+        var names = NivaraColumn<string>.Create(new[] { "b", "a", "b", "a", "b" });
+        var ages = NivaraColumn<int>.Create(new[] { 30, 20, 10, 40, 25 });
+        var frame = NivaraFrame.Create(("Name", names), ("Age", ages));
+
+        // Act
+        var chained = frame.OrderBy("Name").ThenBy("Age");
+        var multiKey = frame.OrderBy(new SortKey("Name"), new SortKey("Age"));
+
+        // Assert
+        Assert.That(chained.GetColumn<string>("Name").ToArray(), Is.EqualTo(multiKey.GetColumn<string>("Name").ToArray()));
+        Assert.That(chained.GetColumn<int>("Age").ToArray(), Is.EqualTo(multiKey.GetColumn<int>("Age").ToArray()));
+    }
+
+    [Test]
+    public void ThenBy_AfterOrderBy_WithNulls_PlacesNullsLast()
+    {
+        // Arrange
+        var names = NivaraColumn<string>.Create(new[] { "a", "a", "b", "b" });
+        var values = NivaraColumn<int>.CreateFromNullable(new int?[] { 2, null, 1, null });
+        var frame = NivaraFrame.Create(("Name", names), ("Val", values));
+
+        // Act
+        var result = frame.OrderBy("Name").ThenBy("Val");
+
+        // Assert
+        // Name asc, Val asc NullsLast: a2, a<null>, b1, b<null>
+        var sortedValues = result.GetColumn<int>("Val");
+        Assert.That(sortedValues[0], Is.EqualTo(2));
+        Assert.That(sortedValues.IsNull(1), Is.True);
+        Assert.That(sortedValues[2], Is.EqualTo(1));
+        Assert.That(sortedValues.IsNull(3), Is.True);
     }
 }

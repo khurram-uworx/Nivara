@@ -340,4 +340,139 @@ public class LinqQueryTests
         Assert.That(sortedIds[3], Is.EqualTo(4));
         Assert.That(sortedIds[4], Is.EqualTo(5));
     }
+
+    [Test]
+    public void ThenBy_WithColumnReference_PreservesPrimaryOrderWithinTies()
+    {
+        // Arrange
+        var names = NivaraColumn<string>.Create(new[] { "b", "a", "b", "a", "b" });
+        var ages = NivaraColumn<int>.Create(new[] { 30, 20, 10, 40, 25 });
+        var frame = NivaraFrame.Create(("Name", names), ("Age", ages));
+
+        // Act
+        var result = frame.AsQueryFrame()
+            .OrderBy(x => x["Name"])
+            .ThenBy(x => x["Age"])
+            .ToNivaraFrame();
+
+        // Assert
+        // Name asc, then Age asc within each name: a20, a40, b10, b25, b30
+        Assert.That(result.GetColumn<string>("Name").ToArray(), Is.EqualTo(new[] { "a", "a", "b", "b", "b" }));
+        Assert.That(result.GetColumn<int>("Age").ToArray(), Is.EqualTo(new[] { 20, 40, 10, 25, 30 }));
+    }
+
+    [Test]
+    public void ThenBy_WithComputedKey_SortsByMaterializedColumn()
+    {
+        // Arrange
+        var ids = NivaraColumn<int>.Create(new[] { 1, 1, 2, 2 });
+        var vals = NivaraColumn<int>.Create(new[] { 10, 30, 20, 40 });
+        var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        // Act
+        var result = frame.AsQueryFrame()
+            .OrderBy(x => x["ID"])
+            .ThenBy(x => x["Val"] * 2)
+            .ToNivaraFrame();
+
+        // Assert
+        // ID asc, Val*2 asc within each ID: (1,10), (1,30), (2,20), (2,40)
+        Assert.That(result.GetColumn<int>("ID").ToArray(), Is.EqualTo(new[] { 1, 1, 2, 2 }));
+        Assert.That(result.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 10, 30, 20, 40 }));
+    }
+
+    [Test]
+    public void OrderBy_WithComputedKey_ThenBy_WithColumnReference_SortsLexicographically()
+    {
+        // Arrange
+        var ids = NivaraColumn<int>.Create(new[] { 3, 1, 3, 1 });
+        var vals = NivaraColumn<int>.Create(new[] { 2, 4, 1, 3 });
+        var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        // Act
+        var result = frame.AsQueryFrame()
+            .OrderBy(x => x["ID"] * 2)
+            .ThenBy(x => x["Val"])
+            .ToNivaraFrame();
+
+        // Assert
+        // ID*2 asc, then Val asc within ties: (2,3),(2,4),(6,1),(6,2) -> ID:1,1,3,3; Val:3,4,1,2
+        Assert.That(result.GetColumn<int>("ID").ToArray(), Is.EqualTo(new[] { 1, 1, 3, 3 }));
+        Assert.That(result.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 3, 4, 1, 2 }));
+    }
+
+    [Test]
+    public void ThenByDescending_WithComputedKey_SortsDescendingWithinPrimaryGroups()
+    {
+        // Arrange
+        var ids = NivaraColumn<int>.Create(new[] { 1, 1, 2, 2 });
+        var vals = NivaraColumn<int>.Create(new[] { 10, 30, 20, 40 });
+        var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        // Act
+        var result = frame.AsQueryFrame()
+            .OrderBy(x => x["ID"])
+            .ThenByDescending(x => x["Val"])
+            .ToNivaraFrame();
+
+        // Assert
+        // ID asc, Val desc within each ID: (1,30),(1,10),(2,40),(2,20)
+        Assert.That(result.GetColumn<int>("ID").ToArray(), Is.EqualTo(new[] { 1, 1, 2, 2 }));
+        Assert.That(result.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 30, 10, 40, 20 }));
+    }
+
+    [Test]
+    public void ThenBy_WithColumnReferences_DoesNotThrow()
+    {
+        // Arrange
+        var ids = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var vals = NivaraColumn<int>.Create(new[] { 30, 10, 20 });
+        var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        // Act & Assert
+        var result = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"]).ToNivaraFrame();
+        Assert.That(result.GetColumn<int>("ID").ToArray(), Is.EqualTo(new[] { 1, 2, 3 }));
+        Assert.That(result.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 30, 10, 20 }));
+    }
+
+    [Test]
+    public void ThenBy_WithComputedKey_UnderParallelStrategy_MatchesLazy()
+    {
+        // Arrange
+        var ids = NivaraColumn<int>.Create(new[] { 1, 1, 2, 2 });
+        var vals = NivaraColumn<int>.Create(new[] { 10, 30, 20, 40 });
+        var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        var queryFrame = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"] * 2);
+        var plan = queryFrame.ToQueryPlan();
+
+        // Act
+        var engine = new ExecutionEngine();
+        var parallelResult = engine.Execute(plan, new NivaraExecutionContext(ExecutionStrategy.Parallel));
+
+        // Assert
+        Assert.That(parallelResult.GetColumn<int>("ID").ToArray(), Is.EqualTo(new[] { 1, 1, 2, 2 }));
+        Assert.That(parallelResult.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 10, 30, 20, 40 }));
+    }
+
+    [Test]
+    public void ThenBy_WithComputedKey_UnderStreamingStrategy_FallsBackToLazy()
+    {
+        // Arrange
+        var ids = NivaraColumn<int>.Create(new[] { 1, 1, 2, 2 });
+        var vals = NivaraColumn<int>.Create(new[] { 10, 30, 20, 40 });
+        var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
+
+        var queryFrame = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"] + x["ID"]);
+        var plan = queryFrame.ToQueryPlan();
+
+        // Act
+        var engine = new ExecutionEngine();
+        var streamingResult = engine.Execute(plan, new NivaraExecutionContext(ExecutionStrategy.Streaming));
+
+        // Assert
+        // ID asc, (Val+ID) asc within each ID: keys 11, 31, 22, 42 -> (1,10),(1,30),(2,20),(2,40)
+        Assert.That(streamingResult.GetColumn<int>("ID").ToArray(), Is.EqualTo(new[] { 1, 1, 2, 2 }));
+        Assert.That(streamingResult.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 10, 30, 20, 40 }));
+    }
 }
