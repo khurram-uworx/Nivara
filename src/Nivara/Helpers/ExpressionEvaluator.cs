@@ -1,3 +1,4 @@
+using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Tensors;
@@ -122,10 +123,12 @@ sealed class ExpressionEvaluator
         if (typedResult != null)
         {
             typedPathEvaluationCount++;
+            RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: true);
             return typedResult;
         }
 
         boxedPathEvaluationCount++;
+        RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: false);
         return binary.Operator switch
         {
             BinaryOperator.Add => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => AddValues(l, r)),
@@ -153,10 +156,12 @@ sealed class ExpressionEvaluator
         if (typedResult != null)
         {
             typedPathEvaluationCount++;
+            RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: true);
             return typedResult;
         }
 
         boxedPathEvaluationCount++;
+        RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: false);
         return comparison.Operator switch
         {
             ComparisonOperator.Equal => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => CompareEqual(l, r)),
@@ -184,10 +189,12 @@ sealed class ExpressionEvaluator
         if (typedResult != null)
         {
             typedPathEvaluationCount++;
+            RecordEvaluationDiagnostics(column, scalarColumn, typed: true);
             return typedResult;
         }
 
         boxedPathEvaluationCount++;
+        RecordEvaluationDiagnostics(column, scalarColumn, typed: false);
         return scalar.Operator switch
         {
             BinaryOperator.Add => ApplyBinaryOperation(column, scalarColumn, (l, r) => AddValues(l, r)),
@@ -198,6 +205,26 @@ sealed class ExpressionEvaluator
             BinaryOperator.Or => ApplyBinaryOperation(column, scalarColumn, (l, r) => OrValues(l, r)),
             _ => throw new NotSupportedException($"Scalar operator {scalar.Operator} is not supported")
         };
+    }
+
+    /// <summary>
+    /// Records the kernel choice (typed column kernel vs boxed object fallback) for an expression
+    /// evaluation into the active diagnostics tracker, when diagnostics are enabled.
+    /// </summary>
+    static void RecordEvaluationDiagnostics(IColumn left, IColumn right, bool typed)
+    {
+        if (!DiagnosticsTracker.IsEnabled)
+            return;
+
+        DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
+            "ExpressionEvaluation",
+            typed ? KernelType.Vectorized : KernelType.Scalar,
+            left.Length,
+            left.ElementType,
+            left.HasNulls || right.HasNulls,
+            0,
+            TimeSpan.Zero,
+            typed ? "Typed column kernel" : "Boxed object fallback"));
     }
 
     /// <summary>

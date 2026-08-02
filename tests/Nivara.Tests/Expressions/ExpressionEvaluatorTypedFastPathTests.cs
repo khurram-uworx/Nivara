@@ -1,4 +1,7 @@
+using Nivara.Diagnostics;
+using Nivara.Execution;
 using Nivara.Expressions;
+using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Expressions;
@@ -184,5 +187,64 @@ public class ExpressionEvaluatorTypedFastPathTests
             .Collect();
 
         Assert.That(filtered.RowCount, Is.EqualTo(3), "null row must be excluded and 3, 4, 5 kept");
+    }
+
+    [Test]
+    public void Filter_SameTypeNumericColumns_RecordsTypedKernelDiagnostics()
+    {
+        using var frame = CreateFrame();
+        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("Score") < 90.0);
+        var plan = queryFrame.ToQueryPlan();
+
+        var diagnostics = new ExecutionDiagnostics();
+        var context = new NivaraExecutionContext(ExecutionStrategy.Lazy) { ExecutionDiagnostics = diagnostics };
+
+        DiagnosticsTracker.IsEnabled = true;
+        try
+        {
+            var engine = new ExecutionEngine();
+            using var result = engine.Execute(plan, context);
+
+            var typedEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
+                .ToList();
+
+            Assert.That(typedEvaluations, Is.Not.Empty, "same-type numeric filter should record a typed expression evaluation");
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void Select_MixedElementTypeColumns_RecordsBoxedKernelDiagnostics()
+    {
+        using var frame = CreateFrame();
+        var queryFrame = frame.AsQueryFrame().Select(ColumnExpressions.Col("Score") + ColumnExpressions.Col("Bonus"));
+        var plan = queryFrame.ToQueryPlan();
+
+        var diagnostics = new ExecutionDiagnostics();
+        var context = new NivaraExecutionContext(ExecutionStrategy.Lazy) { ExecutionDiagnostics = diagnostics };
+
+        DiagnosticsTracker.IsEnabled = true;
+        try
+        {
+            var engine = new ExecutionEngine();
+            using var result = engine.Execute(plan, context);
+
+            var boxedEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Scalar)
+                .ToList();
+
+            Assert.That(boxedEvaluations, Is.Not.Empty, "mixed double+int expression should record a boxed expression evaluation");
+            Assert.That(boxedEvaluations[0].Notes, Is.EqualTo("Boxed object fallback"));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
     }
 }
