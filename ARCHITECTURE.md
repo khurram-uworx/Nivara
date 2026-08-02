@@ -868,7 +868,7 @@ The `Conv2d<T>` kernel follows a tiled im2col pipeline: gather input patches int
 - **PatchLocation lookup table**: `PatchLocation` struct precomputes `(Batch, OH, OW)` per-tile, eliminating 4 integer divisions per position from all hot loops
 - **ConvForward1x1**: bypasses im2col entirely for 1×1 kernels (stride=1, padding=0). Gathers input channels into pooled buffer, then `Dot` per output channel
 - **InputGrad specializations**: `InputGrad1x1` (direct MultiplyAdd), `InputGrad3x3` (bounds-checked 9-tap scatter), `InputGradGeneric` (nested loops) — eliminates im2col for the backward input path
-- **Zero-copy via TryGetSpan**: eliminates tensor copy when storage is contiguous
+- **Cached flattened span via TryGetSpan**: `NivaraColumn.TryGetSpan` returns a read-only span — a true zero-copy view over `MemoryStorage` (`ProvidesZeroCopySpanAccess == true`), and a cached flattened buffer over `TensorStorage` (`ProvidesZeroCopySpanAccess == false`; first access copies via `FlattenTo`, later accesses reuse the cache). Nivara does not advertise zero-copy for tensor storage
 - **Grouped convolution**: `groups` parameter splits input/output channels. For `groups=1` (common path), zero overhead — full buffers passed directly. For `groups>1`, gather/scatter per group with NCHW layout
 
 #### Conv1d: 1D im2col → Dot
