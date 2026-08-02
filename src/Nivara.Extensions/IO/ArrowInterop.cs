@@ -8,8 +8,7 @@ namespace Nivara.IO;
 /// </summary>
 /// <remarks>
 /// This class handles bidirectional conversion between NivaraFrame/NivaraSeries
-/// and Apache Arrow Table/Array structures, with support for zero-copy operations
-/// when possible.
+/// and Apache Arrow Table/Array structures.
 /// </remarks>
 public static class ArrowInterop
 {
@@ -355,15 +354,6 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateBooleanArray(NivaraColumn<bool> column, ArrowConversionOptions options)
     {
-        // Try zero-copy optimization first if enabled
-        if (options.UseZeroCopy)
-        {
-            var zeroCopyArray = TryCreateZeroCopyBooleanArray(column);
-            if (zeroCopyArray != null)
-                return zeroCopyArray;
-        }
-
-        // Fallback to copying approach
         var builder = new BooleanArray.Builder();
 
         for (int i = 0; i < column.Length; i++)
@@ -382,15 +372,6 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateInt32Array(NivaraColumn<int> column, ArrowConversionOptions options)
     {
-        // Try zero-copy optimization first if enabled
-        if (options.UseZeroCopy)
-        {
-            var zeroCopyArray = TryCreateZeroCopyInt32Array(column);
-            if (zeroCopyArray != null)
-                return zeroCopyArray;
-        }
-
-        // Fallback to copying approach
         var builder = new Int32Array.Builder();
 
         for (int i = 0; i < column.Length; i++)
@@ -445,15 +426,6 @@ public static class ArrowInterop
     /// </summary>
     private static IArrowArray CreateDoubleArray(NivaraColumn<double> column, ArrowConversionOptions options)
     {
-        // Try zero-copy optimization first if enabled
-        if (options.UseZeroCopy)
-        {
-            var zeroCopyArray = TryCreateZeroCopyDoubleArray(column);
-            if (zeroCopyArray != null)
-                return zeroCopyArray;
-        }
-
-        // Fallback to copying approach
         var builder = new DoubleArray.Builder();
 
         for (int i = 0; i < column.Length; i++)
@@ -966,101 +938,6 @@ public static class ArrowInterop
                 typeof(T),
                 new[] { $"Arrow array type {actualArrowType.Name} is not compatible with target type {typeof(T).Name}. Expected Arrow type: {expectedArrowType.Name}" }
             );
-        }
-    }
-
-    /// <summary>
-    /// Attempts to create a zero-copy Boolean Arrow array from a NivaraColumn
-    /// </summary>
-    /// <param name="column">The NivaraColumn to convert</param>
-    /// <returns>A zero-copy Arrow array if possible, null if zero-copy is not feasible</returns>
-    private static IArrowArray? TryCreateZeroCopyBooleanArray(NivaraColumn<bool> column)
-    {
-        // Zero-copy is only possible if:
-        // 1. The column has no nulls (or we can handle the null mask efficiently)
-        // 2. The underlying storage is compatible with Arrow's memory layout
-        // 3. The data is contiguous in memory
-
-        // For now, zero-copy is not implemented for boolean arrays due to bit-packing complexity
-        // This is a fallback that returns null to use the copying approach
-        return null;
-    }
-
-    /// <summary>
-    /// Attempts to create a zero-copy Int32 Arrow array from a NivaraColumn
-    /// </summary>
-    /// <param name="column">The NivaraColumn to convert</param>
-    /// <returns>A zero-copy Arrow array if possible, null if zero-copy is not feasible</returns>
-    private static IArrowArray? TryCreateZeroCopyInt32Array(NivaraColumn<int> column)
-    {
-        // Zero-copy is only possible if:
-        // 1. The column has no nulls (or we can handle the null mask efficiently)
-        // 2. The underlying storage is compatible with Arrow's memory layout
-        // 3. The data is contiguous in memory
-
-        // Check if column has nulls - zero-copy is more complex with nulls
-        if (column.HasNulls)
-        {
-            return null; // Fallback to copying for now
-        }
-
-        // For tensor-backed columns, we might be able to share memory
-        // This is a simplified implementation - in practice, we'd need to check
-        // memory layout compatibility and create Arrow arrays from existing buffers
-        try
-        {
-            // This is a placeholder for actual zero-copy implementation
-            // In a real implementation, we would:
-            // 1. Get the underlying memory buffer from the column
-            // 2. Create an Arrow array that shares this buffer
-            // 3. Handle memory ownership and lifecycle properly
-
-            // For now, return null to use copying approach
-            return null;
-        }
-        catch
-        {
-            // If zero-copy fails for any reason, return null to fallback to copying
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Attempts to create a zero-copy Double Arrow array from a NivaraColumn
-    /// </summary>
-    /// <param name="column">The NivaraColumn to convert</param>
-    /// <returns>A zero-copy Arrow array if possible, null if zero-copy is not feasible</returns>
-    private static IArrowArray? TryCreateZeroCopyDoubleArray(NivaraColumn<double> column)
-    {
-        // Zero-copy is only possible if:
-        // 1. The column has no nulls (or we can handle the null mask efficiently)
-        // 2. The underlying storage is compatible with Arrow's memory layout
-        // 3. The data is contiguous in memory
-
-        // Check if column has nulls - zero-copy is more complex with nulls
-        if (column.HasNulls)
-        {
-            return null; // Fallback to copying for now
-        }
-
-        // For tensor-backed columns, we might be able to share memory
-        // This is a simplified implementation - in practice, we'd need to check
-        // memory layout compatibility and create Arrow arrays from existing buffers
-        try
-        {
-            // This is a placeholder for actual zero-copy implementation
-            // In a real implementation, we would:
-            // 1. Get the underlying memory buffer from the column
-            // 2. Create an Arrow array that shares this buffer
-            // 3. Handle memory ownership and lifecycle properly
-
-            // For now, return null to use copying approach
-            return null;
-        }
-        catch
-        {
-            // If zero-copy fails for any reason, return null to fallback to copying
-            return null;
         }
     }
 }

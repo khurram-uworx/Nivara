@@ -8,16 +8,6 @@ namespace Nivara.IO;
 public class ArrowConversionOptions
 {
     /// <summary>
-    /// Gets or sets whether to use zero-copy operations when possible
-    /// </summary>
-    /// <remarks>
-    /// When enabled, the converter will attempt to share memory between Nivara and Arrow structures
-    /// to avoid copying data. Falls back to copying when zero-copy is not possible.
-    /// Default is true.
-    /// </remarks>
-    public bool UseZeroCopy { get; set; } = true;
-
-    /// <summary>
     /// Gets or sets the timezone for timestamp conversions
     /// </summary>
     /// <remarks>
