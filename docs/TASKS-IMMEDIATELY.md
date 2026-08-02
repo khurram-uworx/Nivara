@@ -48,10 +48,11 @@ whose acceptance is "no public claim contradicts the code."
 - Task 7 edits the same files the reviews already quote (`README.md:147`,
   `GETTING-STARTED.md:1330`, `ARCHITECTURE.md:871`); update the line references in the
   review docs only if a task changes what those lines say.
-- **Do not touch** the six docs (`docs/POLARS-REVIEW.md`, `docs/POLARS-ROADMAP.md`,
-  `docs/ARROW-REVIEW.md`, `docs/ARROW-ROADMAP.md`, `docs/AISTACK-REVIEW.md`,
-  `docs/AISTACK-ROADMAP.md`). They are the release plan, not the triage list. Their
-  `UseZeroCopy` references remain valid as evidence and as the Phase D plan.
+- **Do not touch** `docs/POLARS-REVIEW.md`, `docs/POLARS-ROADMAP.md`,
+  `docs/AISTACK-REVIEW.md`, `docs/AISTACK-ROADMAP.md`. They are the release plan, not
+  the triage list. `docs/ARROW-REVIEW.md` / `docs/ARROW-ROADMAP.md` were reconciled
+  after the `UseZeroCopy` removal (issue #94): their findings and Phase D now read as
+  "add real zero-copy APIs" rather than citing the deleted option.
 - **Not in scope here:** chunked columns, layout/bitmap validity, ONNX, dataset/eval
   layer — those are roadmap phases, tracked in the roadmap docs.
 
@@ -90,8 +91,9 @@ Phase D, which will add real APIs and advertising then.
 
 ### Constraints
 
-- Do not touch the six review/roadmap docs (their `UseZeroCopy` references are evidence
-  and plan, not current behavior).
+- Do not touch the four other review/roadmap docs (`POLARS-*`, `AISTACK-*`).
+  `ARROW-REVIEW` / `ARROW-ROADMAP` were reconciled separately (issue #94) to reflect
+  this removal.
 
 ### Suggested implementation path
 
