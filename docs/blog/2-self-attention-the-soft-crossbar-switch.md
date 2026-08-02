@@ -31,7 +31,7 @@
 ## 2. The cast: Q, K, V — three probes on the same signal
 
 From each token's embedding row, three **Linear** projections are computed (post 1's
-amplifier, applied three times). Source: `BertSelfAttention.Forward`,
+threshold-logic vote, applied three times). Source: `BertSelfAttention.Forward`,
 `samples/Nivara.Samples/BertModel.cs:65-71`:
 
 ```csharp
@@ -118,7 +118,7 @@ O[i] = Σⱼ P[i,j] · V[j]        →   O = P·V, shape [128, 384]
   gradient ≈ 0 — training stalls, and inference output becomes brittle.
 - Fix: divide every score by `√(head_dim)` before softmax — keep the soft mux operating in
   its linear-ish region. Analogy: an amplifier stage with gain compensation so it never
-  saturates the rails.
+  saturates the rails (clips at maximum output).
 
 ```
 S = (Q · Kᵀ) / √d      d = head dimension (32 in MiniLM)
@@ -168,7 +168,32 @@ Attn(x) = oProj( softmax( QKᵀ / √d ) · V )
 
 That's the entire "hard part." Three line-equations, four named pieces, zero calculus.
 
-## 9. End hook → Post 3
+---
+
+## Checkpoint: the encoder map
+
+> Step back from the details — here's where we are on the whole line.
+
+```
+text ──→ ●tokenizer ──→ token ids [128]
+      │  ●token + position + segment lookups, summed ──→ [128×384]
+   ×6 │  each BERT layer:
+      │    ●[attention] ──→ ○⊕ (residual) ──→ ○[LayerNorm] ──→ ○[widen+rectify+squeeze] ──→ ○⊕ (residual) ──→ ○[LayerNorm]
+      ▼
+      ○[CLS] row ──→ ○L2 normalize ──→ unit vector [384] ──→ cosine similarity (cat vs dog)
+
+● covered so far · ○ still ahead
+```
+
+- **Added:** the soft crossbar — Q/K/V probes, the relevance matrix, the soft mux, the
+  value blend, gain compensation, and 12 parallel paths.
+- **Where you are:** every token's vector is now a context-aware blend of every other
+  token's vector — "the cat" knows "sat" is near.
+- **Still unlit:** the wiring around attention (the bypass wire and the gain stage after
+  it), the widen/rectify/squeeze stage, and the readout. And the soft crossbar only exists
+  on paper so far — making it run is the next post.
+
+## End hook → Post 3
 
 > That's the concept. Shipping it is where the engineer's fun begins: heads aren't separate
 > matrices, sentences must be padded to a fixed length and the padding must not vote, exp
@@ -198,3 +223,9 @@ That's the entire "hard part." Three line-equations, four named pieces, zero cal
 - A tiny worked example with 3 tokens and d=2 so all numbers fit: Q/K/V 2-dim, compute the
   3×3 score matrix, softmax row, blend. Worked by hand in the post.
 - Q/K/V "meeting" cartoon.
+
+---
+
+> **If you remember one thing from this post:** attention is a crossbar switch whose
+> routing is decided by the data at runtime — wiring computed from the inputs, not fixed
+> connections.

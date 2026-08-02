@@ -6,16 +6,16 @@
 >
 > What you'll learn: the four blocks that do 90% of a transformer's work and hold almost
 > all of its parameters — the **lexer** (WordPiece tokenizer), the **lookup table**
-> (embeddings), the **automatic gain control** (LayerNorm), and the **multiply–accumulate
-> machine** (Linear). By the end the reader can trace the front half of MiniLM's data flow
+> (embeddings), the **gain-staging stage** (LayerNorm), and the **threshold-logic vote**
+> (Linear). By the end the reader can trace the front half of MiniLM's data flow
 > with shapes in hand.
 
 ## Hook (use as-is or rewrite)
 
 > Everyone wants to hear about attention — it has the catchy diagrams. But if you open up
 > a real sentence-embedding model, the first ~90% of the runtime and more than half of the
-> parameters are boring-looking blocks: a *lexer*, a *lookup table*, an *amplifier*, and a
-> *gain-control stage*. These are the AND gates and op-amps of the whole machine. And
+> parameters are boring-looking blocks: a *lexer*, a *lookup table*, a *voting machine*, and
+> a *gain-staging stage*. These are the AND gates and comparators of the whole machine. And
 > here's the thing — they're the blocks you actually end up debugging.
 
 ## 1. The whole chain on one page
@@ -49,6 +49,11 @@ Talking points:
 |---|---|---|---|---|
 | text | `[128]` ints | 0 | split into subword IDs | the lexer |
 
+- **Introduce the two-part pattern** used for every block (series convention, README):
+  first **the math, gently** — the equation if it's simpler than code, the code if it's
+  simpler, plain words otherwise — then **how MiniLM uses it** — which layer, what it
+  contributes, what it costs. By the last post the reader has every piece assembled.
+
 - **The running example** (see series README): "This is a cat." vs "This is a dog." →
   two 384-d vectors → high cosine similarity; vs "I love programming." → low similarity.
 - Set expectations: this post covers the front half (lexer → embeddings → LayerNorm →
@@ -62,27 +67,37 @@ Talking points:
 |---|---|---|---|---|
 | text | `[128]` token ids | 0 | split into subword tokens | the lexer (compiler front-end) |
 
-Facts & evidence:
+**1. The math, gently.** There is no arithmetic in this block — it converts characters to
+integers. That makes it the easiest node in the series and a good template for the rule we
+use everywhere: *if the code is simpler than the equation, show the code; if a concept is
+simpler still, say it in words.* The whole "math" of tokenization is two dictionary
+lookups:
 
-- The model uses a WordPiece tokenizer. In the sample it's
-  `Microsoft.ML.Tokenizers.BertTokenizer.Create(vocabPath)` loading `vocab.txt`
-  (`samples/Nivara.Samples/BertModel.cs:437-463`, `MiniLMTokenizer.Load/Encode`).
+```csharp
+tokens[i] = vocab[wordpiece(text)];   // e.g. "tokenization" → "token" + "ization"
+```
+
+The data is crunched, but the crunching is bookkeeping: one finite vocabulary
+(`vocab.txt`), one integer per token.
+
+**2. How MiniLM uses it.** This is node #1 in the chain — text goes in, a `[128]` vector of
+token ids comes out. MiniLM's tokenizer is WordPiece (`MiniLMTokenizer.Load/Encode`,
+`samples/Nivara.Samples/BertModel.cs:437-463`):
+
 - `[CLS]` and `[SEP]` are added around the sentence (`addSpecialTokens: true`,
-  `BertModel.cs:449`). Standard BERT WordPiece IDs: `[PAD]=0`, `[UNK]=100`, `[CLS]=101`,
-  `[SEP]=102`, `[MASK]=103`. Verify against the sample's own printed output before quoting
-  exact ids — the program prints the first 10 input token ids
+  `BertModel.cs:449`). Standard BERT ids: `[PAD]=0`, `[UNK]=100`, `[CLS]=101`, `[SEP]=102`,
+  `[MASK]=103` — the program prints the first 10 input token ids so you can verify
   (`samples/NivaraInference/Program.cs:653-657`).
-- Sequences are padded to a fixed `maxLen = 128` with the padding token
-  (`BertModel.cs:459-461`), and an attention mask `[0,1]` marks real vs padded positions.
-- **Why subwords (the engineering payoff):** a finite vocabulary can't cover all of
-  English, so unknown words are *split* into known pieces ("tokenization" → "token" +
-  "ization"). Analogy: a lexer that never hits "unrecognized token" — unknown input
-  decomposes into known lexemes instead of failing. This is why OOV words don't crash
-  the model.
+- Sequences are padded to `maxLen = 128` with the padding token (`BertModel.cs:459-461`),
+  and an attention mask `[0,1]` marks real vs padded positions (attention reads it in
+  post 3).
+- **Why subwords:** a finite vocabulary can't cover all of English, so unknown words are
+  *split* into known pieces ("tokenization" → "token" + "ization"). The model never hits
+  "unrecognized token." Compiler front-end framing: `[CLS]` is BOF, `[SEP]` is EOF,
+  `[PAD]` is padding whitespace.
 
-> **Compiler analogy to lean on:** the tokenizer is the front-end of a compiler — it turns
-> a character stream into a token stream against a fixed vocabulary ("the language spec").
-> `[CLS]` is BOF, `[SEP]` is EOF, `[PAD]` is padding whitespace.
+The piece this node contributes: the integers every other block indexes. Everything after
+this is float math on those integers.
 
 ## 3. The lookup table: token embeddings
 
@@ -92,14 +107,8 @@ Facts & evidence:
 |---|---|---|---|---|
 | `[128]` token ids | `[128, 384]` | **11,720,448 (~52%)** | `out[i] = table[token_id[i]]` | ROM / `dict` / database index |
 
-Facts & evidence:
-
-- The embedding is a matrix `[vocab_size=30522, hidden=384]` stored as a parameter
-  (`Embedding<T>` constructor, `src/Nivara/AutoDiff/Nn/Embedding.cs:18-33`; config in
-  `BertConfig`, `BertModel.cs:8-16`).
-- The forward pass is a **read, not a computation**: it gathers rows by index.
-  `Embedding.Forward` validates ids then calls `ReverseGradOperations.Gather(weight, ids)`
-  (`Embedding.cs:35-64`):
+**1. The math, gently.** The code is simpler than any equation — this is a *read*, not a
+computation. Each token id picks one row out of a big matrix:
 
 ```csharp
 // src/Nivara/AutoDiff/Nn/Embedding.cs:42-63
@@ -114,20 +123,21 @@ for (int i = 0; i < totalTokens; i++)
 }
 
 var result = ReverseGradOperations.Gather(weight.Tensor, tokenIds);
-if (originalShape.Length > 1)
-    result.Reshape(originalShape.Append(embeddingDim).ToArray());
-return result;
 ```
 
-- `Gather` itself: `ReverseGradOperations.Gather(source, indices, axis)` at
-  `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs:1834` (row lookup, axis 0).
-- **Parameter punchline:** this one table is ~11.7M of the ~22.6M parameters — more than
-  half the model. "Most AI parameters aren't math, they're memory."
+`Gather` is row lookup on axis 0 (`ReverseGradOperations.cs:1834`). Think `dict[tokenId]` —
+an array indexed by an integer — or, in hardware terms, a ROM / content-addressable table.
+The entire "math" of this node is `out[i] = table[token_id[i]]`.
 
-Analogy options:
+**2. How MiniLM uses it.** The table is `[vocab_size=30522, hidden=384]`
+(`Embedding<T>` constructor, `src/Nivara/AutoDiff/Nn/Embedding.cs:18-33`; config in
+`BertConfig`, `BertModel.cs:8-16`) — and it is **11,720,448 of the ~22.6M parameters:
+more than half the model.** The rows became meaningful *during training*; at inference
+this is pure read-only memory. This is the piece that turns integers into vectors, and it
+is where "most AI parameters aren't math, they're memory."
 
-- **ROM / content-addressable table:** token id → row of floats, exactly a hardware lookup.
-- **`dict[tokenId]`** in code — `Vector3`-ish array indexed by integer.
+> Same node family, two more times: the position table (next section) and the segment
+> table (`[2,384]`, 768 params) — three lookups summed into one `[128,384]` matrix.
 - The learning that made the rows meaningful happened *during training*; at inference the
   layer is pure read-only memory.
 
@@ -139,10 +149,8 @@ Analogy options:
 |---|---|---|---|---|
 | `[128]` (indices 0..127) | `[128, 384]` | 196,608 | `pos_table[position]` | a counter feeding a table |
 
-Facts & evidence:
-
-- Position ids are literally `0, 1, 2, ...` per sequence, generated at forward time
-  (`BertEncoder.Forward`, `BertModel.cs:258-272`):
+**1. The math, gently.** Zero new math — this is the previous node (a table lookup) plus an
+element-wise add, the first time the series mixes signals:
 
 ```csharp
 var posIds = new T[seqLen];
@@ -152,37 +160,43 @@ posEmbInput.Reshape(seqLen);
 
 var wordEmb = wordEmbed.Forward(input);
 var posEmb  = posEmbed.Forward(posEmbInput);
-var hidden  = _includeTokenTypeEmbedding
-    ? ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, TokenTypeEmb(seqLen)))
-    : ReverseGradOperations.Add(wordEmb, posEmb);
-hidden = embedLn.Forward(hidden);
+var hidden  = ReverseGradOperations.Add(wordEmb, posEmb);   // ← a wire sum
 ```
 
-- Position table length `max_position_embeddings = 512` (`BertConfig`, `BertModel.cs:14`).
-- **Why order matters:** the lookup table gives identical vectors to identical tokens no
-  matter where they appear — "bank" in "river bank" and "bank loan" get the same row.
-  The position table is what lets the model distinguish word #1 from word #2. Analogy: a
-  state machine needs a clock/counter to know where it is; the position table is the
-  counter.
-- Segment (token-type) embedding: `[2, 384]`, 768 params, folded into the same sum for
-  models that use it (`BertModel.cs:15`); DistilBERT skips it (`includeTokenTypeEmbedding:
-  false`).
-- The three embeddings are **summed element-wise** (`ReverseGradOperations.Add`) — no
-  averaging, no concatenation, just a wire sum. Good spot for a "signals get mixed here"
-  diagram: three `[128,384]` signals → one `[128,384]`.
+Position ids are literally `0, 1, 2, ...` per sequence, generated at forward time
+(`BertEncoder.Forward`, `BertModel.cs:258-272`). "Adding a position vector" is adding 384
+numbers, position by position.
 
-## 5. LayerNorm: the automatic gain control
+**2. How MiniLM uses it.** The lookup table gives identical vectors to identical tokens no
+matter where they appear — "bank" in "river bank" and "bank loan" get the same row. The
+position table is what lets the model distinguish word #1 from word #2. Analogy: a state
+machine needs a clock/counter to know where it is; the position table is the counter.
+
+- Table length `max_position_embeddings = 512` (`BertConfig`, `BertModel.cs:14`);
+  `[512, 384]` = 196,608 params.
+- The three lookups — token, position, segment — are **summed element-wise**
+  (`ReverseGradOperations.Add`): no averaging, no concatenation, just a wire sum. Good
+  spot for a "signals get mixed here" diagram: three `[128,384]` signals → one `[128,384]`.
+- DistilBERT skips the segment table (`includeTokenTypeEmbedding: false`, `BertModel.cs:15`).
+
+Piece this node contributes: word identity (table) + word order (table) merged into one
+vector per token — and the first example of the model "mixing" signals, the reason
+LayerNorm sits right behind it.
+
+## 5. LayerNorm: the gain-staging stage
 
 **Datasheet:**
 
 | Input | Output | Parameters | One-liner | Analogy |
 |---|---|---|---|---|
-| `[128, 384]` | `[128, 384]` | 768 (γ+β) | normalize each row, then rescale | AGC / signal conditioning |
+| `[128, 384]` | `[128, 384]` | 768 (γ+β) | normalize each row, then rescale | recording-console levels / gain staging |
 
-Facts & evidence:
+**1. The math, gently.** Three plain-English steps, then the one equation this post needs
+(the equation is genuinely simpler than the code here, so we use it):
 
-- Normalizes **per row** (per token), over the 384 features: subtract the mean, divide by
-  std, then apply affine gain γ and offset β. Formula (the only equation this post needs):
+1. subtract the row's **average** — remove the DC offset / the baseline level,
+2. divide by the row's **spread** (the standard deviation) — scale to a healthy loudness,
+3. multiply by **γ**, add **β** — the gain and offset knobs the model learned.
 
 ```
 μ    = mean over the row
@@ -190,8 +204,9 @@ Facts & evidence:
 y[i] = (x[i] − μ) / sqrt(σ² + ε) · γ[i] + β[i]
 ```
 
-- Kernel implementation, `src/Nivara/AutoDiff/Nn/LayerNormKernel.cs:45-80` (two passes:
-  row means, then diff → dot → inverse std → scale):
+"Variance" is just "how far the numbers spread from the mean" — no more. The kernel is the
+same three steps in code, `src/Nivara/AutoDiff/Nn/LayerNormKernel.cs:45-80` (two passes:
+row means, then diff → dot → inverse std → scale):
 
 ```csharp
 // LayerNormKernel.cs:45-52 (pass 1 — row means)
@@ -213,40 +228,71 @@ TensorPrimitives.Multiply(diffSpan, gamma, outputSlice); // · γ
 TensorPrimitives.Add(outputSlice, beta, outputSlice);     // + β
 ```
 
-- Affine parameters: γ starts at **1**, β starts at **0** (`LayerNorm.cs:37-41`) — the
-  model "learns" the gain/offset knobs during training. ε is a tiny constant that exists
-  **only** to stop division by zero (and is a silent-accuracy trap, see below).
-- `LayerNorm.Forward` validates rank ≥ 2 and that the last dim matches
-  (`LayerNorm.cs:48-53`).
+**2. How MiniLM uses it.** Gain staging, per token: normalize each row over its 384
+features, then re-apply the learned knobs. This is the recording-console node.
 
-Engineering framing:
-
-- **AGC analogy:** every audio chain has an automatic gain controller — remove DC offset,
-  level the signal, then apply the gain you actually want. LayerNorm does exactly this per
-  token.
-- **Why it's needed with 6 stacked stages:** cascading amplifiers accumulate offset and
-  gain drift; any bias from stage 1 gets amplified through stage 6. Normalizing at each
-  stage keeps every block in a stable operating range so the nonlinearities downstream
-  (post 2/4) never saturate or dead-zone.
-- **ε = "a tiny series resistance"** so you never divide by zero.
+- **Recording-console analogy:** every track's level meter has a healthy zone — green, not
+  peaking into the red. A signal in the red **clips**; a signal in the weeds gets buried in
+  noise. Tokens arrive at wildly different volumes, so before routing further you normalize.
+  LayerNorm subtracts the **DC offset** (mean), scales by **loudness** (std), then re-applies
+  **γ** and **β** — the per-band sliders on an equalizer you leave in a fixed position
+  (γ is per-dimension, so per-band gain; β is per-band trim). γ starts at **1**, β at **0**
+  (`LayerNorm.cs:37-41`) — the model "learns" the knob positions during training.
+- **Why manage each signal's level individually? Because a signal is a mix of frequencies.**
+  A token's 384 values are 384 components stacked into one waveform. Each band's LED meter
+  can look fine on its own — but when the bands align, the *combined* peak is far hotter
+  than any single one. The overall meter is what clips.
+  Zoom out: this is a whole *mix*. The model constantly adds signals together — residual
+  connections literally sum two `[128,384]` matrices (post 4), attention blends every token
+  into every other (post 2), the FFN amplifies (post 4). If every channel arrives hot, the
+  sum drives the bus into the red even though no single channel did. That's why you re-level
+  *every* signal *at every stage* — so the mix never collectively overloads.
+- **Headroom payoff:** downstream stages — the amplifiers and the rectifier — clip on hot
+  signals. Leave headroom and nothing distorts; that's gain staging, the same discipline a
+  recording engineer applies before every stage.
+- **Where it sits:** right after the embedding sum, and then inside every BERT layer after
+  each mixer — **13 total** (1 here + 2 in each of the 6 layers). This is also why it sits
+  after every mixer: each mix is new collective clipping risk.
+- **ε = "don't compute gain on silence"** — the tiny floor so you never divide by zero.
+  `LayerNorm.Forward` validates rank ≥ 2 and the last-dim match (`LayerNorm.cs:48-53`).
 
 **The ε gotcha (what I learned):** the BERT config ships `layer_norm_eps = 1e-12`
 (`BertConfig.LayerNormEps`, `BertModel.cs:16`), which is *not* PyTorch's LayerNorm default
 of `1e-5`. Copying the wrong ε degrades outputs silently — no error, no warning. The model
 spec *includes* its constants.
 
-## 6. Linear: the multiply–accumulate machine
+## 6. Linear: the threshold-logic vote
 
 **Datasheet:**
 
 | Input | Output | Parameters | One-liner | Analogy |
 |---|---|---|---|---|
-| `[L, 384]` | `[L, 384]` | 147,840 (384×384 + 384 bias) | `y = x·Wᵀ + b` | bank of matched filters / FIR taps |
+| `[L, 384]` | `[L, 384]` | 147,840 (384×384 + 384 bias) | `y = x·Wᵀ + b` | threshold-logic vote / MAC array |
 
-Facts & evidence:
+**1. The math, gently.** A dot product — and it's the one node where the code loop and the
+equation are equally short, so here's both, in the order engineers read them. Code:
 
-- The operation used *everywhere* else — attention projections (post 2), the FFN (post 4),
-  the classifier head. `Linear.Forward`, `src/Nivara/AutoDiff/Nn/Linear.cs:55-68`:
+```
+for each row r, for each output channel j:
+    y[r, j] = (Σ over i)  x[r, i] · W[j, i]   +  b[j]
+```
+
+i.e. `y = x·Wᵀ + b`: multiply each input value by a weight, add them all up, add one bias.
+That is the entire node — every output number is one "weighted vote tally." Weight is stored
+`[out=384, in=384]` row-major (`Linear.cs:36-39`); each row of W is one threshold gate's
+weight list, and the output row is every gate's tally against the input row.
+
+**2. How MiniLM uses it.** The workhorse node. In the chain itself it's not part of the
+front half (that's lookups + a normalize) — instead it's the block every later stage is
+built from, the ones posts 2–4 cover:
+
+- attention projections **Q, K, V** (post 2),
+- the FFN's two stages **384→1536** and **1536→384** (post 4),
+- the classification head (post 4).
+
+One instance is `384×384 + 384 bias = 147,840` params; MiniLM runs it **4×** inside each
+attention (post 2) and **2×** inside each FFN (post 4). `Linear.Forward`,
+`src/Nivara/AutoDiff/Nn/Linear.cs:55-68`:
 
 ```csharp
 public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -263,28 +309,25 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 }
 ```
 
-- **The math is a dot product per output channel:**
+Bias is a row-broadcast add (`AddBias`, `ReverseGradOperations.cs:49-102`); the shape
+contract is `[aRows,aCols] × [bRows,bCols]` with `aCols == bRows`
+(`ReverseGradOperations.cs:250-253`).
 
-```
-for each row r, for each output channel j:
-    y[r, j] = (Σ over i)  x[r, i] · W[j, i]   +  b[j]
-```
+The threshold-vote picture:
 
-  i.e. `y = x·Wᵀ + b`. Weight is stored `[out=384, in=384]` row-major
-  (`Linear.cs:36-39`); each row of W is a "template" and the output is the correlation of
-  the input row against all templates.
-
-- Bias is applied as a row-broadcast add (`AddBias`, `ReverseGradOperations.cs:49-102`).
-- `MatMul` shape contract: `[aRows,aCols] × [bRows,bCols]` requires `aCols == bRows`
-  (`ReverseGradOperations.cs:250-253`).
-
-Engineering framing:
-
-- **Matched-filter analogy:** each output channel answers "how much does the input look
-  like template #j?" Dot product == correlation == how aligned two signal vectors are.
-- **MAC unit:** each output float is one sum of products — the multiply–accumulate that
-  DSPs have had as an instruction for decades.
-- **Bias = offset voltage.**
+- **Threshold-logic vote (the primary analogy):** a Linear layer is a row of threshold
+  gates. Each input `x[i]` casts a weighted vote (`x[i]·W[j,i]`); the output `y[j]` is the
+  running tally. The bias `b[j]` is the **comparator threshold offset** — the "bar for
+  winning": the tally must clear it for the gate to fire. The whole layer is 384 gates side
+  by side; the whole model is a matrix of them. This is the "the AND gate does this to the
+  signals" view of a neural layer — threshold gates are a real logic-design element (the
+  McCulloch–Pitts neuron).
+- **Hardware truth (one line):** every vote is a multiply–accumulate, so a Linear layer is
+  structurally a **systolic MAC array** — the same fabric as a TPU. A miniature TPU per
+  layer.
+- **Software-native aside:** if inputs and weights were bits, the vote is just
+  `popcount(x AND w)` — counting bitwise agreements. The float dot product is the "soft"
+  version of the same idea.
 
 **What I learned (transpose-free inference):** weights are stored `[out, in]` (the way
 PyTorch/HuggingFace serialize them), but matmul wants the second operand transposed. Two
@@ -313,6 +356,36 @@ options:
 5. **Why shapes/contracts matter for performance too:** the transposed-weight cache is only
    valid while the weight doesn't change (`weight.Version`), which is a subtle
    invalidation problem — an engineer's version of "is this cache stale?"
+
+---
+
+## Checkpoint: the encoder map
+
+> Step back from the details — here's where we are on the whole line.
+
+```
+text ──→ ●tokenizer ──→ token ids [128]
+      │  ●token + position + segment lookups, summed ──→ [128×384]
+   ×6 │  each BERT layer:
+      │    ○[attention] ──→ ○⊕ (residual) ──→ ○[LayerNorm] ──→ ○[widen+rectify+squeeze] ──→ ○⊕ (residual) ──→ ○[LayerNorm]
+      ▼
+      ○[CLS] row ──→ ○L2 normalize ──→ unit vector [384] ──→ cosine similarity (cat vs dog)
+
+● covered so far · ○ still ahead
+```
+
+- **Added:** the front half — lexer, the three lookup tables, the gain-staging stage, and
+  the threshold-logic vote (the workhorse that returns inside the still-unlit blocks).
+- **Where you are:** text is now a `[128×384]` matrix of steady, leveled signals.
+- **Still unlit:** everything inside the 6 stacked layers — attention, the bypass wire and
+  gain stages around it, the widen/rectify/squeeze stage — plus the readout that turns it
+  all into the cat-vs-dog cosine. Posts 2–4 light those.
+
+## End hook → Post 2
+
+> Next: the block that made ChatGPT possible — the soft crossbar switch. Q, K, V, three
+> probes on the same signal, and a soft mux that routes it. Three line-equations, four
+> named pieces, zero calculus.
 
 ## Facts & numbers to reuse (checklist)
 
@@ -343,4 +416,13 @@ options:
 - Block diagram of the front half (lexer → 3 lookups → sum → LN).
 - Datasheet cards for the 4 layers.
 - A tiny worked dot-product: `x=[1,0,-1]`, one weight row `[0.5, 2, -1]` → `y = 1·0.5+0·2+(−1)·(−1) = 1.5`, then +bias.
+- The threshold-gate picture: three inputs voting into an adder, the comparator sitting at
+  the top setting the bar (bias).
+- The recording-console visual: per-band LED meters all green, the combined peak meter in
+  the red — "individually fine, collectively clipping."
 - GELU-vs-ReLU curve is deferred to Post 4.
+
+---
+
+> **If you remember one thing from this post:** half the model is a lookup table —
+> embeddings are memory, not math.

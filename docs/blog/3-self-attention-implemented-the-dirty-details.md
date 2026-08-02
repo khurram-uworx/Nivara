@@ -17,6 +17,11 @@
 > overflowing, and hide the "don't care" inputs with a tri-state value. This is the post
 > where a transformer starts to feel like a circuit.
 
+> **Where we are:** the same soft crossbar from Post 2, now as a memory-layout and
+> numerical-stability problem. Keep the Post 2 picture — pack → QKᵀ → scale → mask →
+> softmax → ×V → scatter — in your head; this post is about making that picture fast and
+> correct.
+
 ## 1. Real shapes & layout: there are no [heads] tensors
 
 - The model never materializes `[batch, heads, seq, d]` cubes. Everything is a flat
@@ -202,6 +207,39 @@ ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLe
    `eps`, `num_heads` are read from `config.json` at load time. Getting the scale wrong
    silently breaks training dynamics.
 
+---
+
+## Checkpoint: the encoder map
+
+> Step back from the details — here's where we are on the whole line.
+
+```
+text ──→ ●tokenizer ──→ token ids [128]
+      │  ●token + position + segment lookups, summed ──→ [128×384]
+   ×6 │  each BERT layer:
+      │    ●[attention] ──→ ○⊕ (residual) ──→ ○[LayerNorm] ──→ ○[widen+rectify+squeeze] ──→ ○⊕ (residual) ──→ ○[LayerNorm]
+      ▼
+      ○[CLS] row ──→ ○L2 normalize ──→ unit vector [384] ──→ cosine similarity (cat vs dog)
+
+● covered so far · ○ still ahead
+```
+
+- **Added:** the soft crossbar is now real — packed heads, a transpose-free QKᵀ, overflow-
+  safe softmax, and a `-∞` mask that makes padding a free no-op.
+- **Where you are:** the attention station is lit and *implemented*; it runs ~110 ms for
+  the whole model (vs 11 ms in PyTorch — the gap is the matmul kernels, not the ideas).
+- **Still unlit:** a BERT layer is not just attention. The wiring around it — the bypass
+  wire and the gain stage after each block — and the widen/rectify/squeeze stage that does
+  the per-token "thinking," then the readout that closes the cat-vs-dog loop.
+
+## End hook → Post 4
+
+> The attention block is complete. But a BERT layer is more than attention: every block is
+> wrapped in a bypass wire that carries the signal through untouched, and each layer ends
+> with a widen-rectify-squeeze stage that thinks per token. Then we read out the `[CLS]` row,
+> L2-normalize it, and the whole series lands on one cosine: cat vs dog. Next: the bypass
+> wire, the rectifier, and everything I learned building it.
+
 ## Facts & numbers to reuse (checklist)
 
 - One forward per layer: 12 heads × (pack + QKᵀ + scale + mask + softmax + ×V + scatter).
@@ -232,3 +270,8 @@ ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLe
 - The `-∞` mask diagram: a 128×128 grid with a few columns shaded; softmax row shown
   zeroing those weights.
 - A tiny worked head (e.g., 4 tokens, d=2) showing scores → max-subtract → exp → sum=1.
+
+---
+
+> **If you remember one thing from this post:** the `-∞` padding mask means masked attention
+> needs no special code path — the mask is data, and the kernel never branches on it.

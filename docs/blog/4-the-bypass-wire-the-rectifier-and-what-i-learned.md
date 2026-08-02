@@ -51,8 +51,19 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 - **Analogy:** expand the signal into a wider scratch register (more "headroom" to form
   intermediate features), apply a nonlinearity, then fold it back to the bus width. It's a
   two-stage amplifier where the rectifier sits between the stages.
+- **Why widen to 1536, then squeeze back to 384?** Because a wider lane is where the model
+  forms *combinations*. Each of the 384 input values is already a blend of meanings; to
+  detect a *new* feature the model must weigh many inputs at once, and it needs separate
+  lanes so different combinations don't trample each other. So it temporarily expands to a
+  1536-wide workbench — each lane can specialize in one combination — the rectifier keeps
+  each lane's answer from canceling, and the second Linear folds the useful lanes back into
+  the 384-wide bus the next layer expects. The "4×" is not a law; it's a configuration
+  choice, like a buffer size (`BertConfig.IntermediateSize`, `BertModel.cs:13`). Wide enough
+  to form rich combinations, cheap enough to keep the math fast.
 - Param note: the FFN (~1.18M per layer) is roughly twice the attention stack (~0.59M) —
   the "boring" layers are the expensive ones.
+- (Why a rectifier at all? Because without one the whole stack collapses into a single
+  Linear — the next section.)
 
 ## 2. GELU: the soft rectifier
 
@@ -62,6 +73,14 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 |---|---|---|---|---|
 | `[384]` (or any) | same shape | 0 | smooth gate on positive values | a diode with a soft knee |
 
+- **Why a rectifier at all?** The question nobody asks, so let's answer it before we meet
+  the parts. A `Linear` layer is multiply-and-add; if you chain six of them with *no*
+  rectifier, the chain silently collapses into **one** Linear — the matrices fold together
+  into a single multiply-add, and six stacked stages buy you exactly nothing over one. The
+  rectifier is the one step that isn't linear, and it's what makes a stack of stages able to
+  represent things a single stage can't. In code terms: without it, stacking layers is just
+  inlining the same function over and over; with it, each stage becomes a fresh decision
+  layer that builds on the last.
 - **ReLU** (`max(x, 0)`) is a hard diode: negatives → 0, positives pass through. Sharp
   corner at 0. Kernel: `ReverseGradOperations.Relu` at
   `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs:879-905`.
@@ -71,6 +90,10 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 ```
 GELU(x) = x · Φ(x) = x · ½(1 + erf(x/√2))
 ```
+
+  Don't let `erf` scare you — treat it as a library call: `x * 0.5 * (1 + erf(x/sqrt2))`
+  is `x * SoftGate(x)`, where `SoftGate` scores "how positive is x" on a smooth 0→1 scale
+  and you never need to read it. Φ (uppercase phi) is just the name of that soft gate.
 
   For large positive x, Φ(x)→1 so GELU(x)≈x. For large negative x, Φ(x)→0 so GELU(x)≈0.
   Around 0 it's smooth — small signals pass *partially*, unlike ReLU's hard cutoff.
@@ -156,7 +179,10 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 
   In a batched classifier head it's the same idea: `Gather(encoded, [0, seqLen, 2·seqLen, …])`
   (`DistilBertModel.cs:44-50`). Analogy: pin 0 of the bus — the convention is that the
-  first token's row carries the sentence summary.
+  first token's row carries the sentence summary. Why row 0 specifically? Because during
+  training the model was *told* the `[CLS]` position must summarize the whole sentence, so
+  it learned to route the useful bits there. A designated output pin — by contract, not by
+  magic.
 
 - **L2 normalization** (`BertModel.cs:376-397`): divide every element by the vector's
   magnitude, producing a **unit vector** (the sample prints `L2 norm: ~1.0`,
@@ -165,6 +191,21 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
   `cosine(a,b) = dot(a,b) / (|a|·|b|) = dot(a,b)` for unit vectors. Two sentences are
   "similar" iff their 384-d directions are close. This closes the loop on the running
   example: cat vs dog → high cosine; cat vs programming → low.
+
+---
+
+## For the software-only reader: the audio decoder ring
+
+> The block analogies in this post are real circuits. If you skipped the electronics course,
+> here's the same four ideas in Post 1's audio vocabulary and in code — one row per block,
+> a single pass that rebuilds your mental model.
+
+| Block | Analog circuit | Audio / digital for SW-only |
+|---|---|---|
+| FFN | two-stage amplifier + rectifier | **Audio:** split the signal into more EQ bands with extra headroom, drive them, mix back to the 384-wide bus — per-band shaping, not per-token magic. |
+| GELU | diode with a soft knee | **Audio:** soft-knee vs hard-knee dynamics — ReLU cuts abruptly at 0 (hard knee), GELU turns on gradually (soft knee). **Code:** `Math.Max(x,0)` vs a smooth clamp. |
+| Residual | bypass / feedback wire | **Audio:** true bypass — a wire carries the input straight through; the block only adds a delta. **Code:** `out = block(x) + x`. |
+| Readout | pin 0 of the bus | **Audio:** a designated master/summary channel normalized to a reference level. **Code:** `Vector3.Normalize` — direction survives, so cosine == dot. |
 
 ## 5. What I actually learned (retrospective — the post's payoff)
 
@@ -192,14 +233,38 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
    186 ms on the same CPU (`README.md:218-230`). Publish it. The gap is the matmul
    kernels (naive loops vs MKL), which is a known, bounded engineering problem — not a
    flaw in the architecture or the concepts being explained.
-6. **The thesis.** None of these blocks are exotic: lookup table, dot product, gain
-   control, soft switch, bypass wire, rectifier. If you can trace shapes and read a
-   datasheet, you can read a transformer.
+6. **The thesis.** None of these blocks are exotic: lookup table, threshold-logic vote,
+   gain-staging stage, soft switch, bypass wire, rectifier. If you can trace shapes and
+   read a datasheet, you can read a transformer.
+
+---
+
+## Checkpoint: the encoder map (the whole line, lit)
+
+> Step back from the details — here's where we are on the whole line.
+
+```
+text ──→ ●tokenizer ──→ token ids [128]
+      │  ●token + position + segment lookups, summed ──→ [128×384]
+   ×6 │  each BERT layer:
+      │    ●[attention] ──→ ●⊕ (residual) ──→ ●[LayerNorm] ──→ ●[widen+rectify+squeeze] ──→ ●⊕ (residual) ──→ ●[LayerNorm]
+      ▼
+      ●[CLS] row ──→ ●L2 normalize ──→ unit vector [384] ──→ cosine similarity (cat vs dog)
+
+● covered so far · ○ still ahead
+```
+
+Every station is lit. Nothing left to dim: text in, a unit vector out, and the series'
+running example lands on one cosine — cat vs dog high, cat vs programming low.
 
 ## Facts & numbers to reuse (checklist)
 
 - FFN per layer: `fc1(384→1536)` → GELU → `fc2(1536→384)`; 1,181,568 params
   (≈2× the attention stack's 591,360).
+- Why the rectifier: chained Linears with no nonlinearity collapse into one Linear; the
+  rectifier is what makes stacking stages meaningful.
+- Why widen→squeeze: a 1536-wide workbench lets lanes form different feature combos, then
+  fold the useful ones back to the 384-wide bus; 4× is a config choice, not a law.
 - GELU exact: `x·½(1+erf(x/√2))`; tanh approx: `x·½(1+tanh(√(2/π)·(x+0.044715x³)))`; ReLU: `max(x,0)`.
 - MiniLM + DistilBERT encoder use exact GELU; the SST-2 head uses **ReLU**; GPT-style uses tanh-approx.
 - GELU/ReLU bug: logits off by ~0.05, argmax flips on borderline cases (`README.md:192`).
@@ -230,9 +295,14 @@ public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
 
 ## Series wrap-up
 
-The four posts form an arc: workhorses (lookup, amplify, gain-control) → attention concept
+The four posts form an arc: workhorses (lookup, vote, gain-staging) → attention concept
 (the soft crossbar) → attention implementation (layout, stability, the -∞ mask) → residuals,
 rectifier, and the meta-lessons. The running cat/dog example ties them together, and the
 retrospective (section 5) is the essay a software engineer can take away: read a model the
 way you'd read a schematic — datasheet, signal flow, shapes — and the maths stops being a
 wall.
+
+---
+
+> **If you remember one thing from this post:** a stack of Linears with no rectifier
+> collapses into a single Linear — the nonlinearity is what makes depth mean something.

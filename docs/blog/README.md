@@ -17,10 +17,58 @@ and snippet can be traced back to a `file:line` reference at the end of each pos
   from the maths of ML.
 - **Voice:** how circuit-analysis / logic-design courses were taught — "the AND gate does
   *this* to the signals." Every layer is a block with a defined I/O contract (a datasheet).
+- **Analog → audio/CS decoder ring.** Circuit analogies ship with a one-line audio (Post 1's
+  console vocabulary: bands, gain staging, soft knee, true bypass) or code equivalent when
+  the concept isn't in a typical software engineer's mental model — so SW-only readers stay
+  oriented without losing the hardware truth (Post 4 collects them in one table).
 - **The one-sentence thesis of the whole series:**
   > A transformer is built from the same parts engineers already know — a lookup table,
-  > a multiply–accumulate, a gain-control stage, a soft switch, a bypass wire, and a
+  > a threshold-logic vote, a gain-staging stage, a soft switch, a bypass wire, and a
   > rectifier. If you can trace shapes and read a datasheet, you can read a transformer.
+
+**How every block is presented (the two-part pattern).** Every node in the series gets the
+same two beats, in the same order:
+
+1. **The math, gently.** Lead with whatever is least scary and still true: if a single
+   equation is simpler than the code, print the equation; if a few lines of code are
+   simpler, print the code; otherwise say it in plain words — "this is how the data gets
+   crunched." The math ceiling for this series is a dot product and a mean. No calculus,
+   no derivatives, no proofs.
+2. **How MiniLM uses it.** Where the block sits in the chain (which layer), what it
+   contributes to the model, and which config numbers/params it costs. Each post adds a
+   piece to the picture; by the final post the reader has assembled the whole model and can
+   say "oh, *that's* how MiniLM works."
+
+**The checkpoint: the encoder map (how every post closes).** Posts 2–4 are detail-heavy, so
+each post ends with a step-back beat so the reader never loses where they are. Every post
+prints the **same canonical map**, with stations marked `●` (covered so far) or `○` (still
+ahead) — a subway map: you always see the whole line, your stop is lit, the rest is dim.
+Three bullets after the map, always in the same order:
+
+- **Added:** one line on what this post just taught.
+- **Where you are:** which stations are now lit.
+- **Still unlit:** what remains → hands off to the next post.
+
+Canonical map (use this exact text in every checkpoint):
+
+```
+text ──→ ●tokenizer ──→ token ids [128]
+      │  ●token + position + segment lookups, summed ──→ [128×384]
+   ×6 │  each BERT layer:
+      │    ○[attention] ──→ ○⊕ (residual) ──→ ○[LayerNorm] ──→ ○[widen+rectify+squeeze] ──→ ○⊕ (residual) ──→ ○[LayerNorm]
+      ▼
+      ○[CLS] row ──→ ○L2 normalize ──→ unit vector [384] ──→ cosine similarity (cat vs dog)
+
+● covered so far · ○ still ahead
+```
+
+Checkpoints are unnumbered sections styled distinctly (`---` divider + `## Checkpoint: the
+encoder map`) so they read as a recurring convention beat, not another lesson.
+
+**The takeaway line (how every post closes).** After the visuals, every post ends with one
+italicized sentence — *if you remember one thing from this post, it's ___.* It's the
+elevator-pitch version of the facts checklist: the single idea a reader should still have
+after closing the tab.
 
 ## Running example (used in every post)
 
@@ -137,6 +185,10 @@ fused packed-heads kernel cut DistilBERT encoder inference **~236 ms → ~186 ms
    backprop nodes are allocated at all — inference is pure forward spans.
 9. **Half the model is memory, not math.** The token lookup table is ~52% of all
    parameters.
+10. **LayerNorm after every mixer = gain staging.** The model re-normalizes after each
+    residual add / attention blend / FFN because many individually-green signals can
+    *collectively* clip the mix — the same reason a recording console re-levels after every
+    bus. Normalizing each stage is what keeps the stacked chain from distorting.
 
 ## How to run the sample (for the "try it yourself" sections)
 
@@ -159,10 +211,10 @@ dotnet run --project samples/NivaraInference -c Release -- minilm compare
 
 | File | Post | Covers |
 |---|---|---|
-| `1-the-workhorses-from-words-to-numbers.md` | 1. The Workhorses: From Words to Numbers | Tokenizer, embeddings (lookup tables), LayerNorm, Linear |
+| `1-the-workhorses-from-words-to-numbers.md` | 1. The Workhorses: From Words to Numbers | Tokenizer (lexer), embeddings (lookup tables), LayerNorm (gain staging / console levels), Linear (threshold-logic vote / MAC array) |
 | `2-self-attention-the-soft-crossbar-switch.md` | 2. Self-Attention, the Soft Crossbar Switch (concept) | Q, K, V, dot-product relevance, softmax soft-mux, scaling, multi-head |
 | `3-self-attention-implemented-the-dirty-details.md` | 3. Self-Attention, Implemented: The Dirty Details | Packing heads, transpose-free QKᵀ, softmax stability, the −∞ padding mask, fused kernel perf |
-| `4-the-bypass-wire-the-rectifier-and-what-i-learned.md` | 4. The Bypass Wire, the Rectifier, and Everything I Learned | FFN, GELU vs ReLU bug, residual connections, [CLS]+L2 pooling, retrospective |
+| `4-the-bypass-wire-the-rectifier-and-what-i-learned.md` | 4. The Bypass Wire, the Rectifier, and Everything I Learned | FFN (why widen→squeeze), GELU vs ReLU bug, residual (bypass wire), [CLS]+L2 pooling, audio decoder ring, retrospective |
 
 ## Source files referenced throughout
 
