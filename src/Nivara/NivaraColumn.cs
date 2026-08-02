@@ -863,8 +863,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             HasNulls || other.HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        // Handle both TensorStorage and MemoryStorage combinations
-        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        // Tensor-backed or mixed Tensor/Memory storage: materialize both sides into pooled
+        // buffers so the vectorized kernel operates on uniform contiguous data.
+        if (storage is not MemoryStorage<T> || other.storage is not MemoryStorage<T>)
         {
             T[]? pooledLeftDataBuffer = null;
             T[]? pooledRightDataBuffer = null;
@@ -889,7 +890,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 // Use our helper method for addition
                 addTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                // Handle null propagation for tensor storage
+                // Handle null propagation
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
@@ -953,7 +954,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform arithmetic operations on columns with different storage types");
+            throw new InvalidOperationException("Unreachable: the Memory+Memory combination is handled by the second branch");
         }
     }
 
@@ -962,8 +963,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<T> multiplyVectorized(NivaraColumn<T> other)
     {
-        // Handle both TensorStorage and MemoryStorage combinations
-        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        // Tensor-backed or mixed Tensor/Memory storage: materialize both sides into pooled
+        // buffers so the vectorized kernel operates on uniform contiguous data.
+        if (storage is not MemoryStorage<T> || other.storage is not MemoryStorage<T>)
         {
             T[]? pooledLeftDataBuffer = null;
             T[]? pooledRightDataBuffer = null;
@@ -988,7 +990,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 // Use our helper method for multiplication
                 multiplyTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                // Handle null propagation for tensor storage
+                // Handle null propagation
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
@@ -1052,7 +1054,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform arithmetic operations on columns with different storage types");
+            throw new InvalidOperationException("Unreachable: the Memory+Memory combination is handled by the second branch");
         }
     }
 
@@ -1155,8 +1157,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> equalsVectorized(NivaraColumn<T> other)
     {
-        // Handle both TensorStorage and MemoryStorage combinations
-        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        // Tensor-backed or mixed Tensor/Memory storage: materialize both sides into pooled
+        // buffers so the vectorized kernel operates on uniform contiguous data.
+        if (storage is not MemoryStorage<T> || other.storage is not MemoryStorage<T>)
         {
             T[]? pooledLeftDataBuffer = null;
             T[]? pooledRightDataBuffer = null;
@@ -1181,7 +1184,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 // Use our helper method for element-wise equality
                 equalsTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                // Handle null propagation for tensor storage
+                // Handle null propagation
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
@@ -1256,7 +1259,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform comparison operations on columns with different storage types");
+            throw new InvalidOperationException("Unreachable: the Memory+Memory combination is handled by the second branch");
         }
     }
 
@@ -1361,7 +1364,49 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform comparison operations on columns with different storage types");
+            var result = new bool[Length];
+            var comparer = EqualityComparer<T>.Default;
+
+            // Handle null propagation for any non-Memory storage combination
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNulls = storage.NullMask;
+            var rightNulls = other.storage.NullMask;
+
+            bool hasAnyNulls = leftNulls.Length > 0 || rightNulls.Length > 0;
+            bool[]? resultNullMaskArray = null;
+
+            if (hasAnyNulls)
+            {
+                resultNullMaskArray = new bool[result.Length];
+            }
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                bool leftIsNull = leftNulls.Length > 0 && leftNulls[i];
+                bool rightIsNull = rightNulls.Length > 0 && rightNulls[i];
+                bool hasNull = leftIsNull || rightIsNull;
+
+                if (hasNull)
+                {
+                    result[i] = false; // null compared to anything is false
+                    if (resultNullMaskArray != null)
+                        resultNullMaskArray[i] = true;
+                }
+                else
+                {
+                    result[i] = comparer.Equals(storage[i], other.storage[i]);
+                    if (resultNullMaskArray != null)
+                        resultNullMaskArray[i] = false;
+                }
+            }
+
+            if (resultNullMaskArray != null)
+            {
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
         }
     }
 
@@ -1452,8 +1497,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> greaterThanVectorized(NivaraColumn<T> other)
     {
-        // Handle both TensorStorage and MemoryStorage combinations
-        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        // Tensor-backed or mixed Tensor/Memory storage: materialize both sides into pooled
+        // buffers so the vectorized kernel operates on uniform contiguous data.
+        if (storage is not MemoryStorage<T> || other.storage is not MemoryStorage<T>)
         {
             T[]? pooledLeftDataBuffer = null;
             T[]? pooledRightDataBuffer = null;
@@ -1478,7 +1524,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 // Use our helper method for element-wise greater than
                 greaterThanTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                // Handle null propagation for tensor storage
+                // Handle null propagation
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
@@ -1551,7 +1597,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform comparison operations on columns with different storage types");
+            throw new InvalidOperationException("Unreachable: the Memory+Memory combination is handled by the second branch");
         }
     }
 
@@ -1656,7 +1702,49 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform comparison operations on columns with different storage types");
+            var result = new bool[Length];
+            var comparer = Comparer<T>.Default;
+
+            // Handle null propagation for any non-Memory storage combination
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNulls = storage.NullMask;
+            var rightNulls = other.storage.NullMask;
+
+            bool hasAnyNulls = leftNulls.Length > 0 || rightNulls.Length > 0;
+            bool[]? resultNullMaskArray = null;
+
+            if (hasAnyNulls)
+            {
+                resultNullMaskArray = new bool[result.Length];
+            }
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                bool leftIsNull = leftNulls.Length > 0 && leftNulls[i];
+                bool rightIsNull = rightNulls.Length > 0 && rightNulls[i];
+                bool hasNull = leftIsNull || rightIsNull;
+
+                if (hasNull)
+                {
+                    result[i] = false; // null compared to anything is false
+                    if (resultNullMaskArray != null)
+                        resultNullMaskArray[i] = true;
+                }
+                else
+                {
+                    result[i] = comparer.Compare(storage[i], other.storage[i]) > 0;
+                    if (resultNullMaskArray != null)
+                        resultNullMaskArray[i] = false;
+                }
+            }
+
+            if (resultNullMaskArray != null)
+            {
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
         }
     }
 
@@ -1747,8 +1835,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> lessThanVectorized(NivaraColumn<T> other)
     {
-        // Handle both TensorStorage and MemoryStorage combinations
-        if (storage.StorageType == StorageType.Tensor && other.storage.StorageType == StorageType.Tensor)
+        // Tensor-backed or mixed Tensor/Memory storage: materialize both sides into pooled
+        // buffers so the vectorized kernel operates on uniform contiguous data.
+        if (storage is not MemoryStorage<T> || other.storage is not MemoryStorage<T>)
         {
             T[]? pooledLeftDataBuffer = null;
             T[]? pooledRightDataBuffer = null;
@@ -1773,7 +1862,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 // Use our helper method for element-wise less than
                 lessThanTensorPrimitive(leftDataBuffer.AsSpan(0, Length), rightDataBuffer.AsSpan(0, Length), result.AsSpan());
 
-                // Handle null propagation for tensor storage
+                // Handle null propagation
                 ReadOnlyMemory<bool>? resultNullMask = null;
                 var leftNullMask = storage.NullMask;
                 var rightNullMask = other.storage.NullMask;
@@ -1846,7 +1935,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform comparison operations on columns with different storage types");
+            throw new InvalidOperationException("Unreachable: the Memory+Memory combination is handled by the second branch");
         }
     }
 
@@ -1951,7 +2040,49 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else
         {
-            throw new InvalidOperationException("Cannot perform comparison operations on columns with different storage types");
+            var result = new bool[Length];
+            var comparer = Comparer<T>.Default;
+
+            // Handle null propagation for any non-Memory storage combination
+            ReadOnlyMemory<bool>? resultNullMask = null;
+            var leftNulls = storage.NullMask;
+            var rightNulls = other.storage.NullMask;
+
+            bool hasAnyNulls = leftNulls.Length > 0 || rightNulls.Length > 0;
+            bool[]? resultNullMaskArray = null;
+
+            if (hasAnyNulls)
+            {
+                resultNullMaskArray = new bool[result.Length];
+            }
+
+            for (int i = 0; i < result.Length; i++)
+            {
+                bool leftIsNull = leftNulls.Length > 0 && leftNulls[i];
+                bool rightIsNull = rightNulls.Length > 0 && rightNulls[i];
+                bool hasNull = leftIsNull || rightIsNull;
+
+                if (hasNull)
+                {
+                    result[i] = false; // null compared to anything is false
+                    if (resultNullMaskArray != null)
+                        resultNullMaskArray[i] = true;
+                }
+                else
+                {
+                    result[i] = comparer.Compare(storage[i], other.storage[i]) < 0;
+                    if (resultNullMaskArray != null)
+                        resultNullMaskArray[i] = false;
+                }
+            }
+
+            if (resultNullMaskArray != null)
+            {
+                resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
+            }
+
+            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            return new NivaraColumn<bool>(resultStorage);
         }
     }
 

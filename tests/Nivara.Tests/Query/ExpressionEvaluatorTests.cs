@@ -77,6 +77,64 @@ public class ExpressionEvaluatorTests
     }
 
     [Test]
+    public void Evaluate_MixedStorageSameTypeComparison_UsesTypedPath_WithNullMask()
+    {
+        // Memory-backed nullable column vs Tensor-backed constant column (issue #96)
+        var left = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
+        var right = NivaraColumn<double>.Create(new[] { 2.0, 2.0, 2.0, 2.0 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = left,
+            ["B"] = right
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") > ColumnExpressions.Col("B");
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1), "mixed-storage same-type comparison must use the typed fast path");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0), "typed path must not fall back to boxed for mixed storage");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = left.IsNull(i) || right.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo((double)left.GetValue(i)! > (double)right.GetValue(i)!),
+                    $"comparison value at {i} must match boxed semantics");
+        }
+    }
+
+    [Test]
+    public void Evaluate_MixedStorageSameTypeBinary_UsesTypedPath_WithNullMask()
+    {
+        // Memory-backed nullable column vs Tensor-backed constant column (issue #96)
+        var left = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
+        var right = NivaraColumn<double>.Create(new[] { 10.0, 10.0, 10.0, 10.0 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = left,
+            ["B"] = right
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1), "mixed-storage same-type binary must use the typed fast path");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0), "typed path must not fall back to boxed for mixed storage");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = left.IsNull(i) || right.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo((double)left.GetValue(i)! + (double)right.GetValue(i)!),
+                    $"value at {i} must match boxed addition");
+        }
+    }
+
+    [Test]
     public void Evaluate_MixedTypeNumeric_FallsBackToBoxedPath()
     {
         // Arrange
