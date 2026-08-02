@@ -3,8 +3,11 @@ using Nivara.Diagnostics;
 namespace Nivara.Storage;
 
 /// <summary>
-/// Memory-backed storage implementation for non-vectorizable types.
-/// Uses Memory&lt;T&gt; for efficient memory management without vectorization.
+/// Memory-backed storage implementation using Memory&lt;T&gt;.
+/// Used for reference types and non-vectorizable value types; also holds vectorizable
+/// element types when constructed directly (e.g. via CreateFromNullable).
+/// IsVectorizable reflects the element type, not the storage backend, so memory-backed
+/// numeric columns dispatch to the same vectorized kernels as tensor-backed columns.
 /// </summary>
 /// <typeparam name="T">The type of elements to store</typeparam>
 sealed class MemoryStorage<T> : IColumnStorage<T>
@@ -77,7 +80,7 @@ sealed class MemoryStorage<T> : IColumnStorage<T>
     public int Length => data.Length;
 
     /// <inheritdoc />
-    public bool IsVectorizable => false;
+    public bool IsVectorizable => ColumnStorageFactory.IsVectorizable<T>();
 
     /// <inheritdoc />
     public bool HasNulls => nullMask.HasValue && nullMask.Value.Length > 0;

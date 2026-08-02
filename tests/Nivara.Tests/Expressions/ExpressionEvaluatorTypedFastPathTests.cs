@@ -1,7 +1,6 @@
 using Nivara.Diagnostics;
 using Nivara.Execution;
 using Nivara.Expressions;
-using Nivara.Query;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Expressions;
@@ -177,7 +176,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void MemoryStorageColumn_Comparison_FallsBackToBoxed_FiltersCorrectly()
+    public void MemoryStorageColumn_Comparison_EngagesTypedKernel_FiltersCorrectly()
     {
         var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         using var frame = NivaraFrame.Create(("ID", ids));
@@ -187,6 +186,95 @@ public class ExpressionEvaluatorTypedFastPathTests
             .Collect();
 
         Assert.That(filtered.RowCount, Is.EqualTo(3), "null row must be excluded and 3, 4, 5 kept");
+    }
+
+    [Test]
+    public void MixedStorage_SelectComparison_WithNulls_CarriesNullMask()
+    {
+        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        using var frame = NivaraFrame.Create(("ID", ids));
+
+        using var selected = frame.AsQueryFrame()
+            .Select(ColumnExpressions.Col("ID") > 2)
+            .Collect();
+
+        var comparisonColumn = selected.GetColumn<bool>("(ID > 2)");
+
+        Assert.That(comparisonColumn.HasNulls, Is.True, "mixed Memory/Tensor comparison should carry a null mask");
+        Assert.That(comparisonColumn.IsNull(1), Is.True, "null input row should produce a null comparison");
+        Assert.That(comparisonColumn[0], Is.False, "1 > 2 is false");
+        Assert.That(comparisonColumn[2], Is.True, "3 > 2 is true");
+        Assert.That(comparisonColumn[4], Is.True, "5 > 2 is true");
+    }
+
+    [Test]
+    public void MixedStorage_TensorLeftMemoryRight_Comparison_CarriesNullMask()
+    {
+        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        var bonus = NivaraColumn<int>.Create(new[] { 10, 20, 30, 40, 50 });
+        using var frame = NivaraFrame.Create(("ID", ids), ("Bonus", bonus));
+
+        using var selected = frame.AsQueryFrame()
+            .Select(ColumnExpressions.Col("Bonus") > ColumnExpressions.Col("ID"))
+            .Collect();
+
+        var comparisonColumn = selected.GetColumn<bool>("(Bonus > ID)");
+
+        Assert.That(comparisonColumn.HasNulls, Is.True, "Tensor-left/Memory-right comparison should carry a null mask");
+        Assert.That(comparisonColumn.IsNull(1), Is.True, "null input row should produce a null comparison");
+        Assert.That(comparisonColumn[0], Is.True, "10 > 1 is true");
+        Assert.That(comparisonColumn[2], Is.True, "30 > 3 is true");
+    }
+
+    [Test]
+    public void MixedStorage_NullableColumnAddition_MatchesBoxedSemantics()
+    {
+        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        var bonus = NivaraColumn<int>.Create(new[] { 10, 20, 30, 40, 50 });
+        using var frame = NivaraFrame.Create(("ID", ids), ("Bonus", bonus));
+
+        using var selected = frame.AsQueryFrame()
+            .Select(ColumnExpressions.Col("ID") + ColumnExpressions.Col("Bonus"))
+            .Collect();
+
+        var sum = selected.GetColumn<int>("(ID + Bonus)");
+
+        Assert.That(sum.HasNulls, Is.True, "mixed Memory/Tensor addition should carry a null mask");
+        Assert.That(sum.IsNull(1), Is.True, "null input row should produce a null result");
+        Assert.That(sum[0], Is.EqualTo(11));
+        Assert.That(sum[2], Is.EqualTo(33));
+        Assert.That(sum[4], Is.EqualTo(55));
+    }
+
+    [Test]
+    public void MixedStorage_NullableColumnComparison_RecordsTypedKernelDiagnostics()
+    {
+        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        using var frame = NivaraFrame.Create(("ID", ids));
+        var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("ID") > 2);
+        var plan = queryFrame.ToQueryPlan();
+
+        var diagnostics = new ExecutionDiagnostics();
+        var context = new NivaraExecutionContext(ExecutionStrategy.Lazy) { ExecutionDiagnostics = diagnostics };
+
+        DiagnosticsTracker.IsEnabled = true;
+        try
+        {
+            var engine = new ExecutionEngine();
+            using var result = engine.Execute(plan, context);
+
+            var typedEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
+                .ToList();
+
+            Assert.That(typedEvaluations, Is.Not.Empty, "mixed Tensor/Memory comparison should record a typed (vectorized) expression evaluation");
+            Assert.That(result.RowCount, Is.EqualTo(3), "null row must be excluded and 3, 4, 5 kept");
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
     }
 
     [Test]

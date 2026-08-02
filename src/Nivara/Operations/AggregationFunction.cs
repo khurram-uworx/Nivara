@@ -1,4 +1,6 @@
 using Nivara.Extensions;
+using System.Globalization;
+using System.Numerics;
 using System.Numerics.Tensors;
 
 namespace Nivara;
@@ -196,13 +198,13 @@ public sealed class SumAggregation : AggregationFunction
 
         return elementType switch
         {
-            Type t when t == typeof(int) => SumVectorized<int, long>(validValues, (a, b) => a + b, 0L),
-            Type t when t == typeof(byte) => SumVectorized<byte, long>(validValues, (a, b) => a + b, 0L),
-            Type t when t == typeof(short) => SumVectorized<short, long>(validValues, (a, b) => a + b, 0L),
-            Type t when t == typeof(long) => SumVectorized<long, long>(validValues, (a, b) => a + b, 0L),
-            Type t when t == typeof(float) => SumVectorizedFloat(validValues),
-            Type t when t == typeof(double) => SumVectorizedDouble(validValues),
-            Type t when t == typeof(decimal) => SumVectorized<decimal, decimal>(validValues, (a, b) => a + b, 0m),
+            Type t when t == typeof(int) => SumVectorized<long>(validValues),
+            Type t when t == typeof(byte) => SumVectorized<long>(validValues),
+            Type t when t == typeof(short) => SumVectorized<long>(validValues),
+            Type t when t == typeof(long) => SumVectorized<long>(validValues),
+            Type t when t == typeof(float) => SumVectorized<double>(validValues),
+            Type t when t == typeof(double) => SumVectorized<double>(validValues),
+            Type t when t == typeof(decimal) => SumScalarDecimal(validValues),
             _ => throw new ArgumentException($"Sum aggregation not supported for type {column.ElementType.Name}")
         };
     }
@@ -230,46 +232,28 @@ public sealed class SumAggregation : AggregationFunction
     }
 
     /// <summary>
-    /// Performs vectorized sum for float values using TensorPrimitives
+    /// Performs vectorized sum for numeric values using generic TensorPrimitives after
+    /// widening each boxed value into the promoted result type (int/byte/short/long → long,
+    /// float → double), preserving the documented result-type promotion rules.
     /// </summary>
-    static object SumVectorizedFloat(List<object> validValues)
+    static object SumVectorized<TResult>(List<object> validValues)
+        where TResult : unmanaged, INumber<TResult>
     {
-        if (validValues.Count == 0) return 0.0;
-
-        var floatValues = new float[validValues.Count];
+        var widened = new TResult[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-            floatValues[i] = (float)validValues[i];
+            widened[i] = (TResult)Convert.ChangeType(validValues[i], typeof(TResult), CultureInfo.InvariantCulture);
 
-        var result = TensorPrimitives.Sum(floatValues.AsSpan());
-        return (double)result; // Return as double for consistency
+        return TensorPrimitives.Sum(widened.AsSpan());
     }
 
     /// <summary>
-    /// Performs vectorized sum for double values using TensorPrimitives
+    /// Performs scalar decimal sum aggregation (decimal is not a supported TensorPrimitives element type)
     /// </summary>
-    static object SumVectorizedDouble(List<object> validValues)
+    static object SumScalarDecimal(List<object> validValues)
     {
-        if (validValues.Count == 0) return 0.0;
-
-        var doubleValues = new double[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            doubleValues[i] = (double)validValues[i];
-
-        return TensorPrimitives.Sum(doubleValues.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs typed sum aggregation with proper type conversion
-    /// </summary>
-    static TResult SumVectorized<TInput, TResult>(List<object> validValues,
-        Func<TResult, TInput, TResult> addFunc, TResult identity)
-        where TInput : struct
-        where TResult : struct
-    {
-        var sum = identity;
+        decimal sum = 0m;
         foreach (var value in validValues)
-            if (value is TInput typedValue)
-                sum = addFunc(sum, typedValue);
+            sum += (decimal)value;
 
         return sum;
     }
@@ -320,37 +304,38 @@ public sealed class MinAggregation : AggregationFunction
         if (validValues.Count == 0)
             return null;
 
+        // Handle nullable types by checking the underlying type
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+
         // Use vectorized operations for supported types
-        return column.ElementType switch
+        return elementType switch
         {
-            Type t when t == typeof(float) => MinVectorizedFloat(validValues),
-            Type t when t == typeof(double) => MinVectorizedDouble(validValues),
+            Type t when t == typeof(float) => MinVectorized<float>(validValues),
+            Type t when t == typeof(double) => MinVectorized<double>(validValues),
+            Type t when t == typeof(int) => MinVectorized<int>(validValues),
+            Type t when t == typeof(long) => MinVectorized<long>(validValues),
+            Type t when t == typeof(short) => MinVectorized<short>(validValues),
+            Type t when t == typeof(ushort) => MinVectorized<ushort>(validValues),
+            Type t when t == typeof(uint) => MinVectorized<uint>(validValues),
+            Type t when t == typeof(ulong) => MinVectorized<ulong>(validValues),
+            Type t when t == typeof(byte) => MinVectorized<byte>(validValues),
+            Type t when t == typeof(sbyte) => MinVectorized<sbyte>(validValues),
+            Type t when t == typeof(decimal) => MinVectorized<decimal>(validValues),
             _ => MinScalar(validValues)
         };
     }
 
     /// <summary>
-    /// Performs vectorized min for float values using TensorPrimitives
+    /// Performs vectorized min for numeric values using generic TensorPrimitives
     /// </summary>
-    static object MinVectorizedFloat(List<object> validValues)
+    static object MinVectorized<T>(List<object> validValues)
+        where T : unmanaged, INumber<T>
     {
-        var floatValues = new float[validValues.Count];
+        var typedValues = new T[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-            floatValues[i] = (float)validValues[i];
+            typedValues[i] = (T)validValues[i];
 
-        return TensorPrimitives.Min(floatValues.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs vectorized min for double values using TensorPrimitives
-    /// </summary>
-    static object MinVectorizedDouble(List<object> validValues)
-    {
-        var doubleValues = new double[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            doubleValues[i] = (double)validValues[i];
-
-        return TensorPrimitives.Min(doubleValues.AsSpan());
+        return TensorPrimitives.Min(typedValues.AsSpan());
     }
 
     /// <summary>
@@ -400,37 +385,38 @@ public sealed class MaxAggregation : AggregationFunction
         if (validValues.Count == 0)
             return null;
 
+        // Handle nullable types by checking the underlying type
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+
         // Use vectorized operations for supported types
-        return column.ElementType switch
+        return elementType switch
         {
-            Type t when t == typeof(float) => MaxVectorizedFloat(validValues),
-            Type t when t == typeof(double) => MaxVectorizedDouble(validValues),
+            Type t when t == typeof(float) => MaxVectorized<float>(validValues),
+            Type t when t == typeof(double) => MaxVectorized<double>(validValues),
+            Type t when t == typeof(int) => MaxVectorized<int>(validValues),
+            Type t when t == typeof(long) => MaxVectorized<long>(validValues),
+            Type t when t == typeof(short) => MaxVectorized<short>(validValues),
+            Type t when t == typeof(ushort) => MaxVectorized<ushort>(validValues),
+            Type t when t == typeof(uint) => MaxVectorized<uint>(validValues),
+            Type t when t == typeof(ulong) => MaxVectorized<ulong>(validValues),
+            Type t when t == typeof(byte) => MaxVectorized<byte>(validValues),
+            Type t when t == typeof(sbyte) => MaxVectorized<sbyte>(validValues),
+            Type t when t == typeof(decimal) => MaxVectorized<decimal>(validValues),
             _ => MaxScalar(validValues)
         };
     }
 
     /// <summary>
-    /// Performs vectorized max for float values using TensorPrimitives
+    /// Performs vectorized max for numeric values using generic TensorPrimitives
     /// </summary>
-    static object MaxVectorizedFloat(List<object> validValues)
+    static object MaxVectorized<T>(List<object> validValues)
+        where T : unmanaged, INumber<T>
     {
-        var floatValues = new float[validValues.Count];
+        var typedValues = new T[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-            floatValues[i] = (float)validValues[i];
+            typedValues[i] = (T)validValues[i];
 
-        return TensorPrimitives.Max(floatValues.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs vectorized max for double values using TensorPrimitives
-    /// </summary>
-    static object MaxVectorizedDouble(List<object> validValues)
-    {
-        var doubleValues = new double[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            doubleValues[i] = (double)validValues[i];
-
-        return TensorPrimitives.Max(doubleValues.AsSpan());
+        return TensorPrimitives.Max(typedValues.AsSpan());
     }
 
     /// <summary>

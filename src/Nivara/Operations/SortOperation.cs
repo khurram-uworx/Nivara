@@ -1,5 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Execution;
+using Nivara.Helpers;
 using Nivara.Query;
 
 namespace Nivara.Operations;
@@ -241,86 +242,7 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
     /// <param name="indices">The indices specifying the new order</param>
     /// <returns>A reordered column</returns>
     public static IColumn ReorderColumn(IColumn column, int[] indices)
-    {
-        var elementType = column.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => ReorderColumnTyped<int>(column, indices),
-            Type t when t == typeof(double) => ReorderColumnTyped<double>(column, indices),
-            Type t when t == typeof(float) => ReorderColumnTyped<float>(column, indices),
-            Type t when t == typeof(long) => ReorderColumnTyped<long>(column, indices),
-            Type t when t == typeof(string) => ReorderColumnTyped<string>(column, indices),
-            Type t when t == typeof(bool) => ReorderColumnTyped<bool>(column, indices),
-            Type t when t == typeof(decimal) => ReorderColumnTyped<decimal>(column, indices),
-            Type t when t == typeof(byte) => ReorderColumnTyped<byte>(column, indices),
-            Type t when t == typeof(short) => ReorderColumnTyped<short>(column, indices),
-            Type t when t == typeof(DateTime) => ReorderColumnTyped<DateTime>(column, indices),
-            _ => ReorderColumnGeneric(column, indices)
-        };
-    }
-
-    /// <summary>
-    /// Reorders a column for a specific type
-    /// </summary>
-    public static IColumn ReorderColumnTyped<T>(IColumn column, int[] indices)
-    {
-        // Check if T is a value type to determine which creation method to use
-        if (typeof(T).IsValueType)
-        {
-            // For value types, create nullable array and use CreateFromNullable
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var reorderedArray = System.Array.CreateInstance(nullableType, indices.Length);
-
-            for (int i = 0; i < indices.Length; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                if (value != null)
-                {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    reorderedArray.SetValue(nullableInstance, i);
-                }
-                // null values remain null in the array
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { reorderedArray })!;
-        }
-        else
-        {
-            // For reference types, create regular array and use CreateForReferenceType
-            var reorderedArray = new T[indices.Length];
-
-            for (int i = 0; i < indices.Length; i++)
-            {
-                var value = column.GetValue(indices[i]);
-                reorderedArray[i] = (T)value!; // Reference types can be null
-            }
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { reorderedArray })!;
-        }
-    }
-
-    /// <summary>
-    /// Reorders a column for unknown types using object column
-    /// </summary>
-    public static IColumn ReorderColumnGeneric(IColumn column, int[] indices)
-    {
-        var reorderedArray = new object[indices.Length];
-
-        for (int i = 0; i < indices.Length; i++)
-        {
-            reorderedArray[i] = column.GetValue(indices[i])!;
-        }
-
-        return NivaraColumn<object>.Create(reorderedArray);
-    }
+        => ColumnFilterHelper.ReorderColumn(column, indices);
 
     /// <summary>
     /// Checks if a type is comparable and can be used for sorting

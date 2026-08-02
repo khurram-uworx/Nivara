@@ -351,6 +351,37 @@ public class NivaraSeriesAggregateTests
 
     #endregion
 
+    #region All Integer Primitives
+
+    /// <summary>
+    /// Feature: nivara-series, Property: Integer primitive vectorization
+    /// For every integer primitive, Sum/Min/Max should route through the generic
+    /// TensorPrimitives kernel and produce the correct result.
+    /// Validates: Vectorized operations for integer types
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Integer primitive vectorization")]
+    public void Sum_AllIntegerPrimitives_ReturnsCorrectSum()
+    {
+        verifyIntegerAggregate(new long[] { 3, 1, 2 }, 6L, 1L, 3L);
+        verifyIntegerAggregate(new short[] { 3, 1, 2 }, (short)6, (short)1, (short)3);
+        verifyIntegerAggregate(new byte[] { 3, 1, 2 }, (byte)6, (byte)1, (byte)3);
+        verifyIntegerAggregate(new ushort[] { 3, 1, 2 }, (ushort)6, (ushort)1, (ushort)3);
+        verifyIntegerAggregate(new uint[] { 3, 1, 2 }, 6u, 1u, 3u);
+        verifyIntegerAggregate(new ulong[] { 3, 1, 2 }, 6ul, 1ul, 3ul);
+        verifyIntegerAggregate(new sbyte[] { 3, 1, 2 }, (sbyte)6, (sbyte)1, (sbyte)3);
+    }
+
+    static void verifyIntegerAggregate<T>(T[] values, T expectedSum, T expectedMin, T expectedMax)
+        where T : unmanaged
+    {
+        Assert.That(NivaraSeries<T>.Create(values).Sum(), Is.EqualTo(expectedSum));
+        Assert.That(NivaraSeries<T>.Create(values).Min(), Is.EqualTo(expectedMin));
+        Assert.That(NivaraSeries<T>.Create(values).Max(), Is.EqualTo(expectedMax));
+    }
+
+    #endregion
+
     #region Edge Cases and Error Handling
 
     /// <summary>

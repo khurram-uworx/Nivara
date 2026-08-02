@@ -1,3 +1,4 @@
+using System.Numerics;
 using Nivara.Storage;
 using Nivara.Tensors;
 using NUnit.Framework;
@@ -2101,6 +2102,62 @@ public class NivaraColumnTests
         var column = NivaraColumn<float>.Create(new[] { 3.0f, 1.0f, 4.0f });
         Assert.That(column.Min(), Is.EqualTo(1.0f).Within(1e-6f));
         Assert.That(column.Max(), Is.EqualTo(4.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void IntegerKernels_AllNumericPrimitives_ProduceCorrectResults()
+    {
+        VerifyIntegerKernels<int>(new[] { 1, 2, 3, 4, 5 }, 3);
+        VerifyIntegerKernels<long>(new[] { 10L, 20L, 30L }, 7L);
+        VerifyIntegerKernels<short>(new[] { (short)2, (short)4, (short)6 }, (short)3);
+        VerifyIntegerKernels<ushort>(new[] { (ushort)2, (ushort)4, (ushort)6 }, (ushort)3);
+        VerifyIntegerKernels<uint>(new[] { 2u, 4u, 6u }, 3u);
+        VerifyIntegerKernels<ulong>(new[] { 2ul, 4ul, 6ul }, 3ul);
+        VerifyIntegerKernels<byte>(new[] { (byte)2, (byte)4, (byte)6 }, (byte)3);
+        VerifyIntegerKernels<sbyte>(new[] { (sbyte)2, (sbyte)4, (sbyte)6 }, (sbyte)3);
+    }
+
+    static void VerifyIntegerKernels<T>(T[] values, T scalar)
+        where T : unmanaged,
+            IAdditionOperators<T, T, T>, IMultiplyOperators<T, T, T>,
+            IEqualityOperators<T, T, bool>, IComparisonOperators<T, T, bool>
+    {
+        var column = NivaraColumn<T>.Create(values);
+
+        var shifted = new T[values.Length];
+        for (int i = 0; i < values.Length; i++)
+        {
+            shifted[i] = values[i] + scalar;
+        }
+        var otherShift = NivaraColumn<T>.Create(shifted);
+
+        var multiplyScalar = column.Multiply(scalar);
+        var multiplyEw = column.Multiply(column);
+        var addEw = column.Add(otherShift);
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(multiplyScalar[i], Is.EqualTo(values[i] * scalar));
+            Assert.That(multiplyEw[i], Is.EqualTo(values[i] * values[i]));
+            Assert.That(addEw[i], Is.EqualTo(values[i] + (values[i] + scalar)));
+        }
+
+        var equalsScalar = column.Equals(scalar);
+        var equalsEw = column.Equals(column);
+        var greaterScalar = column.GreaterThan(scalar);
+        var greaterEw = column.GreaterThan(column);
+        var lessScalar = column.LessThan(scalar);
+        var lessEw = column.LessThan(column);
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(equalsScalar[i], Is.EqualTo(values[i] == scalar));
+            Assert.That(equalsEw[i], Is.True);
+            Assert.That(greaterScalar[i], Is.EqualTo(values[i] > scalar));
+            Assert.That(greaterEw[i], Is.False);
+            Assert.That(lessScalar[i], Is.EqualTo(values[i] < scalar));
+            Assert.That(lessEw[i], Is.False);
+        }
     }
 
     #endregion

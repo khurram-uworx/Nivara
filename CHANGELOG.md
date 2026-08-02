@@ -6,7 +6,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Breaking changes
 
-- `ArrowConversionOptions.UseZeroCopy` removed — the option defaulted to `true` but every zero-copy interop path was a placeholder that silently copied. Nivara does not advertise unsupported capability; real zero-copy returns with ARROW-ROADMAP Phase D (adding real APIs then). See `docs/TASKS-IMMEDIATELY.md`.
+- `ArrowConversionOptions.UseZeroCopy` removed — the option defaulted to `true` but every zero-copy interop path was a placeholder that silently copied. Nivara does not advertise unsupported capability; real zero-copy returns with ARROW-ROADMAP Phase D (adding real APIs then).
 
 ### Query Engine
 
