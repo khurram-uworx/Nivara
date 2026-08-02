@@ -2183,7 +2183,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// The returned tensor owns a copy so column immutability is preserved.
     /// </summary>
     /// <remarks>
-    /// Prefer <see cref="TryGetSpan"/> for zero-copy access when the column is null-free.
+    /// The column data is copied into the tensor; the column remains immutable and unmodified.
     /// </remarks>
     /// <exception cref="InvalidOperationException">Thrown when the column contains null values</exception>
     public Tensor<T> ToTensor()
@@ -2268,11 +2268,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Attempts to get a zero-copy read-only span over the column data.
+    /// Attempts to get a read-only span over the column data.
     /// Returns true when the column has no null values; false otherwise.
     /// When false, use <see cref="CopyTo"/> with a fill value instead.
     /// </summary>
     /// <remarks>
+    /// The span is a genuine zero-copy view for memory-backed columns; for tensor-backed columns it
+    /// is backed by a cached flattened copy (see <c>IColumnStorage&lt;T&gt;.ProvidesZeroCopySpanAccess</c>).
     /// Returns <see cref="ReadOnlySpan{T}"/> (not <see cref="Span{T}"/>) to preserve
     /// column immutability. This diverges from BCL's <c>Tensor&lt;T&gt;.TryGetSpan</c>
     /// which returns a mutable <see cref="Span{T}"/>.

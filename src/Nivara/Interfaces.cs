@@ -117,26 +117,42 @@ internal interface IColumnStorage<T> : IDisposable
     StorageType StorageType { get; }
 
     /// <summary>
-    /// Gets a read-only span view of the underlying data.
-    /// Provides zero-copy access to the storage data for high-performance operations.
+    /// Gets a value indicating whether span access is a true zero-copy view of the underlying storage.
     /// </summary>
+    /// <remarks>
+    /// <see cref="MemoryStorage{T}"/> exposes a genuine view (shared <see cref="ReadOnlyMemory{T}"/>).
+    /// <see cref="TensorStorage{T}"/> returns a cached flattened <em>copy</em>, so callers that need
+    /// zero-copy semantics should branch on this flag rather than assume.
+    /// </remarks>
+    internal bool ProvidesZeroCopySpanAccess { get; }
+
+    /// <summary>
+    /// Gets a read-only span over the underlying data.
+    /// </summary>
+    /// <remarks>
+    /// A true zero-copy view only when <see cref="ProvidesZeroCopySpanAccess"/> is true;
+    /// for tensor-backed storage this returns a cached flattened copy.
+    /// </remarks>
     /// <returns>A read-only span over the storage data</returns>
     /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support span access</exception>
     internal ReadOnlySpan<T> AsSpan();
 
     /// <summary>
-    /// Attempts to get a read-only span view of the underlying data when no nulls are present.
-    /// Zero-copy when the column is null-free; returns false when nulls exist.
+    /// Attempts to get a read-only span over the underlying data when no nulls are present.
+    /// Returns false when nulls exist. Zero-copy only when <see cref="ProvidesZeroCopySpanAccess"/> is true.
     /// </summary>
     /// <param name="span">When this method returns, contains the read-only span if successful</param>
     /// <returns>true if a span was obtained (no nulls present), false otherwise</returns>
     internal bool TryGetSpan(out ReadOnlySpan<T> span);
 
     /// <summary>
-    /// Gets a writable span view of the underlying data.
-    /// Provides zero-copy access for scenarios requiring data mutation.
+    /// Gets a writable span for scenarios requiring data mutation.
     /// </summary>
-    /// <returns>A writable span over the storage data</returns>
+    /// <remarks>
+    /// Always backed by a private copy — both storage types expose read-only data, so mutations
+    /// never affect the stored data. Not zero-copy.
+    /// </remarks>
+    /// <returns>A writable span over a private copy of the storage data</returns>
     /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support writable span access</exception>
     internal Span<T> AsWritableSpan();
 }

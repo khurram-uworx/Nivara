@@ -208,4 +208,43 @@ public class TensorStorageTests
     }
 
     #endregion
+
+    #region Span access & slice copy semantics
+
+    [Test]
+    public void TensorStorage_ProvidesZeroCopySpanAccess_IsFalse()
+    {
+        var storage = new TensorStorage<int>(new[] { 1, 2, 3 });
+
+        Assert.That(storage.ProvidesZeroCopySpanAccess, Is.False,
+            "TensorStorage span access is a cached flattened copy, not a zero-copy view");
+    }
+
+    [Test]
+    public void TensorStorage_GetFlattenedSpan_ReturnsIndependentCopy()
+    {
+        var storage = new TensorStorage<int>(new[] { 1, 2, 3 });
+
+        var span = storage.GetFlattenedSpan();
+        storage.Data[new nint[] { 0 }] = 99;
+
+        Assert.That(span[0], Is.EqualTo(1),
+            "GetFlattenedSpan should return a copy unaffected by mutation of the underlying tensor data");
+    }
+
+    [Test]
+    public void TensorStorage_Slice_ReturnsIndependentCopy()
+    {
+        var storage = new TensorStorage<int>(new[] { 1, 2, 3, 4, 5 });
+
+        var sliced = storage.Slice(1, 2);
+        Assert.That(sliced[0], Is.EqualTo(2));
+
+        storage.Data[new nint[] { 1 }] = 99;
+
+        Assert.That(sliced[0], Is.EqualTo(2),
+            "TensorStorage.Slice should return an independent copy, unaffected by source mutation");
+    }
+
+    #endregion
 }

@@ -362,4 +362,49 @@ public class MemoryStorageTests
     }
 
     #endregion
+
+    #region Span access & slice view semantics
+
+    [Test]
+    public void MemoryStorage_ProvidesZeroCopySpanAccess_IsTrue()
+    {
+        var storage = new MemoryStorage<int>(new[] { 1, 2, 3 });
+
+        Assert.That(storage.ProvidesZeroCopySpanAccess, Is.True,
+            "MemoryStorage span access is a genuine zero-copy view over ReadOnlyMemory<T>");
+    }
+
+    [Test]
+    public void MemoryStorage_Slice_ReturnsSharedBufferView()
+    {
+        var sourceArray = new[] { 10, 20, 30, 40 };
+        var storage = new MemoryStorage<int>(new ReadOnlyMemory<int>(sourceArray));
+
+        var sliced = storage.Slice(1, 2);
+        Assert.That(sliced[0], Is.EqualTo(20));
+
+        sourceArray[1] = 200;
+
+        Assert.That(sliced[0], Is.EqualTo(200),
+            "MemoryStorage.Slice should share the underlying buffer (zero-copy view)");
+    }
+
+    [Test]
+    public void MemoryStorage_Slice_WithNulls_ReturnsSharedNullMaskView()
+    {
+        var dataArray = new[] { 1, 2, 3, 4 };
+        var maskArray = new bool[] { false, true, false, false };
+        var storage = new MemoryStorage<int>(new ReadOnlyMemory<int>(dataArray), new ReadOnlyMemory<bool>(maskArray));
+
+        var sliced = storage.Slice(1, 2);
+        Assert.That(sliced.HasNulls, Is.True);
+        Assert.That(sliced.NullMask[0], Is.True);
+
+        maskArray[1] = false;
+
+        Assert.That(sliced.NullMask[0], Is.False,
+            "MemoryStorage null-mask slice should share the underlying buffer");
+    }
+
+    #endregion
 }
