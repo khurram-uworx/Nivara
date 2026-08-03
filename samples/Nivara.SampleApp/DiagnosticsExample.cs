@@ -10,7 +10,6 @@ public static class DiagnosticsExample
     static void ShowColumnDiagnostics(string title, ColumnDiagnostics diagnostics)
     {
         Console.WriteLine($"{title}:");
-        Console.WriteLine($"  Storage Type: {diagnostics.StorageType}");
         Console.WriteLine($"  Is Vectorizable: {diagnostics.IsVectorizable}");
         Console.WriteLine($"  Element Type: {diagnostics.ElementType.Name}");
         Console.WriteLine($"  Length: {diagnostics.Length}");

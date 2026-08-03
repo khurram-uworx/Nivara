@@ -105,11 +105,9 @@ public class IntegrationTests
         var guidDiagnostics = guidColumn.Diagnostics;
 
         Assert.That(stringDiagnostics.IsVectorizable, Is.False, "String columns should not be vectorizable");
-        Assert.That(stringDiagnostics.StorageType, Is.EqualTo(StorageType.Memory), "Non-vectorizable types should use memory storage");
         Assert.That(stringDiagnostics.RecommendedKernel, Is.EqualTo(KernelType.Scalar), "Non-vectorizable types should recommend scalar kernel");
 
         Assert.That(guidDiagnostics.IsVectorizable, Is.False, "Guid columns should not be vectorizable");
-        Assert.That(guidDiagnostics.StorageType, Is.EqualTo(StorageType.Memory), "Non-vectorizable types should use memory storage");
 
         // Clean up
         stringColumn.Dispose();

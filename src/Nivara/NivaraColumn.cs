@@ -546,68 +546,30 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        // Handle both TensorStorage and ColumnStorage
-        if (storage.StorageType == StorageType.Tensor)
-        {
-            T[]? pooledDataBuffer = null;
-            try
-            {
-                var dataBuffer = Length >= 1024
-                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
-                    : new T[Length];
-                for (int i = 0; i < storage.Length; i++)
-                {
-                    dataBuffer[i] = storage[i];
-                }
-                var result = new T[Length];
-
-                // Use our helper method for multiplication
-                multiplyTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
-
-                // Handle null propagation for tensor storage
-                ReadOnlyMemory<bool>? resultNullMask = null;
-                var nullMask = storage.NullMask;
-                if (nullMask.Length > 0)
-                {
-                    var nullMaskArray = nullMask.ToArray();
-                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-                }
-
-                // Create result storage using the factory, passing the null mask
-                var resultStorage = ColumnStorageFactory.CreateFromOwnedArray(result, resultNullMask);
-                return new NivaraColumn<T>(resultStorage);
-            }
-            finally
-            {
-                if (pooledDataBuffer != null)
-                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
-            }
-        }
-        else if (storage is ColumnStorage<T> memoryStorage)
-        {
-            var data = memoryStorage.Data.Span;
-            var result = new T[data.Length];
-
-            // Use our helper method for multiplication
-            multiplyTensorPrimitive(data, scalar, result.AsSpan());
-
-            // Handle null propagation
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = memoryStorage.NullMaskMemory;
-            if (nullMask.HasValue && nullMask.Value.Length > 0)
-            {
-                var nullMaskArray = new bool[data.Length];
-                nullMask.Value.Span.CopyTo(nullMaskArray);
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-            }
-
-            var resultStorage = new ColumnStorage<T>(result, resultNullMask);
-            return new NivaraColumn<T>(resultStorage);
-        }
-        else
+        // ColumnStorage is the sole storage implementation; use its zero-copy span view.
+        if (storage is not ColumnStorage<T> memoryStorage)
         {
             throw new InvalidOperationException("Unsupported storage type for vectorized operations");
         }
+
+        var data = memoryStorage.Data.Span;
+        var result = new T[data.Length];
+
+        // Use our helper method for multiplication
+        multiplyTensorPrimitive(data, scalar, result.AsSpan());
+
+        // Handle null propagation
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = memoryStorage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+        }
+
+        var resultStorage = new ColumnStorage<T>(result, resultNullMask);
+        return new NivaraColumn<T>(resultStorage);
     }
 
     /// <summary>
@@ -747,81 +709,37 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        // Handle both TensorStorage and ColumnStorage
-        if (storage.StorageType == StorageType.Tensor)
-        {
-            T[]? pooledDataBuffer = null;
-            try
-            {
-                var dataBuffer = Length >= 1024
-                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
-                    : new T[Length];
-                for (int i = 0; i < storage.Length; i++)
-                {
-                    dataBuffer[i] = storage[i];
-                }
-                var result = new bool[Length];
-
-                // Use our helper method for equality comparison
-                equalsTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
-
-                // Handle null propagation for tensor storage
-                ReadOnlyMemory<bool>? resultNullMask = null;
-                var nullMask = storage.NullMask;
-                if (nullMask.Length > 0)
-                {
-                    var nullMaskArray = nullMask.ToArray();
-                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                    // Set result to false where nulls exist (null comparisons yield null/false)
-                    for (int i = 0; i < result.Length; i++)
-                    {
-                        if (nullMaskArray[i])
-                            result[i] = false;
-                    }
-                }
-
-                var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
-                return new NivaraColumn<bool>(resultStorage);
-            }
-            finally
-            {
-                if (pooledDataBuffer != null)
-                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
-            }
-        }
-        else if (storage is ColumnStorage<T> memoryStorage)
-        {
-            var data = memoryStorage.Data.Span;
-            var result = new bool[data.Length];
-
-            // Use our helper method for equality comparison
-            equalsTensorPrimitive(data, scalar, result.AsSpan());
-
-            // Handle null propagation - null compared to anything is null (false in boolean result)
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = memoryStorage.NullMaskMemory;
-            if (nullMask.HasValue && nullMask.Value.Length > 0)
-            {
-                var nullMaskArray = new bool[data.Length];
-                nullMask.Value.Span.CopyTo(nullMaskArray);
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                // Set result to false where nulls exist (null comparisons yield null/false)
-                for (int i = 0; i < result.Length; i++)
-                {
-                    if (nullMaskArray[i])
-                        result[i] = false;
-                }
-            }
-
-            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
-        }
-        else
+        // ColumnStorage is the sole storage implementation; use its zero-copy span view.
+        if (storage is not ColumnStorage<T> memoryStorage)
         {
             throw new InvalidOperationException("Unsupported storage type for vectorized operations");
         }
+
+        var data = memoryStorage.Data.Span;
+        var result = new bool[data.Length];
+
+        // Use our helper method for equality comparison
+        equalsTensorPrimitive(data, scalar, result.AsSpan());
+
+        // Handle null propagation - null compared to anything is null (false in boolean result)
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = memoryStorage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+            // Set result to false where nulls exist (null comparisons yield null/false)
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (nullMaskArray[i])
+                    result[i] = false;
+            }
+        }
+
+        var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
+        return new NivaraColumn<bool>(resultStorage);
     }
 
     /// <summary>
@@ -1047,81 +965,37 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> greaterThanVectorized(T scalar)
     {
-        // Handle both TensorStorage and ColumnStorage
-        if (storage.StorageType == StorageType.Tensor)
-        {
-            T[]? pooledDataBuffer = null;
-            try
-            {
-                var dataBuffer = Length >= 1024
-                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
-                    : new T[Length];
-                for (int i = 0; i < storage.Length; i++)
-                {
-                    dataBuffer[i] = storage[i];
-                }
-                var result = new bool[Length];
-
-                // Use our helper method for greater than comparison
-                greaterThanTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
-
-                // Handle null propagation for tensor storage
-                ReadOnlyMemory<bool>? resultNullMask = null;
-                var nullMask = storage.NullMask;
-                if (nullMask.Length > 0)
-                {
-                    var nullMaskArray = nullMask.ToArray();
-                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                    // Set result to false where nulls exist
-                    for (int i = 0; i < result.Length; i++)
-                    {
-                        if (nullMaskArray[i])
-                            result[i] = false;
-                    }
-                }
-
-                var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
-                return new NivaraColumn<bool>(resultStorage);
-            }
-            finally
-            {
-                if (pooledDataBuffer != null)
-                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
-            }
-        }
-        else if (storage is ColumnStorage<T> memoryStorage)
-        {
-            var data = memoryStorage.Data.Span;
-            var result = new bool[data.Length];
-
-            // Use our helper method for greater than comparison
-            greaterThanTensorPrimitive(data, scalar, result.AsSpan());
-
-            // Handle null propagation
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = memoryStorage.NullMaskMemory;
-            if (nullMask.HasValue && nullMask.Value.Length > 0)
-            {
-                var nullMaskArray = new bool[data.Length];
-                nullMask.Value.Span.CopyTo(nullMaskArray);
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                // Set result to false where nulls exist
-                for (int i = 0; i < result.Length; i++)
-                {
-                    if (nullMaskArray[i])
-                        result[i] = false;
-                }
-            }
-
-            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
-        }
-        else
+        // ColumnStorage is the sole storage implementation; use its zero-copy span view.
+        if (storage is not ColumnStorage<T> memoryStorage)
         {
             throw new InvalidOperationException("Unsupported storage type for vectorized operations");
         }
+
+        var data = memoryStorage.Data.Span;
+        var result = new bool[data.Length];
+
+        // Use our helper method for greater than comparison
+        greaterThanTensorPrimitive(data, scalar, result.AsSpan());
+
+        // Handle null propagation
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = memoryStorage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+            // Set result to false where nulls exist
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (nullMaskArray[i])
+                    result[i] = false;
+            }
+        }
+
+        var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
+        return new NivaraColumn<bool>(resultStorage);
     }
 
     /// <summary>
@@ -1242,81 +1116,37 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> lessThanVectorized(T scalar)
     {
-        // Handle both TensorStorage and ColumnStorage
-        if (storage.StorageType == StorageType.Tensor)
-        {
-            T[]? pooledDataBuffer = null;
-            try
-            {
-                var dataBuffer = Length >= 1024
-                    ? (pooledDataBuffer = ArrayPool<T>.Shared.Rent(Length))
-                    : new T[Length];
-                for (int i = 0; i < storage.Length; i++)
-                {
-                    dataBuffer[i] = storage[i];
-                }
-                var result = new bool[Length];
-
-                // Use our helper method for less than comparison
-                lessThanTensorPrimitive(dataBuffer.AsSpan(0, Length), scalar, result.AsSpan());
-
-                // Handle null propagation for tensor storage
-                ReadOnlyMemory<bool>? resultNullMask = null;
-                var nullMask = storage.NullMask;
-                if (nullMask.Length > 0)
-                {
-                    var nullMaskArray = nullMask.ToArray();
-                    resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                    // Set result to false where nulls exist
-                    for (int i = 0; i < result.Length; i++)
-                    {
-                        if (nullMaskArray[i])
-                            result[i] = false;
-                    }
-                }
-
-                var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
-                return new NivaraColumn<bool>(resultStorage);
-            }
-            finally
-            {
-                if (pooledDataBuffer != null)
-                    ArrayPool<T>.Shared.Return(pooledDataBuffer);
-            }
-        }
-        else if (storage is ColumnStorage<T> memoryStorage)
-        {
-            var data = memoryStorage.Data.Span;
-            var result = new bool[data.Length];
-
-            // Use our helper method for less than comparison
-            lessThanTensorPrimitive(data, scalar, result.AsSpan());
-
-            // Handle null propagation
-            ReadOnlyMemory<bool>? resultNullMask = null;
-            var nullMask = memoryStorage.NullMaskMemory;
-            if (nullMask.HasValue && nullMask.Value.Length > 0)
-            {
-                var nullMaskArray = new bool[data.Length];
-                nullMask.Value.Span.CopyTo(nullMaskArray);
-                resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-
-                // Set result to false where nulls exist
-                for (int i = 0; i < result.Length; i++)
-                {
-                    if (nullMaskArray[i])
-                        result[i] = false;
-                }
-            }
-
-            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
-            return new NivaraColumn<bool>(resultStorage);
-        }
-        else
+        // ColumnStorage is the sole storage implementation; use its zero-copy span view.
+        if (storage is not ColumnStorage<T> memoryStorage)
         {
             throw new InvalidOperationException("Unsupported storage type for vectorized operations");
         }
+
+        var data = memoryStorage.Data.Span;
+        var result = new bool[data.Length];
+
+        // Use our helper method for less than comparison
+        lessThanTensorPrimitive(data, scalar, result.AsSpan());
+
+        // Handle null propagation
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = memoryStorage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+
+            // Set result to false where nulls exist
+            for (int i = 0; i < result.Length; i++)
+            {
+                if (nullMaskArray[i])
+                    result[i] = false;
+            }
+        }
+
+        var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
+        return new NivaraColumn<bool>(resultStorage);
     }
 
     /// <summary>
@@ -1597,11 +1427,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         {
             ObjectDisposedException.ThrowIf(disposed, this);
 
-            // Use the StorageType property from the storage interface
-            var storageType = storage.StorageType;
-
             return new ColumnDiagnostics(
-                storageType,
                 storage.IsVectorizable,
                 typeof(T),
                 storage.Length,
@@ -1750,8 +1576,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// When false, use <see cref="CopyTo"/> with a fill value instead.
     /// </summary>
     /// <remarks>
-    /// The span is a genuine zero-copy view for memory-backed columns; for tensor-backed columns it
-    /// is backed by a cached flattened copy (see <c>IColumnStorage&lt;T&gt;.ProvidesZeroCopySpanAccess</c>).
+    /// The span is a genuine zero-copy view over the underlying storage array.
     /// Returns <see cref="ReadOnlySpan{T}"/> (not <see cref="Span{T}"/>) to preserve
     /// column immutability. This diverges from BCL's <c>Tensor&lt;T&gt;.TryGetSpan</c>
     /// which returns a mutable <see cref="Span{T}"/>.

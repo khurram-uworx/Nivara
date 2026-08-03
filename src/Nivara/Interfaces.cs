@@ -67,7 +67,7 @@ public interface IColumn<T> : IColumn
 
 /// <summary>
 /// Internal storage abstraction for column data.
-/// Provides unified interface for both tensor-backed and memory-backed storage.
+/// Implemented by the single unified <see cref="ColumnStorage{T}"/> class.
 /// </summary>
 /// <typeparam name="T">The type of elements stored in the column</typeparam>
 internal interface IColumnStorage<T> : IDisposable
@@ -111,27 +111,10 @@ internal interface IColumnStorage<T> : IDisposable
     IColumnStorage<T> Slice(int start, int length);
 
     /// <summary>
-    /// Gets diagnostic information about this storage implementation.
-    /// Used for performance analysis and kernel selection.
-    /// </summary>
-    StorageType StorageType { get; }
-
-    /// <summary>
-    /// Gets a value indicating whether span access is a true zero-copy view of the underlying storage.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="ColumnStorage{T}"/> exposes a genuine view (shared <see cref="ReadOnlyMemory{T}"/>).
-    /// <see cref="TensorStorage{T}"/> returns a cached flattened <em>copy</em>, so callers that need
-    /// zero-copy semantics should branch on this flag rather than assume.
-    /// </remarks>
-    internal bool ProvidesZeroCopySpanAccess { get; }
-
-    /// <summary>
     /// Gets a read-only span over the underlying data.
     /// </summary>
     /// <remarks>
-    /// A true zero-copy view only when <see cref="ProvidesZeroCopySpanAccess"/> is true;
-    /// for tensor-backed storage this returns a cached flattened copy.
+    /// A true zero-copy view over the underlying storage array.
     /// </remarks>
     /// <returns>A read-only span over the storage data</returns>
     /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support span access</exception>
@@ -139,7 +122,7 @@ internal interface IColumnStorage<T> : IDisposable
 
     /// <summary>
     /// Attempts to get a read-only span over the underlying data when no nulls are present.
-    /// Returns false when nulls exist. Zero-copy only when <see cref="ProvidesZeroCopySpanAccess"/> is true.
+    /// Returns false when nulls exist. The span is a true zero-copy view over the storage array.
     /// </summary>
     /// <param name="span">When this method returns, contains the read-only span if successful</param>
     /// <returns>true if a span was obtained (no nulls present), false otherwise</returns>

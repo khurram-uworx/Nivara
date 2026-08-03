@@ -130,12 +130,6 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     public bool HasNulls => nullMask is not null;
 
     /// <inheritdoc />
-    public bool ProvidesZeroCopySpanAccess => true;
-
-    /// <inheritdoc />
-    public StorageType StorageType => StorageType.Memory;
-
-    /// <inheritdoc />
     public ReadOnlySpan<bool> NullMask
     {
         get

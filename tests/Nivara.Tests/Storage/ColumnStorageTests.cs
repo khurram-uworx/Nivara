@@ -366,15 +366,6 @@ public class ColumnStorageTests
     #region Span access & slice view semantics
 
     [Test]
-    public void ColumnStorage_ProvidesZeroCopySpanAccess_IsTrue()
-    {
-        var storage = new ColumnStorage<int>(new[] { 1, 2, 3 });
-
-        Assert.That(storage.ProvidesZeroCopySpanAccess, Is.True,
-            "ColumnStorage span access is a genuine zero-copy view over ReadOnlyMemory<T>");
-    }
-
-    [Test]
     public void ColumnStorage_Slice_ReturnsSharedBufferView()
     {
         var sourceArray = new[] { 10, 20, 30, 40 };
