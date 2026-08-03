@@ -218,7 +218,11 @@ public static class GradientUtils
 
     /// <summary>
     /// Creates a constant tensor that doesn't require gradients.
+    /// The tensor wraps <paramref name="data"/> zero-copy; the caller must not
+    /// mutate <paramref name="data"/> afterward.
     /// </summary>
+    /// <param name="data">The values; ownership transfers to the tensor</param>
+    /// <returns>A constant ReverseGradTensor sharing <paramref name="data"/></returns>
     public static ReverseGradTensor<T> Constant<T>(T[] data) where T : struct, IFloatingPointIeee754<T>
     {
         if (data == null)
