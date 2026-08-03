@@ -61,16 +61,31 @@ public static class ForwardGradOperations
             throw new ArgumentException($"Cannot subtract tensors with different lengths: {a.Length} vs {b.Length}");
         }
 
-        var primal = a.Data.Subtract(b.Data);
+        var primalArr = new T[a.Length];
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        TensorPrimitives.Subtract(aSpan, bSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent || b.RequiresTangent)
         {
             if (a.Tangent == null)
-                tangent = b.Tangent?.Negate();
+            {
+                b.Tangent!.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[a.Length];
+                TensorPrimitives.Negate(bTanSpan, tanArr);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
             else if (b.Tangent == null)
                 tangent = a.Tangent;
             else
-                tangent = a.Tangent.Subtract(b.Tangent);
+            {
+                a.Tangent.TryGetSpan(out var aTanSpan);
+                b.Tangent.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[a.Length];
+                TensorPrimitives.Subtract(aTanSpan, bTanSpan, tanArr);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a, b));
@@ -129,16 +144,42 @@ public static class ForwardGradOperations
             }
         }
 
-        var primal = a.Data.Divide(b.Data);
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        var primalArr = new T[a.Length];
+        TensorPrimitives.Divide(aSpan, bSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent || b.RequiresTangent)
         {
             if (a.Tangent == null)
-                tangent = primal.Negate().Multiply(b.Tangent!).Divide(b.Data);
+            {
+                b.Tangent!.TryGetSpan(out var bTanSpan);
+                var numArr = new T[a.Length];
+                TensorPrimitives.Multiply(primalArr, bTanSpan, numArr);
+                TensorPrimitives.Negate(numArr, numArr);
+                var tanArr = new T[a.Length];
+                TensorPrimitives.Divide(numArr, bSpan, tanArr);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
             else if (b.Tangent == null)
-                tangent = a.Tangent.Divide(b.Data);
+            {
+                a.Tangent.TryGetSpan(out var aTanSpan);
+                var tanArr = new T[a.Length];
+                TensorPrimitives.Divide(aTanSpan, bSpan, tanArr);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
             else
-                tangent = a.Tangent.Subtract(primal.Multiply(b.Tangent)).Divide(b.Data);
+            {
+                a.Tangent.TryGetSpan(out var aTanSpan);
+                b.Tangent.TryGetSpan(out var bTanSpan);
+                var numArr = new T[a.Length];
+                TensorPrimitives.Multiply(primalArr, bTanSpan, numArr);
+                TensorPrimitives.Subtract(aTanSpan, numArr, numArr);
+                var tanArr = new T[a.Length];
+                TensorPrimitives.Divide(numArr, bSpan, tanArr);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a, b));
@@ -173,7 +214,11 @@ public static class ForwardGradOperations
                 $"Matrix dimensions incompatible: a({aRows}x{aCols}) @ b({bRows}x{bCols}). " +
                 $"a's column count ({aCols}) must equal b's row count ({bRows}).");
 
-        var primal = a.Data.MatMul(b.Data, aRows, aCols, bCols);
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        var primalArr = new T[aRows * bCols];
+        GradKernels.MatMul(aSpan, bSpan, primalArr, aRows, aCols, bCols);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         var resultShape = new[] { aRows, bCols };
 
         NivaraColumn<T>? tangent = null;
@@ -184,17 +229,29 @@ public static class ForwardGradOperations
 
             if (aTan != null && bTan != null)
             {
-                var tAB = aTan.MatMul(b.Data, aRows, aCols, bCols);
-                var aT_B = a.Data.MatMul(bTan, aRows, aCols, bCols);
-                tangent = tAB + aT_B;
+                aTan.TryGetSpan(out var aTanSpan);
+                var tAB = new T[aRows * bCols];
+                GradKernels.MatMul(aTanSpan, bSpan, tAB, aRows, aCols, bCols);
+                bTan.TryGetSpan(out var bTanSpan);
+                var aT_B = new T[aRows * bCols];
+                GradKernels.MatMul(aSpan, bTanSpan, aT_B, aRows, aCols, bCols);
+                var tanArr = new T[aRows * bCols];
+                TensorPrimitives.Add(tAB, aT_B, tanArr);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
             }
             else if (aTan != null)
             {
-                tangent = aTan.MatMul(b.Data, aRows, aCols, bCols);
+                aTan.TryGetSpan(out var aTanSpan);
+                var tanArr = new T[aRows * bCols];
+                GradKernels.MatMul(aTanSpan, bSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
             }
             else if (bTan != null)
             {
-                tangent = a.Data.MatMul(bTan, aRows, aCols, bCols);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[aRows * bCols];
+                GradKernels.MatMul(aSpan, bTanSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
             }
         }
 
@@ -215,13 +272,19 @@ public static class ForwardGradOperations
 
         var rows = a.shape[0];
         var cols = a.shape[1];
-        var primal = a.Data.Transpose(rows, cols);
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Transpose(aSpan, primalArr, rows, cols);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         var resultShape = new[] { cols, rows };
 
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Tangent.Transpose(rows, cols);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.Transpose(aTanSpan, tanArr, rows, cols);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, resultShape);
@@ -301,11 +364,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Relu();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Relu(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Data.ReluGradient(a.Tangent);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.ReluGradient(aSpan, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -316,11 +385,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Gelu();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Gelu(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Data.GeluGradient(a.Tangent);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.GeluGradient(aSpan, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -335,11 +410,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Sigmoid();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Sigmoid(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = primal.SigmoidGradient(a.Tangent);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.SigmoidGradient(primalArr, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -354,11 +435,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Tanh();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Tanh(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = primal.TanhGradient(a.Tangent);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.TanhGradient(primalArr, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -373,11 +460,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Negate();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Negate(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Tangent.Negate();
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.Negate(aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -392,11 +485,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Abs();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Abs(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Data.AbsGradient(a.Tangent);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.AbsGradient(aSpan, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -411,11 +510,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Clamp(min, max);
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Clamp(aSpan, min, max, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Data.ClipGradient(a.Tangent, min, max);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.ClipGradient(aSpan, aTanSpan, min, max, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -433,11 +538,17 @@ public static class ForwardGradOperations
         if (negativeSlope == T.Zero)
             negativeSlope = T.CreateChecked(0.01);
 
-        var primal = a.Data.LeakyRelu(negativeSlope);
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.LeakyRelu(aSpan, negativeSlope, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Data.LeakyReluGradient(a.Tangent, negativeSlope);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.LeakyReluGradient(aSpan, aTanSpan, negativeSlope, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -452,11 +563,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Exp();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Exp(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = primal * a.Tangent;
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            TensorPrimitives.Multiply(primalArr, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -471,11 +588,17 @@ public static class ForwardGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var primal = a.Data.Log();
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Log(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Data.LogGradient(a.Tangent);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.LogGradient(aSpan, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -492,11 +615,17 @@ public static class ForwardGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var classCount = a.Rank >= 2 ? a.shape[1] : a.Length;
-        var primal = a.Data.Softmax(classCount);
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Softmax(aSpan, primalArr, classCount);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = primal.SoftmaxGradient(a.Tangent, classCount);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.SoftmaxGradient(primalArr, aTanSpan, tanArr, classCount);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -512,11 +641,17 @@ public static class ForwardGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var classCount = a.Rank >= 2 ? a.shape[1] : a.Length;
-        var primal = a.Data.LogSoftmax(classCount);
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.LogSoftmax(aSpan, primalArr, classCount);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            tangent = a.Data.LogSoftmaxGradient(a.Tangent, classCount);
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.LogSoftmaxGradient(aSpan, aTanSpan, tanArr, classCount);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
@@ -602,16 +737,24 @@ public static class ForwardGradOperations
 
             if (mean.RequiresTangent && mean.Tangent != null)
             {
-                var dMean = mean.Data.Multiply(mean.Tangent);
-                tanValue += new NivaraSeries<T>(dMean).Sum();
+                mean.Data.TryGetSpan(out var mSpan);
+                mean.Tangent.TryGetSpan(out var mTanSpan);
+                var dMeanArr = new T[mean.Length];
+                TensorPrimitives.Multiply(mSpan, mTanSpan, dMeanArr);
+                tanValue += TensorPrimitives.Sum(dMeanArr);
             }
 
             if (logVar.RequiresTangent && logVar.Tangent != null)
             {
-                var expLv = logVar.Data.Exp();
-                var half = T.CreateChecked(0.5);
-                var dLogVar = expLv.Multiply(logVar.Tangent).Subtract(logVar.Tangent).Multiply(half);
-                tanValue += new NivaraSeries<T>(dLogVar).Sum();
+                logVar.Data.TryGetSpan(out var lvSpan);
+                logVar.Tangent.TryGetSpan(out var lvTanSpan);
+                var expLvArr = new T[logVar.Length];
+                TensorPrimitives.Exp(lvSpan, expLvArr);
+                var dLogVarArr = new T[logVar.Length];
+                TensorPrimitives.Multiply(expLvArr, lvTanSpan, dLogVarArr);
+                TensorPrimitives.Subtract(dLogVarArr, lvTanSpan, dLogVarArr);
+                TensorPrimitives.Multiply(dLogVarArr, T.CreateChecked(0.5), dLogVarArr);
+                tanValue += TensorPrimitives.Sum(dLogVarArr);
             }
 
             tangent = NivaraColumn<T>.Create(new T[] { tanValue });
