@@ -318,6 +318,8 @@ This avoids API fragmentation while keeping performance optimizations internal.
 
 ### 6.5.3 Storage Abstraction (Pluggable by Design)
 
+> **Superseded 2026-08-03 (storage consolidation, PR #110):** the two-storage split sketched below (`TensorStorage<T>` / `MemoryStorage<T>`) was consolidated into a single sole-owner `ColumnStorage<T>` (`src/Nivara/Storage/ColumnStorage.cs`) with an optional `bool[]` null mask. The `IColumnStorage<T>` seam remains; span access is a genuine zero-copy view, and unmanaged columns expose a public zero-copy `Tensor<T>` view via `NivaraColumn<T>.AsTensorView()` (issue #107).
+
 Nivara introduces an internal storage abstraction:
 
 ```csharp

@@ -213,11 +213,11 @@ dequantize on-the-fly during `Linear.Forward` or `Embedding.Forward`.
 ### 5d. BCL Tensor<int> / Tensor<long> Storage (No AutoDiff)
 
 **Idea**: Use `System.Numerics.Tensors.Tensor<int>` directly for non-differentiable
-integer data within `NivaraColumn<int>` (already supported via TensorStorage<int>).
+integer data within `NivaraColumn<int>` (already supported via `ColumnStorage<int>`).
 
 **Pros**:
 - Zero-copy storage for integer columns in DataFrames
-- Already works (TensorStorage supports int, long, etc.)
+- Already works (`ColumnStorage<int>` supports int, long, etc.)
 
 **Cons**:
 - Can't be used with AutoDiff
@@ -225,7 +225,7 @@ integer data within `NivaraColumn<int>` (already supported via TensorStorage<int
 - Requires separate code paths for integer data
 
 **Verdict**: Already the case — integer data in DataFrames uses
-`TensorStorage<int>` or `MemoryStorage<int>`. The issue is only about
+`ColumnStorage<int>`. The issue is only about
 AutoDiff tensor conversion.
 
 ### 5e. Revisit: Remove Embedding.Forward T Cast Overhead
