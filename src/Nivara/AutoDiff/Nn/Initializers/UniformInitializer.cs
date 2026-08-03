@@ -26,7 +26,7 @@ public sealed class UniformInitializer<T> : IInitializer<T> where T : struct, IF
         for (int i = 0; i < n; i++)
             data[i] = T.CreateChecked(random.NextDouble()) * range + lower;
 
-        var column = NivaraColumn<T>.Create(data);
+        var column = NivaraColumn<T>.CreateFromOwnedArray(data);
         parameter.Tensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, tensor.Shape);
     }
 }

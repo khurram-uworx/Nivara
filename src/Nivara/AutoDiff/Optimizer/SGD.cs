@@ -31,7 +31,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         for (int i = 0; i < n; i++)
             result[i] = dataSpan[i] - velocity[i];
 
-        return new ReverseGradTensor<T>(NivaraColumn<T>.Create(result), requiresGrad: true, tensor.shape);
+        return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(result), requiresGrad: true, tensor.shape);
     }
 
     public static ReverseGradTensor<T> SgdUpdate(ReverseGradTensor<T> tensor, T learningRate, T weightDecay = default)
@@ -82,7 +82,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
             TensorPrimitives.Subtract(dataSpan, result, result);
         }
 
-        return new ReverseGradTensor<T>(NivaraColumn<T>.Create(result), requiresGrad: false, tensor.shape);
+        return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(result), requiresGrad: false, tensor.shape);
     }
 
     readonly double momentum;

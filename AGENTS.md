@@ -59,8 +59,8 @@ Where to look (implementation map)
 - Operation type constants
   - `src/Nivara/Query/OperationType.cs` — `OperationType.Filter`, `.Select`, `.Sort`, `.GroupBy`, `.Join`, etc.
 
-- Frame-level batch ops
-  - `src/Nivara/NivaraFrame.cs` — `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` (all `[Obsolete]` — use `TensorPrimitives` on column spans directly) with null propagation and `OperationDiagnostics` recording.
+- Frame-level row-major interop
+  - `src/Nivara/NivaraFrame.cs` — `ToTensors`, `TryGetRowMajorSpan`, `CopyToRowMajor` (frame tensor-axis math `Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms` was removed in the AutoDiff refactor — use `TensorPrimitives` on column/row spans directly).
 
 - AutoDiff subsystem
   - `docs/AUTODIFF.md` — canonical reference for all AutoDiff operations, modules, optimizers, forward-mode AD, and DataFrame integration
@@ -141,7 +141,7 @@ Suggested small, safe improvements to implement (prioritized)
 - ✓ Add internal `AsTensorSpanIfNoNulls()` to `Nivara.Storage.TensorStorage` — DONE (Phase 0).
 - ✓ Add `BufferPool.Rent(int size)` usage in `NivaraColumn` heavy paths — DONE (Phase 0).
 - ✓ Implement `DetermineKernelType` central helper — DONE as `KernelSelector.DetermineKernelType()` (Phase 1).
-- ✓ Add `RowNorms`/`ColumnNorms` on `NivaraFrame` — DONE (Phase 3). `RowNorms` uses `Vector<T>` SIMD kernel in `TensorsHelper.RowNorms` with `TensorPrimitives.Norm` fallback.
+- ✗ `RowNorms`/`ColumnNorms` on `NivaraFrame` — REMOVED in the AutoDiff refactor (Task 10): the frame tensor-axis methods (`Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms`) had no production callers and were deleted along with the `TensorsHelper.RowNorms` SIMD kernel. Use `TensorPrimitives` on column/row spans directly.
 - ✓ Add `TopKDescending` on `NivaraSeries<T>` — DONE (Phase 3).
 
 Common gotchas (use these as lint-like checks in generated code)
@@ -308,7 +308,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - ✓ **Public zero-copy tensor view (#107)**: `NivaraColumn<T>.AsTensorView()` / `NivaraSeries<T>.AsTensorView()` are public — lazy `Tensor<T>` view over the backing array (throws on nulls / reference types, cached via `ColumnStorage<T>.AsTensor()`); callers treat it as read-only.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets (element-wise `Series`/`Frame` ↔ `Tensor<T>` interop still copies); `AsTensorView()` covers the flat, null-free column case.
 - **NivaraSeries TopKDescending**: added in Phase 3 on `NivaraSeries<T>` (not `NivaraFrame`), returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.
-- ✓ **NivaraFrame RowNorms**: batch `Vector<T>` kernel implemented in `TensorsHelper.RowNorms` — single-pass SIMD square-accumulate per row with `TensorPrimitives.Norm` fallback. ColumnNorms uses per-column `TensorPrimitives.Norm` (no batch needed).
+- ✓ **NivaraFrame RowNorms/ColumnNorms removed**: the frame tensor-axis methods (`Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms`) and the `TensorsHelper.RowNorms` kernel were deleted in the AutoDiff refactor (Task 10) — they had no production callers. Use `TensorPrimitives` on column spans (`TryGetSpan`) or row-major spans (`CopyToRowMajor`).
 - **Phase D complete**: Execution engine overhauled — Pattern B (`DataFrameOperation` strategy dispatch) eliminated, real parallel and streaming implementations, diagnostics integration across all strategies, `OperationType` constants replacing magic strings, 1948 tests passing.
 - ✓ **AutoDiff P0–P6 complete**: reverse-mode autograd, NN module system, full optimizer family (SGD, Adam, AdamW), training loops, data-parallel training, model serialization — all implemented in core `src/Nivara/AutoDiff/`
 - ✓ **BCEWithLogitsLoss fused backward**: replaced multi-op decomposition (Relu + Abs + SoftPlus) with single `OpNode<T>` computing `sigmoid(x) - z` directly. Fixes subgradient error at x=0 where Relu and Abs both return 0. `reduceToMean` overload added. `LeakyRelu` default slope corrected from 0 to 0.01. ADR-001 null cleanup removed ~200 lines of dead null branches from AccumulateGradient, KL/sample ops, and AdamW.
@@ -364,8 +364,8 @@ References (implementations to inspect)
 
 ## Active AutoDiff Direction
 
-The large architectural cleanup in `docs/NEXT-REFACTORING.md` is **not** active
-for the current implementation work unless explicitly requested.
+The AutoDiff refactor (see ADR-001/ADR-002 and the CHANGELOG for the executed
+plan) is **complete** — the implementation follows the direction below.
 
 Current product direction:
 

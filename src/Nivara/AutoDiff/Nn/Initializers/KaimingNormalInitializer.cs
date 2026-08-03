@@ -25,7 +25,7 @@ public sealed class KaimingNormalInitializer<T> : IInitializer<T> where T : stru
             data[i] = T.CreateChecked(normal) * std;
         }
 
-        var column = NivaraColumn<T>.Create(data);
+        var column = NivaraColumn<T>.CreateFromOwnedArray(data);
         parameter.Tensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, shape);
     }
 }

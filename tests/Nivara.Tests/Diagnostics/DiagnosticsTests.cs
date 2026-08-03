@@ -1,5 +1,3 @@
-#pragma warning disable CS0618 // Tests exercise deprecated APIs during migration
-
 using Nivara.Diagnostics;
 using NUnit.Framework;
 
@@ -157,98 +155,6 @@ public class DiagnosticsTests
     }
 
     [Test]
-    public void DiagnosticsTracker_FrameDot_RecordsBatchOperationDetails()
-    {
-        DiagnosticsTracker.IsEnabled = true;
-        DiagnosticsTracker.ClearRecordedOperations();
-
-        try
-        {
-            using var vector = new NivaraSeries<float>(
-                NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f }));
-            using var frame = CreateDiagnosticsFrameWithNulls();
-
-            using var result = frame.Dot(vector);
-
-            var operation = AssertSingleOperation("FrameDot");
-            AssertFrameBatchOperation(operation, "FrameDot", inputLength: 3, hadNulls: true);
-        }
-        finally
-        {
-            DiagnosticsTracker.IsEnabled = false;
-            DiagnosticsTracker.ClearRecordedOperations();
-        }
-    }
-
-    [Test]
-    public void DiagnosticsTracker_FrameCosineSimilarity_RecordsBatchOperationDetails()
-    {
-        DiagnosticsTracker.IsEnabled = true;
-        DiagnosticsTracker.ClearRecordedOperations();
-
-        try
-        {
-            using var vector = new NivaraSeries<float>(
-                NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f }));
-            using var frame = CreateDiagnosticsFrameWithNulls();
-
-            using var result = frame.CosineSimilarity(vector);
-
-            var operation = AssertSingleOperation("FrameCosineSimilarity");
-            AssertFrameBatchOperation(operation, "FrameCosineSimilarity", inputLength: 3, hadNulls: true);
-        }
-        finally
-        {
-            DiagnosticsTracker.IsEnabled = false;
-            DiagnosticsTracker.ClearRecordedOperations();
-        }
-    }
-
-    [Test]
-    public void DiagnosticsTracker_FrameColumnNorms_RecordsBatchOperationDetails()
-    {
-        DiagnosticsTracker.IsEnabled = true;
-        DiagnosticsTracker.ClearRecordedOperations();
-
-        try
-        {
-            using var frame = CreateDiagnosticsFrameWithNulls();
-
-            using var result = frame.ColumnNorms<float>();
-
-            var operation = AssertSingleOperation("FrameColumnNorms");
-            AssertFrameBatchOperation(operation, "FrameColumnNorms", inputLength: 2, hadNulls: true);
-        }
-        finally
-        {
-            DiagnosticsTracker.IsEnabled = false;
-            DiagnosticsTracker.ClearRecordedOperations();
-        }
-    }
-
-    [Test]
-    public void DiagnosticsTracker_FrameRowNorms_RecordsBatchOperationDetails()
-    {
-        DiagnosticsTracker.IsEnabled = true;
-        DiagnosticsTracker.ClearRecordedOperations();
-
-        try
-        {
-            using var frame = CreateDiagnosticsFrameWithNulls();
-
-            using var result = frame.RowNorms<float>();
-
-            var operation = AssertSingleOperation("FrameRowNorms");
-            AssertFrameBatchOperation(operation, "FrameRowNorms", inputLength: 3, hadNulls: true);
-        }
-        finally
-        {
-            DiagnosticsTracker.IsEnabled = false;
-            DiagnosticsTracker.ClearRecordedOperations();
-        }
-    }
-
-    [Test]
     public void DiagnosticsTracker_ColumnToTensor_RecordsAllocationDiagnostics()
     {
         DiagnosticsTracker.IsEnabled = true;
@@ -288,35 +194,6 @@ public class DiagnosticsTests
             Assert.That(operation.AllocatedBytes, Is.GreaterThan(0));
             Assert.That(operation.HadNulls, Is.True);
             Assert.That(operation.Notes, Does.Contain("TensorConversion=NullReplacement"));
-        }
-        finally
-        {
-            DiagnosticsTracker.IsEnabled = false;
-            DiagnosticsTracker.ClearRecordedOperations();
-        }
-    }
-
-    [Test]
-    public void DiagnosticsTracker_FrameBatchOperations_RecordAllocationDiagnostics()
-    {
-        DiagnosticsTracker.IsEnabled = true;
-        DiagnosticsTracker.ClearRecordedOperations();
-
-        try
-        {
-            using var frame = CreateDiagnosticsFrameWithNulls();
-
-            using var columnNorms = frame.ColumnNorms<float>();
-            using var rowNorms = frame.RowNorms<float>();
-
-            var operations = DiagnosticsTracker.GetRecordedOperations();
-            var columnNormsOperation = operations.Single(op => op.OperationType == "FrameColumnNorms");
-            var rowNormsOperation = operations.Single(op => op.OperationType == "FrameRowNorms");
-
-            Assert.That(columnNormsOperation.AllocatedBytes, Is.GreaterThan(0));
-            Assert.That(columnNormsOperation.Notes, Does.Contain("FrameBatch=ColumnNorms"));
-            Assert.That(rowNormsOperation.AllocatedBytes, Is.GreaterThan(0));
-            Assert.That(rowNormsOperation.Notes, Does.Contain("FrameBatch=RowNorms"));
         }
         finally
         {
@@ -388,15 +265,6 @@ public class DiagnosticsTests
         Assert.That(result, Does.Contain("Memory"));
     }
 
-    private static NivaraFrame CreateDiagnosticsFrameWithNulls()
-    {
-        return new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1.0f, 2.0f, 3.0f })),
-            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { 4.0f, null, 6.0f })),
-        });
-    }
-
     private static OperationDiagnostics AssertSingleOperation(string operationType)
     {
         var operations = DiagnosticsTracker.GetRecordedOperations();
@@ -405,18 +273,5 @@ public class DiagnosticsTests
         Assert.That(operations[0].OperationType, Is.EqualTo(operationType));
 
         return operations[0];
-    }
-
-    private static void AssertFrameBatchOperation(
-        OperationDiagnostics operation,
-        string operationType,
-        int inputLength,
-        bool hadNulls)
-    {
-        Assert.That(operation.OperationType, Is.EqualTo(operationType));
-        Assert.That(operation.KernelUsed, Is.EqualTo(KernelSelector.DetermineBatchKernelType<float>()));
-        Assert.That(operation.InputLength, Is.EqualTo(inputLength));
-        Assert.That(operation.ElementType, Is.EqualTo(typeof(float)));
-        Assert.That(operation.HadNulls, Is.EqualTo(hadNulls));
     }
 }

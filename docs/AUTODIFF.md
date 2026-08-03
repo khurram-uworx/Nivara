@@ -191,17 +191,17 @@ public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754
 |--------|-------------|
 | `Data` | The underlying `NivaraColumn<T>` |
 | `Length` | Number of elements |
-| `HasNulls` | Whether data contains null values |
 | `Shape` | Read-only copy of dimension sizes |
 | `Rank` | Number of dimensions |
 | `this[int index]` | Element accessor |
-| `IsNull(int index)` | Null check |
 | `Reshape(params int[] dims)` | Sets shape metadata (product must equal Length) |
-| `AsTensor()` | Returns `Tensor<T>` view (throws if nulls present) |
+| `AsTensor()` | Zero-copy `Tensor<T>` view sharing the backing array (throws if the ADR-001 non-nullable domain is violated) |
 | `ToColumn()` | Returns `NivaraColumn<T>` |
 | `ToSeries()` | Returns `NivaraSeries<T>` |
 
-Constructor validates the type via `TypeValidator.ValidateNumericType<T>()`.
+Type support is enforced at compile time by the `IFloatingPointIeee754<T>`
+generic constraint; the constructors retain a `TypeValidator.ValidateNumericType<T>()`
+call (now a no-op) for compatibility.
 
 ### ReverseGradTensor\<T\>
 
@@ -290,11 +290,11 @@ Static graph traversal engine:
 
 | Op | Forward | Backward Rule | Null Semantics |
 |----|---------|---------------|----------------|
-| `Add(a, b)` | `a + b` | `∂/∂a = grad`, `∂/∂b = grad` | mask OR |
-| `Subtract(a, b)` | `a - b` | `∂/∂a = grad`, `∂/∂b = -grad` | mask OR |
-| `Multiply(a, b)` | `a * b` | `∂/∂a = grad * b`, `∂/∂b = grad * a` | mask OR |
-| `Divide(a, b)` | `a / b` | `∂/∂a = grad / b`, `∂/∂b = -(a/b²) * grad` | mask OR; throws on zero division |
-| `Clip(a, min, max)` | `clamp(a, min, max)` | 1 if in-range, 0 outside | mask OR |
+| `Add(a, b)` | `a + b` | `∂/∂a = grad`, `∂/∂b = grad` | n/a — non-nullable (ADR-001) |
+| `Subtract(a, b)` | `a - b` | `∂/∂a = grad`, `∂/∂b = -grad` | n/a — non-nullable (ADR-001) |
+| `Multiply(a, b)` | `a * b` | `∂/∂a = grad * b`, `∂/∂b = grad * a` | n/a — non-nullable (ADR-001) |
+| `Divide(a, b)` | `a / b` | `∂/∂a = grad / b`, `∂/∂b = -(a/b²) * grad` | throws on zero division |
+| `Clip(a, min, max)` | `clamp(a, min, max)` | 1 if in-range, 0 outside | n/a — non-nullable (ADR-001) |
 | `Pow(a, exponent)` | `a^exponent` | `exponent * a^(exponent-1) * grad` | Scalar exponent |
 
 ### Matrix / Tensor Manipulation
@@ -309,7 +309,13 @@ Static graph traversal engine:
 | `Gather(source, indices, axis)` | Select indices along axis | Scattered back via `SegmentSum` | indices valid for source shape |
 | `MultiHeadAttention(query, key, value, numHeads, scale, mask?)` | Packed per-head scaled dot-product attention | Single fused VJP producing dQ, dK, dV | `query/key/value` rank 2 `[len, dim]`; `mask` additive `[qLen, kvLen]` |
 
-MatMul is implemented in `ReverseGradOperations.MatMul` via `NivaraColumn<T>.MatMul()` (`src/Nivara/Tensors/NivaraTensorExtensions.cs`) using `TensorPrimitives.Dot` + `Parallel.For` for SIMD-accelerated forward and backward passes.
+MatMul is implemented in `ReverseGradOperations.MatMul` as a single `OpNode`
+over the shared span kernels `TensorsHelper.MultiplyCore` (forward produces
+`result[aRows × bCols]` from `TensorPrimitives.Dot` rows) and
+`TensorsHelper.Transpose` (backward computes `grad @ bᵀ` and `aᵀ @ grad`).
+Operand data comes from zero-copy column spans via `TryGetSpan`; results wrap
+once with `NivaraColumn<T>.CreateFromOwnedArray`. Outside
+`GradientUtils.Grad()`, the forward pass runs without creating the `OpNode`.
 
 `MultiHeadAttention` (issue #86) is a fused attention kernel in `src/Nivara/AutoDiff/Operations/AttentionKernels.cs`: heads are gathered into contiguous column groups once, QK^T/softmax/PV run per head over `TensorPrimitives` row kernels (`SoftmaxRows`, `SoftmaxBackwardRows`), and results are packed back via `ScatterHead`. It executes as a single `OpNode` producing dQ/dK/dV in one backward pass, replacing the per-head `Slice`/`Transpose`/`MatMul`/`Softmax` decomposition. Inference outside `GradientUtils.Grad()` runs the forward pass without building any graph nodes. `TransformerBlock`, `MultiheadAttention<T>`, and the `BertModel` sample all route through this kernel.
 
@@ -1038,10 +1044,13 @@ var checkpoint = ModelSerializer.LoadCheckpoint<float>("checkpoint.json");
 parameters. You can remove keys, serialize the dictionary, or load it into a
 compatible model without accidentally mutating the source model.
 
-**Format:** JSON with format marker `"nivara-ss-v1"` / `"nivara-ckpt-v1"`, version field, type name, and parameter entries. Each parameter entry stores:
+**Format:** JSON with format marker `"nivara-ss-v2"` / `"nivara-ckpt-v2"`, version field, type name, and parameter entries. Each parameter entry stores:
 - `Shape` — `int[]` dimension sizes
 - `Values` — base64-encoded binary (via `MemoryMarshal.AsBytes`), length-validated on load
-- `HasNulls` / `NullMask` — optional null mask as base64 bool array
+
+The AutoDiff domain is non-nullable (ADR-001), so no null mask is persisted.
+Files written with the v1 format (which stored `HasNulls` / `NullMask`) are
+rejected loudly on load with an "unsupported format" error.
 
 **Validation on load:** shape rank, exact shape, element count, and parameter
 name matching with descriptive error messages. `LoadStateDict(..., strict:

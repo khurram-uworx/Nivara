@@ -113,6 +113,84 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Helper method to perform vectorized subtraction using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    static void subtractTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        var type = typeof(T);
+
+        // Route every numeric primitive to a constrained generic kernel so integer types
+        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        if (type == typeof(float)) { NumericTensorKernels<float>.Subtract(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
+        if (type == typeof(double)) { NumericTensorKernels<double>.Subtract(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
+        if (type == typeof(int)) { NumericTensorKernels<int>.Subtract(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
+        if (type == typeof(long)) { NumericTensorKernels<long>.Subtract(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), reinterpretWritable<long>(destination)); return; }
+        if (type == typeof(short)) { NumericTensorKernels<short>.Subtract(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), reinterpretWritable<short>(destination)); return; }
+        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Subtract(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
+        if (type == typeof(uint)) { NumericTensorKernels<uint>.Subtract(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), reinterpretWritable<uint>(destination)); return; }
+        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Subtract(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
+        if (type == typeof(byte)) { NumericTensorKernels<byte>.Subtract(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
+        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Subtract(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = (T)(object)((dynamic)x[i]! - (dynamic)y[i]!)!;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized division using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    static void divideTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        var type = typeof(T);
+
+        // Route every numeric primitive to a constrained generic kernel so integer types
+        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
+        if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
+        if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
+        if (type == typeof(long)) { NumericTensorKernels<long>.Divide(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), reinterpretWritable<long>(destination)); return; }
+        if (type == typeof(short)) { NumericTensorKernels<short>.Divide(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), reinterpretWritable<short>(destination)); return; }
+        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Divide(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
+        if (type == typeof(uint)) { NumericTensorKernels<uint>.Divide(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), reinterpretWritable<uint>(destination)); return; }
+        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Divide(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
+        if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
+        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = (T)(object)((dynamic)x[i]! / (dynamic)y[i]!)!;
+        }
+    }
+
+    /// <summary>
+    /// Helper method to perform vectorized scalar division using TensorPrimitives with runtime type dispatch
+    /// </summary>
+    static void divideTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
+    {
+        var type = typeof(T);
+
+        // Route every numeric primitive to a constrained generic kernel so integer types
+        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), reinterpretWritable<float>(destination)); return; }
+        if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), reinterpretWritable<double>(destination)); return; }
+        if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), reinterpretWritable<int>(destination)); return; }
+        if (type == typeof(long)) { NumericTensorKernels<long>.Divide(reinterpretReadOnly<long>(x), reinterpretScalar<long>(y), reinterpretWritable<long>(destination)); return; }
+        if (type == typeof(short)) { NumericTensorKernels<short>.Divide(reinterpretReadOnly<short>(x), reinterpretScalar<short>(y), reinterpretWritable<short>(destination)); return; }
+        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Divide(reinterpretReadOnly<ushort>(x), reinterpretScalar<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
+        if (type == typeof(uint)) { NumericTensorKernels<uint>.Divide(reinterpretReadOnly<uint>(x), reinterpretScalar<uint>(y), reinterpretWritable<uint>(destination)); return; }
+        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Divide(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
+        if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
+        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+
+        for (int i = 0; i < x.Length; i++)
+        {
+            destination[i] = (T)(object)((dynamic)x[i]! / (dynamic)y!)!;
+        }
+    }
+
+    /// <summary>
     /// Helper method to perform vectorized equality comparison using optimized loops with runtime type dispatch
     /// </summary>
     static void equalsTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
@@ -557,6 +635,49 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
 
         // Use our helper method for multiplication
         multiplyTensorPrimitive(data, scalar, result.AsSpan());
+
+        // Handle null propagation
+        ReadOnlyMemory<bool>? resultNullMask = null;
+        var nullMask = memoryStorage.NullMaskMemory;
+        if (nullMask.HasValue && nullMask.Value.Length > 0)
+        {
+            var nullMaskArray = new bool[data.Length];
+            nullMask.Value.Span.CopyTo(nullMaskArray);
+            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
+        }
+
+        var resultStorage = new ColumnStorage<T>(result, resultNullMask);
+        return new NivaraColumn<T>(resultStorage);
+    }
+
+    /// <summary>
+    /// Performs vectorized scalar division using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> divideVectorized(T divisor)
+    {
+        // Determine which kernel will actually be used
+        var kernelType = determineKernelType();
+
+        // Record diagnostic information
+        var diagnostic = new OperationDiagnostics(
+            "ScalarDivision",
+            kernelType,
+            Length,
+            typeof(T),
+            HasNulls);
+        DiagnosticsTracker.RecordOperation(diagnostic);
+
+        // ColumnStorage is the sole storage implementation; use its zero-copy span view.
+        if (storage is not ColumnStorage<T> memoryStorage)
+        {
+            throw new InvalidOperationException("Unsupported storage type for vectorized operations");
+        }
+
+        var data = memoryStorage.Data.Span;
+        var result = new T[data.Length];
+
+        // Use our helper method for division
+        divideTensorPrimitive(data, divisor, result.AsSpan());
 
         // Handle null propagation
         ReadOnlyMemory<bool>? resultNullMask = null;
@@ -1727,6 +1848,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Divides all elements in the column by a scalar value.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="divisor">The scalar value to divide each element by</param>
+    /// <returns>A new column with element-wise division results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Divide(T divisor)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
+
+        return divideVectorized(divisor);
+    }
+
+    /// <summary>
     /// Adds corresponding elements of two columns together.
     /// Only supported for numeric types that implement INumber&lt;T&gt;.
     /// </summary>
@@ -1776,6 +1914,58 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         validateTypeSupportsOperation("arithmetic");
 
         return multiplyVectorized(other);
+    }
+
+    /// <summary>
+    /// Subtracts corresponding elements of another column from this column.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="other">The column to subtract from this column</param>
+    /// <returns>A new column with element-wise subtraction results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Subtract(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (other.disposed)
+            throw new ObjectDisposedException(nameof(other));
+
+        // Use centralized validation
+        validateCompatibleLength(other, "subtraction");
+        validateTypeSupportsOperation("arithmetic");
+
+        return applyElementwiseBinary(other, subtractTensorPrimitive);
+    }
+
+    /// <summary>
+    /// Divides corresponding elements of another column into this column.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="other">The column to divide this column by</param>
+    /// <returns>A new column with element-wise division results</returns>
+    /// <exception cref="ArgumentNullException">Thrown when other is null</exception>
+    /// <exception cref="ArgumentException">Thrown when columns have different lengths</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Divide(NivaraColumn<T> other)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (other == null)
+            throw new ArgumentNullException(nameof(other));
+
+        if (other.disposed)
+            throw new ObjectDisposedException(nameof(other));
+
+        // Use centralized validation
+        validateCompatibleLength(other, "division");
+        validateTypeSupportsOperation("arithmetic");
+
+        return applyElementwiseBinary(other, divideTensorPrimitive);
     }
 
     /// <summary>

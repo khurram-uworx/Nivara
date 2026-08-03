@@ -93,68 +93,6 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Helper method to perform vectorized min using TensorPrimitives with runtime type dispatch
-    /// </summary>
-    static T minTensorPrimitive(ReadOnlySpan<T> values)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
-        if (type == typeof(float)) return reinterpretBack(NumericTensorKernels<float>.Min(SpanReinterpret.ReadOnly<T, float>(values)));
-        if (type == typeof(double)) return reinterpretBack(NumericTensorKernels<double>.Min(SpanReinterpret.ReadOnly<T, double>(values)));
-        if (type == typeof(int)) return reinterpretBack(NumericTensorKernels<int>.Min(SpanReinterpret.ReadOnly<T, int>(values)));
-        if (type == typeof(long)) return reinterpretBack(NumericTensorKernels<long>.Min(SpanReinterpret.ReadOnly<T, long>(values)));
-        if (type == typeof(short)) return reinterpretBack(NumericTensorKernels<short>.Min(SpanReinterpret.ReadOnly<T, short>(values)));
-        if (type == typeof(ushort)) return reinterpretBack(NumericTensorKernels<ushort>.Min(SpanReinterpret.ReadOnly<T, ushort>(values)));
-        if (type == typeof(uint)) return reinterpretBack(NumericTensorKernels<uint>.Min(SpanReinterpret.ReadOnly<T, uint>(values)));
-        if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Min(SpanReinterpret.ReadOnly<T, ulong>(values)));
-        if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Min(SpanReinterpret.ReadOnly<T, byte>(values)));
-        if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Min(SpanReinterpret.ReadOnly<T, sbyte>(values)));
-
-        // Fall back to scalar min for other types
-        T result = values[0];
-        var comparer = Comparer<T>.Default;
-        for (int i = 1; i < values.Length; i++)
-        {
-            if (comparer.Compare(values[i], result) < 0)
-                result = values[i];
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Helper method to perform vectorized max using TensorPrimitives with runtime type dispatch
-    /// </summary>
-    static T maxTensorPrimitive(ReadOnlySpan<T> values)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
-        if (type == typeof(float)) return reinterpretBack(NumericTensorKernels<float>.Max(SpanReinterpret.ReadOnly<T, float>(values)));
-        if (type == typeof(double)) return reinterpretBack(NumericTensorKernels<double>.Max(SpanReinterpret.ReadOnly<T, double>(values)));
-        if (type == typeof(int)) return reinterpretBack(NumericTensorKernels<int>.Max(SpanReinterpret.ReadOnly<T, int>(values)));
-        if (type == typeof(long)) return reinterpretBack(NumericTensorKernels<long>.Max(SpanReinterpret.ReadOnly<T, long>(values)));
-        if (type == typeof(short)) return reinterpretBack(NumericTensorKernels<short>.Max(SpanReinterpret.ReadOnly<T, short>(values)));
-        if (type == typeof(ushort)) return reinterpretBack(NumericTensorKernels<ushort>.Max(SpanReinterpret.ReadOnly<T, ushort>(values)));
-        if (type == typeof(uint)) return reinterpretBack(NumericTensorKernels<uint>.Max(SpanReinterpret.ReadOnly<T, uint>(values)));
-        if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Max(SpanReinterpret.ReadOnly<T, ulong>(values)));
-        if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Max(SpanReinterpret.ReadOnly<T, byte>(values)));
-        if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Max(SpanReinterpret.ReadOnly<T, sbyte>(values)));
-
-        // Fall back to scalar max for other types
-        T result = values[0];
-        var comparer = Comparer<T>.Default;
-        for (int i = 1; i < values.Length; i++)
-        {
-            if (comparer.Compare(values[i], result) > 0)
-                result = values[i];
-        }
-        return result;
-    }
-
-    /// <summary>
     /// Helper method to divide a sum by count for average calculation
     /// </summary>
     static T divideByCount(T sum, int count)
@@ -356,31 +294,6 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Performs vectorized sum computation using TensorPrimitives when possible
-    /// </summary>
-    T sumVectorized()
-    {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
-
-            if (validValues.Count == 0)
-                throw new InvalidOperationException("Cannot compute sum: all values are null. Series must contain at least one valid value.");
-
-            return sumTensorPrimitive(validValues.ToArray().AsSpan());
-        }
-
-        // All values are valid, use direct span access
-        return sumTensorPrimitive(values.AsSpan());
-    }
-
-    /// <summary>
     /// Performs vectorized average computation using TensorPrimitives when possible
     /// </summary>
     T averageVectorized()
@@ -405,56 +318,6 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         // All values are valid, use direct span access
         var totalSum = sumTensorPrimitive(values.AsSpan());
         return divideByCount(totalSum, Length);
-    }
-
-    /// <summary>
-    /// Performs vectorized min computation using TensorPrimitives when possible
-    /// </summary>
-    T minVectorized()
-    {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
-
-            if (validValues.Count == 0)
-                throw new InvalidOperationException("Cannot compute minimum: all values are null. Series must contain at least one valid value.");
-
-            return minTensorPrimitive(validValues.ToArray().AsSpan());
-        }
-
-        // All values are valid, use direct span access
-        return minTensorPrimitive(values.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs vectorized max computation using TensorPrimitives when possible
-    /// </summary>
-    T maxVectorized()
-    {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
-
-            if (validValues.Count == 0)
-                throw new InvalidOperationException("Cannot compute maximum: all values are null. Series must contain at least one valid value.");
-
-            return maxTensorPrimitive(validValues.ToArray().AsSpan());
-        }
-
-        // All values are valid, use direct span access
-        return maxTensorPrimitive(values.AsSpan());
     }
 
     /// <summary>
@@ -845,27 +708,6 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     // Aggregate Functions
 
     /// <summary>
-    /// Computes the sum of all valid elements in the series.
-    /// Uses vectorized operations when possible for optimal performance.
-    /// </summary>
-    /// <returns>The sum of all valid elements</returns>
-    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the series is empty</exception>
-    public T Sum()
-    {
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        if (Length == 0)
-            throw new InvalidOperationException("Cannot compute sum of empty series. Series must contain at least one element.");
-
-        // Check if T is a supported numeric type
-        if (!typeof(T).IsNumericType())
-            throw new InvalidOperationException($"Sum operation is not supported for type {typeof(T).Name}. Only numeric types support sum operations.");
-
-        return sumVectorized();
-    }
-
-    /// <summary>
     /// Computes the average (arithmetic mean) of all valid elements in the series.
     /// Uses vectorized operations when possible for optimal performance.
     /// </summary>
@@ -884,48 +726,6 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             throw new InvalidOperationException($"Average operation is not supported for type {typeof(T).Name}. Only numeric types support average operations.");
 
         return averageVectorized();
-    }
-
-    /// <summary>
-    /// Finds the minimum value among all valid elements in the series.
-    /// Uses vectorized operations when possible for optimal performance.
-    /// </summary>
-    /// <returns>The minimum value among all valid elements</returns>
-    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
-    public T Min()
-    {
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        if (Length == 0)
-            throw new InvalidOperationException("Cannot compute minimum of empty series. Series must contain at least one element.");
-
-        // Check if T is a supported comparable type
-        if (!typeof(T).IsComparableType())
-            throw new InvalidOperationException($"Min operation is not supported for type {typeof(T).Name}. Only comparable types support min operations.");
-
-        return minVectorized();
-    }
-
-    /// <summary>
-    /// Finds the maximum value among all valid elements in the series.
-    /// Uses vectorized operations when possible for optimal performance.
-    /// </summary>
-    /// <returns>The maximum value among all valid elements</returns>
-    /// <exception cref="InvalidOperationException">Thrown when T does not support comparison operations</exception>
-    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
-    public T Max()
-    {
-        ObjectDisposedException.ThrowIf(disposed, this);
-
-        if (Length == 0)
-            throw new InvalidOperationException("Cannot compute maximum of empty series. Series must contain at least one element.");
-
-        // Check if T is a supported comparable type
-        if (!typeof(T).IsComparableType())
-            throw new InvalidOperationException($"Max operation is not supported for type {typeof(T).Name}. Only comparable types support max operations.");
-
-        return maxVectorized();
     }
 
     /// <summary>

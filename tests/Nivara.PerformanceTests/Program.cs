@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Numerics.Tensors;
 using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
@@ -29,8 +30,9 @@ static class Program
         Run("ColumnSigmoid 1M x float", 5, 200,
             () =>
             {
-                var a = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
-                return () => a.Sigmoid();
+                var a = Fill(new float[1_000_000]);
+                var dest = new float[1_000_000];
+                return () => TensorPrimitives.Sigmoid(a, dest);
             });
 
         Run("Linear forward [32x256] -> [32x256]", 5, 100,

@@ -225,7 +225,7 @@ public class ForwardParityTests
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
         ReverseGradOperations.Sum(ReverseGradOperations.Sum(rx)).Backward();
-        var backSum = new NivaraSeries<float>(rx.Grad!).Sum();
+        var backSum = rx.Grad!.Sum();
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }));
         var fsum = ForwardGradOperations.Sum(fx);
@@ -240,7 +240,7 @@ public class ForwardParityTests
 
         var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
         ReverseGradOperations.Sum(ReverseGradOperations.Mean(rx)).Backward();
-        var backSum = new NivaraSeries<float>(rx.Grad!).Sum();
+        var backSum = rx.Grad!.Sum();
 
         var fx = new ForwardGradTensor<float>(xData, NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }));
         var fmean = ForwardGradOperations.Mean(fx);
@@ -337,7 +337,7 @@ public class ForwardParityTests
         Assert.That(fresult.Tangent!.Length, Is.EqualTo(6));
         Assert.That(expected.Length, Is.EqualTo(6));
         // Forward and backward tangents/gradients should have consistent sum
-        Assert.That(fresult.Tangent.Sum(), Is.EqualTo(new NivaraSeries<float>(expected).Sum()).Within(1e-6f));
+        Assert.That(fresult.Tangent.Sum(), Is.EqualTo(expected.Sum()).Within(1e-6f));
     }
 
     [Test]

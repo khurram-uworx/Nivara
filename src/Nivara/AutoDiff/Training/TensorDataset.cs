@@ -1,5 +1,6 @@
 using System.Buffers;
 using System.Numerics;
+using Nivara.AutoDiff.Exceptions;
 
 namespace Nivara.AutoDiff.Training;
 
@@ -54,44 +55,24 @@ public sealed class TensorDataset<T> where T : struct, IFloatingPointIeee754<T>
 
         var columns = new NivaraColumn<T>[numCols];
         for (int j = 0; j < numCols; j++)
+        {
             columns[j] = _frame.GetColumn<T>(columnNames[j]);
+            if (columns[j].HasNulls)
+                throw new AutoGradException(GradTensor<T>.Adr001Message);
+        }
 
         T[] data = ArrayPool<T>.Shared.Rent(totalLength);
-        bool[]? nullMask = null;
-        bool hasNulls = false;
 
         try
         {
-            for (int i = 0; i < batchSize; i++)
+            for (int j = 0; j < numCols; j++)
             {
-                int rowIdx = indices[i];
-                int rowBase = i * numCols;
-
-                for (int j = 0; j < numCols; j++)
-                {
-                    int destIdx = rowBase + j;
-                    data[destIdx] = columns[j][rowIdx];
-
-                    if (columns[j].IsNull(rowIdx))
-                    {
-                        (nullMask ??= new bool[totalLength])[destIdx] = true;
-                        hasNulls = true;
-                    }
-                }
+                columns[j].TryGetSpan(out var colSpan);
+                for (int i = 0; i < batchSize; i++)
+                    data[i * numCols + j] = colSpan[indices[i]];
             }
 
-            NivaraColumn<T> column;
-            if (hasNulls)
-            {
-                column = NivaraColumn<T>.CreateFromSpans(
-                    data.AsSpan(0, totalLength),
-                    nullMask.AsSpan(0, totalLength));
-            }
-            else
-            {
-                column = NivaraColumn<T>.Create(data.AsSpan(0, totalLength));
-            }
-
+            var column = NivaraColumn<T>.Create(data.AsSpan(0, totalLength));
             var tensor = new ReverseGradTensor<T>(column, requiresGrad);
             tensor.Reshape(batchSize, numCols);
 

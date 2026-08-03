@@ -21,7 +21,7 @@ Future tensor-oriented ambitions that are not committed product direction:
 - Row-wise frame scoring APIs such as `RowDot<T>(NivaraSeries<T> query, IColumn? labels = null)` and `RowCosineSimilarity<T>(NivaraSeries<T> query, IColumn? labels = null)` for feature-vector workflows where rows represent embeddings, samples, items, or observations.
 - Matrix and embedding-table ingestion helpers such as `NivaraFrame.FromRows<T>(IEnumerable<(string Label, T[] Vector)> rows)` and richer `FromTensor<T>(Tensor<T> matrix, string[]? columnNames = null, object[]? rowLabels = null)` overloads.
 - Internal row-major materialization helpers for homogeneous numeric frames, using pooled buffers for large data and preserving the `[rows, columns]` tensor convention.
-- Potential reuse of the row-major helper for optimized `RowNorms<T>()`, `TensorPrimitives.Dot`, `TensorPrimitives.CosineSimilarity`, and `TensorPrimitives.Norm` row-slice kernels.
+- Row-slice `TensorPrimitives.Dot`, `TensorPrimitives.CosineSimilarity`, and `TensorPrimitives.Norm` kernels over the row-major layout. (The old frame `RowNorms<T>()` API was removed in the AutoDiff refactor, Task 10.)
 - Null semantics for any row-wise result should remain mask-first: nulls in a row make only that row's score null, nulls in the query make all scores null, and placeholder values at null positions are not valid output.
 - Benchmark coverage should compare current per-row temporary buffer behavior, row-major materialization, row-slice tensor kernels, and allocation pressure for repeated row-wise scoring.
 

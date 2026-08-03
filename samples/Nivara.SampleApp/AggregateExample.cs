@@ -1,3 +1,5 @@
+using Nivara.Tensors;
+
 namespace Nivara.SampleApp;
 
 public static class AggregateExample
@@ -13,10 +15,10 @@ public static class AggregateExample
         var intSeries = NivaraSeries<int>.Create(intData);
 
         Console.WriteLine($"Data: [{string.Join(", ", intData)}]");
-        Console.WriteLine($"Sum: {intSeries.Sum()}");
+        Console.WriteLine($"Sum: {intSeries.Values.Sum()}");
         Console.WriteLine($"Average: {intSeries.Average()}");
-        Console.WriteLine($"Min: {intSeries.Min()}");
-        Console.WriteLine($"Max: {intSeries.Max()}");
+        Console.WriteLine($"Min: {intSeries.Values.Min()}");
+        Console.WriteLine($"Max: {intSeries.Values.Max()}");
         Console.WriteLine();
 
         // Test with floating point data (should use TensorPrimitives)
@@ -25,10 +27,10 @@ public static class AggregateExample
         var floatSeries = NivaraSeries<float>.Create(floatData);
 
         Console.WriteLine($"Data: [{string.Join(", ", floatData)}]");
-        Console.WriteLine($"Sum: {floatSeries.Sum():F1}");
+        Console.WriteLine($"Sum: {floatSeries.Values.Sum():F1}");
         Console.WriteLine($"Average: {floatSeries.Average():F1}");
-        Console.WriteLine($"Min: {floatSeries.Min():F1}");
-        Console.WriteLine($"Max: {floatSeries.Max():F1}");
+        Console.WriteLine($"Min: {floatSeries.Values.Min():F1}");
+        Console.WriteLine($"Max: {floatSeries.Values.Max():F1}");
         Console.WriteLine();
 
         // Test with double data (should use TensorPrimitives)
@@ -37,10 +39,10 @@ public static class AggregateExample
         var doubleSeries = NivaraSeries<double>.Create(doubleData);
 
         Console.WriteLine($"Data: [π, e, 1.0, 10.0]");
-        Console.WriteLine($"Sum: {doubleSeries.Sum():F3}");
+        Console.WriteLine($"Sum: {doubleSeries.Values.Sum():F3}");
         Console.WriteLine($"Average: {doubleSeries.Average():F3}");
-        Console.WriteLine($"Min: {doubleSeries.Min():F3}");
-        Console.WriteLine($"Max: {doubleSeries.Max():F3}");
+        Console.WriteLine($"Min: {doubleSeries.Values.Min():F3}");
+        Console.WriteLine($"Max: {doubleSeries.Values.Max():F3}");
         Console.WriteLine();
 
         // Test with null values
@@ -50,29 +52,10 @@ public static class AggregateExample
         var nullableSeries = new NivaraSeries<int>(column);
 
         Console.WriteLine($"Data: [1, null, 3, null, 5]");
-        Console.WriteLine($"Sum: {nullableSeries.Sum()} (ignores nulls)");
+        Console.WriteLine($"Sum: {nullableSeries.Values.Sum()} (ignores nulls)");
         Console.WriteLine($"Average: {nullableSeries.Average()} (ignores nulls)");
-        Console.WriteLine($"Min: {nullableSeries.Min()} (ignores nulls)");
-        Console.WriteLine($"Max: {nullableSeries.Max()} (ignores nulls)");
-        Console.WriteLine();
-
-        // Test with string data (non-numeric, should work for Min/Max)
-        Console.WriteLine("String Series (Comparison only):");
-        var stringData = new[] { "zebra", "apple", "banana", "cherry" };
-        var stringSeries = NivaraSeries<string>.Create(stringData);
-
-        Console.WriteLine($"Data: [{string.Join(", ", stringData)}]");
-        Console.WriteLine($"Min: {stringSeries.Min()} (lexicographic)");
-        Console.WriteLine($"Max: {stringSeries.Max()} (lexicographic)");
-
-        try
-        {
-            stringSeries.Sum();
-        }
-        catch (InvalidOperationException ex)
-        {
-            Console.WriteLine($"Sum: Not supported for strings - {ex.Message.Split('.')[0]}");
-        }
+        Console.WriteLine($"Min: {nullableSeries.Values.Min()} (ignores nulls)");
+        Console.WriteLine($"Max: {nullableSeries.Values.Max()} (ignores nulls)");
         Console.WriteLine();
 
         Console.WriteLine("=== Example Complete ===");

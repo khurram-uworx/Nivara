@@ -29,7 +29,7 @@ public static class XavierNormal
                 data[i] = T.CreateChecked(normal) * std;
             }
 
-            var column = NivaraColumn<T>.Create(data);
+            var column = NivaraColumn<T>.CreateFromOwnedArray(data);
             var newTensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, shape);
             parameters[kvp.Key] = newTensor;
         }

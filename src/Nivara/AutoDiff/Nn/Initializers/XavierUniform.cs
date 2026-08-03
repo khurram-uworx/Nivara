@@ -25,7 +25,7 @@ public static class XavierUniform
             for (int i = 0; i < n; i++)
                 data[i] = T.CreateChecked(random.NextDouble() * 2.0 - 1.0) * bound;
 
-            var column = NivaraColumn<T>.Create(data);
+            var column = NivaraColumn<T>.CreateFromOwnedArray(data);
             var newTensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, shape);
             parameters[kvp.Key] = newTensor;
         }

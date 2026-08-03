@@ -22,8 +22,8 @@ public static class ModelSerializer
         File.WriteAllText(path, StateDictToJson(model.StateDict()));
     }
 
-    const string ExpectedModelFormat = "nivara-ss-v1";
-    const string ExpectedCheckpointFormat = "nivara-ckpt-v1";
+    const string ExpectedModelFormat = "nivara-ss-v2";
+    const string ExpectedCheckpointFormat = "nivara-ckpt-v2";
 
     public static void Load<T>(Module<T> model, string path) where T : struct, IFloatingPointIeee754<T>
     {
@@ -103,15 +103,10 @@ public static class ModelSerializer
 
             var values = DeserializeBinary<T>(entry.Values, length);
 
-            var nullMask = entry.HasNulls && entry.NullMask != null
-                ? DeserializeBinary<bool>(entry.NullMask, length)
-                : null;
-
             parameters[name] = new ParameterData<T>
             {
                 Shape = entry.Shape,
-                Values = values,
-                NullMask = nullMask
+                Values = values
             };
         }
 
@@ -168,21 +163,10 @@ public static class ModelSerializer
             var values = new T[length];
             data.CopyTo(values, T.Zero);
 
-            bool hasNulls = data.HasNulls;
-            bool[]? nullMask = null;
-
-            if (hasNulls && data.TryGetNullMask(out var mask))
-            {
-                nullMask = new bool[length];
-                mask.CopyTo(nullMask);
-            }
-
             entries[name] = new ParameterEntry
             {
                 Shape = tensor.Shape,
-                Values = SerializeBinary(values),
-                HasNulls = hasNulls,
-                NullMask = nullMask != null ? SerializeBinary(nullMask) : null
+                Values = SerializeBinary(values)
             };
         }
 
@@ -197,11 +181,7 @@ public static class ModelSerializer
 
         int length = GetElementCount(entry.Shape);
         var values = DeserializeBinary<T>(entry.Values, length);
-        var column = entry.HasNulls && entry.NullMask != null
-            ? NivaraColumn<T>.CreateFromSpans(
-                values.AsSpan(0, length),
-                DeserializeBinary<bool>(entry.NullMask, length).AsSpan(0, length))
-            : NivaraColumn<T>.Create(values.AsSpan(0, length));
+        var column = NivaraColumn<T>.CreateFromOwnedArray(values);
 
         return new ReverseGradTensor<T>(column, requiresGrad, entry.Shape);
     }
@@ -229,12 +209,6 @@ public static class ModelSerializer
         return Convert.ToBase64String(bytes);
     }
 
-    static string SerializeBinary(bool[] data)
-    {
-        var bytes = MemoryMarshal.AsBytes(data.AsSpan());
-        return Convert.ToBase64String(bytes);
-    }
-
     static T[] DeserializeBinary<T>(string base64, int expectedLength) where T : struct
     {
         var bytes = Convert.FromBase64String(base64);
@@ -251,7 +225,7 @@ public static class ModelSerializer
 
     sealed class ModelFile
     {
-        public string Format { get; set; } = "nivara-ss-v1";
+        public string Format { get; set; } = "nivara-ss-v2";
         public string Type { get; set; } = "";
         public int Version { get; set; } = 1;
         public Dictionary<string, ParameterEntry> Parameters { get; set; } = new();
@@ -259,7 +233,7 @@ public static class ModelSerializer
 
     sealed class CheckpointFile
     {
-        public string Format { get; set; } = "nivara-ckpt-v1";
+        public string Format { get; set; } = "nivara-ckpt-v2";
         public string Type { get; set; } = "";
         public int Version { get; set; } = 1;
         public int Epoch { get; set; }
@@ -271,7 +245,5 @@ public static class ModelSerializer
     {
         public int[] Shape { get; set; } = [];
         public string Values { get; set; } = "";
-        public bool HasNulls { get; set; }
-        public string? NullMask { get; set; }
     }
 }

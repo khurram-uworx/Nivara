@@ -13,7 +13,6 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
 
     readonly List<T[]> expAvgBuffers = [];
     readonly List<T[]> expAvgSqBuffers = [];
-    readonly List<T[]> resultBuffers = [];
     int step;
 
     public AdamW(double beta1 = 0.9, double beta2 = 0.999, double eps = 1e-8)
@@ -30,7 +29,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
     }
 
     ReverseGradTensor<T> applyAdamW(
-        ReverseGradTensor<T> tensor, T[] expAvg, T[] expAvgSq, T[] resultBuf, T lr, T wd, T biasCorr1, T biasCorr2)
+        ReverseGradTensor<T> tensor, T[] expAvg, T[] expAvgSq, T lr, T wd, T biasCorr1, T biasCorr2)
     {
         var data = tensor.Data;
         var grad = tensor.Grad!;
@@ -41,19 +40,20 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
 
         data.TryGetSpan(out var dataSpan);
         grad.TryGetSpan(out var gradSpan);
+        var resultArr = new T[n];
 
         if (typeof(T) == typeof(float))
         {
             ApplyAdamW_Kernel_Float(
                 MemoryMarshal.Cast<T, float>(expAvg.AsSpan())[..n],
                 MemoryMarshal.Cast<T, float>(expAvgSq.AsSpan())[..n],
-                MemoryMarshal.Cast<T, float>(resultBuf.AsSpan())[..n],
+                MemoryMarshal.Cast<T, float>(resultArr.AsSpan())[..n],
                 MemoryMarshal.Cast<T, float>(dataSpan),
                 MemoryMarshal.Cast<T, float>(gradSpan),
                 n, (float)(object)lr!, (float)(object)wd!,
                 (float)(object)biasCorr1!, (float)(object)biasCorr2!,
                 (float)(object)beta1T!, (float)(object)beta2T!, (float)(object)epsT!);
-            return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf), requiresGrad: true, tensor.shape);
+            return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(resultArr), requiresGrad: true, tensor.shape);
         }
 
         if (typeof(T) == typeof(double))
@@ -61,13 +61,13 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
             ApplyAdamW_Kernel_Double(
                 MemoryMarshal.Cast<T, double>(expAvg.AsSpan())[..n],
                 MemoryMarshal.Cast<T, double>(expAvgSq.AsSpan())[..n],
-                MemoryMarshal.Cast<T, double>(resultBuf.AsSpan())[..n],
+                MemoryMarshal.Cast<T, double>(resultArr.AsSpan())[..n],
                 MemoryMarshal.Cast<T, double>(dataSpan),
                 MemoryMarshal.Cast<T, double>(gradSpan),
                 n, (double)(object)lr!, (double)(object)wd!,
                 (double)(object)biasCorr1!, (double)(object)biasCorr2!,
                 (double)(object)beta1T!, (double)(object)beta2T!, (double)(object)epsT!);
-            return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf), requiresGrad: true, tensor.shape);
+            return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(resultArr), requiresGrad: true, tensor.shape);
         }
 
         for (int i = 0; i < n; i++)
@@ -82,13 +82,13 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
             var vHat = expAvgSq[i] / biasCorr2;
             var denom = T.CreateChecked(Math.Sqrt(double.CreateChecked(vHat))) + epsT;
 
-            resultBuf[i] = dataSpan[i] - lr * mHat / denom;
+            resultArr[i] = dataSpan[i] - lr * mHat / denom;
 
             if (wd != T.Zero)
-                resultBuf[i] -= lr * wd * dataSpan[i];
+                resultArr[i] -= lr * wd * dataSpan[i];
         }
 
-        return new ReverseGradTensor<T>(NivaraColumn<T>.Create(resultBuf.AsSpan(0, n)), requiresGrad: true, tensor.shape);
+        return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(resultArr), requiresGrad: true, tensor.shape);
     }
 
     static void ApplyAdamW_Kernel_Float(
@@ -191,7 +191,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
                     continue;
 
                 EnsureBuffer(bufIdx, tensor.Length);
-                var newTensor = applyAdamW(tensor, expAvgBuffers[bufIdx], expAvgSqBuffers[bufIdx], resultBuffers[bufIdx], lr, wd, biasCorr1, biasCorr2);
+                var newTensor = applyAdamW(tensor, expAvgBuffers[bufIdx], expAvgSqBuffers[bufIdx], lr, wd, biasCorr1, biasCorr2);
                 param.Tensor = newTensor;
                 bufIdx++;
             }
@@ -209,8 +209,6 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
             var expAvgSq = ArrayPool<T>.Shared.Rent(size);
             expAvgSq.AsSpan(0, size).Clear();
             expAvgSqBuffers.Add(expAvgSq);
-
-            resultBuffers.Add(new T[size]);
         }
     }
 
@@ -223,6 +221,5 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
         }
         expAvgBuffers.Clear();
         expAvgSqBuffers.Clear();
-        resultBuffers.Clear();
     }
 }

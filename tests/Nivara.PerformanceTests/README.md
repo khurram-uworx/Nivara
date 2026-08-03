@@ -2,15 +2,17 @@
 
 Console benchmark harness for the **storage consolidation** (single
 `ColumnStorage<T>`) that ran as Task 7 of the storage plan (plan archived in
-git history). It is a plain stopwatch harness — no BDN dependency — so it runs
-portably anywhere `dotnet` is available.
+git history). It doubles as the perf gate for the AutoDiff refactor (span-based
+`GradKernels`, inference-default `GradientUtils.Grad()`). It is a plain
+stopwatch harness — no BDN dependency — so it runs portably anywhere `dotnet`
+is available.
 
 ## Scenarios
 
 | Scenario | What it measures |
 |---|---|
 | `ColumnAdd 1M x float` | `NivaraColumn<float>.Add(NivaraColumn<float>)` — the columnar binary-op path |
-| `ColumnSigmoid 1M x float` | `NivaraColumn<float>.Sigmoid()` extension |
+| `ColumnSigmoid 1M x float` | Raw kernel — `TensorPrimitives.Sigmoid` over a pre-allocated 1M destination (the `NivaraColumn<float>.Sigmoid()` extension was removed in Task 8 of the refactor) |
 | `Linear forward [32x256] -> [32x256]` | `Linear<float>` inference forward (no `Grad()` scope) |
 | `Linear forward+backward [32x256]` | `Linear<float>` forward + `Backward` inside `GradientUtils.Grad()` |
 | `TransformerBlock forward [32x64, 4 heads]` | `TransformerBlock<float>` inference forward |
@@ -38,7 +40,8 @@ tests/Nivara.PerformanceTests/bin/Release/net10.0/Nivara.PerformanceTests.exe
 ### Baseline policy (do not re-litigate)
 
 - The **Results** table below is the canonical baseline (**point A**) for
-  future A/B comparisons — recorded 2026-08-03 against the then-current HEAD.
+  future A/B comparisons — last recorded 2026-08-04 against the then-current
+  HEAD.
 - **Never rebuild past commits to re-derive point A.** The previous A/B table
   (built in a git worktree at `549c6cc`) is superseded; its findings still
   hold (the ColumnAdd branch-removal win and the AutoDiff allocation
@@ -50,28 +53,37 @@ tests/Nivara.PerformanceTests/bin/Release/net10.0/Nivara.PerformanceTests.exe
 
 ## Results
 
-**Baseline (point A)** recorded **2026-08-03** on the then-current HEAD
-(post-storage-consolidation single `ColumnStorage<T>`). Supersedes the earlier
-pre-consolidation A/B table (see "Baseline policy" above).
+**Baseline (point A)** recorded **2026-08-04** on the then-current HEAD (after
+the AutoDiff refactor: `GradKernels` span kernels, inference-default
+`GradientUtils.Grad()`, optimizer zero-copy column wraps, and the Task 8
+`NivaraTensorExtensions` strip). Supersedes the 2026-08-03 point A that was
+recorded after storage consolidation; the numbers below are the canonical
+reference going forward.
 
-Machine: 16 logical processors, x64, .NET 10.0.x (Release). Medians of 6 runs.
+Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 6 runs.
 
 | Scenario | ops/s | B/op | gen0/op |
 |---|---|---|---|
-| ColumnAdd 1M x float | 872 | 4,000,537 | 0.33 |
-| ColumnSigmoid 1M x float | 182 | 8,000,840 | 0.66 |
-| Linear forward [32x256] | 441 | 69,247 | 0.00 |
-| Linear forward+backward [32x256] | 94 | 1,787,949 | 0.50 |
-| TransformerBlock forward [32x64, 4 heads] | 148 | 191,486 | 0.02 |
+| ColumnAdd 1M x float | 1,755 | 4,000,537 | 0.33 |
+| ColumnSigmoid 1M x float | 642 | 0 | 0.00 |
+| Linear forward [32x256] | 427 | 69,944 | 0.00 |
+| Linear forward+backward [32x256] | 166 | 1,787,036 | 0.45 |
+| TransformerBlock forward [32x64, 4 heads] | 137 | 196,118 | 0.03 |
 
 ### Notes
 
-- **ColumnSigmoid gen0/op is high relative to its allocation profile.** The
-  ~8 MB/op is dominated by a single ~4 MB result array (>85 KB, so LOH, not
-  gen0); gen0/op counts how often the *small-object* gen0 budget is hit in the
-  measured window. B/op and throughput are stable across runs; treat gen0/op as
-  a GC-scheduling-sensitive signal, not an allocation-volume metric. Tracked as
-  issue #109 (conclusion: no regression, metric is not allocation-proportional).
-- **ColumnAdd dominates the table** because the single-`ColumnStorage<T>`
+- **ColumnSigmoid is not comparable to the 2026-08-03 point A.** Task 8
+  stripped the `NivaraColumn<float>.Sigmoid()` extension, so the scenario now
+  measures the raw kernel with the destination array allocated up front —
+  B/op is 0 and gen0/op is 0 by construction. The old ~8 MB/op / 0.66 gen0
+  signal (issue #109) is obsolete; the conclusion from that issue (gen0/op is
+  GC-scheduling-sensitive, not allocation-proportional) still holds.
+- **ColumnAdd still dominates the table.** The single-`ColumnStorage<T>`
   layout removed the pre-consolidation pooled-copy branch from
   `applyElementwiseBinary` — that win is the reason this harness exists.
+  Throughput reads ~1,755 ops/s now (vs 872 at the 2026-08-03 point A) with the
+  same 4 MB/op allocation profile.
+- **Linear forward+backward** allocates ~0.9 KB less per op than at point A
+  (1,787,036 vs 1,787,949 B/op) and runs at ~1.8× the ops/s, consistent with
+  the refactor's span-kernel and zero-copy column-wrap work. **TransformerBlock**
+  is within the documented ±10% run-to-run variance of point A.
