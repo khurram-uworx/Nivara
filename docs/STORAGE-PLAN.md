@@ -401,22 +401,23 @@ Make `NEXT-REFACTORING.md` consume this plan and fix stale ADR-001 storage names
   a pointer to `STORAGE-PLAN.md` plus a 3–5 line summary of the change.
 - "What moves where" rows for `ColumnStorageFactory`/`TensorStorage<T>`
   (lines 269–270): factory = simplify (not "add nullable dispatch"); drop the
-  `NullableTensorStorage` row.
-- §7 manifest (lines 681–764): remove `NullableTensorStorage.cs` new-file row;
+  obsolete nullable-storage row.
+- §7 manifest (lines 681–764): remove the obsolete nullable-storage new-file row;
   change `TensorStorage.cs` "rewritten" → deleted; add `ColumnStorage.cs`
   (rename from `MemoryStorage.cs`); fix line-count deltas table.
-- §8 risks #1–3 (lines 770–782): reword — no `NullableTensorStorage`; risk #1
-  (`Tensor.TryGetSpan` contiguity) still applies to the lazy `AsTensor()` view;
-  nullable path = `data[]` + `mask[]` in the same storage.
-- §9 sequence steps 1–4 (lines 823–827): replace `NullableTensorStorage` /
-  `TensorStorage clean` with the consolidation tasks, keeping the VALIDATE gate.
+- §8 risks #1–3 (lines 770–782): reword — no separate nullable storage class;
+  risk #1 (`Tensor.TryGetSpan` contiguity) still applies to the lazy
+  `AsTensor()` view; nullable path = `data[]` + `mask[]` in the same storage.
+- §9 sequence steps 1–4 (lines 823–827): replace the obsolete storage-class
+  steps / `TensorStorage clean` with the consolidation tasks, keeping the
+  VALIDATE gate.
 - ADR-001 (`docs/adr/001-autodiff-nonnullable-domain.md`): update the
   storage-layer names (`NivaraColumn`, `TensorStorage`, `MemoryStorage`) to
   `ColumnStorage<T>`; note enforcement is a runtime throw at `FromColumn`.
 
 ### Acceptance criteria
 
-- `rg -n "NullableTensorStorage" docs/` returns no hits.
+- No docs/ file references the obsolete nullable-storage class by name; `rg` over `docs/` finds nothing.
 - `rg -n "TensorStorage|MemoryStorage" docs/NEXT-REFACTORING.md docs/adr/001*` returns only intended historical/adjusted references.
 - Both docs reference `STORAGE-PLAN.md` by relative link.
 

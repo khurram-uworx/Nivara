@@ -56,9 +56,10 @@ when revising the implementation approach:
   "type is SIMD-accelerated."
 - AutoDiff may not need a full raw-`Tensor<T>` rewrite to use
   `TensorPrimitives` well. The current common path already creates
-  `NivaraColumn<T>` values through `ColumnStorageFactory`, which selects
-  `TensorStorage<T>` for supported unmanaged numeric types, and many AutoDiff
-  paths already call `TryGetSpan(...)` before using `TensorPrimitives`.
+  `NivaraColumn<T>` values through `ColumnStorageFactory`, which builds the
+  single `ColumnStorage<T>` for every type (see `docs/STORAGE-PLAN.md`), and
+  many AutoDiff paths already call `TryGetSpan(...)` before using
+  `TensorPrimitives`.
 - The stronger requirement is that AutoDiff declare its boundary explicitly:
   tensors entering AutoDiff should be dense, non-null, numeric, and
   span-capable/tensor-backed for the operations being performed.
@@ -194,10 +195,10 @@ storage engine should consume as much platform sugar as possible.
 **Nullable vs non-nullable columns**: The storage layer is a **single**
 `ColumnStorage<T>` — a sole-owner `T[]` plus an optional `bool[]` null mask
 (`null` ⇒ non-nullable). Vectorization is decided at runtime per-op by
-`KernelSelector`, not by a storage class. The earlier two-storage design
-(`TensorStorage<T>` / `NullableTensorStorage<T>`) is superseded by
-`docs/STORAGE-PLAN.md`. Users clean their nullable data (`DropNulls`,
-`FillNull`) at the AutoDiff boundary before entering the graph (ADR-001).
+`KernelSelector`, not by a storage class. The earlier two-storage design is
+superseded by `docs/STORAGE-PLAN.md`. Users clean their nullable data
+(`DropNulls`, `FillNull`) at the AutoDiff boundary before entering the graph
+(ADR-001).
 
 **NivaraSeries**: Kept as a labeled-column-wrapper. All tensor math
 (`Sum`, `Mean`, `AddTensor`, etc.) removed from it. Revisit after the
@@ -275,9 +276,9 @@ columnar engine (null-aware, type-safe, DataFrame) and the autograd engine
 ## 1. Column storage: nullable vs non-nullable
 
 **Superseded by [`docs/STORAGE-PLAN.md`](STORAGE-PLAN.md).** The two-storage
-split (`TensorStorage<T>` non-nullable / `NullableTensorStorage<T>` nullable)
-described below is **obsolete**. The storage layer is consolidated into a single
-`ColumnStorage<T>` (replaces `MemoryStorage<T>`; deletes `TensorStorage<T>`).
+split (tensor-backed vs memory-backed storages) described below is
+**obsolete**. The storage layer is consolidated into a single `ColumnStorage<T>`
+(replaces `MemoryStorage<T>`; deletes `TensorStorage<T>`).
 
 Summary of the change (details and tasks in `docs/STORAGE-PLAN.md`):
 
@@ -686,10 +687,10 @@ public static class FrameTensorOperations
 | GradOperations: ~1221 | ~600 | -621 |
 | ForwardGradOperations: ~990 | ~500 | -490 |
 | TensorStorage: ~288 | deleted | -288 |
-| MemoryStorage: ~226 | ColumnStorage: ~250 (rename + `AsTensor()`) | +24 |
+| MemoryStorage: ~226 | ColumnStorage: ~294 (rename + `AsTensor()`) | +68 |
 | GradKernels: 0 | ~400 | +400 |
-| ColumnStorageFactory: ~301 | ~60 | -241 |
-| **Net** | | **~-2016 lines** |
+| ColumnStorageFactory: ~301 | ~108 | -193 |
+| **Net** | | **~-1924 lines** |
 
 ## 8. Risk and testing strategy
 
