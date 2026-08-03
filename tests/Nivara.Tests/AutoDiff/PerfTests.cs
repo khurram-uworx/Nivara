@@ -36,12 +36,12 @@ public class PerfTests
         for (int i = 0; i < size; i++)
             data[i] = (float)(rng.NextDouble() * 4 - 2);
 
-        var column = NivaraColumn<float>.Create(data);
+        var output = new float[data.Length];
 
-        column.Gelu();
-        column.Relu();
-        var geluTime = MeasureBestOfFiveMs(() => column.Gelu());
-        var reluTime = MeasureBestOfFiveMs(() => column.Relu());
+        GradKernels.Gelu<float>(data, output);
+        GradKernels.Relu<float>(data, output);
+        var geluTime = MeasureBestOfFiveMs(() => GradKernels.Gelu<float>(data, output));
+        var reluTime = MeasureBestOfFiveMs(() => GradKernels.Relu<float>(data, output));
 
         double geluPerSec = size / (geluTime / 1000.0);
         double reluPerSec = size / (reluTime / 1000.0);

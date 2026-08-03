@@ -24,6 +24,15 @@ static class NumericTensorKernels<T>
     public static void Add(ReadOnlySpan<T> x, T y, Span<T> destination)
         => TensorPrimitives.Add(x, y, destination);
 
+    public static void Subtract(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+        => TensorPrimitives.Subtract(x, y, destination);
+
+    public static void Divide(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+        => TensorPrimitives.Divide(x, y, destination);
+
+    public static void Divide(ReadOnlySpan<T> x, T y, Span<T> destination)
+        => TensorPrimitives.Divide(x, y, destination);
+
     public static void Multiply(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
         => TensorPrimitives.Multiply(x, y, destination);
 

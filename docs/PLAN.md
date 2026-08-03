@@ -590,6 +590,24 @@ claim is confirmed except for a handful of tests/samples that must be redirected
 - Build is green across src, samples, tests.
 - Grep confirms zero remaining call sites for the deleted methods.
 
+**Status: COMPLETE** — `NivaraTensorExtensions.cs` stripped to the four
+reductions; activations/gradients/MatMul/Transpose/GELU family/obsolete Series
+methods/`MatrixMultiply` deleted. `Subtract`/`Divide` promoted from extensions
+to first-class `NivaraColumn<T>` members (with `NumericTensorKernels`
+`TensorPrimitives` overloads) to keep `ExpressionEvaluator` and
+`ReverseGradOperations.Mean` working. Test callers redirected: `PerfTests`
+Gelu/Relu throughput → `GradKernels`; `PerformanceTests` ColumnSigmoid →
+`TensorPrimitives.Sigmoid`; obsolete-method tests removed from
+`NivaraSeriesIsValidTests`; Gelu null-propagation test + unused
+`GeluTanhApprox` removed from `NullHandlingPropertyTests`;
+`NivaraTensorExtensionsGeluTests.cs` deleted. `GradKernelsTests` rewritten to
+known-value kernel tests (local Abramowitz–Stegun `Erf` helper — `Math.Erf` is
+not available in this runtime). Plan's `Program.cs:130`/`TimeSeriesModel.cs`
+redirects confirmed stale — no callers found there. Full AutoDiff suite 746/746
+passing; Serialization/SeriesIsValid/NullHandling suites 33/33 passing; solution
++ all 11 samples build green. Gate C (Tasks 8–10) partially satisfied (Task 8
+done; Tasks 9–10 pending).
+
 **Files likely involved:**
 - `src/Nivara/Tensors/NivaraTensorExtensions.cs`
 - `src/Nivara/Tensors/TensorsHelper.cs` (check for duplication)
