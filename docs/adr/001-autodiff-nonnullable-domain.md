@@ -14,7 +14,7 @@ The AutoDiff subsystem (`src/Nivara/AutoDiff/`) has pervasive null-handling code
 - `IsNull(index)` checks in backward loops
 - Conditional `CreateFromSpans` vs `Create` based on null presence
 
-This adds ~40% code volume to every operation and creates two execution paths that must be tested and maintained. The null handling belongs to the **storage layer** (`NivaraColumn`, `TensorStorage`, `MemoryStorage`), not to the mathematical computation graph.
+This adds ~40% code volume to every operation and creates two execution paths that must be tested and maintained. The null handling belongs to the **storage layer** (`NivaraColumn`, `ColumnStorage`), not to the mathematical computation graph.
 
 ## Decision
 
@@ -40,7 +40,7 @@ This adds ~40% code volume to every operation and creates two execution paths th
 
 - `NivaraColumn<T>` storage layer — null masks remain for SQL-like semantics in the DataFrame/Frame API.
 - `IColumn.IsNull(index)` — external consumers may still query nullability.
-- `TensorStorage` / `MemoryStorage` — null masks are a storage concern.
+- `ColumnStorage<T>` — null masks are a storage concern (optional `bool[]` on the single storage class).
 
 ## Consequences
 
@@ -50,7 +50,7 @@ This adds ~40% code volume to every operation and creates two execution paths th
 - Easier to add new operations (write one path, not two)
 - Faster execution (no per-element null checks in hot backward loops)
 - `AccumulateGradient` becomes a simple `TensorPrimitives.Add` + overwrite
-- **SIMD/Tensor-ready by default:** null-free data means `TryGetSpan(out var span)` always succeeds, `TensorStorage` always backs the column, and every operation can use `TensorPrimitives` / `Vector<T>` / `Span<T>` fast paths without fallback branches. The null-checking overhead eliminated is not just branch prediction — it's the *entire scalar fallback path* that can now be deleted.
+- **SIMD/Tensor-ready by default:** null-free data means `TryGetSpan(out var span)` always succeeds, `ColumnStorage<T>` backs the column with a zero-copy span (and a lazy `AsTensor()` view for unmanaged `T`), and every operation can use `TensorPrimitives` / `Vector<T>` / `Span<T>` fast paths without fallback branches. The null-checking overhead eliminated is not just branch prediction — it's the *entire scalar fallback path* that can now be deleted.
 
 **Negative:**
 - Callers must strip nulls before entering AutoDiff (one-time cost at boundary)
@@ -60,3 +60,15 @@ This adds ~40% code volume to every operation and creates two execution paths th
 - New operations: follow the non-nullable contract from the start
 - Existing operations: remove null paths opportunistically (high-traffic ops first: MatMul, Softmax, Concat, Gather, Slice, Add, Multiply)
 - No API break — `NivaraColumn` stays nullable; only the internal AutoDiff path changes
+
+## Amendment (2026-08-03): single-storage + runtime boundary
+
+- The storage layer is consolidated into a single `ColumnStorage<T>`
+  (sole-owner `T[]` + optional `bool[]` mask), replacing the two-storage split
+  (`TensorStorage` / `MemoryStorage`). See `docs/STORAGE-PLAN.md`.
+- Boundary enforcement is upgraded from a debug-only `Debug.Assert` to a
+  **runtime throw** (`AutoGradException`/`InvalidOperationException` containing
+  "ADR-001") in `FromColumn`/`FromSeries`/`FromArray`/`FromMatrix` when the
+  input column `HasNulls`. Callers must `DropNulls()`/`FillNull` first.
+- The enter path uses `ColumnStorage<T>.AsTensor()` for a zero-copy view into
+  the non-nullable tensor; no flatten-copy at the boundary.
