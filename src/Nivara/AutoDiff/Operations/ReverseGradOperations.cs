@@ -2352,13 +2352,12 @@ public static class ReverseGradOperations
     }
 
     /// <summary>
-    /// Gets the underlying data span. ADR-001 guarantees no nulls in AutoDiff,
-    /// so TryGetSpan always succeeds.
+    /// Gets the underlying data span. Delegates to <see cref="GradTensor{T}.AsSpan"/>,
+    /// which enforces the ADR-001 non-nullable boundary.
     /// </summary>
     internal static ReadOnlySpan<T> AsSpan<T>(this ReverseGradTensor<T> t) where T : struct, IFloatingPointIeee754<T>
     {
-        t.Data.TryGetSpan(out var span);
-        return span;
+        return t.AsSpan();
     }
 
     /// <summary>

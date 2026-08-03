@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Exceptions;
 using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -158,6 +159,20 @@ public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754
     }
 
     /// <summary>
+    /// Gets a read-only span over the tensor data.
+    /// The AutoDiff domain is non-nullable (ADR-001), so the backing column
+    /// always exposes a contiguous span; a failure to do so is a boundary
+    /// violation and throws.
+    /// </summary>
+    internal ReadOnlySpan<T> AsSpan()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        if (!Data.TryGetSpan(out var span))
+            throw new AutoGradException(Adr001Message);
+        return span;
+    }
+
+    /// <summary>
     /// Gets the element at the specified index
     /// </summary>
     /// <param name="index">The zero-based index</param>
@@ -170,18 +185,6 @@ public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754
             ObjectDisposedException.ThrowIf(disposed, this);
             return Data[index];
         }
-    }
-
-    /// <summary>
-    /// Determines whether the element at the specified index is null
-    /// </summary>
-    /// <param name="index">The zero-based index to check</param>
-    /// <returns>true if the element is null; otherwise, false</returns>
-    /// <exception cref="IndexOutOfRangeException">Thrown when index is out of bounds</exception>
-    public bool IsNull(int index)
-    {
-        ObjectDisposedException.ThrowIf(disposed, this);
-        return Data.IsNull(index);
     }
 
     /// <summary>
