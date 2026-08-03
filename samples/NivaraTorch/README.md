@@ -147,6 +147,11 @@ The test:
 
 #### Results
 
+Re-verified **2026-08-04** after the AutoDiff refactor (span-based
+`GradKernels`, inference-default `GradientUtils.Grad()`, optimizer zero-copy
+column wraps): the loss curves, prediction agreement, and weight-divergence
+figures below are unchanged within rounding.
+
 ##### Loss curves — near-identical (max diff 0.04%)
 
 | Epoch | PyTorch | Nivara | Relative diff |
@@ -251,7 +256,8 @@ The test:
 
 #### Results
 
-All 6 JVP test cases pass:
+All 6 JVP test cases pass (re-verified **2026-08-04** after the AutoDiff
+refactor — values unchanged):
 
 | Case | Status | Primal | JVP |
 |------|--------|--------|-----|

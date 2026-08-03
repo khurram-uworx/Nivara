@@ -217,17 +217,17 @@ The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the
 
 ## Performance benchmarks
 
-Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode. PyTorch uses MKL-optimized kernels. Both use batch size 1 with 3-pass warmup + 10 timed passes. Numbers vary with machine load; the table below was captured in a single session.
+Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode. PyTorch uses MKL-optimized kernels. Both use batch size 1 with 3-pass warmup + 10 timed passes. Numbers vary with machine load; the Nivara column below was re-measured **2026-08-04** after the AutoDiff refactor (span-based `GradKernels`, inference-default `GradientUtils.Grad()`), and the PyTorch text-model figures were re-confirmed in the same session.
 
 | Model | Input | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |-------|-------|---------------|-------------------|----------|
-| **MobileNetV2** | 1×3×224×224 | 115 ms | 2,254 ms | **~20×** |
-| **ResNet-18** | 1×3×224×224 | 68 ms | 641 ms | **~9×** |
-| **MiniLM-L6** | 128 tokens | 11 ms | 110 ms | **~10×** |
-| **DistilBERT** | 128 tokens | 31 ms | 186 ms | **~6×** |
-| **DistilBERT SST-2** | 128 tokens | 31 ms | 232 ms | **~8×** |
+| **MobileNetV2** | 1×3×224×224 | 115 ms | 563 ms | **~5×** |
+| **ResNet-18** | 1×3×224×224 | 68 ms | 263 ms | **~4×** |
+| **MiniLM-L6** | 128 tokens | 11 ms | 73 ms | **~7×** |
+| **DistilBERT** | 128 tokens | 31 ms | 164 ms | **~5×** |
+| **DistilBERT SST-2** | 128 tokens | 31 ms | 187 ms | **~6×** |
 
-AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The vision model gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops. ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, cutting DistilBERT encoder inference from ~236 ms to ~186 ms.
+AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The AutoDiff refactor cut the gap substantially: vision inference dropped ~4× (MobileNetV2 from ~2,254 ms to ~563 ms, ResNet-18 from ~641 ms to ~263 ms) and transformers ran faster still (MiniLM ~110 → ~73 ms, DistilBERT ~186 → ~164 ms, SST-2 ~232 → ~187 ms). The vision gap is now dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops — ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, keeping DistilBERT encoder inference at ~164 ms.
 
 ## Sample data
 
