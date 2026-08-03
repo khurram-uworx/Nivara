@@ -772,6 +772,20 @@ AutoDiff tests and samples.
   the long test command per AGENTS.md).
 - Inference-graph regression tests (`InferenceGraphTests.cs`) stay green.
 
+**Status: COMPLETE** — adaptation landed incrementally across Tasks 2–11; the
+suite was kept green at each validation point. All enumerated test classes
+(`GradOperationsTests`, `ForwardGradOperationsTests`, `BackwardPassTests`,
+`NnTests`, `LossTests`, `ForwardParityTests`, `TypeSafetyTests`,
+`NivaraIntegrationTests`, `SerializationTests`, `GradientUtilsTests`) compile
+against the new kernels/surfaces and pass. `NivaraSeriesIsValidTests.cs` retains
+only `IsValid`/`IsNull` tests — the obsolete-method tests were already deleted.
+All 11 samples compile 0 warnings; training samples wrap forward/loss/backward
+in `using (GradientUtils.Grad())` and `NivaraInference` is inference-only. The
+only NUnit test project in the solution is `Nivara.Tests`
+(`Nivara.PerformanceTests` is a console benchmark harness), so the full suite is
+`Nivara.Tests` at 2116/2116; the Task 12 enumerated classes +
+`InferenceGraphTests` re-verified 520/520. No code changes were required.
+
 **Files likely involved:**
 - `tests/Nivara.Tests/AutoDiff/*`
 - `samples/*` (as enumerated)
