@@ -29,7 +29,7 @@ public sealed class NormalInitializer<T> : IInitializer<T> where T : struct, IFl
             data[i] = T.CreateChecked(normal) * std + mean;
         }
 
-        var column = NivaraColumn<T>.Create(data);
+        var column = NivaraColumn<T>.CreateFromOwnedArray(data);
         parameter.Tensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, tensor.Shape);
     }
 }

@@ -724,6 +724,21 @@ Grep confirms zero remaining frame-method call sites; all remaining
 **Acceptance criteria:**
 - Training tests and sample apps compile and behave unchanged.
 
+**Status: COMPLETE** — all 13 initializer implementations (6 static `Init<T>`
+plus `KaimingUniformInitializer`, `KaimingNormalInitializer`,
+`XavierUniformInitializer`, `XavierNormalInitializer`, `UniformInitializer`,
+`NormalInitializer`, `PyTorchDefaultInitializer`) now wrap freshly allocated
+weight arrays with `NivaraColumn<T>.CreateFromOwnedArray` (zero-copy) instead of
+copying through `NivaraColumn<T>.Create(data)`. `TensorDataset<T>.BuildTensor`
+slices column spans via `TryGetSpan` (columns looped outer, batch inner into the
+row-major buffer) and throws `AutoGradException` (ADR-001) up front when any
+source column `HasNulls`, removing the dead null-mask/`CreateFromSpans` path
+that previously always threw at the `ReverseGradTensor` constructor.
+`NivaraAutoGradExtensions` required no adaptation — it already routes through
+`FromColumn`/`FromSeries` against the current surface. Verified: solution + 11
+samples build 0 warnings; `NnTests`/`TrainingTests`/`DataParallelTests` 246/246;
+full suite 2116/2116.
+
 **Files likely involved:**
 - `src/Nivara/AutoDiff/Nn/Initializers/*.cs`
 - `src/Nivara/AutoDiff/Training/TensorDataset.cs`

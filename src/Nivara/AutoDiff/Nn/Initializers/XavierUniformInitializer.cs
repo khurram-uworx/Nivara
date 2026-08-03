@@ -22,7 +22,7 @@ public sealed class XavierUniformInitializer<T> : IInitializer<T> where T : stru
         for (int i = 0; i < n; i++)
             data[i] = T.CreateChecked(random.NextDouble() * 2.0 - 1.0) * bound;
 
-        var column = NivaraColumn<T>.Create(data);
+        var column = NivaraColumn<T>.CreateFromOwnedArray(data);
         parameter.Tensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, shape);
     }
 }

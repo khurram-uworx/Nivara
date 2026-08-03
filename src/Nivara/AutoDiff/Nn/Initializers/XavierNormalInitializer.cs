@@ -26,7 +26,7 @@ public sealed class XavierNormalInitializer<T> : IInitializer<T> where T : struc
             data[i] = T.CreateChecked(normal) * std;
         }
 
-        var column = NivaraColumn<T>.Create(data);
+        var column = NivaraColumn<T>.CreateFromOwnedArray(data);
         parameter.Tensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, shape);
     }
 }

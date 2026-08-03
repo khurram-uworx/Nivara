@@ -22,7 +22,7 @@ public static class Uniform
             for (int i = 0; i < n; i++)
                 data[i] = T.CreateChecked(random.NextDouble()) * range + lo;
 
-            var column = NivaraColumn<T>.Create(data);
+            var column = NivaraColumn<T>.CreateFromOwnedArray(data);
             var newTensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, tensor.Shape);
             parameters[kvp.Key] = newTensor;
         }

@@ -25,7 +25,7 @@ public static class Normal
                 data[i] = T.CreateChecked(normal) * sigma + mu;
             }
 
-            var column = NivaraColumn<T>.Create(data);
+            var column = NivaraColumn<T>.CreateFromOwnedArray(data);
             var newTensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, tensor.Shape);
             parameters[kvp.Key] = newTensor;
         }
