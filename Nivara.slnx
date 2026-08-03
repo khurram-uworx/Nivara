@@ -31,6 +31,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Nivara.Tests/Nivara.Tests.csproj" />
+    <Project Path="tests/Nivara.PerformanceTests/Nivara.PerformanceTests.csproj" />
   </Folder>
   <Project Path="src/Nivara.Extensions/Nivara.Extensions.csproj" />
   <Project Path="src/Nivara/Nivara.csproj" />
