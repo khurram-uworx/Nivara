@@ -5,7 +5,7 @@
 
 ## Context
 
-`docs/NEXT-REFACTORING.md` (§2) originally proposed replacing
+The original refactoring discussion plan (§2) proposed replacing
 `GradTensor<T>.Data` (`NivaraColumn<T>`) with raw `Tensor<T>` storage from
 System.Numerics.Tensors, and rewiring every op, module, optimizer, and
 serializer onto `Tensor<T>`. Later, the plan's own "Observations" section

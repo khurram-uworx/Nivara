@@ -364,8 +364,8 @@ References (implementations to inspect)
 
 ## Active AutoDiff Direction
 
-The large architectural cleanup in `docs/NEXT-REFACTORING.md` is **not** active
-for the current implementation work unless explicitly requested.
+The AutoDiff refactor (see ADR-001/ADR-002 and the CHANGELOG for the executed
+plan) is **complete** — the implementation follows the direction below.
 
 Current product direction:
 
