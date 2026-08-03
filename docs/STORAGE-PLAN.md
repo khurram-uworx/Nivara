@@ -467,45 +467,13 @@ wrapper + flattened cache per column). Measure before claiming.
 
 ### Results
 
-Benchmark harness: `tests/Nivara.PerformanceTests` (console stopwatch harness, no
-GC forcing, steady-state warmup). AFTER = post-consolidation HEAD; BEFORE = same
-harness built in a git worktree at `549c6cc` (pre-consolidation
-`TensorStorage`/`MemoryStorage` split). Values are medians of 3 Release runs each,
-identical `Program.cs`, same machine (16 logical processors, .NET 10.0.9).
+The before/after benchmark results and documented findings were captured in
+`tests/Nivara.PerformanceTests/README.md` (the canonical home for this data).
 
-| Scenario | BEFORE ops/s | AFTER ops/s | Δ | BEFORE B/op | AFTER B/op | Δ B/op |
-|---|---|---|---|---|---|---|
-| ColumnAdd 1M x float | 67 | 669 | **+10.0x** | 4,000,771 | 4,000,586 | ~0% |
-| ColumnSigmoid 1M x float | 181 | 164 | −9% (noise) | 8,000,579 | 8,000,795 | ~0% |
-| Linear forward [32x256] | 359 | 388 | +8% (noise) | 103,763 | 69,169 | −33% |
-| Linear forward+backward [32x256] | 77 | 89 | +16% | 2,904,207 | 1,787,573 | −38% |
-| TransformerBlock forward [32x64, 4 heads] | 118 | 118 | ~0% | 330,043 | 191,545 | **−42%** |
-
-Documented findings:
-
-- **Columnar-op branch removal (ColumnAdd +10x).** The pre-consolidation
-  `applyElementwiseBinary` had a "tensor-backed or mixed storage" branch that
-  materialized *both* operands into `ArrayPool` buffers element-by-element on
-  every op before running the kernel. `Create` routed `float` columns to
-  `TensorStorage<T>`, so `Add` always hit that path. The single
-  `ColumnStorage<T>` layout removes the branch entirely — both operands are
-  already plain arrays and the direct-span kernel runs with no per-op
-  materialization. This is exactly the branch-removal win the plan predicted.
-- **Entry zero-copy.** `FromColumn`/tensor-from-column wrappers were already
-  wrapper-only pre-consolidation; the flattened-copy elimination lands in
-  `FromArray`/`FromMatrix` (`CreateFromOwnedArray`) and in `AsTensor()` no longer
-  producing a per-column `Tensor<T>` + flattened cache. That is reflected in the
-  AutoDiff allocation reduction below rather than a dedicated micro-benchmark.
-- **AutoDiff indirect gains (allocations −33%/−38%/−42% on Linear/backward/
-  TransformerBlock).** With no per-column `Tensor<T>` wrapper + flattened cache,
-  and the pooled-copy branches gone from the ops AutoDiff calls, the graph ops
-  allocate markedly less. Throughput for these SIMD-dominated paths is within
-  run-to-run noise; the structural win is allocation pressure.
-- **ColumnSigmoid flat (within noise).** The `Sigmoid` extension runs the same
-  `TensorsHelper.Sigmoid` span kernel pre/post; it never hit the removed
-  pooled-copy branch, so throughput is unchanged. gen0/op rose (0.35 → 0.63)
-  with identical B/op, consistent with unchanged allocation volume on a different
-  GC segment layout; filed as a low-priority follow-up.
+Highlights (median of 3 Release runs each, baseline = git worktree at `549c6cc`,
+same harness/machine): ColumnAdd +10.0x (columnar-op branch removal), AutoDiff
+allocations −33%/−38%/−42% (Linear forward, forward+backward, TransformerBlock),
+ColumnSigmoid flat within noise (issue #109).
 
 ### Files likely involved
 

@@ -194,6 +194,23 @@ Tensor<float> tensor =
 
 and stop there.
 
+### The zero-copy `AsTensor()` surface
+
+The one tensor interop surface core Nivara exposes is a **lazy zero-copy
+`Tensor<T>` view**: internal `ColumnStorage<T>.AsTensor()` wraps the storage's
+sole-owner `T[]` with `Tensor.Create(data, [length])` — no copy, no flattened
+cache (unmanaged `T` only; `Half`/`BFloat16` pass, reference types throw).
+`NivaraColumn<T>.AsTensorView()` is the guarded internal entry, and
+`GradTensor<T>.AsTensor()` is the public AutoDiff accessor. This is the
+intended way to hand a dense, non-null, contiguous column to
+`System.Numerics.Tensors` consumers. Reserve `Tensor.FlattenTo` for
+non-contiguous/multi-dim tensors — a contiguous column already *is* its
+`Tensor<T>`.
+
+Columns otherwise interop with BCL tensors element-wise via
+`TensorInteropExtensions` (`Series`/`Frame` ↔ `Tensor<T>`), never by pretending
+columnar ops are tensor ops.
+
 No custom tensor ecosystem.
 
 No tensor operators.

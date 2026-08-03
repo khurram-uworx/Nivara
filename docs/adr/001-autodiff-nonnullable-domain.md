@@ -65,7 +65,8 @@ This adds ~40% code volume to every operation and creates two execution paths th
 
 - The storage layer is consolidated into a single `ColumnStorage<T>`
   (sole-owner `T[]` + optional `bool[]` mask), replacing the two-storage split
-  (`TensorStorage` / `MemoryStorage`). See `docs/STORAGE-PLAN.md`.
+  (`TensorStorage` / `MemoryStorage`). Rationale is recorded in `CHANGELOG.md`
+  (Unreleased → Storage Consolidation).
 - Boundary enforcement is upgraded from a debug-only `Debug.Assert` to a
   **runtime throw** (`AutoGradException` containing "ADR-001") in the
   `ReverseGradTensor`/`ForwardGradTensor` constructors, which covers the
