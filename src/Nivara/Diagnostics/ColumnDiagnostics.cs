@@ -11,19 +11,16 @@ public sealed class ColumnDiagnostics
     /// <summary>
     /// Initializes a new instance of ColumnDiagnostics
     /// </summary>
-    /// <param name="storageType">The type of storage being used</param>
     /// <param name="isVectorizable">Whether the column supports vectorized operations</param>
     /// <param name="elementType">The element type of the column</param>
     /// <param name="length">The number of elements in the column</param>
     /// <param name="hasNulls">Whether the column contains null values</param>
     internal ColumnDiagnostics(
-        StorageType storageType,
         bool isVectorizable,
         Type elementType,
         int length,
         bool hasNulls)
     {
-        StorageType = storageType;
         IsVectorizable = isVectorizable;
         ElementType = elementType ?? throw new ArgumentNullException(nameof(elementType));
         Length = length;
@@ -63,11 +60,6 @@ public sealed class ColumnDiagnostics
         // For other value types, use a conservative estimate
         return 32;
     }
-
-    /// <summary>
-    /// Gets the type of storage implementation being used
-    /// </summary>
-    public StorageType StorageType { get; }
 
     /// <summary>
     /// Gets a value indicating whether this column supports vectorized operations
@@ -123,12 +115,7 @@ public sealed class ColumnDiagnostics
             }
 
             // Add storage overhead (approximate)
-            long storageOverhead = StorageType switch
-            {
-                StorageType.Memory => 64, // ReadOnlyMemory overhead
-                StorageType.Tensor => 128, // Tensor overhead (future)
-                _ => 32
-            };
+            long storageOverhead = 64; // Single ColumnStorage instance: array ref + mask ref + view fields
 
             return dataSize + storageOverhead;
         }
@@ -145,12 +132,7 @@ public sealed class ColumnDiagnostics
                 ? Math.Min(VectorSize / GetElementSize(ElementType), 8) // Cap at 8x improvement
                 : 1;
 
-            var memoryEfficiency = StorageType switch
-            {
-                StorageType.Memory => HasNulls ? 0.85 : 0.95, // Null mask overhead
-                StorageType.Tensor => HasNulls ? 0.80 : 0.90, // Tensor overhead
-                _ => 0.75
-            };
+            var memoryEfficiency = HasNulls ? 0.85 : 0.95; // Null mask overhead
 
             return new PerformanceCharacteristics(
                 throughputMultiplier,
@@ -168,29 +150,12 @@ public sealed class ColumnDiagnostics
         return $"ColumnDiagnostics {{ " +
                $"Type: {ElementType.Name}, " +
                $"Length: {Length:N0}, " +
-               $"Storage: {StorageType}, " +
                $"Vectorizable: {IsVectorizable}, " +
                $"HasNulls: {HasNulls}, " +
                $"RecommendedKernel: {RecommendedKernel}, " +
                $"EstimatedMemory: {EstimatedMemoryUsage:N0} bytes " +
                $"}}";
     }
-}
-
-/// <summary>
-/// Represents the type of storage implementation being used
-/// </summary>
-public enum StorageType
-{
-    /// <summary>
-    /// Memory-backed storage using Memory&lt;T&gt;
-    /// </summary>
-    Memory,
-
-    /// <summary>
-    /// Tensor-backed storage using System.Numerics.Tensors (future implementation)
-    /// </summary>
-    Tensor
 }
 
 /// <summary>

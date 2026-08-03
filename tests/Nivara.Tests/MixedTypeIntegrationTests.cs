@@ -14,7 +14,7 @@ public class MixedTypeIntegrationTests
 {
     [Test]
     [Category("Integration")]
-    public void MixedTypeFrame_WithDifferentStorageTypes_WorksCorrectly()
+    public void MixedTypeFrame_WithDifferentVectorizationCharacteristics_WorksCorrectly()
     {
         // Arrange - Create frame with mix of vectorizable and non-vectorizable types
         var vectorizableInt = NivaraColumn<int>.Create(Enumerable.Range(1, 100).ToArray());
@@ -22,7 +22,7 @@ public class MixedTypeIntegrationTests
         var nonVectorizableString = NivaraColumn<string>.Create(Enumerable.Range(1, 100).Select(i => $"Item{i}").ToArray());
         var nonVectorizableGuid = NivaraColumn<Guid>.Create(Enumerable.Range(1, 100).Select(_ => Guid.NewGuid()).ToArray());
 
-        // Act - Create frame with mixed storage types
+        // Act - Create frame with mixed vectorization characteristics
         var frame = NivaraFrame.Create(
             ("IntColumn", vectorizableInt),
             ("DoubleColumn", vectorizableDouble),
@@ -30,15 +30,15 @@ public class MixedTypeIntegrationTests
             ("GuidColumn", nonVectorizableGuid)
         );
 
-        // Assert - Verify different storage types coexist correctly
+        // Assert - Verify different vectorization characteristics coexist correctly
         Assert.That(frame.RowCount, Is.EqualTo(100));
         Assert.That(frame.ColumnCount, Is.EqualTo(4));
 
-        // Verify storage types are as expected
-        Assert.That(vectorizableInt.Diagnostics.StorageType, Is.EqualTo(StorageType.Tensor));
-        Assert.That(vectorizableDouble.Diagnostics.StorageType, Is.EqualTo(StorageType.Tensor));
-        Assert.That(nonVectorizableString.Diagnostics.StorageType, Is.EqualTo(StorageType.Memory));
-        Assert.That(nonVectorizableGuid.Diagnostics.StorageType, Is.EqualTo(StorageType.Memory));
+        // Verify vectorization characteristics are as expected
+        Assert.That(vectorizableInt.Diagnostics.IsVectorizable, Is.True);
+        Assert.That(vectorizableDouble.Diagnostics.IsVectorizable, Is.True);
+        Assert.That(nonVectorizableString.Diagnostics.IsVectorizable, Is.False);
+        Assert.That(nonVectorizableGuid.Diagnostics.IsVectorizable, Is.False);
 
         // Verify frame operations work with mixed types
         var intColumn = frame.GetColumn<int>("IntColumn");

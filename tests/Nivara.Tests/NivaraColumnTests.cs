@@ -28,8 +28,8 @@ public class NivaraColumnTests
 
         Assert.That(intColumn, Is.Not.Null, "Int column should be created");
         Assert.That(intColumn.Length, Is.EqualTo(intValues.Length), "Int column should preserve length");
-        // Int is vectorizable and should use TensorStorage
-        Assert.That(intColumn.IsVectorizable, Is.True, "Int columns should use TensorStorage and be vectorizable");
+        // Int is vectorizable
+        Assert.That(intColumn.IsVectorizable, Is.True, "Int columns should be vectorizable");
 
         // Test with float (vectorizable type)
         var floatValues = new[] { 1.0f, 2.5f, -3.14f };
@@ -37,7 +37,7 @@ public class NivaraColumnTests
 
         Assert.That(floatColumn, Is.Not.Null, "Float column should be created");
         Assert.That(floatColumn.Length, Is.EqualTo(floatValues.Length), "Float column should preserve length");
-        Assert.That(floatColumn.IsVectorizable, Is.True, "Float columns should use TensorStorage and be vectorizable");
+        Assert.That(floatColumn.IsVectorizable, Is.True, "Float columns should be vectorizable");
 
         // Test with double (vectorizable type)
         var doubleValues = new[] { 1.0, 2.5, -3.14159 };
@@ -45,7 +45,7 @@ public class NivaraColumnTests
 
         Assert.That(doubleColumn, Is.Not.Null, "Double column should be created");
         Assert.That(doubleColumn.Length, Is.EqualTo(doubleValues.Length), "Double column should preserve length");
-        Assert.That(doubleColumn.IsVectorizable, Is.True, "Double columns should use TensorStorage and be vectorizable");
+        Assert.That(doubleColumn.IsVectorizable, Is.True, "Double columns should be vectorizable");
 
         // Test with long (vectorizable type)
         var longValues = new[] { 1L, 2L, 3L };
@@ -53,7 +53,7 @@ public class NivaraColumnTests
 
         Assert.That(longColumn, Is.Not.Null, "Long column should be created");
         Assert.That(longColumn.Length, Is.EqualTo(longValues.Length), "Long column should preserve length");
-        Assert.That(longColumn.IsVectorizable, Is.True, "Long columns should use TensorStorage and be vectorizable");
+        Assert.That(longColumn.IsVectorizable, Is.True, "Long columns should be vectorizable");
 
         // Test with byte (vectorizable type)
         var byteValues = new byte[] { 1, 2, 3 };
@@ -61,7 +61,7 @@ public class NivaraColumnTests
 
         Assert.That(byteColumn, Is.Not.Null, "Byte column should be created");
         Assert.That(byteColumn.Length, Is.EqualTo(byteValues.Length), "Byte column should preserve length");
-        Assert.That(byteColumn.IsVectorizable, Is.True, "Byte columns should use TensorStorage and be vectorizable");
+        Assert.That(byteColumn.IsVectorizable, Is.True, "Byte columns should be vectorizable");
 
         // Test with empty arrays
         var emptyIntColumn = NivaraColumn<int>.Create(Array.Empty<int>());
@@ -86,7 +86,7 @@ public class NivaraColumnTests
     /// **Validates: Requirements 1.2, 6.2**
     /// </summary>
     [Test]
-    public void NonVectorizableTypes_ShouldUseMemoryStorage()
+    public void NonVectorizableTypes_ShouldUseColumnStorage()
     {
         // Test with string (reference type)
         var stringTestCases = new[]
@@ -1435,7 +1435,7 @@ public class NivaraColumnTests
     [Test]
     public void IsNull_WithExplicitEmptyNullMask_TreatsAllPositionsAsNonNull()
     {
-        var storage = new MemoryStorage<int>(
+        var storage = new ColumnStorage<int>(
             new ReadOnlyMemory<int>(new[] { 1, 2, 3 }),
             ReadOnlyMemory<bool>.Empty);
         var column = new NivaraColumn<int>(storage);

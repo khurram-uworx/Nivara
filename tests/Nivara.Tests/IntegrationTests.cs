@@ -79,7 +79,6 @@ public class IntegrationTests
         Assert.That(diagnostics1.IsVectorizable, Is.True, "Integer columns should be vectorizable");
         Assert.That(diagnostics1.IsHardwareAccelerated, Is.EqualTo(Vector.IsHardwareAccelerated), "Hardware acceleration should match system capability");
         Assert.That(diagnostics1.RecommendedKernel, Is.EqualTo(KernelType.Vectorized), "Large integer columns should recommend vectorized kernel");
-        Assert.That(diagnostics1.StorageType, Is.EqualTo(StorageType.Tensor), "Vectorizable types should use tensor storage");
 
         // Verify operation results are correct
         Assert.That(sum.Length, Is.EqualTo(size));
@@ -95,7 +94,7 @@ public class IntegrationTests
 
     [Test]
     [Category("Integration")]
-    public void NonVectorizable_UsesMemoryStorage()
+    public void NonVectorizable_UsesColumnStorage()
     {
         // Arrange - Create columns with non-vectorizable types
         var stringColumn = NivaraColumn<string>.Create(new[] { "Hello", "World", "Test" });
@@ -106,11 +105,9 @@ public class IntegrationTests
         var guidDiagnostics = guidColumn.Diagnostics;
 
         Assert.That(stringDiagnostics.IsVectorizable, Is.False, "String columns should not be vectorizable");
-        Assert.That(stringDiagnostics.StorageType, Is.EqualTo(StorageType.Memory), "Non-vectorizable types should use memory storage");
         Assert.That(stringDiagnostics.RecommendedKernel, Is.EqualTo(KernelType.Scalar), "Non-vectorizable types should recommend scalar kernel");
 
         Assert.That(guidDiagnostics.IsVectorizable, Is.False, "Guid columns should not be vectorizable");
-        Assert.That(guidDiagnostics.StorageType, Is.EqualTo(StorageType.Memory), "Non-vectorizable types should use memory storage");
 
         // Clean up
         stringColumn.Dispose();

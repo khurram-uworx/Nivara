@@ -19,21 +19,21 @@ public class ComprehensiveIntegrationTest
     {
         // === PHASE 1: Column Creation and Storage Selection ===
 
-        // Create vectorizable columns (should use TensorStorage)
+        // Create vectorizable columns (unified ColumnStorage, kernel selected at runtime)
         var ids = NivaraColumn<int>.Create(Enumerable.Range(1, 1000).ToArray());
         var scores = NivaraColumn<double>.Create(Enumerable.Range(1, 1000).Select(i => i * 0.75 + 25).ToArray());
         var active = NivaraColumn<bool>.Create(Enumerable.Range(1, 1000).Select(i => i % 3 != 0).ToArray());
 
-        // Create non-vectorizable columns (should use MemoryStorage)
+        // Create non-vectorizable columns
         var names = NivaraColumn<string>.Create(Enumerable.Range(1, 1000).Select(i => $"User{i:D4}").ToArray());
         var timestamps = NivaraColumn<DateTime>.Create(Enumerable.Range(1, 1000).Select(i => DateTime.Now.AddDays(-i)).ToArray());
 
-        // Verify automatic storage selection
-        Assert.That(ids.Diagnostics.StorageType, Is.EqualTo(StorageType.Tensor), "Integer columns should use tensor storage");
-        Assert.That(scores.Diagnostics.StorageType, Is.EqualTo(StorageType.Tensor), "Double columns should use tensor storage");
-        Assert.That(active.Diagnostics.StorageType, Is.EqualTo(StorageType.Tensor), "Boolean columns should use tensor storage");
-        Assert.That(names.Diagnostics.StorageType, Is.EqualTo(StorageType.Memory), "String columns should use memory storage");
-        Assert.That(timestamps.Diagnostics.StorageType, Is.EqualTo(StorageType.Memory), "DateTime columns should use memory storage");
+        // Verify automatic vectorization selection
+        Assert.That(ids.Diagnostics.IsVectorizable, Is.True, "Integer columns should be vectorizable");
+        Assert.That(scores.Diagnostics.IsVectorizable, Is.True, "Double columns should be vectorizable");
+        Assert.That(active.Diagnostics.IsVectorizable, Is.True, "Boolean columns should be vectorizable");
+        Assert.That(names.Diagnostics.IsVectorizable, Is.False, "String columns should not be vectorizable");
+        Assert.That(timestamps.Diagnostics.IsVectorizable, Is.False, "DateTime columns should not be vectorizable");
 
         // === PHASE 2: Vectorization and Performance Characteristics ===
 

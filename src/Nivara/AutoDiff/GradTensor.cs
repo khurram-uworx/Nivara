@@ -12,6 +12,10 @@ namespace Nivara.AutoDiff;
 /// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
 public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
+    internal const string Adr001Message =
+        "ADR-001: AutoDiff is a non-nullable domain. Null values cannot enter the computation graph; " +
+        "call DropNulls() before creating a tensor.";
+
     internal bool disposed;
     internal int[] shape;
 
@@ -141,7 +145,8 @@ public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754
     }
 
     /// <summary>
-    /// Gets a tensor view of the data for operations requiring tensor semantics
+    /// Gets a zero-copy tensor view of the data for operations requiring tensor semantics.
+    /// The view shares the tensor's backing array; the column remains immutable.
     /// </summary>
     /// <returns>A Tensor&lt;T&gt; view of the data</returns>
     /// <exception cref="InvalidOperationException">Thrown when the data contains null values</exception>
@@ -149,8 +154,7 @@ public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        var series = ToSeries();
-        return series.ToTensor();
+        return Data.AsTensorView();
     }
 
     /// <summary>

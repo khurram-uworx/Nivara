@@ -56,9 +56,10 @@ when revising the implementation approach:
   "type is SIMD-accelerated."
 - AutoDiff may not need a full raw-`Tensor<T>` rewrite to use
   `TensorPrimitives` well. The current common path already creates
-  `NivaraColumn<T>` values through `ColumnStorageFactory`, which selects
-  `TensorStorage<T>` for supported unmanaged numeric types, and many AutoDiff
-  paths already call `TryGetSpan(...)` before using `TensorPrimitives`.
+  `NivaraColumn<T>` values through `ColumnStorageFactory`, which builds the
+  single `ColumnStorage<T>` for every type (see §1 below), and
+  many AutoDiff paths already call `TryGetSpan(...)` before using
+  `TensorPrimitives`.
 - The stronger requirement is that AutoDiff declare its boundary explicitly:
   tensors entering AutoDiff should be dense, non-null, numeric, and
   span-capable/tensor-backed for the operations being performed.
@@ -191,12 +192,14 @@ float/double kernels. No custom vectorization abstractions, no custom
 intrinsics, no custom tensor hierarchy — .NET 10 owns that now. The
 storage engine should consume as much platform sugar as possible.
 
-**Nullable vs non-nullable columns**: `NivaraColumn<float>` is backed by
-`Tensor<float>` with NO null mask — pure math, `HasNulls = false`. `NivaraColumn<float?>`
-(`Nullable<float>`) gets a separate `NullableTensorStorage<T>` that
-manages `Tensor<T> + Tensor<bool>` mask behind the scenes. The type system
-drives the storage decision, not a runtime flag. Users clean their nullable
-data (`DropNulls`, `FillNull`) at the boundary before entering AutoDiff.
+**Nullable vs non-nullable columns**: The storage layer is a **single**
+`ColumnStorage<T>` — a sole-owner `T[]` plus an optional `bool[]` null mask
+(`null` ⇒ non-nullable). Vectorization is decided at runtime per-op by
+`KernelSelector`, not by a storage class. The earlier two-storage design is
+superseded and the consolidation is **complete** (design recorded in ADR-001;
+results in `tests/Nivara.PerformanceTests/README.md`). Users clean their nullable data
+(`DropNulls`, `FillNull`) at the AutoDiff boundary before entering the graph
+(ADR-001).
 
 **NivaraSeries**: Kept as a labeled-column-wrapper. All tensor math
 (`Sum`, `Mean`, `AddTensor`, etc.) removed from it. Revisit after the
@@ -245,12 +248,12 @@ columnar engine (null-aware, type-safe, DataFrame) and the autograd engine
 │  NivaraFrame  NivaraSeries (labeled wrapper)        │
 │  Null semantics  Schema  I/O  Joins  GroupBy        │
 │  Reductions (Sum, Mean, Min, Max) with null support │
-│  Backed by Tensor<T> (non-nullable) or              │
-│    Tensor<T> + bool mask (nullable)                 │
+│  Backed by ColumnStorage<T>: sole-owner T[] +       │
+│    optional bool[] null mask; lazy AsTensor() view  │
 ├──────────────────────────────────────────────────┤
 │                Storage Layer                        │
-│  TensorStorage<T>  NullableTensorStorage<T>         │
-│  MemoryStorage<T>  ColumnStorageFactory             │
+│  ColumnStorage<T>  ColumnStorageFactory             │
+│  KernelSelector (per-op vectorize/scalar decision)  │
 └──────────────────────────────────────────────────┘
 ```
 
@@ -266,112 +269,45 @@ columnar engine (null-aware, type-safe, DataFrame) and the autograd engine
 | `NivaraFrame` | Dot, CosineSimilarity, ColumnNorms, RowNorms | **Move** to `Nivara.Extensions.Tensors` | Per TENSORS.md — column math should not pretend to be tensor axes. |
 | `NivaraFrame` | MatrixMultiply | **Delete** | No callers anywhere. |
 | `NivaraSeries` | Sum, Mean, tensor math methods | **Remove** from NivaraSeries (already on NivaraColumn) | NivaraSeries becomes a labeled-column-wrapper only. |
-| `ColumnStorageFactory` | IsVectorizable<T>() dispatch | **Add** nullable axis | Pick TensorStorage<T> or NullableTensorStorage<T> based on T vs T?. |
-| `TensorStorage<T>` | Null mask fields and branches | **Remove** for non-nullable T | T? gets its own `NullableTensorStorage<T>` class. |
+| `ColumnStorageFactory` | Tensor/Memory dispatch | **Simplify** to single `ColumnStorage<T>` construction | Done. No runtime type switches. |
+| `MemoryStorage<T>` + `TensorStorage<T>` | Two-storage split | **Consolidate** into `ColumnStorage<T>` | Done. Single `T[]` + optional `bool[]` mask; lazy `AsTensor()` view. |
 | `GradTensor<T>` | NivaraColumn<T> Data | **Replace** with Tensor<T> Data | Back onto System.Numerics.Tensors. |
 | `Grad/ForwardGradOperations` | 1221 + 990 lines of NivaraColumn ops | **Rewrite** to Tensor<T> + GradKernels | ~50% line reduction, no column coupling. |
 
 ## 1. Column storage: nullable vs non-nullable
 
-### Type-level dispatch
+**Superseded — the consolidation is complete.** The two-storage
+split (tensor-backed vs memory-backed storages) described below is
+**obsolete**. The storage layer is consolidated into a single `ColumnStorage<T>`
+(replaces `MemoryStorage<T>`; deletes `TensorStorage<T>`).
 
-`ColumnStorageFactory` determines the storage backend by examining T at
-construction time:
+Summary of the change (execution plan archived in git history; design recorded
+in ADR-001; before/after results in `tests/Nivara.PerformanceTests/README.md`):
 
-```
-typeof(T)           IsVectorizable?  IsNullable?      Storage backend
-─────────────────────────────────────────────────────────────────────
-float               ✓                 no               TensorStorage<float> (no mask)
-float?              ✓                 yes              NullableTensorStorage<float> (data + mask)
-double              ✓                 no               TensorStorage<double> (no mask)
-double?             ✓                 yes              NullableTensorStorage<double> (data + mask)
-int                 ✓                 no               TensorStorage<int> (no mask)
-int?                ✓                 yes              NullableTensorStorage<int> (data + mask)
-string              ✗ (ref type)     —                MemoryStorage<string> (no change)
-```
+- One class owns a sole-owner contiguous `T[] data` plus an optional `bool[]?`
+  null mask (`null` ⇒ non-nullable). `Data` = `data.AsMemory()`, `AsSpan()` is a
+  true zero-copy view, and `AsTensor()` is a lazy cached `Tensor<T>` view
+  (guarded to unmanaged `T`, zero-copy wrap of the array).
+- Vectorized vs scalar execution is decided at **runtime per-op** by
+  `KernelSelector.DetermineKernelType()`, never by storage class.
+- `IColumnStorage<T>` drops `StorageType` and `ProvidesZeroCopySpanAccess`;
+  `ColumnDiagnostics` uses constants.
+- `ColumnStorageFactory` collapses to direct `ColumnStorage<T>` construction —
+  no `IsVectorizable`/`IsUnmanagedType` dispatch, no 11-way type switches.
+- **Why the two-storage split was wrong:** storage class never equaled speed —
+  `TensorPrimitives` vectorizes any contiguous span, and `TensorStorage<T>`'s
+  span access required a cached `FlattenTo` copy while
+  `MemoryStorage<T>.Data.Span` was the true zero-copy path. Nulls never
+  justified a second class either: an optional `bool[]` mask flag suffices.
+  The split only duplicated `NivaraColumn` paths.
+- `NivaraColumn<T>` collapses ~15 `StorageType == Tensor` / `is MemoryStorage<T>`
+  dual-path blocks into one span path.
+- The AutoDiff boundary (ADR-001) is upgraded to a **runtime throw** on
+  `HasNulls` at `FromColumn`/`FromSeries`/`FromArray`/`FromMatrix`, and the
+  enter path uses the zero-copy `AsTensor()` view.
 
-Detection:
-
-```csharp
-internal static bool IsNullableType(Type type) =>
-    type.IsGenericType && type.GetGenericTypeDefinition() == typeof(Nullable<>);
-
-internal static Type GetNonNullableType(Type type) =>
-    IsNullableType(type) ? type.GetGenericArguments()[0] : type;
-```
-
-### `TensorStorage<T>` — non-nullable only
-
-Stripped of all null-mask machinery:
-
-| Member | Before | After |
-|---|---|---|
-| `HasNulls` | computed from mask | `false` (constant) |
-| `NullCount` | computed from mask | `0` (constant) |
-| `NullMask` | `Tensor<bool>?` | empty span |
-| Internal | `Tensor<T> data + Tensor<bool>? nullMask` | `Tensor<T> data` only |
-
-All null-branch operations (mask propagation, null filtering) are removed.
-The storage is a pure `Tensor<T>` wrapper.
-
-### `NullableTensorStorage<T>` — new, nullable only
-
-New internal class for `T?` types where `T` is unmanaged. Same semantics as
-the current `TensorStorage<T>` but only instantiated for nullable types:
-
-```csharp
-internal sealed class NullableTensorStorage<T> : IColumnStorage<T?>
-    where T : unmanaged
-{
-    private readonly Tensor<T> _data;
-    private readonly Tensor<bool>? _nullMask;
-    // ...
-}
-```
-
-`NullableTensorStorage<T>` implements `IColumnStorage<Nullable<T>>` and
-provides the same null-aware operations (mask propagation for arithmetic,
-null filtering for reductions).
-
-### `NivaraColumn<T>` — conditional behavior
-
-`NivaraColumn<T>` is a single class that adapts its behavior based on
-whether T is nullable or not:
-
-| Member | Non-nullable T | Nullable T (i.e. U?) |
-|---|---|---|
-| `this[i]` | returns `T` | returns `T` (which is `Nullable<U>`) |
-| `HasNulls` | `false` | computed from storage mask |
-| `NullCount` | `0` | computed from storage mask |
-| `DropNulls()` | returns `this` (identity) | filters, returns `NivaraColumn<U>` |
-| `FillNull(T)` | no-op (identity) | replaces nulls → `NivaraColumn<U>` |
-| `ToArray()` | copies `Tensor<T>` | copies nulls as `default(T)` |
-| `Slice()` | slices data only | slices data + mask |
-
-The column is constructed via `ColumnStorageFactory.Create(ReadOnlySpan<T>)`,
-which selects the appropriate storage backend.
-
-### Enter/exit AutoDiff boundary
-
-```csharp
-// Enter: columnar → tensor
-// Non-nullable: zero-copy when storage is already Tensor<T>
-var col = frame.GetColumn<float>("features");               // NivaraColumn<float>
-var tensor = ReverseGradTensor<float>.FromColumn(col);      // Tensor<T>, no nulls
-
-// Nullable: must clean first
-var nullableCol = frame.GetColumn<float?>("features_with_nulls");
-var cleaned = nullableCol.DropNulls();                      // NivaraColumn<float>
-var tensor = ReverseGradTensor<float>.FromColumn(cleaned);
-
-// Exit: tensor → columnar
-var resultCol = resultTensor.ToColumn();                     // NivaraColumn<float>, no mask
-frame.AddColumn("predictions", resultCol);
-```
-
-`FromColumn` validates that the column has no nulls (throws if `HasNulls`).
-`ToColumn` wraps the `Tensor<T>` data in a non-nullable `NivaraColumn<T>`
-with no null mask.
+The remainder of this section is retained only for historical context and is
+not to be implemented as written.
 
 ## 2. AutoDiff: GradTensor backs onto Tensor<T>
 
@@ -684,16 +620,16 @@ public static class FrameTensorOperations
 
 | File | Purpose |
 |---|---|
-| `src/Nivara/Storage/NullableTensorStorage.cs` | Nullable column storage (data + mask) |
+| `src/Nivara/Storage/ColumnStorage.cs` | Unified column storage (rename of `MemoryStorage.cs`) — `T[]` + optional `bool[]` mask + lazy `AsTensor()` view. Landed. |
 | `src/Nivara/AutoDiff/Operations/GradKernels.cs` | All span-based kernel operations |
 
 ### Rewritten (core changes)
 
 | File | Change summary |
 |---|---|
-| `src/Nivara/Storage/TensorStorage.cs` | Remove null mask, pure Tensor<T> |
-| `src/Nivara/Storage/ColumnStorageFactory.cs` | Add nullable dispatch |
-| `src/Nivara/NivaraColumn.cs` | Conditional null behavior per T vs T? |
+| `src/Nivara/Storage/ColumnStorage.cs` | Was `MemoryStorage<T>` → `ColumnStorage<T>`; backing becomes sole-owner `T[]`; gains lazy `Tensor<T>` view |
+| `src/Nivara/Storage/ColumnStorageFactory.cs` | Simplify to direct `ColumnStorage<T>` construction; delete 11-way type switches |
+| `src/Nivara/NivaraColumn.cs` | Collapse ~15 `StorageType == Tensor` / `is MemoryStorage<T>` dual paths into one span path |
 | `src/Nivara/AutoDiff/GradTensor.cs` | Back onto Tensor<T> |
 | `src/Nivara/AutoDiff/ReverseGradTensor.cs` | Grad as Tensor<T>? |
 | `src/Nivara/AutoDiff/ForwardGradTensor.cs` | Tangent as Tensor<T>? |
@@ -728,6 +664,7 @@ public static class FrameTensorOperations
 
 | File | Reason |
 |---|---|
+| `src/Nivara/Storage/TensorStorage.cs` | Superseded by unified `ColumnStorage<T>` (deleted) |
 | `src/Nivara/Tensors/` obsolete Series extensions (in `NivaraTensorExtensions.cs`) | No callers |
 
 ### Tests
@@ -757,11 +694,11 @@ public static class FrameTensorOperations
 | NivaraTensorExtensions: ~1000 lines | ~200 lines | -800 |
 | GradOperations: ~1221 | ~600 | -621 |
 | ForwardGradOperations: ~990 | ~500 | -490 |
-| TensorStorage: ~272 | ~150 | -122 |
+| TensorStorage: ~288 | deleted | -288 |
+| MemoryStorage: ~226 | ColumnStorage: ~294 (rename + `AsTensor()`) | +68 |
 | GradKernels: 0 | ~400 | +400 |
-| NullableTensorStorage: 0 | ~150 | +150 |
-| ColumnStorageFactory: ~80 | ~110 | +30 |
-| **Net** | | **~-1453 lines** |
+| ColumnStorageFactory: ~301 | ~108 | -193 |
+| **Net** | | **~-1924 lines** |
 
 ## 8. Risk and testing strategy
 
@@ -770,16 +707,19 @@ public static class FrameTensorOperations
 1. **Tensor<T>.TryGetSpan behavior**: `Tensor<T>` may not always provide a
    contiguous span for large multi-dimensional tensors. Use `FlattenTo`
    with stack-alloc or small-array fallback. The pattern is
-   `data.TryGetSpan(out var span) ? span : data.FlattenTo(scratch)`.
+   `data.TryGetSpan(out var span) ? span : data.FlattenTo(scratch)`. This
+   applies to the lazy `ColumnStorage<T>.AsTensor()` view for any
+   non-1D/stepped tensor.
 
-2. **Zero-copy FromColumn**: For non-nullable `NivaraColumn<T>` backed by
-   `TensorStorage<T>`, the underlying `Tensor<T>` is already there.
-   `FromColumn` can extract it via internal access. No copy.
+2. **Zero-copy FromColumn**: `ColumnStorage<T>.AsTensor()` wraps the sole-owner
+   `T[]` directly (`Tensor.Create(data, [length])`), so non-nullable
+   `FromColumn` can extract the tensor with no copy. Guard `AsTensor()` to
+    unmanaged `T` only; runtime-throw on `HasNulls` per ADR-001 (landed).
 
-3. **Nullable column storage performance**: `NullableTensorStorage<T>`
-   stores data + mask separately. Row operations (slice, copy) must handle
-   both tensors. This is correct but ~2x allocation for the nullable path.
-   Acceptable — the non-nullable path is where performance matters.
+3. **Nullable column storage**: nulls live in an optional `bool[]` mask on the
+   same `ColumnStorage<T>` — no second storage class, no `Tensor<bool>` mask.
+   Nullable slice/copy handle `data` + `mask` together; allocations are the
+   `T[]` + `bool[]` pair, which is the same cost as today.
 
 4. **OpNode delegate type change**: All backward closures in GradOperations
    and ForwardGradOperations need to be updated. Each closure captures the
@@ -815,32 +755,33 @@ public static class FrameTensorOperations
 ### Recovery
 
 If a step breaks downstream code, fix forward. The sequence is designed so
-that storage changes (1-4) can be validated before AutoDiff kernel changes
-(5-11). If the column tests pass, the foundation is solid.
+that storage changes (1-5) can be validated before
+AutoDiff kernel changes (6-12). If the column tests pass, the foundation is solid.
 
 ## 9. Sequence
 
 ```
- 1. NullableTensorStorage          ← new type, no deps
- 2. TensorStorage clean            ← remove masks, no deps
- 3. ColumnStorageFactory           ← nullable dispatch
- 4. NivaraColumn<T>                ← conditional null behavior
+ 1. ColumnStorage<T>              ← rename MemoryStorage → ColumnStorage, T[] backing, AsTensor() view (storage-plan Task 1)
+ 2. ColumnStorageFactory          ← direct construction, delete type switches (storage-plan Task 2)
+ 3. IColumnStorage<T> + Diags     ← drop StorageType/ProvidesZeroCopySpanAccess (storage-plan Task 3)
     ─── VALIDATE: column tests pass ───
- 5. GradKernels                    ← new file, spans only
- 6. GradTensor rewrite             ← Tensor<T> backing
- 7. ReverseGradTensor rewrite      ← Tensor<T>? Grad
- 8. ForwardGradTensor rewrite      ← Tensor<T>? Tangent
- 9. OpNode + ComputationGraph      ← gradient type change
-10. GradOperations rewrite         ← use GradKernels + Tensor<T>
-11. ForwardGradOperations rewrite  ← same
+ 4. NivaraColumn<T>               ← collapse dual-path branches to one span path (storage-plan Task 4)
+ 5. AutoDiff boundary             ← runtime throw on HasNulls, zero-copy FromColumn (storage-plan Task 5)
+ 6. GradKernels                   ← new file, spans only
+ 7. GradTensor rewrite            ← Tensor<T> backing
+ 8. ReverseGradTensor rewrite     ← Tensor<T>? Grad
+ 9. ForwardGradTensor rewrite     ← Tensor<T>? Tangent
+10. OpNode + ComputationGraph     ← gradient type change
+11. GradOperations rewrite        ← use GradKernels + Tensor<T>
+12. ForwardGradOperations rewrite ← same
     ─── VALIDATE: Autodiff tests pass ───
-12. NivaraTensorExtensions         ← strip to reductions
-13. NivaraSeries cleanup           ← remove tensor math
-14. Frame deprecations             ← move Dot etc to Extensions
-15. Optimizer adaptation           ← Tensor<T>? Grad
-16. Training adaptation            ← Tensor<T> in datasets
-17. Serialization adaptation       ← Tensor<T> format, preserve state dict APIs
-18. Initializer adaptation         ← direct Tensor<T>
-19. Tests + samples                ← adapt everything
+13. NivaraTensorExtensions        ← strip to reductions
+14. NivaraSeries cleanup          ← remove tensor math
+15. Frame deprecations            ← move Dot etc to Extensions
+16. Optimizer adaptation          ← Tensor<T>? Grad
+17. Training adaptation           ← Tensor<T> in datasets
+18. Serialization adaptation      ← Tensor<T> format, preserve state dict APIs
+19. Initializer adaptation        ← direct Tensor<T>
+20. Tests + samples               ← adapt everything
     ─── VALIDATE: full dotnet test ───
 ```

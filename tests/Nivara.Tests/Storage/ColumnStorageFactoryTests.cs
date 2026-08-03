@@ -26,7 +26,7 @@ public class ColumnStorageFactoryTests
     {
         var storage = ColumnStorageFactory.Create<int>(values);
 
-        // Note: Current implementation always uses MemoryStorage, but we test the intended behavior
+        // Note: Current implementation always uses ColumnStorage, but we test the intended behavior
         // This test validates that the factory method works and the IsVectorizable method correctly identifies vectorizable types
         Assert.That(ColumnStorageFactory.IsVectorizable<int>(), Is.True,
             "int should be identified as vectorizable type");
@@ -277,7 +277,7 @@ public class ColumnStorageFactoryTests
     #region Explicit Null Mask Tests
 
     [Test]
-    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMaskForTensorStorage()
+    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMask_ForValueType()
     {
         var values = new[] { 1, 2, 3 };
 
@@ -289,7 +289,7 @@ public class ColumnStorageFactoryTests
     }
 
     [Test]
-    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMaskForMemoryStorage()
+    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMask_ForReferenceType()
     {
         var values = new[] { "a", "b", "c" };
 
@@ -301,7 +301,7 @@ public class ColumnStorageFactoryTests
     }
 
     [Test]
-    public void ColumnStorageFactory_CreateFromOwnedArray_TensorStorage_UsesOwnedArrayAndPreservesNullMask()
+    public void ColumnStorageFactory_CreateFromOwnedArray_ForValueType_UsesOwnedArrayAndPreservesNullMask()
     {
         var values = new[] { 1, 2, 3 };
         var nullMask = new ReadOnlyMemory<bool>(new[] { false, true, false });
@@ -309,7 +309,6 @@ public class ColumnStorageFactoryTests
         var storage = ColumnStorageFactory.CreateFromOwnedArray(values, nullMask);
         values[0] = 10;
 
-        Assert.That(storage.StorageType, Is.EqualTo(StorageType.Tensor));
         Assert.That(storage[0], Is.EqualTo(10));
         Assert.That(storage.HasNulls, Is.True);
         Assert.That(storage.NullMask.Length, Is.EqualTo(3));
@@ -317,7 +316,7 @@ public class ColumnStorageFactoryTests
     }
 
     [Test]
-    public void ColumnStorageFactory_CreateFromOwnedArray_MemoryStorage_UsesOwnedArrayAndPreservesNullMask()
+    public void ColumnStorageFactory_CreateFromOwnedArray_ForReferenceType_UsesOwnedArrayAndPreservesNullMask()
     {
         var values = new[] { "a", "b", "c" };
         var nullMask = new ReadOnlyMemory<bool>(new[] { false, true, false });
@@ -325,7 +324,6 @@ public class ColumnStorageFactoryTests
         var storage = ColumnStorageFactory.CreateFromOwnedArray(values, nullMask);
         values[0] = "changed";
 
-        Assert.That(storage.StorageType, Is.EqualTo(StorageType.Memory));
         Assert.That(storage[0], Is.EqualTo("changed"));
         Assert.That(storage.HasNulls, Is.True);
         Assert.That(storage.NullMask.Length, Is.EqualTo(3));

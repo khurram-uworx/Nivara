@@ -1187,7 +1187,7 @@ public class TensorInteropTests
     #region Performance and Memory Tests
 
     [Test]
-    public void TensorSpanConversion_IsZeroCopy_ForTensorStorage()
+    public void TensorSpanConversion_IsEfficient_ForLargeData()
     {
         // This test verifies that TensorSpan conversion is efficient
         // We can't easily test true zero-copy without internal access,
