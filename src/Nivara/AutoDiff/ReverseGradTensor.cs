@@ -1,6 +1,6 @@
+using Nivara.AutoDiff.Exceptions;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
-using System.Diagnostics;
 using System.Numerics;
 
 namespace Nivara.AutoDiff;
@@ -44,7 +44,8 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
     public ReverseGradTensor(NivaraColumn<T> data, bool requiresGrad = false)
         : base(data)
     {
-        Debug.Assert(data is null || !data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
+        if (data.HasNulls)
+            throw new AutoGradException(Adr001Message);
         RequiresGrad = requiresGrad;
         GradFn = null;
     }
@@ -55,7 +56,8 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
     internal ReverseGradTensor(NivaraColumn<T> data, bool requiresGrad, int[] shape)
         : base(data, shape)
     {
-        Debug.Assert(data is null || !data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
+        if (data.HasNulls)
+            throw new AutoGradException(Adr001Message);
         RequiresGrad = requiresGrad;
         GradFn = null;
     }
@@ -91,7 +93,8 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
     }
 
     /// <summary>
-    /// Creates a ReverseGradTensor from an array of values
+    /// Creates a ReverseGradTensor from an array of values. The tensor wraps the
+    /// array zero-copy; the caller must not mutate <paramref name="array"/> afterward.
     /// </summary>
     /// <param name="array">The array of values</param>
     /// <param name="requiresGrad">Whether the tensor should track gradients</param>
@@ -102,14 +105,15 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
         if (array == null)
             throw new ArgumentNullException(nameof(array));
 
-        var column = NivaraColumn<T>.Create(array);
+        var column = NivaraColumn<T>.CreateFromOwnedArray(array);
         return new ReverseGradTensor<T>(column, requiresGrad);
     }
 
     /// <summary>
     /// Creates a ReverseGradTensor from row-major matrix data with explicit dimensions.
-    /// The tensor's shape is set to [rows, cols] so callers can use shape-aware MatMul/Transpose
-    /// without manually calling Reshape.
+    /// The tensor wraps the array zero-copy; the caller must not mutate
+    /// <paramref name="rowMajorData"/> afterward. The tensor's shape is set to [rows, cols]
+    /// so callers can use shape-aware MatMul/Transpose without manually calling Reshape.
     /// </summary>
     /// <param name="rowMajorData">Flat array containing matrix data in row-major order</param>
     /// <param name="rows">Number of rows</param>
@@ -127,7 +131,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
             throw new ArgumentException(
                 $"Data length ({rowMajorData.Length}) must equal rows * cols ({rows} * {cols} = {rows * cols})");
 
-        var column = NivaraColumn<T>.Create(rowMajorData);
+        var column = NivaraColumn<T>.CreateFromOwnedArray(rowMajorData);
         var tensor = new ReverseGradTensor<T>(column, requiresGrad);
         tensor.Reshape(rows, cols);
         return tensor;

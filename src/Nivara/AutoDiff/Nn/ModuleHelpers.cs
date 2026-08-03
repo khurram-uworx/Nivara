@@ -7,11 +7,8 @@ internal static class ModuleHelpers<T> where T : struct, IFloatingPointIeee754<T
 {
     internal static ReadOnlySpan<T> GetSpan(ReverseGradTensor<T> tensor)
     {
-        if (tensor.Data.TryGetSpan(out var span))
-            return span;
-        var arr = new T[tensor.Length];
-        tensor.Data.CopyTo(arr, T.Zero);
-        return arr;
+        tensor.Data.TryGetSpan(out var span);
+        return span;
     }
 
     internal static T[] CopyToTemp(NivaraColumn<T> column, int length)

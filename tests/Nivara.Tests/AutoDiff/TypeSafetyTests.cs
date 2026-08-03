@@ -318,4 +318,114 @@ public class TypeSafetyTests
         Assert.DoesNotThrow(() => TypeValidator.ValidateShapeCompatibility(5, 5, "TestOperation"));
     }
 
+    [Test]
+    public void ReverseGradTensor_FromColumn_Nullable_ThrowsRuntime()
+    {
+        // Arrange
+        var nullableCol = NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 3f });
+
+        // Act & Assert
+        var ex = Assert.Throws<AutoGradException>(() => ReverseGradTensor<float>.FromColumn(nullableCol));
+        Assert.That(ex!.Message, Does.Contain("ADR-001"));
+    }
+
+    [Test]
+    public void ReverseGradTensor_Constructor_Nullable_ThrowsRuntime()
+    {
+        // Arrange
+        var nullableCol = NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 3f });
+
+        // Act & Assert
+        var ex = Assert.Throws<AutoGradException>(() => new ReverseGradTensor<float>(nullableCol));
+        Assert.That(ex!.Message, Does.Contain("ADR-001"));
+    }
+
+    [Test]
+    public void ForwardGradTensor_FromColumn_Nullable_ThrowsRuntime()
+    {
+        // Arrange
+        var nullableCol = NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 3f });
+
+        // Act & Assert
+        var ex = Assert.Throws<AutoGradException>(() => ForwardGradTensor<float>.FromColumn(nullableCol));
+        Assert.That(ex!.Message, Does.Contain("ADR-001"));
+    }
+
+    [Test]
+    public void ForwardGradTensor_FromColumn_NullableTangent_ThrowsRuntime()
+    {
+        // Arrange
+        var col = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f });
+        var nullableTangent = NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 3f });
+
+        // Act & Assert
+        var ex = Assert.Throws<AutoGradException>(() =>
+            ForwardGradTensor<float>.FromColumn(col, nullableTangent));
+        Assert.That(ex!.Message, Does.Contain("ADR-001"));
+    }
+
+    [Test]
+    public void ReverseGradTensor_FromColumn_NonNullable_IsZeroCopy()
+    {
+        // Arrange
+        var column = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f });
+
+        // Act
+        var tensor = ReverseGradTensor<float>.FromColumn(column);
+
+        // Assert
+        Assert.That(tensor.Data.TryGetSpan(out var tensorSpan), Is.True);
+        Assert.That(column.TryGetSpan(out var columnSpan), Is.True);
+        Assert.That(tensorSpan == columnSpan, Is.True,
+            "FromColumn must wrap the column zero-copy (shared backing array)");
+    }
+
+    [Test]
+    public void ReverseGradTensor_FromArray_AliasesSourceArray()
+    {
+        // Arrange
+        var array = new float[] { 1f, 2f, 3f };
+
+        // Act
+        var tensor = ReverseGradTensor<float>.FromArray(array);
+
+        // Assert
+        Assert.That(tensor.Data.TryGetSpan(out var span), Is.True);
+        Assert.That(span == array.AsSpan(), Is.True,
+            "FromArray must wrap the caller's array zero-copy");
+    }
+
+    [Test]
+    public void ReverseGradTensor_FromMatrix_AliasesSourceArray()
+    {
+        // Arrange
+        var array = new float[] { 1f, 2f, 3f, 4f };
+
+        // Act
+        var tensor = ReverseGradTensor<float>.FromMatrix(array, rows: 2, cols: 2);
+
+        // Assert
+        Assert.That(tensor.Data.TryGetSpan(out var span), Is.True);
+        Assert.That(span == array.AsSpan(), Is.True,
+            "FromMatrix must wrap the caller's array zero-copy");
+        Assert.That(tensor.Shape, Is.EqualTo(new[] { 2, 2 }));
+    }
+
+    [Test]
+    public void GradTensor_AsTensor_IsZeroCopyView()
+    {
+        // Arrange
+        var column = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f });
+        var tensor = ReverseGradTensor<float>.FromColumn(column);
+
+        // Act
+        var tensorView = tensor.AsTensor();
+
+        // Assert
+        Assert.That(tensorView.TryGetSpan(new nint[] { 0 }, (int)tensorView.FlattenedLength, out Span<float> viewSpan), Is.True);
+        Assert.That(column.TryGetSpan(out var columnSpan), Is.True);
+        Assert.That((ReadOnlySpan<float>)viewSpan == columnSpan, Is.True,
+            "AsTensor() must return a zero-copy view sharing the column's backing array");
+    }
+
 }

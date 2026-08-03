@@ -1,5 +1,5 @@
+using Nivara.AutoDiff.Exceptions;
 using Nivara.AutoDiff.Operations;
-using System.Diagnostics;
 using System.Numerics;
 
 namespace Nivara.AutoDiff;
@@ -35,10 +35,16 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
     public ForwardGradTensor(NivaraColumn<T> data, NivaraColumn<T>? tangent = null)
         : base(data)
     {
-        Debug.Assert(!data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
-        if (tangent != null && tangent.Length != data.Length)
-            throw new ArgumentOutOfRangeException(nameof(tangent),
-                $"Tangent length ({tangent.Length}) must match data length ({data.Length})");
+        if (data.HasNulls)
+            throw new AutoGradException(Adr001Message);
+        if (tangent != null)
+        {
+            if (tangent.HasNulls)
+                throw new AutoGradException(Adr001Message);
+            if (tangent.Length != data.Length)
+                throw new ArgumentOutOfRangeException(nameof(tangent),
+                    $"Tangent length ({tangent.Length}) must match data length ({data.Length})");
+        }
 
         RequiresTangent = tangent != null;
         Tangent = tangent;
@@ -50,10 +56,16 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
     internal ForwardGradTensor(NivaraColumn<T> data, NivaraColumn<T>? tangent, int[] shape)
         : base(data, shape)
     {
-        Debug.Assert(!data.HasNulls, "ADR-001: AutoDiff domain is non-nullable");
-        if (tangent != null && tangent.Length != data.Length)
-            throw new ArgumentOutOfRangeException(nameof(tangent),
-                $"Tangent length ({tangent.Length}) must match data length ({data.Length})");
+        if (data.HasNulls)
+            throw new AutoGradException(Adr001Message);
+        if (tangent != null)
+        {
+            if (tangent.HasNulls)
+                throw new AutoGradException(Adr001Message);
+            if (tangent.Length != data.Length)
+                throw new ArgumentOutOfRangeException(nameof(tangent),
+                    $"Tangent length ({tangent.Length}) must match data length ({data.Length})");
+        }
 
         RequiresTangent = tangent != null;
         Tangent = tangent;
@@ -91,7 +103,9 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
     }
 
     /// <summary>
-    /// Creates a ForwardGradTensor from an array of values
+    /// Creates a ForwardGradTensor from an array of values. The tensor wraps the
+    /// arrays zero-copy; the caller must not mutate <paramref name="array"/> or
+    /// <paramref name="tangent"/> afterward.
     /// </summary>
     /// <param name="array">The array of primal values</param>
     /// <param name="tangent">Optional array of tangent values, or null if not tracking</param>
@@ -102,13 +116,15 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
         if (array == null)
             throw new ArgumentNullException(nameof(array));
 
-        var dataCol = NivaraColumn<T>.Create(array);
-        NivaraColumn<T>? tangentCol = tangent != null ? NivaraColumn<T>.Create(tangent) : null;
+        var dataCol = NivaraColumn<T>.CreateFromOwnedArray(array);
+        NivaraColumn<T>? tangentCol = tangent != null ? NivaraColumn<T>.CreateFromOwnedArray(tangent) : null;
         return new ForwardGradTensor<T>(dataCol, tangentCol);
     }
 
     /// <summary>
     /// Creates a ForwardGradTensor from row-major matrix data with explicit dimensions.
+    /// The tensor wraps the arrays zero-copy; the caller must not mutate
+    /// <paramref name="rowMajorData"/> or <paramref name="tangent"/> afterward.
     /// The tensor's shape is set to [rows, cols] so callers can use shape-aware MatMul/Transpose
     /// without manually calling Reshape.
     /// </summary>
@@ -128,8 +144,8 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
             throw new ArgumentException(
                 $"Data length ({rowMajorData.Length}) must equal rows * cols ({rows} * {cols} = {rows * cols})");
 
-        var column = NivaraColumn<T>.Create(rowMajorData);
-        NivaraColumn<T>? tangentCol = tangent != null ? NivaraColumn<T>.Create(tangent) : null;
+        var column = NivaraColumn<T>.CreateFromOwnedArray(rowMajorData);
+        NivaraColumn<T>? tangentCol = tangent != null ? NivaraColumn<T>.CreateFromOwnedArray(tangent) : null;
         var tensor = new ForwardGradTensor<T>(column, tangentCol);
         tensor.Reshape(rows, cols);
         return tensor;

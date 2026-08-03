@@ -67,8 +67,14 @@ This adds ~40% code volume to every operation and creates two execution paths th
   (sole-owner `T[]` + optional `bool[]` mask), replacing the two-storage split
   (`TensorStorage` / `MemoryStorage`). See `docs/STORAGE-PLAN.md`.
 - Boundary enforcement is upgraded from a debug-only `Debug.Assert` to a
-  **runtime throw** (`AutoGradException`/`InvalidOperationException` containing
-  "ADR-001") in `FromColumn`/`FromSeries`/`FromArray`/`FromMatrix` when the
-  input column `HasNulls`. Callers must `DropNulls()`/`FillNull` first.
-- The enter path uses `ColumnStorage<T>.AsTensor()` for a zero-copy view into
-  the non-nullable tensor; no flatten-copy at the boundary.
+  **runtime throw** (`AutoGradException` containing "ADR-001") in the
+  `ReverseGradTensor`/`ForwardGradTensor` constructors, which covers the
+  `FromColumn`/`FromSeries`/`FromArray`/`FromMatrix` factories and direct
+  construction whenever the input column `HasNulls`. `ForwardGradTensor`
+  tangent columns are guarded identically. Callers must
+  `DropNulls()`/`FillNull` first.
+- The enter path is zero-copy: `FromColumn`/`FromSeries` wrap the input column
+  (no copy), `FromArray`/`FromMatrix` wrap the caller's array via
+  `CreateFromOwnedArray` (caller must not mutate it afterward), and
+  `GradTensor.AsTensor()` returns a `ColumnStorage<T>.AsTensor()` view sharing
+  the backing array — no flatten-copy at the boundary.

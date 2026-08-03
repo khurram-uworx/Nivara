@@ -1330,6 +1330,29 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Gets a zero-copy <see cref="Tensor{T}"/> view over the column data that shares
+    /// the underlying array. The column remains immutable; mutating the returned tensor
+    /// would corrupt the column, so callers must treat it as read-only.
+    /// </summary>
+    /// <returns>A Tensor&lt;T&gt; view sharing the column's backing storage</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the column contains null values or the element type is not unmanaged</exception>
+    internal Tensor<T> AsTensorView()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (HasNulls)
+            throw new InvalidOperationException(
+                "Cannot create a zero-copy tensor view from a column with null values. " +
+                "Use ToTensor() or DropNulls().");
+
+        if (storage is ColumnStorage<T> columnStorage)
+            return columnStorage.AsTensor();
+
+        throw new InvalidOperationException(
+            $"Column of type {typeof(T).Name} does not support zero-copy tensor views.");
+    }
+
+    /// <summary>
     /// Gets a writable span view of the underlying data.
     /// Provides zero-copy access for scenarios requiring data mutation.
     /// Note: This may create a copy for immutable storage implementations.
