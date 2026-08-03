@@ -35,47 +35,43 @@ tests/Nivara.PerformanceTests/bin/Release/net10.0/Nivara.PerformanceTests.exe
 - Compare **on the same machine/config**; run each build 3 times and take the
   median — run-to-run variance is ~±10% for these scenarios.
 
+### Baseline policy (do not re-litigate)
+
+- The **Results** table below is the canonical baseline (**point A**) for
+  future A/B comparisons — recorded 2026-08-03 against the then-current HEAD.
+- **Never rebuild past commits to re-derive point A.** The previous A/B table
+  (built in a git worktree at `549c6cc`) is superseded; its findings still
+  hold (the ColumnAdd branch-removal win and the AutoDiff allocation
+  reductions are the reason this harness exists), but the numbers are no
+  longer the comparison point.
+- When measuring a change: record new results on the same machine, compare
+  against the **Results** table, and replace it with the new numbers. That
+  keeps point A rolling forward and avoids hunting through git history.
+
 ## Results
 
-**AFTER** = post-consolidation HEAD (single `ColumnStorage<T>`).
-**BEFORE** = pre-consolidation two-storage layout (`TensorStorage<T>` /
-`MemoryStorage<T>` split), same harness built in a git worktree at commit
-`549c6cc` with identical `Program.cs`.
+**Baseline (point A)** recorded **2026-08-03** on the then-current HEAD
+(post-storage-consolidation single `ColumnStorage<T>`). Supersedes the earlier
+pre-consolidation A/B table (see "Baseline policy" above).
 
-Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 3 runs.
+Machine: 16 logical processors, x64, .NET 10.0.x (Release). Medians of 6 runs.
 
-| Scenario | BEFORE ops/s | AFTER ops/s | Δ | BEFORE B/op | AFTER B/op | Δ B/op |
-|---|---|---|---|---|---|---|
-| ColumnAdd 1M x float | 67 | 669 | **+10.0x** | 4,000,771 | 4,000,586 | ~0% |
-| ColumnSigmoid 1M x float | 181 | 164 | −9% (noise) | 8,000,579 | 8,000,795 | ~0% |
-| Linear forward [32x256] | 359 | 388 | +8% (noise) | 103,763 | 69,169 | −33% |
-| Linear forward+backward [32x256] | 77 | 89 | +16% | 2,904,207 | 1,787,573 | −38% |
-| TransformerBlock forward [32x64, 4 heads] | 118 | 118 | ~0% | 330,043 | 191,545 | **−42%** |
+| Scenario | ops/s | B/op | gen0/op |
+|---|---|---|---|
+| ColumnAdd 1M x float | 872 | 4,000,537 | 0.33 |
+| ColumnSigmoid 1M x float | 182 | 8,000,840 | 0.66 |
+| Linear forward [32x256] | 441 | 69,247 | 0.00 |
+| Linear forward+backward [32x256] | 94 | 1,787,949 | 0.50 |
+| TransformerBlock forward [32x64, 4 heads] | 148 | 191,486 | 0.02 |
 
-### Findings
+### Notes
 
-- **Columnar-op branch removal (ColumnAdd +10x).** Pre-consolidation
-  `applyElementwiseBinary` had a "tensor-backed or mixed storage" branch that
-  materialized *both* operands into `ArrayPool` buffers element-by-element on
-  every op before running the kernel. `Create` routed `float` columns to
-  `TensorStorage<T>`, so `Add` always hit that path. The single
-  `ColumnStorage<T>` layout removes the branch entirely — both operands are
-  already plain arrays and the direct-span kernel runs with no per-op
-  materialization. This is exactly the branch-removal win the plan predicted.
-- **Entry zero-copy.** `FromColumn`/tensor-from-column wrappers were already
-  wrapper-only pre-consolidation; the flattened-copy elimination lands in
-  `FromArray`/`FromMatrix` (`CreateFromOwnedArray`) and in `AsTensor()` no
-  longer producing a per-column `Tensor<T>` + flattened cache. That is reflected
-  in the AutoDiff allocation reduction below rather than a dedicated
-  micro-benchmark.
-- **AutoDiff indirect gains (allocations −33%/−38%/−42% on Linear forward /
-  forward+backward / TransformerBlock).** With no per-column `Tensor<T>` wrapper
-  + flattened cache, and the pooled-copy branches gone from the ops AutoDiff
-  calls, the graph ops allocate markedly less. Throughput for these
-  SIMD-dominated paths is within run-to-run noise; the structural win is
-  allocation pressure.
-- **ColumnSigmoid flat (within noise).** The `Sigmoid` extension runs the same
-  `TensorsHelper.Sigmoid` span kernel pre/post; it never hit the removed
-  pooled-copy branch, so throughput is unchanged. gen0/op rose (0.35 → 0.63)
-  with identical B/op, consistent with unchanged allocation volume on a
-  different GC segment layout — tracked as issue #109.
+- **ColumnSigmoid gen0/op is high relative to its allocation profile.** The
+  ~8 MB/op is dominated by a single ~4 MB result array (>85 KB, so LOH, not
+  gen0); gen0/op counts how often the *small-object* gen0 budget is hit in the
+  measured window. B/op and throughput are stable across runs; treat gen0/op as
+  a GC-scheduling-sensitive signal, not an allocation-volume metric. Tracked as
+  issue #109 (conclusion: no regression, metric is not allocation-proportional).
+- **ColumnAdd dominates the table** because the single-`ColumnStorage<T>`
+  layout removed the pre-consolidation pooled-copy branch from
+  `applyElementwiseBinary` — that win is the reason this harness exists.
