@@ -127,10 +127,10 @@ public class ComplexScenarioIntegrationTests
         var vectorizedDoubles = NivaraColumn<double>.Create(Enumerable.Range(1, 1000).Select(i => i * 1.5).ToArray());
         var scalarStrings = NivaraColumn<string>.Create(Enumerable.Range(1, 1000).Select(i => $"Item{i}").ToArray());
 
-        // Verify storage types
-        Assert.That(vectorizedInts.Diagnostics.StorageType, Is.EqualTo(StorageType.Tensor), "Ints should use tensor storage");
-        Assert.That(vectorizedDoubles.Diagnostics.StorageType, Is.EqualTo(StorageType.Tensor), "Doubles should use tensor storage");
-        Assert.That(scalarStrings.Diagnostics.StorageType, Is.EqualTo(StorageType.Memory), "Strings should use memory storage");
+        // Verify diagnostics
+        Assert.That(vectorizedInts.Diagnostics.IsVectorizable, Is.True, "Ints should be vectorizable");
+        Assert.That(vectorizedDoubles.Diagnostics.IsVectorizable, Is.True, "Doubles should be vectorizable");
+        Assert.That(scalarStrings.Diagnostics.IsVectorizable, Is.False, "Strings should not be vectorizable");
 
         // Act - Perform operations that mix vectorized and scalar operations
         var doubledInts = vectorizedInts * 2; // Vectorized operation

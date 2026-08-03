@@ -19,8 +19,7 @@ public class DiagnosticsTests
         var diagnostics = column.Diagnostics;
 
         // Assert
-        Assert.That(diagnostics.StorageType, Is.EqualTo(StorageType.Tensor));
-        Assert.That(diagnostics.IsVectorizable, Is.True); // Int columns now use TensorStorage
+        Assert.That(diagnostics.IsVectorizable, Is.True); // Int columns are vectorizable
         Assert.That(diagnostics.ElementType, Is.EqualTo(typeof(int)));
         Assert.That(diagnostics.Length, Is.EqualTo(5));
         Assert.That(diagnostics.HasNulls, Is.False);
@@ -39,7 +38,6 @@ public class DiagnosticsTests
         var diagnostics = column.Diagnostics;
 
         // Assert
-        Assert.That(diagnostics.StorageType, Is.EqualTo(StorageType.Memory));
         Assert.That(diagnostics.IsVectorizable, Is.False);
         Assert.That(diagnostics.ElementType, Is.EqualTo(typeof(string)));
         Assert.That(diagnostics.Length, Is.EqualTo(3));

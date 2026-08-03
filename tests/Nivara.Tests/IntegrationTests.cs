@@ -79,7 +79,6 @@ public class IntegrationTests
         Assert.That(diagnostics1.IsVectorizable, Is.True, "Integer columns should be vectorizable");
         Assert.That(diagnostics1.IsHardwareAccelerated, Is.EqualTo(Vector.IsHardwareAccelerated), "Hardware acceleration should match system capability");
         Assert.That(diagnostics1.RecommendedKernel, Is.EqualTo(KernelType.Vectorized), "Large integer columns should recommend vectorized kernel");
-        Assert.That(diagnostics1.StorageType, Is.EqualTo(StorageType.Tensor), "Vectorizable types should use tensor storage");
 
         // Verify operation results are correct
         Assert.That(sum.Length, Is.EqualTo(size));

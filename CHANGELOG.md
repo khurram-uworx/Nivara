@@ -12,7 +12,8 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - `Nivara.Storage.MemoryStorage<T>` renamed to `Nivara.Storage.ColumnStorage<T>` and moved to sole-owner contiguous `T[]` backing with an optional `bool[]` null mask (`null` mask ⇒ non-nullable column). `Data`/`NullMaskMemory`/`AsSpan()`/`TryGetSpan`/`Slice` keep their zero-copy, shared-buffer semantics.
 - New internal lazy `ColumnStorage<T>.AsTensor()` returns a zero-copy `Tensor<T>` view over the storage's backing array (unmanaged `T` only — `Half`/`BFloat16` pass; reference-containing types throw). Slices are supported via `Tensor.Create(array, start, lengths, strides)`.
-- Storage consolidation onto a single `ColumnStorage<T>` is in progress (see `docs/STORAGE-PLAN.md`): `TensorStorage<T>` will be removed once the factory and `NivaraColumn` dispatch paths are collapsed in follow-up commits.
+- `ColumnStorageFactory` now builds `ColumnStorage<T>` directly for every type — vectorizable primitives no longer route to `TensorStorage<T>`. The tensor/memory split helpers (`createTensorStorage`, `CreateTensorStorageForType`, `CreateTensorStorageForOwnedArray`, `CreateTensorStorageForNullableType`) and the duplicate `IsUnmanagedType<T>()` type list were deleted; the runtime unmanaged guard lives on `ColumnStorage<T>.AsTensor()` via `RuntimeHelpers.IsReferenceOrContainsReferences<T>()`. `IsVectorizable<T>()` is retained for `KernelSelector` heuristics.
+- Storage consolidation onto a single `ColumnStorage<T>` is in progress (see `docs/STORAGE-PLAN.md`): `TensorStorage<T>` and the `StorageType`-based dispatch in `NivaraColumn` will be removed in follow-up commits.
 
 ### Query Engine
 
