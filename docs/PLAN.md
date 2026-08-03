@@ -16,6 +16,13 @@ work into assignable tasks per `docs/TASKS-TEMPLATE.md`.
   train explicitly** (`GradientUtils.Grad()`). No `NoGrad` primary API.
 - ADR-001 (AutoDiff is a non-nullable domain) is settled and enforced at
   runtime. Null cleaning happens before entry.
+- **Architecture (this refactor's one-way door): Option A — span boundary**,
+  locked on 2026-08-03 and recorded in `docs/adr/002-autodiff-span-boundary.md`.
+  `GradTensor<T>` keeps `NivaraColumn<T>` as the AutoDiff I/O boundary; the new
+  `GradKernels` layer is span-in/span-out over generic `TensorPrimitives`; ops
+  wrap results once; `OpNode`/`ComputationGraph` delegate types are unchanged;
+  raw `Tensor<T>` backing is explicitly declined. Agents must not re-open this
+  fork.
 
 Branch: `khurram/refactoring` (created from `main`).
 
@@ -332,33 +339,39 @@ issue immediately using `gh`:
 
 ## Part D — Tasks
 
-### Task 1: Confirm architecture scope (decision gate)
+### Task 1: Record the architecture decision (decided — non-blocking)
 
 **Priority:** High
 
-**Goal:** Ratify the smaller revision (Part C) vs the plan's original full
-raw-`Tensor<T>` rewrite.
+**Goal:** Record the already-made architecture decision as ADR-002 and update
+the affected docs. Do not re-litigate the decision.
 
-**Why this exists:** NEXT-REFACTORING §2 and its own Observations section
-conflict. The current surface (1948+ passing tests, new conv/attention/transformer/
-VAE ops) makes a wholesale storage rewrite high-risk for little benefit.
+**Why this exists:** NEXT-REFACTORING §2 conflicts with its own Observations
+section. The decision was made explicitly (maintainer review, 2026-08-03);
+agents must not reopen it.
 
-**Decision required:** Adopt Part C's "keep `NivaraColumn<T>` boundary, span
-kernels, delete dead code" target. Explicitly decline the raw `Tensor<T>` backing
-unless profiling shows the column wrapper dominates op cost.
+**Decision (locked):** Option A — span boundary (ADR-002). `GradTensor<T>`
+keeps `NivaraColumn<T>` as the AutoDiff I/O boundary; new `GradKernels` span
+layer; ops wrap results once; no `OpNode`/`ComputationGraph` delegate changes;
+raw `Tensor<T>` backing declined.
 
 **Scope:**
-- Reconcile NEXT-REFACTORING §2 with the Observations section.
-- Decide `GradTensor<T>.Data` surface: keep public (recommended) vs internalize.
-  Recommendation: keep `Data` + `ToColumn()`; add `internal` span access.
-- Confirm `OpNode<T>.BackwardFunction` stays `Action<NivaraColumn<T>>` (no
-  delegate change needed under the smaller revision).
+- Write `docs/adr/002-autodiff-span-boundary.md` recording the accepted option,
+  rejected options (B: raw `Tensor<T>` backing, C: internal `T[]`+shape) with
+  rationale, and consequences (keep public `Data` + `ToColumn()`; add internal
+  `AsSpan()`/`AsTensor()` in Task 7; remove `IsNull(int)`).
+- Reconcile NEXT-REFACTORING §2/§3 narrative with the decision (mark the
+  raw-`Tensor<T>` rewrite sections as superseded by ADR-002).
+- Confirm `GradTensor<T>.Data` stays public; internal span access lands in
+  Task 7.
 
 **Acceptance criteria:**
-- A short decision note is appended to this document recording the choice.
-- Task 2 onward proceed under the chosen architecture.
+- ADR-002 exists and matches the locked decision.
+- NEXT-REFACTORING.md marks the superseded sections.
+- Task 2 onward proceeds without re-opening the decision.
 
 **Files likely involved:**
+- `docs/adr/002-autodiff-span-boundary.md` (new)
 - `docs/NEXT-REFACTORING.md`
 - `docs/PLAN.md`
 
@@ -723,7 +736,8 @@ accurate.
 
 ## Suggested Execution Order
 
-1. Task 1 (decision gate)
+1. Task 1 (record locked decision as ADR-002 — docs only, non-blocking; safe to
+   run in parallel with Task 2)
 2. Task 2 → Task 3 → Task 4 (kernel layer, then ops migration — sequential,
    share `GradKernels.cs` and the operations files)
 3. Task 7 (boundary gates) — can start after Task 2
@@ -745,9 +759,9 @@ accurate.
 - **Merge-conflict risk files:** `NivaraTensorExtensions.cs`, `ReverseGradOperations.cs`,
   `ForwardGradOperations.cs`, `GradTensor.cs`. Run Tasks 2–4 on the same branch
   head sequentially; parallelize only Tasks 5–11 after the kernel layer lands.
-- **Do not start until Task 1:** Tasks 2–11 all depend on the architecture
-  decision.
-- **Decision gates:** Task 1 only. Tasks 5–6's breaking changes are pre-approved
+- **Do not start until Task 1:** none — the architecture decision (Option A,
+  span boundary) is locked and recorded in ADR-002. Tasks 2–11 proceed under it.
+- **Decision gates:** none blocking. Tasks 5–6's breaking changes are pre-approved
   (backward compat not a concern).
 - **Shared touchpoints:** samples `Program.cs`, `TimeSeriesModel.cs` and tests
   `NullHandlingPropertyTests.cs`, `InferenceFastPathTests.cs` are edited by both
@@ -755,8 +769,8 @@ accurate.
 
 ## Suggested Agent Handout Batches
 
-### Batch A: decision-critical
-- Task 1
+### Batch A: docs (non-blocking, parallel-safe)
+- Task 1 (record ADR-002; reconcile NEXT-REFACTORING §2/§3)
 
 ### Batch B: implementation (sequential, shared files)
 - Task 2, Task 3, Task 4, Task 7
@@ -771,7 +785,8 @@ accurate.
 
 - every task has an owner-sized scope ✅
 - every task has acceptance criteria ✅
-- decision-gate tasks clearly marked (Task 1) ✅
+- decision-gate tasks clearly marked (none blocking; ADR-002 records the locked
+  architecture) ✅
 - likely files listed ✅
 - execution order reflects real dependencies ✅
 - full-suite validation gated behind user confirmation (per AGENTS.md) ✅

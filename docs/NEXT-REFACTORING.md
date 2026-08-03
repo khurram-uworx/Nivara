@@ -311,6 +311,15 @@ not to be implemented as written.
 
 ## 2. AutoDiff: GradTensor backs onto Tensor<T>
 
+> **SUPERSEDED (2026-08-03)** by ADR-002
+> (`docs/adr/002-autodiff-span-boundary.md`). The raw `Tensor<T>` backing
+> rewrite in this section and its downstream references is **declined**.
+> Accepted target: keep `NivaraColumn<T>` as the AutoDiff boundary, add
+> span-in/span-out `GradKernels` over generic `TensorPrimitives`, keep
+> `OpNode`/`ComputationGraph` delegate shapes. Only the properties marked
+> "kept" here (e.g. remove `IsNull(int)`, add internal span access) carry
+> forward — see the execution plan `docs/PLAN.md`.
+
 ### Core principle
 
 `GradTensor<T>` — and therefore `ReverseGradTensor<T>` and
