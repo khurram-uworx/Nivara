@@ -176,7 +176,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void MemoryStorageColumn_Comparison_EngagesTypedKernel_FiltersCorrectly()
+    public void ColumnStorageColumn_Comparison_EngagesTypedKernel_FiltersCorrectly()
     {
         var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         using var frame = NivaraFrame.Create(("ID", ids));

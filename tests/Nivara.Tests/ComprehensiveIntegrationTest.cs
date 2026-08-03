@@ -24,7 +24,7 @@ public class ComprehensiveIntegrationTest
         var scores = NivaraColumn<double>.Create(Enumerable.Range(1, 1000).Select(i => i * 0.75 + 25).ToArray());
         var active = NivaraColumn<bool>.Create(Enumerable.Range(1, 1000).Select(i => i % 3 != 0).ToArray());
 
-        // Create non-vectorizable columns (should use MemoryStorage)
+        // Create non-vectorizable columns (should use ColumnStorage)
         var names = NivaraColumn<string>.Create(Enumerable.Range(1, 1000).Select(i => $"User{i:D4}").ToArray());
         var timestamps = NivaraColumn<DateTime>.Create(Enumerable.Range(1, 1000).Select(i => DateTime.Now.AddDays(-i)).ToArray());
 

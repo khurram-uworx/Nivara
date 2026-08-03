@@ -86,7 +86,7 @@ public class NivaraColumnTests
     /// **Validates: Requirements 1.2, 6.2**
     /// </summary>
     [Test]
-    public void NonVectorizableTypes_ShouldUseMemoryStorage()
+    public void NonVectorizableTypes_ShouldUseColumnStorage()
     {
         // Test with string (reference type)
         var stringTestCases = new[]
@@ -1435,7 +1435,7 @@ public class NivaraColumnTests
     [Test]
     public void IsNull_WithExplicitEmptyNullMask_TreatsAllPositionsAsNonNull()
     {
-        var storage = new MemoryStorage<int>(
+        var storage = new ColumnStorage<int>(
             new ReadOnlyMemory<int>(new[] { 1, 2, 3 }),
             ReadOnlyMemory<bool>.Empty);
         var column = new NivaraColumn<int>(storage);

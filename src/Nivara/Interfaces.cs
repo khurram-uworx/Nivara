@@ -120,7 +120,7 @@ internal interface IColumnStorage<T> : IDisposable
     /// Gets a value indicating whether span access is a true zero-copy view of the underlying storage.
     /// </summary>
     /// <remarks>
-    /// <see cref="MemoryStorage{T}"/> exposes a genuine view (shared <see cref="ReadOnlyMemory{T}"/>).
+    /// <see cref="ColumnStorage{T}"/> exposes a genuine view (shared <see cref="ReadOnlyMemory{T}"/>).
     /// <see cref="TensorStorage{T}"/> returns a cached flattened <em>copy</em>, so callers that need
     /// zero-copy semantics should branch on this flag rather than assume.
     /// </remarks>

@@ -26,7 +26,7 @@ public class ColumnStorageFactoryTests
     {
         var storage = ColumnStorageFactory.Create<int>(values);
 
-        // Note: Current implementation always uses MemoryStorage, but we test the intended behavior
+        // Note: Current implementation always uses ColumnStorage, but we test the intended behavior
         // This test validates that the factory method works and the IsVectorizable method correctly identifies vectorizable types
         Assert.That(ColumnStorageFactory.IsVectorizable<int>(), Is.True,
             "int should be identified as vectorizable type");
@@ -289,7 +289,7 @@ public class ColumnStorageFactoryTests
     }
 
     [Test]
-    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMaskForMemoryStorage()
+    public void ColumnStorageFactory_Create_WithExplicitEmptyNullMask_TreatsAsNoNullMaskForColumnStorage()
     {
         var values = new[] { "a", "b", "c" };
 
@@ -317,7 +317,7 @@ public class ColumnStorageFactoryTests
     }
 
     [Test]
-    public void ColumnStorageFactory_CreateFromOwnedArray_MemoryStorage_UsesOwnedArrayAndPreservesNullMask()
+    public void ColumnStorageFactory_CreateFromOwnedArray_ColumnStorage_UsesOwnedArrayAndPreservesNullMask()
     {
         var values = new[] { "a", "b", "c" };
         var nullMask = new ReadOnlyMemory<bool>(new[] { false, true, false });

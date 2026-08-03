@@ -8,6 +8,12 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - `ArrowConversionOptions.UseZeroCopy` removed — the option defaulted to `true` but every zero-copy interop path was a placeholder that silently copied. Nivara does not advertise unsupported capability; real zero-copy returns with ARROW-ROADMAP Phase D (adding real APIs then).
 
+### Storage Consolidation
+
+- `Nivara.Storage.MemoryStorage<T>` renamed to `Nivara.Storage.ColumnStorage<T>` and moved to sole-owner contiguous `T[]` backing with an optional `bool[]` null mask (`null` mask ⇒ non-nullable column). `Data`/`NullMaskMemory`/`AsSpan()`/`TryGetSpan`/`Slice` keep their zero-copy, shared-buffer semantics.
+- New internal lazy `ColumnStorage<T>.AsTensor()` returns a zero-copy `Tensor<T>` view over the storage's backing array (unmanaged `T` only — `Half`/`BFloat16` pass; reference-containing types throw). Slices are supported via `Tensor.Create(array, start, lengths, strides)`.
+- Storage consolidation onto a single `ColumnStorage<T>` is in progress (see `docs/STORAGE-PLAN.md`): `TensorStorage<T>` will be removed once the factory and `NivaraColumn` dispatch paths are collapsed in follow-up commits.
+
 ### Query Engine
 
 - `OrderBy`/`OrderByDescending` support computed sort keys (`OrderBy(x => x["A"] + x["B"])`) via a materialized-key `SortByExpressionOperation` — no longer throws `NotSupportedException`; null placement and direction match `Sort` semantics

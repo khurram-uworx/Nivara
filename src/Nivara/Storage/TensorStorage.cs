@@ -133,7 +133,7 @@ sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
     /// <remarks>
     /// Returns an <em>independent copy</em>: tensor slicing is not contiguous, so the data and
     /// null mask are flattened and rebuilt via <see cref="GetFlattenedSpan"/>. Contrast with
-    /// <see cref="MemoryStorage{T}.Slice"/>, which returns a true zero-copy view.
+    /// <see cref="ColumnStorage{T}.Slice"/>, which returns a true zero-copy view.
     /// </remarks>
     /// <param name="start">The starting index of the slice</param>
     /// <param name="length">The number of elements in the slice</param>
@@ -156,7 +156,7 @@ sealed class TensorStorage<T> : IColumnStorage<T> where T : unmanaged
         }
 
         // Get data as span and slice it. Tensor slicing is not contiguous, so the result is an
-        // independent copy (unlike MemoryStorage<T>.Slice which shares the underlying buffer).
+        // independent copy (unlike ColumnStorage<T>.Slice which shares the underlying buffer).
         var slicedDataArray = GetFlattenedSpan().Slice(start, length).ToArray();
         var slicedData = Tensor.Create(slicedDataArray, [length]);
 

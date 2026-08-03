@@ -65,11 +65,11 @@ static class ColumnStorageFactory
     /// <typeparam name="T">The value type</typeparam>
     /// <param name="values">The nullable values</param>
     /// <returns>A memory storage instance</returns>
-    static MemoryStorage<T> createMemoryStorage<T>(ReadOnlySpan<T?> values) where T : struct
+    static ColumnStorage<T> createColumnStorage<T>(ReadOnlySpan<T?> values) where T : struct
     {
         if (values.IsEmpty)
         {
-            return new MemoryStorage<T>(ReadOnlySpan<T>.Empty);
+            return new ColumnStorage<T>(ReadOnlySpan<T>.Empty);
         }
 
         var dataArray = new T[values.Length];
@@ -95,7 +95,7 @@ static class ColumnStorageFactory
         var data = new ReadOnlyMemory<T>(dataArray);
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : null;
 
-        return new MemoryStorage<T>(data, nullMask);
+        return new ColumnStorage<T>(data, nullMask);
     }
 
     /// <summary>
@@ -113,8 +113,8 @@ static class ColumnStorageFactory
             return CreateTensorStorageForType<T>(values);
         }
 
-        // Use MemoryStorage for non-vectorizable types or reference types
-        return new MemoryStorage<T>(values, detectNulls: !typeof(T).IsValueType);
+        // Use ColumnStorage for non-vectorizable types or reference types
+        return new ColumnStorage<T>(values, detectNulls: !typeof(T).IsValueType);
     }
 
     /// <summary>
@@ -133,8 +133,8 @@ static class ColumnStorageFactory
             return CreateTensorStorageForType<T>(values, nullMask);
         }
 
-        // Use MemoryStorage for non-vectorizable types or reference types
-        return new MemoryStorage<T>(values.ToArray().AsMemory(), nullMask);
+        // Use ColumnStorage for non-vectorizable types or reference types
+        return new ColumnStorage<T>(values.ToArray().AsMemory(), nullMask);
     }
 
     /// <summary>
@@ -150,7 +150,7 @@ static class ColumnStorageFactory
             return CreateTensorStorageForOwnedArray<T>(values, nullMask);
         }
 
-        return new MemoryStorage<T>(new ReadOnlyMemory<T>(values), nullMask);
+        return new ColumnStorage<T>(new ReadOnlyMemory<T>(values), nullMask);
     }
 
     /// <summary>
@@ -167,8 +167,8 @@ static class ColumnStorageFactory
             return CreateTensorStorageForNullableType<T>(values);
         }
 
-        // Use MemoryStorage for non-vectorizable value types
-        return createMemoryStorage(values);
+        // Use ColumnStorage for non-vectorizable value types
+        return createColumnStorage(values);
     }
 
     /// <summary>

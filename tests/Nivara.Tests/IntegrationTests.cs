@@ -95,7 +95,7 @@ public class IntegrationTests
 
     [Test]
     [Category("Integration")]
-    public void NonVectorizable_UsesMemoryStorage()
+    public void NonVectorizable_UsesColumnStorage()
     {
         // Arrange - Create columns with non-vectorizable types
         var stringColumn = NivaraColumn<string>.Create(new[] { "Hello", "World", "Test" });

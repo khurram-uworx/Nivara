@@ -342,8 +342,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         }
         else if (typeof(T).IsClass)
         {
-            // For reference types, always detect nulls using MemoryStorage directly
-            return new MemoryStorage<T>(values, detectNulls: true);
+            // For reference types, always detect nulls using ColumnStorage directly
+            return new ColumnStorage<T>(values, detectNulls: true);
         }
         else
         {
@@ -417,8 +417,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (!typeof(T).IsClass)
             throw new InvalidOperationException($"CreateForReferenceType can only be used with reference types. Use Create or CreateFromNullable for value types.");
 
-        // For reference types, always detect nulls using MemoryStorage directly
-        var storage = new MemoryStorage<T>(values, detectNulls: true);
+        // For reference types, always detect nulls using ColumnStorage directly
+        var storage = new ColumnStorage<T>(values, detectNulls: true);
         return new NivaraColumn<T>(storage);
     }
 
@@ -449,7 +449,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         // Handle empty array
         if (values.Length == 0)
         {
-            return new NivaraColumn<T>(new MemoryStorage<T>(ReadOnlySpan<T>.Empty));
+            return new NivaraColumn<T>(new ColumnStorage<T>(ReadOnlySpan<T>.Empty));
         }
 
         // Process nullable values manually
@@ -476,7 +476,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var data = new ReadOnlyMemory<T>(dataArray);
         var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : null;
 
-        var storage = new MemoryStorage<T>(data, nullMask);
+        var storage = new ColumnStorage<T>(data, nullMask);
         return new NivaraColumn<T>(storage);
     }
 
@@ -509,7 +509,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
 
         var dataArray = values.ToArray();
         var maskArray = nullMask.ToArray();
-        var storage = new MemoryStorage<T>(new ReadOnlyMemory<T>(dataArray), new ReadOnlyMemory<bool>(maskArray));
+        var storage = new ColumnStorage<T>(new ReadOnlyMemory<T>(dataArray), new ReadOnlyMemory<bool>(maskArray));
         return new NivaraColumn<T>(storage);
     }
 
@@ -546,7 +546,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        // Handle both TensorStorage and MemoryStorage
+        // Handle both TensorStorage and ColumnStorage
         if (storage.StorageType == StorageType.Tensor)
         {
             T[]? pooledDataBuffer = null;
@@ -583,7 +583,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                     ArrayPool<T>.Shared.Return(pooledDataBuffer);
             }
         }
-        else if (storage is MemoryStorage<T> memoryStorage)
+        else if (storage is ColumnStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new T[data.Length];
@@ -601,7 +601,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
 
-            var resultStorage = new MemoryStorage<T>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<T>(result, resultNullMask);
             return new NivaraColumn<T>(resultStorage);
         }
         else
@@ -619,7 +619,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<T> applyElementwiseBinary(NivaraColumn<T> other, Action<ReadOnlySpan<T>, ReadOnlySpan<T>, Span<T>> kernel)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        if (storage is ColumnStorage<T> leftMemory && other.storage is ColumnStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -646,7 +646,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
 
-            return new NivaraColumn<T>(new MemoryStorage<T>(result, resultNullMask));
+            return new NivaraColumn<T>(new ColumnStorage<T>(result, resultNullMask));
         }
 
         // Tensor-backed or mixed storage: materialize both sides into pooled buffers.
@@ -747,7 +747,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             HasNulls);
         DiagnosticsTracker.RecordOperation(diagnostic);
 
-        // Handle both TensorStorage and MemoryStorage
+        // Handle both TensorStorage and ColumnStorage
         if (storage.StorageType == StorageType.Tensor)
         {
             T[]? pooledDataBuffer = null;
@@ -781,7 +781,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                     }
                 }
 
-                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
                 return new NivaraColumn<bool>(resultStorage);
             }
             finally
@@ -790,7 +790,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                     ArrayPool<T>.Shared.Return(pooledDataBuffer);
             }
         }
-        else if (storage is MemoryStorage<T> memoryStorage)
+        else if (storage is ColumnStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -815,7 +815,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 }
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -834,7 +834,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> applyElementwiseCompare(NivaraColumn<T> other, Action<ReadOnlySpan<T>, ReadOnlySpan<T>, Span<bool>> kernel)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        if (storage is ColumnStorage<T> leftMemory && other.storage is ColumnStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -867,7 +867,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
 
-            return new NivaraColumn<bool>(new MemoryStorage<bool>(result, resultNullMask));
+            return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
         }
 
         // Tensor-backed or mixed storage: materialize both sides into pooled buffers.
@@ -918,7 +918,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
 
-            return new NivaraColumn<bool>(new MemoryStorage<bool>(result, resultNullMask));
+            return new NivaraColumn<bool>(new ColumnStorage<bool>(result, resultNullMask));
         }
         finally
         {
@@ -942,7 +942,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> equalsScalar(T scalar)
     {
-        if (storage is MemoryStorage<T> memoryStorage)
+        if (storage is ColumnStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -974,7 +974,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -988,7 +988,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> equalsScalar(NivaraColumn<T> other)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        if (storage is ColumnStorage<T> leftMemory && other.storage is ColumnStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -1033,7 +1033,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -1047,7 +1047,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> greaterThanVectorized(T scalar)
     {
-        // Handle both TensorStorage and MemoryStorage
+        // Handle both TensorStorage and ColumnStorage
         if (storage.StorageType == StorageType.Tensor)
         {
             T[]? pooledDataBuffer = null;
@@ -1081,7 +1081,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                     }
                 }
 
-                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
                 return new NivaraColumn<bool>(resultStorage);
             }
             finally
@@ -1090,7 +1090,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                     ArrayPool<T>.Shared.Return(pooledDataBuffer);
             }
         }
-        else if (storage is MemoryStorage<T> memoryStorage)
+        else if (storage is ColumnStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -1115,7 +1115,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 }
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -1137,7 +1137,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> greaterThanScalar(T scalar)
     {
-        if (storage is MemoryStorage<T> memoryStorage)
+        if (storage is ColumnStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -1169,7 +1169,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -1183,7 +1183,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> greaterThanScalar(NivaraColumn<T> other)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        if (storage is ColumnStorage<T> leftMemory && other.storage is ColumnStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -1228,7 +1228,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -1242,7 +1242,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> lessThanVectorized(T scalar)
     {
-        // Handle both TensorStorage and MemoryStorage
+        // Handle both TensorStorage and ColumnStorage
         if (storage.StorageType == StorageType.Tensor)
         {
             T[]? pooledDataBuffer = null;
@@ -1276,7 +1276,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                     }
                 }
 
-                var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+                var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
                 return new NivaraColumn<bool>(resultStorage);
             }
             finally
@@ -1285,7 +1285,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                     ArrayPool<T>.Shared.Return(pooledDataBuffer);
             }
         }
-        else if (storage is MemoryStorage<T> memoryStorage)
+        else if (storage is ColumnStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -1310,7 +1310,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 }
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -1332,7 +1332,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> lessThanScalar(T scalar)
     {
-        if (storage is MemoryStorage<T> memoryStorage)
+        if (storage is ColumnStorage<T> memoryStorage)
         {
             var data = memoryStorage.Data.Span;
             var result = new bool[data.Length];
@@ -1364,7 +1364,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
@@ -1378,7 +1378,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     NivaraColumn<bool> lessThanScalar(NivaraColumn<T> other)
     {
-        if (storage is MemoryStorage<T> leftMemory && other.storage is MemoryStorage<T> rightMemory)
+        if (storage is ColumnStorage<T> leftMemory && other.storage is ColumnStorage<T> rightMemory)
         {
             var leftData = leftMemory.Data.Span;
             var rightData = rightMemory.Data.Span;
@@ -1423,7 +1423,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
                 resultNullMask = new ReadOnlyMemory<bool>(resultNullMaskArray);
             }
 
-            var resultStorage = new MemoryStorage<bool>(result, resultNullMask);
+            var resultStorage = new ColumnStorage<bool>(result, resultNullMask);
             return new NivaraColumn<bool>(resultStorage);
         }
         else
