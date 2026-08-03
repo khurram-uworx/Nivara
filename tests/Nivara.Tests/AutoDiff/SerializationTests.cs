@@ -292,12 +292,13 @@ public class SerializationTests
         ModelSerializer.Save(model, path);
         var json = File.ReadAllText(path);
 
-        Assert.That(json, Does.Contain("nivara-ss-v1"));
+        Assert.That(json, Does.Contain("nivara-ss-v2"));
         Assert.That(json, Does.Contain("Weight"));
         Assert.That(json, Does.Contain("Bias"));
         Assert.That(json, Does.Contain("Shape"));
         Assert.That(json, Does.Contain("Values"));
-        Assert.That(json, Does.Contain("HasNulls"));
+        Assert.That(json, Does.Not.Contain("HasNulls"));
+        Assert.That(json, Does.Not.Contain("NullMask"));
 
         File.Delete(path);
     }
@@ -312,7 +313,7 @@ public class SerializationTests
         ModelSerializer.SaveCheckpoint(model, epoch, path);
         var json = File.ReadAllText(path);
 
-        Assert.That(json, Does.Contain("nivara-ckpt-v1"));
+        Assert.That(json, Does.Contain("nivara-ckpt-v2"));
         Assert.That(json, Does.Contain("Epoch"));
 
         File.Delete(path);

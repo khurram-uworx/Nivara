@@ -6,6 +6,7 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Breaking changes
 
+- **Model/checkpoint serialization format bumped to `nivara-ss-v2` / `nivara-ckpt-v2`** (AutoDiff, ADR-001): the null-mask persistence (`HasNulls` / `NullMask` on parameter entries, `ParameterData<T>.NullMask`) was removed from the AutoDiff non-nullable domain. Deserialize now uses the zero-copy `CreateFromOwnedArray` path. v1 files are rejected loudly with an "unsupported format" error instead of being silently misread.
 - `ArrowConversionOptions.UseZeroCopy` removed — the option defaulted to `true` but every zero-copy interop path was a placeholder that silently copied. Nivara does not advertise unsupported capability; real zero-copy returns with ARROW-ROADMAP Phase D (adding real APIs then).
 
 ### Storage Consolidation

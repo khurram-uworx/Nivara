@@ -1038,10 +1038,13 @@ var checkpoint = ModelSerializer.LoadCheckpoint<float>("checkpoint.json");
 parameters. You can remove keys, serialize the dictionary, or load it into a
 compatible model without accidentally mutating the source model.
 
-**Format:** JSON with format marker `"nivara-ss-v1"` / `"nivara-ckpt-v1"`, version field, type name, and parameter entries. Each parameter entry stores:
+**Format:** JSON with format marker `"nivara-ss-v2"` / `"nivara-ckpt-v2"`, version field, type name, and parameter entries. Each parameter entry stores:
 - `Shape` — `int[]` dimension sizes
 - `Values` — base64-encoded binary (via `MemoryMarshal.AsBytes`), length-validated on load
-- `HasNulls` / `NullMask` — optional null mask as base64 bool array
+
+The AutoDiff domain is non-nullable (ADR-001), so no null mask is persisted.
+Files written with the v1 format (which stored `HasNulls` / `NullMask`) are
+rejected loudly on load with an "unsupported format" error.
 
 **Validation on load:** shape rank, exact shape, element count, and parameter
 name matching with descriptive error messages. `LoadStateDict(..., strict:

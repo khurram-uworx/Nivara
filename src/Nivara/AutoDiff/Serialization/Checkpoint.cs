@@ -14,5 +14,4 @@ public sealed class ParameterData<T> where T : struct, IFloatingPointIeee754<T>
 {
     public int[] Shape { get; init; } = [];
     public T[] Values { get; init; } = [];
-    public bool[]? NullMask { get; init; }
 }
