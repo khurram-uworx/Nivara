@@ -1,5 +1,3 @@
-#pragma warning disable CS0618 // Tests exercise deprecated APIs during migration
-
 using Nivara.Tensors;
 using NUnit.Framework;
 using System.Numerics;
@@ -735,56 +733,6 @@ public class TensorInteropTests
     }
 
     [Test]
-    public void FrameDot_WithProductColumns_ReturnsOneScorePerColumn()
-    {
-        // Arrange
-        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
-        using var products = new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
-            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
-            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
-        });
-
-        // Act
-        using var scores = products.Dot(user);
-
-        // Assert
-        Assert.That(scores.Length, Is.EqualTo(3));
-        Assert.That(scores[0], Is.EqualTo(1.16f).Within(1e-6f));
-        Assert.That(scores[1], Is.EqualTo(0.50f).Within(1e-6f));
-        Assert.That(scores[2], Is.EqualTo(1.11f).Within(1e-6f));
-    }
-
-    [Test]
-    public void FrameCosineSimilarity_WithProductColumns_MatchesTensorPrimitives()
-    {
-        // Arrange
-        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
-        using var products = new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
-            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
-            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
-        });
-
-        // Act
-        using var scores = products.CosineSimilarity(user);
-
-        // Assert
-        Assert.That(scores.Length, Is.EqualTo(3));
-        Assert.That(scores[0], Is.EqualTo(TensorPrimitives.CosineSimilarity(
-            new[] { 0.9f, 0.2f, 0.5f, 0.4f },
-            new[] { 0.8f, 0.1f, 0.6f, 0.3f })).Within(1e-6f));
-        Assert.That(scores[1], Is.EqualTo(TensorPrimitives.CosineSimilarity(
-            new[] { 0.1f, 0.9f, 0.2f, 0.7f },
-            new[] { 0.8f, 0.1f, 0.6f, 0.3f })).Within(1e-6f));
-        Assert.That(scores[2], Is.EqualTo(TensorPrimitives.CosineSimilarity(
-            new[] { 0.7f, 0.1f, 0.8f, 0.2f },
-            new[] { 0.8f, 0.1f, 0.6f, 0.3f })).Within(1e-6f));
-    }
-
-    [Test]
     public void ArgSortDescending_ReturnsStableIndicesWithNullsLast()
     {
         // Arrange
@@ -915,8 +863,14 @@ public class TensorInteropTests
             ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
         });
 
-        using var scores = products.CosineSimilarity(user);
-        var ranking = scores.ArgSortDescending();
+        var userSpan = user.Values.AsSpan();
+        var scores = new float[products.ColumnCount];
+        for (int i = 0; i < products.ColumnCount; i++)
+            scores[i] = TensorPrimitives.CosineSimilarity(
+                products.GetColumn<float>(products.ColumnNames[i]).AsSpan(), userSpan);
+        using var scoresSeries = NivaraSeries<float>.Create(scores);
+
+        var ranking = scoresSeries.ArgSortDescending();
 
         Assert.That(ranking.Length, Is.EqualTo(3));
         Assert.That(ranking[0], Is.EqualTo(0));
@@ -935,213 +889,18 @@ public class TensorInteropTests
             ("C", (IColumn)NivaraColumn<float>.Create(new[] { 0.7f, 0.1f, 0.8f, 0.2f })),
         });
 
-        using var scores = products.CosineSimilarity(user);
-        var top2 = scores.TopKDescending(2);
+        var userSpan = user.Values.AsSpan();
+        var scores = new float[products.ColumnCount];
+        for (int i = 0; i < products.ColumnCount; i++)
+            scores[i] = TensorPrimitives.CosineSimilarity(
+                products.GetColumn<float>(products.ColumnNames[i]).AsSpan(), userSpan);
+        using var scoresSeries = NivaraSeries<float>.Create(scores, products.ColumnNames.ToArray());
+
+        var top2 = scoresSeries.TopKDescending(2);
 
         Assert.That(top2.Length, Is.EqualTo(2));
         Assert.That(top2[0].Label, Is.EqualTo("A"));
         Assert.That(top2[1].Label, Is.EqualTo("C"));
-    }
-
-    [Test]
-    public void ColumnNorms_WithFloatColumns_MatchesTensorPrimitives()
-    {
-        using var frame = new NivaraFrame(new[]
-        {
-            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 4.0f })),
-            ("Y", (IColumn)NivaraColumn<float>.Create(new[] { 0.0f, 1.0f })),
-        });
-
-        using var norms = frame.ColumnNorms<float>();
-
-        Assert.That(norms.Length, Is.EqualTo(2));
-        Assert.That(norms[0], Is.EqualTo(TensorPrimitives.Norm(new[] { 3.0f, 4.0f })).Within(1e-6f));
-        Assert.That(norms[1], Is.EqualTo(TensorPrimitives.Norm(new[] { 0.0f, 1.0f })).Within(1e-6f));
-        Assert.That(norms.IsNull(0), Is.False);
-        Assert.That(norms.IsNull(1), Is.False);
-    }
-
-    [Test]
-    public void ColumnNorms_WithNullColumn_ReturnsNullForThatColumn()
-    {
-        using var frame = new NivaraFrame(new[]
-        {
-            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 4.0f })),
-            ("Y", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 1.0f })),
-        });
-
-        using var norms = frame.ColumnNorms<float>();
-
-        Assert.That(norms.Length, Is.EqualTo(2));
-        Assert.That(norms.IsNull(0), Is.False);
-        Assert.That(norms.IsNull(1), Is.True);
-    }
-
-    [Test]
-    public void RowNorms_WithFloatRows_MatchesTensorPrimitives()
-    {
-        using var frame = new NivaraFrame(new[]
-        {
-            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 0.0f })),
-            ("Y", (IColumn)NivaraColumn<float>.Create(new[] { 4.0f, 1.0f })),
-        });
-
-        using var norms = frame.RowNorms<float>();
-
-        Assert.That(norms.Length, Is.EqualTo(2));
-        Assert.That(norms[0], Is.EqualTo(TensorPrimitives.Norm(new[] { 3.0f, 4.0f })).Within(1e-6f));
-        Assert.That(norms[1], Is.EqualTo(TensorPrimitives.Norm(new[] { 0.0f, 1.0f })).Within(1e-6f));
-        Assert.That(norms.IsNull(0), Is.False);
-        Assert.That(norms.IsNull(1), Is.False);
-    }
-
-    [Test]
-    public void RowNorms_WithNullInRow_ReturnsNullForThatRow()
-    {
-        using var frame = new NivaraFrame(new[]
-        {
-            ("X", (IColumn)NivaraColumn<float>.Create(new[] { 3.0f, 0.0f })),
-            ("Y", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 1.0f })),
-        });
-
-        using var norms = frame.RowNorms<float>();
-
-        Assert.That(norms.Length, Is.EqualTo(2));
-        Assert.That(norms.IsNull(0), Is.True);
-        Assert.That(norms.IsNull(1), Is.False);
-    }
-
-    [Test]
-    public void RowNorms_WithWideFrame_UsesPooledBufferAndPreservesNulls()
-    {
-        var columns = Enumerable.Range(0, 1024)
-            .Select(i => (
-                $"C{i}",
-                (IColumn)(i == 100
-                    ? NivaraColumn<float>.CreateFromNullable(new float?[] { null, 2.0f })
-                    : NivaraColumn<float>.Create(new[] { 1.0f, 2.0f }))))
-            .ToArray();
-        using var frame = new NivaraFrame(columns);
-
-        using var norms = frame.RowNorms<float>();
-
-        Assert.That(norms.Length, Is.EqualTo(2));
-        Assert.That(norms.IsNull(0), Is.True);
-        Assert.That(norms.IsNull(1), Is.False);
-        Assert.That(norms[1], Is.EqualTo(64.0f).Within(1e-6f));
-    }
-
-    [Test]
-    public void FrameDot_WithEmptyColumnsAndEmptyVector_ReturnsZeroScorePerColumn()
-    {
-        using var vector = NivaraSeries<float>.Create(Array.Empty<float>());
-        using var frame = new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-            ("B", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-        });
-
-        using var scores = frame.Dot(vector);
-
-        Assert.That(scores.Length, Is.EqualTo(2));
-        Assert.That(scores.GetLabel(0), Is.EqualTo("A"));
-        Assert.That(scores.GetLabel(1), Is.EqualTo("B"));
-        Assert.That(scores[0], Is.EqualTo(0.0f));
-        Assert.That(scores[1], Is.EqualTo(0.0f));
-        Assert.That(scores.IsNull(0), Is.False);
-        Assert.That(scores.IsNull(1), Is.False);
-    }
-
-    [Test]
-    public void ColumnNorms_WithEmptyColumns_ReturnsZeroNormPerColumn()
-    {
-        using var frame = new NivaraFrame(new[]
-        {
-            ("X", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-            ("Y", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-        });
-
-        using var norms = frame.ColumnNorms<float>();
-
-        Assert.That(norms.Length, Is.EqualTo(2));
-        Assert.That(norms.GetLabel(0), Is.EqualTo("X"));
-        Assert.That(norms.GetLabel(1), Is.EqualTo("Y"));
-        Assert.That(norms[0], Is.EqualTo(0.0f));
-        Assert.That(norms[1], Is.EqualTo(0.0f));
-    }
-
-    [Test]
-    public void RowNorms_WithZeroRowFrame_ReturnsEmptySeries()
-    {
-        using var frame = new NivaraFrame(new[]
-        {
-            ("X", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-            ("Y", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-        });
-
-        using var norms = frame.RowNorms<float>();
-
-        Assert.That(norms.Length, Is.EqualTo(0));
-    }
-
-    [Test]
-    public void CosineSimilarity_WithEmptyColumnsAndEmptyVector_ThrowsClearException()
-    {
-        using var vector = NivaraSeries<float>.Create(Array.Empty<float>());
-        using var frame = new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-            ("B", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
-        });
-
-        var ex = Assert.Throws<ArgumentException>(() => frame.CosineSimilarity(vector));
-        Assert.That(ex!.Message, Does.Contain("Cannot compute cosine similarity for empty vectors"));
-    }
-
-    [Test]
-    public void CosineSimilarity_WithLengthMismatch_ThrowsArgumentException()
-    {
-        using var vector = NivaraSeries<float>.Create(new[] { 1.0f });
-        using var frame = new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1.0f, 2.0f })),
-        });
-
-        Assert.Throws<ArgumentException>(() => frame.CosineSimilarity(vector));
-    }
-
-    [Test]
-    public void Dot_WithNullVector_ReturnsNullForAllColumns()
-    {
-        using var vector = new NivaraSeries<float>(NivaraColumn<float>.CreateFromNullable(new float?[] { null, 0.1f, 0.6f, 0.3f }));
-        using var products = new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
-            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0.1f, 0.9f, 0.2f, 0.7f })),
-        });
-
-        using var scores = products.Dot(vector);
-
-        Assert.That(scores.Length, Is.EqualTo(2));
-        Assert.That(scores.IsNull(0), Is.True);
-        Assert.That(scores.IsNull(1), Is.True);
-    }
-
-    [Test]
-    public void CosineSimilarity_WithNullInOneColumn_ReturnsNullOnlyForThatColumn()
-    {
-        using var user = NivaraSeries<float>.Create(new[] { 0.8f, 0.1f, 0.6f, 0.3f });
-        using var products = new NivaraFrame(new[]
-        {
-            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 0.9f, 0.2f, 0.5f, 0.4f })),
-            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { 0.1f, null, 0.2f, 0.7f })),
-        });
-
-        using var scores = products.CosineSimilarity(user);
-
-        Assert.That(scores.Length, Is.EqualTo(2));
-        Assert.That(scores.IsNull(0), Is.False);
-        Assert.That(scores.IsNull(1), Is.True);
     }
 
     #endregion

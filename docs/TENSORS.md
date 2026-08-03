@@ -69,9 +69,10 @@ var ranked = Enumerable.Range(0, products.RowCount)
     .Take(3);
 ```
 
-That is much healthier than:
+That is much healthier than the removed frame tensor-axis API:
 
 ```csharp
+// deleted in the AutoDiff refactor (Task 10) — use TensorPrimitives on spans
 products.CosineSimilarity(query)
 ```
 
@@ -85,17 +86,13 @@ For tensor math, vector operations, embeddings, and model-facing APIs, prefer th
 Nivara focuses on typed, null-aware, immutable tabular data and provides interop points to platform primitives.
 ```
 
-The deprecated tensor APIs (`Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms`, `DotProduct`, `Norm`) are already marked `[Obsolete]`. The next step is to move them under an explicit namespace like:
-
-```csharp
-Nivara.Experimental.Tensors
-```
-
-or:
-
-```csharp
-Nivara.Extensions.Tensors
-```
+The deprecated tensor APIs on `NivaraFrame`/`NivaraSeries`
+(`Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms`, `DotProduct`, `Norm`)
+have been **removed** (Task 10 of the AutoDiff refactor) rather than moved to a
+separate namespace — they had no production callers, and the platform
+`TensorPrimitives` kernels are the sanctioned replacement. Column math is done
+on spans via `TryGetSpan`; row-major operations assemble spans with
+`CopyToRowMajor`.
 
 Core Nivara should stay boring and strong:
 

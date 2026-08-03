@@ -662,25 +662,47 @@ and all 11 samples build with 0 warnings.
 **Priority:** Medium
 
 **Goal:** Delete `Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms` from
-`NivaraFrame.cs` (lines 476/530/585/632) and add them as
-`Nivara.Extensions.Tensors.FrameTensorOperations` per `TENSORS.md`. No obsolete
-shims (breaking OK).
+`NivaraFrame.cs`. The plan's original relocation to
+`Nivara.Extensions.Tensors.FrameTensorOperations` (per `TENSORS.md`) was **not
+pursued** — the methods have no production callers, so they were deleted
+outright per the "remove if not being used" directive. No obsolete shims
+(breaking OK).
 
 **Why this exists:** TENSORS.md directs column math to `TensorPrimitives` on
 spans; frame columns are not tensor axes.
 
 **Scope:**
-- Remove from core; add extensions in `Nivara.Extensions` (new `Tensors/`
-  folder) using `TensorPrimitives` on column spans.
-- Redirect in-repo callers (sample/tests) or keep them on the extension.
+- Remove from core (the four `[Obsolete]` methods + private
+  `dotSpans`/`cosineSimilaritySpans`/`normSpan` helpers).
+- Delete the now-dead `TensorsHelper.RowNorms` SIMD kernel (only consumer was
+  `frame.RowNorms`).
+- Remove/rewrite test callers.
 
 **Acceptance criteria:**
 - `NivaraFrame` has no tensor-axis methods.
-- Extensions build and unit-tested.
+- `TensorsHelper.RowNorms` gone; no CS0618 pragmas remain in tests.
+
+**Status: COMPLETE** — deleted `Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms`
+from `NivaraFrame.cs` (and the `dotSpans`/`cosineSimilaritySpans`/`normSpan`
+helpers; `using System.Numerics;` no longer needed). Removed the orphaned
+`TensorsHelper.RowNorms` kernel (only caller was `frame.RowNorms`) and its 3
+`TensorsHelperTests`. `TensorInteropTests`: 14 frame-method tests deleted; the 2
+`RankingWorkflow_*` tests rewritten to compute per-column scores with
+`TensorPrimitives.CosineSimilarity` on column spans (the recommended
+replacement) before running `ArgSortDescending`/`TopKDescending`; CS0618 pragma
+removed. `DiagnosticsTests`: 5 `FrameDot`/`FrameCosineSimilarity`/
+`FrameColumnNorms`/`FrameRowNorms` diagnostics tests deleted along with the
+`CreateDiagnosticsFrameWithNulls`/`AssertFrameBatchOperation` helpers; CS0618
+pragma removed. `CopyToRowMajor`/`ToTensors` retained (public, still used).
+Grep confirms zero remaining frame-method call sites; all remaining
+`.Dot(`/`.CosineSimilarity(` hits are `TensorPrimitives` kernels.
 
 **Files likely involved:**
 - `src/Nivara/NivaraFrame.cs`
-- `src/Nivara.Extensions/Tensors/FrameTensorOperations.cs` (new)
+- `src/Nivara/Tensors/TensorsHelper.cs`
+- `tests/Nivara.Tests/Tensors/TensorInteropTests.cs`
+- `tests/Nivara.Tests/Tensors/TensorsHelperTests.cs`
+- `tests/Nivara.Tests/Diagnostics/DiagnosticsTests.cs`
 
 ---
 
