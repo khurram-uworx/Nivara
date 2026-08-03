@@ -20,11 +20,11 @@ Concretely, when this roadmap is done:
 
 ### Where we are today
 
-The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/TensorStorage.cs:14`, `MemoryStorage.cs:13`), internal span access flattens to a copy (`TensorStorage.cs:207-210`), interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, recorded in `CHANGELOG.md`, so all conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:688-710`).
+The semantics are right: explicit null masks, mask-OR kernels, immutable columns, Arrow/Parquet positioned as interchange. The physics are not: validity is byte-wise `bool` (`src/Nivara/Storage/ColumnStorage.cs`), Arrow/Parquet interop has **no zero-copy path** (the placeholder `UseZeroCopy` option and `TryCreateZeroCopy*Array` methods were removed by the claims-integrity triage, recorded in `CHANGELOG.md`, so all interchange conversion copies), and there is no chunked-column model in core (Arrow chunked arrays are flattened on import, `ArrowInterop.cs:688-710`). Internal column→tensor access is now a genuine zero-copy view (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, backed by `ColumnStorage<T>.AsTensor()`); that is a Nivara-internal capability and does not carry over to the Arrow/Parquet boundary.
 
 ### Non-goals (explicit)
 
-- **No Arrow-internal storage rewrite.** Internal representation stays `Tensor<T>`/`Memory<T>`; Arrow remains an interchange boundary (POLARS-REVIEW Pillar 7).
+- **No Arrow-internal storage rewrite.** Internal representation stays sole-owner `ColumnStorage<T>` (`T[]` + optional `bool[]` null mask, single contiguous buffer); Arrow remains an interchange boundary (POLARS-REVIEW Pillar 7).
 - **No custom ownership model.** Sharing is achieved with immutable buffers + GC + structural sharing; no refcounting, no manual memory management.
 - **No change to public null semantics.** ADR-001 and mask-OR behavior are preserved throughout; only the *representation* of the mask changes.
 - **No unsafe hand-rolled SIMD** in the validity path; use `System.Runtime.Intrinsics`/`TensorPrimitives` where worth it, scalar mask logic elsewhere.
@@ -65,7 +65,7 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 - Move string columns to a **variable-binary layout**: contiguous `byte` data buffer + `int` offset buffer, with a span/string projection layer so the public API (`string` values) is unchanged.
 - Generic kernels dispatch on layout; `KernelSelector` gains a layout input.
 
-**Key files:** new `src/Nivara/Storage/ColumnLayout.cs`, `MemoryStorage<T>` rework for strings, `src/Nivara/KernelSelector.cs`, `src/Nivara/NivaraColumn.cs`.
+**Key files:** new `src/Nivara/Storage/ColumnLayout.cs`, `ColumnStorage<T>` layout work for strings, `src/Nivara/KernelSelector.cs`, `src/Nivara/NivaraColumn.cs`.
 
 **Dependencies:** Phase A (chunks are the natural unit of a variable-binary buffer).
 
@@ -102,15 +102,15 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 ### Phase D — Real zero-copy, both directions *(credibility win)*
 
-**Motivation:** Every interop path copies today — the placeholder `UseZeroCopy` option was removed rather than kept lying (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94), and even internal span access flattens. This phase adds the real zero-copy APIs back.
+**Motivation:** Every Arrow/Parquet interchange path copies today — the placeholder `UseZeroCopy` option was removed rather than kept lying (claims-integrity triage, recorded in `CHANGELOG.md`, issue #94). This phase adds the real zero-copy APIs back.
 
 **Scope:**
 - Re-introduce the zero-copy interop path (the placeholder `TryCreateZeroCopy*Array` methods were removed) with real `MemoryMarshal`/buffer-handoff implementations: build Apache.Arrow arrays from existing `Memory<T>` (data buffer + validity bitmap) instead of builders+`Append`.
-- Make `TensorStorage.GetFlattenedSpan()` a true **view** where the layout permits (no per-access `FlattenTo` allocation); keep caching as an optimization, not a necessity.
+- ✅ *Done as of the storage consolidation:* the internal column→`Tensor<T>` view is now real and public — `NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()` return `ColumnStorage<T>.AsTensor()`, a lazy zero-copy view (no per-access `FlattenTo` allocation, cached). What remains is the *interop* half (Arrow/Parquet) on this page.
 - Expose zero-copy through a dedicated option (e.g. a re-added `UseZeroCopy`) that engages only when the layout is compatible, throws/fails loudly when it cannot, and **never silently copies while reporting zero-copy**.
-- `MemoryMarshal.AsBytes` for unmanaged flat layouts ↔ Arrow buffers; `ReadOnlyMemory<T>` sharing into `Tensor<T>`/`TensorSpan<T>` where the BCL allows.
+- `MemoryMarshal.AsBytes` for unmanaged flat layouts + Arrow buffers; `ReadOnlyMemory<T>` sharing into `Tensor<T>`/`TensorSpan<T>` where the BCL allows.
 
-**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs`, `src/Nivara.Extensions/IO/ArrowConversionOptions.cs` (option re-added here), `src/Nivara/Storage/TensorStorage.cs`, `src/Nivara/Tensors/TensorInteropExtensions.cs`.
+**Key files:** `src/Nivara.Extensions/IO/ArrowInterop.cs`, `src/Nivara.Extensions/IO/ArrowConversionOptions.cs` (option re-added here), `src/Nivara/Storage/ColumnStorage.cs`, `src/Nivara/Tensors/TensorInteropExtensions.cs`.
 
 **Dependencies:** Phases A–C (zero-copy needs chunked, layout-explicit, bitmap-validity columns).
 
@@ -191,7 +191,7 @@ The semantics are right: explicit null masks, mask-OR kernels, immutable columns
 
 Both roadmaps sit on the same foundation (typed, null-aware, span-first columns). Phase A here should be sequenced against POLARS-ROADMAP Phase 1 (typed expression engine): they are independent — expression typing does not need chunks, and chunks do not need expression typing — but both must land before Phase D/F merge points.
 
-**What we leverage, not reinvent:** the existing storage seam (`IColumnStorage<T>`, `TensorStorage`/`MemoryStorage`), the async members already on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs:34-52`), `MemoryStorage.Slice` (already a true `ReadOnlyMemory` view — proof the pattern works), `KernelSelector`, and the Arrow/Parquet interop test suite in `tests/Nivara.Tests/IO/`.
+**What we leverage, not reinvent:** the existing storage seam (`IColumnStorage<T>`, sole-owner `ColumnStorage<T>`), the async members already on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs:34-52`), `ColumnStorage<T>.Slice` (already a true `ReadOnlyMemory` view — proof the pattern works), `KernelSelector`, and the Arrow/Parquet interop test suite in `tests/Nivara.Tests/IO/`.
 
 ---
 

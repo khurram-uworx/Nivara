@@ -428,4 +428,58 @@ public class TypeSafetyTests
             "AsTensor() must return a zero-copy view sharing the column's backing array");
     }
 
+    [Test]
+    public void NivaraColumn_AsTensorView_IsZeroCopyView()
+    {
+        // Arrange
+        var column = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f });
+
+        // Act
+        var tensorView = column.AsTensorView();
+
+        // Assert
+        Assert.That(tensorView.TryGetSpan(new nint[] { 0 }, (int)tensorView.FlattenedLength, out Span<float> viewSpan), Is.True);
+        Assert.That(column.TryGetSpan(out var columnSpan), Is.True);
+        Assert.That((ReadOnlySpan<float>)viewSpan == columnSpan, Is.True,
+            "AsTensorView() must return a zero-copy view sharing the column's backing array");
+    }
+
+    [Test]
+    public void NivaraColumn_AsTensorView_ThrowsOnNulls()
+    {
+        // Arrange
+        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1f, null, 3f });
+
+        // Act + Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => column.AsTensorView());
+        Assert.That(ex!.Message, Does.Contain("null"));
+    }
+
+    [Test]
+    public void NivaraColumn_AsTensorView_ThrowsForReferenceTypes()
+    {
+        // Arrange
+        var column = NivaraColumn<string>.CreateForReferenceType(new string[] { "a", "b", "c" });
+
+        // Act + Assert
+        Assert.Throws<InvalidOperationException>(() => column.AsTensorView());
+    }
+
+    [Test]
+    public void NivaraSeries_AsTensorView_IsZeroCopyView()
+    {
+        // Arrange
+        var series = new NivaraSeries<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }));
+
+        // Act
+        var tensorView = series.AsTensorView();
+
+        // Assert
+        Assert.That(tensorView.TryGetSpan(new nint[] { 0 }, (int)tensorView.FlattenedLength, out Span<float> viewSpan), Is.True);
+        Assert.That(series.Values.TryGetSpan(out var columnSpan), Is.True);
+        Assert.That((ReadOnlySpan<float>)viewSpan == columnSpan, Is.True,
+            "NivaraSeries.AsTensorView() must share the underlying column's backing array");
+    }
+
 }

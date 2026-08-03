@@ -86,7 +86,7 @@ The pillars below are the concrete translation.
 
 | Pillar | Status | Evidence | Roadmap |
 | --- | --- | --- | --- |
-| 1 · GC-aware pooled memory | ✅ Native | `TensorStorage`/`MemoryStorage` (`src/Nivara/Storage/`); `GetFlattenedSpan()` cached; `BufferPool`/`ArrayPool` in hot paths (Adam/AdamW, AccumulateGradient); immutability + structural sharing | Done |
+| 1 · GC-aware pooled memory | ✅ Native | Sole-owner `ColumnStorage<T>` (`src/Nivara/Storage/ColumnStorage.cs`); zero-copy `AsTensor()` view cached; `BufferPool`/`ArrayPool` in hot paths (Adam/AdamW, AccumulateGradient); immutability + structural sharing | Done |
 | 2 · Typed expression → fused kernels | ❌ Violated | Boxed interpreter in `src/Nivara/Helpers/ExpressionEvaluator.cs`; see §4 | **Phase 1–2** |
 | 3 · Generic math (SAIS) | 🟡 Partial | AutoDiff already `IFloatingPointIeee754<T>` + generic `TensorPrimitives`; but `NivaraColumn` arithmetic still float/double type-switches (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`) | Phase 2 |
 | 4 · BCL tensor substrate | ✅ Native | `TensorPrimitives` kernels in `TensorsHelper.cs`, `NivaraTensorExtensions.cs`; `Tensor<T>` storage | Done |
@@ -133,7 +133,7 @@ Every query predicate or projection that goes through `QueryFrame` (`.Where(...)
 
 ## 6. What is already right (and should not be changed)
 
-- **Storage is native, not a port.** `TensorStorage`/`MemoryStorage` + pooled buffers is exactly Pillar 1. Do not rewrite it to an Arrow-internal format; Arrow belongs at the boundary (Pillar 7).
+- **Storage is native, not a port.** Sole-owner `ColumnStorage<T>` + pooled buffers is exactly Pillar 1. Do not rewrite it to an Arrow-internal format; Arrow belongs at the boundary (Pillar 7).
 - **The optimizer is real.** Pushdown + fusion + elimination rules with plan inspection and diagnostics is a genuine native asset.
 - **AutoDiff is the proof-of-pattern.** It already demonstrates generic-math SAIS kernels, span-first implementations, `ArrayPool` discipline, and the inference-default model. The column layer should copy its techniques, not invent new ones.
 - **Diagnostics everywhere.** `OperationDiagnostics`, `ExecutionEngine.LastDiagnostics`, `QueryPlan` inspection — observability is a native strength no Python/Rust stack matches ergonomically.

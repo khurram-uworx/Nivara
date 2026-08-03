@@ -120,7 +120,9 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 
 ---
 
-### Phase 5 — Safe read-only tensor views
+### Phase 5 — Safe read-only tensor views ✅ *delivered via public `AsTensorView()` (#107)*
+
+**Status note:** delivered as the public zero-copy `NivaraColumn<T>.AsTensorView()` / `NivaraSeries<T>.AsTensorView()` surface (issue #107) — a lazy `Tensor<T>` view over the sole-owner backing array, guarded (nulls/reference types throw) rather than a `TryGet` contract. Callers treat the view as read-only; immutability is convention, not a `ReadOnlyTensorSpan<T>` type. `ToTensorSpan` still copies to protect immutability.
 
 **Motivation:** `ToTensorSpan` copies to protect immutability (`TensorInteropExtensions.cs:84-88`) — the *right* principle, but a safe read-only view eliminates the copy for flat, null-free columns without ever exposing a writable span.
 
@@ -128,7 +130,7 @@ The strongest lens of the three. AutoDiff is a complete on-device stack (`src/Ni
 - Add `TryGetReadOnlyTensorSpan<T>()` on `NivaraColumn<T>`/`NivaraSeries<T>` that returns a `ReadOnlyTensorSpan<T>` **view** over storage when the column is null-free and layout-compatible (flat), else `false` (caller falls back to the copy path).
 - Aligns with ARROW-ROADMAP Phase D (true views) and feeds tensor-first kernels (`TensorPrimitives` chains) without copies.
 
-**Key files:** `src/Nivara/Tensors/TensorInteropExtensions.cs`, `src/Nivara/Storage/TensorStorage.cs`, `src/Nivara/Storage/MemoryStorage.cs`.
+**Key files:** `src/Nivara/NivaraColumn.cs`, `src/Nivara/NivaraSeries.cs`, `src/Nivara/Storage/ColumnStorage.cs` (the landed `AsTensorView`/`AsTensor` implementation).
 
 **Dependencies:** ARROW-ROADMAP Phase D (internal zero-copy views) — this phase is its tensor-facing consumer.
 

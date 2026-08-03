@@ -8,6 +8,8 @@ The Polars lens (`docs/POLARS-REVIEW.md`) asked whether Nivara behaves like a *q
 
 > **Reconciled 2026-08-02 (issue #94):** the `ArrowConversionOptions.UseZeroCopy` option and `TryCreateZeroCopy*Array` placeholders cited below were **removed** by the claims-integrity triage (recorded in `CHANGELOG.md`; Tasks 1–2 of the triage). §4.1's finding stands — the code could not deliver zero-copy — and the remedy changed from "make the option honest" to "add real zero-copy APIs when ready" (`docs/ARROW-ROADMAP.md` Phase D). No public API or README advertises zero-copy today.
 
+> **Superseded 2026-08-03 (storage consolidation, PR #110):** the storage-specific evidence in the §3 scorecard and §4 findings is **historical** — it describes the pre-consolidation `TensorStorage`/`MemoryStorage` split. Post-consolidation there is a single sole-owner `ColumnStorage<T>` (`src/Nivara/Storage/ColumnStorage.cs`): span access is a genuine zero-copy view, and internal column→`Tensor<T>` views are real and **public** (`NivaraColumn<T>.AsTensorView()`/`NivaraSeries<T>.AsTensorView()`, issue #107). The *Arrow/Parquet interchange* conclusion in §4.1 still holds — that boundary remains element-by-element copying until `docs/ARROW-ROADMAP.md` Phase D. Pillar 2's validity-bitmap gap and Pillar 4's chunked-column gap are unchanged.
+
 ---
 
 ## 1. Why a physics lens

@@ -1336,7 +1336,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     /// <returns>A Tensor&lt;T&gt; view sharing the column's backing storage</returns>
     /// <exception cref="InvalidOperationException">Thrown when the column contains null values or the element type is not unmanaged</exception>
-    internal Tensor<T> AsTensorView()
+    public Tensor<T> AsTensorView()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 

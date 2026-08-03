@@ -53,6 +53,14 @@ public sealed class Parameter<T> : IDisposable where T : struct, IFloatingPointI
     {
     }
 
+    /// <summary>
+    /// Creates a parameter wrapping <paramref name="data"/> zero-copy.
+    /// The caller must not mutate <paramref name="data"/> afterward — the parameter's
+    /// tensor shares the array, so mutating it corrupts the parameter.
+    /// </summary>
+    /// <param name="name">The parameter name</param>
+    /// <param name="data">The initial values; ownership transfers to the parameter</param>
+    /// <param name="requiresGrad">Whether gradients should be tracked for this parameter</param>
     public Parameter(string name, T[] data, bool requiresGrad = true)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));

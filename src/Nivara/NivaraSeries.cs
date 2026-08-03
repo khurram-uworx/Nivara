@@ -810,6 +810,19 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Gets a zero-copy <see cref="Tensor{T}"/> view over the series data that shares
+    /// the underlying array. The series remains immutable; mutating the returned tensor
+    /// would corrupt the series, so callers must treat it as read-only.
+    /// </summary>
+    /// <returns>A Tensor&lt;T&gt; view sharing the series' backing storage</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the series contains null values or the element type is not unmanaged</exception>
+    public Tensor<T> AsTensorView()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return values.AsTensorView();
+    }
+
+    /// <summary>
     /// Converts this series to a Tensor&lt;T&gt;, replacing null values with the specified default.
     /// </summary>
     /// <param name="defaultValue">Value to use in place of nulls</param>
