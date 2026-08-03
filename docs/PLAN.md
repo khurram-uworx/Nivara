@@ -219,6 +219,117 @@ Changes vs `NEXT-REFACTORING.md`:
 
 ---
 
+## Working Principles for Agents (apply to every task)
+
+Standing instructions for any coding agent (or sub-agent) picking up a task in
+this plan. Re-read this section before starting work.
+
+### W1. Tensors, Vectors, SIMD / numerics intrinsics first
+
+Nivara's identity is tensors and vectors: `System.Numerics.Tensors`,
+`TensorPrimitives`, `Vector<T>`, and numeric intrinsics. Whenever a task touches
+a numeric hot path, actively look for an opportunity to:
+
+- use a **generic, span-based `TensorPrimitives`** overload instead of a scalar
+  loop;
+- use **`Vector<T>` / `Vector128<T>`/`Vector256<T>` intrinsics** where
+  `TensorPrimitives` has no matching primitive;
+- remove per-element null/branch checks so the vectorized path stays reachable
+  (see W4).
+
+Do not introduce custom vectorization abstractions or a custom tensor hierarchy —
+.NET owns that now. Prefer the platform primitive; delete a scalar fallback only
+when it is provably dead.
+
+### W2. Learn official APIs from Microsoft Learn (MCP)
+
+`System.Numerics.Tensors` and generic math are young and move quickly. Before
+writing or changing tensor/kernel code, use the **microsoft-learn MCP** tools
+(`microsoft_docs_search`, `microsoft_docs_fetch`, `microsoft_code_sample_search`)
+to confirm:
+
+- the exact signature and **generic-math constraint** of the primitive (e.g.
+  `TensorPrimitives.Sigmoid<T>` requires `IExponentialFunctions<T>`);
+- the correct overload for the version pinned in this repo
+  (`System.Numerics.Tensors` **10.0.10**), e.g. `Tensor.Create<T>(array, lengths)`
+  vs `CreateFromShapeUninitialized<T>` vs `TryGetSpan(...)`;
+- whether `Half`/`BFloat16` satisfy the constraint.
+
+Ground the code in official docs; do not rely on memory of API shapes.
+
+### W3. Understand symbols before editing (code-memory MCP)
+
+Before modifying a symbol, use the **code-memory MCP** tools to learn its
+definition, callers, dependents, and test coverage:
+
+- `code-memory_semantic_search` / `code-memory_sql_query` to find symbols;
+- `code-memory_get_edit_context` / `code-memory_trace_dependency` /
+  `code-memory_impact_analysis` to see who depends on what and which tests cover
+  it;
+- `code-memory_get_architecture_overview` / `code-memory_get_component_clusters`
+  for layering.
+
+When delegating to sub-agents, explicitly instruct them to use both MCPs
+(microsoft-learn + code-memory) where they make sense, and to report what they
+learned — not just what they changed.
+
+### W4. Honor the ADRs; prune dead null branches, keep boundary checks
+
+Read `docs/adr/` before implementing (currently
+`docs/adr/001-autodiff-nonnullable-domain.md`, status: accepted). **AutoDiff is
+a non-nullable domain.** While implementing:
+
+- **Prune null handling that can no longer execute** in the AutoDiff hot paths
+  whenever you touch them: `HasNulls` checks, `WithoutNulls()` calls,
+  `TryGetNullMask` dual paths, mask OR-propagation, `IsNull` loops in backward
+  kernels, and null-conditioned `Create`/`CreateFromSpans` branches. Each removal
+  is the "subtract → lean" payoff of ADR-001 and directly enables W1 (single
+  vectorized path).
+- **Implement missing boundary checks.** Every entry point that accepts a
+  nullable column — `ReverseGradTensor`/`ForwardGradTensor` constructors and the
+  `FromColumn`/`FromSeries`/`FromArray`/`FromMatrix` factories, including the
+  `ForwardGradTensor` tangent — must throw `AutoGradException` (message contains
+  "ADR-001") when the input `HasNulls`. Do not assume a factory is guarded;
+  verify each one.
+- Null semantics stay in the columnar/storage layer (`NivaraColumn`,
+  `ColumnStorage<T>`, `IColumn.IsNull`); null cleaning happens before entry
+  (`DropNulls`/`FillNull`).
+
+### W5. Test failures are diagnostics, not noise
+
+When a test fails:
+
+1. Identify the **root cause** first: is it (a) an intended behavior change from
+   this refactor, (b) a design change that legitimately invalidates an old
+   expectation, or (c) a real defect in the change?
+2. Do not rush a quick fix or blanket `Skip`. Approach it as an engineering
+   decision.
+3. If the production change is correct and the old test expectation is stale
+   (e.g. deleted methods, changed serialization format, simplified semantics),
+   **update the test** to assert the new contract and record the behavior change
+   in `CHANGELOG.md`.
+4. If the change introduced a bug, fix the code; if the test exposes a latent
+   codebase bug, fix the codebase.
+5. Keep the full suite green at each validation gate (Task 13). During iteration
+   run only the targeted test project; ask before running the long full
+   `dotnet test` (per AGENTS.md).
+
+### W6. Capture "later" work as GitHub issues
+
+While implementing, when you encounter work that is out of scope but worth doing
+later (design follow-ups, API gaps, perf ideas, doc debt), record it as a GitHub
+issue immediately using `gh`:
+
+- `gh issue create --repo khurram-uworx/Nivara --title "<short title>" --body-file <file>`
+  (write the body to a temp file first — avoids the PowerShell backtick/backslash
+  escaping gotcha in AGENTS.md).
+- Reference the file/line and the reason it is deferred (scope, risk, or
+  dependency).
+- Do not silently leave bare TODO comments for deferred work; the issue is the
+  record. PRs that resolve an issue reference `#<number>` in the description.
+
+---
+
 ## Part D — Tasks
 
 ### Task 1: Confirm architecture scope (decision gate)
@@ -664,3 +775,7 @@ accurate.
 - likely files listed ✅
 - execution order reflects real dependencies ✅
 - full-suite validation gated behind user confirmation (per AGENTS.md) ✅
+- agents honor Working Principles W1–W6 (SIMD-first, Microsoft-Learn MCP,
+  code-memory MCP, ADR-001 null pruning + boundary checks, root-cause test
+  triage, `gh issue` for deferred work) ✅
+- every user-visible breaking change logged in `CHANGELOG.md` ✅
