@@ -634,6 +634,23 @@ NivaraSeries as a labeled-column-wrapper only.
 - No `Sum/Min/Max` members on `NivaraSeries<T>`.
 - Aggregate/series tests updated and green.
 
+**Status: COMPLETE** — removed public `Sum()`/`Min()`/`Max()` from
+`NivaraSeries<T>` plus the now-dead private helpers (`sumVectorized`,
+`minVectorized`, `maxVectorized`, `minTensorPrimitive`, `maxTensorPrimitive`);
+`Average()` (and its `averageVectorized`/`sumTensorPrimitive`/`divideByCount`
+helpers) retained per scope. Callers redirected to the column reductions:
+`ForwardGradOperations.Sum/Mean/KlDivergence` and
+`ReverseGradOperations.Sum/KlDivergence` now call `a.Data.Sum()`/`a.Tangent.Sum()`/
+`klElements.Sum()` directly (no `NivaraSeries` wrapper); `ForwardParityTests`
+uses `rx.Grad!.Sum()`/`expected.Sum()`. `NivaraSeriesAggregateTests` rewritten:
+Sum/Min/Max tests now target `NivaraColumn<T>` (error messages updated to the
+column wording; all-null Sum returns 0 instead of throwing; string/object
+non-numeric Min/Max/Sum cases removed — column reductions are
+`INumber<T>`-constrained); Average tests unchanged. `samples/.../AggregateExample.cs`
+uses `series.Values.Sum()/Min()/Max()` and drops the string comparison demo.
+Grep confirms zero remaining `NivaraSeries` Sum/Min/Max call sites. Core, solution,
+and all 11 samples build with 0 warnings.
+
 **Files likely involved:**
 - `src/Nivara/NivaraSeries.cs`
 - `tests/Nivara.Tests/NivaraSeriesAggregateTests.cs`

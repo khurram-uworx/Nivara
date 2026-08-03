@@ -308,14 +308,13 @@ public static class ForwardGradOperations
             throw new InvalidOperationException("Cannot compute sum of empty tensor");
         }
 
-        var series = a.ToSeries();
-        var sumValue = series.Sum();
+        var sumValue = a.Data.Sum();
         var resultData = NivaraColumn<T>.Create(new T[] { sumValue });
 
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            var tanSum = new NivaraSeries<T>(a.Tangent).Sum();
+            var tanSum = a.Tangent!.Sum();
             tangent = NivaraColumn<T>.Create(new T[] { tanSum });
         }
 
@@ -343,7 +342,7 @@ public static class ForwardGradOperations
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            var tanSum = new NivaraSeries<T>(a.Tangent).Sum();
+            var tanSum = a.Tangent!.Sum();
             var tanMean = tanSum / T.CreateChecked(a.Length);
             tangent = NivaraColumn<T>.Create(new T[] { tanMean });
         }
@@ -727,7 +726,7 @@ public static class ForwardGradOperations
                 nameof(logVar));
 
         var klElements = ApplyKlElementWise(mean.Data, logVar.Data);
-        var klSum = new NivaraSeries<T>(klElements).Sum();
+        var klSum = klElements.Sum();
         var resultData = NivaraColumn<T>.Create(new T[] { klSum });
 
         NivaraColumn<T>? tangent = null;

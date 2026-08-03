@@ -752,8 +752,7 @@ public static class ReverseGradOperations
             throw new InvalidOperationException("Cannot compute sum of empty tensor");
         }
 
-        var series = a.ToSeries();
-        var sumValue = series.Sum();
+        var sumValue = a.Data.Sum();
 
         var resultData = NivaraColumn<T>.Create(new T[] { sumValue });
         var resultTensor = new ReverseGradTensor<T>(resultData, GradientUtils.ShouldTrackGrad(a), ScalarShape());
@@ -1951,7 +1950,7 @@ public static class ReverseGradOperations
                 nameof(logVar));
 
         var klElements = ApplyKlElementWise(mean.Data, logVar.Data);
-        var klSum = new NivaraSeries<T>(klElements).Sum();
+        var klSum = klElements.Sum();
 
         var resultData = NivaraColumn<T>.Create(new T[] { klSum });
         var resultTensor = new ReverseGradTensor<T>(resultData, GradientUtils.ShouldTrackGrad(mean, logVar), ScalarShape());

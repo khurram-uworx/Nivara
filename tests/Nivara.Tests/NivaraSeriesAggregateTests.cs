@@ -1,10 +1,13 @@
+using Nivara.Tensors;
+using System.Numerics;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
 
 /// <summary>
-/// Tests for NivaraSeries aggregate functions (Sum, Average, Min, Max).
-/// Covers vectorized operations, null handling, and type support validation.
+/// Tests for NivaraSeries aggregate functions and the column-level reductions
+/// (Sum, Min, Max) that back the series. NivaraSeries keeps Average; Sum/Min/Max
+/// live on NivaraColumn&lt;T&gt; (null-aware, TensorPrimitives).
 /// </summary>
 [TestFixture]
 public class NivaraSeriesAggregateTests
@@ -12,8 +15,8 @@ public class NivaraSeriesAggregateTests
     #region Sum Tests
 
     /// <summary>
-    /// Feature: nivara-series, Property: Sum computation
-    /// For any series of numeric values, Sum should return the correct arithmetic sum.
+    /// Feature: core-column-types, Property: Sum computation
+    /// For any column of numeric values, Sum should return the correct arithmetic sum.
     /// Validates: Requirements for aggregate functions
     /// </summary>
     [TestCase(new int[] { 1, 2, 3, 4, 5 }, 15)]
@@ -21,133 +24,116 @@ public class NivaraSeriesAggregateTests
     [TestCase(new int[] { 0, 0, 0 }, 0)]
     [TestCase(new int[] { 42 }, 42)]
     [TestCase(new int[] { int.MaxValue, -1 }, int.MaxValue - 1)]
-    [Category("Feature: nivara-series, Property: Sum computation")]
+    [Category("Feature: core-column-types, Property: Sum computation")]
     public void Sum_IntegerValues_ReturnsCorrectSum(int[] values, int expected)
     {
         // Arrange
-        var series = NivaraSeries<int>.Create(values);
+        var column = NivaraColumn<int>.Create(values);
 
         // Act
-        var result = series.Sum();
+        var result = column.Sum();
 
         // Assert
         Assert.That(result, Is.EqualTo(expected));
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Sum computation with vectorization
-    /// For any series of float values, Sum should use TensorPrimitives when possible.
+    /// Feature: core-column-types, Property: Sum computation with vectorization
+    /// For any column of float values, Sum should use TensorPrimitives when possible.
     /// Validates: Vectorized operations for performance
     /// </summary>
     [TestCase(new float[] { 1.5f, 2.5f, 3.0f }, 7.0f)]
     [TestCase(new float[] { -1.1f, 1.1f }, 0.0f)]
     [TestCase(new float[] { float.MaxValue, -float.MaxValue }, 0.0f)]
-    [Category("Feature: nivara-series, Property: Sum computation with vectorization")]
+    [Category("Feature: core-column-types, Property: Sum computation with vectorization")]
     public void Sum_FloatValues_ReturnsCorrectSum(float[] values, float expected)
     {
         // Arrange
-        var series = NivaraSeries<float>.Create(values);
+        var column = NivaraColumn<float>.Create(values);
 
         // Act
-        var result = series.Sum();
+        var result = column.Sum();
 
         // Assert
         Assert.That(result, Is.EqualTo(expected).Within(0.0001f));
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Sum computation with vectorization
-    /// For any series of double values, Sum should use TensorPrimitives when possible.
+    /// Feature: core-column-types, Property: Sum computation with vectorization
+    /// For any column of double values, Sum should use TensorPrimitives when possible.
     /// Validates: Vectorized operations for performance
     /// </summary>
     [TestCase(new double[] { 1.5, 2.5, 3.0 }, 7.0)]
     [TestCase(new double[] { -1.1, 1.1 }, 0.0)]
     [TestCase(new double[] { Math.PI, Math.E }, Math.PI + Math.E)]
-    [Category("Feature: nivara-series, Property: Sum computation with vectorization")]
+    [Category("Feature: core-column-types, Property: Sum computation with vectorization")]
     public void Sum_DoubleValues_ReturnsCorrectSum(double[] values, double expected)
     {
         // Arrange
-        var series = NivaraSeries<double>.Create(values);
+        var column = NivaraColumn<double>.Create(values);
 
         // Act
-        var result = series.Sum();
+        var result = column.Sum();
 
         // Assert
         Assert.That(result, Is.EqualTo(expected).Within(0.0001));
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Sum with null handling
-    /// For any series with null values, Sum should compute sum of valid values only.
+    /// Feature: core-column-types, Property: Sum with null handling
+    /// For any column with null values, Sum should compute sum of valid values only.
     /// Validates: Null-aware aggregate operations
     /// </summary>
     [Test]
-    [Category("Feature: nivara-series, Property: Sum with null handling")]
+    [Category("Feature: core-column-types, Property: Sum with null handling")]
     public void Sum_WithNullValues_ReturnsValidSum()
     {
         // Arrange
         var nullableData = new int?[] { 1, null, 3, null, 5 };
         var column = NivaraColumn<int>.CreateFromNullable(nullableData);
-        var series = new NivaraSeries<int>(column);
 
         // Act
-        var result = series.Sum();
+        var result = column.Sum();
 
         // Assert
         Assert.That(result, Is.EqualTo(9)); // 1 + 3 + 5
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Sum error handling
-    /// For any empty series, Sum should throw InvalidOperationException.
+    /// Feature: core-column-types, Property: Sum error handling
+    /// For any empty column, Sum should throw InvalidOperationException.
     /// Validates: Error handling for edge cases
     /// </summary>
     [Test]
-    [Category("Feature: nivara-series, Property: Sum error handling")]
-    public void Sum_EmptySeries_ThrowsInvalidOperationException()
+    [Category("Feature: core-column-types, Property: Sum error handling")]
+    public void Sum_EmptyColumn_ThrowsInvalidOperationException()
     {
         // Arrange
-        var series = NivaraSeries<int>.Create(Array.Empty<int>());
+        var column = NivaraColumn<int>.Create(Array.Empty<int>());
 
         // Act & Assert
-        var ex = Assert.Throws<InvalidOperationException>(() => series.Sum());
-        Assert.That(ex.Message, Does.Contain("Cannot compute sum of empty series"));
+        var ex = Assert.Throws<InvalidOperationException>(() => column.Sum());
+        Assert.That(ex.Message, Does.Contain("Cannot compute Sum on an empty column"));
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Sum error handling
-    /// For any series with all null values, Sum should throw InvalidOperationException.
-    /// Validates: Error handling for null-only series
+    /// Feature: core-column-types, Property: Sum with null handling
+    /// For any column with all null values, Sum should return zero.
+    /// Validates: Null-aware aggregate operations
     /// </summary>
     [Test]
-    [Category("Feature: nivara-series, Property: Sum error handling")]
-    public void Sum_AllNullValues_ThrowsInvalidOperationException()
+    [Category("Feature: core-column-types, Property: Sum with null handling")]
+    public void Sum_AllNullValues_ReturnsZero()
     {
         // Arrange
         var nullableData = new int?[] { null, null, null };
         var column = NivaraColumn<int>.CreateFromNullable(nullableData);
-        var series = new NivaraSeries<int>(column);
 
-        // Act & Assert
-        var ex = Assert.Throws<InvalidOperationException>(() => series.Sum());
-        Assert.That(ex.Message, Does.Contain("all values are null"));
-    }
+        // Act
+        var result = column.Sum();
 
-    /// <summary>
-    /// Feature: nivara-series, Property: Sum type validation
-    /// For any non-numeric type, Sum should throw InvalidOperationException.
-    /// Validates: Type safety for aggregate operations
-    /// </summary>
-    [Test]
-    [Category("Feature: nivara-series, Property: Sum type validation")]
-    public void Sum_NonNumericType_ThrowsInvalidOperationException()
-    {
-        // Arrange
-        var series = NivaraSeries<string>.Create(new[] { "a", "b", "c" });
-
-        // Act & Assert
-        var ex = Assert.Throws<InvalidOperationException>(() => series.Sum());
-        Assert.That(ex.Message, Does.Contain("Sum operation is not supported for type String"));
+        // Assert
+        Assert.That(result, Is.EqualTo(0));
     }
 
     #endregion
@@ -222,64 +208,45 @@ public class NivaraSeriesAggregateTests
     #region Min Tests
 
     /// <summary>
-    /// Feature: nivara-series, Property: Min computation
-    /// For any series of comparable values, Min should return the smallest value.
+    /// Feature: core-column-types, Property: Min computation
+    /// For any column of numeric values, Min should return the smallest value.
     /// Validates: Requirements for aggregate functions
     /// </summary>
     [TestCase(new int[] { 5, 2, 8, 1, 9 }, 1)]
     [TestCase(new int[] { -1, -5, -2 }, -5)]
     [TestCase(new int[] { 42 }, 42)]
     [TestCase(new int[] { int.MaxValue, int.MinValue }, int.MinValue)]
-    [Category("Feature: nivara-series, Property: Min computation")]
+    [Category("Feature: core-column-types, Property: Min computation")]
     public void Min_IntegerValues_ReturnsCorrectMin(int[] values, int expected)
     {
         // Arrange
-        var series = NivaraSeries<int>.Create(values);
+        var column = NivaraColumn<int>.Create(values);
 
         // Act
-        var result = series.Min();
+        var result = column.Min();
 
         // Assert
         Assert.That(result, Is.EqualTo(expected));
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Min computation with vectorization
-    /// For any series of float values, Min should use TensorPrimitives when possible.
+    /// Feature: core-column-types, Property: Min computation with vectorization
+    /// For any column of float values, Min should use TensorPrimitives when possible.
     /// Validates: Vectorized operations for performance
     /// </summary>
     [TestCase(new float[] { 3.5f, 1.2f, 4.8f }, 1.2f)]
     [TestCase(new float[] { -1.5f, -2.5f }, -2.5f)]
-    [Category("Feature: nivara-series, Property: Min computation with vectorization")]
+    [Category("Feature: core-column-types, Property: Min computation with vectorization")]
     public void Min_FloatValues_ReturnsCorrectMin(float[] values, float expected)
     {
         // Arrange
-        var series = NivaraSeries<float>.Create(values);
+        var column = NivaraColumn<float>.Create(values);
 
         // Act
-        var result = series.Min();
+        var result = column.Min();
 
         // Assert
         Assert.That(result, Is.EqualTo(expected).Within(0.0001f));
-    }
-
-    /// <summary>
-    /// Feature: nivara-series, Property: Min with string values
-    /// For any series of string values, Min should return lexicographically smallest value.
-    /// Validates: Comparison operations for non-numeric types
-    /// </summary>
-    [Test]
-    [Category("Feature: nivara-series, Property: Min with string values")]
-    public void Min_StringValues_ReturnsCorrectMin()
-    {
-        // Arrange
-        var series = NivaraSeries<string>.Create(new[] { "zebra", "apple", "banana" });
-
-        // Act
-        var result = series.Min();
-
-        // Assert
-        Assert.That(result, Is.EqualTo("apple"));
     }
 
     #endregion
@@ -287,63 +254,62 @@ public class NivaraSeriesAggregateTests
     #region Max Tests
 
     /// <summary>
-    /// Feature: nivara-series, Property: Max computation
-    /// For any series of comparable values, Max should return the largest value.
+    /// Feature: core-column-types, Property: Max computation
+    /// For any column of numeric values, Max should return the largest value.
     /// Validates: Requirements for aggregate functions
     /// </summary>
     [TestCase(new int[] { 5, 2, 8, 1, 9 }, 9)]
     [TestCase(new int[] { -1, -5, -2 }, -1)]
     [TestCase(new int[] { 42 }, 42)]
     [TestCase(new int[] { int.MaxValue, int.MinValue }, int.MaxValue)]
-    [Category("Feature: nivara-series, Property: Max computation")]
+    [Category("Feature: core-column-types, Property: Max computation")]
     public void Max_IntegerValues_ReturnsCorrectMax(int[] values, int expected)
     {
         // Arrange
-        var series = NivaraSeries<int>.Create(values);
+        var column = NivaraColumn<int>.Create(values);
 
         // Act
-        var result = series.Max();
+        var result = column.Max();
 
         // Assert
         Assert.That(result, Is.EqualTo(expected));
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Max computation with vectorization
-    /// For any series of double values, Max should use TensorPrimitives when possible.
+    /// Feature: core-column-types, Property: Max computation with vectorization
+    /// For any column of double values, Max should use TensorPrimitives when possible.
     /// Validates: Vectorized operations for performance
     /// </summary>
     [TestCase(new double[] { 3.5, 1.2, 4.8 }, 4.8)]
     [TestCase(new double[] { -1.5, -2.5 }, -1.5)]
-    [Category("Feature: nivara-series, Property: Max computation with vectorization")]
+    [Category("Feature: core-column-types, Property: Max computation with vectorization")]
     public void Max_DoubleValues_ReturnsCorrectMax(double[] values, double expected)
     {
         // Arrange
-        var series = NivaraSeries<double>.Create(values);
+        var column = NivaraColumn<double>.Create(values);
 
         // Act
-        var result = series.Max();
+        var result = column.Max();
 
         // Assert
         Assert.That(result, Is.EqualTo(expected).Within(0.0001));
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Max with null handling
-    /// For any series with null values, Max should find maximum among valid values only.
+    /// Feature: core-column-types, Property: Max with null handling
+    /// For any column with null values, Max should find maximum among valid values only.
     /// Validates: Null-aware aggregate operations
     /// </summary>
     [Test]
-    [Category("Feature: nivara-series, Property: Max with null handling")]
+    [Category("Feature: core-column-types, Property: Max with null handling")]
     public void Max_WithNullValues_ReturnsValidMax()
     {
         // Arrange
         var nullableData = new int?[] { 2, null, 8, null, 5 };
         var column = NivaraColumn<int>.CreateFromNullable(nullableData);
-        var series = new NivaraSeries<int>(column);
 
         // Act
-        var result = series.Max();
+        var result = column.Max();
 
         // Assert
         Assert.That(result, Is.EqualTo(8));
@@ -354,13 +320,13 @@ public class NivaraSeriesAggregateTests
     #region All Integer Primitives
 
     /// <summary>
-    /// Feature: nivara-series, Property: Integer primitive vectorization
+    /// Feature: core-column-types, Property: Integer primitive vectorization
     /// For every integer primitive, Sum/Min/Max should route through the generic
     /// TensorPrimitives kernel and produce the correct result.
     /// Validates: Vectorized operations for integer types
     /// </summary>
     [Test]
-    [Category("Feature: nivara-series, Property: Integer primitive vectorization")]
+    [Category("Feature: core-column-types, Property: Integer primitive vectorization")]
     public void Sum_AllIntegerPrimitives_ReturnsCorrectSum()
     {
         verifyIntegerAggregate(new long[] { 3, 1, 2 }, 6L, 1L, 3L);
@@ -373,11 +339,11 @@ public class NivaraSeriesAggregateTests
     }
 
     static void verifyIntegerAggregate<T>(T[] values, T expectedSum, T expectedMin, T expectedMax)
-        where T : unmanaged
+        where T : unmanaged, INumber<T>
     {
-        Assert.That(NivaraSeries<T>.Create(values).Sum(), Is.EqualTo(expectedSum));
-        Assert.That(NivaraSeries<T>.Create(values).Min(), Is.EqualTo(expectedMin));
-        Assert.That(NivaraSeries<T>.Create(values).Max(), Is.EqualTo(expectedMax));
+        Assert.That(NivaraColumn<T>.Create(values).Sum(), Is.EqualTo(expectedSum));
+        Assert.That(NivaraColumn<T>.Create(values).Min(), Is.EqualTo(expectedMin));
+        Assert.That(NivaraColumn<T>.Create(values).Max(), Is.EqualTo(expectedMax));
     }
 
     #endregion
@@ -385,43 +351,47 @@ public class NivaraSeriesAggregateTests
     #region Edge Cases and Error Handling
 
     /// <summary>
-    /// Feature: nivara-series, Property: Aggregate error handling
-    /// For any disposed series, aggregate functions should throw ObjectDisposedException.
+    /// Feature: core-column-types, Property: Aggregate error handling
+    /// For any disposed column/series, aggregate functions should throw ObjectDisposedException.
     /// Validates: Resource management and disposal patterns
     /// </summary>
     [Test]
-    [Category("Feature: nivara-series, Property: Aggregate error handling")]
-    public void AggregateFunction_DisposedSeries_ThrowsObjectDisposedException()
+    [Category("Feature: core-column-types, Property: Aggregate error handling")]
+    public void AggregateFunction_Disposed_ThrowsObjectDisposedException()
     {
         // Arrange
         var series = NivaraSeries<int>.Create(new[] { 1, 2, 3 });
         series.Dispose();
 
         // Act & Assert
-        Assert.Throws<ObjectDisposedException>(() => series.Sum());
         Assert.Throws<ObjectDisposedException>(() => series.Average());
-        Assert.Throws<ObjectDisposedException>(() => series.Min());
-        Assert.Throws<ObjectDisposedException>(() => series.Max());
+
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        column.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => column.Sum());
+        Assert.Throws<ObjectDisposedException>(() => column.Min());
+        Assert.Throws<ObjectDisposedException>(() => column.Max());
     }
 
     /// <summary>
-    /// Feature: nivara-series, Property: Aggregate type validation
-    /// For any non-comparable type, Min/Max should throw InvalidOperationException.
-    /// Validates: Type safety for comparison operations
+    /// Feature: core-column-types, Property: Min/Max error handling
+    /// For any column where all values are null, Min/Max should throw InvalidOperationException.
+    /// Validates: Error handling for null-only columns
     /// </summary>
     [Test]
-    [Category("Feature: nivara-series, Property: Aggregate type validation")]
-    public void MinMax_NonComparableType_ThrowsInvalidOperationException()
+    [Category("Feature: core-column-types, Property: Min/Max error handling")]
+    public void MinMax_AllNullValues_ThrowsInvalidOperationException()
     {
-        // Arrange - using object type which doesn't implement IComparable
-        var series = NivaraSeries<object>.Create(new object[] { new object(), new object() });
+        // Arrange
+        var nullableData = new int?[] { null, null, null };
+        var column = NivaraColumn<int>.CreateFromNullable(nullableData);
 
         // Act & Assert
-        var minEx = Assert.Throws<InvalidOperationException>(() => series.Min());
-        var maxEx = Assert.Throws<InvalidOperationException>(() => series.Max());
+        var minEx = Assert.Throws<InvalidOperationException>(() => column.Min());
+        var maxEx = Assert.Throws<InvalidOperationException>(() => column.Max());
 
-        Assert.That(minEx.Message, Does.Contain("Min operation is not supported"));
-        Assert.That(maxEx.Message, Does.Contain("Max operation is not supported"));
+        Assert.That(minEx.Message, Does.Contain("all values are null"));
+        Assert.That(maxEx.Message, Does.Contain("all values are null"));
     }
 
     #endregion
