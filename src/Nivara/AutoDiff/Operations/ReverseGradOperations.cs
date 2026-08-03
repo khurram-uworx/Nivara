@@ -952,7 +952,7 @@ public static class ReverseGradOperations
         bool trackGrad = GradientUtils.ShouldTrackGrad(a);
 
         var resultArr = new T[a.Length];
-        NivaraTensorExtensions.GeluExactKernel(a.AsSpan(), resultArr);
+        GradKernels.GeluExact(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, trackGrad);
 
@@ -965,7 +965,7 @@ public static class ReverseGradOperations
             {
                 typedGradOutput.TryGetSpan(out var gradSpan);
                 var gradArr = new T[a.Length];
-                NivaraTensorExtensions.GeluExactGradientKernel(aArr, gradSpan, gradArr);
+                GradKernels.GeluExactGradient(aArr, gradSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.Create(gradArr));
             });
 
@@ -1563,16 +1563,19 @@ public static class ReverseGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var result = a.Data.Softmax(a.Rank >= 2 ? a.shape[1] : a.Length);
-        var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(a), a.shape);
+        int classCount = a.Rank >= 2 ? a.shape[1] : a.Length;
+        var resultArr = new T[a.Length];
+        GradKernels.Softmax(a.AsSpan(), resultArr, classCount);
+        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var savedResult = result;
             var gradFn = new OpNode<T>("Softmax", new object[] { a }, (typedGradOutput) =>
             {
-                var aGrad = savedResult.SoftmaxGradient(typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
-                AccumulateGradient(a, aGrad);
+                typedGradOutput.TryGetSpan(out var gSpan);
+                var aGradArr = new T[a.Length];
+                GradKernels.SoftmaxGradient(resultArr, gSpan, aGradArr, classCount);
+                AccumulateGradient(a, NivaraColumn<T>.Create(aGradArr));
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -1585,15 +1588,19 @@ public static class ReverseGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var result = a.Data.LogSoftmax(a.Rank >= 2 ? a.shape[1] : a.Length);
-        var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(a), a.shape);
+        int classCount = a.Rank >= 2 ? a.shape[1] : a.Length;
+        var resultArr = new T[a.Length];
+        GradKernels.LogSoftmax(a.AsSpan(), resultArr, classCount);
+        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
             var gradFn = new OpNode<T>("LogSoftmax", new object[] { a }, (typedGradOutput) =>
             {
-                var aGrad = a.Data.LogSoftmaxGradient(typedGradOutput, a.Rank >= 2 ? a.shape[1] : a.Length);
-                AccumulateGradient(a, aGrad);
+                typedGradOutput.TryGetSpan(out var gSpan);
+                var aGradArr = new T[a.Length];
+                GradKernels.LogSoftmaxGradient(a.AsSpan(), gSpan, aGradArr, classCount);
+                AccumulateGradient(a, NivaraColumn<T>.Create(aGradArr));
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
