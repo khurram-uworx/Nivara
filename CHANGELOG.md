@@ -16,7 +16,15 @@ All notable changes to Nivara are documented here. Released versions are publish
 - `Nivara.Storage.TensorStorage<T>` deleted and `StorageType`/`StorageType`-based dispatch removed from the storage contract (`IColumnStorage<T>`), `ColumnDiagnostics`, and `NivaraColumn`. All storage is the single `ColumnStorage<T>`; span access is always a genuine zero-copy view (`ProvidesZeroCopySpanAccess` dropped), and the `NivaraColumn` vectorized scalar kernels now operate directly on the storage's zero-copy span instead of pooling + copying the tensor-backed buffers. The scalar-comparison dead branches that threw for unsupported combinations were removed along with the tensor path.
 - Storage consolidation onto a single `ColumnStorage<T>` is **complete**: `NivaraColumn` dispatch path collapse, AutoDiff boundary hardening (runtime ADR-001 throws), and the benchmark gate all landed. Before/after results (baseline vs post-consolidation) are captured in `tests/Nivara.PerformanceTests/README.md`.
 - **AutoDiff boundary (ADR-001) enforced at runtime**: `ReverseGradTensor`/`ForwardGradTensor` constructors now throw `AutoGradException` (message contains "ADR-001") when the input column `HasNulls` (previously only a stripped-in-Release `Debug.Assert`); `ForwardGradTensor` tangent columns are guarded identically.
-- **AutoDiff enter path is zero-copy**: `FromColumn`/`FromSeries` wrap the column without copying; `FromArray`/`FromMatrix` now wrap the caller's array via `CreateFromOwnedArray` — **breaking contract change**, callers must not mutate the source array afterward. `GradTensor.AsTensor()` returns a zero-copy `ColumnStorage<T>.AsTensor()` view sharing the backing array instead of a flattened copy; new internal `NivaraColumn.AsTensorView()` backs it. `ModuleHelpers.GetSpan` fallback copy removed (`TryGetSpan` now always succeeds for AutoDiff tensors).
+- **AutoDiff enter path is zero-copy**: `FromColumn`/`FromSeries` wrap the column without copying; `FromArray`/`FromMatrix` now wrap the caller's array via `CreateFromOwnedArray` — **breaking contract change**, callers must not mutate the source array afterward. `GradTensor.AsTensor()` returns a zero-copy `ColumnStorage<T>.AsTensor()` view sharing the backing array instead of a flattened copy; `NivaraColumn.AsTensorView()` backs it. `ModuleHelpers.GetSpan` fallback copy removed (`TryGetSpan` now always succeeds for AutoDiff tensors).
+
+### Fixed
+
+- **Owned-array contract documented on remaining factory surfaces** (#106): `Parameter(string, T[], bool)` and `GradientUtils.Constant(T[])` wrap caller arrays zero-copy; XML docs now state ownership transfers and that the source array must not be mutated afterward, matching the `FromArray`/`FromMatrix` contract.
+
+### Added
+
+- **Public zero-copy tensor view** (#107): `NivaraColumn<T>.AsTensorView()` and `NivaraSeries<T>.AsTensorView()` are now public (previously internal). They return a lazy `Tensor<T>` view sharing the column's/series' backing array with no copy; null-containing columns and reference element types throw `InvalidOperationException`. Callers must treat the view as read-only.
 
 ### Query Engine
 
