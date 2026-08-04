@@ -1,23 +1,22 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.VectorData;
-using Nivara.Samples;
+using OllamaSharp;
+using System.Linq;
 
 namespace NivaraChat;
 
 internal sealed class FactualExecutor : Executor<string, string>
 {
-    private readonly InMemoryVectorStore _vectorStore;
+    private readonly CommunityToolkit.VectorData.InMemory.InMemoryVectorStore _vectorStore;
     private readonly OllamaApiClient _chatClient;
-    private readonly MiniLMEmbeddingGenerator _embeddingGenerator;
     private readonly int _topK;
 
-    public FactualExecutor(InMemoryVectorStore vectorStore, OllamaApiClient chatClient, MiniLMEmbeddingGenerator embeddingGenerator, int topK = 3)
+    public FactualExecutor(CommunityToolkit.VectorData.InMemory.InMemoryVectorStore vectorStore, OllamaApiClient chatClient, int topK = 3)
         : base("Factual RAG")
     {
         _vectorStore = vectorStore;
         _chatClient = chatClient;
-        _embeddingGenerator = embeddingGenerator;
         _topK = topK;
     }
 
