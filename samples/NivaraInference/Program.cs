@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Operations;
 using Nivara.Samples;
 using System.Diagnostics;
 using System.Drawing;
+using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 
 namespace NivaraInference;
@@ -328,7 +329,7 @@ class Program
         var rawBytes = File.ReadAllBytes(inputPath);
         float[] inputData = new float[rawBytes.Length / 4];
         Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
-        Console.WriteLine($"  {inputData.Length} floats, mean={inputData.Average():F6}");
+        Console.WriteLine($"  {inputData.Length} floats, mean={TensorPrimitives.Average(inputData.AsSpan()):F6}");
 
         var input = ReverseGradTensor<float>.FromMatrix(inputData, 1, 3 * 224 * 224);
         input.Reshape(1, 3, 224, 224);
@@ -362,7 +363,7 @@ class Program
         }
         Console.WriteLine("]");
 
-        Console.WriteLine($"Logits stats: min={logits.Min():F6}, max={logits.Max():F6}, mean={logits.Average():F6}");
+        Console.WriteLine($"Logits stats: min={TensorPrimitives.Min(logits.AsSpan()):F6}, max={TensorPrimitives.Max(logits.AsSpan()):F6}, mean={TensorPrimitives.Average(logits.AsSpan()):F6}");
 
         PrintTopK(output);
 
@@ -390,7 +391,7 @@ class Program
         var rawBytes = File.ReadAllBytes(inputPath);
         float[] inputData = new float[rawBytes.Length / 4];
         Buffer.BlockCopy(rawBytes, 0, inputData, 0, rawBytes.Length);
-        Console.WriteLine($"  {inputData.Length} floats, mean={inputData.Average():F6}");
+        Console.WriteLine($"  {inputData.Length} floats, mean={TensorPrimitives.Average(inputData.AsSpan()):F6}");
 
         var input = ReverseGradTensor<float>.FromMatrix(inputData, 1, 3 * 224 * 224);
         input.Reshape(1, 3, 224, 224);
@@ -423,8 +424,8 @@ class Program
         using var fs = File.Create(path);
         fs.Write(MemoryMarshal.AsBytes(data.AsSpan()));
 
-        double mean = data.Average();
-        float min = data.Min(), max = data.Max();
+        double mean = TensorPrimitives.Average(data.AsSpan());
+        float min = TensorPrimitives.Min(data.AsSpan()), max = TensorPrimitives.Max(data.AsSpan());
         string shapeStr = string.Join("x", tensor.Shape);
         Console.WriteLine($"  {name}: [{shapeStr}], mean={mean:F6}, min={min:F6}, max={max:F6}");
         Console.Write($"    first9: [");
@@ -667,7 +668,7 @@ class Program
 
         Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
         Console.WriteLine($"Output shape: [{output.Shape[^1]}]");
-        Console.WriteLine($"Output stats: min={outputData.Min():F6}, max={outputData.Max():F6}, mean={outputData.Average():F6}");
+        Console.WriteLine($"Output stats: min={TensorPrimitives.Min(outputData.AsSpan()):F6}, max={TensorPrimitives.Max(outputData.AsSpan()):F6}, mean={TensorPrimitives.Average(outputData.AsSpan()):F6}");
         Console.Write("Output[:10]: [");
         for (int i = 0; i < Math.Min(10, outputData.Length); i++)
         {
@@ -676,9 +677,7 @@ class Program
         }
         Console.WriteLine("]");
 
-        float norm = 0f;
-        foreach (var v in outputData) norm += v * v;
-        norm = MathF.Sqrt(norm);
+        float norm = TensorPrimitives.Norm(outputData.AsSpan());
         Console.WriteLine($"L2 norm: {norm:F6} (should be ~1.0 for normalized embeddings)");
         Console.WriteLine();
 
@@ -740,9 +739,7 @@ class Program
         for (int i = 0; i < sentences.Length; i++)
         {
             var emb = embeddings[i];
-            float norm = 0f;
-            foreach (var v in emb) norm += v * v;
-            norm = MathF.Sqrt(norm);
+            float norm = TensorPrimitives.Norm(emb.AsSpan());
 
             Console.WriteLine($"[{i}] {sentences[i]}");
             Console.Write($"    first 10: [");
@@ -752,7 +749,7 @@ class Program
                 if (j < Math.Min(10, emb.Length) - 1) Console.Write(", ");
             }
             Console.WriteLine("]");
-            Console.WriteLine($"    stats: min={emb.Min():F6}, max={emb.Max():F6}, mean={emb.Average():F6}, L2 norm={norm:F6}");
+            Console.WriteLine($"    stats: min={TensorPrimitives.Min(emb.AsSpan()):F6}, max={TensorPrimitives.Max(emb.AsSpan()):F6}, mean={TensorPrimitives.Average(emb.AsSpan()):F6}, L2 norm={norm:F6}");
             Console.WriteLine();
         }
 
@@ -766,7 +763,7 @@ class Program
             Console.Write($"  [{i}]  ");
             for (int j = 0; j < sentences.Length; j++)
             {
-                float sim = CosineSimilarity(embeddings[i], embeddings[j]);
+                float sim = TensorPrimitives.CosineSimilarity(embeddings[i].AsSpan(), embeddings[j].AsSpan());
                 Console.Write($"{sim,7:F4} ");
             }
             Console.WriteLine();
@@ -875,7 +872,7 @@ class Program
 
         Console.WriteLine($"Forward: {fwdSw.ElapsedMilliseconds} ms");
         Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
-        Console.WriteLine($"Output stats: min={outputData.Min():F6}, max={outputData.Max():F6}, mean={outputData.Average():F6}, std={StdDev(outputData):F6}");
+        Console.WriteLine($"Output stats: min={TensorPrimitives.Min(outputData.AsSpan()):F6}, max={TensorPrimitives.Max(outputData.AsSpan()):F6}, mean={TensorPrimitives.Average(outputData.AsSpan()):F6}, std={StdDev(outputData):F6}");
         Console.Write("Output[:10]: [");
         for (int i = 0; i < Math.Min(10, outputData.Length); i++)
         {
@@ -942,13 +939,10 @@ class Program
     static double StdDev(float[] data)
     {
         if (data.Length == 0) return 0;
-        double mean = data.Average();
-        double sumSq = 0;
-        foreach (var v in data)
-        {
-            double diff = v - mean;
-            sumSq += diff * diff;
-        }
+        double mean = TensorPrimitives.Average(data.AsSpan());
+        var diff = new float[data.Length];
+        TensorPrimitives.Add(data.AsSpan(), (float)-mean, diff);
+        double sumSq = TensorPrimitives.Dot(diff, diff);
         return Math.Sqrt(sumSq / data.Length);
     }
 
@@ -985,24 +979,24 @@ class Program
         Buffer.BlockCopy(rawBytes, 0, refData, 0, rawBytes.Length);
 
         int len = Math.Min(outputData.Length, refData.Length);
-        float maxAbs = 0f, sumAbs = 0f, dot = 0f, normA = 0f, normB = 0f;
-        for (int i = 0; i < len; i++)
-        {
-            float diff = MathF.Abs(outputData[i] - refData[i]);
-            if (diff > maxAbs) maxAbs = diff;
-            sumAbs += diff;
-            dot += outputData[i] * refData[i];
-            normA += outputData[i] * outputData[i];
-            normB += refData[i] * refData[i];
-        }
+        var outputSpan = outputData.AsSpan(0, len);
+        var refSpan = refData.AsSpan(0, len);
+
+        var diffArr = new float[len];
+        TensorPrimitives.Subtract(outputSpan, refSpan, diffArr);
+        var absDiff = new float[len];
+        TensorPrimitives.Abs(diffArr.AsSpan(), absDiff);
+        float maxAbs = TensorPrimitives.Max(absDiff);
+        float sumAbs = TensorPrimitives.Sum(absDiff);
+        float cosineSim = TensorPrimitives.CosineSimilarity(outputSpan, refSpan);
 
         Console.WriteLine($"Input text: \"{text}\"");
         Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
-        Console.WriteLine($"  C# stats: min={outputData.Min():F6}, max={outputData.Max():F6}, mean={outputData.Average():F6}, std={StdDev(outputData):F6}");
-        Console.WriteLine($"  Py stats: min={refData.Min():F6}, max={refData.Max():F6}, mean={refData.Average():F6}, std={StdDev(refData):F6}");
+        Console.WriteLine($"  C# stats: min={TensorPrimitives.Min(outputData.AsSpan()):F6}, max={TensorPrimitives.Max(outputData.AsSpan()):F6}, mean={TensorPrimitives.Average(outputData.AsSpan()):F6}, std={StdDev(outputData):F6}");
+        Console.WriteLine($"  Py stats: min={TensorPrimitives.Min(refData.AsSpan()):F6}, max={TensorPrimitives.Max(refData.AsSpan()):F6}, mean={TensorPrimitives.Average(refData.AsSpan()):F6}, std={StdDev(refData):F6}");
         Console.WriteLine($"  max abs diff: {maxAbs:F6}");
         Console.WriteLine($"  mean abs diff: {sumAbs / len:F8}");
-        Console.WriteLine($"  cosine similarity: {dot / (MathF.Sqrt(normA) * MathF.Sqrt(normB)):F8}");
+        Console.WriteLine($"  cosine similarity: {cosineSim:F8}");
         Console.WriteLine();
 
         Console.Write("C# Output[:10]: [");
@@ -1220,7 +1214,7 @@ class Program
             Console.Write($"  [{i}]  ");
             for (int j = 0; j < sentences.Length; j++)
             {
-                float sim = CosineSimilarity(embeddings[i], embeddings[j]);
+                float sim = TensorPrimitives.CosineSimilarity(embeddings[i].AsSpan(), embeddings[j].AsSpan());
                 Console.Write($"{sim,7:F4} ");
             }
             Console.WriteLine();
@@ -1228,19 +1222,5 @@ class Program
         Console.WriteLine();
 
         return 0;
-    }
-
-    static float CosineSimilarity(float[] a, float[] b)
-    {
-        float dot = 0f, normA = 0f, normB = 0f;
-        int len = Math.Min(a.Length, b.Length);
-        for (int i = 0; i < len; i++)
-        {
-            dot += a[i] * b[i];
-            normA += a[i] * a[i];
-            normB += b[i] * b[i];
-        }
-        float denom = MathF.Sqrt(normA) * MathF.Sqrt(normB);
-        return denom > 1e-12f ? dot / denom : 0f;
     }
 }

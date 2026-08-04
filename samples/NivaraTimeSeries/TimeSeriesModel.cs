@@ -2,6 +2,7 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
+using System.Numerics.Tensors;
 
 namespace NivaraTimeSeries;
 
@@ -109,12 +110,16 @@ public sealed class TimeSeriesModel<T> : Module<T> where T : struct, IFloatingPo
     public float ReconstructError(ReverseGradTensor<T> input)
     {
         var recon = Forward(input);
-        float sumSq = 0;
-        for (int i = 0; i < input.Length; i++)
+        int len = input.Length;
+        var reconArr = new float[len];
+        var inputArr = new float[len];
+        for (int i = 0; i < len; i++)
         {
-            float diff = float.CreateChecked(recon[i] - input[i]);
-            sumSq += diff * diff;
+            reconArr[i] = float.CreateChecked(recon[i]);
+            inputArr[i] = float.CreateChecked(input[i]);
         }
-        return sumSq / input.Length;
+        var diff = new float[len];
+        TensorPrimitives.Subtract(reconArr.AsSpan(), inputArr.AsSpan(), diff);
+        return TensorPrimitives.Dot(diff, diff) / len;
     }
 }

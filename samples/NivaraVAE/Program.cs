@@ -8,6 +8,7 @@ using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using NivaraVAE;
 using System.Buffers;
+using System.Numerics.Tensors;
 
 var options = Options.Parse(args);
 
@@ -225,8 +226,9 @@ static void InterpolateLinear(VaeModel<float> model, PatternDataset dataset, int
             var zData = new float[mu1.Length];
             var mu1Pixels = ExtractPixels(mu1, mu1.Length);
             var mu2Pixels = ExtractPixels(mu2, mu2.Length);
-            for (int j = 0; j < zData.Length; j++)
-                zData[j] = alpha * mu1Pixels[j] + (1 - alpha) * mu2Pixels[j];
+            var scaledMu1 = new float[mu1.Length];
+            TensorPrimitives.Multiply(mu1Pixels.AsSpan(), alpha, scaledMu1.AsSpan());
+            TensorPrimitives.MultiplyAdd(mu2Pixels.AsSpan(), 1 - alpha, scaledMu1.AsSpan(), zData.AsSpan());
 
             var z = ReverseGradTensor<float>.FromMatrix(zData, 1, zData.Length, requiresGrad: false);
             var decoded = model.Decode(z);
@@ -490,8 +492,9 @@ static void InterpolateConv(ConvVAE<float> model, PatternDataset dataset, int co
             mu2.Data.CopyTo(mu2Data, default(float)!);
 
             var zData = new float[mu1.Length];
-            for (int j = 0; j < zData.Length; j++)
-                zData[j] = alpha * mu1Data[j] + (1 - alpha) * mu2Data[j];
+            var scaledMu1 = new float[mu1.Length];
+            TensorPrimitives.Multiply(mu1Data.AsSpan(), alpha, scaledMu1.AsSpan());
+            TensorPrimitives.MultiplyAdd(mu2Data.AsSpan(), 1 - alpha, scaledMu1.AsSpan(), zData.AsSpan());
 
             var z = ReverseGradTensor<float>.FromMatrix(zData, 1, zData.Length, requiresGrad: false);
             z.Reshape(mu1.Shape);

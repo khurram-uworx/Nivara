@@ -7,6 +7,7 @@ using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using NivaraGpt;
 using System.Diagnostics;
+using System.Numerics.Tensors;
 
 int nEmbd = 64;
 int nLayer = 2;
@@ -150,12 +151,13 @@ if (!string.IsNullOrWhiteSpace(dumpWeightsPath))
             int len = kvp.Value.Length;
             var data = new float[len];
             kvp.Value.Tensor.Data.CopyTo(data, 0f);
-            float mean = data.Average();
-            float variance = data.Sum(x => (x - mean) * (x - mean)) / data.Length;
-            float std = MathF.Sqrt(variance);
-            float min = data.Min();
-            float max = data.Max();
-            float l2 = MathF.Sqrt(data.Sum(x => x * x));
+            float mean = TensorPrimitives.Average(data.AsSpan());
+            var diff = new float[data.Length];
+            TensorPrimitives.Add(data.AsSpan(), -mean, diff);
+            float std = MathF.Sqrt(TensorPrimitives.Dot(diff, diff) / data.Length);
+            float min = TensorPrimitives.Min(data.AsSpan());
+            float max = TensorPrimitives.Max(data.AsSpan());
+            float l2 = TensorPrimitives.Norm(data.AsSpan());
             idx++;
             string comma = idx < parameters.Count ? "," : "";
             fs.WriteLine($"  \"{kvp.Key}\": {{\"len\":{data.Length},\"mean\":{mean:F6},\"std\":{std:F6},\"min\":{min:F6},\"max\":{max:F6},\"l2\":{l2:F4}}}{comma}");
