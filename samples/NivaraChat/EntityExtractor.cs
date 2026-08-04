@@ -25,7 +25,10 @@ internal sealed class EntityExtractor : Executor<string, string>
     {
         var entities = ModelInferenceHelper.RunTokenClassifier(
             _model, _tokenizer, text, _maxSeqLen, EntityClasses);
+        float confidence = ModelInferenceHelper.RunTokenClassifierWithConfidence(
+            _model, _tokenizer, text, _maxSeqLen, EntityClasses);
 
-        return ValueTask.FromResult(JsonSerializer.Serialize(entities));
+        var result = JsonSerializer.Serialize(new { entities, confidence });
+        return ValueTask.FromResult(result);
     }
 }
