@@ -10,16 +10,16 @@ Each section is a self-contained feature that can be implemented independently
 or composed together. They are ordered roughly by dependency (earlier ideas
 don't require later ones).
 
-| # | Idea | Key Ecosystem APIs | Nivara Gaps |
-|---|------|--------------------|-------------|
-| A | IChatClient backed by batched transformer | `IChatClient`, DI | LayerNorm, batched Embedding, Concat |
-| B | Confidence-based handoff | Conditional edges | Score extraction from models |
-| C | Nivara as AIFunction tools | `AIFunctionFactory`, tool calling | None (existing models) |
-| D | RAG with Nivara embeddings | `IEmbeddingGenerator`, vector search | Embedding generator wrapper |
-| E | Writer-critic feedback loop | Conditional edges, feedback | None (existing validator) |
-| F | Nivara as IEmbeddingGenerator | `IEmbeddingGenerator<T>` | Embedding wrapper module |
-| G | Intent classification router | Handoff orchestration | Intent classifier model |
-| H | Online learning from LLM feedback | `DataLoader` incremental | Incremental training API |
+| # | Idea | Key Ecosystem APIs | Nivara Gaps | Status |
+|---|------|--------------------|-------------|--------|
+| A | IChatClient backed by batched transformer | `IChatClient`, DI | LayerNorm, batched Embedding, Concat | |
+| B | Confidence-based handoff | Conditional edges | Score extraction from models | **Done** |
+| C | Nivara as AIFunction tools | `AIFunctionFactory`, tool calling | None (existing models) | **Done** |
+| D | RAG with Nivara embeddings | `IEmbeddingGenerator`, vector search | Embedding generator wrapper | |
+| E | Writer-critic feedback loop | Conditional edges, feedback | None (existing validator) | **Done** |
+| F | Nivara as IEmbeddingGenerator | `IEmbeddingGenerator<T>` | Embedding wrapper module | **Done** |
+| G | Intent classification router | Handoff orchestration | Intent classifier model | |
+| H | Online learning from LLM feedback | `DataLoader` incremental | Incremental training API | |
 
 ---
 
@@ -450,6 +450,15 @@ After validation, these new modules would be promoted to `src/Nivara/`:
 
 # B. Confidence-Based Handoff Pattern
 
+> **Status: Implemented** (`--handoff` flag)
+> `ConfidenceRouter` uses `--threshold` to route: high confidence →
+> `NivaraResultFormatter`, low confidence → `LlmExecutor`. LLM fallback
+> is internal (not workflow conditional edges) because the Agent Framework
+> `AddEdge` condition does not enforce exclusivity — both edges fire.
+> Confidence extraction via `RunClassifierWithConfidence` /
+> `RunTokenClassifierWithConfidence` on the model logits. Live tested
+> with Ollama.
+
 ## Goal
 
 Use Agent Framework conditional edges to route based on Nivara model
@@ -566,6 +575,15 @@ workflow architecture demo.
 ---
 
 # C. Nivara as AIFunction Tools for the LLM
+
+> **Status: Implemented** (`--tools` flag)
+> `NivaraToolFunctions` wraps `analyze_sentiment`, `extract_entities`,
+> and `validate_response` as `AIFunction` tools via
+> `AIFunctionFactory.Create()`. Uses `ChatClientAgent` with tools —
+> the framework's built-in tool-calling loop handles invocation
+> automatically. Ollama's own tool-calling loop shadows the framework
+> one, so `ChatClientAgent` is used instead of a custom orchestrator.
+> Live tested with Ollama.
 
 ## Goal
 
@@ -834,6 +852,14 @@ public partial class RagRetrievalExecutor : Executor<string>
 
 # E. Writer-Critic Feedback Loop
 
+> **Status: Implemented** (`--critic` flag)
+> `WriterCriticLoop` is a plain class (not `Executor`) with `RunAsync`
+> that accepts `IWorkflowContext` for `Grad()` access. Bounded to 3
+> iterations. Critic scoring via `CriticExecutor.ScoreAsync` — direct
+> invocation of the validator model (not workflow-level feedback).
+> Feedback prompt sends previous score + generic improvement
+> suggestions. Live tested with Ollama.
+
 ## Goal
 
 Use the Agent Framework's conditional edges to create an iterative
@@ -943,6 +969,13 @@ None. Uses existing Nivara models and Agent Framework patterns.
 ---
 
 # F. Nivara as Local IEmbeddingGenerator
+
+> **Status: Implemented** (`EmbeddingGenerator` class)
+> `NivaraEmbeddingGenerator` wraps `TextClassifierModel` + `MeanPool`
+> and implements `IEmbeddingGenerator<string, Embedding<float>>`.
+> Uses `[JsonPropertyName]` for lowercase JSON serialization. Average
+> entity-confidence per-token caps around 0.8; threshold `0.7` is
+> practical. Lives in `samples/NivaraChat/` with the other executors.
 
 ## Goal
 
