@@ -65,6 +65,9 @@ if (args.Length > 0)
         case "--rag":
             await RunRagPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama);
             break;
+        case "--rag-agent":
+            await RunRagAgentPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama);
+            break;
         default:
             PrintUsage();
             break;
@@ -673,6 +676,7 @@ void PrintUsage()
     Console.WriteLine("  --critic             Writer-critic loop: LLM writes, Nivara scores, retry if poor");
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
     Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer");
+    Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
@@ -844,5 +848,121 @@ async Task RunRagPipeline(string modelsDir, string ollamaUrl, string modelName, 
         Console.WriteLine($"\n  LLM response ({llmMs} ms):");
         Console.WriteLine($"  {response.Text}");
         Console.WriteLine();
+    }
+}
+
+async Task RunRagAgentPipeline(string modelsDir, string ollamaUrl, string modelName, string? docsDir, int topK, bool useOllama)
+{
+    Console.WriteLine("=== NivaraChat — RAG Agent (TextSearchProvider) ===\n");
+
+    if (!useOllama)
+    {
+        Console.WriteLine("Error: --rag-agent requires --ollama for LLM generation.");
+        return;
+    }
+
+    var minilmDir = Path.Combine(GetRepoRoot(), "samples", "data", "minilm");
+    if (!Directory.Exists(minilmDir))
+    {
+        Console.WriteLine($"MiniLM model not found at: {minilmDir}");
+        Console.WriteLine("Download model files (model.safetensors, config.json, vocab.txt) to that directory.");
+        return;
+    }
+
+    Console.WriteLine("Loading MiniLM embedding model...");
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+    sw.Stop();
+    Console.WriteLine($"  Dimensions: {generator.EmbeddingDimension}");
+    Console.WriteLine($"  Loaded in:  {sw.ElapsedMilliseconds} ms\n");
+
+    var vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(
+        new() { EmbeddingGenerator = generator });
+    var collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
+    await collection.EnsureCollectionExistsAsync();
+
+    var repoRoot = GetRepoRoot();
+    var resolvedDocsDir = docsDir ?? Path.Combine(repoRoot, "docs");
+    var mdFiles = Directory.Exists(resolvedDocsDir)
+        ? Directory.GetFiles(resolvedDocsDir, "*.md")
+        : [];
+
+    var readmePath = Path.Combine(repoRoot, "samples", "NivaraChat", "README.md");
+    if (File.Exists(readmePath))
+        mdFiles = [.. mdFiles, readmePath];
+
+    if (mdFiles.Length == 0)
+    {
+        Console.WriteLine($"No markdown files found in {resolvedDocsDir}");
+        return;
+    }
+
+    Console.WriteLine($"Indexing {mdFiles.Length} markdown files...");
+    sw.Restart();
+    await DocumentChunker.IndexMarkdownFiles(collection, mdFiles);
+    sw.Stop();
+    Console.WriteLine($"  Indexed in {sw.ElapsedMilliseconds} ms\n");
+
+    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    Console.WriteLine("Ollama connected.\n");
+
+    var textSearch = new TextSearchProvider(
+        async (query, ct) =>
+        {
+            var results = new List<TextSearchProvider.TextSearchResult>();
+            await foreach (var result in collection.SearchAsync(query, topK, cancellationToken: ct))
+            {
+                results.Add(new TextSearchProvider.TextSearchResult
+                {
+                    Text = result.Record.Text,
+                    SourceName = result.Record.Source
+                });
+            }
+            return results;
+        },
+        new TextSearchProviderOptions
+        {
+            SearchTime = TextSearchProviderOptions.TextSearchBehavior.BeforeAIInvoke,
+            RecentMessageMemoryLimit = 2
+        });
+
+    var baseAgent = new ChatClientAgent(chatClient,
+        name: "NivaraRagAgent",
+        instructions: "You are a helpful assistant that answers questions about the Nivara project using the provided context. Always base your answers on the retrieved context.");
+
+    var agent = new AIAgentBuilder(baseAgent)
+        .UseAIContextProviders(textSearch)
+        .Build();
+
+    Console.WriteLine($"Top-K: {topK} chunks. TextSearchProvider auto-injects context before each LLM call.");
+    Console.WriteLine("Type a question (or 'quit' to exit):\n");
+
+    while (true)
+    {
+        Console.Write("> ");
+        var query = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(query) || query == "quit") break;
+
+        var run = await InProcessExecution.RunAsync(
+            new WorkflowBuilder(agent).WithOutputFrom(agent).Build(),
+            query);
+
+        Console.WriteLine("\n--- RAG Agent Response ---");
+        foreach (var evt in run.NewEvents)
+        {
+            switch (evt)
+            {
+                case AgentResponseUpdateEvent updateEvt:
+                    if (updateEvt.Update?.Text is string text && !string.IsNullOrEmpty(text))
+                        Console.Write(text);
+                    break;
+                case AgentResponseEvent agentEvt:
+                    if (agentEvt.Data is string data && !string.IsNullOrEmpty(data))
+                        Console.WriteLine(data);
+                    break;
+            }
+        }
+        Console.WriteLine("\n");
     }
 }
