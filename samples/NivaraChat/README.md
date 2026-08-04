@@ -106,14 +106,42 @@ Input text
               confident (>=0.8)    uncertain (<0.8)
                     │                    │
                     v                    v
-           [NivaraResultFormatter]  [Ollama LLM]
+            Nivara result          [Ollama LLM]
 ```
+
+Tested examples:
+
+| Input | Threshold | Path taken | Why |
+|-------|-----------|------------|-----|
+| `"I love this product!"` | 0.8 (default) | LLM | Sentiment 0.58, entity 0.27 — both below threshold |
+| `"I love this product!"` | 0.7 | LLM | Entity confidence 0.27 still below 0.7 |
+| `"John Smith from Acme Corp reported great work on January 15"` | 0.8 | LLM | Entity confidence 0.798 just below 0.8 |
+| `"John Smith from Acme Corp reported great work on January 15"` | 0.7 | Nivara only | Both above 0.7 — no LLM needed |
+
+The entity model's average per-token confidence tends to cap around 0.8 for multi-entity inputs. Use `--threshold 0.7` for a more practical cutoff.
 
 ### Tool calling (`--tools`)
 Flips the architecture: the LLM *decides* when to call Nivara models. Nivara models are wrapped as `AIFunction` tools via `AIFunctionFactory` with `[Description]` attributes. The LLM receives tool definitions and chooses when to invoke sentiment analysis, entity extraction, or response validation. Requires `--ollama`.
 
+Tested examples:
+
+| Input | Tools called | Notes |
+|-------|-------------|-------|
+| `"John Smith from Acme Corp reported great work"` | ExtractEntities, AnalyzeSentiment | LLM chose both tools, summarized results |
+| `"Acme Corp in New York announced on March 3"` | ExtractEntities, AnalyzeSentiment | Multi-entity extraction works well |
+
+The LLM decides which tools to call based on the `[Description]` attributes. Tool results are fed back automatically by the `ChatClientAgent` framework.
+
 ### Writer-critic loop (`--critic`)
 The LLM generates a response, a Nivara validator model scores it for quality/consistency, and the LLM re-generates if the score is below threshold. Bounded to 3 iterations with structured feedback. Demonstrates Nivara models evaluating LLM output, not just generating their own. Requires `--ollama`.
+
+Tested examples:
+
+| Input | Result | Score |
+|-------|--------|-------|
+| `"Explain quantum computing to a 5-year-old"` | PASS on attempt 1 | 0.98 |
+
+The validator model was trained on `"original || response"` format for consistency checking. High scores indicate the response is consistent with the query. Max 3 iterations — if all fail, the last attempt is returned with a notice.
 
 ### Embedding search (`--embed`)
 Indexes 8 knowledge documents using `IEmbeddingGenerator` backed by a local MiniLM transformer, then runs an interactive REPL. Type a query and the system retrieves the top-4 most relevant documents ranked by cosine similarity. This demonstrates the retrieval step for RAG (Retrieval-Augmented Generation) — in a full pipeline, retrieved context would be injected into the LLM prompt via `TextSearchProvider`. Uses `NivaraEmbeddingGenerator<string>` from `Nivara.Extensions`, the same interface as OpenAI/Ollama embedding providers.
