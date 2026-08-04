@@ -1,6 +1,7 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
+using Nivara.Extensions.AI;
 using System.Numerics;
 
 namespace Nivara.Samples;
@@ -488,5 +489,41 @@ public static class MiniLMTokenizer
             mask.Reshape(attnMask.Length);
         }
         return (input, mask);
+    }
+}
+
+public static class MiniLMEmbeddingGenerator
+{
+    public static NivaraEmbeddingGenerator<string> Create(
+        string modelDir,
+        int maxLen = 128,
+        string providerName = "Nivara-MiniLM")
+    {
+        var tensors = SafeTensorsLoader.Read(Path.Combine(modelDir, "model.safetensors"));
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine(modelDir, "vocab.txt"));
+
+        Func<string, float[]> embeddingFactory = text =>
+        {
+            var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen);
+            var output = mask != null
+                ? model.ForwardWithMask(input, mask)
+                : model.Forward(input);
+
+            var result = new float[output.Length];
+            output.Data.TryGetSpan(out var span);
+            if (!span.IsEmpty)
+                span.Slice(0, output.Length).CopyTo(result);
+            else
+                output.Data.CopyTo(result, 0f);
+            return result;
+        };
+
+        return new NivaraEmbeddingGenerator<string>(
+            embeddingFactory,
+            config.HiddenSize,
+            providerName,
+            defaultModelId: "all-minilm-l6-v2");
     }
 }
