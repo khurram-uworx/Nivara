@@ -56,6 +56,12 @@ dotnet run --project samples/NivaraChat -- --critic --ollama --text "Explain qua
 
 # Embedding search (index documents, retrieve context via IEmbeddingGenerator)
 dotnet run --project samples/NivaraChat -- --embed
+
+# RAG pipeline: chunk docs, retrieve context, LLM generate answer (requires --ollama)
+dotnet run --project samples/NivaraChat -- --rag --ollama --text "How does embedding search work?"
+
+# RAG agent: same with TextSearchProvider auto-context injection (requires --ollama)
+dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is NivaraChat?"
 ```
 
 ## CLI options
@@ -70,10 +76,14 @@ dotnet run --project samples/NivaraChat -- --embed
 | `--tools` | — | Mode: LLM orchestrator calls Nivara models as AIFunction tools |
 | `--critic` | — | Mode: writer-critic loop — LLM writes, Nivara scores, retry if poor |
 | `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
+| `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
+| `--rag-agent` | — | Mode: RAG agent — same as `--rag` with `TextSearchProvider` auto-context injection |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
 | `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
+| `--docs-dir <path>` | `docs/` | Documents directory for `--rag` and `--rag-agent` modes |
+| `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |
 
 ## Modes of use
 
@@ -145,6 +155,67 @@ The validator model was trained on `"original || response"` format for consisten
 
 ### Embedding search (`--embed`)
 Indexes 8 knowledge documents using `IEmbeddingGenerator` backed by a local MiniLM transformer, then runs an interactive REPL. Type a query and the system retrieves the top-4 most relevant documents ranked by cosine similarity. This demonstrates the retrieval step for RAG (Retrieval-Augmented Generation) — in a full pipeline, retrieved context would be injected into the LLM prompt via `TextSearchProvider`. Uses `NivaraEmbeddingGenerator<string>` from `Nivara.Extensions`, the same interface as OpenAI/Ollama embedding providers.
+
+### RAG pipeline (`--rag`)
+Full Retrieval-Augmented Generation pipeline. Loads real Nivara documentation (markdown files from `docs/` + `README.md`), chunks them into paragraphs, indexes via `InMemoryVectorStore` with auto-embedding from the local MiniLM model, then runs an interactive REPL. User questions are matched against stored chunks via cosine similarity, top-K chunks are injected into a manually constructed prompt, and the LLM generates a grounded answer. Shows retrieval time and LLM time separately. Requires `--ollama`.
+
+```
+Documents (docs/*.md, README.md)
+    │
+    v
+ChunkText (paragraph splitting, ~500 chars)
+    │
+    v
+InMemoryVectorStore + MiniLMEmbeddingGenerator
+    │  auto-embeds each chunk via Nivara IEmbeddingGenerator
+    v
+User query
+    │
+    v
+collection.SearchAsync(query, top: K)  →  ranked chunks
+    │
+    v
+Manual prompt: "Answer based on context:\n{chunks}\n\nQuestion: {query}"
+    │
+    v
+Ollama LLM  →  grounded response
+```
+
+Tested examples:
+
+| Input | Top-K | Retrieval | LLM | Answer quality |
+|-------|-------|-----------|-----|----------------|
+| `"How does embedding search work?"` | 3 | 371ms | 27.5s | Describes MiniLM → InMemoryVectorStore → cosine similarity pipeline |
+| `"What is NivaraChat?"` | 3 | 538ms | 17.2s | Correctly identifies RAG pipeline with MiniLM + TextSearchProvider |
+
+Uses: `MiniLMEmbeddingGenerator.Create()`, `InMemoryVectorStore`, `DocumentChunker.ChunkText()`, `collection.SearchAsync()`.
+
+### RAG agent (`--rag-agent`)
+Same retrieval pipeline as `--rag`, but uses `TextSearchProvider` from the Agent Framework for automatic context injection instead of manual prompt construction. `TextSearchProvider` intercepts each LLM call, performs a search, and injects the retrieved context before the LLM sees the query. This is the standard ecosystem pattern for RAG and composes with other `AIContextProvider` implementations. Requires `--ollama`.
+
+```
+Documents (same as --rag)
+    │
+    v
+InMemoryVectorStore + MiniLMEmbeddingGenerator
+    │
+    v
+TextSearchProvider (SearchTime = BeforeAIInvoke)
+    │  auto-searches before every LLM call
+    │  injects top-K chunks as additional context
+    v
+ChatClientAgent + Ollama LLM
+    │
+    v
+Grounded response with source citations
+```
+
+Tested examples:
+
+| Input | Answer quality |
+|-------|----------------|
+| `"How does embedding search work?"` | Describes MiniLM → InMemoryVectorStore → auto-embedding pipeline with code example |
+| `"What is NivaraChat?"` | Identifies as Nivara project component for RAG pipeline |
 
 ## Agents pipeline architecture
 

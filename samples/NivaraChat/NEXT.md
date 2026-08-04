@@ -15,7 +15,7 @@ don't require later ones).
 | A | IChatClient backed by batched transformer | `IChatClient`, DI | LayerNorm, batched Embedding, Concat | |
 | B | Confidence-based handoff | Conditional edges | Score extraction from models | **Done** |
 | C | Nivara as AIFunction tools | `AIFunctionFactory`, tool calling | None (existing models) | **Done** |
-| D | RAG with Nivara embeddings | `IEmbeddingGenerator`, vector search | Embedding generator wrapper | |
+| D | RAG with Nivara embeddings | `IEmbeddingGenerator`, vector search | Embedding generator wrapper | **Done** |
 | E | Writer-critic feedback loop | Conditional edges, feedback | None (existing validator) | **Done** |
 | F | Nivara as IEmbeddingGenerator | `IEmbeddingGenerator<T>` | Embedding wrapper module | **Done** |
 | G | Intent classification router | Handoff orchestration | Intent classifier model | |
@@ -710,6 +710,15 @@ None. Uses existing Nivara models as-is, wrapped via `AIFunctionFactory`.
 ---
 
 # D. RAG Pipeline with Nivara Embeddings
+
+> **Status: Implemented** (`--rag` and `--rag-agent` flags)
+> Uses `InMemoryVectorStore` with `CommunityToolkit.VectorData.InMemory`
+> and `Microsoft.Extensions.VectorData.Abstractions`. `DocumentChunk`
+> data model with `[VectorStoreKey/Data/Vector]` attributes enables
+> auto-embedding via `NivaraEmbeddingGenerator`. Two RAG paths:
+> `--rag` (manual prompt injection) and `--rag-agent` (TextSearchProvider
+> auto-context). Chunking via paragraph splitting (~500 chars).
+> Live tested with Ollama llama3.2.
 
 ## Goal
 
