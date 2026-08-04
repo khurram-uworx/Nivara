@@ -43,6 +43,9 @@ dotnet run --project samples/NivaraChat -- --interactive
 
 # Interactive agents mode with Ollama LLM
 dotnet run --project samples/NivaraChat -- --interactive --ollama
+
+# Embedding search (index documents, retrieve context via IEmbeddingGenerator)
+dotnet run --project samples/NivaraChat -- --embed
 ```
 
 ## CLI options
@@ -53,6 +56,7 @@ dotnet run --project samples/NivaraChat -- --interactive --ollama
 | `--workflow` | — | Mode: executor-based workflow pipeline with fan-out/fan-in |
 | `--interactive` | — | Mode: agents pipeline with live interactive input |
 | `--agents` | — | Mode: same as `--interactive`, supports `--text` for single-shot |
+| `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit (works with `--workflow`, `--agents`, or `--interactive`) |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
@@ -70,6 +74,9 @@ Sequential pipeline where each trained model is wrapped as an `IChatClient` via 
 
 ### Interactive (`--interactive`)
 Same as `--agents` but with live input. Type `quit` to exit. With `--ollama`, the LLM agent is appended after the validator.
+
+### Embedding search (`--embed`)
+Indexes 8 knowledge documents using `IEmbeddingGenerator` backed by a local MiniLM transformer, then runs an interactive REPL. Type a query and the system retrieves the top-4 most relevant documents ranked by cosine similarity. This demonstrates the retrieval step for RAG (Retrieval-Augmented Generation) — in a full pipeline, retrieved context would be injected into the LLM prompt via `TextSearchProvider`. Uses `NivaraEmbeddingGenerator<string>` from `Nivara.Extensions`, the same interface as OpenAI/Ollama embedding providers.
 
 ## Agents pipeline architecture
 
@@ -219,6 +226,7 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 | `IChatClient` | NivaraChatClient.cs | Microsoft.Extensions.AI chat abstraction |
 | `AsAIAgent()` | Program.cs | Convert `IChatClient` to `ChatClientAgent` |
 | `ChatClientAgent` | Program.cs | Agent Framework participant from `IChatClient` |
+| `NivaraEmbeddingGenerator<T>` | Nivara.Extensions | `IEmbeddingGenerator<TInput, Embedding<float>>` implementation for local models |
 
 ## Requirements
 
@@ -245,6 +253,7 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 | `TextClassifierModel<T>` | `samples/Nivara.Samples/TextClassifierModel.cs` | Embedding → MeanPool → MLP document classifier. |
 | `TokenClassifierModel<T>` | `samples/Nivara.Samples/TokenClassifierModel.cs` | Embedding → MLP per-token classifier for NER and sequence labeling. |
 | `TextTokenizer` | `samples/Nivara.Samples/TextTokenizer.cs` | Word-level tokenizer with vocab, encode/decode, special tokens, save/load. |
+| `MiniLMEmbeddingGenerator` | `samples/Nivara.Samples/BertModel.cs` | Factory wiring MiniLM weights + BertTokenizer into `NivaraEmbeddingGenerator<string>`. |
 
 ## Limitations
 
