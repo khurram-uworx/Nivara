@@ -199,9 +199,9 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 
 | API | Where | Purpose |
 |-----|-------|---------|
-| `TextClassifierModel<T>` | Core (`AutoDiff/Nn/`) | Document-level classification (sentiment, validator) |
-| `TokenClassifierModel<T>` | Core (`AutoDiff/Nn/`) | Token-level classification (NER) |
-| `TextTokenizer` | Core (`AutoDiff/Nn/`) | Word-level tokenization, vocab, encode/decode |
+| `TextClassifierModel<T>` | `Nivara.Samples` (shared with NivaraClassifier) | Document-level classification (sentiment, validator) |
+| `TokenClassifierModel<T>` | `Nivara.Samples` | Token-level classification (NER) |
+| `TextTokenizer` | `Nivara.Samples` (shared with NivaraClassifier) | Word-level tokenization, vocab, encode/decode |
 | `Module<T>` | All models | Model base class |
 | `Embedding<T>` | All models | Learned word embeddings |
 | `Linear<T>` | All models | Fully connected layers |
@@ -238,13 +238,13 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 
 ## Library gaps this example resolved
 
-### Core additions driven by this example
+### Library additions driven by this example
 
 | New API | Location | Purpose |
 |---------|----------|---------|
-| `TextClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TextClassifierModel.cs` | Promoted from NivaraClassifier. Embedding → MeanPool → MLP document classifier. |
-| `TokenClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TokenClassifierModel.cs` | New. Embedding → MLP per-token classifier for NER and sequence labeling. |
-| `TextTokenizer` | `src/Nivara/AutoDiff/Nn/TextTokenizer.cs` | Promoted from NivaraClassifier. Word-level tokenizer with vocab, encode/decode, special tokens, save/load. |
+| `TextClassifierModel<T>` | `samples/Nivara.Samples/TextClassifierModel.cs` | Embedding → MeanPool → MLP document classifier. |
+| `TokenClassifierModel<T>` | `samples/Nivara.Samples/TokenClassifierModel.cs` | Embedding → MLP per-token classifier for NER and sequence labeling. |
+| `TextTokenizer` | `samples/Nivara.Samples/TextTokenizer.cs` | Word-level tokenizer with vocab, encode/decode, special tokens, save/load. |
 
 ## Limitations
 
