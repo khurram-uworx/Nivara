@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
+using System.Text.Json;
 
 namespace NivaraChat;
 
@@ -20,27 +21,36 @@ internal sealed class ValidatorExecutor : Executor<string, string>
         if (_pending.Count < ExpectedCount)
             return ValueTask.FromResult("");
 
-        string? sentiment = null;
-        string? entities = null;
+        string? sentimentJson = null;
+        string? entitiesJson = null;
         foreach (var msg in _pending)
         {
-            if (msg.StartsWith('{'))
-                entities = msg;
-            else
-                sentiment = msg;
+            using var doc = JsonDocument.Parse(msg);
+            if (doc.RootElement.TryGetProperty("entities", out _))
+                entitiesJson = msg;
+            else if (doc.RootElement.TryGetProperty("label", out _))
+                sentimentJson = msg;
         }
         _pending.Clear();
 
-        sentiment ??= "unknown";
-        entities ??= "{}";
+        sentimentJson ??= "{\"label\":\"unknown\",\"confidence\":0}";
+        entitiesJson ??= "{\"entities\":{},\"confidence\":0}";
 
-        bool hasEntities = entities.Contains("\"person\"") || entities.Contains("\"org\"")
-            || entities.Contains("\"date\"") || entities.Contains("\"location\"");
-        bool hasMeaningfulSentiment = sentiment != "Neutral" && sentiment != "unknown";
+        using var sentDoc = JsonDocument.Parse(sentimentJson);
+        string sentimentLabel = sentDoc.RootElement.GetProperty("label").GetString() ?? "unknown";
+        float sentimentConfidence = sentDoc.RootElement.GetProperty("confidence").GetSingle();
 
-        var confidence = (hasEntities || hasMeaningfulSentiment) ? 0.9 : 0.3;
-        var status = (hasEntities || hasMeaningfulSentiment) ? "CONSISTENT" : "INCONSISTENT";
-        var result = $"{{\"status\":\"{status}\",\"confidence\":{confidence:F1},\"sentiment\":\"{sentiment}\",\"entities\":{entities}}}";
+        using var entDoc = JsonDocument.Parse(entitiesJson);
+        float entityConfidence = entDoc.RootElement.GetProperty("confidence").GetSingle();
+        var entitiesRaw = entDoc.RootElement.GetProperty("entities").GetRawText();
+
+        bool hasEntities = entitiesRaw.Contains("\"person\"") || entitiesRaw.Contains("\"org\"")
+            || entitiesRaw.Contains("\"date\"") || entitiesRaw.Contains("\"location\"");
+        bool hasMeaningfulSentiment = sentimentLabel != "neutral" && sentimentLabel != "unknown";
+
+        float confidence = (hasEntities || hasMeaningfulSentiment) ? 0.9f : 0.3f;
+        string status = (hasEntities || hasMeaningfulSentiment) ? "CONSISTENT" : "INCONSISTENT";
+        var result = $"{{\"status\":\"{status}\",\"confidence\":{confidence:F1},\"sentiment\":\"{sentimentLabel}\",\"sentimentConfidence\":{sentimentConfidence:F2},\"entities\":{entitiesRaw},\"entityConfidence\":{entityConfidence:F2}}}";
         return ValueTask.FromResult(result);
     }
 }

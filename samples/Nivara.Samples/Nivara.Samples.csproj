@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
+    <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
     <PackageReference Include="Microsoft.ML.Tokenizers" Version="2.0.0" />
   </ItemGroup>
 

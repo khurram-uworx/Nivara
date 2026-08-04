@@ -43,6 +43,19 @@ dotnet run --project samples/NivaraChat -- --interactive
 
 # Interactive agents mode with Ollama LLM
 dotnet run --project samples/NivaraChat -- --interactive --ollama
+
+# Confidence handoff — Nivara decides if LLM is needed (requires --ollama)
+dotnet run --project samples/NivaraChat -- --handoff --ollama --text "I love this product!"
+dotnet run --project samples/NivaraChat -- --handoff --ollama --text "This product is interesting but I'm not sure"
+
+# Tool calling — LLM orchestrates Nivara models as AIFunction tools (requires --ollama)
+dotnet run --project samples/NivaraChat -- --tools --ollama --text "John Smith from Acme Corp reported great work"
+
+# Writer-critic loop — LLM writes, Nivara scores, retry if poor (requires --ollama)
+dotnet run --project samples/NivaraChat -- --critic --ollama --text "Explain quantum computing to a 5-year-old"
+
+# Embedding search (index documents, retrieve context via IEmbeddingGenerator)
+dotnet run --project samples/NivaraChat -- --embed
 ```
 
 ## CLI options
@@ -53,9 +66,14 @@ dotnet run --project samples/NivaraChat -- --interactive --ollama
 | `--workflow` | — | Mode: executor-based workflow pipeline with fan-out/fan-in |
 | `--interactive` | — | Mode: agents pipeline with live interactive input |
 | `--agents` | — | Mode: same as `--interactive`, supports `--text` for single-shot |
-| `--text <message>` | — | Single-shot: run pipeline on one message and exit (works with `--workflow`, `--agents`, or `--interactive`) |
+| `--handoff` | — | Mode: confidence-based handoff — Nivara decides if LLM is needed |
+| `--tools` | — | Mode: LLM orchestrator calls Nivara models as AIFunction tools |
+| `--critic` | — | Mode: writer-critic loop — LLM writes, Nivara scores, retry if poor |
+| `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
+| `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
+| `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
 
 ## Modes of use
 
@@ -70,6 +88,63 @@ Sequential pipeline where each trained model is wrapped as an `IChatClient` via 
 
 ### Interactive (`--interactive`)
 Same as `--agents` but with live input. Type `quit` to exit. With `--ollama`, the LLM agent is appended after the validator.
+
+### Confidence handoff (`--handoff`)
+Demonstrates the hybrid deterministic/stochastic pattern. Nivara models run first; if both sentiment and entity extraction are confident (>= `--threshold`, default 0.8), the result is returned without calling the LLM. If either is uncertain, the partial Nivara results are forwarded to the LLM for enrichment. Requires `--ollama`.
+
+```
+Input text
+    │
+    v
+[TextRouter] --fan-out--> [SentimentExecutor, EntityExtractor]
+                               │
+                          fan-in barrier
+                               │
+                               v
+                        [ConfidenceRouter]
+                         /           \
+              confident (>=0.8)    uncertain (<0.8)
+                    │                    │
+                    v                    v
+            Nivara result          [Ollama LLM]
+```
+
+Tested examples:
+
+| Input | Threshold | Path taken | Why |
+|-------|-----------|------------|-----|
+| `"I love this product!"` | 0.8 (default) | LLM | Sentiment 0.58, entity 0.27 — both below threshold |
+| `"I love this product!"` | 0.7 | LLM | Entity confidence 0.27 still below 0.7 |
+| `"John Smith from Acme Corp reported great work on January 15"` | 0.8 | LLM | Entity confidence 0.798 just below 0.8 |
+| `"John Smith from Acme Corp reported great work on January 15"` | 0.7 | Nivara only | Both above 0.7 — no LLM needed |
+
+The entity model's average per-token confidence tends to cap around 0.8 for multi-entity inputs. Use `--threshold 0.7` for a more practical cutoff.
+
+### Tool calling (`--tools`)
+Flips the architecture: the LLM *decides* when to call Nivara models. Nivara models are wrapped as `AIFunction` tools via `AIFunctionFactory` with `[Description]` attributes. The LLM receives tool definitions and chooses when to invoke sentiment analysis, entity extraction, or response validation. Requires `--ollama`.
+
+Tested examples:
+
+| Input | Tools called | Notes |
+|-------|-------------|-------|
+| `"John Smith from Acme Corp reported great work"` | ExtractEntities, AnalyzeSentiment | LLM chose both tools, summarized results |
+| `"Acme Corp in New York announced on March 3"` | ExtractEntities, AnalyzeSentiment | Multi-entity extraction works well |
+
+The LLM decides which tools to call based on the `[Description]` attributes. Tool results are fed back automatically by the `ChatClientAgent` framework.
+
+### Writer-critic loop (`--critic`)
+The LLM generates a response, a Nivara validator model scores it for quality/consistency, and the LLM re-generates if the score is below threshold. Bounded to 3 iterations with structured feedback. Demonstrates Nivara models evaluating LLM output, not just generating their own. Requires `--ollama`.
+
+Tested examples:
+
+| Input | Result | Score |
+|-------|--------|-------|
+| `"Explain quantum computing to a 5-year-old"` | PASS on attempt 1 | 0.98 |
+
+The validator model was trained on `"original || response"` format for consistency checking. High scores indicate the response is consistent with the query. Max 3 iterations — if all fail, the last attempt is returned with a notice.
+
+### Embedding search (`--embed`)
+Indexes 8 knowledge documents using `IEmbeddingGenerator` backed by a local MiniLM transformer, then runs an interactive REPL. Type a query and the system retrieves the top-4 most relevant documents ranked by cosine similarity. This demonstrates the retrieval step for RAG (Retrieval-Augmented Generation) — in a full pipeline, retrieved context would be injected into the LLM prompt via `TextSearchProvider`. Uses `NivaraEmbeddingGenerator<string>` from `Nivara.Extensions`, the same interface as OpenAI/Ollama embedding providers.
 
 ## Agents pipeline architecture
 
@@ -151,6 +226,11 @@ NivaraChat/
 ├── EntityExtractor.cs                 # NER entity extraction executor (--workflow)
 ├── ValidatorExecutor.cs               # Rule-based validator executor (--workflow)
 ├── LlmExecutor.cs                     # Ollama LLM executor (--workflow)
+├── ConfidenceRouter.cs                # Confidence-based routing executor (--handoff)
+├── NivaraResultFormatter.cs           # Formats confident Nivara results (--handoff)
+├── CriticExecutor.cs                  # Scores LLM response quality (--critic)
+├── WriterCriticLoop.cs                # Bounded writer-critic retry loop (--critic)
+├── NivaraToolFunctions.cs             # Nivara models as AIFunction tools (--tools)
 ├── ITextModel.cs                      # Text-in/text-out abstraction for ML models
 ├── SentimentTextModel.cs              # ITextModel wrapping TextClassifierModel<float>
 ├── EntityTextModel.cs                 # ITextModel wrapping TokenClassifierModel<float>
@@ -216,9 +296,11 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 | `AddFanOutEdge` | Program.cs | Broadcast input to multiple executors in parallel |
 | `AddFanInBarrierEdge` | Program.cs | Wait for all parallel executors before proceeding |
 | `InProcessExecution.RunAsync` | Program.cs | Static workflow execution |
+| `AIFunctionFactory.Create` | NivaraToolFunctions.cs | Wrap static methods as LLM-callable tools |
 | `IChatClient` | NivaraChatClient.cs | Microsoft.Extensions.AI chat abstraction |
 | `AsAIAgent()` | Program.cs | Convert `IChatClient` to `ChatClientAgent` |
 | `ChatClientAgent` | Program.cs | Agent Framework participant from `IChatClient` |
+| `NivaraEmbeddingGenerator<T>` | Nivara.Extensions | `IEmbeddingGenerator<TInput, Embedding<float>>` implementation for local models |
 
 ## Requirements
 
@@ -245,6 +327,7 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 | `TextClassifierModel<T>` | `samples/Nivara.Samples/TextClassifierModel.cs` | Embedding → MeanPool → MLP document classifier. |
 | `TokenClassifierModel<T>` | `samples/Nivara.Samples/TokenClassifierModel.cs` | Embedding → MLP per-token classifier for NER and sequence labeling. |
 | `TextTokenizer` | `samples/Nivara.Samples/TextTokenizer.cs` | Word-level tokenizer with vocab, encode/decode, special tokens, save/load. |
+| `MiniLMEmbeddingGenerator` | `samples/Nivara.Samples/BertModel.cs` | Factory wiring MiniLM weights + BertTokenizer into `NivaraEmbeddingGenerator<string>`. |
 
 ## Limitations
 

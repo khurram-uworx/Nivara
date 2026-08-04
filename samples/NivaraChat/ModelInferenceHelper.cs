@@ -46,6 +46,37 @@ internal static class ModelInferenceHelper
         return ArgMax(logits.Data, 0, numClasses);
     }
 
+    public static (int bestClass, float confidence) RunClassifierWithConfidence(
+        TextClassifierModel<float> model, TextTokenizer tokenizer,
+        string input, int maxSeqLen, int numClasses, bool addBosEos = true)
+    {
+        var tensorInput = ToTensor(tokenizer, input, maxSeqLen, addBosEos);
+        var logits = model.Forward(tensorInput);
+        int bestClass = ArgMax(logits.Data, 0, numClasses);
+        float confidence = SoftmaxConfidence(logits.Data, 0, numClasses, bestClass);
+        return (bestClass, confidence);
+    }
+
+    public static float RunTokenClassifierWithConfidence(
+        TokenClassifierModel<float> model, TextTokenizer tokenizer,
+        string input, int maxSeqLen, ReadOnlySpan<string> entityClasses)
+    {
+        var tensorInput = ToTensor(tokenizer, input, maxSeqLen, addBosEos: false);
+        var logits = model.Forward(tensorInput);
+
+        int numClasses = entityClasses.Length;
+        int numTokens = Math.Min(TextTokenizer.Tokenize(input).Count, maxSeqLen);
+        if (numTokens == 0) return 0f;
+
+        float totalConfidence = 0f;
+        for (int i = 0; i < numTokens; i++)
+        {
+            int bestClass = ArgMax(logits.Data, i * numClasses, numClasses);
+            totalConfidence += SoftmaxConfidence(logits.Data, i * numClasses, numClasses, bestClass);
+        }
+        return totalConfidence / numTokens;
+    }
+
     public static Dictionary<string, List<string>> RunTokenClassifier(
         TokenClassifierModel<float> model, TextTokenizer tokenizer,
         string input, int maxSeqLen, ReadOnlySpan<string> entityClasses)

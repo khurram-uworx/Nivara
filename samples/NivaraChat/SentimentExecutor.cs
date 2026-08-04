@@ -1,5 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using Nivara.AutoDiff.Nn;
+using System.Text.Json;
 
 namespace NivaraChat;
 
@@ -22,7 +23,9 @@ internal sealed class SentimentExecutor : Executor<string, string>
 
     public override ValueTask<string> HandleAsync(string text, IWorkflowContext context, CancellationToken cancellationToken = default)
     {
-        int bestClass = ModelInferenceHelper.RunClassifier(_model, _tokenizer, text, _maxSeqLen, numClasses: 3);
-        return ValueTask.FromResult(Classes[bestClass]);
+        var (bestClass, confidence) = ModelInferenceHelper.RunClassifierWithConfidence(
+            _model, _tokenizer, text, _maxSeqLen, numClasses: 3);
+        var result = JsonSerializer.Serialize(new { label = Classes[bestClass], confidence });
+        return ValueTask.FromResult(result);
     }
 }
