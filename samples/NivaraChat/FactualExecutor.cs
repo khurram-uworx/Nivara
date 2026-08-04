@@ -3,6 +3,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.VectorData;
 using OllamaSharp;
 using System.Linq;
+using System.Text.Json;
 
 namespace NivaraChat;
 
@@ -24,9 +25,10 @@ internal sealed class FactualExecutor : Executor<string, string>
     {
         try
         {
+            var originalText = ExtractInput(input);
             var collection = _vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
             var searchResults = new List<(DocumentChunk Record, double? Score)>();
-            await foreach (var result in collection.SearchAsync(input, _topK))
+            await foreach (var result in collection.SearchAsync(originalText, _topK))
             {
                 searchResults.Add((result.Record, result.Score));
             }
@@ -35,11 +37,11 @@ internal sealed class FactualExecutor : Executor<string, string>
             if (searchResults.Count > 0)
             {
                 var contextText = string.Join("\n\n", searchResults.Select(r => r.Record.Text));
-                prompt = $"Answer the following question based on the provided context.\n\nContext:\n{contextText}\n\nQuestion: {input}\n\nAnswer:";
+                prompt = $"Answer the following question based on the provided context.\n\nContext:\n{contextText}\n\nQuestion: {originalText}\n\nAnswer:";
             }
             else
             {
-                prompt = $"Answer the following question.\n\nQuestion: {input}\n\nAnswer:";
+                prompt = $"Answer the following question.\n\nQuestion: {originalText}\n\nAnswer:";
             }
 
             var response = await _chatClient.GetResponseAsync(prompt);
@@ -49,5 +51,17 @@ internal sealed class FactualExecutor : Executor<string, string>
         {
             return $"Error in factual retrieval: {ex.Message}";
         }
+    }
+
+    private static string ExtractInput(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("text", out var textProp))
+                return textProp.GetString() ?? json;
+        }
+        catch { }
+        return json;
     }
 }

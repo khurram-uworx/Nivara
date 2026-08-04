@@ -18,7 +18,7 @@ don't require later ones).
 | D | RAG with Nivara embeddings | `IEmbeddingGenerator`, vector search | Embedding generator wrapper | **Done** |
 | E | Writer-critic feedback loop | Conditional edges, feedback | None (existing validator) | **Done** |
 | F | Nivara as IEmbeddingGenerator | `IEmbeddingGenerator<T>` | Embedding wrapper module | **Done** |
-| G | Intent classification router | Handoff orchestration | Intent classifier model | |
+| G | Intent classification router | Handoff orchestration | Intent classifier model | **Done** |
 | H | Online learning from LLM feedback | `DataLoader` incremental | Incremental training API | |
 
 ---
@@ -1075,6 +1075,13 @@ var embeddings = await generator.GenerateAsync(new[] { "hello world", "test quer
 ---
 
 # G. Intent Classification Router
+
+> **Status: Implemented** (`--intent` and `--intent-train` flags)
+> `IntentClassifier` routes user input to specialist executors via conditional edges.
+> 5-class intent classifier trained on synthetic data; routing uses `AddEdge<string>` with
+> mutually exclusive conditions. Specialists: `FactualExecutor` (RAG), `QuestionExecutor`,
+> `CommandExecutor` (tool-calling), `EscalationExecutor` (human-in-the-loop),
+> `ChitchatExecutor`. Live tested with Ollama.
 
 ## Goal
 

@@ -25,7 +25,7 @@ internal sealed class IntentClassifier : Executor<string, string>
     {
         var (bestClass, confidence) = ModelInferenceHelper.RunClassifierWithConfidence(
             _model, _tokenizer, text, _maxSeqLen, numClasses: 5);
-        var result = JsonSerializer.Serialize(new { intent = Intents[bestClass], confidence });
+        var result = JsonSerializer.Serialize(new { intent = Intents[bestClass], confidence, text });
         return ValueTask.FromResult(result);
     }
 }

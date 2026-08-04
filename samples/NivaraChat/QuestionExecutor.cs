@@ -1,6 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
+using System.Text.Json;
 
 namespace NivaraChat;
 
@@ -18,7 +19,8 @@ internal sealed class QuestionExecutor : Executor<string, string>
     {
         try
         {
-            var prompt = "You are a helpful assistant. Answer the user's question clearly and concisely.\n\n" + input;
+            var originalText = ExtractInput(input);
+            var prompt = "You are a helpful assistant. Answer the user's question clearly and concisely.\n\n" + originalText;
             var response = await _chatClient.GetResponseAsync(prompt);
             return response.ToString();
         }
@@ -26,5 +28,17 @@ internal sealed class QuestionExecutor : Executor<string, string>
         {
             return $"Error calling LLM: {ex.Message}";
         }
+    }
+
+    private static string ExtractInput(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("text", out var textProp))
+                return textProp.GetString() ?? json;
+        }
+        catch { }
+        return json;
     }
 }
