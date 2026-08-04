@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
+using Nivara.Samples;
 using NivaraClassifier;
 using System.Globalization;
 
@@ -99,7 +100,7 @@ void RunTraining(Options opt)
 
     var lossFn = new CrossEntropyLoss<double>();
 
-    var trainFrame = BuildFrame(trainTokens, trainLabels, trainCount, opt.MaxSeqLen);
+    var trainFrame = FrameBuilder.BuildDocumentClassificationFrameDouble(trainTokens, trainLabels, trainCount, opt.MaxSeqLen);
     var featureColumns = Enumerable.Range(0, opt.MaxSeqLen).Select(d => $"tok_{d}").ToArray();
     var trainDataset = new TensorDataset<double>(trainFrame, featureColumns, ["label"]);
     var trainLoader = new DataLoader<double>(trainDataset, opt.BatchSize, shuffle: true, seed: opt.Seed);
@@ -194,26 +195,6 @@ void RunPrediction(Options opt)
         string label = preds[0] == 1 ? "POSITIVE" : "NEGATIVE";
         Console.WriteLine($"  → {label}\n");
     }
-}
-
-NivaraFrame BuildFrame(int[] tokens, int[] labels, int count, int seqLen)
-{
-    var columns = new List<(string Name, IColumn Column)>();
-
-    for (int d = 0; d < seqLen; d++)
-    {
-        var colData = new double[count];
-        for (int i = 0; i < count; i++)
-            colData[i] = tokens[i * seqLen + d];
-        columns.Add(($"tok_{d}", NivaraColumn<double>.Create(colData)));
-    }
-
-    var labelData = new double[count];
-    for (int i = 0; i < count; i++)
-        labelData[i] = labels[i];
-    columns.Add(("label", NivaraColumn<double>.Create(labelData)));
-
-    return NivaraFrame.Create(columns.ToArray());
 }
 
 // ── Types ───────────────────────────────────────────────────────────────────
