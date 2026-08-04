@@ -21,12 +21,14 @@ if (args.Length > 0)
     var modelName = DefaultModel;
     string? workflowText = null;
     bool useOllama = false;
+    float confidenceThreshold = 0.8f;
 
     for (int i = 1; i < args.Length; i++)
     {
         if (args[i] == "--ollama") { useOllama = true; if (i + 1 < args.Length && !args[i + 1].StartsWith("-")) ollamaUrl = args[++i]; }
         if (args[i] == "--model" && i + 1 < args.Length) modelName = args[++i];
         if (args[i] == "--text" && i + 1 < args.Length) workflowText = args[++i];
+        if (args[i] == "--threshold" && i + 1 < args.Length) confidenceThreshold = float.Parse(args[++i]);
     }
 
     switch (mode)
@@ -42,6 +44,15 @@ if (args.Length > 0)
             break;
         case "--agents":
             await RunAgents(modelsDir, ollamaUrl, modelName, workflowText, useOllama);
+            break;
+        case "--handoff":
+            await RunHandoff(modelsDir, ollamaUrl, modelName, workflowText, useOllama, confidenceThreshold);
+            break;
+        case "--tools":
+            await RunTools(modelsDir, ollamaUrl, modelName, workflowText, useOllama);
+            break;
+        case "--critic":
+            await RunCritic(modelsDir, ollamaUrl, modelName, workflowText, useOllama);
             break;
         case "--embed":
             RunEmbeddingSearch();
@@ -311,6 +322,249 @@ async Task RunAgents(string modelsDir, string ollamaUrl, string modelName, strin
     Console.WriteLine("\nDone.");
 }
 
+async Task RunHandoff(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama, float threshold)
+{
+    Console.WriteLine("=== NivaraChat — Confidence Handoff ===\n");
+
+    if (!File.Exists(Path.Combine(modelsDir, "sentiment_model.json")))
+    {
+        Console.WriteLine("Models not found. Run with --train first.");
+        return;
+    }
+
+    Console.WriteLine("Loading trained models...");
+    var (sentimentModel, sentimentTok) = LoadSentimentModel(modelsDir);
+    var (entityModel, entityTok) = LoadEntityModel(modelsDir);
+    Console.WriteLine("Models loaded.\n");
+
+    if (!useOllama)
+    {
+        Console.WriteLine("Error: --handoff requires --ollama for the LLM fallback path.");
+        sentimentModel.Dispose();
+        entityModel.Dispose();
+        return;
+    }
+
+    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    Console.WriteLine("Ollama connected.\n");
+
+    var router = new TextRouter();
+    var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok);
+    var entityExtractor = new EntityExtractor(entityModel, entityTok);
+    var confidenceRouter = new ConfidenceRouter(threshold);
+    var nivaraFormatter = new NivaraResultFormatter();
+    var llmExecutor = new LlmExecutor(chatClient);
+
+    Console.WriteLine($"Graph: TextRouter --fan-out--> [Sentiment, Entity] --fan-in--> ConfidenceRouter");
+    Console.WriteLine($"  confident (>= {threshold:F1}) --> NivaraResult (skip LLM)");
+    Console.WriteLine($"  uncertain (< {threshold:F1}) --> Ollama LLM\n");
+
+    Workflow BuildWorkflow() => new WorkflowBuilder(router)
+        .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExtractor })
+        .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExtractor }, confidenceRouter)
+        .AddEdge(confidenceRouter, nivaraFormatter)
+        .AddEdge(confidenceRouter, llmExecutor)
+        .WithOutputFrom(sentimentExecutor, entityExtractor, confidenceRouter, nivaraFormatter, llmExecutor)
+        .Build();
+
+    if (singleShotText != null)
+    {
+        var run = await InProcessExecution.RunAsync(BuildWorkflow(), singleShotText);
+        Console.WriteLine("\n--- Handoff Results ---");
+        foreach (var evt in run.NewEvents)
+        {
+            switch (evt)
+            {
+                case ExecutorCompletedEvent executorEvt:
+                    if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                        Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
+                    break;
+                case AgentResponseEvent agentEvt:
+                    Console.WriteLine($"  [LLM] {agentEvt.Data}");
+                    break;
+            }
+        }
+    }
+    else
+    {
+        Console.WriteLine("Type a message to analyze (or 'quit' to exit):\n");
+
+        while (true)
+        {
+            Console.Write("> ");
+            var input = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(input) || input == "quit") break;
+
+            var run = await InProcessExecution.RunAsync(BuildWorkflow(), input);
+
+            Console.WriteLine("\n--- Handoff Results ---");
+            foreach (var evt in run.NewEvents)
+            {
+                switch (evt)
+                {
+                    case ExecutorCompletedEvent executorEvt:
+                        if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                            Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
+                        break;
+                    case AgentResponseEvent agentEvt:
+                        Console.WriteLine($"  [LLM] {agentEvt.Data}");
+                        break;
+                }
+            }
+            Console.WriteLine();
+        }
+    }
+
+    sentimentModel.Dispose();
+    entityModel.Dispose();
+    Console.WriteLine("\nDone.");
+}
+
+async Task RunTools(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
+{
+    Console.WriteLine("=== NivaraChat — Nivara as AIFunction Tools ===\n");
+
+    if (!File.Exists(Path.Combine(modelsDir, "sentiment_model.json")))
+    {
+        Console.WriteLine("Models not found. Run with --train first.");
+        return;
+    }
+
+    if (!useOllama)
+    {
+        Console.WriteLine("Error: --tools requires --ollama for the LLM orchestrator.");
+        return;
+    }
+
+    Console.WriteLine("Loading trained models...");
+    var (sentimentModel, sentimentTok) = LoadSentimentModel(modelsDir);
+    var (entityModel, entityTok) = LoadEntityModel(modelsDir);
+    var (validatorModel, validatorTok) = LoadValidatorModel(modelsDir);
+    Console.WriteLine("Models loaded.\n");
+
+    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    Console.WriteLine("Ollama connected.\n");
+
+    NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok);
+
+    var tools = new[]
+    {
+        AIFunctionFactory.Create(NivaraToolFunctions.AnalyzeSentiment),
+        AIFunctionFactory.Create(NivaraToolFunctions.ExtractEntities),
+        AIFunctionFactory.Create(NivaraToolFunctions.ValidateResponse),
+    };
+
+    var agent = chatClient.AsAIAgent(
+        name: "NivaraOrchestrator",
+        instructions: """
+            You are an analyst. Use the provided Nivara tools to analyze text.
+            Always call tools before generating your response.
+            Present a clear summary of all tool results.
+            """,
+        tools: tools);
+
+    Workflow BuildWorkflow() => new WorkflowBuilder(agent)
+        .WithOutputFrom(agent)
+        .Build();
+
+    string prompt;
+    if (singleShotText != null)
+    {
+        prompt = $"Analyze this text using available tools: {singleShotText}";
+    }
+    else
+    {
+        Console.WriteLine("Type a message to analyze (or 'quit' to exit):\n");
+        Console.Write("> ");
+        var input = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(input) || input == "quit") goto cleanup;
+        prompt = $"Analyze this text using available tools: {input}";
+    }
+
+    var run = await InProcessExecution.RunAsync(BuildWorkflow(), prompt);
+    Console.WriteLine("\n--- Tool Orchestration Results ---");
+    PrintAgentResults(run);
+
+    if (singleShotText == null)
+    {
+        while (true)
+        {
+            Console.Write("> ");
+            var input = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(input) || input == "quit") break;
+
+            var loopRun = await InProcessExecution.RunAsync(BuildWorkflow(), $"Analyze this text using available tools: {input}");
+            Console.WriteLine("\n--- Tool Orchestration Results ---");
+            PrintAgentResults(loopRun);
+            Console.WriteLine();
+        }
+    }
+
+cleanup:
+    sentimentModel.Dispose();
+    entityModel.Dispose();
+    validatorModel.Dispose();
+    Console.WriteLine("\nDone.");
+}
+
+async Task RunCritic(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
+{
+    Console.WriteLine("=== NivaraChat — Writer-Critic Loop ===\n");
+
+    if (!File.Exists(Path.Combine(modelsDir, "sentiment_model.json")))
+    {
+        Console.WriteLine("Models not found. Run with --train first.");
+        return;
+    }
+
+    if (!useOllama)
+    {
+        Console.WriteLine("Error: --critic requires --ollama for the LLM writer.");
+        return;
+    }
+
+    Console.WriteLine("Loading trained models...");
+    var (validatorModel, validatorTok) = LoadValidatorModel(modelsDir);
+    Console.WriteLine("Models loaded.\n");
+
+    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    Console.WriteLine("Ollama connected.\n");
+
+    var critic = new CriticExecutor(validatorModel, validatorTok);
+    var loop = new WriterCriticLoop(chatClient, critic);
+
+    Console.WriteLine("Writer (Ollama) → Critic (Nivara validator) → pass/fail → retry if needed\n");
+
+    if (singleShotText != null)
+    {
+        var result = await loop.RunAsync(singleShotText);
+        Console.WriteLine("\n--- Critic Results ---");
+        Console.WriteLine(result);
+    }
+    else
+    {
+        Console.WriteLine("Type a question (or 'quit' to exit):\n");
+
+        while (true)
+        {
+            Console.Write("> ");
+            var input = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(input) || input == "quit") break;
+
+            var result = await loop.RunAsync(input);
+            Console.WriteLine("\n--- Critic Results ---");
+            Console.WriteLine(result);
+            Console.WriteLine();
+        }
+    }
+
+    validatorModel.Dispose();
+    Console.WriteLine("\nDone.");
+}
+
 async Task RunSingleShot(Workflow workflow, string text)
 {
     var run = await InProcessExecution.RunAsync(workflow, text);
@@ -414,11 +668,15 @@ void PrintUsage()
     Console.WriteLine("  --workflow           Run the Agent Framework workflow (Ollama optional)");
     Console.WriteLine("  --interactive        Interactive mode: agents pipeline with live input");
     Console.WriteLine("  --agents             Same as --interactive, with --text for single-shot");
+    Console.WriteLine("  --handoff            Confidence-based handoff: Nivara decides if LLM is needed");
+    Console.WriteLine("  --tools              LLM orchestrator calls Nivara models as AIFunction tools");
+    Console.WriteLine("  --critic             Writer-critic loop: LLM writes, Nivara scores, retry if poor");
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
     Console.WriteLine("  --text \"<message>\"   Single-shot: run pipeline on one message and exit");
+    Console.WriteLine("  --threshold <float>  Confidence threshold for --handoff (default: 0.8)");
 }
 
 void RunEmbeddingSearch()
