@@ -1,4 +1,3 @@
-using Nivara.Diagnostics;
 using Nivara.Storage;
 using NUnit.Framework;
 

@@ -385,7 +385,7 @@ Current product direction:
 
 ## Agent Framework Workflow Patterns
 
-See `docs/AGENT-FRAMEWORK-NIVARACHAT-PATTERNS.md` for Nivara-specific integration notes from the NivaraChat sample.
+See the "Agent Framework integration patterns" section of `samples/NivaraChat/README.md` for Nivara-specific integration notes from the NivaraChat sample.
 
 ## Architectural Decisions (ADRs)
 

@@ -1,6 +1,6 @@
+using Nivara.AutoDiff.Exceptions;
 using System.Buffers;
 using System.Numerics;
-using Nivara.AutoDiff.Exceptions;
 
 namespace Nivara.AutoDiff.Training;
 

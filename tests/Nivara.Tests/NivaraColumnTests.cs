@@ -1,7 +1,7 @@
-using System.Numerics;
 using Nivara.Storage;
 using Nivara.Tensors;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests;
 

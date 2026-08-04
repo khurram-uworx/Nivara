@@ -1,10 +1,8 @@
-using System.Diagnostics;
-using System.Numerics.Tensors;
-using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Tensors;
+using System.Diagnostics;
+using System.Numerics.Tensors;
 
 namespace Nivara.PerformanceTests;
 

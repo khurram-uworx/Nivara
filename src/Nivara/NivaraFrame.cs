@@ -3,7 +3,6 @@ using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Operations;
 using Nivara.Query;
-using Nivara.Storage;
 using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics.Tensors;

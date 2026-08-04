@@ -126,6 +126,21 @@ Input text
 Final output: structured result
 ```
 
+## Agent Framework integration patterns
+
+Lessons learned from building this sample with Microsoft.Agents.AI.Workflows. Agent Framework is external; this section captures only Nivara-specific integration notes.
+
+- `Executor<TInput, TOutput>` with `public override` — return value auto-sends downstream
+- `.WithOutputFrom()` on `WorkflowBuilder` — registers executors as output sources
+- Read `run.NewEvents` for `ExecutorCompletedEvent` (executor output) and `AgentResponseEvent` (LLM output)
+- `OllamaApiClient` constructor doesn't throw — actual connection happens on `GetResponseAsync`
+- **Workflow objects are single-use per run.** Do not reuse a `Workflow` instance across multiple `InProcessExecution.RunAsync` calls. Create a fresh workflow from the builder for each run (use a factory function / lambda). See [State Isolation](https://learn.microsoft.com/agent-framework/workflows/state#state-isolation).
+- **Streaming output** arrives as `AgentResponseUpdateEvent` with one token per event. Accumulate per-executor-ID, then flush on `ExecutorCompletedEvent` or after all events to avoid printing each token on its own line.
+
+Further reading:
+- [Microsoft Agent Framework docs](https://learn.microsoft.com/agent-framework/workflows/executors)
+- API reference and integration patterns: `docs/RESEARCH-AGENT-FRAMEWORK.md`
+
 ## Architecture
 
 ```
