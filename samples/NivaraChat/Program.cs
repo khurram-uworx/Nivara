@@ -68,6 +68,12 @@ if (args.Length > 0)
         case "--rag-agent":
             await RunRagAgentPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama, workflowText);
             break;
+        case "--intent-train":
+            RunIntentTraining(modelsDir);
+            break;
+        case "--intent":
+            await RunIntentMode(modelsDir, ollamaUrl, modelName, workflowText, useOllama);
+            break;
         default:
             PrintUsage();
             break;
@@ -158,6 +164,169 @@ void RunTraining(string modelsDir)
         Console.WriteLine("Run with --workflow or --agents to test the pipeline, or --interactive for chat.");
     else
         Console.WriteLine("Returning to main menu...");
+}
+
+void RunIntentTraining(string modelsDir)
+{
+    Console.WriteLine("=== NivaraChat Intent Classifier Training ===\n");
+    Directory.CreateDirectory(modelsDir);
+    IntentTrainer.Train(epochs: 20, batchSize: 32, numSamples: 1000, saveDir: modelsDir);
+    Console.WriteLine("\n=== Intent training complete! ===");
+    if (args.Length > 0)
+        Console.WriteLine("Run with --intent to test the intent routing.");
+    else
+        Console.WriteLine("Returning to main menu...");
+}
+
+async Task RunIntentMode(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
+{
+    Console.WriteLine("=== NivaraChat Intent Routing ===\n");
+
+    if (!File.Exists(Path.Combine(modelsDir, "intent_model.json")))
+    {
+        Console.WriteLine("Intent model not found. Run with --intent-train first.");
+        return;
+    }
+
+    Console.WriteLine("Loading intent model...");
+    var (intentModel, intentTok) = LoadIntentModel(modelsDir);
+    Console.WriteLine("Intent model loaded.\n");
+
+    if (!useOllama)
+    {
+        Console.WriteLine("Error: --intent requires --ollama for specialist executors.");
+        intentModel.Dispose();
+        return;
+    }
+
+    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    Console.WriteLine("Ollama connected.\n");
+
+    var minilmDir = Path.Combine(GetRepoRoot(), "samples", "data", "minilm");
+    CommunityToolkit.VectorData.InMemory.InMemoryVectorStore? vectorStore = null;
+    if (Directory.Exists(minilmDir))
+    {
+        Console.WriteLine("Loading MiniLM embedding model for factual retrieval...");
+        var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+        vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(
+            new() { EmbeddingGenerator = generator });
+        var collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
+        await collection.EnsureCollectionExistsAsync();
+        var repoRoot = GetRepoRoot();
+        var docsDir = Path.Combine(repoRoot, "docs");
+        var mdFiles = Directory.Exists(docsDir)
+            ? Directory.GetFiles(docsDir, "*.md")
+            : [];
+        var readmePath = Path.Combine(repoRoot, "samples", "NivaraChat", "README.md");
+        if (File.Exists(readmePath))
+            mdFiles = [.. mdFiles, readmePath];
+        if (mdFiles.Length > 0)
+        {
+            Console.WriteLine($"Indexing {mdFiles.Length} markdown files...");
+            await DocumentChunker.IndexMarkdownFiles(collection, mdFiles);
+        }
+        Console.WriteLine("Factual retrieval ready.\n");
+    }
+    else
+    {
+        Console.WriteLine("MiniLM model not found; factual executor will use LLM without retrieval.\n");
+    }
+
+    var tools = new AIFunction[]
+    {
+        AIFunctionFactory.Create(NivaraToolFunctions.AnalyzeSentiment),
+        AIFunctionFactory.Create(NivaraToolFunctions.ExtractEntities),
+        AIFunctionFactory.Create(NivaraToolFunctions.ValidateResponse),
+    };
+
+    var intentClassifier = new IntentClassifier(intentModel, intentTok);
+    Executor<string, string> factualExecutor = vectorStore != null
+        ? new FactualExecutor(vectorStore, chatClient)
+        : new LlmExecutor(chatClient);
+    var questionExecutor = new QuestionExecutor(chatClient);
+    var commandExecutor = new CommandExecutor(chatClient, tools);
+    var escalationExecutor = new EscalationExecutor();
+    var chitchatExecutor = new ChitchatExecutor(chatClient);
+
+    Console.WriteLine("Graph: IntentClassifier --> AddSwitch --> [Factual, Question, Command, Escalation, Chitchat]\n");
+
+    Workflow BuildWorkflow() => new WorkflowBuilder(intentClassifier)
+        .AddEdge<string>(intentClassifier, factualExecutor,
+            condition: msg => ExtractIntent(msg!) == "factual")
+        .AddEdge<string>(intentClassifier, questionExecutor,
+            condition: msg => ExtractIntent(msg!) == "question")
+        .AddEdge<string>(intentClassifier, commandExecutor,
+            condition: msg => ExtractIntent(msg!) == "command")
+        .AddEdge<string>(intentClassifier, escalationExecutor,
+            condition: msg => ExtractIntent(msg!) == "complaint")
+        .AddEdge<string>(intentClassifier, chitchatExecutor,
+            condition: msg => ExtractIntent(msg!) == "chitchat")
+        .WithOutputFrom(factualExecutor, questionExecutor, commandExecutor, escalationExecutor, chitchatExecutor)
+        .Build();
+
+    static string ExtractIntent(string json)
+    {
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            return doc.RootElement.GetProperty("intent").GetString() ?? "chitchat";
+        }
+        catch
+        {
+            return "chitchat";
+        }
+    }
+
+    if (singleShotText != null)
+    {
+        var run = await InProcessExecution.RunAsync(BuildWorkflow(), singleShotText);
+        Console.WriteLine("\n--- Intent Routing Results ---");
+        foreach (var evt in run.NewEvents)
+        {
+            switch (evt)
+            {
+                case ExecutorCompletedEvent executorEvt:
+                    if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                        Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
+                    break;
+                case AgentResponseEvent agentEvt:
+                    Console.WriteLine($"  [LLM] {agentEvt.Data}");
+                    break;
+            }
+        }
+    }
+    else
+    {
+        Console.WriteLine("Type a message to classify (or 'quit' to exit):\n");
+
+        while (true)
+        {
+            Console.Write("> ");
+            var input = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(input) || input == "quit") break;
+
+            var run = await InProcessExecution.RunAsync(BuildWorkflow(), input);
+
+            Console.WriteLine("\n--- Intent Routing Results ---");
+            foreach (var evt in run.NewEvents)
+            {
+                switch (evt)
+                {
+                    case ExecutorCompletedEvent executorEvt:
+                        if (executorEvt.Data?.ToString() is string data && !string.IsNullOrEmpty(data))
+                            Console.WriteLine($"  [{executorEvt.ExecutorId}] {data}");
+                        break;
+                    case AgentResponseEvent agentEvt:
+                        Console.WriteLine($"  [LLM] {agentEvt.Data}");
+                        break;
+                }
+            }
+            Console.WriteLine();
+        }
+    }
+
+    intentModel.Dispose();
 }
 
 async Task RunWorkflow(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
@@ -659,6 +828,15 @@ void PrintAgentResults(Run run)
     var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, "entity_tokenizer.json"));
     var model = new TokenClassifierModel<float>(tokenizer.VocabSize, 32, 64, 5, 20);
     ModelSerializer.Load(model, Path.Combine(modelsDir, "entity_model.json"));
+    model.Eval();
+    return (model, tokenizer);
+}
+
+(TextClassifierModel<float> model, TextTokenizer tokenizer) LoadIntentModel(string modelsDir)
+{
+    var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, "intent_tokenizer.json"));
+    var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, 5, 20);
+    ModelSerializer.Load(model, Path.Combine(modelsDir, "intent_model.json"));
     model.Eval();
     return (model, tokenizer);
 }

@@ -78,6 +78,8 @@ dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is 
 | `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
 | `--rag-agent` | — | Mode: RAG agent — same as `--rag` with `TextSearchProvider` auto-context injection |
+| `--intent-train` | — | Mode: train intent classifier (5 classes) |
+| `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
@@ -217,6 +219,32 @@ Tested examples:
 | `"How does embedding search work?"` | Describes MiniLM → InMemoryVectorStore → auto-embedding pipeline with code example |
 | `"What is NivaraChat?"` | Identifies as Nivara project component for RAG pipeline |
 
+### Intent routing (`--intent`)
+5-class intent classifier routes user input to specialist executors using conditional edges. Requires `--ollama` for specialist executors (except escalation). Training produces `models/intent_model.json` and `models/intent_tokenizer.json`.
+
+```
+User input
+    │
+    v
+[IntentClassifier]           Nivara TextClassifierModel, 5 classes
+    │
+    ├── "factual"      ──> [FactualExecutor]       RAG retrieval + LLM generation
+    ├── "question"     ──> [QuestionExecutor]      General Q&A via Ollama
+    ├── "command"      ──> [CommandExecutor]       LLM with AIFunction tools
+    ├── "complaint"    ──> [EscalationExecutor]    Human-in-the-loop (no LLM)
+    └── "chitchat"     ──> [ChitchatExecutor]      Casual conversation via Ollama
+```
+
+Tested examples:
+
+| Input | Intent | Response quality |
+|-------|--------|------------------|
+| `"I'm unhappy with the service"` | complaint | Escalation message with timestamp |
+| `"What is the capital of France?"` | question | LLM answer: Paris |
+| `"Hello!"` | chitchat | Friendly greeting |
+
+Uses: `IntentClassifier`, `FactualExecutor`, `QuestionExecutor`, `CommandExecutor`, `EscalationExecutor`, `ChitchatExecutor`, `AddEdge<string>` conditional routing.
+
 ## Agents pipeline architecture
 
 ```
@@ -313,9 +341,17 @@ NivaraChat/
 │   ├── SentimentTrainer.cs           # Train sentiment model
 │   ├── EntityTrainer.cs              # Train entity NER model
 │   ├── ValidatorTrainer.cs           # Train workflow validator model
-│   └── AgentsValidatorTrainer.cs     # Train agents validator model
+│   ├── AgentsValidatorTrainer.cs     # Train agents validator model
+│   └── IntentTrainer.cs              # Train intent classifier model
 ├── Data/
-│   └── SyntheticDataGenerator.cs     # Generate all four datasets
+│   ├── SyntheticDataGenerator.cs     # Generate all four datasets
+│   └── IntentDataGenerator.cs        # Generate 5-class intent data
+├── IntentClassifier.cs               # Intent classification executor (--intent)
+├── FactualExecutor.cs                # RAG-based factual executor (--intent)
+├── QuestionExecutor.cs               # General Q&A executor (--intent)
+├── CommandExecutor.cs                # Tool-calling executor (--intent)
+├── EscalationExecutor.cs             # Complaint escalation executor (--intent)
+├── ChitchatExecutor.cs               # Casual conversation executor (--intent)
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```
@@ -345,6 +381,12 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 2)
 ```
 2 classes: valid, invalid. Trained on multi-line accumulated pipeline output format.
+
+**Intent classification (`TextClassifierModel<float>`):**
+```
+Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
+```
+5 classes: factual, question, command, complaint, chitchat.
 
 ## Nivara APIs demonstrated
 
