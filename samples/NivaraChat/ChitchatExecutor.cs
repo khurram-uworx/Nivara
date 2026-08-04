@@ -1,4 +1,5 @@
 using Microsoft.Agents.AI.Workflows;
+using Microsoft.Extensions.AI;
 using OllamaSharp;
 
 namespace NivaraChat;

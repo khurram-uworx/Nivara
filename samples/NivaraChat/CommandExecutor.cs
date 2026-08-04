@@ -26,8 +26,8 @@ internal sealed class CommandExecutor : Executor<string, string>
                 name: "CommandAgent",
                 tools: _tools);
 
-            var result = await agent.RunAsync(input, cancellationToken);
-            return result;
+            var response = await agent.RunAsync(input);
+            return response.ToString();
         }
         catch (Exception ex)
         {
