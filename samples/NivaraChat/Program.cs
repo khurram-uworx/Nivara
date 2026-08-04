@@ -23,6 +23,8 @@ if (args.Length > 0)
     string? workflowText = null;
     bool useOllama = false;
     float confidenceThreshold = 0.8f;
+    string? docsDir = null;
+    int topK = 3;
 
     for (int i = 1; i < args.Length; i++)
     {
@@ -30,6 +32,8 @@ if (args.Length > 0)
         if (args[i] == "--model" && i + 1 < args.Length) modelName = args[++i];
         if (args[i] == "--text" && i + 1 < args.Length) workflowText = args[++i];
         if (args[i] == "--threshold" && i + 1 < args.Length) confidenceThreshold = float.Parse(args[++i]);
+        if (args[i] == "--docs-dir" && i + 1 < args.Length) docsDir = args[++i];
+        if (args[i] == "--top-k" && i + 1 < args.Length) topK = int.Parse(args[++i]);
     }
 
     switch (mode)
@@ -57,6 +61,9 @@ if (args.Length > 0)
             break;
         case "--embed":
             RunEmbeddingSearch();
+            break;
+        case "--rag":
+            await RunRagPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama);
             break;
         default:
             PrintUsage();
@@ -665,11 +672,14 @@ void PrintUsage()
     Console.WriteLine("  --tools              LLM orchestrator calls Nivara models as AIFunction tools");
     Console.WriteLine("  --critic             Writer-critic loop: LLM writes, Nivara scores, retry if poor");
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
+    Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
     Console.WriteLine("  --text \"<message>\"   Single-shot: run pipeline on one message and exit");
     Console.WriteLine("  --threshold <float>  Confidence threshold for --handoff (default: 0.8)");
+    Console.WriteLine("  --docs-dir <path>    Documents directory for --rag (default: docs/ + README.md)");
+    Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag (default: 3)");
 }
 
 void RunEmbeddingSearch()
@@ -745,5 +755,94 @@ void RunEmbeddingSearch()
         for (int rank = 0; rank < ranked.Count; rank++)
             Console.WriteLine($"    #{rank + 1}  {ranked[rank].Score:F4}  \"{documents[ranked[rank].Index]}\"");
         Console.WriteLine("\n  (In a full pipeline, these would be injected into the LLM prompt\n   via TextSearchProvider — see NEXT.md section D)\n");
+    }
+}
+
+async Task RunRagPipeline(string modelsDir, string ollamaUrl, string modelName, string? docsDir, int topK, bool useOllama)
+{
+    Console.WriteLine("=== NivaraChat — RAG Pipeline ===\n");
+
+    if (!useOllama)
+    {
+        Console.WriteLine("Error: --rag requires --ollama for LLM generation.");
+        return;
+    }
+
+    var minilmDir = Path.Combine(GetRepoRoot(), "samples", "data", "minilm");
+    if (!Directory.Exists(minilmDir))
+    {
+        Console.WriteLine($"MiniLM model not found at: {minilmDir}");
+        Console.WriteLine("Download model files (model.safetensors, config.json, vocab.txt) to that directory.");
+        return;
+    }
+
+    Console.WriteLine("Loading MiniLM embedding model...");
+    var sw = System.Diagnostics.Stopwatch.StartNew();
+    var generator = MiniLMEmbeddingGenerator.Create(minilmDir);
+    sw.Stop();
+    Console.WriteLine($"  Dimensions: {generator.EmbeddingDimension}");
+    Console.WriteLine($"  Loaded in:  {sw.ElapsedMilliseconds} ms\n");
+
+    var vectorStore = new CommunityToolkit.VectorData.InMemory.InMemoryVectorStore(
+        new() { EmbeddingGenerator = generator });
+    var collection = vectorStore.GetCollection<string, DocumentChunk>("nivaradocs");
+    await collection.EnsureCollectionExistsAsync();
+
+    var repoRoot = GetRepoRoot();
+    var resolvedDocsDir = docsDir ?? Path.Combine(repoRoot, "docs");
+    var mdFiles = Directory.Exists(resolvedDocsDir)
+        ? Directory.GetFiles(resolvedDocsDir, "*.md")
+        : [];
+
+    var readmePath = Path.Combine(repoRoot, "samples", "NivaraChat", "README.md");
+    if (File.Exists(readmePath))
+        mdFiles = [.. mdFiles, readmePath];
+
+    if (mdFiles.Length == 0)
+    {
+        Console.WriteLine($"No markdown files found in {resolvedDocsDir}");
+        return;
+    }
+
+    Console.WriteLine($"Indexing {mdFiles.Length} markdown files...");
+    sw.Restart();
+    await DocumentChunker.IndexMarkdownFiles(collection, mdFiles);
+    sw.Stop();
+    Console.WriteLine($"  Indexed in {sw.ElapsedMilliseconds} ms\n");
+
+    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    Console.WriteLine("Ollama connected.\n");
+
+    Console.WriteLine($"Top-K: {topK} chunks per query. Type a question (or 'quit' to exit):\n");
+
+    while (true)
+    {
+        Console.Write("> ");
+        var query = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(query) || query == "quit") break;
+
+        sw.Restart();
+        var searchResults = new List<(DocumentChunk Record, double? Score)>();
+        await foreach (var result in collection.SearchAsync(query, topK))
+        {
+            searchResults.Add((result.Record, result.Score));
+        }
+        var retrievalMs = sw.ElapsedMilliseconds;
+
+        Console.WriteLine($"\n  Retrieved {searchResults.Count} chunks ({retrievalMs} ms):");
+        for (int i = 0; i < searchResults.Count; i++)
+            Console.WriteLine($"    #{i + 1}  {searchResults[i].Score:F4}  [{searchResults[i].Record.Source}]  \"{searchResults[i].Record.Text[..Math.Min(100, searchResults[i].Record.Text.Length)]}...\"");
+
+        var context = string.Join("\n\n", searchResults.Select(r => r.Record.Text));
+        var prompt = $"Answer the following question based on the provided context.\n\nContext:\n{context}\n\nQuestion: {query}\n\nAnswer:";
+
+        sw.Restart();
+        var response = await chatClient.GetResponseAsync(prompt, new ChatOptions { ModelId = modelName });
+        var llmMs = sw.ElapsedMilliseconds;
+
+        Console.WriteLine($"\n  LLM response ({llmMs} ms):");
+        Console.WriteLine($"  {response.Text}");
+        Console.WriteLine();
     }
 }
