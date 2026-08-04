@@ -1,3 +1,4 @@
+using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Nivara.AutoDiff.Nn;
@@ -352,20 +353,16 @@ async Task RunHandoff(string modelsDir, string ollamaUrl, string modelName, stri
     var router = new TextRouter();
     var sentimentExecutor = new SentimentExecutor(sentimentModel, sentimentTok);
     var entityExtractor = new EntityExtractor(entityModel, entityTok);
-    var confidenceRouter = new ConfidenceRouter(threshold);
-    var nivaraFormatter = new NivaraResultFormatter();
-    var llmExecutor = new LlmExecutor(chatClient);
+    var confidenceRouter = new ConfidenceRouter(threshold, chatClient);
 
     Console.WriteLine($"Graph: TextRouter --fan-out--> [Sentiment, Entity] --fan-in--> ConfidenceRouter");
-    Console.WriteLine($"  confident (>= {threshold:F1}) --> NivaraResult (skip LLM)");
+    Console.WriteLine($"  confident (>= {threshold:F1}) --> Nivara result (skip LLM)");
     Console.WriteLine($"  uncertain (< {threshold:F1}) --> Ollama LLM\n");
 
     Workflow BuildWorkflow() => new WorkflowBuilder(router)
         .AddFanOutEdge(router, new ExecutorBinding[] { sentimentExecutor, entityExtractor })
         .AddFanInBarrierEdge(new ExecutorBinding[] { sentimentExecutor, entityExtractor }, confidenceRouter)
-        .AddEdge(confidenceRouter, nivaraFormatter)
-        .AddEdge(confidenceRouter, llmExecutor)
-        .WithOutputFrom(sentimentExecutor, entityExtractor, confidenceRouter, nivaraFormatter, llmExecutor)
+        .WithOutputFrom(confidenceRouter)
         .Build();
 
     if (singleShotText != null)
@@ -449,20 +446,16 @@ async Task RunTools(string modelsDir, string ollamaUrl, string modelName, string
 
     NivaraToolFunctions.Initialize(sentimentModel, sentimentTok, entityModel, entityTok, validatorModel, validatorTok);
 
-    var tools = new[]
+    var tools = new AITool[]
     {
         AIFunctionFactory.Create(NivaraToolFunctions.AnalyzeSentiment),
         AIFunctionFactory.Create(NivaraToolFunctions.ExtractEntities),
         AIFunctionFactory.Create(NivaraToolFunctions.ValidateResponse),
     };
 
-    var agent = chatClient.AsAIAgent(
+    var agent = new ChatClientAgent(chatClient,
+        instructions: "You are an analyst. Use the provided Nivara tools to analyze text. Always call tools before generating your response. Present a clear summary of all tool results.",
         name: "NivaraOrchestrator",
-        instructions: """
-            You are an analyst. Use the provided Nivara tools to analyze text.
-            Always call tools before generating your response.
-            Present a clear summary of all tool results.
-            """,
         tools: tools);
 
     Workflow BuildWorkflow() => new WorkflowBuilder(agent)

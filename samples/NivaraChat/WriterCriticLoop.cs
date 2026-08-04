@@ -50,8 +50,11 @@ internal sealed class WriterCriticLoop
 
     private sealed class CritiqueResult
     {
+        [System.Text.Json.Serialization.JsonPropertyName("score")]
         public float Score { get; set; }
+        [System.Text.Json.Serialization.JsonPropertyName("verdict")]
         public string Verdict { get; set; } = "";
+        [System.Text.Json.Serialization.JsonPropertyName("acceptable")]
         public bool Acceptable { get; set; }
     }
 }
