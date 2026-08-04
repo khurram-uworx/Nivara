@@ -14,6 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="CommunityToolkit.VectorData.InMemory" Version="1.0.0" />
     <PackageReference Include="Microsoft.Agents.AI" Version="1.16.0" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows" Version="1.16.0" />
     <PackageReference Include="Microsoft.Agents.AI.Workflows.Generators" Version="1.16.0">
@@ -21,6 +22,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.AI" Version="10.8.3" />
+    <PackageReference Include="Microsoft.Extensions.VectorData.Abstractions" Version="10.8.0" />
     <PackageReference Include="OllamaSharp" Version="5.4.30" />
   </ItemGroup>
 
