@@ -2,6 +2,7 @@ using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
+using Nivara.Extensions.AI;
 using NivaraChess;
 using System.Globalization;
 using System.Numerics.Tensors;
@@ -138,7 +139,11 @@ static void EvaluateFen(ChessEvalModelBase model, string fen)
 
 static void RunEmbeddingDemo(ChessEvalModelBase model)
 {
-    using var generator = new ChessEmbeddingGenerator(model);
+    using var generator = new NivaraEmbeddingGenerator<ChessBoard>(
+        board => model.ComputeEmbedding(board),
+        model.EmbeddingDim,
+        providerName: "NivaraChess",
+        defaultModelId: $"chess-eval-phase{model.Phase}");
 
     var positions = new[]
     {

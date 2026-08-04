@@ -4,7 +4,7 @@ namespace Nivara.Extensions.AI;
 
 public sealed class NivaraEmbeddingGenerator<TInput> : IEmbeddingGenerator<TInput, Embedding<float>>
 {
-    readonly Func<TInput, float[]> _embeddingFactory;
+    readonly Func<TInput, float[]> embeddingFactory;
     readonly EmbeddingGeneratorMetadata metadata;
 
     public int EmbeddingDimension { get; }
@@ -18,7 +18,7 @@ public sealed class NivaraEmbeddingGenerator<TInput> : IEmbeddingGenerator<TInpu
         ArgumentNullException.ThrowIfNull(embeddingFactory);
         if (embeddingDimension <= 0) throw new ArgumentOutOfRangeException(nameof(embeddingDimension));
 
-        _embeddingFactory = embeddingFactory;
+        this.embeddingFactory = embeddingFactory;
         EmbeddingDimension = embeddingDimension;
         metadata = new EmbeddingGeneratorMetadata(
             providerName: providerName,
@@ -37,7 +37,7 @@ public sealed class NivaraEmbeddingGenerator<TInput> : IEmbeddingGenerator<TInpu
         foreach (var value in values)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var vector = _embeddingFactory(value);
+            var vector = embeddingFactory(value);
             results.Add(new Embedding<float>(vector));
         }
 
