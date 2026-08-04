@@ -5,6 +5,7 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
+using System.Numerics.Tensors;
 
 int nEmbd = 16;
 int nLayer = 1;
@@ -183,12 +184,13 @@ if (!string.IsNullOrWhiteSpace(dumpWeightsPath))
         for (int i = 0; i < allWeightArrays.Count; i++)
         {
             var (name, data) = allWeightArrays[i];
-            float mean = data.Average();
-            float variance = data.Sum(x => (x - mean) * (x - mean)) / data.Length;
-            float std = MathF.Sqrt(variance);
-            float min = data.Min();
-            float max = data.Max();
-            float l2 = MathF.Sqrt(data.Sum(x => x * x));
+            float mean = TensorPrimitives.Average(data.AsSpan());
+            var diff = new float[data.Length];
+            TensorPrimitives.Add(data.AsSpan(), -mean, diff);
+            float std = MathF.Sqrt(TensorPrimitives.Dot(diff, diff) / data.Length);
+            float min = TensorPrimitives.Min(data.AsSpan());
+            float max = TensorPrimitives.Max(data.AsSpan());
+            float l2 = TensorPrimitives.Norm(data.AsSpan());
             fs.WriteLine($"  \"{name}\": {{\"len\":{data.Length},\"mean\":{mean:F6},\"std\":{std:F6},\"min\":{min:F6},\"max\":{max:F6},\"l2\":{l2:F4}}}{(i < allWeightArrays.Count - 1 ? "," : "")}");
         }
         fs.WriteLine("}");
@@ -219,21 +221,18 @@ static string Generate(
         logits.Data.CopyTo(buf.AsSpan(), 0f);
 
         // Softmax with temperature
-        float max = buf[0];
-        for (int j = 1; j < buf.Length; j++) if (buf[j] > max) max = buf[j];
-        var exps = new double[buf.Length];
-        double sum = 0;
-        for (int j = 0; j < buf.Length; j++)
-        {
-            exps[j] = Math.Exp((buf[j] - max) / temperature);
-            sum += exps[j];
-        }
-        var probs = new float[buf.Length];
-        for (int j = 0; j < buf.Length; j++) probs[j] = (float)(exps[j] / sum);
+        float max = TensorPrimitives.Max(buf.AsSpan());
+        var shifted = new float[buf.Length];
+        TensorPrimitives.Add(buf.AsSpan(), -max, shifted);
+        TensorPrimitives.Divide(shifted.AsSpan(), (float)temperature, shifted);
+        var exps = new float[buf.Length];
+        TensorPrimitives.Exp(shifted, exps);
+        float sum = TensorPrimitives.Sum(exps);
+        TensorPrimitives.Divide(exps, sum, exps);
 
         double d = rng.NextDouble(), cum = 0;
-        int next = probs.Length - 1;
-        for (int j = 0; j < probs.Length; j++) { cum += probs[j]; if (d < cum) { next = j; break; } }
+        int next = exps.Length - 1;
+        for (int j = 0; j < exps.Length; j++) { cum += exps[j]; if (d < cum) { next = j; break; } }
 
         tokens.Add(next);
         if (next == tokenizer.EOS) break;

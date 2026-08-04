@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
+using Nivara.Samples;
 using NivaraChat.Data;
 
 namespace NivaraChat.Training;
@@ -47,7 +48,7 @@ public static class EntityTrainer
         optimizer.AddParameterGroup(model.GetParameters().Values);
 
         var lossFn = new CrossEntropyLoss<float>();
-        var trainFrame = BuildFrame(trainTokens, trainLabelIds, trainCount, maxSeqLen);
+        var trainFrame = FrameBuilder.BuildTokenClassificationFrame(trainTokens, trainLabelIds, trainCount, maxSeqLen);
         var featureColumns = Enumerable.Range(0, maxSeqLen).Select(d => $"tok_{d}").ToArray();
         var trainDataset = new TensorDataset<float>(trainFrame, featureColumns, Enumerable.Range(0, maxSeqLen).Select(d => $"lbl_{d}").ToArray());
         var trainLoader = new DataLoader<float>(trainDataset, batchSize, shuffle: true, seed: seed);
@@ -74,23 +75,5 @@ public static class EntityTrainer
         Console.WriteLine($"  Saved to {saveDir}/");
 
         return (model, tokenizer);
-    }
-
-    static NivaraFrame BuildFrame(int[] tokens, int[] labels, int count, int seqLen)
-    {
-        var columns = new List<(string Name, IColumn Column)>();
-        for (int d = 0; d < seqLen; d++)
-        {
-            var tokData = new float[count];
-            var lblData = new float[count];
-            for (int i = 0; i < count; i++)
-            {
-                tokData[i] = tokens[i * seqLen + d];
-                lblData[i] = labels[i * seqLen + d];
-            }
-            columns.Add(($"tok_{d}", NivaraColumn<float>.Create(tokData)));
-            columns.Add(($"lbl_{d}", NivaraColumn<float>.Create(lblData)));
-        }
-        return NivaraFrame.Create(columns.ToArray());
     }
 }

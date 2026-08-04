@@ -15,7 +15,7 @@ NivaraClassifier trains a model to predict sentiment (positive/negative) from te
 - **CrossEntropyLoss<T>** with integer labels for multi-class classification
 - **Model serialization** (`ModelSerializer.Save`/`Load`) for persistence
 - **Synthetic data generation** — self-contained, no external datasets required
-- **Reusable tokenizer** (`TextTokenizer`) — a word-level tokenizer with vocab building, encoding, and special tokens (now a core API in `Nivara.AutoDiff.Nn`)
+- **Reusable tokenizer** (`TextTokenizer`) — a word-level tokenizer with vocab building, encoding, and special tokens (shared with NivaraChat, lives in `Nivara.Samples`)
 
 ## Quick start
 
@@ -74,7 +74,7 @@ NivaraClassifier/
 └── NivaraClassifier.csproj     # References Nivara core
 ```
 
-> **Note:** `TextClassifierModel<T>` and `TextTokenizer` were originally defined in this sample but have been promoted to core APIs in `Nivara.AutoDiff.Nn`. The sample now references them from the core library.
+> **Note:** `TextClassifierModel<T>` and `TextTokenizer` live in `Nivara.Samples` (shared with NivaraChat). `ConvTextClassifierModel<T>` is defined locally in this sample.
 
 ### Model architecture
 
@@ -146,13 +146,13 @@ Templates with positive/negative patterns, fill nouns and activities from pools,
 
 | API | Where | Purpose |
 |-----|-------|---------|
-| `Module<T>` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Model base class with parameter registration |
-| `Embedding<T>` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Learned word embeddings (first-class layer) |
-| `Conv1d<T>` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | 1D convolution for n-gram feature extraction |
-| `Linear<T>` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Fully connected layers |
-| `Dropout<T>` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | Regularization between FC layers |
-| `ReverseGradOperations.Relu` | core (`TextClassifierModel<T>`), sample (`ConvTextClassifierModel<T>`) | Non-linearity |
-| `ReverseGradOperations.MeanPool` | core (`TextClassifierModel<T>`) (`--mode linear`) | Sequence pooling `[B,L,D]` → `[B,D]` |
+| `Module<T>` | `TextClassifierModel<T>` (Nivara.Samples), `ConvTextClassifierModel<T>` (local) | Model base class with parameter registration |
+| `Embedding<T>` | `TextClassifierModel<T>` (Nivara.Samples), `ConvTextClassifierModel<T>` (local) | Learned word embeddings (first-class layer) |
+| `Conv1d<T>` | `ConvTextClassifierModel<T>` (local) (`--mode conv`) | 1D convolution for n-gram feature extraction |
+| `Linear<T>` | `TextClassifierModel<T>` (Nivara.Samples), `ConvTextClassifierModel<T>` (local) | Fully connected layers |
+| `Dropout<T>` | `ConvTextClassifierModel<T>` (local) (`--mode conv`) | Regularization between FC layers |
+| `ReverseGradOperations.Relu` | `TextClassifierModel<T>` (Nivara.Samples), `ConvTextClassifierModel<T>` (local) | Non-linearity |
+| `ReverseGradOperations.MeanPool` | `TextClassifierModel<T>` (Nivara.Samples) (`--mode linear`) | Sequence pooling `[B,L,D]` → `[B,D]` |
 | `ReverseGradOperations.TransposeAxes` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | Reshape embedding `[B,L,D]` → `[B,D,L]` for Conv1d |
 | `ReverseGradOperations.Concat` | sample (`ConvTextClassifierModel<T>`) (`--mode conv`) | Concatenate multi-branch conv outputs |
 | `CrossEntropyLoss<T>` | `Program.cs` | Classification loss with integer labels |
@@ -178,17 +178,17 @@ NivaraClassifier drove several core library additions and fixes. The original sp
 | **Embedding\<T\> not a Module\<T\>** | Embedding wasn't a Module — no StateDict, no Train/Eval, no Dispose lifecycle. | `Embedding<T>` now extends `Module<T>` (resolved during NivaraGpt development). |
 | **No batched Embedding Forward** | Single-token `Forward(int)` only. Classifier needs batch `[B, L]` → `[B, L, D]`. | `Embedding<T>.Forward(ReverseGradTensor<T>)` handles batched input via one-hot + MatMul (resolved during NivaraGpt development). |
 | **No integer-label CrossEntropyLoss** | `CrossEntropyLoss<T>` required one-hot targets. | `Forward(logits, int[])` overload added — builds one-hot internally (resolved during NivaraGpt development). |
-| **No word-level tokenizer** | Only char-level tokenizer existed (MicroGpt). | `TextTokenizer` promoted to `Nivara.AutoDiff.Nn` core. |
-| **No document classifier module** | Simplest classifier requires composing Embedding → MeanPool → Linear manually. | `TextClassifierModel<T>` promoted to `Nivara.AutoDiff.Nn` core. Reusable for any document classification task. |
+| **No word-level tokenizer** | Only char-level tokenizer existed (MicroGpt). | `TextTokenizer` added to `Nivara.Samples`. |
+| **No document classifier module** | Simplest classifier requires composing Embedding → MeanPool → Linear manually. | `TextClassifierModel<T>` added to `Nivara.Samples`. Reusable for any document classification task. |
 | **No MeanPool operation** | No built-in mean-over-dimension reduction for `[B, L, D]` → `[B, D]`. | `ReverseGradOperations.MeanPool<T>` added to core with full autograd backward support. |
 
-### Core library additions from this example
+### Library additions from this example
 
 | New API | Location | Purpose |
 |---------|----------|---------|
 | `ReverseGradOperations.MeanPool<T>` | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | Core autograd mean-pooling with backward gradient distribution |
-| `TextClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TextClassifierModel.cs` | Promoted from this sample. Embedding → MeanPool → MLP document classifier. |
-| `TextTokenizer` | `src/Nivara/AutoDiff/Nn/TextTokenizer.cs` | Promoted from this sample. Word-level tokenizer with vocab, encode/decode, special tokens. |
+| `TextClassifierModel<T>` | `samples/Nivara.Samples/TextClassifierModel.cs` | Embedding → MeanPool → MLP document classifier. Shared with NivaraChat. |
+| `TextTokenizer` | `samples/Nivara.Samples/TextTokenizer.cs` | Word-level tokenizer with vocab, encode/decode, special tokens. Shared with NivaraChat. |
 
 ### Core library performance considerations
 

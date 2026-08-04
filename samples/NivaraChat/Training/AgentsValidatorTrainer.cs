@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
+using Nivara.Samples;
 using NivaraChat.Data;
 
 namespace NivaraChat.Training;
@@ -35,7 +36,7 @@ public static class AgentsValidatorTrainer
         optimizer.AddParameterGroup(model.GetParameters().Values);
 
         var lossFn = new CrossEntropyLoss<float>();
-        var trainFrame = BuildFrame(trainTokens, trainLabels, trainCount, maxSeqLen);
+        var trainFrame = FrameBuilder.BuildDocumentClassificationFrame(trainTokens, trainLabels, trainCount, maxSeqLen);
         var featureColumns = Enumerable.Range(0, maxSeqLen).Select(d => $"tok_{d}").ToArray();
         var trainDataset = new TensorDataset<float>(trainFrame, featureColumns, ["label"]);
         var trainLoader = new DataLoader<float>(trainDataset, batchSize, shuffle: true, seed: seed);
@@ -71,22 +72,5 @@ public static class AgentsValidatorTrainer
         Console.WriteLine($"  Saved to {saveDir}/");
 
         return (model, tokenizer);
-    }
-
-    static NivaraFrame BuildFrame(int[] tokens, int[] labels, int count, int seqLen)
-    {
-        var columns = new List<(string Name, IColumn Column)>();
-        for (int d = 0; d < seqLen; d++)
-        {
-            var colData = new float[count];
-            for (int i = 0; i < count; i++)
-                colData[i] = tokens[i * seqLen + d];
-            columns.Add(($"tok_{d}", NivaraColumn<float>.Create(colData)));
-        }
-        var labelData = new float[count];
-        for (int i = 0; i < count; i++)
-            labelData[i] = labels[i];
-        columns.Add(("label", NivaraColumn<float>.Create(labelData)));
-        return NivaraFrame.Create(columns.ToArray());
     }
 }

@@ -9,10 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.AI.Abstractions" Version="10.8.3" />
+    <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
   </ItemGroup>
 
 </Project>

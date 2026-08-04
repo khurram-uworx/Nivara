@@ -1,6 +1,7 @@
 using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using System.Numerics.Tensors;
 
 namespace NivaraChat;
 
@@ -25,14 +26,15 @@ internal static class ModelInferenceHelper
 
     public static float SoftmaxConfidence(NivaraColumn<float> logits, int offset, int count, int predClass)
     {
-        float maxVal = float.MinValue;
+        var slice = new float[count];
         for (int i = 0; i < count; i++)
-            if (logits[offset + i] > maxVal) maxVal = logits[offset + i];
+            slice[i] = logits[offset + i];
 
-        float sumExp = 0f;
-        for (int i = 0; i < count; i++)
-            sumExp += MathF.Exp(logits[offset + i] - maxVal);
-        return MathF.Exp(logits[offset + predClass] - maxVal) / sumExp;
+        float maxVal = TensorPrimitives.Max(slice.AsSpan());
+        TensorPrimitives.Add(slice.AsSpan(), -maxVal, slice);
+        TensorPrimitives.Exp(slice.AsSpan(), slice);
+        float sumExp = TensorPrimitives.Sum(slice.AsSpan());
+        return slice[predClass] / sumExp;
     }
 
     public static int RunClassifier(

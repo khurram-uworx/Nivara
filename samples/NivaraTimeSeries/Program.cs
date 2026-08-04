@@ -8,6 +8,7 @@ using NivaraTimeSeries;
 using System.Buffers;
 using System.Diagnostics;
 using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 
 var options = Options.Parse(args);
 
@@ -162,14 +163,11 @@ static void DetectAnomalies(TimeSeriesModel<float> model, MetricsGenerator datas
         input.Dispose();
     }
 
-    float mean = trainErrors.Average();
-    float variance = 0;
+    float mean = TensorPrimitives.Average(CollectionsMarshal.AsSpan(trainErrors));
+    var diffArr = new float[trainErrors.Count];
     for (int i = 0; i < trainErrors.Count; i++)
-    {
-        float diff = trainErrors[i] - mean;
-        variance += diff * diff;
-    }
-    float stddev = MathF.Sqrt(variance / trainErrors.Count);
+        diffArr[i] = trainErrors[i] - mean;
+    float stddev = MathF.Sqrt(TensorPrimitives.Dot(diffArr, diffArr) / trainErrors.Count);
     float threshold = mean + 2 * stddev;
 
     Console.WriteLine($"  Baseline: mean={mean:F6}, stddev={stddev:F6}, threshold={threshold:F6}");

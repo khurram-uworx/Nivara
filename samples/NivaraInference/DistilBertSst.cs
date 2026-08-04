@@ -2,6 +2,7 @@ using Microsoft.ML.Tokenizers;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
+using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 
 namespace NivaraInference;
@@ -55,23 +56,21 @@ static class DistilBertSst
         if (!span.IsEmpty)
             span.Slice(0, n).CopyTo(logitData);
 
-        float max = logitData[0];
-        for (int i = 1; i < n; i++)
-            max = Math.Max(max, logitData[i]);
+        var logitSpan = logitData.AsSpan();
+        float max = TensorPrimitives.Max(logitSpan);
 
-        float sum = 0f;
-        for (int i = 0; i < n; i++)
-            sum += MathF.Exp(logitData[i] - max);
-
-        var probs = new float[n];
-        for (int i = 0; i < n; i++)
-            probs[i] = MathF.Exp(logitData[i] - max) / sum;
+        var shifted = new float[n];
+        TensorPrimitives.Add(logitSpan, -max, shifted);
+        var exps = new float[n];
+        TensorPrimitives.Exp(shifted, exps);
+        float sum = TensorPrimitives.Sum(exps);
+        TensorPrimitives.Divide(exps, sum, exps);
 
         int argMax = 0;
         for (int i = 1; i < n; i++)
-            if (probs[i] > probs[argMax]) argMax = i;
+            if (exps[i] > exps[argMax]) argMax = i;
 
-        return (argMax, probs);
+        return (argMax, exps);
     }
 
     public static string Label(int argMax) => argMax == 0 ? "NEGATIVE" : "POSITIVE";
