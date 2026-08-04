@@ -63,10 +63,10 @@ if (args.Length > 0)
             RunEmbeddingSearch();
             break;
         case "--rag":
-            await RunRagPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama);
+            await RunRagPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama, workflowText);
             break;
         case "--rag-agent":
-            await RunRagAgentPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama);
+            await RunRagAgentPipeline(modelsDir, ollamaUrl, modelName, docsDir, topK, useOllama, workflowText);
             break;
         default:
             PrintUsage();
@@ -762,7 +762,7 @@ void RunEmbeddingSearch()
     }
 }
 
-async Task RunRagPipeline(string modelsDir, string ollamaUrl, string modelName, string? docsDir, int topK, bool useOllama)
+async Task RunRagPipeline(string modelsDir, string ollamaUrl, string modelName, string? docsDir, int topK, bool useOllama, string? singleShotText)
 {
     Console.WriteLine("=== NivaraChat — RAG Pipeline ===\n");
 
@@ -820,12 +820,8 @@ async Task RunRagPipeline(string modelsDir, string ollamaUrl, string modelName, 
 
     Console.WriteLine($"Top-K: {topK} chunks per query. Type a question (or 'quit' to exit):\n");
 
-    while (true)
+    async Task RunQuery(string query)
     {
-        Console.Write("> ");
-        var query = Console.ReadLine()?.Trim();
-        if (string.IsNullOrEmpty(query) || query == "quit") break;
-
         sw.Restart();
         var searchResults = new List<(DocumentChunk Record, double? Score)>();
         await foreach (var result in collection.SearchAsync(query, topK))
@@ -849,9 +845,24 @@ async Task RunRagPipeline(string modelsDir, string ollamaUrl, string modelName, 
         Console.WriteLine($"  {response.Text}");
         Console.WriteLine();
     }
+
+    if (singleShotText != null)
+    {
+        await RunQuery(singleShotText);
+    }
+    else
+    {
+        while (true)
+        {
+            Console.Write("> ");
+            var query = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(query) || query == "quit") break;
+            await RunQuery(query);
+        }
+    }
 }
 
-async Task RunRagAgentPipeline(string modelsDir, string ollamaUrl, string modelName, string? docsDir, int topK, bool useOllama)
+async Task RunRagAgentPipeline(string modelsDir, string ollamaUrl, string modelName, string? docsDir, int topK, bool useOllama, string? singleShotText)
 {
     Console.WriteLine("=== NivaraChat — RAG Agent (TextSearchProvider) ===\n");
 
@@ -938,12 +949,8 @@ async Task RunRagAgentPipeline(string modelsDir, string ollamaUrl, string modelN
     Console.WriteLine($"Top-K: {topK} chunks. TextSearchProvider auto-injects context before each LLM call.");
     Console.WriteLine("Type a question (or 'quit' to exit):\n");
 
-    while (true)
+    async Task RunQuery(string query)
     {
-        Console.Write("> ");
-        var query = Console.ReadLine()?.Trim();
-        if (string.IsNullOrEmpty(query) || query == "quit") break;
-
         var run = await InProcessExecution.RunAsync(
             new WorkflowBuilder(agent).WithOutputFrom(agent).Build(),
             query);
@@ -964,5 +971,20 @@ async Task RunRagAgentPipeline(string modelsDir, string ollamaUrl, string modelN
             }
         }
         Console.WriteLine("\n");
+    }
+
+    if (singleShotText != null)
+    {
+        await RunQuery(singleShotText);
+    }
+    else
+    {
+        while (true)
+        {
+            Console.Write("> ");
+            var query = Console.ReadLine()?.Trim();
+            if (string.IsNullOrEmpty(query) || query == "quit") break;
+            await RunQuery(query);
+        }
     }
 }
