@@ -107,6 +107,17 @@ Caveat: the batched path runs `Parallel.For` over B (B=16 ≥ 4, work ≥ 2^21),
 
 **Decision:** no further kernel changes this cycle. The batched op already delivers a ~3x time and ~4x allocation win over the honest baseline, so Route A (batched rank-3 MatMul primitives) is **not** justified by these measurements — it stays a backlog idea (issue **#118**). Parallel threshold / cache blocking were not worth perturbing; the `ShouldParallelizeBatch` heuristic (B≥4 and B·work ≥ 2^21) held up at the measured shape.
 
+### Task 5 — DONE (`2a9334b`)
+
+New sample **`samples/NivaraChatClient/`** (word-level causal transformer chat, Idea A from `samples/NivaraChat/NEXT.md`), registered in `Nivara.slnx`.
+
+- `BatchedTransformer<T>` (`BatchedTransformer.cs`): rank-3 `[B, L, D]` transformer using the Task 2 op (`BatchedMultiHeadAttention`) per block, pre-norm LayerNorm blocks, GELU MLP, fixed sinusoidal position encoding (cached), tied LM head (`MatMul(x, wteᵀ)` → `[B*L, V]`). Causal `[B, L, L]` mask built once per forward and reused across blocks.
+- `BatchedChatClient : IChatClient` (`NivaraChatClient.cs`): eval-mode, autoregressive, re-entrant; temperature sampling; multi-turn conversation formatting; streaming overload. Does not own the model (ownership lives with the caller — initial version disposed the model it was handed, which broke the DI demo; fixed).
+- `PositionEncoding.cs`, `TinyShakespeare.cs` (corpus downloaded to `samples/data/tinyshakespeare.txt` on first run; committed for offline use per repo convention), `Program.cs` (CLI mirroring NivaraGpt; word-level `TextTokenizer.FromDocuments`; `TrainingLoop`-style harness with `Adam`, `CrossEntropyLoss`; `ModelSerializer` save/load + `tokenizer.Save/Load` via a `<model>.tokenizer.json` convention; `Microsoft.Extensions.AI` DI wiring via `AddChatClient(factory)` + `IChatClient` resolution).
+- Verified end-to-end: train → save → load (tokenizer auto-restored, strict shape check catches mismatched `--n-embd`/etc. configs) → samples → DI demo reply. `dotnet build Nivara.slnx`: 0 warnings, 0 errors.
+- **Perf note:** word vocab is the dominant cost — `TensorsHelper.MultiplyCore` emits one `TensorPrimitives.Dot` per output element, so the tied LM head over a ~8k vocab is ~1M short dot-calls/batch (≈ 175 ms/batch, ~730 tok/s for `D=32, B=8`). Matches the Task 4 decision: no core kernel changes this cycle. Smoke runs use `--vocab-size 1200` (~3x faster).
+- **Task 6 remains** (salvage NEXT.md → `samples/NivaraChat/README.md`, delete NEXT.md, refresh root README).
+
 ---
 
 ## Task 1: Current-state audit and batched-attention route decision
