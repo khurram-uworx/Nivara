@@ -64,7 +64,7 @@ Three candidate routes (decided in Task 1):
 
 ### Route Decision (Task 1) — 2026-08-05
 
-**Status: recorded, pending team review.** No implementation has started. The plan is being discussed within the team before Task 2 begins.
+**Status: verified and approved.** Task 1 audit re-ran the grounding table against `src/Nivara/` on branch `khurram/shakespear` (2026-08-05). Every claim held with only trivial line drift (`ModuleHelpers.CreateCausalMask` is at line 72, not 67; `LayerNorm.Forward` at 48; `Embedding.Forward` batched at 35). Confirmed: `Concat` (ReverseGradOperations.cs:1313), `Gather` (1840), fused `MultiHeadAttention` (362), `AttentionKernels` `ScatterHead`/`PackHeads`/`SoftmaxRows` (32/42/53). No public API accepts `[B, L, D]` — `MultiheadAttention<T>` and `TransformerBlock<T>` both reject rank-3. **Route B selected.** Backlog issue filed for deferred batched MatMul: **#118**. No production code changed.
 
 **Route selected: B** — extend the existing fused `MultiHeadAttention` op + `AttentionKernels` to accept `[B, L, D]` and loop the batch internally (e.g. `Parallel.For` over B). Reuses the already-correct fused backward; smallest correct surface. Re-confirmed against the repo during Task 1 verification (evidence in the Grounding Audit table above):
 
