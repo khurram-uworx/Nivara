@@ -81,6 +81,13 @@ public abstract class Optimizer<T> : IDisposable where T : struct, IFloatingPoin
         ParameterGroups[groupIndex].LearningRate = learningRate;
     }
 
+    /// <summary>
+    /// Applies updates to all registered parameters, writing in place: each
+    /// parameter's tensor is reused (never replaced) and its version is bumped
+    /// via <c>Touch()</c>. A <c>Step()</c> without a subsequent <c>ZeroGrad()</c>
+    /// therefore accumulates stale gradients across steps (PyTorch semantics).
+    /// The built-in training loops call <c>ZeroGrad()</c> each iteration.
+    /// </summary>
     public abstract void Step();
 
     public abstract Dictionary<string, T[]> StateDict();

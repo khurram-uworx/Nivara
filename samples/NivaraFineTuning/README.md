@@ -171,14 +171,26 @@ same session when comparing (run-to-run variance ~±10% per
 The gap is far smaller than a naive port suggests: at batch size 2 the per-batch
 cost is dominated by 38 small Linear matmuls and the backward pass through 67M
 params, not by BLAS peak throughput, so the CPU SIMD kernels and memory
-management keep Nivara within ~3× of PyTorch's MKL on this configuration. The
-bigger win is measured progress: the 2026-08-06 baseline reflects the PERF-66
-work (`docs/PERF-66.md`) — in-place SGD/Adam/AdamW steps (no per-param `new T[n]`
-allocation), `BatchedMultiHeadAttention` in the encoder (no block-diagonal mask,
-no wasted cross-sequence compute), grad-tracking transposed-B matmul in `Linear`
-(no per-forward weight transpose), and a tiled `Transpose` kernel. Further
-optimizations to validate against this harness: pooled grad buffers and a
-single-pass attention row kernel.
+management keep Nivara within ~3× of PyTorch's MKL on this configuration.
+
+### Before/after (2026-08-06)
+
+| Nivara fine-tune B=2, 25 examples | Before (`e031ff0`) | After (HEAD) |
+|-----------------------------------|--------------------|--------------|
+| Steady-state wall-clock | ~1.3 s/batch | ~1.4 s/batch |
+| Per-param optimizer allocation | 268 MB/batch (`new T[n]` per param per step) | eliminated (in-place writes) |
+
+"Before" is the last commit before the PERF-66 performance work
+(`e031ff0`); "after" is current HEAD. The work — in-place SGD/Adam/AdamW
+steps (write into the parameter's backing array + version bump, no per-param
+`new T[n]`), `BatchedMultiHeadAttention` in the encoder (no block-diagonal
+mask, no wasted cross-sequence compute), grad-tracking transposed-B matmul in
+`Linear` (no per-forward weight transpose), and a tiled `Transpose` kernel —
+kept wall-clock flat (~1.3 → ~1.4 s/batch, within the ±10% run-to-run
+variance; the A/B was measured with the pre-warmup harness) while removing
+the dominant per-batch allocation. The remaining GC pressure is grad-array
+churn. Further optimizations to validate against this harness: pooled grad
+buffers and a single-pass attention row kernel.
 
 ### Re-running
 
