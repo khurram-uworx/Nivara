@@ -271,25 +271,33 @@ public static class ReverseGradOperations
                 {
                     var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, (typedGradOutput) =>
                     {
-                        if (GradientUtils.ShouldTrackGrad(a))
+                        var bTArr = ArrayPool<T>.Shared.Rent(Math.Max(bRows * bCols, 1));
+                        var aTArr = ArrayPool<T>.Shared.Rent(Math.Max(aRows * aCols, 1));
+                        try
                         {
-                            b.Data.TryGetSpan(out var bSpan_b);
-                            var bTArr = new T[bRows * bCols];
-                            TensorsHelper.Transpose(bSpan_b, bTArr.AsSpan(), bRows, bCols);
-                            typedGradOutput.TryGetSpan(out var gradSpan);
-                            var aGradArr = new T[aRows * aCols];
-                            TensorsHelper.MultiplyCore(gradSpan, bTArr.AsSpan(), aGradArr, aRows, bCols, aCols);
-                            AccumulateGradient(a, NivaraColumn<T>.Create(aGradArr));
+                            if (GradientUtils.ShouldTrackGrad(a))
+                            {
+                                b.Data.TryGetSpan(out var bSpan_b);
+                                TensorsHelper.Transpose(bSpan_b, bTArr.AsSpan(0, bRows * bCols), bRows, bCols);
+                                typedGradOutput.TryGetSpan(out var gradSpan);
+                                var aGradArr = new T[aRows * aCols];
+                                TensorsHelper.MultiplyCore(gradSpan, bTArr.AsSpan(0, bRows * bCols), aGradArr, aRows, bCols, aCols);
+                                AccumulateGradient(a, NivaraColumn<T>.Create(aGradArr));
+                            }
+                            if (b.RequiresGrad)
+                            {
+                                a.Data.TryGetSpan(out var aSpan_b);
+                                TensorsHelper.Transpose(aSpan_b, aTArr.AsSpan(0, aRows * aCols), aRows, aCols);
+                                typedGradOutput.TryGetSpan(out var gradSpan2);
+                                var bGradArr = new T[aCols * bCols];
+                                TensorsHelper.MultiplyCore(aTArr.AsSpan(0, aRows * aCols), gradSpan2, bGradArr, aCols, aRows, bCols);
+                                AccumulateGradient(b, NivaraColumn<T>.Create(bGradArr));
+                            }
                         }
-                        if (b.RequiresGrad)
+                        finally
                         {
-                            a.Data.TryGetSpan(out var aSpan_b);
-                            var aTArr = new T[aRows * aCols];
-                            TensorsHelper.Transpose(aSpan_b, aTArr.AsSpan(), aRows, aCols);
-                            typedGradOutput.TryGetSpan(out var gradSpan2);
-                            var bGradArr = new T[aCols * bCols];
-                            TensorsHelper.MultiplyCore(aTArr.AsSpan(), gradSpan2, bGradArr, aCols, aRows, bCols);
-                            AccumulateGradient(b, NivaraColumn<T>.Create(bGradArr));
+                            ArrayPool<T>.Shared.Return(bTArr, clearArray: true);
+                            ArrayPool<T>.Shared.Return(aTArr, clearArray: true);
                         }
                     });
 
