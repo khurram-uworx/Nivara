@@ -105,7 +105,7 @@ Per-batch profile (measured/derived from code):
 | P2 item 4 | ✅ `e031ff0` (grad-tracking `MatMulTransposedB`, cache removed, 828 tests) |
 | P2 item 3 | ✅ in-place SGD/Adam/AdamW (`AsWritableSpan` write-through + `param.Touch()`) |
 | P3 5a/5b/5c | |
-| Benchmark 25 | ⏳ Nivara-only, post-P2: ~18 s/epoch (2.5 s JIT warmup + ~1.2-1.4 s/batch steady), dev acc 59.75%; baseline A/B via worktree @ `e031ff0` pending |
+| Benchmark 25 | ✅ 25-example A/B via worktree: baseline `e031ff0` vs in-place `055e57f` — steady-state **~1.3 s/batch both** (warmup 3.0 s vs 2.5 s), dev acc 58.1% vs 59.8%. Wall-clock flat: the 268 MB/batch `new T[n]` allocation is eliminated (structural win, lower GC pressure at full-epoch scale), but per-batch time is dominated by matmul/backward — consistent with bottleneck #5 (grad-array churn) being the remaining GC driver. |
 
 ---
 
