@@ -7,7 +7,7 @@ captures the context, the reasoning, the decision, and any follow-ups. Append
 new decisions in date order; do not rewrite history.
 
 Related planning documents:
-- `docs/SHAKESPEARE.md` — earlier plan (batched rank-3 MatMul core work + sample); superseded by the decisions below
+- `docs/SHAKESPEARE.md` — earlier plan (batched rank-3 MatMul core work + sample); superseded by the decisions below, **deleted 2026-08-05** (see D-013)
 - `samples/NivaraChat/README.md` — durable NEXT.md content (Idea A description, architecture, CLI spec, gaps, not-doing list); the Idea A showcase now ships as the built-in `--tinyshakespeare` mode (see D-012)
 - `docs/SHAKESPEARE2.md` — revised plan (grounded audit + batched attention via fused op); **retired 2026-08-05** after all six tasks completed — decisions folded into this log (see D-011)
 - `samples/NivaraChat/NEXT.md` — original roadmap for Idea A; **deleted 2026-08-05** after salvage into the README
@@ -438,6 +438,35 @@ documentation, the solution file, and the "where do I look for X" answer.
 
 None — README, decision log references, and the MicroGpt README cross-link were
 updated in the same change.
+
+---
+
+## Decision D-013 — Delete `docs/SHAKESPEARE.md`
+
+**Date:** 2026-08-05
+**Status:** Accepted (this change).
+
+### Context
+
+D-011 retired `docs/SHAKESPEARE2.md` and left `docs/SHAKESPEARE.md` (the
+*earlier* plan proposing generic rank-3 batched MatMul core work + a separate
+`NivaraChatClient` sample) in place as history. A review confirmed every item in
+that plan was addressed via a different route, with durable content captured
+elsewhere: D-001 records the counter-decision (no rank-3 MatMul; backlog issue
+**#118**), D-004 holds the measurements, D-005/D-008/D-009/D-010 the CLI/tokenizer/
+DI/softmax decisions, ADR-003 formalizes the "batch-fused ops, not rank-n
+primitives" principle, and the README holds the durable NEXT.md content.
+
+### Decision
+
+- **Delete `docs/SHAKESPEARE.md`.** Nothing remains to salvage: its task
+  instructions were superseded, its proposed API (rank-3 `BatchedMatMul`) was
+  explicitly rejected, and every decision is recorded in this log or ADR-003.
+- The "Related planning documents" header above is updated accordingly.
+
+### Follow-ups
+
+None.
 
 ---
 
