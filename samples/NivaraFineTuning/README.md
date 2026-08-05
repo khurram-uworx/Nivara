@@ -83,23 +83,29 @@ This downloads Parquet files to `samples/data/sst2/`.
 
 ## Usage
 
+> **Always run with `-c Release`.** The default `dotnet run` configuration is Debug
+> (no JIT optimization), which runs the numeric kernels several times slower than
+> Release. Use `dotnet run -c Release --project samples/NivaraFineTuning -- ...`.
+> The sample enables Server GC and Tiered PGO to reduce GC pauses under the
+> ~1 GB/batch allocation churn of a 67M-parameter training step.
+
 ### Train
 
 ```bash
-dotnet run --project samples/NivaraFineTuning -- --mode train --epochs 3 --batch-size 4
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 3 --batch-size 4
 ```
 
 Trains for 3 epochs with AdamW (lr=2e-5, weight_decay=0.01), reports per-epoch training loss and dev accuracy. Saves the fine-tuned model to `samples/data/distilbert/finetuned_model.json`.
 
 ```bash
 # Quick smoke test (1 epoch, batch size 2)
-dotnet run --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2
 ```
 
 ### Evaluate
 
 ```bash
-dotnet run --project samples/NivaraFineTuning -- --mode eval
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode eval
 ```
 
 Loads the fine-tuned model from `samples/data/distilbert/finetuned_model.json`, runs inference on the SST-2 dev set, reports loss and accuracy.
@@ -107,7 +113,7 @@ Loads the fine-tuned model from `samples/data/distilbert/finetuned_model.json`, 
 ### Interactive prediction
 
 ```bash
-dotnet run --project samples/NivaraFineTuning -- --mode predict
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict
 ```
 
 Type sentences and get POSITIVE/NEGATIVE with confidence percentage. Type `quit` to exit.
@@ -137,6 +143,15 @@ On a single CPU core (no GPU):
 | 3     | ~0.30             | ~81-85%      |
 
 Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 80-85%.
+
+### Expected timing
+
+Fine-tuning runs entirely in managed C# on CPU — this is a correctness/transfer-learning
+demonstration, not a throughput benchmark. For `--max-examples 100 --batch-size 2 --epochs 1 -c Release`:
+expect roughly 1-3 seconds per batch (forward + backward + AdamW through 67M params),
+i.e. on the order of 10-30 minutes per full 67K-example epoch on a modern multi-core CPU.
+Keep `--max-len` at the default 128 and use `--max-examples` to validate the pipeline
+before committing to a full run. PyTorch (BLAS-accelerated) is typically 10-50x faster on the same hardware.
 
 ## Python reference
 
