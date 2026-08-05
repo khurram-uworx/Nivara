@@ -74,6 +74,9 @@ if (args.Length > 0)
         case "--intent":
             await RunIntentMode(modelsDir, ollamaUrl, modelName, workflowText, useOllama);
             break;
+        case "--online-learning":
+            await RunOnlineLearning(modelsDir, ollamaUrl, modelName, useOllama, confidenceThreshold);
+            break;
         default:
             PrintUsage();
             break;
@@ -327,6 +330,72 @@ async Task RunIntentMode(string modelsDir, string ollamaUrl, string modelName, s
     }
 
     intentModel.Dispose();
+}
+
+async Task RunOnlineLearning(string modelsDir, string ollamaUrl, string modelName, bool useOllama, float threshold)
+{
+    Console.WriteLine("=== NivaraChat — Online Learning from LLM Feedback ===\n");
+
+    if (!File.Exists(Path.Combine(modelsDir, "intent_model.json")))
+    {
+        Console.WriteLine("Intent model not found. Run with --intent-train first.");
+        return;
+    }
+
+    if (!useOllama)
+    {
+        Console.WriteLine("Error: --online-learning requires --ollama for LLM feedback.");
+        return;
+    }
+
+    Console.WriteLine("Loading intent model...");
+    var (intentModel, intentTok) = LoadIntentModel(modelsDir);
+    Console.WriteLine("Intent model loaded.\n");
+
+    Console.WriteLine($"Connecting to Ollama at {ollamaUrl} (model: {modelName})...");
+    var chatClient = new OllamaApiClient(new Uri(ollamaUrl), modelName);
+    Console.WriteLine("Ollama connected.\n");
+
+    var collector = new FeedbackCollector(
+        intentModel, intentTok, chatClient, modelsDir,
+        threshold: threshold, retrainThreshold: 10);
+
+    Console.WriteLine($"Threshold: {threshold:F2} — below this, LLM provides corrected intent.");
+    Console.WriteLine($"Retrain buffer: {collector.BufferCount}/10 examples.");
+    Console.WriteLine("Type a message to classify (or 'quit' to exit, 'status' to see buffer):\n");
+
+    while (true)
+    {
+        Console.Write("> ");
+        var input = Console.ReadLine()?.Trim();
+        if (string.IsNullOrEmpty(input) || input == "quit") break;
+
+        if (input == "status")
+        {
+            Console.WriteLine($"  Buffer: {collector.BufferCount}/10 examples collected, {collector.TotalCollected} total.\n");
+            continue;
+        }
+
+        var (intent, confidence, collected) = await collector.ClassifyAsync(input);
+
+        Console.WriteLine($"  Intent: {intent} (confidence: {confidence:F3})" +
+            (collected ? " [LLM-corrected, added to training buffer]" : ""));
+
+        if (collector.ShouldRetrain())
+        {
+            Console.WriteLine("\n  Buffer full — triggering incremental retrain...");
+            var (newModel, newTok) = collector.Retrain();
+            intentModel.Dispose();
+            collector = new FeedbackCollector(
+                newModel, newTok, chatClient, modelsDir,
+                threshold: threshold, retrainThreshold: 10);
+            Console.WriteLine("  Retrain complete. Model updated.\n");
+        }
+        Console.WriteLine();
+    }
+
+    intentModel.Dispose();
+    Console.WriteLine($"\nDone. {collector.TotalCollected} examples collected, {collector.BufferCount} pending.");
 }
 
 async Task RunWorkflow(string modelsDir, string ollamaUrl, string modelName, string? singleShotText, bool useOllama)
@@ -855,11 +924,14 @@ void PrintUsage()
     Console.WriteLine("  --embed              Embedding search: index documents, retrieve context via IEmbeddingGenerator");
     Console.WriteLine("  --rag                RAG pipeline: chunk docs, retrieve context, LLM generate answer");
     Console.WriteLine("  --rag-agent          RAG pipeline with TextSearchProvider auto-context injection");
+    Console.WriteLine("  --intent-train       Train the 5-class intent classifier");
+    Console.WriteLine("  --intent             Intent routing: classify input, route to specialist executor");
+    Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
     Console.WriteLine("  --text \"<message>\"   Single-shot: run pipeline on one message and exit");
-    Console.WriteLine("  --threshold <float>  Confidence threshold for --handoff (default: 0.8)");
+    Console.WriteLine("  --threshold <float>  Confidence threshold for --handoff / --online-learning (default: 0.8)");
     Console.WriteLine("  --docs-dir <path>    Documents directory for --rag (default: docs/ + README.md)");
     Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag (default: 3)");
 }
