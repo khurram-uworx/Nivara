@@ -68,13 +68,14 @@ public static class ModelSerializer
     public static void SaveCheckpoint<T>(
         Module<T> model,
         EpochResult<T> epoch,
-        string path) where T : struct, IFloatingPointIeee754<T>
+        string path,
+        Dictionary<string, T[]>? optimizerState = null) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentNullException.ThrowIfNull(epoch);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var file = BuildCheckpointFile(model, epoch);
+        var file = BuildCheckpointFile(model, epoch, optimizerState);
         var json = JsonSerializer.Serialize(file, s_options);
         File.WriteAllText(path, json);
     }
@@ -110,11 +111,19 @@ public static class ModelSerializer
             };
         }
 
+        var optimizerState = new Dictionary<string, T[]>();
+        foreach (var (name, entry) in file.OptimizerState)
+        {
+            var values = DeserializeBinary<T>(entry.Values, entry.Length);
+            optimizerState[name] = values;
+        }
+
         return new Checkpoint<T>
         {
             Epoch = file.Epoch,
             Loss = file.Loss,
-            Parameters = parameters
+            Parameters = parameters,
+            OptimizerState = optimizerState
         };
     }
 
@@ -135,16 +144,25 @@ public static class ModelSerializer
 
     static CheckpointFile BuildCheckpointFile<T>(
         Module<T> model,
-        EpochResult<T> epoch) where T : struct, IFloatingPointIeee754<T>
+        EpochResult<T> epoch,
+        Dictionary<string, T[]>? optimizerState) where T : struct, IFloatingPointIeee754<T>
     {
         var entries = BuildParameterEntries(model.StateDict());
+
+        var optEntries = new Dictionary<string, OptimizerStateEntry>();
+        if (optimizerState != null)
+        {
+            foreach (var (name, values) in optimizerState)
+                optEntries[name] = new OptimizerStateEntry { Length = values.Length, Values = SerializeBinary(values) };
+        }
 
         return new CheckpointFile
         {
             Type = typeof(T).Name,
             Epoch = epoch.Epoch,
             Loss = double.CreateChecked(epoch.Loss),
-            Parameters = entries
+            Parameters = entries,
+            OptimizerState = optEntries
         };
     }
 
@@ -239,11 +257,18 @@ public static class ModelSerializer
         public int Epoch { get; set; }
         public double Loss { get; set; }
         public Dictionary<string, ParameterEntry> Parameters { get; set; } = new();
+        public Dictionary<string, OptimizerStateEntry> OptimizerState { get; set; } = new();
     }
 
     sealed class ParameterEntry
     {
         public int[] Shape { get; set; } = [];
+        public string Values { get; set; } = "";
+    }
+
+    sealed class OptimizerStateEntry
+    {
+        public int Length { get; set; }
         public string Values { get; set; } = "";
     }
 }

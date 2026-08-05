@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
 using System.Numerics;
@@ -53,12 +54,12 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
     readonly DataLoader<T> _loader;
     readonly Func<ReverseGradTensor<T>, ReverseGradTensor<T>, ReverseGradTensor<T>> _lossFn;
     readonly Optimizer.Optimizer<T> _optimizer;
-    readonly int _epochs;
+    int _maxEpoch;
     bool disposed;
 
     public Module<T> Model => _model;
     public DataLoader<T> Loader => _loader;
-    public int Epochs => _epochs;
+    public int MaxEpoch => _maxEpoch;
 
     public TrainingLoop(
         Module<T> model,
@@ -75,15 +76,15 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         if (epochs <= 0)
             throw new ArgumentException("Epochs must be positive.", nameof(epochs));
 
-        _epochs = epochs;
+        _maxEpoch = epochs;
     }
 
-    public TrainingResult<T> Run()
+    public TrainingResult<T> Run(int startEpoch = 1)
     {
-        var epochResults = new List<EpochResult<T>>(_epochs);
+        var epochResults = new List<EpochResult<T>>(_maxEpoch - startEpoch + 1);
         var totalSw = Stopwatch.StartNew();
 
-        for (int epoch = 1; epoch <= _epochs; epoch++)
+        for (int epoch = startEpoch; epoch <= _maxEpoch; epoch++)
         {
             OnEpochStart(epoch);
 
@@ -91,7 +92,7 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
             var totalLoss = T.Zero;
             int batchCount = 0;
 
-            foreach (var batch in _loader)
+            foreach (var batch in _loader.GetBatches(epoch))
             {
                 using var gradScope = GradientUtils.Grad();
 
@@ -122,6 +123,35 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         return new TrainingResult<T>(epochResults, totalSw.Elapsed);
     }
 
+    public TrainingResult<T> Continue(int additionalEpochs)
+    {
+        if (additionalEpochs <= 0)
+            throw new ArgumentException("Additional epochs must be positive.", nameof(additionalEpochs));
+
+        int startEpoch = _maxEpoch + 1;
+        _maxEpoch += additionalEpochs;
+        return Run(startEpoch);
+    }
+
+    public void SaveCheckpoint(string path, int epoch, T loss)
+    {
+        var epochResult = new EpochResult<T>(epoch, loss, TimeSpan.Zero, 0);
+        var optimizerState = _optimizer.StateDict();
+        Serialization.ModelSerializer.SaveCheckpoint(_model, epochResult, path, optimizerState);
+    }
+
+    public void LoadCheckpoint(string path)
+    {
+        var checkpoint = Serialization.ModelSerializer.LoadCheckpoint<T>(path);
+        _model.LoadStateDict(checkpoint.Parameters.ToDictionary(
+            kv => kv.Key,
+            kv => new ReverseGradTensor<T>(
+                NivaraColumn<T>.CreateFromOwnedArray(kv.Value.Values),
+                requiresGrad: true,
+                kv.Value.Shape)));
+        _optimizer.LoadStateDict(new Dictionary<string, T[]>(checkpoint.OptimizerState));
+    }
+
     protected virtual void OnEpochStart(int epoch)
     {
     }
@@ -132,24 +162,6 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
 
     protected virtual void OnEpochEnd(int epoch, EpochResult<T> result)
     {
-    }
-
-    protected void SaveCheckpoint(string path, int epoch, EpochResult<T> result)
-    {
-        var checkpoint = new
-        {
-            epoch,
-            loss = result.Loss,
-            elapsed = result.Elapsed.TotalSeconds,
-            batches = result.Batches
-        };
-
-        var json = System.Text.Json.JsonSerializer.Serialize(checkpoint, new System.Text.Json.JsonSerializerOptions
-        {
-            WriteIndented = true
-        });
-
-        File.WriteAllText(path, json);
     }
 
     public void Dispose()

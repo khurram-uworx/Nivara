@@ -212,6 +212,38 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
         }
     }
 
+    public override Dictionary<string, T[]> StateDict()
+    {
+        var state = new Dictionary<string, T[]> { ["step"] = [T.CreateChecked(step)] };
+        for (int i = 0; i < expAvgBuffers.Count; i++)
+        {
+            var copy = new T[expAvgBuffers[i].Length];
+            expAvgBuffers[i].AsSpan(0, copy.Length).CopyTo(copy);
+            state[$"expAvg_{i}"] = copy;
+        }
+        for (int i = 0; i < expAvgSqBuffers.Count; i++)
+        {
+            var copy = new T[expAvgSqBuffers[i].Length];
+            expAvgSqBuffers[i].AsSpan(0, copy.Length).CopyTo(copy);
+            state[$"expAvgSq_{i}"] = copy;
+        }
+        return state;
+    }
+
+    public override void LoadStateDict(Dictionary<string, T[]> state)
+    {
+        if (state.TryGetValue("step", out var stepVal))
+            step = int.CreateChecked(stepVal[0]);
+
+        for (int i = 0; i < expAvgBuffers.Count; i++)
+        {
+            if (state.TryGetValue($"expAvg_{i}", out var buf))
+                buf.AsSpan(0, Math.Min(buf.Length, expAvgBuffers[i].Length)).CopyTo(expAvgBuffers[i]);
+            if (state.TryGetValue($"expAvgSq_{i}", out var sqBuf))
+                sqBuf.AsSpan(0, Math.Min(sqBuf.Length, expAvgSqBuffers[i].Length)).CopyTo(expAvgSqBuffers[i]);
+        }
+    }
+
     protected override void DisposeManaged()
     {
         foreach (var buf in expAvgBuffers.Concat(expAvgSqBuffers))

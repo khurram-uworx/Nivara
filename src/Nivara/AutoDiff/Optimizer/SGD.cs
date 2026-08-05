@@ -138,6 +138,27 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         }
     }
 
+    public override Dictionary<string, T[]> StateDict()
+    {
+        var state = new Dictionary<string, T[]>();
+        for (int i = 0; i < velocityBuffers.Count; i++)
+        {
+            var copy = new T[velocityBuffers[i].Length];
+            velocityBuffers[i].AsSpan(0, copy.Length).CopyTo(copy);
+            state[$"velocity_{i}"] = copy;
+        }
+        return state;
+    }
+
+    public override void LoadStateDict(Dictionary<string, T[]> state)
+    {
+        for (int i = 0; i < velocityBuffers.Count; i++)
+        {
+            if (state.TryGetValue($"velocity_{i}", out var buf))
+                buf.AsSpan(0, Math.Min(buf.Length, velocityBuffers[i].Length)).CopyTo(velocityBuffers[i]);
+        }
+    }
+
     protected override void DisposeManaged()
     {
         foreach (var buf in velocityBuffers)

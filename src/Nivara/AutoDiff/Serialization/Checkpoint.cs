@@ -8,6 +8,8 @@ public sealed class Checkpoint<T> where T : struct, IFloatingPointIeee754<T>
     public double Loss { get; init; }
     public IReadOnlyDictionary<string, ParameterData<T>> Parameters { get; init; }
         = new Dictionary<string, ParameterData<T>>();
+    public IReadOnlyDictionary<string, T[]> OptimizerState { get; init; }
+        = new Dictionary<string, T[]>();
 }
 
 public sealed class ParameterData<T> where T : struct, IFloatingPointIeee754<T>
