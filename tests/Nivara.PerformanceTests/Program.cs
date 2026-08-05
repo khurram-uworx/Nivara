@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
 using System.Numerics.Tensors;
@@ -79,7 +80,122 @@ static class Program
                 };
             });
 
+        RunBatchedAttentionScenarios();
+
         return 0;
+    }
+
+    static void RunBatchedAttentionScenarios()
+    {
+        const int B = 16, L = 128, D = 64, H = 4;
+        float scale = 1f / MathF.Sqrt(D / H);
+
+        var qData = Fill(new float[B * L * D]);
+        var kData = Fill(new float[B * L * D]);
+        var vData = Fill(new float[B * L * D]);
+        var dOut = Fill(new float[B * L * D]);
+        var causalPerSeq = BuildCausalMask(L);
+        var causalBatched = BuildCausalMask(B, L);
+
+        Run($"Attn per-seq forward [B{B} L{L} D{D} H{H}]", 3, 12,
+            () =>
+            {
+                var mask = ReverseGradTensor<float>.FromMatrix(causalPerSeq, L, L, requiresGrad: false);
+                return () =>
+                {
+                    for (int b = 0; b < B; b++)
+                    {
+                        var q = Mat2D(Slice(qData, b, L, D), L, D, false);
+                        var k = Mat2D(Slice(kData, b, L, D), L, D, false);
+                        var v = Mat2D(Slice(vData, b, L, D), L, D, false);
+                        ReverseGradOperations.MultiHeadAttention(q, k, v, H, scale, mask);
+                    }
+                };
+            });
+
+        Run($"Attn batched forward [B{B} L{L} D{D} H{H}]", 3, 12,
+            () =>
+            {
+                var q = Mat3D(qData, B, L, D, false);
+                var k = Mat3D(kData, B, L, D, false);
+                var v = Mat3D(vData, B, L, D, false);
+                var mask = Mat3D(causalBatched, B, L, L, false);
+                return () => { ReverseGradOperations.BatchedMultiHeadAttention(q, k, v, H, scale, mask); };
+            });
+
+        Run($"Attn per-seq fwd+bwd [B{B} L{L} D{D} H{H}]", 3, 12,
+            () =>
+            {
+                var mask = ReverseGradTensor<float>.FromMatrix(causalPerSeq, L, L, requiresGrad: false);
+                var ones = Fill(new float[L * D]);
+                return () =>
+                {
+                    using (GradientUtils.Grad())
+                    {
+                        for (int b = 0; b < B; b++)
+                        {
+                            var q = Mat2D(Slice(qData, b, L, D), L, D, true);
+                            var k = Mat2D(Slice(kData, b, L, D), L, D, true);
+                            var v = Mat2D(Slice(vData, b, L, D), L, D, true);
+                            var output = ReverseGradOperations.MultiHeadAttention(q, k, v, H, scale, mask);
+                            output.Backward(Mat2D(ones, L, D, false));
+                        }
+                    }
+                };
+            });
+
+        Run($"Attn batched fwd+bwd [B{B} L{L} D{D} H{H}]", 3, 12,
+            () =>
+            {
+                var q = Mat3D(qData, B, L, D, true);
+                var k = Mat3D(kData, B, L, D, true);
+                var v = Mat3D(vData, B, L, D, true);
+                var mask = Mat3D(causalBatched, B, L, L, false);
+                var dout = Mat3D(dOut, B, L, D, false);
+                return () =>
+                {
+                    using (GradientUtils.Grad())
+                    {
+                        var output = ReverseGradOperations.BatchedMultiHeadAttention(q, k, v, H, scale, mask);
+                        output.Backward(dout);
+                    }
+                };
+            });
+    }
+
+    static float[] BuildCausalMask(int l)
+    {
+        var mask = new float[l * l];
+        for (int i = 0; i < l; i++)
+            for (int j = i + 1; j < l; j++)
+                mask[i * l + j] = float.NegativeInfinity;
+        return mask;
+    }
+
+    static float[] BuildCausalMask(int b, int l)
+    {
+        var mask = new float[b * l * l];
+        var perSeq = BuildCausalMask(l);
+        for (int i = 0; i < b * l * l; i++)
+            mask[i] = perSeq[i % (l * l)];
+        return mask;
+    }
+
+    static float[] Slice(float[] data, int b, int rows, int cols)
+    {
+        var slice = new float[rows * cols];
+        Array.Copy(data, b * rows * cols, slice, 0, rows * cols);
+        return slice;
+    }
+
+    static ReverseGradTensor<float> Mat2D(float[] data, int rows, int cols, bool requiresGrad)
+        => ReverseGradTensor<float>.FromMatrix(data, rows, cols, requiresGrad);
+
+    static ReverseGradTensor<float> Mat3D(float[] data, int b, int l, int d, bool requiresGrad)
+    {
+        var tensor = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad);
+        tensor.Reshape(b, l, d);
+        return tensor;
     }
 
     static void Run(string name, int warmup, int iterations, Func<Action> createOp)
@@ -113,3 +229,4 @@ static class Program
         return values;
     }
 }
+

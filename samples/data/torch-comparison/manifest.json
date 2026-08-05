@@ -1069,5 +1069,57 @@
       3,
       8
     ]
+  },
+  "batched_attn_causal": {
+    "layer": "BatchedMultiHeadAttention",
+    "q_shape": [
+      2,
+      4,
+      16
+    ],
+    "k_shape": [
+      2,
+      4,
+      16
+    ],
+    "v_shape": [
+      2,
+      4,
+      16
+    ],
+    "num_heads": 4,
+    "scale": 0.5,
+    "masked": true,
+    "output_shape": [
+      2,
+      4,
+      16
+    ]
+  },
+  "batched_attn_cross": {
+    "layer": "BatchedMultiHeadAttention",
+    "q_shape": [
+      2,
+      3,
+      8
+    ],
+    "k_shape": [
+      2,
+      5,
+      8
+    ],
+    "v_shape": [
+      2,
+      5,
+      8
+    ],
+    "num_heads": 2,
+    "scale": 0.5,
+    "masked": true,
+    "output_shape": [
+      2,
+      3,
+      8
+    ]
   }
 }

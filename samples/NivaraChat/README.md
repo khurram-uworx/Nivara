@@ -65,6 +65,12 @@ dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is 
 
 # Online learning from LLM feedback (requires --ollama)
 dotnet run --project samples/NivaraChat -- --online-learning --ollama
+
+# TinyShakespeare — batched transformer served as an IChatClient (no LLM needed)
+dotnet run --project samples/NivaraChat -- --tinyshakespeare
+
+# Smoke run: smaller vocab is ~3x faster (full options: --tinyshakespeare --help)
+dotnet run --project samples/NivaraChat -- --tinyshakespeare --vocab-size 1200 --prompt "ROMEO:"
 ```
 
 ## CLI options
@@ -84,6 +90,7 @@ dotnet run --project samples/NivaraChat -- --online-learning --ollama
 | `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
+| `--tinyshakespeare` | — | Mode: train/serve a batched TinyShakespeare transformer as `IChatClient` (see `--tinyshakespeare --help` for its options) |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
@@ -288,6 +295,26 @@ Tested examples:
 
 Uses: `FeedbackCollector`, `IntentTrainer.TrainIncremental()`, `TrainingLoop.Run()`, `Optimizer.StateDict()/LoadStateDict()`.
 
+### TinyShakespeare (`--tinyshakespeare`)
+Trains a **word-level batched causal transformer** on the TinyShakespeare corpus with Nivara's AutoDiff, then serves it through the standard `Microsoft.Extensions.AI.IChatClient` interface and wires it up via DI. No LLM needed — this mode proves Nivara can train a real transformer and serve it in an ecosystem-compatible way. Training runs when no `--load` is given; a saved model skips straight to generation and the DI demo. See the dedicated [TinyShakespeare section](#tinyshakespeare--batched-transformer-ichatclient-mode---tinyshakespeare) below for the full option list, architecture, and the how-it-differs-from-MicroGpt comparison.
+
+```
+TinyShakespeare.txt → word-level TextTokenizer → batched causal transformer training
+    → ModelSerializer.Save/Load → BatchedChatClient : IChatClient
+    → services.AddChatClient(factory) → console/ASP.NET/MAUI
+```
+
+Tested examples:
+
+| Command | Model | Result |
+|---------|-------|--------|
+| `--tinyshakespeare` | 2L × 96D, 4 heads, vocab 8000 (defaults) | Full train on the corpus, 5 generated replies, DI demo reply |
+| `--tinyshakespeare --vocab-size 1200 --prompt "ROMEO:"` | 2L × 96D, 4 heads, vocab 1200 | Smoke run, ~3x faster; generates Shakespeare-style continuations for the prompt |
+| `--tinyshakespeare --data <small.txt> --vocab-size 800 --n-embd 32 --n-layer 1 --block-size 32 --n-head 2 --epochs 1 --samples 2 --prompt "ROMEO:"` | 1L × 32D, 2 heads, vocab 592 (31584 params) | Trained a 249-line slice in 1.3s (1350 tok/s, loss 6.17) and replied via `IChatClient` |
+| `--tinyshakespeare --load models/ts.json --prompt "KING LEAR:" --no-di-demo` | Matches saved model | Skips training, loads weights + tokenizer, generates directly |
+
+Uses: `BatchedTransformer<T>`, `BatchedChatClient` (`IChatClient`), `TextTokenizer`, `ModelSerializer.Save/Load`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Embedding`/`Linear`/`LayerNorm`/`Activation.Gelu`, `CrossEntropyLoss<T>`, `Adam<T>`, `services.AddChatClient()`.
+
 ## Agents pipeline architecture
 
 ```
@@ -396,6 +423,12 @@ NivaraChat/
 ├── EscalationExecutor.cs             # Complaint escalation executor (--intent)
 ├── ChitchatExecutor.cs               # Casual conversation executor (--intent)
 ├── FeedbackCollector.cs              # LLM fallback + feedback buffer (--online-learning)
+├── Transformer/
+│   ├── TransformerMode.cs            # --tinyshakespeare CLI mode + interactive entry
+│   ├── BatchedTransformer.cs         # BatchedTransformer<T> + BatchedTransformerBlock<T>
+│   ├── BatchedChatClient.cs          # IChatClient over a trained BatchedTransformer<float>
+│   ├── PositionEncoding.cs           # Fixed sinusoidal position encoding
+│   └── TinyShakespeare.cs            # Corpus downloader + line-document loader
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```
@@ -462,6 +495,145 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
 | `Optimizer.StateDict()/LoadStateDict()` | IntentTrainer.cs | Save/restore optimizer state for incremental training |
 | `ModelSerializer` (optimizer state) | IntentTrainer.cs | Persist optimizer state in checkpoints |
 
+## TinyShakespeare — batched-transformer `IChatClient` mode (`--tinyshakespeare`)
+
+The former `samples/NivaraChatClient/` companion project now ships as a built-in
+mode of this sample: a **word-level batched causal transformer** trained on
+TinyShakespeare with Nivara's AutoDiff, then served through the standard
+`Microsoft.Extensions.AI.IChatClient` interface and wired up via DI. Where the
+rest of this README demonstrates mixing trained ML models with an LLM
+(fan-out/fan-in, agents, tools), this mode proves Nivara can *train* a real
+transformer and *serve* it in an ecosystem-compatible way:
+
+```
+TinyShakespeare.txt → word-level TextTokenizer → batched causal transformer training
+    → ModelSerializer.Save/Load → BatchedChatClient : IChatClient
+    → services.AddChatClient(factory) → console/ASP.NET/MAUI
+```
+
+It is reachable from the interactive menu (option 4, which prompts with
+defaults) or directly: `dotnet run --project samples/NivaraChat -- --tinyshakespeare`.
+
+### How it differs from MicroGpt
+
+MicroGpt does a per-position forward with a KV cache; this mode uses a proper
+batched causal transformer over `[B, L]` tensors:
+
+| Aspect | MicroGpt | `--tinyshakespeare` |
+|---|---|---|
+| Forward pass | Per-position, KV cache | Batched sequence `[B, L]` |
+| Attention | Per-head dot-product loop | Batched multi-head attention (core `BatchedMultiHeadAttention` op) |
+| Embedding | `Forward(int)` single token | `Forward(ReverseGradTensor<T>)` batch `[B, L] → [B, L, D]` |
+| Normalization | RMSNorm op | `LayerNorm<T>` module |
+| Position encoding | Learned `Embedding` | Sinusoidal (fixed, sample-side) |
+| Loss | Hand-rolled NLL | `CrossEntropyLoss<T>` |
+| Optimizer | Adam | Adam |
+| Training | Manual grad-scope loop | Manual grad-scope loop (same pattern) |
+| Serialization | None | `ModelSerializer` full round-trip + tokenizer JSON |
+| Inference | Generate via sampling | `IChatClient` standard API |
+| Data | Character-level names | Word-level TinyShakespeare |
+
+### Architecture
+
+```
+Input tokens: [B, L]
+    → Embedding → [B, L, D]
+    → + sinusoidal position encoding
+    → N × TransformerBlock:
+        LayerNorm → Q/K/V projections → BatchedMultiHeadAttention (causal mask) → residual
+        LayerNorm → MLP (GELU, expand 4×, compress) → residual
+    → LayerNorm → tied LM head (MatMul(x, wteᵀ)) → [B*L, V] logits
+```
+
+- `BatchedTransformer<T>` (`Transformer/BatchedTransformer.cs`) composes core modules
+  (`Embedding`, `Linear`, `LayerNorm`, `Activation.Gelu`) around the
+  `ReverseGradOperations.BatchedMultiHeadAttention` op. The causal `[B, L, L]`
+  mask is built once per forward and reused across blocks.
+- The tied LM head is `MatMul(x, wteᵀ)`, matching the `[B*L, V]` → `CrossEntropyLoss`
+  (shape[0] = batch, shape[1] = classes) convention.
+- `BatchedChatClient : IChatClient` (`Transformer/BatchedChatClient.cs`) runs the
+  model in eval mode and generates autoregressively with temperature sampling.
+  Each call builds its own tensors, so concurrent use is safe; it does **not** own
+  the model (disposal belongs to the caller / DI container).
+
+### CLI (options after `--tinyshakespeare`)
+
+Run `--tinyshakespeare --help` for the full list. Options mirror the flags below;
+the interactive menu asks for the key ones (model path, vocab size, prompt) with
+defaults.
+
+```
+--n-embd <int>          Embedding dimension (default: 96)
+--n-layer <int>         Transformer layers (default: 2)
+--block-size <int>      Context window (default: 64)
+--n-head <int>          Attention heads (default: 4)
+--dropout <float>       Dropout probability (default: 0.1)
+--epochs <int>          Training epochs (default: 20)
+--batch-size <int>      Batch size (default: 32)
+--lr <float>            Learning rate (default: 3e-3)
+--beta1/--beta2 <float> Adam betas (default: 0.9/0.95)
+--vocab-size <int>      Max word-vocab size (default: 8000)
+--temperature <float>   Sampling temperature (default: 0.8)
+--max-new-tokens <int>  Max tokens per reply (default: 96)
+--samples <int>         Generated samples (default: 5)
+--seed <int>            RNG seed (default: 42)
+--data <path>           Corpus path (downloaded to samples/data/tinyshakespeare.txt on first use)
+--prompt <text>         Chat with the model using this user prompt
+--save <path>           Save trained model to JSON (+ <path>.tokenizer.json)
+--load <path>           Load model from JSON (pass the same architecture flags used at save time)
+--no-di-demo            Skip the DI + IChatClient demo
+--help, -h              Show this help
+```
+
+Default behavior: train (when no `--load`), save (when `--save`), print `--samples`
+generated replies for `--prompt`, then run a DI demo that resolves `IChatClient`
+from a `ServiceCollection` via `AddChatClient(factory)`.
+
+> **CLI delta from the NEXT.md spec:** the spec's `--train`/`--interactive` REPL
+> flags were dropped in favor of the NivaraGpt-style default-train + `--load`
+> skip-training model; `--seq-len` was renamed `--block-size`. Durable NEXT.md
+> content lives here instead.
+
+### Gaps resolved along the way
+
+The NEXT.md gap list is almost entirely obsolete — most items were already fixed
+in core before this work (Grounding Audit): `LayerNorm<T>` module, batched
+`Embedding<T>.Forward(ReverseGradTensor<T>)` (now Gather-based, no one-hot
+MatMul), `ReverseGradOperations.Concat`/`Gather`,
+`Embedding<T> : Module<T>`, `CrossEntropyLoss<T>`, `TrainingLoop<T>` +
+`DataLoader<T>` + `TensorDataset<T>`, `ModelSerializer`. Two gaps no longer apply:
+attention softmax is handled *inside* the MHA op kernel over the last dimension
+(`AttentionKernels.SoftmaxRows`), so no public `Softmax(dim)` was needed, and the
+"Nivara's MatMul is rank-2 only" workaround (flatten batch×head into one matrix)
+is moot because the batched attention op does the batched scores/context math
+directly. The remaining gaps were closed by this work:
+
+- **Batched attention op** — `ReverseGradOperations.BatchedMultiHeadAttention<T>`
+  (rank-3 `[B, L, D]`, optional `[B, qLen, kvLen]` additive mask, `Parallel.For`
+  over the batch past a workload threshold); single-sequence MHA untouched.
+  Mirrors PyTorch (see `tests/Nivara.Tests/NivaraTorch/BatchedAttentionTests.cs`).
+- **IChatClient thread safety** — eval-mode, re-entrant generation; model
+  ownership lives outside the client.
+
+### Not doing (stretch / future)
+
+- Batched KV cache — generation uses a simple autoregressive loop without caching.
+- Top-p/top-k sampling, beam search — temperature + random sampling only.
+- Fine-tuning/LoRA, quantization — full float32 CPU training only, matching
+  Nivara's scope.
+- BPE/subword tokenization, multi-modal, ASP.NET hosting — out of scope, but the
+  sample is DI-compatible so hosting is a one-liner.
+
+### Notes
+
+- **Performance:** the word vocab dominates cost — core `TensorsHelper.MultiplyCore`
+  emits one `TensorPrimitives.Dot` per output element, so the tied LM head over a
+  ~8k vocab is ~1M short dot-calls/batch (~730 tok/s at `D=32, B=8`). Smoke runs
+  use `--vocab-size 1200`.
+- Load requires matching architecture flags; the strict shape validation in
+  `LoadStateDict` fails loudly on a mismatch, and the matching
+  `<model>.tokenizer.json` is auto-restored.
+
 ## Requirements
 
 - .NET 10.0 SDK
@@ -472,10 +644,12 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `Microsoft.Agents.AI` | 1.15.0 | `ChatClientAgent` for LLM integration |
-| `Microsoft.Agents.AI.Workflows` | 1.15.0 | `Executor`, `WorkflowBuilder`, `InProcessExecution` |
-| `Microsoft.Agents.AI.Workflows.Generators` | 1.15.0 | Source generator for `[MessageHandler]` |
-| `Microsoft.Extensions.AI` | 10.8.1 | `IChatClient` abstraction |
+| `Microsoft.Agents.AI` | 1.16.0 | `ChatClientAgent` for LLM integration |
+| `Microsoft.Agents.AI.Workflows` | 1.16.0 | `Executor`, `WorkflowBuilder`, `InProcessExecution` |
+| `Microsoft.Agents.AI.Workflows.Generators` | 1.16.0 | Source generator for `[MessageHandler]` |
+| `Microsoft.Extensions.AI` | 10.8.3 | `IChatClient` abstraction |
+| `Microsoft.Extensions.DependencyInjection` | 10.0.10 | DI wiring for the TinyShakespeare `IChatClient` demo |
+| `Microsoft.Extensions.Hosting` | 10.0.10 | Hosting infrastructure for the DI demo |
 | `OllamaSharp` | 5.4.30 | `OllamaApiClient` implementing `IChatClient` |
 
 ## Library gaps this example resolved

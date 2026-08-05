@@ -6,6 +6,7 @@ using Nivara.AutoDiff.Serialization;
 using Nivara.Samples;
 using NivaraChat;
 using NivaraChat.Training;
+using NivaraChat.Transformer;
 using OllamaSharp;
 using System.Numerics.Tensors;
 
@@ -77,6 +78,9 @@ if (args.Length > 0)
         case "--online-learning":
             await RunOnlineLearning(modelsDir, ollamaUrl, modelName, useOllama, confidenceThreshold);
             break;
+        case "--tinyshakespeare":
+            TransformerMode.Run(args.Skip(1).ToArray());
+            break;
         default:
             PrintUsage();
             break;
@@ -109,6 +113,10 @@ async Task RunInteractiveMenu(string modelsDir)
                 await RunAgents(modelsDir, url3, model3, null, useOllama3);
                 Console.WriteLine();
                 break;
+            case "4":
+                TransformerMode.RunInteractive();
+                Console.WriteLine();
+                break;
             case "q":
                 return;
         }
@@ -122,6 +130,7 @@ string ShowMainMenu()
     Console.WriteLine("  1. Training    - Train sentiment, entity, and validator models");
     Console.WriteLine("  2. Workflow    - Run the Agent Framework workflow pipeline");
     Console.WriteLine("  3. Agents      - Run the agents pipeline with live chat");
+    Console.WriteLine("  4. TinyShakespeare - Train/serve a batched transformer as IChatClient");
     Console.WriteLine("  q. Quit\n");
     Console.Write("> ");
     return Console.ReadLine()?.Trim().ToLower() ?? "";
@@ -927,6 +936,7 @@ void PrintUsage()
     Console.WriteLine("  --intent-train       Train the 5-class intent classifier");
     Console.WriteLine("  --intent             Intent routing: classify input, route to specialist executor");
     Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
+    Console.WriteLine("  --tinyshakespeare    TinyShakespeare: train/serve a batched transformer as IChatClient (see --tinyshakespeare --help)");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
@@ -934,6 +944,9 @@ void PrintUsage()
     Console.WriteLine("  --threshold <float>  Confidence threshold for --handoff / --online-learning (default: 0.8)");
     Console.WriteLine("  --docs-dir <path>    Documents directory for --rag (default: docs/ + README.md)");
     Console.WriteLine("  --top-k <int>        Number of chunks to retrieve for --rag (default: 3)");
+    Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
+    Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
+    Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
 }
 
 void RunEmbeddingSearch()
@@ -1008,7 +1021,7 @@ void RunEmbeddingSearch()
         Console.WriteLine("  Context for LLM:");
         for (int rank = 0; rank < ranked.Count; rank++)
             Console.WriteLine($"    #{rank + 1}  {ranked[rank].Score:F4}  \"{documents[ranked[rank].Index]}\"");
-        Console.WriteLine("\n  (In a full pipeline, these would be injected into the LLM prompt\n   via TextSearchProvider — see NEXT.md section D)\n");
+        Console.WriteLine("\n  (In a full pipeline, these would be injected into the LLM prompt\n   via TextSearchProvider — see README.md \"RAG agent\" section)\n");
     }
 }
 

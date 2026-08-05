@@ -154,4 +154,4 @@ The per-position backward pattern is specific to MicroGpt — it backprops each 
 
 ## Relationship to other examples
 
-MicroGpt is the **training** showcase — it proves Nivara can train a transformer. The NivaraChatClient example (`samples/NivaraChatClient.md`) is the **serving/integration** showcase — it shows how a trained Nivara model participates in a Microsoft Agent Framework workflow alongside an LLM. They are complementary: MicroGpt trains the model, NivaraChatClient puts it to work.
+MicroGpt is the **training** showcase — it proves Nivara can train a transformer. The `--tinyshakespeare` mode of the NivaraChat sample (`samples/NivaraChat/README.md`) is the **serving/integration** showcase — it shows how a trained Nivara model participates in the Microsoft Agent Framework ecosystem as an `IChatClient`. They are complementary: MicroGpt trains the model, `--tinyshakespeare` puts it to work.
