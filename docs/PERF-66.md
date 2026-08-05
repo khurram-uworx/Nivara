@@ -51,7 +51,18 @@ Per-batch profile (measured/derived from code):
    writable-span accessor on `NivaraColumn<T>`. Eliminates the 268 MB/batch
    allocation.
    - Files: `src/Nivara/Storage/ColumnStorage.cs`, `src/Nivara/AutoDiff/Optimizer/{AdamW,Adam,SGD}.cs`, `src/Nivara/AutoDiff/Optimizer/Optimizer.cs` (if shared).
-   - Status: **pending**.
+   - Status: **done** — `AsWritableSpan` is now a write-through span (sole
+     `ColumnStorage<T>` impl, previously returned a `.ToArray()` copy with no
+     callers). Adam/AdamW kernels write the computed update into the
+     parameter's existing array via an extra pooled `update` scratch
+     (2 × `ArrayPool` rents/step instead of a `new T[n]` GC allocation per
+     param); SGD uses a single-pass in-place loop. `Step()` calls
+     `param.Touch()` (version bump) instead of `param.Tensor = newTensor`.
+     Public `SGD<T>.SgdUpdate` remains allocate-based (external API).
+   - ⚠️ Behavior contract: because the parameter tensor is reused (not
+     replaced), a `Step()` without a subsequent `ZeroGrad()` will accumulate
+     stale gradients across steps. Built-in `TrainingLoop`/`DataParallelTrainer`
+     already call `ZeroGrad()` each iteration — matches PyTorch semantics.
 4. **Grad-tracking matmul with `bTransposed: true`** — a `MatMulTransposedB`
    that records a VJP, so training Linear stops double-transposing weights.
    - Files: `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`, `src/Nivara/AutoDiff/Nn/Linear.cs`.
@@ -92,9 +103,9 @@ Per-batch profile (measured/derived from code):
 | P1 item 1 | ✅ `0c29079` |
 | P1 item 2 | ✅ `325f741` |
 | P2 item 4 | ✅ `e031ff0` (grad-tracking `MatMulTransposedB`, cache removed, 828 tests) |
-| P2 item 3 | |
+| P2 item 3 | ✅ in-place SGD/Adam/AdamW (`AsWritableSpan` write-through + `param.Touch()`) |
 | P3 5a/5b/5c | |
-| Benchmark 25 | |
+| Benchmark 25 | ⏳ Nivara-only, post-P2: ~18 s/epoch (2.5 s JIT warmup + ~1.2-1.4 s/batch steady), dev acc 59.75%; baseline A/B via worktree @ `e031ff0` pending |
 
 ---
 

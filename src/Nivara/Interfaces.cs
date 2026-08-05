@@ -130,10 +130,10 @@ internal interface IColumnStorage<T> : IDisposable
     /// Gets a writable span for scenarios requiring data mutation.
     /// </summary>
     /// <remarks>
-    /// Always backed by a private copy — both storage types expose read-only data, so mutations
-    /// never affect the stored data. Not zero-copy.
+    /// A true zero-copy write-through view over the backing array — mutations are
+    /// immediately visible to all other views (spans, tensor views) of the storage.
     /// </remarks>
-    /// <returns>A writable span over a private copy of the storage data</returns>
+    /// <returns>A writable span over the storage data</returns>
     /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support writable span access</exception>
     internal Span<T> AsWritableSpan();
 }
