@@ -83,23 +83,29 @@ This downloads Parquet files to `samples/data/sst2/`.
 
 ## Usage
 
+> **Always run with `-c Release`.** The default `dotnet run` configuration is Debug
+> (no JIT optimization), which runs the numeric kernels several times slower than
+> Release. Use `dotnet run -c Release --project samples/NivaraFineTuning -- ...`.
+> The sample enables Server GC and Tiered PGO to reduce GC pauses under the
+> ~1 GB/batch allocation churn of a 67M-parameter training step.
+
 ### Train
 
 ```bash
-dotnet run --project samples/NivaraFineTuning -- --mode train --epochs 3 --batch-size 4
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 3 --batch-size 4
 ```
 
 Trains for 3 epochs with AdamW (lr=2e-5, weight_decay=0.01), reports per-epoch training loss and dev accuracy. Saves the fine-tuned model to `samples/data/distilbert/finetuned_model.json`.
 
 ```bash
 # Quick smoke test (1 epoch, batch size 2)
-dotnet run --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2
 ```
 
 ### Evaluate
 
 ```bash
-dotnet run --project samples/NivaraFineTuning -- --mode eval
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode eval
 ```
 
 Loads the fine-tuned model from `samples/data/distilbert/finetuned_model.json`, runs inference on the SST-2 dev set, reports loss and accuracy.
@@ -107,7 +113,7 @@ Loads the fine-tuned model from `samples/data/distilbert/finetuned_model.json`, 
 ### Interactive prediction
 
 ```bash
-dotnet run --project samples/NivaraFineTuning -- --mode predict
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode predict
 ```
 
 Type sentences and get POSITIVE/NEGATIVE with confidence percentage. Type `quit` to exit.
@@ -137,6 +143,73 @@ On a single CPU core (no GPU):
 | 3     | ~0.30             | ~81-85%      |
 
 Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 80-85%.
+
+### Expected timing
+
+Fine-tuning runs entirely in managed C# on CPU. For `--max-examples 25 --batch-size 2 --epochs 1 -c Release`
+expect **~1.4 s/batch** steady-state (measured 2026-08-06, see [Performance benchmarks](#performance-benchmarks));
+a full 67K-example epoch extrapolates to ~13 hours. Keep `--max-len` at the default 128 and use
+`--max-examples` to validate the pipeline before committing to a full run.
+
+## Performance benchmarks
+
+Measured on the same machine (CPU-only, no GPU). Nivara runs in Release mode
+with Server GC + Tiered PGO (as configured in the sample project). PyTorch uses
+MKL-optimized kernels with `torch_threads = nproc`. Both sides fine-tune
+DistilBERT-base (67M params) on the first `--max-examples` rows of SST-2 at
+`--batch-size 2 --max-len 128` and report **steady-state ms/batch**: PyTorch
+runs 2 untimed warmup epochs before timing; Nivara excludes the first (JIT
+warmup) batch. `--seed 0` fixes the training shuffle so A/B comparisons are
+reproducible. Numbers vary with machine load — re-measure both sides in the
+same session when comparing (run-to-run variance ~±10% per
+`tests/Nivara.PerformanceTests/README.md`).
+
+| Config | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
+|--------|---------------|-------------------|----------|
+| Fine-tune B=2, L=128, 25 examples | 0.46 s/batch | 1.4 s/batch | **~3×** |
+
+The gap is far smaller than a naive port suggests: at batch size 2 the per-batch
+cost is dominated by 38 small Linear matmuls and the backward pass through 67M
+params, not by BLAS peak throughput, so the CPU SIMD kernels and memory
+management keep Nivara within ~3× of PyTorch's MKL on this configuration.
+
+### Before/after (2026-08-06)
+
+| Nivara fine-tune B=2, 25 examples | Before (`e031ff0`) | After (HEAD) |
+|-----------------------------------|--------------------|--------------|
+| Steady-state wall-clock | ~1.3 s/batch | ~1.4 s/batch |
+| Per-param optimizer allocation | 268 MB/batch (`new T[n]` per param per step) | eliminated (in-place writes) |
+
+"Before" is the last commit before the PERF-66 performance work
+(`e031ff0`); "after" is current HEAD. The work — in-place SGD/Adam/AdamW
+steps (write into the parameter's backing array + version bump, no per-param
+`new T[n]`), `BatchedMultiHeadAttention` in the encoder (no block-diagonal
+mask, no wasted cross-sequence compute), grad-tracking transposed-B matmul in
+`Linear` (no per-forward weight transpose), and a tiled `Transpose` kernel —
+kept wall-clock flat (~1.3 → ~1.4 s/batch, within the ±10% run-to-run
+variance; the A/B was measured with the pre-warmup harness) while removing
+the dominant per-batch allocation. The remaining GC pressure is grad-array
+churn. Further optimizations to validate against this harness: pooled grad
+buffers and a single-pass attention row kernel.
+
+### Re-running
+
+```bash
+cd samples/NivaraFineTuning
+
+# Both sides, tee'd to benchmark_results.txt (uses GNU coreutils tee on PATH)
+.\benchmark_timing.cmd 25 2 1
+
+# PyTorch side only
+python Python\benchmark_timing.py --epochs 1 --batch-size 2 --max-examples 25
+
+# Nivara side only (batch times are printed per batch; batch 1 is JIT warmup)
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2 --max-examples 25
+```
+
+Record new results in the table above with the measurement date and a note on
+what changed. Kernel-level micro-measurements (matmul/transpose/softmax/attention)
+live in `tests/Nivara.PerformanceTests`.
 
 ## Python reference
 

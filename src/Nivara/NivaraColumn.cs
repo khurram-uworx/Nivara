@@ -1474,8 +1474,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
 
     /// <summary>
     /// Gets a writable span view of the underlying data.
-    /// Provides zero-copy access for scenarios requiring data mutation.
-    /// Note: This may create a copy for immutable storage implementations.
+    /// Provides zero-copy write-through access for scenarios requiring data mutation;
+    /// mutations are immediately visible to all views of the column.
     /// </summary>
     /// <returns>A writable span over the column data</returns>
     /// <exception cref="InvalidOperationException">Thrown when the storage doesn't support writable span access</exception>

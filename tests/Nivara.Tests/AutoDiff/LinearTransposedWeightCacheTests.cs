@@ -7,13 +7,15 @@ using NUnit.Framework;
 namespace Nivara.Tests.AutoDiff;
 
 /// <summary>
-/// Tests for the version-stamped transposed-weight cache on the training path
-/// of <see cref="Linear{T}"/> (issue #87). The cache eliminates the per-forward
-/// transpose allocation/copy across a Grad() training loop while preserving
-/// identical forward values and gradient flow into the weight parameter.
+/// Tests for the transpose-free Linear training path: <see cref="Linear{T}"/>
+/// feeds the raw weight in the kernel's transposed-B layout to
+/// <see cref="ReverseGradOperations.MatMulTransposedB{T}"/>, which records a
+/// single VJP (dA = g @ b, dB = g^T @ a) so no weight transpose happens on
+/// forward or backward. Replaces the former version-stamped transposed-weight
+/// cache (issue #87) eliminated in the P2 perf work (issue #66).
 /// </summary>
 [TestFixture]
-public class LinearTransposedWeightCacheTests
+public class LinearTransposedBTrainingTests
 {
     static ReverseGradTensor<float> InputMatrix() => ReverseGradTensor<float>.FromMatrix(
         new float[] { 0.5f, -1.0f, 2.0f, 3.0f, 1.5f, 2.5f, -0.5f, 0.25f }, rows: 2, cols: 4, requiresGrad: false);
@@ -67,7 +69,7 @@ public class LinearTransposedWeightCacheTests
     }
 
     [Test]
-    public void TransposedWeightCache_TrainingForward_MatchesExplicitTransposeMatMul()
+    public void TransposedB_TrainingForward_MatchesExplicitTransposeMatMul()
     {
         // Arrange
         var linear = new Linear<float>(inFeatures: 4, outFeatures: 3);
@@ -89,7 +91,7 @@ public class LinearTransposedWeightCacheTests
     }
 
     [Test]
-    public void TransposedWeightCache_MultipleForwards_ReturnStableResults()
+    public void TransposedB_MultipleForwards_ReturnStableResults()
     {
         // Arrange
         var linear = new Linear<float>(inFeatures: 4, outFeatures: 3);
@@ -101,13 +103,13 @@ public class LinearTransposedWeightCacheTests
             var first = Extract(linear.Forward(input));
             var second = Extract(linear.Forward(input));
 
-            // Assert - identical outputs from the reused cache
+            // Assert - identical outputs, no state carried between forwards
             Assert.That(second, Is.EqualTo(first));
         }
     }
 
     [Test]
-    public void TransposedWeightCache_WeightReplacement_InvalidatesCache()
+    public void TransposedB_WeightReplacement_ForwardUsesUpdatedWeights()
     {
         // Arrange
         var linear = new Linear<float>(inFeatures: 4, outFeatures: 3);
@@ -117,7 +119,7 @@ public class LinearTransposedWeightCacheTests
         {
             var before = Extract(linear.Forward(input));
 
-            // Act - replace the weight tensor (as SGD/Adam/AdamW Step does)
+            // Act - replace the weight tensor (as the allocate-and-replace SGD/Adam path did)
             linear.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(
                 new float[12], rows: 3, cols: 4, requiresGrad: true);
             var after = Extract(linear.Forward(input));
@@ -131,7 +133,7 @@ public class LinearTransposedWeightCacheTests
     }
 
     [Test]
-    public void TransposedWeightCache_Backward_MatchesExplicitTransposeMatMul()
+    public void TransposedB_Backward_WeightGrad_MatchesExplicitTransposeMatMul()
     {
         // Arrange
         var linear = new Linear<float>(inFeatures: 4, outFeatures: 3);
@@ -139,16 +141,49 @@ public class LinearTransposedWeightCacheTests
         var seed = ReverseGradTensor<float>.FromMatrix(
             new float[] { 1, 2, 3, 4, 5, 6 }, rows: 2, cols: 3, requiresGrad: false);
 
-        // Act - cached path, then explicit path on the same unchanged weights
-        var wGradCached = RunForwardBackward(linear, input, seed);
+        // Act - transposed-B path, then explicit path on the same unchanged weights
+        var wGradNew = RunForwardBackward(linear, input, seed);
         linear.WeightParam.Tensor.ZeroGrad();
         linear.Bias!.ZeroGrad();
         var wGradExplicit = RunExplicitForwardBackward(linear, input, seed);
 
-        // Assert - identical gradients into the weight parameter
-        Assert.That(wGradCached.Length, Is.EqualTo(wGradExplicit.Length));
-        for (int i = 0; i < wGradCached.Length; i++)
-            Assert.That(wGradCached[i], Is.EqualTo(wGradExplicit[i]).Within(1e-5f));
+        // Assert - identical gradients into the weight parameter (dB = g^T @ a)
+        Assert.That(wGradNew.Length, Is.EqualTo(wGradExplicit.Length));
+        for (int i = 0; i < wGradNew.Length; i++)
+            Assert.That(wGradNew[i], Is.EqualTo(wGradExplicit[i]).Within(1e-5f));
+    }
+
+    [Test]
+    public void TransposedB_Backward_InputGrad_MatchesExplicitTransposeMatMul()
+    {
+        // Arrange - input tracks gradients so the VJP's dA = g @ b is exercised
+        var linear = new Linear<float>(inFeatures: 4, outFeatures: 3);
+        var input = ReverseGradTensor<float>.FromMatrix(
+            new float[] { 0.5f, -1.0f, 2.0f, 3.0f, 1.5f, 2.5f, -0.5f, 0.25f }, rows: 2, cols: 4, requiresGrad: true);
+        var seed = ReverseGradTensor<float>.FromMatrix(
+            new float[] { 1, 2, 3, 4, 5, 6 }, rows: 2, cols: 3, requiresGrad: false);
+
+        float[] dInputNew;
+        using (GradientUtils.Grad())
+        {
+            var output = linear.Forward(input);
+            output.Backward(seed);
+            dInputNew = ExtractColumn(input.Grad!);
+        }
+        input.ZeroGrad();
+
+        float[] dInputExplicit;
+        using (GradientUtils.Grad())
+        {
+            var output = ReverseGradOperations.AddBias(
+                ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(linear.Weight)),
+                linear.Bias!);
+            output.Backward(seed);
+            dInputExplicit = ExtractColumn(input.Grad!);
+        }
+
+        // Assert - identical gradients into the input (dA = g @ b, no weight transpose)
+        Assert.That(dInputNew, Is.EqualTo(dInputExplicit).Within(1e-5f));
     }
 
     [Test]
@@ -168,7 +203,7 @@ public class LinearTransposedWeightCacheTests
     }
 
     [Test]
-    public void TransposedWeightCache_OptimizerStep_InvalidatesCacheAndTrains()
+    public void TransposedB_OptimizerStep_ForwardTracksUpdatedWeights()
     {
         // Arrange - one full training step through SGD
         var linear = new Linear<float>(inFeatures: 4, outFeatures: 3);
@@ -190,7 +225,7 @@ public class LinearTransposedWeightCacheTests
             after = Sum(output2);
         }
 
-        // Assert - optimizer step mutated the weight and the cache picked it up
+        // Assert - optimizer step mutated the weight and the next forward reflects it
         Assert.That(after, Is.Not.EqualTo(before).Within(1e-5f));
     }
 }

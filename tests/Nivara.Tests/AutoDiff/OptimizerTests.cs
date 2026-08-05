@@ -432,4 +432,139 @@ public class OptimizerTests
         Assert.That(() => SGD<float>.SgdUpdate(param, -0.1f),
             Throws.ArgumentException.With.Message.Contains("positive"));
     }
+
+    [Test]
+    public void Sgd_Step_ReusesParameterTensorInPlace()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.1f);
+        sgd.AddParameterGroup(param);
+
+        var original = param.Tensor;
+        var version = param.Version;
+
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        sgd.Step();
+
+        Assert.That(object.ReferenceEquals(param.Tensor, original), Is.True);
+        Assert.That(param.Version, Is.EqualTo(version + 1));
+        Assert.That(param.Tensor[0], Is.EqualTo(0.9f).Within(1e-6f));
+    }
+
+    [Test]
+    public void Sgd_StepWithMomentum_MultipleSteps_MatchesHandComputedReference()
+    {
+        var param = new Parameter<float>("w", new float[] { 10f, 20f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.01f, momentum: 0.9);
+        sgd.AddParameterGroup(param);
+
+        var lr = 0.01f;
+        var velocity = new[] { 0f, 0f };
+        var expected = new[] { 10f, 20f };
+
+        for (int step = 0; step < 3; step++)
+        {
+            sgd.ZeroGrad();
+            ReverseGradOperations.Sum(param.Tensor).Backward();
+            sgd.Step();
+
+            for (int i = 0; i < 2; i++)
+            {
+                velocity[i] = 0.9f * velocity[i] + lr;
+                expected[i] -= velocity[i];
+                Assert.That(param.Tensor[i], Is.EqualTo(expected[i]).Within(1e-5f));
+            }
+        }
+    }
+
+    [Test]
+    public void Adam_Step_ReusesParameterTensorInPlace()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adam = new Adam<float>(beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adam.AddParameterGroup(param);
+
+        var original = param.Tensor;
+        var version = param.Version;
+
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        adam.Step();
+
+        Assert.That(object.ReferenceEquals(param.Tensor, original), Is.True);
+        Assert.That(param.Version, Is.EqualTo(version + 1));
+    }
+
+    [Test]
+    public void Adam_Step_ValuesMatchHandComputedReference()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adam = new Adam<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adam.AddParameterGroup(param);
+
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        adam.Step();
+
+        // step=1: biasCorr1 = 1 - 0.9 = 0.1, biasCorr2 = 1 - 0.999 = 0.001
+        // expAvg = 0.1*grad = 0.1, expAvgSq = 0.001*grad^2 = 0.001
+        // mHat = 1, vHat = 1, update = lr * 1 / (sqrt(1) + eps) = 0.01
+        // new = data - update = [0.99, 1.99, 2.99]
+        Assert.That(param.Tensor[0], Is.EqualTo(0.99f).Within(1e-5f));
+        Assert.That(param.Tensor[1], Is.EqualTo(1.99f).Within(1e-5f));
+        Assert.That(param.Tensor[2], Is.EqualTo(2.99f).Within(1e-5f));
+    }
+
+    [Test]
+    public void AdamW_Step_ReusesParameterTensorInPlace()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adamw = new AdamW<float>(beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamw.AddParameterGroup(param);
+
+        var original = param.Tensor;
+        var version = param.Version;
+
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        adamw.Step();
+
+        Assert.That(object.ReferenceEquals(param.Tensor, original), Is.True);
+        Assert.That(param.Version, Is.EqualTo(version + 1));
+    }
+
+    [Test]
+    public void AdamW_StepWithWeightDecay_ValuesMatchHandComputedReference()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f }, requiresGrad: true);
+        var adamw = new AdamW<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamw.AddParameterGroup(param, 0.01f, weightDecay: 0.01f);
+
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        adamw.Step();
+
+        // step=1: update = lr * mHat/denom + lr * wd * data = 0.01 + 0.01*0.01*data
+        // data=1 -> 0.01 + 0.0001 = 0.0101 -> new = 0.9899
+        // data=2 -> 0.01 + 0.0002 = 0.0102 -> new = 1.9898
+        Assert.That(param.Tensor[0], Is.EqualTo(0.9899f).Within(1e-5f));
+        Assert.That(param.Tensor[1], Is.EqualTo(1.9898f).Within(1e-5f));
+    }
+
+    [Test]
+    public void Adam_Step_FloatAndDouble_ProduceEquivalentValues()
+    {
+        var data = new double[] { 1.0, 2.0, 3.0 };
+
+        var paramF = new Parameter<float>("wf", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adamF = new Adam<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamF.AddParameterGroup(paramF);
+        ReverseGradOperations.Sum(paramF.Tensor).Backward();
+        adamF.Step();
+
+        var paramD = new Parameter<double>("wd", data, requiresGrad: true);
+        var adamD = new Adam<double>(0.01, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamD.AddParameterGroup(paramD);
+        ReverseGradOperations.Sum(paramD.Tensor).Backward();
+        adamD.Step();
+
+        for (int i = 0; i < 3; i++)
+            Assert.That((double)paramF.Tensor[i], Is.EqualTo(paramD.Tensor[i]).Within(1e-6));
+    }
 }

@@ -6,22 +6,24 @@ namespace Nivara.AutoDiff.Optimizer;
 
 public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee754<T>
 {
-    static ReverseGradTensor<T> stepNoMomentum(ReverseGradTensor<T> tensor, T lr, T wd)
+    static void stepNoMomentumInPlace(NivaraColumn<T> data, NivaraColumn<T> grad, Span<T> writable, T lr, T wd)
     {
-        var result = SgdUpdate(tensor, lr, wd);
-        return new ReverseGradTensor<T>(result.Data, requiresGrad: true, tensor.shape);
-    }
-
-    static ReverseGradTensor<T> stepWithMomentum(ReverseGradTensor<T> tensor, T[] velocity, T lr, T wd)
-    {
-        var data = tensor.Data;
-        var grad = tensor.Grad!;
-        int n = data.Length;
-        var momentumT = T.CreateChecked(0.9);
-
         data.TryGetSpan(out var dataSpan);
         grad.TryGetSpan(out var gradSpan);
-        var result = new T[n];
+        int n = data.Length;
+
+        for (int i = 0; i < n; i++)
+            writable[i] = wd != T.Zero
+                ? dataSpan[i] - lr * (wd * dataSpan[i] + gradSpan[i])
+                : dataSpan[i] - lr * gradSpan[i];
+    }
+
+    static void stepWithMomentumInPlace(NivaraColumn<T> data, NivaraColumn<T> grad, Span<T> writable, T[] velocity, T lr, T wd)
+    {
+        data.TryGetSpan(out var dataSpan);
+        grad.TryGetSpan(out var gradSpan);
+        int n = data.Length;
+        var momentumT = T.CreateChecked(0.9);
 
         for (int i = 0; i < n; i++)
             velocity[i] = wd != T.Zero
@@ -29,9 +31,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
                 : momentumT * velocity[i] + lr * gradSpan[i];
 
         for (int i = 0; i < n; i++)
-            result[i] = dataSpan[i] - velocity[i];
-
-        return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(result), requiresGrad: true, tensor.shape);
+            writable[i] = dataSpan[i] - velocity[i];
     }
 
     public static ReverseGradTensor<T> SgdUpdate(ReverseGradTensor<T> tensor, T learningRate, T weightDecay = default)
@@ -125,15 +125,14 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
                 if (momentum > 0.0)
                 {
                     ensureVelocityBuffer(velIdx, tensor.Length);
-                    var newTensor = stepWithMomentum(tensor, velocityBuffers[velIdx], lr, wd);
-                    param.Tensor = newTensor;
+                    stepWithMomentumInPlace(tensor.Data, tensor.Grad!, tensor.Data.AsWritableSpan(), velocityBuffers[velIdx], lr, wd);
                     velIdx++;
                 }
                 else
                 {
-                    var newTensor = stepNoMomentum(tensor, lr, wd);
-                    param.Tensor = newTensor;
+                    stepNoMomentumInPlace(tensor.Data, tensor.Grad!, tensor.Data.AsWritableSpan(), lr, wd);
                 }
+                param.Touch();
             }
         }
     }

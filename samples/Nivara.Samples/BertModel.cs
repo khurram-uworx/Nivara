@@ -49,6 +49,7 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
     public readonly Linear<T> kProj;
     public readonly Linear<T> vProj;
     public readonly Linear<T> oProj;
+    readonly int embedDim;
     readonly int _numHeads;
     readonly T _scale;
 
@@ -58,6 +59,7 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         kProj = new Linear<T>(embedDim, embedDim);
         vProj = new Linear<T>(embedDim, embedDim);
         oProj = new Linear<T>(embedDim, embedDim);
+        this.embedDim = embedDim;
         _numHeads = numHeads;
         _scale = T.CreateChecked(1.0 / Math.Sqrt(embedDim / numHeads));
         RegisterModules(qProj, kProj, vProj, oProj);
@@ -99,53 +101,39 @@ public sealed class BertSelfAttention<T> : Module<T> where T : struct, IFloating
         var K = kProj.Forward(input);
         var V = vProj.Forward(input);
 
-        var mask = BuildBlockDiagonalMask(attentionMask, batchSize, seqLen);
-        return oProj.Forward(MultiHeadAttention(Q, K, V, mask));
+        Q.Reshape(batchSize, seqLen, embedDim);
+        K.Reshape(batchSize, seqLen, embedDim);
+        V.Reshape(batchSize, seqLen, embedDim);
+
+        var mask = BuildBatchedPaddingMask(attentionMask, batchSize, seqLen);
+        var attn = ReverseGradOperations.BatchedMultiHeadAttention(Q, K, V, _numHeads, _scale, mask);
+        attn.Reshape(batchSize * seqLen, embedDim);
+
+        return oProj.Forward(attn);
     }
 
-    static ReverseGradTensor<T> BuildBlockDiagonalMask(
+    static ReverseGradTensor<T> BuildBatchedPaddingMask(
         ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
     {
-        int N = batchSize * seqLen;
-        var maskData = new T[N * N];
+        var maskData = new T[batchSize * seqLen * seqLen];
         var negInf = T.CreateChecked(double.NegativeInfinity);
 
         for (int b = 0; b < batchSize; b++)
         {
-            int offset = b * seqLen;
-
+            int rowBase = b * seqLen * seqLen;
+            int maskBase = b * seqLen;
             for (int j = 0; j < seqLen; j++)
             {
-                int colIdx = offset + j;
-                if (attentionMask.Data[colIdx] == T.Zero)
+                if (attentionMask.Data[maskBase + j] == T.Zero)
                 {
                     for (int i = 0; i < seqLen; i++)
-                    {
-                        int row = offset + i;
-                        maskData[row * N + colIdx] = negInf;
-                    }
-                }
-            }
-
-            for (int other = 0; other < batchSize; other++)
-            {
-                if (other == b) continue;
-                int otherOffset = other * seqLen;
-                for (int i = 0; i < seqLen; i++)
-                {
-                    int row = offset + i;
-                    for (int j = 0; j < seqLen; j++)
-                    {
-                        int otherCol = otherOffset + j;
-                        maskData[row * N + otherCol] = negInf;
-                    }
+                        maskData[rowBase + i * seqLen + j] = negInf;
                 }
             }
         }
 
-        var maskCol = NivaraColumn<T>.Create(maskData);
-        var tensor = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
-        tensor.Reshape(N, N);
+        var tensor = ReverseGradTensor<T>.FromArray(maskData, requiresGrad: false);
+        tensor.Reshape(batchSize, seqLen, seqLen);
         return tensor;
     }
 

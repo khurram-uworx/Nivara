@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
@@ -175,5 +176,92 @@ public class DistilBertSequenceClassificationTests
 
         var ex = Assert.Throws<ArgumentException>(() => model.Forward(inputIds, mask, 1, 8));
         Assert.That(ex!.Message, Does.Contain("different lengths"));
+    }
+
+    [Test]
+    public void ForwardBatched_BatchedEqualsIndependentSingleSequenceRuns()
+    {
+        // The batched path isolates sequences per batch element (previously via a
+        // block-diagonal mask on the flattened input). Batched B=2 must produce the
+        // same logits as running each sequence independently at B=1.
+        var tensors = FabricateWeights();
+        var config = TinyConfig() with { NumHiddenLayers = 1 };
+        using var model = new DistilBertForSequenceClassification<float>(config, NumClasses);
+        model.LoadWeights(tensors);
+
+        int L = 8;
+        var ids1 = new float[L];
+        var ids2 = new float[L];
+        for (int i = 0; i < L; i++)
+        {
+            ids1[i] = (i * 2 + 1) % Vocab;
+            ids2[i] = (i * 3 + 2) % Vocab;
+        }
+        var ones = new float[L];
+        Array.Fill(ones, 1f);
+
+        // Sequence 2 has its trailing half padded to exercise key-position masking.
+        var mask2 = new float[L];
+        Array.Fill(mask2, 1f, 0, L / 2);
+
+        var single1 = model.Forward(GradientUtils.Constant(ids1), GradientUtils.Constant(ones), 1, L);
+        var single2 = model.Forward(GradientUtils.Constant(ids2), GradientUtils.Constant(mask2), 1, L);
+
+        var concatIds = new float[2 * L];
+        var concatMask = new float[2 * L];
+        Array.Copy(ids1, 0, concatIds, 0, L);
+        Array.Copy(ids2, 0, concatIds, L, L);
+        Array.Copy(ones, 0, concatMask, 0, L);
+        Array.Copy(mask2, 0, concatMask, L, L);
+        var batched = model.Forward(GradientUtils.Constant(concatIds), GradientUtils.Constant(concatMask), 2, L);
+
+        Assert.That(batched.Shape, Is.EqualTo(new[] { 2, NumClasses }));
+        for (int c = 0; c < NumClasses; c++)
+        {
+            Assert.That(batched[c], Is.EqualTo(single1[c]).Within(1e-4f));
+            Assert.That(batched[NumClasses + c], Is.EqualTo(single2[c]).Within(1e-4f));
+        }
+    }
+
+    [Test]
+    public void ForwardBatched_Backward_ProducesParameterGradients()
+    {
+        // Regression for the training path: ForwardBatched reshapes Q/K/V from
+        // [B*L, D] to [B, L, D] in place and feeds BatchedMultiHeadAttention, whose
+        // backward accumulates into the reshaped tensors. Gradient must flow all the
+        // way back through the MatMul projections to every parameter.
+        var tensors = FabricateWeights();
+        var config = TinyConfig() with { NumHiddenLayers = 1 };
+        using var model = new DistilBertForSequenceClassification<float>(config, NumClasses);
+        model.LoadWeights(tensors);
+
+        int L = 8;
+        var ids = new float[2 * L];
+        var mask = new float[2 * L];
+        var labels = new int[] { 0, 1 };
+        for (int i = 0; i < 2 * L; i++)
+        {
+            ids[i] = (i * 2 + 1) % Vocab;
+            mask[i] = 1f;
+        }
+
+        using (GradientUtils.Grad())
+        {
+            var logits = model.Forward(GradientUtils.Constant(ids), GradientUtils.Constant(mask), 2, L);
+            var loss = new CrossEntropyLoss<float>().Forward(logits, labels);
+            loss.Backward();
+        }
+
+        var parameters = model.GetParameters().Values;
+        Assert.That(parameters, Is.Not.Empty);
+        foreach (var param in parameters)
+        {
+            Assert.That(param.Tensor.Grad, Is.Not.Null,
+                $"Parameter '{param.Name}' received no gradient through the batched attention path.");
+            var grad = param.Tensor.Grad!;
+            for (int i = 0; i < grad.Length; i++)
+                Assert.That(float.IsFinite(grad[i]), Is.True,
+                    $"Parameter '{param.Name}' has a non-finite gradient at index {i}.");
+        }
     }
 }

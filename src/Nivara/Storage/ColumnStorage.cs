@@ -259,7 +259,7 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
-        return data.AsSpan(dataStart, dataLength).ToArray();
+        return data.AsSpan(dataStart, dataLength);
     }
 
     /// <inheritdoc />

@@ -490,7 +490,7 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
 - Initializes weights with Kaiming-Uniform: `U(-√(6/fanIn), √(6/fanIn))`
 - Forward transposes weight, applies MatMul, then broadcasts bias via `ones @ bias`
 - Inference (outside `GradientUtils.Grad()`) passes the raw weight straight to the kernel's transposed-B matmul (`MatMulTransposedB`) — zero transposes
-- Training (inside `GradientUtils.Grad()`) reuses a version-stamped transposed-weight cache (issue #87): the `[in, out]` transpose buffer is computed once and invalidated only when `Parameter<T>.Version` changes (weight replaced by an optimizer `Step()` or invalidated via `Touch()`), eliminating the per-forward transpose allocation/copy across an epoch
+- Training (inside `GradientUtils.Grad()`) records a grad-tracking `MatMulTransposedB` op: `Linear` passes its raw `[outFeatures, inFeatures]` weight to the transposed-B matmul, so weights are never transposed per forward or per backward (the earlier version-stamped transpose cache, issue #87, was removed)
 
 ### Sequential\<T\>
 
@@ -868,6 +868,13 @@ optimizer.AddParameterGroup(model.GetParameters().Values, learningRate, weightDe
 | `ZeroGrad()` | Zeros gradients on all managed parameters |
 | `AddParameterGroup(...)` | Registers owning `Parameter<T>` objects; use `model.GetParameters().Values` for modules |
 | `Dispose()` | Releases rented state buffers |
+
+**In-place steps** — `Step()` writes the update into each parameter's existing
+backing array and bumps its version (`Touch()`); the parameter tensor is never
+replaced. Consequently a `Step()` without a subsequent `ZeroGrad()` accumulates
+stale gradients across steps (PyTorch semantics). The built-in
+`TrainingLoop<T>` and `DataParallelTrainer<T>` call `ZeroGrad()` once per
+iteration; manual training code must do the same.
 
 ### SGD\<T\>
 
