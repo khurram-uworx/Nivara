@@ -71,7 +71,7 @@ Per-batch profile (measured/derived from code):
 ## Verification protocol
 
 - `dotnet build Nivara.slnx` (Release).
-- Targeted tests: `OptimizerTests`, `LinearTransposedWeightCacheTests` (rewritten in P2 item 4), NivaraTorch parity, ForwardParityTests, `BatchedMultiHeadAttentionTests`, `DistilBertSequenceClassificationTests`, `PerfTests`.
+- Targeted tests: `OptimizerTests`, `LinearTransposedBTrainingTests` (rewritten from `LinearTransposedWeightCacheTests` in P2 item 4), NivaraTorch parity, ForwardParityTests, `BatchedMultiHeadAttentionTests`, `DistilBertSequenceClassificationTests`, `PerfTests`.
 - Full test suite run with human confirmation before starting (AGENTS.md).
 - **Timed benchmark:** `samples/NivaraFineTuning/benchmark_timing.cmd 25 2 1`
   (`-c Release --epochs 1 --batch-size 2 --max-examples 25`). 25 examples is

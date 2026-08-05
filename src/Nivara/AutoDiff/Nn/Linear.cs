@@ -1,7 +1,5 @@
 using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Utilities;
-using Nivara.Tensors;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
@@ -13,8 +11,6 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
     readonly bool useBias;
     readonly Parameter<T> weight;
     readonly Parameter<T>? bias;
-    T[]? transposedWeight;
-    long transposedWeightVersion = -1;
 
     public int InFeatures => inFeatures;
     public int OutFeatures => outFeatures;
@@ -57,27 +53,11 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
         if (input == null) throw new ArgumentNullException(nameof(input));
 
         var w = weight.Tensor;
-        var output = GradientUtils.IsGradEnabled
-            ? ReverseGradOperations.MatMul(input, GetTransposedWeight(w))
-            : ReverseGradOperations.MatMulTransposedB(input, w);
+        var output = ReverseGradOperations.MatMulTransposedB(input, w);
 
         if (useBias && bias != null)
             output = ReverseGradOperations.AddBias(output, bias.Tensor);
 
         return output;
-    }
-
-    ReverseGradTensor<T> GetTransposedWeight(ReverseGradTensor<T> w)
-    {
-        if (transposedWeight is null || transposedWeightVersion != weight.Version)
-        {
-            if (transposedWeight is null || transposedWeight.Length != outFeatures * inFeatures)
-                transposedWeight = new T[outFeatures * inFeatures];
-            w.Data.TryGetSpan(out var wSpan);
-            TensorsHelper.Transpose(wSpan, transposedWeight.AsSpan(), outFeatures, inFeatures);
-            transposedWeightVersion = weight.Version;
-        }
-
-        return ReverseGradOperations.TransposeCached(w, transposedWeight);
     }
 }

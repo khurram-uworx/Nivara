@@ -310,13 +310,17 @@ public static class ReverseGradOperations
     }
 
     /// <summary>
-    /// Inference-only matmul where <paramref name="b"/> is already in the
-    /// transposed-B layout the core kernel consumes (b is [bCols, aCols]
-    /// row-major — i.e. the raw weight of a linear layer). Computes
-    /// a @ b^T with zero transposes and builds no gradient graph. Only call
-    /// outside <see cref="GradientUtils.Grad"/> scope.
+    /// Matmul where <paramref name="b"/> is already in the transposed-B
+    /// layout the core kernel consumes (b is [bCols, aCols] row-major — i.e.
+    /// the raw weight of a linear layer). Computes a @ b^T with zero
+    /// transposes on either operand. Outside grad scope this is a plain
+    /// inference kernel with no graph node; inside
+    /// <see cref="GradientUtils.Grad"/> scope it records a single
+    /// "MatMulTransposedB" node whose VJP produces dA = g @ b and
+    /// dB = g^T @ a (one transpose of the output gradient, never of the
+    /// weights), so training Linear no longer double-transposes weights.
     /// </summary>
-    internal static ReverseGradTensor<T> MatMulTransposedB<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
+    public static ReverseGradTensor<T> MatMulTransposedB<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -342,10 +346,49 @@ public static class ReverseGradOperations
                 b.Data.TryGetSpan(out var bSpan);
                 var resultArr = new T[aRows * bCols];
                 TensorsHelper.MultiplyCore(aSpan, bSpan, resultArr, aRows, aCols, bCols, bTransposed: true);
-                return new ReverseGradTensor<T>(
+
+                var shouldTrack = GradientUtils.ShouldTrackGrad(a, b);
+                var resultTensor = new ReverseGradTensor<T>(
                     NivaraColumn<T>.CreateFromOwnedArray(resultArr),
-                    requiresGrad: false,
+                    shouldTrack,
                     new[] { aRows, bCols });
+
+                if (shouldTrack)
+                {
+                    var gradFn = new OpNode<T>("MatMulTransposedB", new object[] { a, b }, (typedGradOutput) =>
+                    {
+                        if (GradientUtils.ShouldTrackGrad(a))
+                        {
+                            b.Data.TryGetSpan(out var bSpan_b);
+                            typedGradOutput.TryGetSpan(out var gradSpan);
+                            var aGradArr = new T[aRows * aCols];
+                            TensorsHelper.MultiplyCore(gradSpan, bSpan_b, aGradArr, aRows, bCols, aCols);
+                            AccumulateGradient(a, NivaraColumn<T>.Create(aGradArr));
+                        }
+
+                        if (GradientUtils.ShouldTrackGrad(b))
+                        {
+                            a.Data.TryGetSpan(out var aSpan_b);
+                            typedGradOutput.TryGetSpan(out var gradSpan2);
+                            var gTArr = ArrayPool<T>.Shared.Rent(Math.Max(bCols * aRows, 1));
+                            try
+                            {
+                                TensorsHelper.Transpose(gradSpan2, gTArr.AsSpan(0, bCols * aRows), aRows, bCols);
+                                var bGradArr = new T[bCols * aCols];
+                                TensorsHelper.MultiplyCore(gTArr.AsSpan(0, bCols * aRows), aSpan_b, bGradArr, bCols, aRows, aCols);
+                                AccumulateGradient(b, NivaraColumn<T>.Create(bGradArr));
+                            }
+                            finally
+                            {
+                                ArrayPool<T>.Shared.Return(gTArr, clearArray: true);
+                            }
+                        }
+                    });
+
+                    ComputationGraph.AddNode(resultTensor, gradFn);
+                }
+
+                return resultTensor;
             },
             AutoDiffDiagnostics.MatrixNote("MatMulTransposedB", aRows, aCols, bCols));
     }
@@ -867,50 +910,6 @@ public static class ReverseGradOperations
                 return resultTensor;
             },
             $"AutoDiff=Transpose;Shape={rows}x{cols}->{cols}x{rows}");
-    }
-
-    /// <summary>
-    /// Transpose with a caller-supplied destination buffer already holding
-    /// the transposed data. Produces the same graph semantics as
-    /// <see cref="Transpose{T}"/> (a single "Transpose" node whose backward
-    /// accumulates into <paramref name="a"/>) but skips the per-call transpose
-    /// copy — the buffer is a module-owned cache invalidated by the
-    /// parameter's version stamp. Requires grad tracking.
-    /// </summary>
-    internal static ReverseGradTensor<T> TransposeCached<T>(ReverseGradTensor<T> a, T[] transposedData)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        if (a == null) throw new ArgumentNullException(nameof(a));
-        if (transposedData == null) throw new ArgumentNullException(nameof(transposedData));
-        if (a.Rank != 2)
-            throw new ArgumentException($"Transpose requires a matrix (rank 2), got rank {a.Rank}", nameof(a));
-
-        var rows = a.shape[0];
-        var cols = a.shape[1];
-        if (transposedData.Length != rows * cols)
-            throw new ArgumentException(
-                $"Transposed data length {transposedData.Length} does not match expected {rows * cols}.", nameof(transposedData));
-
-        var resultShape = new[] { cols, rows };
-        var resultTensor = new ReverseGradTensor<T>(
-            NivaraColumn<T>.CreateFromOwnedArray(transposedData),
-            GradientUtils.ShouldTrackGrad(a),
-            resultShape);
-
-        if (GradientUtils.ShouldTrackGrad(a))
-        {
-            var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput) =>
-            {
-                var gArr = new T[cols * rows];
-                typedGradOutput.TryGetSpan(out var gradSpan);
-                TensorsHelper.Transpose(gradSpan, gArr.AsSpan(), cols, rows);
-                AccumulateGradient(a, NivaraColumn<T>.Create(gArr));
-            });
-
-            ComputationGraph.AddNode(resultTensor, gradFn);
-        }
-
-        return resultTensor;
     }
 
     public static ReverseGradTensor<T> TransposeAxes<T>(ReverseGradTensor<T> a, int axis1, int axis2) where T : struct, IFloatingPointIeee754<T>
