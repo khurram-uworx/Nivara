@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Numerics;
+using System.Threading;
 
 namespace Nivara.AutoDiff.Training;
 
@@ -29,9 +30,11 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFlo
 
     public int Count => _dataset.Count;
 
+    int enumerationCount;
+
     public IEnumerator<Batch<T>> GetEnumerator()
     {
-        return GetBatches(0, 0).GetEnumerator();
+        return GetBatches(Interlocked.Increment(ref enumerationCount), 0).GetEnumerator();
     }
 
     public IEnumerable<Batch<T>> GetBatches(int epoch = 0, int skipBatches = 0)
