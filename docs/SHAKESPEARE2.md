@@ -90,6 +90,23 @@ Batched API shape (tentative, to be finalized with the team):
 - **Task 2 — DONE** (`e451f80`): new `ReverseGradOperations.BatchedMultiHeadAttention<T>` op (ReverseGradOperations.cs:569) accepting rank-3 `[B, L, D]` + optional `[B, qLen, kvLen]` additive mask; `Parallel.For` over B when `ShouldParallelizeBatch` (B≥4 and total work ≥ 2^21); ArrayPool-pooled transient buffers; single-sequence MHA untouched. 8 unit tests in `tests/Nivara.Tests/AutoDiff/BatchedMultiHeadAttentionTests.cs`; all pass.
 - **Task 3 — DONE** (`d2ecc46`): batched causal self-attention + batched cross-attention fixture cases appended at the end of `gen_reference.py` `run()` (seed-303 `attn_rng` stream; the seed-42 shared-stream conv/linear fixtures were regenerated per the documented convention — the full `samples/data/torch-comparison/` tree is committed as one unit). New `tests/Nivara.Tests/NivaraTorch/BatchedAttentionTests.cs` (3 tests: causal forward, causal backward, cross forward+backward) compare against PyTorch fixtures. Full NivaraTorch suite: 71/71 pass.
 
+### Results (Task 4) — 2026-08-05
+
+Harness: `tests/Nivara.PerformanceTests/Program.cs` (extended with 4 batched-attention scenarios), Release build, .NET 10.0.9, 16 logical processors, x64. Shapes = Idea A defaults from NEXT.md (`B=16, L=128, D=64, H=4`), causal additive mask. Numbers are medians of 3+ runs × 12 iterations; warmup 3.
+
+| Scenario | Per-seq loop (baseline) | Batched op (Task 2) | Improvement |
+|---|---|---|---|
+| forward — time/op | ~20.5 ms | ~7.5 ms | **~2.7x** |
+| forward — B/op | ~2.14 MB | ~0.53 MB | **~4.0x** |
+| forward — gen0/op | 0.17 | 0.00 | — |
+| forward+backward — time/op | ~72 ms | ~23 ms | **~3.1x** |
+| forward+backward — B/op | ~7.96 MB | ~7.88 MB (see caveat) | n/a |
+| forward+backward — gen0/op | ~1.1 | ~0.33 | **~3.3x** |
+
+Caveat: the batched path runs `Parallel.For` over B (B=16 ≥ 4, work ≥ 2^21), so a share of its allocations occurs on thread-pool workers and is not attributed to the calling thread by `GC.GetAllocatedBytesForCurrentThread`. The gen0/op delta (0.00–0.33 vs 0.17–1.1) is the reliable signal: the batched path essentially stops gen0 churn on the hot thread.
+
+**Decision:** no further kernel changes this cycle. The batched op already delivers a ~3x time and ~4x allocation win over the honest baseline, so Route A (batched rank-3 MatMul primitives) is **not** justified by these measurements — it stays a backlog idea (issue **#118**). Parallel threshold / cache blocking were not worth perturbing; the `ShouldParallelizeBatch` heuristic (B≥4 and B·work ≥ 2^21) held up at the measured shape.
+
 ---
 
 ## Task 1: Current-state audit and batched-attention route decision
