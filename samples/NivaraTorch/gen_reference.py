@@ -880,6 +880,74 @@ def run():
     save_attn_case("attn_cross", attn_cq, attn_ck, attn_cv, attn_cscale, attn_cmask, attn_cdout, num_heads=2)
 
     # =========================================================================
+    # Batched fused multi-head attention tests
+    # (ReverseGradOperations.BatchedMultiHeadAttention, inputs are [B, L, D])
+    # Same semantics as the single-sequence cases above but with a leading batch
+    # dimension and a per-batch-element [B, qLen, kvLen] additive mask.
+    # Appended at the END of the generation stream so the shared attn_rng stream
+    # is untouched and every existing fixture stays bit-identical.
+    # =========================================================================
+    def save_batched_attn_case(name, q, k, v, scale, mask, dout, num_heads=4):
+        q = q.detach().requires_grad_(True)
+        k = k.detach().requires_grad_(True)
+        v = v.detach().requires_grad_(True)
+        d = q.shape[2]
+        head_dim = d // num_heads
+        heads = []
+        for h in range(num_heads):
+            qh = q[:, :, h * head_dim:(h + 1) * head_dim]
+            kh = k[:, :, h * head_dim:(h + 1) * head_dim]
+            vh = v[:, :, h * head_dim:(h + 1) * head_dim]
+            scores = torch.matmul(qh, kh.transpose(-2, -1)) * scale
+            if mask is not None:
+                scores = scores + mask
+            p = torch.softmax(scores, dim=-1)
+            heads.append(torch.matmul(p, vh))
+        out = torch.cat(heads, dim=-1)
+        dq, dk, dv = torch.autograd.grad(out, (q, k, v), grad_outputs=dout)
+
+        q.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_q.bin"))
+        k.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_k.bin"))
+        v.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_v.bin"))
+        out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_output.bin"))
+        if mask is not None:
+            mask.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_mask.bin"))
+        dout.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dout.bin"))
+        dq.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dq.bin"))
+        dk.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dk.bin"))
+        dv.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{name}_dv.bin"))
+        manifest[name] = {
+            "layer": "BatchedMultiHeadAttention",
+            "q_shape": list(q.shape),
+            "k_shape": list(k.shape),
+            "v_shape": list(v.shape),
+            "num_heads": num_heads,
+            "scale": float(scale),
+            "masked": mask is not None,
+            "output_shape": list(out.shape),
+        }
+        print(f"  {name}: q={list(q.shape)} k={list(k.shape)} v={list(v.shape)} output={list(out.shape)}")
+
+    # Batched self-attention with a per-batch causal mask (B=2, L=4, D=16, H=4).
+    bat_q = torch.randn(2, 4, 16, generator=attn_rng)
+    bat_k = torch.randn(2, 4, 16, generator=attn_rng)
+    bat_v = torch.randn(2, 4, 16, generator=attn_rng)
+    bat_scale = 1.0 / math.sqrt(4)  # headDim = 16 / 4
+    bat_mask = torch.triu(torch.full((1, 4, 4), float("-inf")), diagonal=1).repeat(2, 1, 1)
+    bat_dout = torch.randn(2, 4, 16, generator=attn_rng)
+    save_batched_attn_case("batched_attn_causal", bat_q, bat_k, bat_v, bat_scale, bat_mask, bat_dout)
+
+    # Batched cross-attention (B=2, qLen=3, kvLen=5, D=8, H=2), last key padded.
+    bat_cq = torch.randn(2, 3, 8, generator=attn_rng)
+    bat_ck = torch.randn(2, 5, 8, generator=attn_rng)
+    bat_cv = torch.randn(2, 5, 8, generator=attn_rng)
+    bat_cscale = 1.0 / math.sqrt(4)  # headDim = 8 / 2
+    bat_cmask = torch.zeros(2, 3, 5)
+    bat_cmask[:, :, 4] = float("-inf")
+    bat_cdout = torch.randn(2, 3, 8, generator=attn_rng)
+    save_batched_attn_case("batched_attn_cross", bat_cq, bat_ck, bat_cv, bat_cscale, bat_cmask, bat_cdout, num_heads=2)
+
+    # =========================================================================
     # Write manifest
     # =========================================================================
     manifest_path = os.path.join(TEST_DIR, "manifest.json")
