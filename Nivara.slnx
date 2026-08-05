@@ -8,7 +8,6 @@
     <Project Path="samples/MicroGpt/MicroGpt.csproj" />
     <Project Path="samples/Nivara.Samples/Nivara.Samples.csproj" />
     <Project Path="samples/NivaraChat/NivaraChat.csproj" />
-    <Project Path="samples/NivaraChatClient/NivaraChatClient.csproj" />
     <Project Path="samples/NivaraChess/NivaraChess.csproj" />
     <Project Path="samples/Nivara.SampleApp/Nivara.SampleApp.csproj" />
     <Project Path="samples/NivaraClassifier/NivaraClassifier.csproj" />
