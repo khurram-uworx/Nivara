@@ -86,4 +86,64 @@ public static class IntentTrainer
 
         return (model, tokenizer);
     }
+
+    public static (TextClassifierModel<float> model, TextTokenizer tokenizer) TrainIncremental(
+        string[] feedbackTexts, int[] feedbackLabels,
+        string modelsDir, int additionalEpochs = 5, int batchSize = 16)
+    {
+        var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, "intent_tokenizer.json"));
+        var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen: 20);
+        ModelSerializer.Load(model, Path.Combine(modelsDir, "intent_model.json"));
+        Console.WriteLine("  Loaded existing intent model weights.");
+
+        int maxSeqLen = 20;
+        var allTexts = new List<string>();
+        var allLabels = new List<int>();
+
+        var (origTexts, origLabels) = IntentDataGenerator.GenerateIntentData(500, seed: 42);
+        allTexts.AddRange(origTexts);
+        allLabels.AddRange(origLabels);
+
+        allTexts.AddRange(feedbackTexts);
+        allLabels.AddRange(feedbackLabels);
+
+        var allTokens = new int[allTexts.Count * maxSeqLen];
+        for (int i = 0; i < allTexts.Count; i++)
+        {
+            var encoded = tokenizer.Encode(allTexts[i], fixedLength: maxSeqLen);
+            Array.Copy(encoded, 0, allTokens, i * maxSeqLen, maxSeqLen);
+        }
+
+        var frame = FrameBuilder.BuildDocumentClassificationFrame(allTokens, allLabels.ToArray(), allTexts.Count, maxSeqLen);
+        var featureColumns = Enumerable.Range(0, maxSeqLen).Select(d => $"tok_{d}").ToArray();
+        var dataset = new TensorDataset<float>(frame, featureColumns, ["label"]);
+        var loader = new DataLoader<float>(dataset, batchSize, shuffle: true, seed: 42);
+
+        using var optimizer = new Adam<float>(learningRate: 0.0005f);
+        optimizer.AddParameterGroup(model.GetParameters().Values);
+
+        var lossFn = new CrossEntropyLoss<float>();
+        var loop = new TrainingLoop<float>(
+            model, loader,
+            (logits, lbls) =>
+            {
+                int bs = logits.Length / 5;
+                var targets = new int[bs];
+                for (int i = 0; i < bs; i++)
+                    targets[i] = int.CreateChecked(lbls.Data[i]);
+                return lossFn.Forward(logits, targets);
+            },
+            optimizer, additionalEpochs);
+
+        var result = loop.Run();
+
+        var lastLoss = result.Epochs[^1].Loss;
+        Console.WriteLine($"  Incremental training complete: {result.Epochs.Count} epochs, final loss {lastLoss:F4}");
+
+        ModelSerializer.Save(model, Path.Combine(modelsDir, "intent_model.json"));
+        Console.WriteLine($"  Saved updated model to {modelsDir}/");
+
+        model.Eval();
+        return (model, tokenizer);
+    }
 }
