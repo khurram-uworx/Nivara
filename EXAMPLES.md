@@ -380,6 +380,7 @@ with torch.no_grad():
 **Nivara** — reverse-mode AutoDiff with gradient tracking (operator overloads for `+`, `-`, `*`):
 ```csharp
 using Nivara.AutoDiff;
+using Nivara.AutoDiff.Extensions;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
@@ -398,7 +399,7 @@ using var b = ReverseGradTensor<float>.FromArray([0.1f, 0.1f, 0.1f], requiresGra
 using (GradientUtils.Grad())
 {
     var prediction = w * x + b;
-    var loss = GradOperations.Mean((prediction - y) * (prediction - y));
+    var loss = ReverseGradOperations.Mean((prediction - y) * (prediction - y));
 
     loss.Backward();
 }
@@ -470,7 +471,7 @@ result.PrintSummary();
 
 **What changed from Act 7a:**
 - No raw tensor creation — `Linear<T>` registers weight/bias as parameters automatically
-- No manual forward pass with `GradOperations.Add/Multiply/Subtract` — just `L1.Forward(x)`
+- No manual forward pass with `ReverseGradOperations.Add/Multiply/Subtract` — just `L1.Forward(x)`
 - No manual `Backward()` + `SgdUpdate` — `TrainingLoop` handles forward/backward/step/zero-grad
 - No `using` statements per tensor — `Module<T>` implements `IDisposable` and disposes child modules
 
@@ -506,8 +507,8 @@ class FraudNet : Module<float>
 
     public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
     {
-        var h = GradOperations.Relu(L1.Forward(x));
-        h = GradOperations.Relu(L2.Forward(h));
+        var h = ReverseGradOperations.Relu(L1.Forward(x));
+        h = ReverseGradOperations.Relu(L2.Forward(h));
         return L3.Forward(h);
     }
 }

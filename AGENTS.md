@@ -29,9 +29,8 @@ Principles (high level)
 
 Where to look (implementation map)
 - Storage and selection
+  - `src/Nivara/Storage/ColumnStorage.cs` — the single unified storage class (sole-owner `T[]` + optional `bool[]` null mask; zero-copy Slice; lazy zero-copy `AsTensor()` for unmanaged types).
   - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime selection: `IsVectorizable<T>()` and `Create<T>(ReadOnlySpan<T>)`.
-  - `src/Nivara/Storage/TensorStorage.cs` — tensor-backed storage implementation.
-  - `src/Nivara/Storage/MemoryStorage.cs` — memory-backed storage and null-mask representation.
 
 - Column kernels and high-level ops
   - `src/Nivara/NivaraColumn.cs` — arithmetic, comparison, mask propagation, and use of `TensorPrimitives` for `float`/`double`.
@@ -90,18 +89,18 @@ Where to look (implementation map)
   - `src/Nivara/AutoDiff/Serialization/` — ModelSerializer for JSON save/load and state-dict JSON wrappers
 
 - Factory & utilities
-  - `src/Nivara/Storage/ColumnStorageFactory.cs` — runtime switch for creating `Nivara.Storage.TensorStorage<T>` vs `Nivara.Storage.MemoryStorage<T>`.
+  - `src/Nivara/Storage/ColumnStorageFactory.cs` — `Create<T>(ReadOnlySpan<T>)`, `Create<T>(ReadOnlySpan<T>, ReadOnlyMemory<bool>? nullMask)`, `CreateFromOwnedArray<T>`, and `IsVectorizable<T>()`; all produce the single `ColumnStorage<T>`.
   - `src/Nivara/Tensors/NivaraTensorExtensions.cs` — `NivaraColumn<T>` extension methods for element-wise math, gradient helpers.
   - `src/Nivara/Tensors/TensorInteropExtensions.cs` — tensor helpers used across codebase.
 
 Key rules for AI Agents to follow when generating tensor-aware code
 1. Storage selection
-   - Call `Nivara.Storage.ColumnStorageFactory.IsVectorizable<T>()` first to decide tensor usage.
-   - Only instantiate `Nivara.Storage.TensorStorage<T>` when `T` is unmanaged and vectorizable.
+   - Call `Nivara.Storage.ColumnStorageFactory.IsVectorizable<T>()` when you need to know whether `T` supports vectorized kernels.
+   - All columns use the single `ColumnStorage<T>` (sole-owner `T[]` + optional `bool[]` null mask); kernel dispatch is decided by `KernelSelector`, never by the storage class.
 
 2. Zero-copy preference
-   - If `Nivara.Storage.TensorStorage` exposes `AsTensorSpan()` and the null mask is empty, prefer `TensorSpan<T>` kernels to avoid allocations.
-   - When creating `TensorSpan` from an existing span, ensure there are no nulls; otherwise throw or fallback to copy.
+   - Use `NivaraColumn<T>.TryGetSpan` (returns a zero-copy read-only view when the column has no nulls, `false` otherwise) or `AsTensorView()` (lazy zero-copy `Tensor<T>` for unmanaged types; check `HasNulls` first) to avoid allocations.
+   - When creating a `TensorSpan`/`Tensor<T>` from an existing span, ensure there are no nulls; otherwise throw or fallback to copy.
 
 3. Kernel use
    - Use `TensorPrimitives` for `float` and `double` arithmetic/comparisons. Prefer generic `TensorPrimitives` overloads (e.g., `TensorPrimitives.CosineSimilarity<T>`) when available for type flexibility without branching.
@@ -114,7 +113,7 @@ Key rules for AI Agents to follow when generating tensor-aware code
 5. Minimize allocations
    - Avoid calling `Tensor.FlattenTo` repeatedly in hot loops.
    - For temporary buffers larger than 1024 elements, rent arrays from `ArrayPool<T>.Shared` (core) or `BufferPool` (Extensions) and return promptly.
-   - Consider caching the flattened buffer inside `Nivara.Storage.TensorStorage` behind an `internal` API if multiple accesses are expected.
+   - `AsTensorView()` caches the lazy `Tensor<T>` view inside `ColumnStorage<T>`; reuse it rather than rebuilding tensors.
 
 6. Kernel selection heuristics
    - Implement or reuse `DetermineKernelType()` that considers:
@@ -124,7 +123,7 @@ Key rules for AI Agents to follow when generating tensor-aware code
    - If kernel selection resolves to scalar, avoid preparing tensor copies.
 
 7. Safe type dispatch
-   - When converting spans/arrays to typed `Nivara.Storage.TensorStorage<T>`, convert to arrays first and then call the `TensorStorage<T>` constructor. Avoid `MemoryMarshal.Cast` unless `T` is unmanaged.
+   - When converting spans/arrays to typed `Nivara.Storage.ColumnStorage<T>`, convert to arrays first and then use `ColumnStorageFactory.Create<T>(...)` or `CreateFromOwnedArray<T>`. Avoid `MemoryMarshal.Cast` unless `T` is unmanaged.
    - Keep explicit type-switch branches for each supported primitive (int, float, double, long, short, byte, bool, etc.).
 
 8. Consolidating duplicate logic
@@ -137,8 +136,8 @@ Key rules for AI Agents to follow when generating tensor-aware code
     - Use `ColumnDiagnostics`, `DiagnosticsTracker`, and `QueryDiagnostics` when changing kernel selection, query execution, or optimization behavior.
 
 Suggested small, safe improvements to implement (prioritized)
-- ✓ Cache flattened buffer in `Nivara.Storage.TensorStorage` (internal, lazy) — DONE via `GetFlattenedSpan()` in Phase 0.
-- ✓ Add internal `AsTensorSpanIfNoNulls()` to `Nivara.Storage.TensorStorage` — DONE (Phase 0).
+- ✓ Cache flattened buffer in `Nivara.Storage.TensorStorage` (internal, lazy) — SUPERSEDED by the 1.2.0 storage consolidation: `TensorStorage` was deleted; `ColumnStorage<T>` owns a `T[]` and `Slice` is zero-copy, so no flattened copy cache is needed.
+- ✓ Add internal `AsTensorSpanIfNoNulls()` to `Nivara.Storage.TensorStorage` — SUPERSEDED by `ColumnStorage<T>.AsTensor()` / public `NivaraColumn<T>.AsTensorView()`.
 - ✓ Add `BufferPool.Rent(int size)` usage in `NivaraColumn` heavy paths — DONE (Phase 0).
 - ✓ Implement `DetermineKernelType` central helper — DONE as `KernelSelector.DetermineKernelType()` (Phase 1).
 - ✗ `RowNorms`/`ColumnNorms` on `NivaraFrame` — REMOVED in the AutoDiff refactor (Task 10): the frame tensor-axis methods (`Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms`) had no production callers and were deleted along with the `TensorsHelper.RowNorms` SIMD kernel. Use `TensorPrimitives` on column/row spans directly.
@@ -294,7 +293,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **FlattenTo**: cache flattened tensor data if multiple accesses needed; use single `FlattenTo` for one-time access.
 - **StreamingBufferManager**: use bounded buffer manager (in Extensions) for large datasets with memory budgets and GC triggers.
 - **Vectorization checks**: verify `Vector.IsHardwareAccelerated` and type vectorizability before using SIMD kernels.
-- **Unmanaged constraint**: `TensorStorage<T>` requires unmanaged types (`int`, `float`, `double`, `long`, `bool`).
+- **Unmanaged constraint**: `ColumnStorage<T>.AsTensor()` / `NivaraColumn<T>.AsTensorView()` require unmanaged `T` (`int`, `float`, `double`, `long`, `bool`, etc.).
 - **Resource management**: implement object-disposed guards and dispose frames, columns, and data sources consistently.
 - **Diagnostics**: preserve diagnostic context when wrapping kernel, query, optimization, and I/O failures.
 
@@ -334,19 +333,18 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 - **Common deps (Extensions only)**: CsvHelper 33.1.0, Apache.Arrow 23.0.0, Parquet.Net 6.0.3, Microsoft.ML 5.0.0, System.Numerics.Tensors 10.0.10
 - **Useful helpers**: `ColumnDiagnostics`, `DiagnosticsTracker`, `ColumnStorageFactory.IsVectorizable<T>()`, `NivaraColumn<T>.CreateFromNullable(T?[])`, `Tensor.Create(array)` + `FlattenTo(buffer)`, `KernelSelector.DetermineKernelType()`, `SGD<T>.SgdUpdate()`, `Adam<T>`, `AdamW<T>`, `Linear<T>`, `Sequential<T>`, `Module<T>.StateDict()`, `Module<T>.LoadStateDict()`, `TrainingLoop<T>`, `DataParallelTrainer<T>`, `ModelSerializer`, `MSELoss<T>(reduceToMean)`, `Activation.Gelu`, `ReverseGradOperations.Gelu`
 - **AutoDiff type constraint**: `IFloatingPointIeee754<T>` (float, double, Half) — ADR-001 non-nullable domain
-- **Storage**: `TensorStorage` for vectorizable unmanaged types, `MemoryStorage` for others
+- **Storage**: single `ColumnStorage<T>` for all types (sole-owner `T[]` + optional `bool[]` null mask; zero-copy Slice; lazy `AsTensorView()`); vectorization decided by `KernelSelector`
 - **Null handling**: explicit boolean masks, no NaN-based semantics
 - **Query execution**: lazy by default, multiple strategies (eager, streaming, parallel)
 
 References (implementations to inspect)
+- `src/Nivara/Storage/ColumnStorage.cs`
 - `src/Nivara/Storage/ColumnStorageFactory.cs`
-- `src/Nivara/Storage/TensorStorage.cs`
 - `src/Nivara/NivaraColumn.cs`
 - `src/Nivara/Tensors/TensorsHelper.cs`
 - `src/Nivara/Tensors/TensorInteropExtensions.cs`
 - `src/Nivara/KernelSelector.cs`
 - `src/Nivara/NivaraFrame.cs`
-- `src/Nivara/Storage/MemoryStorage.cs`
 - `src/Nivara/Interfaces.cs`
 - `src/Nivara/Query/IQueryInterfaces.cs`
 - `src/Nivara/Execution/ExecutionEngine.cs`

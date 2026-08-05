@@ -113,8 +113,6 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 ├── DepthwiseSeparableConv2d<T>       ← MobileNet-style: depthwise conv + pointwise 1×1
 ├── MaxPool2d<T>                      ← 2D max pooling
 ├── AdaptiveAvgPool2d<T>              ← Adaptive average pooling (global pooling for classifier heads)
-├── TextClassifierModel<T>            ← Embedding → MeanPool → FC → ReLU → FC (pre-built)
-├── TokenClassifierModel<T>           ← Embedding → FC → ReLU → FC per-token (pre-built)
 ├── VAE<T>                            ← Variational Autoencoder (encoder → reparameterize → decoder; optional conditioning)
 ├── ConvVAE<T>                        ← Fully convolutional VAE (Conv2d encoder, 1×1 Conv heads)
 ├── TransformerBlock<T>               ← Multi-head causal self-attention + GELU MLP (pre-norm)
@@ -123,6 +121,8 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 ├── Sampler<T>                        ← Temperature/top-k categorical sampling
 ├── TextTokenizer                     ← Vocabulary builder with special tokens
 └── Initializers/                     ← Kaiming, Xavier, Uniform, Normal, PyTorchDefault
+
+Pre-built application-level classifiers (`TextClassifierModel<T>`, `TokenClassifierModel<T>`) moved out of core in 1.2.0 to `samples/Nivara.Samples/` (namespace `Nivara.AutoDiff.Nn`). Core provides composable primitives only.
 
 Loss Functions (Nn.Functional)
 ───────────────────────────────
@@ -325,7 +325,7 @@ once with `NivaraColumn<T>.CreateFromOwnedArray`. Outside
 |----|---------|---------------|-------|
 | `Sum(a)` | `∑a` | `broadcast(grad, n)` — fills gradient value to all positions | Expects scalar output |
 | `Mean(a)` | `(∑a)/n` | `broadcast(grad/n, n)` — fills gradient/n to all positions | Expects scalar output |
-| `MeanPool(a, poolSize, embedDim)` | Mean over `poolSize` tokens per embedding dim | Gradient divided by `poolSize` and scattered back | Used by TextClassifierModel |
+| `MeanPool(a, poolSize, embedDim)` | Mean over `poolSize` tokens per embedding dim | Gradient divided by `poolSize` and scattered back | Used by TextClassifierModel (in samples since 1.2.0) |
 
 ### Normalization
 
@@ -529,7 +529,9 @@ public sealed class SparseEmbedding<T> : Module<T> where T : struct, IFloatingPo
 
 Sparse embedding bag for fixed-width batches of active feature indices. Input shape `[batchSize, maxActiveFeatures]`, output `[batchSize, embeddingDim]`. Entries matching `PaddingIndex` are ignored. Useful for feature hashing / sparse feature sets.
 
-### TextClassifierModel\<T\>
+### TextClassifierModel\<T\> *(samples)*
+
+> Moved out of core in 1.2.0 — lives in `samples/Nivara.Samples/TextClassifierModel.cs` (namespace `Nivara.AutoDiff.Nn`). Reference the `Nivara.Samples` project to use it.
 
 ```csharp
 public sealed class TextClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
@@ -541,7 +543,9 @@ Pre-built text classification pipeline: `Embedding → MeanPool → Linear(hidde
 - `Forward(input)` — logits for each class (mean-pooled over sequence)
 - `Predict(int[] tokenIds)` — returns `int[]` of predicted class indices per batch
 
-### TokenClassifierModel\<T\>
+### TokenClassifierModel\<T\> *(samples)*
+
+> Moved out of core in 1.2.0 — lives in `samples/Nivara.Samples/TokenClassifierModel.cs` (namespace `Nivara.AutoDiff.Nn`). Reference the `Nivara.Samples` project to use it.
 
 ```csharp
 public sealed class TokenClassifierModel<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
@@ -1542,8 +1546,8 @@ var prediction = loaded.Forward(testInput);
 | `Activation<T>` / `Dropout<T>` | `src/Nivara/AutoDiff/Nn/Activation.cs` / `Dropout.cs` |
 | `Embedding<T>` | `src/Nivara/AutoDiff/Nn/Embedding.cs` |
 | `SparseEmbedding<T>` | `src/Nivara/AutoDiff/Nn/SparseEmbedding.cs` |
-| `TextClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TextClassifierModel.cs` |
-| `TokenClassifierModel<T>` | `src/Nivara/AutoDiff/Nn/TokenClassifierModel.cs` |
+| `TextClassifierModel<T>` | `samples/Nivara.Samples/TextClassifierModel.cs` *(moved from core in 1.2.0)* |
+| `TokenClassifierModel<T>` | `samples/Nivara.Samples/TokenClassifierModel.cs` *(moved from core in 1.2.0)* |
 | `VAE<T>` | `src/Nivara/AutoDiff/Nn/VAE.cs` |
 | `ConvVAE<T>` | `src/Nivara/AutoDiff/Nn/ConvVAE.cs` |
 | `Conv1d<T>` | `src/Nivara/AutoDiff/Nn/Conv1d.cs` |
