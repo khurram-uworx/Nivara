@@ -1,5 +1,4 @@
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
 using System.Numerics;

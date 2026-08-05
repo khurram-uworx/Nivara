@@ -13,13 +13,6 @@ don't require later ones).
 | # | Idea | Key Ecosystem APIs | Nivara Gaps | Status |
 |---|------|--------------------|-------------|--------|
 | A | IChatClient backed by batched transformer | `IChatClient`, DI | LayerNorm, batched Embedding, Concat | |
-| B | Confidence-based handoff | Conditional edges | Score extraction from models | **Done** |
-| C | Nivara as AIFunction tools | `AIFunctionFactory`, tool calling | None (existing models) | **Done** |
-| D | RAG with Nivara embeddings | `IEmbeddingGenerator`, vector search | Embedding generator wrapper | **Done** |
-| E | Writer-critic feedback loop | Conditional edges, feedback | None (existing validator) | **Done** |
-| F | Nivara as IEmbeddingGenerator | `IEmbeddingGenerator<T>` | Embedding wrapper module | **Done** |
-| G | Intent classification router | Handoff orchestration | Intent classifier model | **Done** |
-| H | Online learning from LLM feedback | `DataLoader` incremental | Incremental training API | **Done** |
 
 ---
 

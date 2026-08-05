@@ -1,5 +1,4 @@
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Serialization;
 using System.ComponentModel;
 using System.Text.Json;
 

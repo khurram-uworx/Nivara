@@ -1,6 +1,5 @@
 using System.Collections;
 using System.Numerics;
-using System.Threading;
 
 namespace Nivara.AutoDiff.Training;
 

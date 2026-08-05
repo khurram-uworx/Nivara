@@ -7,23 +7,29 @@ Console.WriteLine();
 
 // Run the diagnostics example
 DiagnosticsExample.RunExample();
-
 Console.WriteLine();
 Console.WriteLine();
 
 // Run the aggregate functions example
 AggregateExample.Run();
-
 Console.WriteLine();
 Console.WriteLine();
 
 // Run the automatic differentiation example
 AutoDiffExample.Run();
-
 Console.WriteLine();
-Console.WriteLine();
-Console.WriteLine("═══════════════════════════════════════════════════════════════");
 Console.WriteLine();
 
 // Run the cross-framework FraudNet example
 CrossFrameworkFraudNet.Run();
+Console.WriteLine();
+Console.WriteLine();
+
+// Run the forward-parity example
+ForwardParityExample.Run();
+Console.WriteLine();
+Console.WriteLine();
+
+Console.WriteLine("═══════════════════════════════════════════════════════════════");
+Console.WriteLine();
+

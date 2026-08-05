@@ -1,5 +1,3 @@
-using Nivara.AutoDiff.Nn;
-
 namespace Nivara.Samples;
 
 public static class FrameBuilder

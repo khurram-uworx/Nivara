@@ -1,12 +1,6 @@
 using Microsoft.Extensions.AI;
 using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Nn.Functional;
-using Nivara.AutoDiff.Optimizer;
-using Nivara.AutoDiff.Serialization;
-using Nivara.AutoDiff.Training;
-using NivaraChat.Data;
 using NivaraChat.Training;
-using System.Text.Json;
 
 namespace NivaraChat;
 

@@ -1,8 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.VectorData;
 using OllamaSharp;
-using System.Linq;
 using System.Text.Json;
 
 namespace NivaraChat;
