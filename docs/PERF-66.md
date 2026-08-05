@@ -91,7 +91,7 @@ Per-batch profile (measured/derived from code):
 |---|---|
 | P1 item 1 | ✅ `0c29079` |
 | P1 item 2 | ✅ `325f741` |
-| P2 item 4 | |
+| P2 item 4 | ✅ `e031ff0` (grad-tracking `MatMulTransposedB`, cache removed, 828 tests) |
 | P2 item 3 | |
 | P3 5a/5b/5c | |
 | Benchmark 25 | |
