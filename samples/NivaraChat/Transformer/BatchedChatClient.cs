@@ -3,7 +3,7 @@ using Nivara;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 
-namespace NivaraChatClient;
+namespace NivaraChat.Transformer;
 
 /// <summary>
 /// An <see cref="IChatClient"/> backed by a trained <see cref="BatchedTransformer{T}"/>.

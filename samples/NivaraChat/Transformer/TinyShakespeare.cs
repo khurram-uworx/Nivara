@@ -1,6 +1,6 @@
 using System.Net.Http;
 
-namespace NivaraChatClient;
+namespace NivaraChat.Transformer;
 
 /// <summary>
 /// Loads the TinyShakespeare corpus (karpathy/char-rnn), downloading it to
@@ -21,7 +21,7 @@ internal static class TinyShakespeare
         Console.WriteLine($"Downloading TinyShakespeare to {path} ...");
 
         using var client = new HttpClient();
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("NivaraChatClient/1.0");
+        client.DefaultRequestHeaders.UserAgent.ParseAdd("NivaraChat/1.0");
         string text = client.GetStringAsync(DownloadUrl).GetAwaiter().GetResult();
         File.WriteAllText(path, text);
         return path;

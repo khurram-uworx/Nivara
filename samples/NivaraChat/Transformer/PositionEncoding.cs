@@ -2,7 +2,7 @@ using Nivara;
 using Nivara.AutoDiff;
 using System.Numerics;
 
-namespace NivaraChatClient;
+namespace NivaraChat.Transformer;
 
 /// <summary>
 /// Fixed sinusoidal position encoding (non-trainable). Position <c>pos</c> in

@@ -4,7 +4,7 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
 
-namespace NivaraChatClient;
+namespace NivaraChat.Transformer;
 
 /// <summary>
 /// Causal batched transformer with weight tying and a fixed sinusoidal position
