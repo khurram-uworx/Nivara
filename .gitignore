@@ -353,3 +353,6 @@ samples/data/minilm/
 samples/data/sst2/
 samples/data/distilbert/
 samples/data/distilbert_sst/
+
+# Benchmark output
+samples/NivaraFineTuning/benchmark_results.txt

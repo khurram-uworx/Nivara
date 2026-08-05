@@ -16,13 +16,14 @@ if "%EPOCHS%"=="" set "EPOCHS=1"
 echo Nivara Fine-Tuning Benchmark > benchmark_results.txt
 echo %DATE% %TIME% >> benchmark_results.txt
 echo examples=%EXAMPLES% batch_size=%BATCH_SIZE% epochs=%EPOCHS% >> benchmark_results.txt
+echo Machine: %COMPUTERNAME% %PROCESSOR_IDENTIFIER% >> benchmark_results.txt
 echo. >> benchmark_results.txt
 
 REM --- PyTorch baseline ---
 echo [PyTorch] Starting...
 echo. >> benchmark_results.txt
 echo === PyTorch === >> benchmark_results.txt
-python Python\benchmark_timing.py --epochs %EPOCHS% --batch-size %BATCH_SIZE% --max-examples %EXAMPLES% 2>&1 | tee -append benchmark_results.txt
+python Python\benchmark_timing.py --epochs %EPOCHS% --batch-size %BATCH_SIZE% --max-examples %EXAMPLES% 2>&1 | tee -a benchmark_results.txt
 echo. >> benchmark_results.txt
 
 echo ======================== >> benchmark_results.txt
@@ -31,7 +32,7 @@ echo. >> benchmark_results.txt
 REM --- Nivara baseline ---
 echo [Nivara] Starting...
 echo === Nivara === >> benchmark_results.txt
-dotnet run --project ..\..\samples\NivaraFineTuning -c Release -- --mode train --epochs %EPOCHS% --batch-size %BATCH_SIZE% --max-examples %EXAMPLES% 2>&1 | tee -append benchmark_results.txt
+dotnet run --project ..\..\samples\NivaraFineTuning -c Release -- --mode train --epochs %EPOCHS% --batch-size %BATCH_SIZE% --max-examples %EXAMPLES% 2>&1 | tee -a benchmark_results.txt
 
 echo. >> benchmark_results.txt
 echo Done. Results written to benchmark_results.txt

@@ -65,8 +65,9 @@ Per-batch profile (measured/derived from code):
      already call `ZeroGrad()` each iteration — matches PyTorch semantics.
 4. **Grad-tracking matmul with `bTransposed: true`** — a `MatMulTransposedB`
    that records a VJP, so training Linear stops double-transposing weights.
-   - Files: `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`, `src/Nivara/AutoDiff/Nn/Linear.cs`.
-   - Status: **pending**.
+    - Files: `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`, `src/Nivara/AutoDiff/Nn/Linear.cs`.
+    - Status: **done** — commit `e031ff0`; Linear uses the recorded VJP and the
+      weight-cache was removed.
 
 ### P3 — Kernel micro-optimizations (measure first)
 
@@ -75,7 +76,13 @@ Per-batch profile (measured/derived from code):
    - Blocked/cache-friendly `Transpose`.
    - Fused single-pass softmax rows with row-level parallelism.
    - Files: `src/Nivara/Tensors/TensorsHelper.cs`.
-   - Status: **pending**.
+   - Status: **done** — commit `34f694e`. Sequential matmul passes the left
+     operand span directly (no rent/copy); the copy survives only in the
+     `Parallel.For` branch (C# 13/14 CS9108 forbids capturing ref-like span
+     params in lambdas — the copy is the price of parallelism). `Transpose`
+     is a 32×32 tiled loop. Softmax rows use a single fused row kernel (no
+     per-row dispatch/guards); the parallel row branch was dropped for the
+     same CS9108 constraint (not a benchmark hotspot).
 
 ---
 
@@ -104,7 +111,9 @@ Per-batch profile (measured/derived from code):
 | P1 item 2 | ✅ `325f741` |
 | P2 item 4 | ✅ `e031ff0` (grad-tracking `MatMulTransposedB`, cache removed, 828 tests) |
 | P2 item 3 | ✅ in-place SGD/Adam/AdamW (`AsWritableSpan` write-through + `param.Touch()`) |
-| P3 5a/5b/5c | |
+| P3 5a/5b/5c | ✅ `34f694e` (tiled transpose, skip aCopy in sequential matmul, fused softmax row kernel; 853 tests) |
+| Benchmark harness | ✅ `benchmark_timing.py` hardened (seed/warmup/machine info; reproducible A/B), `benchmark_timing.cmd` `tee -a` fix + machine header, methodology documented in `samples/NivaraFineTuning/README.md` (mirrors `NivaraInference`) |
+| Benchmark 25 (final) | ✅ 2026-08-06, seed 0, 2 untimed PyTorch warmup epochs, Nivara batch 1 excluded as JIT warmup — PyTorch **0.46 s/batch**, Nivara **~1.4 s/batch** (~3×). P3 changes are behavior-identical; wall-clock unchanged vs the A/B (expected — sequential matmul path, no allocation difference at B=2). |
 | Benchmark 25 | ✅ 25-example A/B via worktree: baseline `e031ff0` vs in-place `055e57f` — steady-state **~1.3 s/batch both** (warmup 3.0 s vs 2.5 s), dev acc 58.1% vs 59.8%. Wall-clock flat: the 268 MB/batch `new T[n]` allocation is eliminated (structural win, lower GC pressure at full-epoch scale), but per-batch time is dominated by matmul/backward — consistent with bottleneck #5 (grad-array churn) being the remaining GC driver. |
 
 ---

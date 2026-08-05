@@ -146,12 +146,58 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 
 ### Expected timing
 
-Fine-tuning runs entirely in managed C# on CPU — this is a correctness/transfer-learning
-demonstration, not a throughput benchmark. For `--max-examples 100 --batch-size 2 --epochs 1 -c Release`:
-expect roughly 1-3 seconds per batch (forward + backward + AdamW through 67M params),
-i.e. on the order of 10-30 minutes per full 67K-example epoch on a modern multi-core CPU.
-Keep `--max-len` at the default 128 and use `--max-examples` to validate the pipeline
-before committing to a full run. PyTorch (BLAS-accelerated) is typically 10-50x faster on the same hardware.
+Fine-tuning runs entirely in managed C# on CPU. For `--max-examples 25 --batch-size 2 --epochs 1 -c Release`
+expect **~1.4 s/batch** steady-state (measured 2026-08-06, see [Performance benchmarks](#performance-benchmarks));
+a full 67K-example epoch extrapolates to ~13 hours. Keep `--max-len` at the default 128 and use
+`--max-examples` to validate the pipeline before committing to a full run.
+
+## Performance benchmarks
+
+Measured on the same machine (CPU-only, no GPU). Nivara runs in Release mode
+with Server GC + Tiered PGO (as configured in the sample project). PyTorch uses
+MKL-optimized kernels with `torch_threads = nproc`. Both sides fine-tune
+DistilBERT-base (67M params) on the first `--max-examples` rows of SST-2 at
+`--batch-size 2 --max-len 128` and report **steady-state ms/batch**: PyTorch
+runs 2 untimed warmup epochs before timing; Nivara excludes the first (JIT
+warmup) batch. `--seed 0` fixes the training shuffle so A/B comparisons are
+reproducible. Numbers vary with machine load — re-measure both sides in the
+same session when comparing (run-to-run variance ~±10% per
+`tests/Nivara.PerformanceTests/README.md`).
+
+| Config | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
+|--------|---------------|-------------------|----------|
+| Fine-tune B=2, L=128, 25 examples | 0.46 s/batch | 1.4 s/batch | **~3×** |
+
+The gap is far smaller than a naive port suggests: at batch size 2 the per-batch
+cost is dominated by 38 small Linear matmuls and the backward pass through 67M
+params, not by BLAS peak throughput, so the CPU SIMD kernels and memory
+management keep Nivara within ~3× of PyTorch's MKL on this configuration. The
+bigger win is measured progress: the 2026-08-06 baseline reflects the PERF-66
+work (`docs/PERF-66.md`) — in-place SGD/Adam/AdamW steps (no per-param `new T[n]`
+allocation), `BatchedMultiHeadAttention` in the encoder (no block-diagonal mask,
+no wasted cross-sequence compute), grad-tracking transposed-B matmul in `Linear`
+(no per-forward weight transpose), and a tiled `Transpose` kernel. Further
+optimizations to validate against this harness: pooled grad buffers and a
+single-pass attention row kernel.
+
+### Re-running
+
+```bash
+cd samples/NivaraFineTuning
+
+# Both sides, tee'd to benchmark_results.txt (uses GNU coreutils tee on PATH)
+.\benchmark_timing.cmd 25 2 1
+
+# PyTorch side only
+python Python\benchmark_timing.py --epochs 1 --batch-size 2 --max-examples 25
+
+# Nivara side only (batch times are printed per batch; batch 1 is JIT warmup)
+dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epochs 1 --batch-size 2 --max-examples 25
+```
+
+Record new results in the table above with the measurement date and a note on
+what changed. Kernel-level micro-measurements (matmul/transpose/softmax/attention)
+live in `tests/Nivara.PerformanceTests`.
 
 ## Python reference
 
