@@ -550,6 +550,277 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("MultiHeadAttention", [qLen, D]));
     }
 
+    /// <summary>
+    /// Batched fused multi-head scaled dot-product attention as a single graph
+    /// node. The batch overload of <see cref="MultiHeadAttention{T}"/>: query is
+    /// [B, qLen, D], key/value are [B, kvLen, D], output is [B, qLen, D] with
+    /// D = numHeads * headDim. Each batch element runs the identical per-head
+    /// fused kernel (pack heads, QK^T via the transposed-B layout, scale/mask,
+    /// softmax rows, scores @ V, scatter) so the batch never flattens into
+    /// cross-sequence scores. The batch dimension loops internally and
+    /// parallelizes over B when the total work justifies it
+    /// (<see cref="ShouldParallelizeBatch"/>); the single-sequence op is
+    /// untouched and bit-identical.
+    ///
+    /// <paramref name="mask"/> is an optional [B, qLen, kvLen] additive mask —
+    /// use <c>T.NegativeInfinity</c> to suppress positions (padding/causal),
+    /// applied per batch element.
+    /// </summary>
+    public static ReverseGradTensor<T> BatchedMultiHeadAttention<T>(
+        ReverseGradTensor<T> query,
+        ReverseGradTensor<T> key,
+        ReverseGradTensor<T> value,
+        int numHeads,
+        T scale,
+        ReverseGradTensor<T>? mask = null)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (query == null) throw new ArgumentNullException(nameof(query));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+        if (value == null) throw new ArgumentNullException(nameof(value));
+        if (numHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
+        if (query.Rank != 3)
+            throw new ArgumentException($"Query must be [B, L, D] (rank 3), got rank {query.Rank}", nameof(query));
+        if (key.Rank != 3)
+            throw new ArgumentException($"Key must be [B, L, D] (rank 3), got rank {key.Rank}", nameof(key));
+        if (value.Rank != 3)
+            throw new ArgumentException($"Value must be [B, L, D] (rank 3), got rank {value.Rank}", nameof(value));
+
+        int batch = query.shape[0];
+        int qLen = query.shape[1];
+        int kvLen = key.shape[1];
+        int D = query.shape[2];
+        if (D % numHeads != 0)
+            throw new ArgumentException($"Query width ({D}) must be divisible by numHeads ({numHeads}).", nameof(query));
+        int headDim = D / numHeads;
+        if (key.shape[2] != D || value.shape[2] != D)
+            throw new ArgumentException($"Key/Value width must equal query width ({D}).");
+        if (key.shape[0] != batch || value.shape[0] != batch)
+            throw new ArgumentException($"Key/Value batch size must equal query batch size ({batch}).");
+        if (key.shape[1] != value.shape[1])
+            throw new ArgumentException($"Key and Value sequence lengths must match (got {key.shape[1]} vs {value.shape[1]}).");
+        if (mask != null && (mask.Rank != 3 || mask.shape[0] != batch || mask.shape[1] != qLen || mask.shape[2] != kvLen))
+            throw new ArgumentException($"Mask must be a {batch}x{qLen}x{kvLen} additive tensor.");
+
+        bool shouldTrack = GradientUtils.ShouldTrackGrad(query, key, value);
+        int scoreLen = qLen * kvLen;
+        int qHeadsLen = numHeads * qLen * headDim;
+        int kvHeadsLen = numHeads * kvLen * headDim;
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffBatchedMultiHeadAttention",
+            query.Length + key.Length + value.Length,
+
+            () =>
+            {
+                var qSpan = query.AsSpan();
+                var kSpan = key.AsSpan();
+                var vSpan = value.AsSpan();
+
+                var qHeads = ArrayPool<T>.Shared.Rent(Math.Max(batch * qHeadsLen, 1));
+                var kHeads = ArrayPool<T>.Shared.Rent(Math.Max(batch * kvHeadsLen, 1));
+                var vHeads = ArrayPool<T>.Shared.Rent(Math.Max(batch * kvHeadsLen, 1));
+                try
+                {
+                    int qRowLen = qLen * D;
+                    int kvRowLen = kvLen * D;
+                    for (int b = 0; b < batch; b++)
+                    {
+                        AttentionKernels<T>.PackHeads(
+                            qSpan.Slice(b * qRowLen, qRowLen),
+                            qHeads.AsSpan(b * qHeadsLen, qHeadsLen), qLen, numHeads, headDim);
+                        AttentionKernels<T>.PackHeads(
+                            kSpan.Slice(b * kvRowLen, kvRowLen),
+                            kHeads.AsSpan(b * kvHeadsLen, kvHeadsLen), kvLen, numHeads, headDim);
+                        AttentionKernels<T>.PackHeads(
+                            vSpan.Slice(b * kvRowLen, kvRowLen),
+                            vHeads.AsSpan(b * kvHeadsLen, kvHeadsLen), kvLen, numHeads, headDim);
+                    }
+
+                    var output = new T[batch * qLen * D];
+                    T[]? savedWeights = shouldTrack ? new T[batch * numHeads * scoreLen] : null;
+
+                    bool parallel = ShouldParallelizeBatch(batch, (long)qLen * kvLen * headDim * 2);
+                    if (parallel)
+                        Parallel.For(0, batch, b => ProcessBatchForward(b, mask));
+                    else
+                        for (int b = 0; b < batch; b++)
+                            ProcessBatchForward(b, mask);
+
+                    void ProcessBatchForward(int b, ReverseGradTensor<T>? maskTensor)
+                    {
+                        var maskSpan = maskTensor != null ? maskTensor.AsSpan() : ReadOnlySpan<T>.Empty;
+                        var scores = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                        var outHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                        try
+                        {
+                            var qhBatch = qHeads.AsSpan(b * qHeadsLen, qHeadsLen);
+                            var kvhBatch = kHeads.AsSpan(b * kvHeadsLen, kvHeadsLen);
+                            var vBatch = vHeads.AsSpan(b * kvHeadsLen, kvHeadsLen);
+                            int outOff = b * qLen * D;
+                            int wOff = b * numHeads * scoreLen;
+
+                            for (int h = 0; h < numHeads; h++)
+                            {
+                                var qh = qhBatch.Slice(h * qLen * headDim, qLen * headDim);
+                                var kh = kvhBatch.Slice(h * kvLen * headDim, kvLen * headDim);
+                                var vh = vBatch.Slice(h * kvLen * headDim, kvLen * headDim);
+
+                                TensorsHelper.MultiplyCore(qh, kh, scores, qLen, headDim, kvLen, bTransposed: true);
+                                var scoresSpan = scores.AsSpan(0, scoreLen);
+                                TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
+                                if (!maskSpan.IsEmpty)
+                                    TensorPrimitives.Add(scoresSpan, maskSpan.Slice(b * scoreLen, scoreLen), scoresSpan);
+
+                                AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
+
+                                if (savedWeights != null)
+                                    scoresSpan.CopyTo(savedWeights.AsSpan(wOff + h * scoreLen, scoreLen));
+
+                                TensorsHelper.MultiplyCore(scores, vh, outHead, qLen, kvLen, headDim);
+                                AttentionKernels<T>.ScatterHead(
+                                    outHead.AsSpan(0, qLen * headDim), output.AsSpan(outOff, qLen * D), qLen, D, h, headDim);
+                            }
+                        }
+                        finally
+                        {
+                            ArrayPool<T>.Shared.Return(scores, clearArray: true);
+                            ArrayPool<T>.Shared.Return(outHead, clearArray: true);
+                        }
+                    }
+
+                    var result = new ReverseGradTensor<T>(
+                        NivaraColumn<T>.CreateFromOwnedArray(output), shouldTrack, new[] { batch, qLen, D });
+
+                    if (shouldTrack)
+                    {
+                        var weights = savedWeights!;
+                        var inputs = mask != null
+                            ? new object[] { query, key, value, mask }
+                            : new object[] { query, key, value };
+
+                        var gradFn = new OpNode<T>("BatchedMultiHeadAttention", inputs, (typedGradOutput) =>
+                        {
+                            var dQ = new T[batch * qLen * D];
+                            var dK = new T[batch * kvLen * D];
+                            var dV = new T[batch * kvLen * D];
+
+                            typedGradOutput.TryGetSpan(out var gradSpan);
+
+                            bool gradParallel = ShouldParallelizeBatch(batch, (long)qLen * kvLen * headDim * 2);
+                            if (gradParallel)
+                                Parallel.For(0, batch, b => ProcessBatchGrad(b, query, key, value, typedGradOutput));
+                            else
+                                for (int b = 0; b < batch; b++)
+                                    ProcessBatchGrad(b, query, key, value, typedGradOutput);
+
+                            if (query.RequiresGrad)
+                                AccumulateGradient(query, NivaraColumn<T>.CreateFromOwnedArray(dQ));
+                            if (key.RequiresGrad)
+                                AccumulateGradient(key, NivaraColumn<T>.CreateFromOwnedArray(dK));
+                            if (value.RequiresGrad)
+                                AccumulateGradient(value, NivaraColumn<T>.CreateFromOwnedArray(dV));
+
+                            void ProcessBatchGrad(
+                                int b,
+                                ReverseGradTensor<T> qTensor,
+                                ReverseGradTensor<T> kTensor,
+                                ReverseGradTensor<T> vTensor,
+                                NivaraColumn<T> gradColumn)
+                            {
+                                var bQSpan = qTensor.AsSpan();
+                                var bKSpan = kTensor.AsSpan();
+                                var bVSpan = vTensor.AsSpan();
+                                gradColumn.TryGetSpan(out var bGradSpan);
+                                var qHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                                var kHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                                var vHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                                var dOHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                                var dQHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                                var dKHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                                var dVHead = ArrayPool<T>.Shared.Rent(Math.Max(kvLen * headDim, 1));
+                                var dP = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                                var dPT = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                                var pT = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                                try
+                                {
+                                    bQSpan = bQSpan.Slice(b * qLen * D, qLen * D);
+                                    bKSpan = bKSpan.Slice(b * kvLen * D, kvLen * D);
+                                    bVSpan = bVSpan.Slice(b * kvLen * D, kvLen * D);
+                                    bGradSpan = bGradSpan.Slice(b * qLen * D, qLen * D);
+                                    int dQOff = b * qLen * D;
+                                    int dKOff = b * kvLen * D;
+                                    int dVOff = b * kvLen * D;
+                                    int wOff = b * numHeads * scoreLen;
+
+                                    for (int h = 0; h < numHeads; h++)
+                                    {
+                                        var qhSpan = qHead.AsSpan(0, qLen * headDim);
+                                        var khSpan = kHead.AsSpan(0, kvLen * headDim);
+                                        var vhSpan = vHead.AsSpan(0, kvLen * headDim);
+                                        AttentionKernels<T>.GatherHead(bQSpan, qhSpan, qLen, D, h, headDim);
+                                        AttentionKernels<T>.GatherHead(bKSpan, khSpan, kvLen, D, h, headDim);
+                                        AttentionKernels<T>.GatherHead(bVSpan, vhSpan, kvLen, D, h, headDim);
+
+                                        var dOH = dOHead.AsSpan(0, qLen * headDim);
+                                        AttentionKernels<T>.GatherHead(bGradSpan, dOH, qLen, D, h, headDim);
+
+                                        var pHead = weights.AsSpan(wOff + h * scoreLen, scoreLen);
+                                        var dPSpan = dP.AsSpan(0, scoreLen);
+
+                                        TensorsHelper.MultiplyCore(dOH, vhSpan, dP, qLen, headDim, kvLen, bTransposed: true);
+                                        AttentionKernels<T>.SoftmaxBackwardRows(pHead, dPSpan, qLen, kvLen);
+                                        TensorPrimitives.Multiply(dPSpan, scale, dPSpan);
+
+                                        var dQH = dQHead.AsSpan(0, qLen * headDim);
+                                        var dKH = dKHead.AsSpan(0, kvLen * headDim);
+                                        var dVH = dVHead.AsSpan(0, kvLen * headDim);
+
+                                        TensorsHelper.MultiplyCore(dP, khSpan, dQHead, qLen, kvLen, headDim);
+                                        TensorsHelper.Transpose(dPSpan, dPT.AsSpan(0, scoreLen), qLen, kvLen);
+                                        TensorsHelper.MultiplyCore(dPT, qhSpan, dKHead, kvLen, qLen, headDim);
+                                        TensorsHelper.Transpose(pHead, pT.AsSpan(0, scoreLen), qLen, kvLen);
+                                        TensorsHelper.MultiplyCore(pT, dOH, dVHead, kvLen, qLen, headDim);
+
+                                        AttentionKernels<T>.ScatterHead(dQH, dQ.AsSpan(dQOff, qLen * D), qLen, D, h, headDim);
+                                        AttentionKernels<T>.ScatterHead(dKH, dK.AsSpan(dKOff, kvLen * D), kvLen, D, h, headDim);
+                                        AttentionKernels<T>.ScatterHead(dVH, dV.AsSpan(dVOff, kvLen * D), kvLen, D, h, headDim);
+                                    }
+                                }
+                                finally
+                                {
+                                    ArrayPool<T>.Shared.Return(qHead, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(kHead, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(vHead, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(dOHead, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(dQHead, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(dKHead, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(dVHead, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(dP, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(dPT, clearArray: true);
+                                    ArrayPool<T>.Shared.Return(pT, clearArray: true);
+                                }
+                            }
+                        });
+
+                        ComputationGraph.AddNode(result, gradFn);
+                    }
+
+                    return result;
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(qHeads, clearArray: true);
+                    ArrayPool<T>.Shared.Return(kHeads, clearArray: true);
+                    ArrayPool<T>.Shared.Return(vHeads, clearArray: true);
+                }
+            },
+            AutoDiffDiagnostics.ShapeNote("BatchedMultiHeadAttention", [batch, qLen, D]));
+    }
+
+    static bool ShouldParallelizeBatch(int batch, long workPerBatch)
+        => batch >= 4 && batch * workPerBatch >= 2L << 20;
+
     public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
