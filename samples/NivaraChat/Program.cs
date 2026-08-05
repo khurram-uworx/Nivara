@@ -1008,7 +1008,7 @@ void RunEmbeddingSearch()
         Console.WriteLine("  Context for LLM:");
         for (int rank = 0; rank < ranked.Count; rank++)
             Console.WriteLine($"    #{rank + 1}  {ranked[rank].Score:F4}  \"{documents[ranked[rank].Index]}\"");
-        Console.WriteLine("\n  (In a full pipeline, these would be injected into the LLM prompt\n   via TextSearchProvider — see NEXT.md section D)\n");
+        Console.WriteLine("\n  (In a full pipeline, these would be injected into the LLM prompt\n   via TextSearchProvider — see README.md \"RAG agent\" section)\n");
     }
 }
 
