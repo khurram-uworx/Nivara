@@ -38,7 +38,7 @@ Trains a neural network to evaluate chess positions using Nivara's autograd engi
 
 ## [NivaraChat/README.md](NivaraChat/README.md) — Hybrid Agent Workflow
 
-Demonstrates Nivara-trained domain-specific models as first-class participants in `Microsoft.Agents.AI.Workflows` graphs, mixed with an Ollama-backed `ChatClientAgent` node.
+Demonstrates Nivara-trained domain-specific models as first-class participants in `Microsoft.Agents.AI.Workflows` graphs, mixed with an Ollama-backed `ChatClientAgent` node. Also hosts the batched TinyShakespeare transformer (`--tinyshakespeare` mode) served as an `IChatClient` via DI — the single home for all Microsoft.Extensions.AI / Agent Framework integration.
 
 ## [NivaraTimeSeries/README.md](NivaraTimeSeries/README.md) — Server Monitoring Anomaly Detection
 

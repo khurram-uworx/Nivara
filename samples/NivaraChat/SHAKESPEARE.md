@@ -8,7 +8,7 @@ new decisions in date order; do not rewrite history.
 
 Related planning documents:
 - `docs/SHAKESPEARE.md` — earlier plan (batched rank-3 MatMul core work + sample); superseded by the decisions below
-- `samples/NivaraChat/README.md` — durable NEXT.md content (Idea A description, architecture, CLI spec, gaps, not-doing list); companion-sample section covers `samples/NivaraChatClient/`
+- `samples/NivaraChat/README.md` — durable NEXT.md content (Idea A description, architecture, CLI spec, gaps, not-doing list); the Idea A showcase now ships as the built-in `--tinyshakespeare` mode (see D-012)
 - `docs/SHAKESPEARE2.md` — revised plan (grounded audit + batched attention via fused op); **retired 2026-08-05** after all six tasks completed — decisions folded into this log (see D-011)
 - `samples/NivaraChat/NEXT.md` — original roadmap for Idea A; **deleted 2026-08-05** after salvage into the README
 
@@ -402,6 +402,42 @@ resolved along the way" section.
 ### Follow-ups
 
 None.
+
+---
+
+## Decision D-012 — Consolidate NivaraChatClient into NivaraChat as `--tinyshakespeare`
+
+**Date:** 2026-08-05
+**Status:** Accepted (this change).
+
+### Context
+
+After D-011 the Idea A showcase lived in a separate `samples/NivaraChatClient/`
+project (word-level batched TinyShakespeare transformer served as an
+`IChatClient`), while every other M.E.AI / Agent Framework integration lived in
+`samples/NivaraChat/`. Two sample projects for one ecosystem surface split the
+documentation, the solution file, and the "where do I look for X" answer.
+
+### Decision
+
+- **Delete `samples/NivaraChatClient/`** and fold its code into
+  `samples/NivaraChat/` under the `NivaraChat.Transformer` namespace
+  (`Transformer/` folder), matching the existing `.Training` / `.Data`
+  sub-namespace convention. `NivaraChatClient.cs` was renamed to
+  `BatchedChatClient.cs` to match its type and avoid a filename collision with
+  the existing `NivaraChatClient.cs` (the `ITextModel` wrapper).
+- **New CLI mode `--tinyshakespeare`** delegates to the extracted
+  `TransformerMode.Run`; the interactive menu gained a **4th entry** that
+  prompts with defaults (model path, vocab size, prompt) for unfamiliar users.
+- The old top-level-statements `Program.cs` was extracted into
+  `TransformerMode.cs` (two entry points cannot coexist in one project).
+- `NivaraChat.csproj` gained `Microsoft.Extensions.DependencyInjection` and
+  `Microsoft.Extensions.Hosting` for the DI demo.
+
+### Follow-ups
+
+None — README, decision log references, and the MicroGpt README cross-link were
+updated in the same change.
 
 ---
 
