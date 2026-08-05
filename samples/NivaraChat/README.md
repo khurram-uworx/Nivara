@@ -295,6 +295,26 @@ Tested examples:
 
 Uses: `FeedbackCollector`, `IntentTrainer.TrainIncremental()`, `TrainingLoop.Run()`, `Optimizer.StateDict()/LoadStateDict()`.
 
+### TinyShakespeare (`--tinyshakespeare`)
+Trains a **word-level batched causal transformer** on the TinyShakespeare corpus with Nivara's AutoDiff, then serves it through the standard `Microsoft.Extensions.AI.IChatClient` interface and wires it up via DI. No LLM needed — this mode proves Nivara can train a real transformer and serve it in an ecosystem-compatible way. Training runs when no `--load` is given; a saved model skips straight to generation and the DI demo. See the dedicated [TinyShakespeare section](#tinyshakespeare--batched-transformer-ichatclient-mode--tinyshakespeare) below for the full option list, architecture, and the how-it-differs-from-MicroGpt comparison.
+
+```
+TinyShakespeare.txt → word-level TextTokenizer → batched causal transformer training
+    → ModelSerializer.Save/Load → BatchedChatClient : IChatClient
+    → services.AddChatClient(factory) → console/ASP.NET/MAUI
+```
+
+Tested examples:
+
+| Command | Model | Result |
+|---------|-------|--------|
+| `--tinyshakespeare` | 2L × 96D, 4 heads, vocab 8000 (defaults) | Full train on the corpus, 5 generated replies, DI demo reply |
+| `--tinyshakespeare --vocab-size 1200 --prompt "ROMEO:"` | 2L × 96D, 4 heads, vocab 1200 | Smoke run, ~3x faster; generates Shakespeare-style continuations for the prompt |
+| `--tinyshakespeare --data <small.txt> --vocab-size 800 --n-embd 32 --n-layer 1 --block-size 32 --n-head 2 --epochs 1 --samples 2 --prompt "ROMEO:"` | 1L × 32D, 2 heads, vocab 592 (31584 params) | Trained a 249-line slice in 1.3s (1350 tok/s, loss 6.17) and replied via `IChatClient` |
+| `--tinyshakespeare --load models/ts.json --prompt "KING LEAR:" --no-di-demo` | Matches saved model | Skips training, loads weights + tokenizer, generates directly |
+
+Uses: `BatchedTransformer<T>`, `BatchedChatClient` (`IChatClient`), `TextTokenizer`, `ModelSerializer.Save/Load`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Embedding`/`Linear`/`LayerNorm`/`Activation.Gelu`, `CrossEntropyLoss<T>`, `Adam<T>`, `services.AddChatClient()`.
+
 ## Agents pipeline architecture
 
 ```
@@ -477,9 +497,9 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
 
 ## TinyShakespeare — batched-transformer `IChatClient` mode (`--tinyshakespeare`)
 
-Idea A (the former `samples/NivaraChatClient/` companion project) now ships as a
-built-in mode of this sample: a **word-level batched causal transformer** trained
-on TinyShakespeare with Nivara's AutoDiff, then served through the standard
+The former `samples/NivaraChatClient/` companion project now ships as a built-in
+mode of this sample: a **word-level batched causal transformer** trained on
+TinyShakespeare with Nivara's AutoDiff, then served through the standard
 `Microsoft.Extensions.AI.IChatClient` interface and wired up via DI. Where the
 rest of this README demonstrates mixing trained ML models with an LLM
 (fan-out/fan-in, agents, tools), this mode proves Nivara can *train* a real
