@@ -16,6 +16,10 @@ is available.
 | `Linear forward [32x256] -> [32x256]` | `Linear<float>` inference forward (no `Grad()` scope) |
 | `Linear forward+backward [32x256]` | `Linear<float>` forward + `Backward` inside `GradientUtils.Grad()` |
 | `TransformerBlock forward [32x64, 4 heads]` | `TransformerBlock<float>` inference forward |
+| `Attn per-seq forward [B16 L128 D64 H4]` | `ReverseGradOperations.MultiHeadAttention` looped over 16 sequences — per-head `Slice`/`Transpose` graph nodes, causal mask per sequence |
+| `Attn batched forward [B16 L128 D64 H4]` | `ReverseGradOperations.BatchedMultiHeadAttention` — heads packed once, fused QK^T/softmax/PV per-head `TensorPrimitives` row kernels (issue #86) |
+| `Attn per-seq fwd+bwd [B16 L128 D64 H4]` | Per-seq `MultiHeadAttention` forward + `Backward` inside `GradientUtils.Grad()` |
+| `Attn batched fwd+bwd [B16 L128 D64 H4]` | `BatchedMultiHeadAttention` forward + `Backward` inside `GradientUtils.Grad()` |
 
 Each scenario reports **ops/s**, **ns/op**, **bytes/op** (`GC.GetAllocatedBytesForCurrentThread`
 delta), and **gen0/op** (`GC.CollectionCount(0)` delta).
@@ -53,25 +57,35 @@ tests/Nivara.PerformanceTests/bin/Release/net10.0/Nivara.PerformanceTests.exe
 
 ## Results
 
-**Baseline (point A)** recorded **2026-08-04** on the then-current HEAD (after
-the AutoDiff refactor: `GradKernels` span kernels, inference-default
-`GradientUtils.Grad()`, optimizer zero-copy column wraps, and the Task 8
-`NivaraTensorExtensions` strip). Supersedes the 2026-08-03 point A that was
-recorded after storage consolidation; the numbers below are the canonical
-reference going forward.
+**Baseline (point A)** recorded **2026-08-05** on the current HEAD (post-v1.2.0
+release prep). Supersedes the 2026-08-04 point A that was recorded after the
+AutoDiff refactor; the numbers below are the canonical reference going forward.
+The four batched-attention scenarios (fused `MultiHeadAttention` /
+`BatchedMultiHeadAttention` kernels, issue #86) were already in the harness but
+are now documented here for the first time.
 
 Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 6 runs.
 
 | Scenario | ops/s | B/op | gen0/op |
 |---|---|---|---|
-| ColumnAdd 1M x float | 1,755 | 4,000,537 | 0.33 |
-| ColumnSigmoid 1M x float | 642 | 0 | 0.00 |
-| Linear forward [32x256] | 427 | 69,944 | 0.00 |
-| Linear forward+backward [32x256] | 166 | 1,787,036 | 0.45 |
-| TransformerBlock forward [32x64, 4 heads] | 137 | 196,118 | 0.03 |
+| ColumnAdd 1M x float | 1,672 | 4,000,537 | 0.33 |
+| ColumnSigmoid 1M x float | 599 | 0 | 0.00 |
+| Linear forward [32x256] | 369 | 69,920 | 0.00 |
+| Linear forward+backward [32x256] | 171 | 1,492,187 | 0.35 |
+| TransformerBlock forward [32x64, 4 heads] | 135 | 196,159 | 0.07 |
+| Attn per-seq forward [B16 L128 D64 H4] | 90 | 2,137,638 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | 405 | 528,686 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 31 | 7,963,817 | 1.17 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 137 | 7,878,336 | 0.33 |
 
 ### Notes
 
+- **Linear forward is the one outlier vs the 2026-08-04 point A** (369 vs 427
+  ops/s, −14%): it also showed the widest run-to-run spread of any scenario
+  (245–442 ops/s across the six runs), so this is machine-load noise rather than
+  a code regression. Every other core scenario is within ±7% of point A
+  (ColumnAdd 1,672 vs 1,755, ColumnSigmoid 599 vs 642, Linear forward+backward
+  171 vs 166, TransformerBlock 135 vs 137).
 - **ColumnSigmoid is not comparable to the 2026-08-03 point A.** Task 8
   stripped the `NivaraColumn<float>.Sigmoid()` extension, so the scenario now
   measures the raw kernel with the destination array allocated up front —
@@ -81,9 +95,18 @@ Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 6 runs.
 - **ColumnAdd still dominates the table.** The single-`ColumnStorage<T>`
   layout removed the pre-consolidation pooled-copy branch from
   `applyElementwiseBinary` — that win is the reason this harness exists.
-  Throughput reads ~1,755 ops/s now (vs 872 at the 2026-08-03 point A) with the
-  same 4 MB/op allocation profile.
-- **Linear forward+backward** allocates ~0.9 KB less per op than at point A
-  (1,787,036 vs 1,787,949 B/op) and runs at ~1.8× the ops/s, consistent with
-  the refactor's span-kernel and zero-copy column-wrap work. **TransformerBlock**
-  is within the documented ±10% run-to-run variance of point A.
+  Throughput holds at ~1,672 ops/s (vs 1,755 at the 2026-08-04 point A) with the
+  same 4 MB/op allocation profile, within the documented ±10% variance.
+- **Batched attention is the fast path for transformers.** `BatchedMultiHeadAttention`
+  forward runs ~4.5× per-op faster than looping `MultiHeadAttention` per
+  sequence (405 vs 90 ops/s) with ~4× the allocation (528,686 vs 2,137,638
+  B/op): heads are packed once per forward and QK^T/softmax/PV run as a single
+  per-head pass with no per-head `Slice`/`Transpose` graph nodes. The fused
+  forward+backward row (137 ops/s, 7,878,336 B/op) is the number that matters
+  for `TransformerBlock` training pipelines.
+- **Linear forward+backward** allocates ~295 KB/op less than the 2026-08-04
+  point A (1,492,187 vs 1,787,036 B/op) at parity throughput (171 vs 166 ops/s):
+  the drop is the rank-2 MatMul backward transpose buffers now rented from
+  `ArrayPool<T>.Shared` (commit `61ff968`, merged 2026-08-05 via PR #121), on
+  top of the refactor's span-kernel and zero-copy column-wrap work. gen0/op is
+  down accordingly (0.35 vs 0.45).
