@@ -62,6 +62,9 @@ dotnet run --project samples/NivaraChat -- --rag --ollama --text "How does embed
 
 # RAG agent: same with TextSearchProvider auto-context injection (requires --ollama)
 dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is NivaraChat?"
+
+# Online learning from LLM feedback (requires --ollama)
+dotnet run --project samples/NivaraChat -- --online-learning --ollama
 ```
 
 ## CLI options
@@ -78,6 +81,7 @@ dotnet run --project samples/NivaraChat -- --rag-agent --ollama --text "What is 
 | `--embed` | — | Mode: embedding search — index documents, retrieve context via `IEmbeddingGenerator` |
 | `--rag` | — | Mode: RAG pipeline — chunk markdown docs, retrieve via vector search, LLM generates answer |
 | `--rag-agent` | — | Mode: RAG agent — same as `--rag` with `TextSearchProvider` auto-context injection |
+| `--online-learning` | — | Mode: online learning from LLM feedback — incremental retrain with validated examples |
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
@@ -245,6 +249,45 @@ Tested examples:
 
 Uses: `IntentClassifier`, `FactualExecutor`, `QuestionExecutor`, `CommandExecutor`, `EscalationExecutor`, `ChitchatExecutor`, `AddEdge<string>` conditional routing.
 
+### Online learning (`--online-learning`)
+Demonstrates online learning from LLM feedback. The intent classifier runs first; when confidence is below the threshold (default 0.8), the LLM provides a corrected intent which is added to a training buffer. When the buffer reaches 10 examples, the model is incrementally retrained using `IntentTrainer.TrainIncremental()` with a lower learning rate (0.0005). The updated model is saved and continues classifying. Requires `--ollama`.
+
+```
+User input
+    │
+    v
+[IntentClassifier]           Nivara TextClassifierModel, 5 classes
+    │
+    ├── confidence >= 0.8    ──> Return Nivara classification (no LLM needed)
+    │
+    └── confidence < 0.8     ──> [Ollama LLM]
+                                    │
+                                    v
+                              LLM provides corrected intent
+                                    │
+                                    v
+                              Add (text, intent) to training buffer
+                                    │
+                                    v
+                              Buffer full (10 examples)?
+                                    │
+                               yes ──> IntentTrainer.TrainIncremental()
+                                    │   loads existing model, trains 5 epochs
+                                    │   at lr=0.0005, saves updated model
+                                    v
+                              Continue with updated model
+```
+
+Tested examples:
+
+| Input | Threshold | Result |
+|-------|-----------|--------|
+| `"hello there"` | 0.8 | chitchat (confidence: 0.934) — no LLM needed |
+| `"what is the capital of France"` | 0.8 | LLM-corrected to question (confidence: 0.550) |
+| `"turn on the lights"` | 0.8 | LLM-corrected to command (confidence: 0.493) |
+
+Uses: `FeedbackCollector`, `IntentTrainer.TrainIncremental()`, `TrainingLoop.Run()`, `Optimizer.StateDict()/LoadStateDict()`.
+
 ## Agents pipeline architecture
 
 ```
@@ -342,7 +385,7 @@ NivaraChat/
 │   ├── EntityTrainer.cs              # Train entity NER model
 │   ├── ValidatorTrainer.cs           # Train workflow validator model
 │   ├── AgentsValidatorTrainer.cs     # Train agents validator model
-│   └── IntentTrainer.cs              # Train intent classifier model
+│   └── IntentTrainer.cs              # Train intent classifier + incremental retrain
 ├── Data/
 │   ├── SyntheticDataGenerator.cs     # Generate all four datasets
 │   └── IntentDataGenerator.cs        # Generate 5-class intent data
@@ -352,6 +395,7 @@ NivaraChat/
 ├── CommandExecutor.cs                # Tool-calling executor (--intent)
 ├── EscalationExecutor.cs             # Complaint escalation executor (--intent)
 ├── ChitchatExecutor.cs               # Casual conversation executor (--intent)
+├── FeedbackCollector.cs              # LLM fallback + feedback buffer (--online-learning)
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```
@@ -414,6 +458,9 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
 | `AsAIAgent()` | Program.cs | Convert `IChatClient` to `ChatClientAgent` |
 | `ChatClientAgent` | Program.cs | Agent Framework participant from `IChatClient` |
 | `NivaraEmbeddingGenerator<T>` | Nivara.Extensions | `IEmbeddingGenerator<TInput, Embedding<float>>` implementation for local models |
+| `TrainingLoop.Run(startEpoch)` | IntentTrainer.cs | Resume training from checkpoint |
+| `Optimizer.StateDict()/LoadStateDict()` | IntentTrainer.cs | Save/restore optimizer state for incremental training |
+| `ModelSerializer` (optimizer state) | IntentTrainer.cs | Persist optimizer state in checkpoints |
 
 ## Requirements
 

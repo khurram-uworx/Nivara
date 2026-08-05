@@ -19,7 +19,7 @@ don't require later ones).
 | E | Writer-critic feedback loop | Conditional edges, feedback | None (existing validator) | **Done** |
 | F | Nivara as IEmbeddingGenerator | `IEmbeddingGenerator<T>` | Embedding wrapper module | **Done** |
 | G | Intent classification router | Handoff orchestration | Intent classifier model | **Done** |
-| H | Online learning from LLM feedback | `DataLoader` incremental | Incremental training API | |
+| H | Online learning from LLM feedback | `DataLoader` incremental | Incremental training API | **Done** |
 
 ---
 
@@ -1166,6 +1166,16 @@ builder.AddEdge(intentClassifier, toolAgent,
 
 # H. Online Learning from LLM Feedback
 
+> **Status: Implemented** (`--online-learning` flag)
+> `FeedbackCollector` wraps intent classifier with LLM fallback, collects
+> validated (text, intent) pairs in buffer. When buffer reaches 10 examples,
+> `IntentTrainer.TrainIncremental()` loads existing model, combines with
+> feedback data, trains additional epochs at lower LR (0.0005). Core library
+> incremental training support: `Optimizer.StateDict()/LoadStateDict()`,
+> `Checkpoint.OptimizerState`, `ModelSerializer` optimizer state,
+> `DataLoader.GetBatches(epoch, skipBatches)`, `TrainingLoop.Run(startEpoch)`,
+> `Continue(n)`, `SaveCheckpoint/LoadCheckpoint`. Live tested with Ollama.
+
 ## Goal
 
 When the LLM generates high-quality responses, use them as training
@@ -1252,17 +1262,26 @@ private async Task RetrainModels(TrainingExample[] examples)
 
 | API / Feature | Purpose |
 |---|---|
-| `TrainingLoop<T>` | Retraining with augmented data |
-| `DataLoader<T>` | New data loading |
-| `ModelSerializer.Save/Load` | Warm-start from existing weights |
+| `TrainingLoop.Run(startEpoch)` | Resume training from checkpoint |
+| `Optimizer.StateDict()/LoadStateDict()` | Save/restore optimizer state for incremental training |
+| `DataLoader.GetBatches(epoch, skipBatches)` | Epoch-aware shuffling for incremental training |
+| `ModelSerializer` (optimizer state) | Persist optimizer state in checkpoints |
+| `Checkpoint.OptimizerState` | Optimizer state in checkpoint |
 | `IChatClient.GetResponseAsync` | LLM as data generator |
-| Nivara `TextClassifierModel` | Progressive improvement |
+| `TextClassifierModel<T>` | Intent classification (progressive improvement) |
 
 ## Core Library Changes
 
 | New API | File | Purpose |
 |---|---|---|
-| Incremental `TrainingLoop` option | `src/Nivara/AutoDiff/Training/` | Warm-start support (load existing weights before training) |
+| `Optimizer.StateDict()/LoadStateDict()` | `src/Nivara/AutoDiff/Optimizer/` | Save/restore optimizer state |
+| `Checkpoint.OptimizerState` | `src/Nivara/AutoDiff/Serialization/Checkpoint.cs` | Optimizer state in checkpoint |
+| `ModelSerializer` (optimizer state) | `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs` | Persist optimizer state in checkpoints |
+| `DataLoader.GetBatches(epoch, skipBatches)` | `src/Nivara/AutoDiff/Training/DataLoader.cs` | Epoch-aware shuffling |
+| `TrainingLoop.Run(startEpoch)` | `src/Nivara/AutoDiff/Training/TrainingLoop.cs` | Resume training from epoch |
+| `TrainingLoop.Continue(n)` | `src/Nivara/AutoDiff/Training/TrainingLoop.cs` | Add epochs to existing training |
+| `TrainingLoop.SaveCheckpoint/LoadCheckpoint` | `src/Nivara/AutoDiff/Training/TrainingLoop.cs` | Checkpoint save/load |
+| `IntentTrainer.TrainIncremental()` | `samples/NivaraChat/Training/IntentTrainer.cs` | Incremental training from feedback |
 
 ---
 
