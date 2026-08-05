@@ -7,9 +7,9 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
-    <PackageVersion>1.1.0</PackageVersion>
-    <Description>I/O adapters, Parquet, Apache Arrow, and ML.NET integration for Nivara</Description>
-    <PackageReleaseNotes>Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, automatic differentiation (reverse-mode AD for float/double columns), CsvHelper-based CSV parsing, lazy data source infrastructure.</PackageReleaseNotes>
+    <PackageVersion>1.2.0</PackageVersion>
+    <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, and AI integration for Nivara</Description>
+    <PackageReleaseNotes>v1.2.0: NivaraEmbeddingGenerator&lt;TInput&gt; wraps any IEmbeddingGenerator&lt;TInput, Embedding&lt;float&gt;&gt; as a label column generator for NivaraFrame.FromRows; brings Microsoft.Extensions.AI.Abstractions into Extensions; ArrowConversionOptions.UseZeroCopy removed (placeholder paths were silently copying; real zero-copy returns with ARROW-ROADMAP Phase D). Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, CsvHelper-based CSV parsing, lazy data source infrastructure.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
   </PropertyGroup>

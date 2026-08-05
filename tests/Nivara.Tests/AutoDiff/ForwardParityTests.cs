@@ -7,7 +7,7 @@ namespace Nivara.Tests.AutoDiff;
 
 /// <summary>
 /// Cross-validation tests comparing forward-mode JVP (ForwardGradOperations)
-/// with reverse-mode gradients (GradOperations + Backward).
+/// with reverse-mode gradients (ReverseGradOperations + Backward).
 ///
 /// For element-wise ops seeded with tangent on one input:
 ///   Forward JVP result = ∂f/∂input  (element-wise)

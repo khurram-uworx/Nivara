@@ -2,13 +2,14 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
-## Unreleased
+## [1.2.0] - 2026-08-05
 
 ### Breaking changes
 
 - **`NivaraFrame.Dot<T>` / `CosineSimilarity<T>` / `ColumnNorms<T>` / `RowNorms<T>` removed** (AutoDiff refactor, Task 10): the four deprecated frame tensor-axis methods are deleted rather than relocated — they had no production callers. Use `TensorPrimitives.Dot` / `TensorPrimitives.CosineSimilarity` / `TensorPrimitives.Norm` on column spans (via `TryGetSpan`) or on row-major spans assembled through `CopyToRowMajor`. The `TensorsHelper.RowNorms` kernel (only consumer was `frame.RowNorms`) was removed with them.
 - **`NivaraSeries<T>.Sum()` / `Min()` / `Max()` removed** (AutoDiff refactor, Task 9): NivaraSeries is now a labeled-column wrapper and keeps only `Average()`. Use the null-aware column reductions `NivaraColumn<T>` extensions `Sum` / `Min` / `Max` (`Nivara.Tensors`, `INumber<T>`-constrained) via `series.Values`; empty-column `Sum` throws, all-null `Sum` returns `T.Zero`, all-null `Min`/`Max` throw. Non-numeric (string/object) Min/Max/Sum are no longer supported.
 - **`NivaraTensorExtensions` stripped to column reductions** (AutoDiff refactor, Task 8): the column-level activations/gradients/MatMul/Transpose/GELU family extension methods were deleted (they now live in `GradKernels` as span kernels) along with the obsolete Series extensions (`AddTensor`, `MultiplyTensor`, `SumTensor`, `DotProduct`, `Norm`, `TransformTensor`) and `MatrixMultiply`. Remaining members: `Sum`, `Mean`, `Min`, `Max`. `NivaraColumn<T>.Subtract(NivaraColumn<T>)` / `Divide(NivaraColumn<T>)` / `Divide(T)` were promoted from extensions to first-class members.
+- **`TextClassifierModel<T>` / `TokenClassifierModel<T>` moved out of core** — the two pre-built NLP classification modules now live in `samples/Nivara.Samples` (`TextClassifierModel.cs`, `TokenClassifierModel.cs`). `TextTokenizer` remains in core (`src/Nivara/AutoDiff/Nn/TextTokenizer.cs`). Samples and docs were updated to reference the new home.
 - **Model/checkpoint serialization format bumped to `nivara-ss-v2` / `nivara-ckpt-v2`** (AutoDiff, ADR-001): the null-mask persistence (`HasNulls` / `NullMask` on parameter entries, `ParameterData<T>.NullMask`) was removed from the AutoDiff non-nullable domain. Deserialize now uses the zero-copy `CreateFromOwnedArray` path. v1 files are rejected loudly with an "unsupported format" error instead of being silently misread.
 - `ArrowConversionOptions.UseZeroCopy` removed — the option defaulted to `true` but every zero-copy interop path was a placeholder that silently copied. Nivara does not advertise unsupported capability; real zero-copy returns with ARROW-ROADMAP Phase D (adding real APIs then).
 
@@ -23,13 +24,30 @@ All notable changes to Nivara are documented here. Released versions are publish
 - **AutoDiff enter path is zero-copy**: `FromColumn`/`FromSeries` wrap the column without copying; `FromArray`/`FromMatrix` now wrap the caller's array via `CreateFromOwnedArray` — **breaking contract change**, callers must not mutate the source array afterward. `GradTensor.AsTensor()` returns a zero-copy `ColumnStorage<T>.AsTensor()` view sharing the backing array instead of a flattened copy; `NivaraColumn.AsTensorView()` backs it. `ModuleHelpers.GetSpan` fallback copy removed (`TryGetSpan` now always succeeds for AutoDiff tensors).
 - **AutoDiff initializers and `TensorDataset<T>` enter the graph zero-copy** (Task 11): all 13 initializer implementations wrap freshly allocated weight arrays with `NivaraColumn<T>.CreateFromOwnedArray` instead of copying through `Create`; `TensorDataset<T>.GetBatch` now slices column spans via `TryGetSpan` and throws ADR-001 when a source column contains nulls (previously the null-mask path always threw at the tensor constructor, so behavior is unchanged).
 
+### AutoDiff (GradKernels & inference fast paths)
+
+- **`GradKernels<T>` span-kernel layer** (ADR-002, Tasks 1–6): all `ReverseGradOperations` and `ForwardGradOperations` now delegate to shared `GradKernels<T>` span kernels (`Span<T>`/`ReadOnlySpan<T>` + `TensorPrimitives`), replacing per-op duplicated column math and eliminating `NivaraColumn.Data` access. Results wrap once via `NivaraColumn<T>.CreateFromOwnedArray` (no copy). ADR-002 records the span boundary as the canonical AutoDiff architecture.
+- **Inference-only fast paths**: `Gelu`, `GeluExact`, `LayerNorm` run single-path inference kernels that never construct graph nodes outside `GradientUtils.Grad()` (verified by `InferenceGraphTests`/`InferenceFastPathTests`); conv bias tracking is gated on `Grad()` scope so inference builds no graph. AutoDiff diagnostics are gated behind a static toggle for zero-cost inference.
+- **Linear inference & transposed-weight cache** (#87): forward inference passes the raw weight to the kernel's `MatMulTransposedB` path (zero transposes); training reuses a version-stamped transposed-weight cache invalidated only on `Parameter<T>.Version` change.
+- **New ops**: `AddBias` row-broadcast (Linear bias), `MatMulTransposedB` (transposed-B matmul), `GeluExact` (exact erf GELU for BERT-family activations, SIMD `TensorPrimitives`), `BatchedMultiHeadAttention` — fused `[B, L, D]` batch attention with per-batch additive `[B, qLen, kvLen]` masks, single `OpNode` VJP producing dQ/dK/dV (PyTorch-parity fixtures + perf scenarios).
+- **BCL-tuned MatMul kernels**: `MultiplyCore` optimized against `TensorPrimitives.Dot` (BCL swap-target annotations in `TensorsHelper`); rank-2 backward transpose buffers now pooled via `ArrayPool<T>.Shared` instead of per-call allocations.
+- **Enter path is zero-copy** (Task 11): all 13 initializers wrap freshly allocated weight arrays with `CreateFromOwnedArray`; `TensorDataset<T>.GetBatch` slices column spans via `TryGetSpan` and throws ADR-001 on null-containing columns.
+
+### Training & Serialization
+
+- **`Optimizer<T>.StateDict()` / `LoadStateDict()`** — optimizers now expose their moment/velocity buffers for incremental-training scenarios (matching the module `StateDict`/`LoadStateDict` contract).
+- **Optimizer state persisted in checkpoints**: `Checkpoint<T>.OptimizerState` added and `ModelSerializer.SaveCheckpoint`/`LoadCheckpoint` now round-trip optimizer state alongside model parameters, so a checkpoint is a full training resume point.
+- **Epoch-aware `DataLoader<T>.GetBatches(epoch, skipBatches)`** — yields a single epoch's batches with skip support, enabling incremental/online training loops (`NivaraChat --online-learning` uses it).
+
 ### Fixed
 
 - **Owned-array contract documented on remaining factory surfaces** (#106): `Parameter(string, T[], bool)` and `GradientUtils.Constant(T[])` wrap caller arrays zero-copy; XML docs now state ownership transfers and that the source array must not be mutated afterward, matching the `FromArray`/`FromMatrix` contract.
+- **Storage consolidation doc debt** (#108): 7 planning/review docs reconciled with the single `ColumnStorage<T>` design; public zero-copy claims aligned with the post-consolidation span semantics (Task 7).
 
 ### Added
 
 - **Public zero-copy tensor view** (#107): `NivaraColumn<T>.AsTensorView()` and `NivaraSeries<T>.AsTensorView()` are now public (previously internal). They return a lazy `Tensor<T>` view sharing the column's/series' backing array with no copy; null-containing columns and reference element types throw `InvalidOperationException`. Callers must treat the view as read-only.
+- **`NivaraEmbeddingGenerator<TInput>`** in `Nivara.Extensions` (AI): wraps any `IEmbeddingGenerator<TInput, Embedding<float>>` as a label column generator for `NivaraFrame.FromRows`; brings `Microsoft.Extensions.AI.Abstractions` into Extensions. Powers the `NivaraChat --embed` and `--rag`/`--rag-agent` modes.
 
 ### Query Engine
 

@@ -31,7 +31,7 @@ Many implementation choices make more sense when viewed through this lens. These
 
 At a high level, Nivara consists of:
 
-- **Columnar storage abstractions** (`Nivara.Storage.MemoryStorage<T>`, `Nivara.Storage.TensorStorage<T>`)
+- **Columnar storage abstractions** (`Nivara.Storage.ColumnStorage<T>` — a single unified storage class for all element types)
 - **Schema-aware frames** (`NivaraFrame`, `Nivara.Query.QueryFrame`)
 - **A lazy query layer** with optimization engine (`Nivara.Query`, `Nivara.Optimization`)
 - **Execution strategies** (`Nivara.Execution` - lazy, eager, streaming, parallel)
@@ -67,52 +67,44 @@ Key characteristics:
 
 - **Strongly typed** (`T` is never erased at the API level)
 - **Immutable** (operations return new columns)
-- **Pluggable storage backend** (Memory vs Tensor storage)
+- **Unified storage backend** (single `ColumnStorage<T>`; kernel dispatch via `KernelSelector`)
 - **Explicit null handling** via optional boolean masks
 
 Each column delegates to an `IColumnStorage<T>` implementation:
 
-- **Data storage** (`Nivara.Storage.MemoryStorage<T>` or `Nivara.Storage.TensorStorage<T>`)
+- **Data storage** (`Nivara.Storage.ColumnStorage<T>` — a sole-owner `T[]` plus an optional `bool[]` null mask)
 - **Null mask** (when nulls are present)
-- **Type-specific operations** (scalar vs vectorized)
+- **Kernel selection** (scalar vs vectorized decided by `KernelSelector`, never by the storage class)
 
 ### Storage Backend Selection
 
-The `ColumnStorageFactory` automatically selects the optimal storage backend:
+All columns use a single storage class — `ColumnStorage<T>`. There is no Memory-vs-Tensor split at the storage layer; whether a column dispatches to vectorized `TensorPrimitives` kernels is decided at runtime by `KernelSelector.DetermineKernelType()` (which considers `ColumnStorageFactory.IsVectorizable<T>()`, `Vector.IsHardwareAccelerated`, and a length threshold).
 
-#### MemoryStorage<T>
-- Used for non-vectorizable types (strings, objects, complex types)
-- Simple `Memory<T>` backing with scalar operations
-- Predictable performance characteristics
-- Lower memory overhead
-
-#### TensorStorage<T>
-- Used for vectorizable types (`int`, `float`, `double`, `bool`)
-- Backed by `System.Numerics.Tensors`
-- Automatic SIMD acceleration via `TensorPrimitives`
-- Falls back to scalar operations when needed
+- **Unified `T[]` backing** with an optional `bool[]` null mask, shared by all types
+- **Kernel dispatch** (scalar vs vectorized) is a runtime decision, not a storage-type decision
+- `ColumnStorageFactory.IsVectorizable<T>()` reports whether `T` supports SIMD (`int`, `float`, `double`, `long`, `short`, `byte`, `bool`, etc.)
 
 This selection is **transparent** to users and happens at column creation time. It is an internal storage and execution choice, not a promise that Nivara owns tensor math APIs.
 
 ### Storage Layout and Span Access
 
 ```
-NivaraColumn<T> → IColumnStorage<T> → ColumnStorageFactory picks backend by IsVectorizable<T>:
-  non-vectorizable → MemoryStorage<T>  (Memory<T>, scalar)        → TryGetSpan/Slice = zero-copy VIEW  (ProvidesZeroCopySpanAccess = true)
-  vectorizable     → TensorStorage<T>  (Tensor<T>, SIMD)          → GetFlattenedSpan/Slice = cached COPY (ProvidesZeroCopySpanAccess = false)
+NivaraColumn<T> → IColumnStorage<T> → ColumnStorage<T> (sole-owner T[] + optional bool[] null mask)
+  TryGetSpan   → zero-copy VIEW over T[] when no nulls; returns false when nulls present
+  Slice        → zero-copy shared-buffer view (mutations to the source array are visible)
+  AsTensorView → lazy zero-copy Tensor<T> view for unmanaged element types (check HasNulls first)
 ```
 
-Span-access semantics differ by backend, so callers must not assume slicing or
-`TryGetSpan` is cheap. Query them via `IColumnStorage<T>.ProvidesZeroCopySpanAccess`
-(`true` for `MemoryStorage<T>`, `false` for `TensorStorage<T>`):
+Span-access semantics are uniform across all types because there is a single storage class:
 
-- **`MemoryStorage<T>`** — `AsSpan()`/`TryGetSpan` and `Slice` are true zero-copy
-  views over the backing `Memory<T>`; mutation of the returned span is visible in
-  storage.
-- **`TensorStorage<T>`** — `GetFlattenedSpan()` returns a cached flattened **copy**
-  (first access materializes via `FlattenTo`, later accesses reuse the cache) and
-  `Slice` returns an independent copy; tensor slicing is not contiguous, so no view
-  is returned. Nivara does not advertise zero-copy for the tensor-backed path.
+- **`TryGetSpan`** returns a true zero-copy read-only view over the backing `T[]` when the
+  column has no nulls; it returns `false` (no span) when a null mask is present so callers
+  take the explicit-fill path.
+- **`Slice`** returns a zero-copy shared-buffer view — it shares the source array and null
+  mask, so mutations to the source are visible through the slice.
+- **`AsTensorView()`** exposes a lazy zero-copy `Tensor<T>` view over the same array for
+  unmanaged element types (cached after first access); callers must check `HasNulls` first
+  since null positions hold `default(T)`.
 
 ### Null Representation Decision
 
@@ -145,46 +137,37 @@ Null-related behavior is a major source of subtle bugs.
 
 ---
 
-## Memory vs Tensor Storage
+## Storage & Kernel Selection
 
-Nivara uses a factory-based approach to select optimal storage:
+Nivara uses a single storage class with runtime kernel dispatch:
 
-### MemoryStorage<T>
+### ColumnStorage<T>
 
-**Used when:**
-- `T` is not vectorizable (strings, objects, DateTime, etc.)
-- Operations cannot benefit from SIMD acceleration
+All columns use `ColumnStorage<T>` — a sole-owner contiguous `T[]` plus an optional `bool[]` null mask.
 
 **Characteristics:**
-- Simple `Memory<T>` layout
-- Scalar execution paths only
-- Predictable semantics and performance
-- Lower memory overhead
-- Faster for non-numeric operations
+- One storage implementation for every element type (vectorizable or not)
+- Slices are zero-copy shared-buffer views
+- `AsTensorView()` provides a lazy zero-copy `Tensor<T>` view for unmanaged types
+- Whether operations dispatch to SIMD kernels is decided by `KernelSelector`, never by the storage class
 
-### TensorStorage<T>
+### Kernel Selection
 
-**Used when:**
-- `T` supports SIMD operations (`int`, `float`, `double`, `bool`)
-- Operations can be safely vectorized
+`KernelSelector.DetermineKernelType()` decides scalar vs vectorized execution at runtime:
 
-**Characteristics:**
-- Uses `System.Numerics.Tensors` for storage
-- Automatic SIMD acceleration via `TensorPrimitives`
-- Falls back to scalar paths when vectorization isn't beneficial
-- Higher performance for mathematical operations
-- Slightly higher memory overhead
+**Vectorized when:**
+- `T` is vectorizable per `ColumnStorageFactory.IsVectorizable<T>()` (`int`, `float`, `double`, `long`, `short`, `byte`, `bool`, etc.)
+- `Vector.IsHardwareAccelerated`
+- Length exceeds the vectorization threshold (`Length >= vectorSize * 4`)
+
+**Scalar otherwise.**
 
 ### Automatic Selection
 
-The `Nivara.Storage.ColumnStorageFactory.IsVectorizable<T>()` method determines storage type:
-
 ```csharp
-// Automatically selects TensorStorage<int>
-var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
-
-// Automatically selects MemoryStorage<string>
-var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
+// Kernel selection is automatic and transparent to users:
+var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3 });                    // vectorizable
+var stringColumn = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" }); // scalar
 ```
 
 This distinction is **internal** and transparent to users.
@@ -888,7 +871,7 @@ The `Conv2d<T>` kernel follows a tiled im2col pipeline: gather input patches int
 - **PatchLocation lookup table**: `PatchLocation` struct precomputes `(Batch, OH, OW)` per-tile, eliminating 4 integer divisions per position from all hot loops
 - **ConvForward1x1**: bypasses im2col entirely for 1×1 kernels (stride=1, padding=0). Gathers input channels into pooled buffer, then `Dot` per output channel
 - **InputGrad specializations**: `InputGrad1x1` (direct MultiplyAdd), `InputGrad3x3` (bounds-checked 9-tap scatter), `InputGradGeneric` (nested loops) — eliminates im2col for the backward input path
-- **Cached flattened span via TryGetSpan**: `NivaraColumn.TryGetSpan` returns a read-only span — a true zero-copy view over `MemoryStorage` (`ProvidesZeroCopySpanAccess == true`), and a cached flattened buffer over `TensorStorage` (`ProvidesZeroCopySpanAccess == false`; first access copies via `FlattenTo`, later accesses reuse the cache). Nivara does not advertise zero-copy for tensor storage
+- **Span access via TryGetSpan**: `NivaraColumn.TryGetSpan` returns a true zero-copy read-only view over the backing array when the column has no nulls, and returns `false` when a null mask is present (callers take the explicit-fill path). `AsTensorView()` exposes a lazy zero-copy `Tensor<T>` view for unmanaged element types
 - **Grouped convolution**: `groups` parameter splits input/output channels. For `groups=1` (common path), zero overhead — full buffers passed directly. For `groups>1`, gather/scatter per group with NCHW layout
 
 #### Conv1d: 1D im2col → Dot
@@ -960,10 +943,10 @@ This appendix summarizes key architecture decisions in concise form. See the rel
 
 ### Storage & Vectorization
 
-- **Storage strategy**: Default to `MemoryStorage` for non-vectorizable types and `TensorStorage` for vectorizable types. Use `ColumnStorageFactory` with runtime type checks.
-  - Rationale: generic static constraints are limiting (CS0080); runtime dispatch is more flexible.
-- **Vectorization detection**: Use factory-level checks (`IsVectorizable<T>()`) rather than instance flags.
-  - Rationale: storage selection vs arithmetic vectorization have different concerns; factory centralizes decisions.
+- **Storage strategy**: Single `ColumnStorage<T>` for all types (sole-owner `T[]` + optional `bool[]` null mask); vectorization decided by `KernelSelector` at runtime, never by the storage class.
+  - Rationale: one storage path simplifies span/slice semantics; generic static constraints are limiting (CS0080); runtime dispatch is more flexible.
+- **Vectorization detection**: Use factory-level checks (`IsVectorizable<T>()`) plus `KernelSelector` heuristics.
+  - Rationale: kernel selection is orthogonal to storage; `KernelSelector` centralizes vectorization decisions.
 - **Null semantics**: Explicit boolean masks, never NaN-based.
   - Rationale: predictable across all types; NaN only works reliably for IEEE floats.
 - **Comparisons**: Return `NivaraColumn<bool>` with SQL-like null propagation (null compared to anything → null).

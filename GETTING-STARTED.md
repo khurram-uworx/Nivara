@@ -73,9 +73,7 @@ var c = a + b;    // Vectorized addition
 // Results: a=[1.0, 2.0, 3.0], b=[1.5, 3.0, 4.5], c=[2.5, 5.0, 7.5]
 ```
 
-Nivara automatically selects the storage backend:
-- **TensorStorage**: For vectorizable types (`int`, `float`, `double`, `bool`)
-- **MemoryStorage**: For non-vectorizable types (`string`, `Guid`, reference types)
+All columns share a single storage class (`ColumnStorage<T>`, a sole-owner `T[]` plus an optional `bool[]` null mask). Whether an operation dispatches to a SIMD kernel is decided at runtime by `KernelSelector` — vectorized when `T` is vectorizable (`int`, `float`, `double`, `bool`, etc.), hardware acceleration is available, and the column is large enough to make vectorization worthwhile. This is transparent to users.
 
 Use `System.Numerics.Tensors` directly for tensor math such as dot products, norms, cosine similarity, and model-facing APIs. Nivara's role is to preserve typed columns, schemas, labels, and null masks at the tabular boundary.
 
@@ -1051,7 +1049,7 @@ var y = tensors["y"];
 
 ### Computing Gradients
 
-`ReverseGradTensor<T>` supports `+`, `-`, `*`, `/` and unary `-` operator overloads that delegate to `GradOperations`:
+`ReverseGradTensor<T>` supports `+`, `-`, `*`, `/` and unary `-` operator overloads that delegate to `ReverseGradOperations`:
 
 ```csharp
 // Simple linear model: z = w * x + b using operator overloads.
@@ -1064,7 +1062,7 @@ using (GradientUtils.Grad())
 
     // MSE loss: mean((z - y)^2)
     var diff = z - y;
-    var loss = GradOperations.Mean(diff * diff);
+    var loss = ReverseGradOperations.Mean(diff * diff);
 
     // Backward pass — computes gradients for w and b
     loss.Backward();
@@ -1238,7 +1236,7 @@ var causalAttn = mha.Forward(input, causal: true);          // with causal mask
 
 ### NLP Models
 
-Two ready-to-use differentiable NLP models are included:
+Two ready-to-use differentiable NLP models ship as application-level sample code in `samples/Nivara.Samples/` (namespace `Nivara.AutoDiff.Nn`), built from core primitives (`Embedding`, `Linear`, `MeanPool`):
 
 #### Text Classifier (sequence → single label)
 
