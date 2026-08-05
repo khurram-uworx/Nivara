@@ -83,6 +83,10 @@ public abstract class Optimizer<T> : IDisposable where T : struct, IFloatingPoin
 
     public abstract void Step();
 
+    public abstract Dictionary<string, T[]> StateDict();
+
+    public abstract void LoadStateDict(Dictionary<string, T[]> state);
+
     public virtual void ZeroGrad()
     {
         foreach (var group in ParameterGroups)
