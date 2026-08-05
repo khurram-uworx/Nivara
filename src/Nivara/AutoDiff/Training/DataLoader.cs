@@ -27,7 +27,14 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFlo
         _seed = seed;
     }
 
+    public int Count => _dataset.Count;
+
     public IEnumerator<Batch<T>> GetEnumerator()
+    {
+        return GetBatches(0, 0).GetEnumerator();
+    }
+
+    public IEnumerable<Batch<T>> GetBatches(int epoch = 0, int skipBatches = 0)
     {
         int count = _dataset.Count;
         int[] indices = new int[count];
@@ -36,7 +43,9 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFlo
 
         if (_shuffle)
         {
-            var rng = _seed.HasValue ? new Random(_seed.Value) : Random.Shared;
+            var rng = _seed.HasValue
+                ? new Random(_seed.Value + epoch)
+                : new Random(epoch);
             for (int i = count - 1; i > 0; i--)
             {
                 int j = rng.Next(i + 1);
@@ -44,11 +53,19 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFlo
             }
         }
 
+        int batchIndex = 0;
         for (int i = 0; i < count; i += _batchSize)
         {
+            if (batchIndex < skipBatches)
+            {
+                batchIndex++;
+                continue;
+            }
+
             int remaining = count - i;
             int batchLen = remaining < _batchSize ? remaining : _batchSize;
             yield return _dataset.GetBatch(indices.AsSpan(i, batchLen));
+            batchIndex++;
         }
     }
 
