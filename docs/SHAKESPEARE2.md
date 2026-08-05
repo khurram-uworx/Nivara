@@ -84,6 +84,12 @@ Batched API shape (tentative, to be finalized with the team):
 - `Parallel.For` over the batch when large enough; single-sequence path kept intact and bit-identical.
 - Batched-MatMul improvement idea deferred as a backlog issue (to be filed when implementation begins).
 
+### Progress — 2026-08-05
+
+- **Task 1 — DONE** (`7b44c30`): route decision block above; backlog issue **#118** filed (batched MatMul deferred).
+- **Task 2 — DONE** (`e451f80`): new `ReverseGradOperations.BatchedMultiHeadAttention<T>` op (ReverseGradOperations.cs:569) accepting rank-3 `[B, L, D]` + optional `[B, qLen, kvLen]` additive mask; `Parallel.For` over B when `ShouldParallelizeBatch` (B≥4 and total work ≥ 2^21); ArrayPool-pooled transient buffers; single-sequence MHA untouched. 8 unit tests in `tests/Nivara.Tests/AutoDiff/BatchedMultiHeadAttentionTests.cs`; all pass.
+- **Task 3 — DONE** (`d2ecc46`): batched causal self-attention + batched cross-attention fixture cases appended at the end of `gen_reference.py` `run()` (seed-303 `attn_rng` stream; the seed-42 shared-stream conv/linear fixtures were regenerated per the documented convention — the full `samples/data/torch-comparison/` tree is committed as one unit). New `tests/Nivara.Tests/NivaraTorch/BatchedAttentionTests.cs` (3 tests: causal forward, causal backward, cross forward+backward) compare against PyTorch fixtures. Full NivaraTorch suite: 71/71 pass.
+
 ---
 
 ## Task 1: Current-state audit and batched-attention route decision
