@@ -279,8 +279,9 @@ User input
                               Buffer full (10 examples)?
                                     │
                                yes ──> IntentTrainer.TrainIncremental()
-                                    │   loads existing model, trains 5 epochs
-                                    │   at lr=0.0005, saves updated model
+                                    │   loads checkpoint (weights + optimizer state)
+                                    │   trains 5 epochs at lr=0.0005 via Continue()
+                                    │   saves updated model + checkpoint
                                     v
                               Continue with updated model
 ```
@@ -293,7 +294,7 @@ Tested examples:
 | `"what is the capital of France"` | 0.8 | LLM-corrected to question (confidence: 0.550) |
 | `"turn on the lights"` | 0.8 | LLM-corrected to command (confidence: 0.493) |
 
-Uses: `FeedbackCollector`, `IntentTrainer.TrainIncremental()`, `TrainingLoop.Run()`, `Optimizer.StateDict()/LoadStateDict()`.
+Uses: `FeedbackCollector`, `IntentTrainer.TrainIncremental()`, `TrainingLoop.Continue()`, `TrainingLoop.SaveCheckpoint()/LoadCheckpoint()`, `Optimizer.StateDict()/LoadStateDict()`.
 
 ### TinyShakespeare (`--tinyshakespeare`)
 Trains a **word-level batched causal transformer** on the TinyShakespeare corpus with Nivara's AutoDiff, then serves it through the standard `Microsoft.Extensions.AI.IChatClient` interface and wires it up via DI. No LLM needed — this mode proves Nivara can train a real transformer and serve it in an ecosystem-compatible way. Training runs when no `--load` is given; a saved model skips straight to generation and the DI demo. See the dedicated [TinyShakespeare section](#tinyshakespeare--batched-transformer-ichatclient-mode---tinyshakespeare) below for the full option list, architecture, and the how-it-differs-from-MicroGpt comparison.
