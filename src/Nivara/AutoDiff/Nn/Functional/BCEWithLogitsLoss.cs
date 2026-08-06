@@ -1,6 +1,5 @@
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Tensors;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
@@ -44,7 +43,7 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, IFloatingPointIeee754
                 gradOutput.CopyTo(grad.AsSpan(), default(T)!);
 
                 var sigmoidX = new T[n];
-                TensorsHelper.Sigmoid(logitsData.AsSpan(), sigmoidX.AsSpan());
+                GradKernels.Sigmoid(logitsData.AsSpan(), sigmoidX.AsSpan());
 
                 var logitsGrad = new T[n];
                 for (int i = 0; i < n; i++)
