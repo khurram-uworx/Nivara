@@ -149,6 +149,7 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
                 requiresGrad: true,
                 kv.Value.Shape)));
         _optimizer.LoadStateDict(new Dictionary<string, T[]>(checkpoint.OptimizerState));
+        _maxEpoch = checkpoint.Epoch;
     }
 
     protected virtual void OnEpochStart(int epoch)

@@ -82,6 +82,9 @@ public static class IntentTrainer
         Directory.CreateDirectory(saveDir);
         ModelSerializer.Save(model, Path.Combine(saveDir, "intent_model.json"));
         tokenizer.Save(Path.Combine(saveDir, "intent_tokenizer.json"));
+        trainLoop.SaveCheckpoint(
+            Path.Combine(saveDir, "intent_checkpoint.json"),
+            result.Epochs[^1].Epoch, result.Epochs[^1].Loss);
         Console.WriteLine($"  Saved to {saveDir}/");
 
         return (model, tokenizer);
@@ -91,10 +94,20 @@ public static class IntentTrainer
         string[] feedbackTexts, int[] feedbackLabels,
         string modelsDir, int additionalEpochs = 5, int batchSize = 16)
     {
+        var checkpointPath = Path.Combine(modelsDir, "intent_checkpoint.json");
+        bool hasCheckpoint = File.Exists(checkpointPath);
+
         var tokenizer = TextTokenizer.Load(Path.Combine(modelsDir, "intent_tokenizer.json"));
         var model = new TextClassifierModel<float>(tokenizer.VocabSize, 32, 64, numClasses: 5, maxSeqLen: 20);
-        ModelSerializer.Load(model, Path.Combine(modelsDir, "intent_model.json"));
-        Console.WriteLine("  Loaded existing intent model weights.");
+        if (hasCheckpoint)
+        {
+            Console.WriteLine("  Loading intent checkpoint (weights + optimizer state).");
+        }
+        else
+        {
+            ModelSerializer.Load(model, Path.Combine(modelsDir, "intent_model.json"));
+            Console.WriteLine("  No checkpoint found; warm-starting weights with a fresh optimizer.");
+        }
 
         int maxSeqLen = 20;
         var allTexts = new List<string>();
@@ -135,15 +148,25 @@ public static class IntentTrainer
             },
             optimizer, additionalEpochs);
 
-        var result = loop.Run();
+        var result = hasCheckpoint
+            ? ResumeFromCheckpoint(loop, checkpointPath, additionalEpochs)
+            : loop.Run();
 
         var lastLoss = result.Epochs[^1].Loss;
         Console.WriteLine($"  Incremental training complete: {result.Epochs.Count} epochs, final loss {lastLoss:F4}");
 
         ModelSerializer.Save(model, Path.Combine(modelsDir, "intent_model.json"));
+        loop.SaveCheckpoint(checkpointPath, result.Epochs[^1].Epoch, result.Epochs[^1].Loss);
         Console.WriteLine($"  Saved updated model to {modelsDir}/");
 
         model.Eval();
         return (model, tokenizer);
+    }
+
+    static TrainingResult<float> ResumeFromCheckpoint(
+        TrainingLoop<float> loop, string checkpointPath, int additionalEpochs)
+    {
+        loop.LoadCheckpoint(checkpointPath);
+        return loop.Continue(additionalEpochs);
     }
 }
