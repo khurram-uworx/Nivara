@@ -408,4 +408,489 @@ public class GradKernelsTests
 
         Assert.That(actual, Is.EqualTo(new[] { 1.0f, 4.0f, 2.0f, 5.0f, 3.0f, 6.0f }).Within(1e-6));
     }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Half (F16) variants
+    //  All FloatInputs values are exactly representable in Half, so the
+    //  expected values are computed from the exact inputs in double and compared
+    //  with tolerances that absorb the reduced output precision.
+    // ══════════════════════════════════════════════════════════════════════
+
+    static readonly Half[] HalfInputs = Array.ConvertAll(FloatInputs, x => (Half)x);
+
+    static readonly float[] LogInputs = { 0.5f, 1.0f, 2.0f, 3.0f, 0.25f, 10.0f, 4.0f, 1.5f };
+    static readonly Half[] HalfLogInputs = Array.ConvertAll(LogInputs, x => (Half)x);
+
+    static T D<T>(double v) where T : struct, IFloatingPointIeee754<T> => T.CreateChecked(v);
+
+    static void AssertRowSoftmax<T>(ReadOnlySpan<T> input, ReadOnlySpan<T> actual, int classCount, double tolerance)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int rows = input.Length / classCount;
+        for (int r = 0; r < rows; r++)
+        {
+            double max = double.CreateChecked(input[r * classCount]);
+            for (int j = 1; j < classCount; j++)
+                max = Math.Max(max, double.CreateChecked(input[r * classCount + j]));
+
+            double sum = 0.0;
+            for (int j = 0; j < classCount; j++)
+                sum += Math.Exp(double.CreateChecked(input[r * classCount + j]) - max);
+
+            for (int j = 0; j < classCount; j++)
+            {
+                int idx = r * classCount + j;
+                Assert.That(double.CreateChecked(actual[idx]),
+                    Is.EqualTo(Math.Exp(double.CreateChecked(input[idx]) - max) / sum).Within(tolerance),
+                    $"Index {idx}");
+            }
+        }
+    }
+
+    [Test]
+    public void Sigmoid_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(1.0 / (1.0 + Math.Exp(-double.CreateChecked(x)))), GradKernels.Sigmoid<Half>, 1e-2);
+    }
+
+    [Test]
+    public void Tanh_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(Math.Tanh(double.CreateChecked(x))), GradKernels.Tanh<Half>, 1e-2);
+    }
+
+    [Test]
+    public void Relu_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(Math.Max(double.CreateChecked(x), 0.0)), GradKernels.Relu<Half>, 1e-6);
+    }
+
+    [Test]
+    public void Exp_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(Math.Exp(double.CreateChecked(x))), GradKernels.Exp<Half>, 1e-2);
+    }
+
+    [Test]
+    public void Log_Half_KnownValues()
+    {
+        AssertKernel(HalfLogInputs, x => D<Half>(Math.Log(double.CreateChecked(x))), GradKernels.Log<Half>, 1e-2);
+    }
+
+    [Test]
+    public void Abs_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(Math.Abs(double.CreateChecked(x))), GradKernels.Abs<Half>, 1e-6);
+    }
+
+    [Test]
+    public void Clamp_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(Math.Clamp(double.CreateChecked(x), -1.0, 2.0)),
+            (input, output) => GradKernels.Clamp<Half>(input, (Half)(-1.0), (Half)2.0, output), 1e-6);
+    }
+
+    [Test]
+    public void Negate_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(-double.CreateChecked(x)), GradKernels.Negate<Half>, 1e-6);
+    }
+
+    [Test]
+    public void Divide_Half_KnownValues()
+    {
+        var numerator = Array.ConvertAll(new[] { 1.0f, 4.0f, 9.0f, 16.0f, 25.0f, 36.0f, 49.0f, 64.0f }, x => (Half)x);
+        var denominator = Array.ConvertAll(new[] { 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f }, x => (Half)x);
+        var actual = new Half[numerator.Length];
+        GradKernels.Divide<Half>(numerator, denominator, actual);
+        for (int i = 0; i < numerator.Length; i++)
+            Assert.That(double.CreateChecked(actual[i]),
+                Is.EqualTo(double.CreateChecked(numerator[i]) / double.CreateChecked(denominator[i])).Within(1e-2),
+                $"Index {i}");
+    }
+
+    [Test]
+    public void Gelu_Half_KnownValues()
+    {
+        const double sqrt2OverPi = 0.7978845608028654;
+        const double coeff = 0.044715;
+        AssertKernel(HalfInputs, x =>
+        {
+            double v = double.CreateChecked(x);
+            double z = sqrt2OverPi * (v + coeff * v * v * v);
+            return D<Half>(0.5 * v * (1.0 + Math.Tanh(z)));
+        }, GradKernels.Gelu<Half>, 1e-2);
+    }
+
+    [Test]
+    public void GeluExact_Half_KnownValues()
+    {
+        AssertKernel(HalfInputs, x => D<Half>(0.5 * double.CreateChecked(x) * (1.0 + Erf(double.CreateChecked(x) * 0.7071067811865476))), GradKernels.GeluExact<Half>, 1e-2);
+    }
+
+    [Test]
+    public void Softmax_RowWise_Half_KnownValues()
+    {
+        var input = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 1.5f, 0.5f, 2.5f, -1.0f, 0.0f, 1.0f }, x => (Half)x);
+        var actual = new Half[input.Length];
+        GradKernels.Softmax<Half>(input, actual, 3);
+        AssertRowSoftmax(input, actual, 3, 1e-2);
+    }
+
+    [Test]
+    public void LogSoftmax_RowWise_Half_KnownValues()
+    {
+        var input = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 1.5f, 0.5f, 2.5f, -1.0f, 0.0f, 1.0f }, x => (Half)x);
+        var actual = new Half[input.Length];
+        GradKernels.LogSoftmax<Half>(input, actual, 3);
+        AssertRowLogSoftmax(input, actual, 3, 1e-2);
+    }
+
+    static void AssertRowLogSoftmax<T>(ReadOnlySpan<T> input, ReadOnlySpan<T> actual, int classCount, double tolerance)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int rows = input.Length / classCount;
+        for (int r = 0; r < rows; r++)
+        {
+            double max = double.CreateChecked(input[r * classCount]);
+            for (int j = 1; j < classCount; j++)
+                max = Math.Max(max, double.CreateChecked(input[r * classCount + j]));
+
+            double sum = 0.0;
+            for (int j = 0; j < classCount; j++)
+                sum += Math.Exp(double.CreateChecked(input[r * classCount + j]) - max);
+
+            for (int j = 0; j < classCount; j++)
+            {
+                int idx = r * classCount + j;
+                Assert.That(double.CreateChecked(actual[idx]),
+                    Is.EqualTo(double.CreateChecked(input[idx]) - max - Math.Log(sum)).Within(tolerance),
+                    $"Index {idx}");
+            }
+        }
+    }
+
+    [Test]
+    public void MatMul_Half_Unsupported_ThrowsNotSupported()
+    {
+        var a = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f }, x => (Half)x);
+        var b = Array.ConvertAll(new[] { 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f }, x => (Half)x);
+        var actual = new Half[4];
+        Assert.Throws<NotSupportedException>(() => GradKernels.MatMul<Half>(a, b, actual, 2, 3, 2));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Gradient kernels (Half / float)
+    // ══════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public void SigmoidGradient_Half_KnownValues()
+    {
+        var input = Array.ConvertAll(new[] { 0.7310585786300049f, 0.2689414213699951f, 0.5f, 0.6224593312018546f, 0.7310585786300049f, 0.9241418199787566f, 0.9525741268224334f, 0.43782349911420193f }, x => (Half)x);
+        var grad = Array.ConvertAll(new[] { 1.0f, -2.0f, 0.5f, 3.0f, -1.0f, 0.25f, 2.0f, -0.5f }, x => (Half)x);
+        AssertGradientKernel(input, grad, (s, g) => D<Half>(double.CreateChecked(s) * (1.0 - double.CreateChecked(s)) * double.CreateChecked(g)), GradKernels.SigmoidGradient<Half>, 1e-2);
+    }
+
+    [Test]
+    public void TanhGradient_Half_KnownValues()
+    {
+        var input = Array.ConvertAll(new[] { -0.9981778976111987f, -0.7615941559557649f, 0f, 0.46211715726000974f, 0.7615941559557649f, 0.9866142981514303f, 0.9950547536867305f, -0.24491866240370913f }, x => (Half)x);
+        var grad = Array.ConvertAll(new[] { 0.5f, 1.0f, -1.0f, 2.0f, -0.5f, 1.5f, -2.0f, 0.25f }, x => (Half)x);
+        AssertGradientKernel(input, grad, (t, g) => D<Half>((1.0 - double.CreateChecked(t) * double.CreateChecked(t)) * double.CreateChecked(g)), GradKernels.TanhGradient<Half>, 1e-2);
+    }
+
+    [Test]
+    public void ReluGradient_Half_KnownValues()
+    {
+        var grad = Enumerable.Range(1, HalfInputs.Length).Select(i => (Half)i).ToArray();
+        AssertGradientKernel(HalfInputs, grad, (x, g) => double.CreateChecked(x) > 0.0 ? g : (Half)0, GradKernels.ReluGradient<Half>, 1e-6);
+    }
+
+    [Test]
+    public void LeakyReluGradient_Half_KnownValues()
+    {
+        var grad = Enumerable.Range(1, HalfInputs.Length).Select(i => (Half)(i * 0.5)).ToArray();
+        const float slope = 0.01f;
+        AssertGradientKernel(HalfInputs, grad, (x, g) => double.CreateChecked(x) > 0.0 ? g : D<Half>(slope * double.CreateChecked(g)),
+            (input, g, output) => GradKernels.LeakyReluGradient<Half>(input, g, (Half)slope, output), 1e-3);
+    }
+
+    [Test]
+    public void GeluGradient_Half_KnownValues()
+    {
+        var grad = Enumerable.Range(1, HalfInputs.Length).Select(i => (Half)(i * 0.5)).ToArray();
+        AssertGradientKernel(HalfInputs, grad, (x, g) => D<Half>(GeluGradientExpected(double.CreateChecked(x)) * double.CreateChecked(g)), GradKernels.GeluGradient<Half>, 1e-2);
+    }
+
+    static double GeluGradientExpected(double x)
+    {
+        const double sqrt2OverPi = 0.7978845608028654;
+        const double coeff = 0.044715;
+        double z = sqrt2OverPi * (x + coeff * x * x * x);
+        double tanhZ = Math.Tanh(z);
+        double dTanh = 1.0 - tanhZ * tanhZ;
+        return 0.5 * (1.0 + tanhZ) + 0.5 * x * dTanh * sqrt2OverPi * (1.0 + 3.0 * coeff * x * x);
+    }
+
+    [Test]
+    public void GeluExactGradient_Half_KnownValues()
+    {
+        var grad = Enumerable.Range(1, HalfInputs.Length).Select(i => (Half)(i * 0.5)).ToArray();
+        AssertGradientKernel(HalfInputs, grad, (x, g) => D<Half>(GeluExactGradientExpected(double.CreateChecked(x)) * double.CreateChecked(g)), GradKernels.GeluExactGradient<Half>, 1e-2);
+    }
+
+    static double GeluExactGradientExpected(double x)
+    {
+        const double invSqrt2 = 0.7071067811865476;
+        const double invSqrt2Pi = 0.3989422804014327;
+        double cdf = 0.5 * (1.0 + Erf(x * invSqrt2));
+        double pdf = Math.Exp(-0.5 * x * x) * invSqrt2Pi;
+        return cdf + x * pdf;
+    }
+
+    [Test]
+    public void LogGradient_Half_KnownValues()
+    {
+        var grad = Enumerable.Range(1, HalfLogInputs.Length).Select(i => (Half)i).ToArray();
+        AssertGradientKernel(HalfLogInputs, grad, (x, g) => D<Half>(double.CreateChecked(g) / double.CreateChecked(x)), GradKernels.LogGradient<Half>, 1e-2);
+    }
+
+    [Test]
+    public void AbsGradient_Half_KnownValues()
+    {
+        var grad = Enumerable.Range(1, HalfInputs.Length).Select(i => (Half)(i * 0.25)).ToArray();
+        AssertGradientKernel(HalfInputs, grad, (x, g) => D<Half>(Math.Sign(double.CreateChecked(x))) * g, GradKernels.AbsGradient<Half>, 1e-6);
+    }
+
+    [Test]
+    public void ClipGradient_Half_KnownValues()
+    {
+        var grad = Enumerable.Range(1, HalfInputs.Length).Select(i => (Half)i).ToArray();
+        AssertGradientKernel(HalfInputs, grad, (x, g) => double.CreateChecked(x) >= -1.0 && double.CreateChecked(x) <= 2.0 ? g : (Half)0,
+            (input, g, output) => GradKernels.ClipGradient<Half>(input, g, (Half)(-1.0), (Half)2.0, output), 1e-6);
+    }
+
+    [Test]
+    public void SoftmaxGradient_RowWise_Half_KnownValues()
+    {
+        var input = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 1.5f, 0.5f, 2.5f, -1.0f, 0.0f, 1.0f }, x => (Half)x);
+        var grad = Array.ConvertAll(new[] { 0.1f, -0.2f, 0.3f, 0.4f, -0.5f, 0.6f, 0.7f, -0.8f, 0.9f }, x => (Half)x);
+        var softmax = new Half[input.Length];
+        GradKernels.Softmax<Half>(input, softmax, 3);
+        var actual = new Half[input.Length];
+        GradKernels.SoftmaxGradient<Half>(softmax, grad, actual, 3);
+        AssertSoftmaxGradient(softmax, grad, actual, 3, 1e-2);
+    }
+
+    static void AssertSoftmaxGradient<T>(ReadOnlySpan<T> softmax, ReadOnlySpan<T> grad, ReadOnlySpan<T> actual, int classCount, double tolerance)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int rows = softmax.Length / classCount;
+        for (int r = 0; r < rows; r++)
+        {
+            double dot = 0.0;
+            for (int j = 0; j < classCount; j++)
+                dot += double.CreateChecked(softmax[r * classCount + j]) * double.CreateChecked(grad[r * classCount + j]);
+            for (int j = 0; j < classCount; j++)
+            {
+                int idx = r * classCount + j;
+                double expected = double.CreateChecked(softmax[idx]) * (double.CreateChecked(grad[idx]) - dot);
+                Assert.That(double.CreateChecked(actual[idx]), Is.EqualTo(expected).Within(tolerance), $"Index {idx}");
+            }
+        }
+    }
+
+    [Test]
+    public void LogSoftmaxGradient_RowWise_Half_KnownValues()
+    {
+        var input = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 1.5f, 0.5f, 2.5f, -1.0f, 0.0f, 1.0f }, x => (Half)x);
+        var grad = Array.ConvertAll(new[] { 0.1f, -0.2f, 0.3f, 0.4f, -0.5f, 0.6f, 0.7f, -0.8f, 0.9f }, x => (Half)x);
+        var actual = new Half[input.Length];
+        GradKernels.LogSoftmaxGradient<Half>(input, grad, actual, 3);
+        AssertLogSoftmaxGradient(input, grad, actual, 3, 1e-2);
+    }
+
+    static void AssertLogSoftmaxGradient<T>(ReadOnlySpan<T> input, ReadOnlySpan<T> grad, ReadOnlySpan<T> actual, int classCount, double tolerance)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int rows = input.Length / classCount;
+        for (int r = 0; r < rows; r++)
+        {
+            double max = double.CreateChecked(input[r * classCount]);
+            for (int j = 1; j < classCount; j++)
+                max = Math.Max(max, double.CreateChecked(input[r * classCount + j]));
+            double sumExp = 0.0;
+            double sumGrad = 0.0;
+            for (int j = 0; j < classCount; j++)
+            {
+                sumExp += Math.Exp(double.CreateChecked(input[r * classCount + j]) - max);
+                sumGrad += double.CreateChecked(grad[r * classCount + j]);
+            }
+            for (int j = 0; j < classCount; j++)
+            {
+                int idx = r * classCount + j;
+                double soft = Math.Exp(double.CreateChecked(input[idx]) - max) / sumExp;
+                double expected = double.CreateChecked(grad[idx]) - soft * sumGrad;
+                Assert.That(double.CreateChecked(actual[idx]), Is.EqualTo(expected).Within(tolerance), $"Index {idx}");
+            }
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Additional float coverage: single-row softmax grads, MatMul variants
+    // ══════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public void SoftmaxGradient_SingleRow_KnownValues()
+    {
+        var input = new[] { -2.0f, -1.0f, 0.0f, 1.0f, 2.0f };
+        var grad = new[] { 0.1f, -0.2f, 0.3f, 0.4f, -0.5f };
+        var softmax = new float[input.Length];
+        GradKernels.Softmax<float>(input, softmax, input.Length);
+        var actual = new float[input.Length];
+        GradKernels.SoftmaxGradient<float>(softmax, grad, actual, input.Length);
+
+        double dot = 0.0;
+        for (int j = 0; j < input.Length; j++)
+            dot += softmax[j] * grad[j];
+        for (int j = 0; j < input.Length; j++)
+        {
+            double expected = softmax[j] * (grad[j] - dot);
+            Assert.That(actual[j], Is.EqualTo((float)expected).Within(1e-5), $"Index {j}");
+        }
+    }
+
+    [Test]
+    public void LogSoftmaxGradient_SingleRow_KnownValues()
+    {
+        var input = new[] { -2.0f, -1.0f, 0.0f, 1.0f, 2.0f };
+        var grad = new[] { 0.1f, -0.2f, 0.3f, 0.4f, -0.5f };
+        var actual = new float[input.Length];
+        GradKernels.LogSoftmaxGradient<float>(input, grad, actual, input.Length);
+
+        double max = input.Max();
+        double sumExp = 0.0;
+        double sumGrad = 0.0;
+        for (int j = 0; j < input.Length; j++)
+        {
+            sumExp += Math.Exp(input[j] - max);
+            sumGrad += grad[j];
+        }
+        for (int j = 0; j < input.Length; j++)
+        {
+            double soft = Math.Exp(input[j] - max) / sumExp;
+            double expected = grad[j] - soft * sumGrad;
+            Assert.That(actual[j], Is.EqualTo((float)expected).Within(1e-5), $"Index {j}");
+        }
+    }
+
+    [Test]
+    public void MatMul_2x3By3x4_KnownValues()
+    {
+        var a = new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f };
+        var b = new[] { 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f, 13.0f, 14.0f, 15.0f, 16.0f, 17.0f, 18.0f };
+        var actual = new float[2 * 4];
+        GradKernels.MatMul<float>(a, b, actual, 2, 3, 4);
+
+        for (int i = 0; i < 2; i++)
+        {
+            for (int j = 0; j < 4; j++)
+            {
+                float expected = 0f;
+                for (int k = 0; k < 3; k++)
+                    expected += a[i * 3 + k] * b[k * 4 + j];
+                Assert.That(actual[i * 4 + j], Is.EqualTo(expected).Within(1e-5), $"Index {i},{j}");
+            }
+        }
+    }
+
+    [Test]
+    public void MatMulTransposedB_2x3Transposed_KnownValues()
+    {
+        var a = new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f };
+        var b = new[] { 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f };
+        var actual = new float[2 * 2];
+        GradKernels.MatMulTransposedB<float>(a, b, actual, 2, 3, 2);
+
+        for (int i = 0; i < 2; i++)
+        {
+            for (int j = 0; j < 2; j++)
+            {
+                float expected = 0f;
+                for (int k = 0; k < 3; k++)
+                    expected += a[i * 3 + k] * b[j * 3 + k];
+                Assert.That(actual[i * 2 + j], Is.EqualTo(expected).Within(1e-5), $"Index {i},{j}");
+            }
+        }
+    }
+
+    [Test]
+    public void MatMulTransposedB_Half_Unsupported_ThrowsNotSupported()
+    {
+        var a = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f }, x => (Half)x);
+        var b = Array.ConvertAll(new[] { 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f }, x => (Half)x);
+        var actual = new Half[4];
+        Assert.Throws<NotSupportedException>(() => GradKernels.MatMulTransposedB<Half>(a, b, actual, 2, 3, 2));
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    //  Error paths
+    // ══════════════════════════════════════════════════════════════════════
+
+    [Test]
+    public void ElementwiseKernels_ShortOutputSpan_Throw()
+    {
+        var input = new float[4];
+        var shortOutput = new float[3];
+        Assert.Throws<ArgumentException>(() => GradKernels.Sigmoid<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Tanh<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Relu<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Exp<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Log<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Abs<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Negate<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Clamp<float>(input, -1f, 1f, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.LeakyRelu<float>(input, 0.01f, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Gelu<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.GeluExact<float>(input, shortOutput));
+        Assert.Throws<ArgumentException>(() => GradKernels.Divide<float>(input, input, shortOutput));
+    }
+
+    [Test]
+    public void Softmax_ShortOutputSpan_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => GradKernels.Softmax<float>(new float[6], new float[3], 3));
+    }
+
+    [Test]
+    public void LogSoftmax_ShortOutputSpan_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => GradKernels.LogSoftmax<float>(new float[6], new float[3], 3));
+    }
+
+    [Test]
+    public void SoftmaxGradient_LengthMismatch_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => GradKernels.SoftmaxGradient<float>(new float[6], new float[4], new float[6], 3));
+        Assert.Throws<ArgumentException>(() => GradKernels.SoftmaxGradient<float>(new float[6], new float[6], new float[3], 3));
+    }
+
+    [Test]
+    public void LogSoftmaxGradient_LengthMismatch_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => GradKernels.LogSoftmaxGradient<float>(new float[6], new float[4], new float[6], 3));
+        Assert.Throws<ArgumentException>(() => GradKernels.LogSoftmaxGradient<float>(new float[6], new float[6], new float[3], 3));
+    }
+
+    [Test]
+    public void MatMul_ShortResult_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => GradKernels.MatMul<float>(new float[6], new float[6], new float[3], 2, 3, 2));
+    }
+
+    [Test]
+    public void MatMulTransposedB_ShortResult_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => GradKernels.MatMulTransposedB<float>(new float[6], new float[6], new float[3], 2, 3, 2));
+    }
 }
