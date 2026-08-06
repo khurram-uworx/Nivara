@@ -40,7 +40,7 @@ public static class TypeConverter
         var targetData = new TTarget[n];
         for (int i = 0; i < n; i++)
             targetData[i] = TTarget.CreateChecked(span[i]);
-        return new ReverseGradTensor<TTarget>(NivaraColumn<TTarget>.Create(targetData), resultRequiresGrad, source.shape);
+        return new ReverseGradTensor<TTarget>(NivaraColumn<TTarget>.CreateFromOwnedArray(targetData), resultRequiresGrad, source.shape);
     }
 
     /// <summary>
