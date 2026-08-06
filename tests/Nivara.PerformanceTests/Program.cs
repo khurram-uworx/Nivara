@@ -34,6 +34,39 @@ static class Program
                 return () => TensorPrimitives.Sigmoid(a, dest);
             });
 
+        Run("Span chain 1M x 3 ops (raw)", 5, 100,
+            () =>
+            {
+                var a = Fill(new float[1_000_000]);
+                var b = Fill(new float[1_000_000]);
+                var c = Fill(new float[1_000_000]);
+                var d = Fill(new float[1_000_000]);
+                var t1 = new float[1_000_000];
+                var t2 = new float[1_000_000];
+                var result = new float[1_000_000];
+                return () =>
+                {
+                    TensorPrimitives.Add(a, b, t1);
+                    TensorPrimitives.Multiply(t1, c, t2);
+                    TensorPrimitives.Subtract(t2, d, result);
+                };
+            });
+
+        Run("Column chain 1M x 3 ops (wrapper)", 5, 100,
+            () =>
+            {
+                var a = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                var b = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                var c = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                var d = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                return () =>
+                {
+                    var t1 = a.Add(b);
+                    var t2 = t1.Multiply(c);
+                    _ = t2.Subtract(d);
+                };
+            });
+
         Run("Linear forward [32x256] -> [32x256]", 5, 100,
             () =>
             {

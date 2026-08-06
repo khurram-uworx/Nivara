@@ -13,6 +13,8 @@ is available.
 |---|---|
 | `ColumnAdd 1M x float` | `NivaraColumn<float>.Add(NivaraColumn<float>)` — the columnar binary-op path |
 | `ColumnSigmoid 1M x float` | Raw kernel — `TensorPrimitives.Sigmoid` over a pre-allocated 1M destination (the `NivaraColumn<float>.Sigmoid()` extension was removed in Task 8 of the refactor) |
+| `Span chain 1M x 3 ops (raw)` | `TensorPrimitives.Add`/`Multiply`/`Subtract` into three pre-allocated 1M destinations — zero-allocation control for the wrapper-cost isolation (P3) |
+| `Column chain 1M x 3 ops (wrapper)` | Same three ops through `NivaraColumn<float>.Add`/`Multiply`/`Subtract`, which allocate a fresh result column per op — isolates the column+storage wrapper cost (P3) |
 | `Linear forward [32x256] -> [32x256]` | `Linear<float>` inference forward (no `Grad()` scope) |
 | `Linear forward+backward [32x256]` | `Linear<float>` forward + `Backward` inside `GradientUtils.Grad()` |
 | `TransformerBlock forward [32x64, 4 heads]` | `TransformerBlock<float>` inference forward |
@@ -70,6 +72,8 @@ Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 6 runs.
 |---|---|---|---|
 | ColumnAdd 1M x float | 1,672 | 4,000,537 | 0.33 |
 | ColumnSigmoid 1M x float | 599 | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 409 | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 193 | 12,001,888 | 0.48 |
 | Linear forward [32x256] | 369 | 69,920 | 0.00 |
 | Linear forward+backward [32x256] | 171 | 1,492,187 | 0.35 |
 | TransformerBlock forward [32x64, 4 heads] | 135 | 196,159 | 0.07 |
@@ -110,3 +114,19 @@ Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 6 runs.
   `ArrayPool<T>.Shared` (commit `61ff968`, merged 2026-08-05 via PR #121), on
   top of the refactor's span-kernel and zero-copy column-wrap work. gen0/op is
   down accordingly (0.35 vs 0.45).
+- **The two `1M x 3 ops` rows are the ADR-002 P3 wrapper-cost isolation** (added
+  2026-08-06). Both run the identical `Add`/`Multiply`/`Subtract` chain over 1M
+  floats; the raw row reuses pre-allocated destinations (0 B/op by construction)
+  while the wrapper row goes through `NivaraColumn`, allocating a fresh result
+  column (~4 MB) per op. The wrapper path therefore carries the ~2 objects/op +
+  result-column allocation the ADR-002 decision called out as the remaining
+  per-op cost. Interpretation: the wrapper's incremental cost over raw spans is
+  the immutable result-column allocation itself (each op must produce a new
+  column), not an overhead that Option B's raw `Tensor<T>` backing would remove
+  — closing F7 with evidence on hand (no ADR-002 amendment filed).
+- **2026-08-06 caveat:** these new rows (and any ops/s column this session) were
+  recorded under elevated machine load — columnar throughput ran ~2× below the
+  canonical point A (e.g. ColumnAdd 815 vs 1,672 ops/s) even though no
+  production code changed since P1c. B/op and gen0/op are allocation-driven and
+  stable across runs; treat the new rows' ops/s as order-of-magnitude only until
+  re-measured on an idle machine.
