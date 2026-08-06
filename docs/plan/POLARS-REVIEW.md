@@ -155,4 +155,4 @@ The roadmap to close those gaps is in **`docs/POLARS-ROADMAP.md`**.
 - `docs/ARROW-ROADMAP.md` — the roadmap for that physics gap.
 - `docs/AISTACK-REVIEW.md` — the third lens: complementing the local .NET AI stack (ONNX, ML.NET, MEAI, AutoDiff).
 - `docs/AISTACK-ROADMAP.md` — the roadmap for that AI-data last mile.
-- `docs/IDEA.md`, `docs/TENSORS.md`, `docs/LINQ.md`, `docs/AUTODIFF.md` — product vision, strategic framing, plan-layer spec, and kernel patterns.
+- `docs/IDEA.md` (retired 2026-08-06; its query/expression-adjacent items are tracked as GitHub issues: [benchmark API #128](https://github.com/khurram-uworx/Nivara/issues/128), [observability #129](https://github.com/khurram-uworx/Nivara/issues/129), [typed LINQ `Query<T>()` #130](https://github.com/khurram-uworx/Nivara/issues/130), [window functions #134](https://github.com/khurram-uworx/Nivara/issues/134)), `docs/TENSORS.md`, `docs/LINQ.md`, `docs/AUTODIFF.md` — product vision, strategic framing, plan-layer spec, and kernel patterns.

@@ -98,7 +98,7 @@ Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
 - **PyTorch-validated kernels are the ecosystem bridge.** <0.04% loss-curve divergence across 55 functional tests means Nivara-trained weights exchange cleanly with the PyTorch ecosystem (TorchSharp's neighbor). "Train in Nivara, exchange weights with the world."
 - **ML.NET interop is first-class**, not an afterthought.
 - **Inference-default is the right native model.** `GradientUtils.Grad()`-gated graph construction matches how a local complementer should behave — predict by default, train explicitly.
-- **`docs/TENSORS.md` already named the right categories** under "Option C: AI Data Infrastructure" — structured AI datasets, embedding columns, vector search, RAG data preparation, feature engineering, evaluation datasets. This review is that Option C, made concrete against the local stack.
+- **`docs/TENSORS.md` already named the right categories** for the AI direction — structured AI datasets, embedding columns, vector search, RAG data preparation, feature engineering, evaluation datasets. This review makes that direction concrete against the local stack.
 
 ---
 
@@ -126,4 +126,4 @@ The roadmap to close that last mile is in **`docs/AISTACK-ROADMAP.md`**.
 - `docs/POLARS-REVIEW.md` / `docs/POLARS-ROADMAP.md` — the query-engine lens and roadmap.
 - `docs/ARROW-REVIEW.md` / `docs/ARROW-ROADMAP.md` — the columnar-physics lens and roadmap.
 - `docs/AUTODIFF.md` — the AutoDiff subsystem this lens evaluates.
-- `docs/TENSORS.md` — "Option C: AI Data Infrastructure" framing.
+- `docs/TENSORS.md` — tensor/AI strategic framing.

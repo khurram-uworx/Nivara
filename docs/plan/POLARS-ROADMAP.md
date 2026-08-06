@@ -202,7 +202,7 @@ The vision at §0 holds, verified by:
 - `docs/POLARS-REVIEW.md` — the lens, the nine pillars, and the per-pillar scorecard this roadmap closes out.
 - `docs/ARROW-REVIEW.md` — the second lens (Arrow-inspired columnar physics) and its scorecard.
 - `docs/ARROW-ROADMAP.md` — the columnar-physics roadmap (chunked columns, layouts, bitmap validity, zero-copy) that this roadmap converges with at the streaming/kernel merge points.
-- `docs/IDEA.md` — original product vision (already Polars-inspired).
-- `docs/TENSORS.md` — "Option B: Become Polars for .NET" strategic framing.
+- `docs/IDEA.md` — original product vision (already Polars-inspired). Retired 2026-08-06; the outstanding items it described are tracked as GitHub issues: [benchmark API #128](https://github.com/khurram-uworx/Nivara/issues/128), [typed LINQ `Query<T>()` #130](https://github.com/khurram-uworx/Nivara/issues/130), [window functions #134](https://github.com/khurram-uworx/Nivara/issues/134), [observability #129](https://github.com/khurram-uworx/Nivara/issues/129).
+- `docs/TENSORS.md` — tensor-vs-Polars strategic framing (Nivara's standing and committed direction).
 - `docs/LINQ.md` — plan-layer and query-engine specification.
 - `docs/AUTODIFF.md` — kernel and generic-math patterns the roadmap reuses.

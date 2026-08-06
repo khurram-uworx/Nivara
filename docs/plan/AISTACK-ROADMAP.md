@@ -193,5 +193,5 @@ The vision at §0 holds, verified by:
 - `docs/POLARS-ROADMAP.md` / `docs/POLARS-REVIEW.md` — the expression-engine roadmap and lens this roadmap builds on.
 - `docs/ARROW-ROADMAP.md` / `docs/ARROW-REVIEW.md` — the columnar-physics roadmap and lens (Phase D here depends on ARROW Phase D).
 - `docs/AUTODIFF.md` — the AutoDiff subsystem all phases touch.
-- `docs/TENSORS.md` — "Option C: AI Data Infrastructure" strategic framing.
+- `docs/TENSORS.md` — tensor/AI strategic framing (Nivara's standing and committed direction).
 - `docs/adr/001-autodiff-nonnullable-domain.md` — the null-boundary rule metrics and embeddings must respect.

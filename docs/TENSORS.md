@@ -1,6 +1,8 @@
 # NIVARA and Tensors/AI primitives
 
-We are **not** positioning Nivara as:
+## Positioning
+
+Nivara is **not** positioning itself as:
 
 ```text
 NumPy for .NET
@@ -10,16 +12,20 @@ Embedding similarity engine
 AutoDiff framework
 ```
 
-We are positioning it as:
+Nivara is positioning itself as:
 
 ```text
 A typed, immutable, null-aware DataFrame/query layer for .NET
 with clean interop to BCL tensors, Microsoft.Extensions.AI, VectorData, Arrow, CSV, JSON, and Parquet.
 ```
 
-.NET already has `System.Numerics.Tensors` for tensor operations, including SIMD-accelerated primitives, and `Microsoft.Extensions.AI` defines embedding abstractions like `IEmbeddingGenerator` / `Embedding`. Nivara should integrate with those instead of competing with them. ([NuGet][1])
+.NET already owns the numerical and AI primitives:
 
-The examples should be rewritten to say this explicitly:
+- `System.Numerics.Tensors` for tensor operations — stable in .NET 10, with SIMD-accelerated
+  `TensorPrimitives` kernels and a multi-dimensional `Tensor<T>` ([package][1], [what's new][2]).
+- `Microsoft.Extensions.AI` for embedding abstractions like `IEmbeddingGenerator` / `Embedding`.
+
+Nivara integrates with those instead of competing with them.
 
 ```text
 Use Nivara for tabular data:
@@ -40,7 +46,7 @@ Use .NET / Microsoft libraries for numerical and AI primitives:
 - IEmbeddingGenerator
 ```
 
-A good example shape would be:
+A good example shape:
 
 ```csharp
 // Nivara owns the table.
@@ -69,16 +75,10 @@ var ranked = Enumerable.Range(0, products.RowCount)
     .Take(3);
 ```
 
-That is much healthier than the removed frame tensor-axis API:
+That is the deliberate shape: Nivara owns the table, the BCL owns the math. We do not
+pretend dataframe columns are tensor axes.
 
-```csharp
-// deleted in the AutoDiff refactor (Task 10) — use TensorPrimitives on spans
-products.CosineSimilarity(query)
-```
-
-because it avoids pretending that dataframe columns are tensor axes.
-
-We should update the docs with a principle like this:
+The principle:
 
 ```text
 Nivara does not try to replace System.Numerics.Tensors or Microsoft.Extensions.AI.
@@ -86,15 +86,7 @@ For tensor math, vector operations, embeddings, and model-facing APIs, prefer th
 Nivara focuses on typed, null-aware, immutable tabular data and provides interop points to platform primitives.
 ```
 
-The deprecated tensor APIs on `NivaraFrame`/`NivaraSeries`
-(`Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms`, `DotProduct`, `Norm`)
-have been **removed** (Task 10 of the AutoDiff refactor) rather than moved to a
-separate namespace — they had no production callers, and the platform
-`TensorPrimitives` kernels are the sanctioned replacement. Column math is done
-on spans via `TryGetSpan`; row-major operations assemble spans with
-`CopyToRowMajor`.
-
-Core Nivara should stay boring and strong:
+Core Nivara stays boring and strong:
 
 ```text
 DataFrame
@@ -108,217 +100,155 @@ I/O
 Interop
 ```
 
-That is the maintainable path.
+---
 
-# NIVARA Possible Future Strategy
+## What Nivara actually exposes
 
-The question is no longer:
+### The zero-copy `AsTensorView()` surface
 
-> "Can we build NumPy for C#?"
+The one tensor interop surface core Nivara exposes is a **lazy zero-copy `Tensor<T>` view**:
 
-The question is:
+- `ColumnStorage<T>.AsTensor()` — internal; wraps the storage's sole-owner `T[]` with
+  `Tensor.Create(data, [length])` (slices use `Tensor.Create(data, start, lengths, strides)`),
+  no copy, no flattened cache. Unmanaged `T` only
+  (`RuntimeHelpers.IsReferenceOrContainsReferences<T>()` guard); `Half` passes, reference types throw.
+- `NivaraColumn<T>.AsTensorView()` and `NivaraSeries<T>.AsTensorView()` — **public** guarded entries
+  (throw on null-containing columns or reference element types).
+- `GradTensor<T>.AsTensor()` — public AutoDiff accessor.
 
-> "What does Nivara own that .NET 10 does not?"
+This is the intended way to hand a dense, non-null, contiguous column to
+`System.Numerics.Tensors` consumers. The view shares the backing array, so callers must not
+mutate it. Reserve `Tensor.FlattenTo` for non-contiguous/multi-dim tensors — a contiguous column
+already *is* its `Tensor<T>`.
 
-That's a much healthier framing.
+Columns otherwise interop with BCL tensors element-wise via `TensorInteropExtensions`
+(`Series`/`Frame` ↔ `Tensor<T>`), never by pretending columnar ops are tensor ops.
+
+### What was removed, and why
+
+The deprecated tensor APIs on `NivaraFrame`/`NivaraSeries`
+(`Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms`, `DotProduct`, `Norm`) were **removed**
+(AutoDiff refactor, Task 10) rather than moved to a separate namespace — they had no production
+callers, and the platform `TensorPrimitives` kernels are the sanctioned replacement.
+`NivaraTensorExtensions` was stripped to null-aware column reductions (`Sum`, `Mean`, `Min`, `Max`).
+Column math is done on spans via `TryGetSpan`; row-major operations assemble spans with
+`CopyToRowMajor`.
+
+No custom tensor ecosystem. No tensor operators. No tensor hierarchy.
 
 ---
 
-## The danger
+## The platform owns the math (.NET 10 grounding)
 
-The danger is trying to compete with the platform.
+Facts grounded in the official docs ([what's new in .NET 10][2]):
 
-For example:
+- `System.Numerics.Tensors` is **stable** in .NET 10 — no longer `[Experimental]`. The APIs still
+  live in the `System.Numerics.Tensors` NuGet package, but they are finalized.
+- `IReadOnlyTensor` gives nongeneric access to `Lengths`/`Strides`; slice operations are zero-copy.
+- C# 14 extension operators provide arithmetic (`tensor + tensor`) when `T` implements the
+  relevant generic-math interfaces (`INumber<T>`, `IAdditionOperators<...>`, etc.).
+- `TensorPrimitives` exposes ~200 generic overloads for `INumber<T>` / `IRootFunctions<T>` /
+  `ITrigonometricFunctions<T>` and friends — e.g. `CosineSimilarity<T>`, `Dot<T>`, `Norm<T>` —
+  SIMD-accelerated on spans.
 
-```csharp
-NivaraSeries<float>.DotProduct(...)
-```
+### BCL swap targets
 
-is increasingly becoming:
+`TensorsHelper` is the shared internal kernel store (MatMul, Transpose) with **BCL swap-target
+annotations** (see [ADR-002][3] and [ADR-003][4]). `Tensor.Transpose<T>` and
+`Tensor.MatrixMultiply<T>` are net-11-preview APIs; when they ship, they replace the handwritten
+kernels. `GradKernels` is the AutoDiff facade over span-in/span-out kernels. These are internal —
+no permanent public tensor API is added on top of a stopgap kernel while the BCL matmul story is
+still in flux.
 
-```csharp
-TensorPrimitives.Dot(...)
-```
+### AutoDiff keeps the span boundary
 
-with extra wrappers.
+[ADR-002][3]: `GradTensor<T>.Data` remains `NivaraColumn<T>`; operations compute over spans and
+wrap results once. [ADR-003][4]: batch is a first-class dimension handled **inside** fused
+ops/modules via internal loops, not by adding general rank-N primitive ops.
 
-That's technical debt.
+### Type support note
 
----
-
-## Option A: Double Down on Columnar Analytics
-
-This is the option we personally find strongest.
-
-Become:
-
-```text
-Arrow-inspired analytical dataframe
-for .NET
-```
-
-instead of:
-
-```text
-NumPy for .NET
-```
-
-Focus on:
-
-```text
-Columns
-Schemas
-Nulls
-Joins
-Grouping
-Query Planning
-Lazy Execution
-Arrow
-Parquet
-CSV
-JSON
-```
-
-Treat tensors as interop.
-
-Example:
-
-```csharp
-Tensor<float> tensor =
-    frame["Embedding"]
-        .AsTensor();
-```
-
-and stop there.
-
-### The zero-copy `AsTensor()` surface
-
-The one tensor interop surface core Nivara exposes is a **lazy zero-copy
-`Tensor<T>` view**: internal `ColumnStorage<T>.AsTensor()` wraps the storage's
-sole-owner `T[]` with `Tensor.Create(data, [length])` — no copy, no flattened
-cache (unmanaged `T` only; `Half`/`BFloat16` pass, reference types throw).
-`NivaraColumn<T>.AsTensorView()` and `NivaraSeries<T>.AsTensorView()` are the
-**public** guarded entries, and `GradTensor<T>.AsTensor()` is the public
-AutoDiff accessor. This is the intended way to hand a dense, non-null,
-contiguous column to `System.Numerics.Tensors` consumers. The view shares the
-backing array, so callers must not mutate it. Reserve `Tensor.FlattenTo` for
-non-contiguous/multi-dim tensors — a contiguous column already *is* its
-`Tensor<T>`.
-
-Columns otherwise interop with BCL tensors element-wise via
-`TensorInteropExtensions` (`Series`/`Frame` ↔ `Tensor<T>`), never by pretending
-columnar ops are tensor ops.
-
-No custom tensor ecosystem.
-
-No tensor operators.
-
-No tensor hierarchy.
-
-No tensor math duplication.
+AutoDiff is constrained to `IFloatingPointIeee754<T>` (float, double, Half). `BFloat16` is
+net11-only (not testable at the net10.0 TFM); today's BFloat16 support is load-time BF16→F32
+widening in `SafeTensorsLoader`. Kernel tests for BFloat16 are deferred to the net11 migration.
 
 ---
 
-## Option B: Become "Polars for .NET"
+## Committed direction
 
-The getting-started guide is accidentally drifting here already.
+The question "what does Nivara own that .NET 10 does not?" is now answered by committed roadmaps,
+not open options:
 
-We see:
+- **Columnar analytics** (was "Option A") — the execution engine is built; the roadmap forward is
+  `docs/POLARS-ROADMAP.md` (query/expression engine) and `docs/ARROW-ROADMAP.md` (columnar physics).
+- **Polars-style engine** (was "Option B") — committed as `docs/POLARS-ROADMAP.md`.
+- **AI data infrastructure** (was "Option C") — committed as `docs/AISTACK-ROADMAP.md`.
 
-```csharp
-Lazy queries
-Optimization
-Predicate pushdown
-Projection pushdown
-Execution engine
-Streaming
-```
-
-Those are Polars ideas.
-
-Not NumPy ideas.
-
-The roadmap could become:
-
-```text
-Nivara = Polars-style engine
-for .NET developers
-```
-
-That's a much larger vision than:
-
-```text
-Tensor wrappers
-```
+The "danger" of competing with the platform is handled by the boundary above: Nivara does not
+re-wrap what `TensorPrimitives` already does, and the tensor surface is interop, not an engine.
 
 ---
 
-## Option C: AI Data Infrastructure
+## Future strategy / where to go next
 
-This is the only AI direction we'd consider.
+### Columnar engine (`docs/POLARS-ROADMAP.md`)
 
-Not:
+- Unified typed expression engine (make-or-break)
+- Kernel fusion + generic-math collapse
+- Window functions
+- Async-first streaming
+- Source generators
 
-```text
-Tensor library
-```
+### Columnar physics (`docs/ARROW-ROADMAP.md`)
 
-but:
+- Chunked column model in core
+- Layout separation + variable-binary strings
+- Validity as an explicit bitmap
+- Real zero-copy interop, both directions
+- Dictionary encoding
+- Interchange-native scanning
 
-```text
-Structured AI datasets
-Embedding columns
-Vector search
-RAG data preparation
-Feature engineering
-Evaluation datasets
-```
+### Local .NET AI stack (`docs/AISTACK-ROADMAP.md`)
 
-Example:
+- ONNX export/import (train in Nivara, exchange with the ecosystem)
+- Embedding columns as a first-class data type
+- Dataset & data-loader layer
+- Evaluation & metrics module
+- Safe read-only tensor views — **already delivered** via public `AsTensorView()` (#107)
 
-```csharp
-frame
-    .GenerateEmbeddings(...)
-    .StoreVectors(...)
-    .ChunkDocuments(...)
-```
+### Scoped tensor ambitions (GitHub issues)
 
-This complements Microsoft's AI stack instead of competing with it.
+Row-wise frame scoring (#138), row-slice `TensorPrimitives` kernels (#141), benchmark coverage
+(#142), and a `Standardize` data-prep alias (#143) are tracked as standalone issues to pick up
+opportunistically between releases — **before** the committed roadmaps. They are scoped as
+**interop conveniences** — not a change to the column-first storage model, not BLAS-level matrix
+multiplication in core.
 
----
-
-## What we should probably remove
-
-If we inherited the project tomorrow, we'd put these on the chopping block:
+### Explicit non-goals
 
 ```text
 Custom tensor abstractions
-Tensor helper duplication
-Tensor math duplication
-Vector math wrappers
+Tensor helper/math duplication with a public API surface
+Vector math wrappers that re-implement TensorPrimitives
+BLAS-level matrix multiplication in core
 ```
 
-because .NET 10 is already doing that work.
+.NET 10 is already doing that work.
 
 ---
 
-## What we should invest in
+## Related documents
 
-We'd put almost all energy into:
+- `docs/plan/POLARS-ROADMAP.md` / `docs/plan/POLARS-REVIEW.md` — columnar engine lens
+- `docs/plan/ARROW-ROADMAP.md` / `docs/plan/ARROW-REVIEW.md` — columnar physics lens
+- `docs/plan/AISTACK-ROADMAP.md` / `docs/plan/AISTACK-REVIEW.md` — local .NET AI stack lens
+- Scoped tensor ambitions are tracked as standalone GitHub issues: [row-wise scoring #138](https://github.com/khurram-uworx/Nivara/issues/138), [row-slice kernels #141](https://github.com/khurram-uworx/Nivara/issues/141), [benchmarks #142](https://github.com/khurram-uworx/Nivara/issues/142), [Standardize #143](https://github.com/khurram-uworx/Nivara/issues/143)
+- `docs/adr/001-autodiff-nonnullable-domain.md` — the null-boundary rule
+- `docs/adr/002-autodiff-span-boundary.md` — the AutoDiff span boundary
+- `docs/adr/003-batch-fused-ops-not-rank-n-primitives.md` — the batch-dimension rule
+- `docs/AUTODIFF.md` — the AutoDiff subsystem reference
 
-```text
-Columnar engine
-Schema system
-Arrow interoperability
-Parquet
-Lazy query execution
-GroupBy/Join performance
-Null semantics
-Expression engine
-```
-
-because those are the pieces where Microsoft has not yet provided a first-class answer.
-
-The biggest insight from the getting-started document is that Nivara already looks much more like a **columnar analytics engine with some tensor features attached** than a **tensor library with dataframe features attached**.
-
-If that's true, then the tensor surface may actually be distracting maintainers from the part of the project that has the best chance of becoming strategically relevant.
+[1]: https://www.nuget.org/packages/System.Numerics.Tensors
+[2]: https://learn.microsoft.com/en-us/dotnet/core/whats-new/dotnet-10/libraries#systemnumerics
+[3]: docs/adr/002-autodiff-span-boundary.md
+[4]: docs/adr/003-batch-fused-ops-not-rank-n-primitives.md

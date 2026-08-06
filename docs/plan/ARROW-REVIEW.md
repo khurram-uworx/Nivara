@@ -83,7 +83,7 @@ A .NET-native implementation of these ideas does not import Arrow's C++ memory m
 | 4 · Chunked columns / RecordBatch | ❌ Absent | No chunked column in core; Arrow `ChunkedArray` is *flattened* on import into single arrays (`ArrowInterop.cs:688-710`), losing chunk structure |
 | 5 · Schema artifact | ✅ Strong | Immutable `Schema` with metadata + compatibility checks (`src/Nivara/Schema.cs:9-300`); source-generated typed accessors missing |
 | 6 · Null-propagating kernels | ✅ Strong | Column kernels are null-aware, mask-OR, vectorized (`TensorPrimitives` in `src/Nivara/NivaraColumn.cs`) — *except* the boxed query expression path (see `docs/POLARS-REVIEW.md` §4) |
-| 7 · Dictionary encoding | ❌ Absent | Listed only as "future" in `docs/IDEA.md` |
+| 7 · Dictionary encoding | ❌ Absent | Listed only as "future" in `docs/IDEA.md` (retired); tracked as [issue #132](https://github.com/khurram-uworx/Nivara/issues/132) |
 | 8 · Interchange-native scanning | 🟡 Partial | Lazy sources + streaming strategies exist (`StreamingExecutionStrategy`); pull-based, not async-first (see `docs/POLARS-ROADMAP.md` Phase 4) |
 
 Legend: ✅ native-aligned · 🟡 partially aligned · ❌ gap.
@@ -138,4 +138,4 @@ The roadmap to close that gap is in **`docs/ARROW-ROADMAP.md`**.
 - `CHANGELOG.md` — records the claims-integrity removal of the `UseZeroCopy` placeholder (issue #94).
 - `docs/POLARS-REVIEW.md` / `docs/POLARS-ROADMAP.md` — the query-engine lens and roadmap.
 - `docs/AISTACK-REVIEW.md` / `docs/AISTACK-ROADMAP.md` — the third lens: complementing the local .NET AI stack, which consumes the chunked/zero-copy foundation this roadmap builds.
-- `docs/IDEA.md`, `docs/TENSORS.md`, `docs/adr/001-autodiff-nonnullable-domain.md` — product vision, strategic framing, null-boundary rule.
+- `docs/IDEA.md` (retired 2026-08-06; its storage/Arrow-adjacent items are tracked as GitHub issues: [dictionary encoding #132](https://github.com/khurram-uworx/Nivara/issues/132), [custom storage plug-in seam #133](https://github.com/khurram-uworx/Nivara/issues/133), [GPU offload #135](https://github.com/khurram-uworx/Nivara/issues/135)), `docs/TENSORS.md`, `docs/adr/001-autodiff-nonnullable-domain.md` — product vision, strategic framing, null-boundary rule.

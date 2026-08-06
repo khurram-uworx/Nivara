@@ -223,6 +223,6 @@ The vision at §0 holds, verified by:
 - `docs/ARROW-REVIEW.md` — the lens, the eight pillars, and the scorecard this roadmap closes out.
 - `docs/POLARS-REVIEW.md` — the query-engine lens (the boxed expression evaluator finding).
 - `docs/POLARS-ROADMAP.md` — the query/expression roadmap this roadmap converges with.
-- `docs/IDEA.md` — original product vision (storage abstraction, Arrow interop sections).
+- `docs/IDEA.md` — original product vision (storage abstraction, Arrow interop sections). Retired 2026-08-06; the remaining storage/Arrow-adjacent items are tracked as GitHub issues: [dictionary encoding #132](https://github.com/khurram-uworx/Nivara/issues/132), [custom storage plug-in seam #133](https://github.com/khurram-uworx/Nivara/issues/133).
 - `docs/TENSORS.md` — tensor-vs-Polars strategic framing.
 - `docs/adr/001-autodiff-nonnullable-domain.md` — the explicit-null boundary all validity work must respect.

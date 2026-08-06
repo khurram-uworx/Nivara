@@ -14,6 +14,41 @@ A sample project demonstrating fine-tuning a pre-trained DistilBERT model for se
 6. Saves and reloads the fine-tuned model via `ModelSerializer`
 7. Interactive sentiment prediction mode
 
+## ML concepts for .NET developers
+
+New to language-model training loops? The hyperparameters in this sample map
+cleanly onto ideas you already know from C#:
+
+| ML term | What it is | C# mental model | This sample |
+|---------|------------|-----------------|-------------|
+| **Batch (B)** | Number of examples processed before one weight update | Rows per `foreach` iteration | `--batch-size 4` |
+| **Epoch** | One complete pass over the training set | One full `for` loop over all rows | `--epochs 3` |
+| **Sequence length (L)** | Fixed width every input row is padded/truncated to | A rectangular array dimension | `--max-len 128` |
+| **Token** | A subword unit produced by the tokenizer | A key looked up in `vocab.txt` | word pieces |
+
+- **Batch size (B).** The model does not adjust its weights after every single
+  sentence. It processes `B` sentences, aggregates their error, and takes one
+  optimization step. `B=2` means 67,349 / 2 ≈ 33,675 weight updates per epoch.
+  Bigger batches = fewer steps and better vectorized-kernel utilization, but
+  more memory and autograd graph per step.
+
+- **Epoch.** A single pass through the entire training set. The default run uses
+  3 epochs, so each sentence is seen 3 times (re-shuffled between passes) —
+  which is why a full run costs roughly 3× a single epoch.
+
+- **Token vs. character.** The model never reads raw text. The tokenizer splits
+  each sentence into subword units first — e.g. `"flawlessly"` becomes the two
+  tokens `["flaw", "##lessly"]`. The average SST-2 sentence is only ~19 tokens,
+  but a long tail of examples exceeds 100.
+
+- **Sequence length (L).** A hard cap on the number of tokens per sentence.
+  Every row is padded to `L` (typically with `[PAD]` tokens) so a batch is a
+  rectangular `[B × L]` matrix the kernels can process in one shot. `128` is the
+  GLUE convention: it covers ~99.9% of sentences at roughly 10× less compute
+  than BERT's 512-token pretraining width. The trade-off: compute scales with
+  `L`, not with actual content, so a 19-token sentence still pays for 128
+  positions — most of the attention work is spent on padding.
+
 ## Architecture
 
 ```
@@ -134,6 +169,11 @@ dotnet run --project samples/NivaraFineTuning -- \
 
 ## Expected results
 
+> The accuracy figures below are **targets** from reference runs, not
+> measurements this sample establishes — it validates on a small slice rather
+> than the full dataset. See
+> [Scope of validation](#scope-of-validation-proof-of-concept-not-a-benchmark-claim).
+
 On a single CPU core (no GPU):
 
 | Epoch | Training loss (avg) | Dev accuracy |
@@ -173,6 +213,25 @@ cost is dominated by 38 small Linear matmuls and the backward pass through 67M
 params, not by BLAS peak throughput, so the CPU SIMD kernels and memory
 management keep Nivara within ~3× of PyTorch's MKL on this configuration.
 
+### Estimated full-run wall-clock (approximate)
+
+> **Disclaimer:** the figures below are **estimates, not measurements.** They
+> extrapolate the 25-example per-batch numbers above to the full 67,349-example
+> train set and assume per-batch cost grows linearly with batch size — which is
+> approximate. Real runs drift with machine load, GC pressure, and thermals;
+> treat them as ballpark planning figures (±30%).
+
+| Config | Framework | 1 epoch (est.) | 3 epochs (est.) |
+|--------|-----------|----------------|-----------------|
+| B=2, L=128 | PyTorch (CPU) | ~4 h | ~13 h |
+| B=2, L=128 | Nivara (.NET 10) | ~13 h | ~39 h |
+| B=4, L=128 | PyTorch (CPU) | ~4 h | ~12 h |
+| B=4, L=128 | Nivara (.NET 10) | ~12 h | ~36 h |
+
+B=4 figures are not benchmarked end-to-end — they're derived from the measured
+B=2 throughput. Batch cost grows sub-linearly in B (better kernel utilization),
+so the per-epoch times above are the same order of magnitude, not exact.
+
 ### Before/after (2026-08-06)
 
 | Nivara fine-tune B=2, 25 examples | Before (`e031ff0`) | After (HEAD) |
@@ -210,6 +269,38 @@ dotnet run -c Release --project samples/NivaraFineTuning -- --mode train --epoch
 Record new results in the table above with the measurement date and a note on
 what changed. Kernel-level micro-measurements (matmul/transpose/softmax/attention)
 live in `tests/Nivara.PerformanceTests`.
+
+## Scope of validation: proof of concept, not a benchmark claim
+
+This sample is deliberately **validated on a tiny slice** of SST-2
+(`--max-examples 25`, batch size 2, one epoch). That was an explicit choice, and
+it deserves an explicit note.
+
+**What we set out to prove.** That the entire fine-tuning pipeline works
+end-to-end in managed C# — SafeTensors weight loading, the frozen-encoder
+forward pass, the backward pass through 67M parameters, AdamW parameter updates,
+full dev-set evaluation, and save/reload. That is a *correctness* question, and
+it does not require the full dataset to answer.
+
+**What was actually measured.** On the 25-example slice, training loss fell from
+~0.75 to ~0.70 across the 13 batches of a single epoch, and evaluation on the
+*full* 872-example dev set returned **60.09% accuracy** — comfortably above the
+50% coin-flip baseline. Those numbers show the loop is learning and the numerics
+line up; they are not a claim about final model quality.
+
+**What we deliberately did not run.** A full SST-2 fine-tune on CPU costs ~13
+hours per epoch (67,349 examples at ~1.4 s/batch), so a complete 3-epoch run is
+~1.5 days of wall-clock. We judged that against the goal — proving technical
+correctness — and chose the 25-example slice instead. The first example of a
+training slice already exercises every layer, every gradient, and every
+optimizer step the full run would; what a slice cannot tell you is *accuracy*,
+which is why the harness still evaluates on the full dev set.
+
+**Where performance stands.** On this machine Nivara is ~3× slower than
+PyTorch's MKL kernels at this configuration (1.4 s vs 0.46 s per batch). The
+honest summary: *technically correct, not yet performant.* The numerics are
+right, the pipeline is complete, and the benchmark harness in the previous
+section is the tool for chasing the gap.
 
 ## Python reference
 
