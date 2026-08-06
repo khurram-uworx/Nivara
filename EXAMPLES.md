@@ -585,6 +585,99 @@ Console.WriteLine($"Fraud probability: {prob:P2}");
 
 ---
 
+### Act 8b: Online training — keep a deployed model learning
+
+> Same FraudNet from Act 8, later in production. New labeled examples arrive (human corrections, LLM feedback, A/B results) — retrain incrementally instead of from scratch: warm-start the weights, retrain on the original data plus the new examples at a lower learning rate, and carry Adam's moment buffers across sessions via checkpoints. A fine-tune, not a re-train.
+
+**Nivara**
+```csharp
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Functional;
+using Nivara.AutoDiff.Training;
+using Nivara.AutoDiff.Serialization;
+using Nivara.AutoDiff.Optimizer;
+
+// Same architecture as Act 8 — the deployed FraudNet
+class FraudNet : Module<float>
+{
+    Linear<float> L1, L2, L3;
+
+    public FraudNet()
+    {
+        L1 = new Linear<float>(8, 64);
+        L2 = new Linear<float>(64, 32);
+        L3 = new Linear<float>(32, 1);
+        RegisterModules(L1, L2, L3);
+    }
+
+    public override ReverseGradTensor<float> Forward(ReverseGradTensor<float> x)
+    {
+        var h = ReverseGradOperations.Relu(L1.Forward(x));
+        h = ReverseGradOperations.Relu(L2.Forward(h));
+        return L3.Forward(h);
+    }
+}
+
+// 1. Original 5 rows from Act 8 + 2 new validated feedback rows (drift correction)
+var frame = NivaraFrame.Create(
+    ("amount", NivaraColumn<float>.Create([100.0f, 5000.0f, 50.0f, 20000.0f, 75.0f,  300.0f, 150.0f])),
+    ("hour", NivaraColumn<float>.Create([14, 2, 10, 3, 18,  22, 9])),
+    ("distance", NivaraColumn<float>.Create([5.0f, 300.0f, 2.0f, 500.0f, 1.0f,  20.0f, 4.0f])),
+    ("prev_attempts", NivaraColumn<float>.Create([0, 3, 0, 5, 1,  2, 0])),
+    ("country_change", NivaraColumn<float>.Create([0, 1, 0, 1, 0,  1, 0])),
+    ("device_new", NivaraColumn<float>.Create([0, 1, 0, 1, 0,  1, 0])),
+    ("amount_ratio", NivaraColumn<float>.Create([1.0f, 10.0f, 0.5f, 20.0f, 0.8f,  2.5f, 1.2f])),
+    ("velocity", NivaraColumn<float>.Create([0.0f, 4.0f, 0.0f, 6.0f, 0.0f,  2.0f, 0.0f])),
+    ("is_fraud", NivaraColumn<float>.Create([0.0f, 1.0f, 0.0f, 1.0f, 0.0f,  1.0f, 0.0f]))
+);
+
+var featureCols = new[] { "amount", "hour", "distance", "prev_attempts",
+                          "country_change", "device_new", "amount_ratio", "velocity" };
+var loader = new DataLoader<float>(
+    new TensorDataset<float>(frame, featureCols, "is_fraud"),
+    batchSize: 16, shuffle: true);
+
+// 2. Warm-start + lower LR — a fine-tune, not a re-train
+using var model = new FraudNet();
+using var optimizer = new Adam<float>(learningRate: 0.0005f);
+optimizer.AddParameterGroup(model.GetParameters().Values);
+
+var loop = new TrainingLoop<float>(
+    model, loader,
+    (pred, target) => new BCEWithLogitsLoss<float>().Forward(pred, target),
+    optimizer, epochs: 5);
+
+// 3. Resume: restores weights AND Adam moments, continues after the saved epoch
+loop.LoadCheckpoint("fraud_checkpoint.json");
+var result = loop.Continue(additionalEpochs: 5);
+result.PrintSummary();
+// Epoch   6 | Loss:   0.041200 | Batches:  1 | Time: 0.02s
+// Epoch  10 | Loss:   0.037100 | Batches:  1 | Time: 0.02s
+
+// 4. Persist updated weights + checkpoint (epoch counter advanced)
+ModelSerializer.Save(model, "fraud_model.json");
+loop.SaveCheckpoint("fraud_checkpoint.json", result.Epochs[^1].Epoch, result.Epochs[^1].Loss);
+model.Eval();   // back to inference mode
+```
+
+**What this adds over Act 8:**
+| Aspect | Act 8 | Act 8b |
+|--------|-------|--------|
+| Starting point | Train from scratch | Warm-start saved weights |
+| Optimizer | Fresh `Adam`, lr 0.001 | Lower LR (0.0005) fine-tune |
+| Dataset | One-time training set | Original + validated feedback rows |
+| Adam state | Reset each run | `SaveCheckpoint`/`LoadCheckpoint` carry `m`/`v`/`t` across sessions |
+| Epoch counter | Restarts at 1 | `Continue(additionalEpochs)` resumes after the saved epoch |
+| Persistence | `ModelSerializer.Save` | Re-save weights + updated checkpoint |
+
+Notes:
+- `LoadCheckpoint` restores both weights and optimizer state; if you only have a weights file, use `ModelSerializer.Load` + a fresh optimizer instead (the fallback path in `samples/NivaraChat`).
+- The learning rate is **constructor state**, not part of the optimizer state dict — so the lower fine-tune LR applies while the restored moments carry over.
+- Full LLM-feedback loop (classify → low confidence → LLM correction → buffer → retrain): `samples/NivaraChat --online-learning`, see [`docs/RETRAINING.md`](docs/RETRAINING.md).
+
+---
+
 ## Related docs
 
-- [`docs/AUTODIFF-GAPS.md`](docs/AUTODIFF-GAPS.md) — AutoDiff gaps
+- [`docs/RETRAINING.md`](docs/RETRAINING.md) — online/incremental retraining with checkpoint resume
