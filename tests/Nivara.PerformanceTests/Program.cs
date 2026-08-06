@@ -27,15 +27,138 @@ static class Program
     {
         var (jsonPath, comparePath, runs, minOpsFraction) = ParseArgs(args);
 
+        if (runs > 1)
+        {
+            var results = MeasureAcrossProcesses(runs);
+            if (results is null)
+                return 2;
+
+            PrintTable(results);
+
+            if (jsonPath is not null)
+                WriteJson(jsonPath, results, runs);
+
+            if (comparePath is not null)
+                return Compare(comparePath, results, minOpsFraction);
+
+            return 0;
+        }
+
+        PrintHeader();
+        RegisterScenarios();
+
+        var singleResults = new List<ScenarioResult>();
+        foreach (var scenario in s_scenarios)
+        {
+            var result = MeasureScenario(scenario, 1);
+            singleResults.Add(result);
+            PrintRow(result);
+        }
+
+        if (jsonPath is not null)
+            WriteJson(jsonPath, singleResults, 1);
+
+        if (comparePath is not null)
+            return Compare(comparePath, singleResults, minOpsFraction);
+
+        return 0;
+    }
+
+    static void PrintHeader()
+    {
         Console.WriteLine("Nivara storage plan benchmark");
         Console.WriteLine($"  Runtime : {Environment.Version}");
         Console.WriteLine($"  Machine : {Environment.ProcessorCount} logical processors, {(Environment.Is64BitProcess ? "x64" : "x86")}");
-        if (runs > 1)
-            Console.WriteLine($"  Runs    : {runs} (median)");
         Console.WriteLine();
         Console.WriteLine($"{"Scenario",-46} {"ops/s",12} {"ns/op",8} {"B/op",12} {"gen0/op",7}");
         Console.WriteLine(new string('-', 92));
+    }
 
+    static void PrintTable(List<ScenarioResult> results)
+    {
+        PrintHeader();
+        foreach (var r in results)
+            PrintRow(r);
+    }
+
+    static List<ScenarioResult>? MeasureAcrossProcesses(int runs)
+    {
+        var exe = Environment.ProcessPath;
+        if (exe is null)
+        {
+            Console.Error.WriteLine("Cannot resolve harness executable path.");
+            return null;
+        }
+
+        var tmpFiles = new string[runs];
+        try
+        {
+            for (int i = 0; i < runs; i++)
+            {
+                tmpFiles[i] = Path.Combine(Path.GetTempPath(), $"nivara-perf-{Guid.NewGuid():N}.json");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = exe,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                psi.ArgumentList.Add("--runs");
+                psi.ArgumentList.Add("1");
+                psi.ArgumentList.Add("--json");
+                psi.ArgumentList.Add(tmpFiles[i]);
+                using var child = Process.Start(psi);
+                if (child is null)
+                {
+                    Console.Error.WriteLine($"Failed to start measurement process {i + 1}.");
+                    return null;
+                }
+                child.WaitForExit();
+                if (child.ExitCode != 0)
+                {
+                    Console.Error.WriteLine($"Measurement process {i + 1} exited with {child.ExitCode}.");
+                    return null;
+                }
+            }
+
+            var runsByName = new Dictionary<string, List<ScenarioResult>>();
+            foreach (var file in tmpFiles)
+            {
+                var report = JsonSerializer.Deserialize<HarnessReport>(File.ReadAllText(file), s_jsonOptions);
+                if (report is null)
+                    return null;
+                foreach (var r in report.Results)
+                {
+                    if (!runsByName.TryGetValue(r.Name, out var list))
+                        runsByName[r.Name] = list = new List<ScenarioResult>();
+                    list.Add(r);
+                }
+            }
+
+            var medians = new List<ScenarioResult>();
+            foreach (var (name, list) in runsByName)
+            {
+                var ops = list.Select(r => r.OpsPerSec).OrderBy(v => v).ToArray();
+                var ns = list.Select(r => r.NsPerOp).OrderBy(v => v).ToArray();
+                var bytes = list.Select(r => r.BytesPerOp).OrderBy(v => v).ToArray();
+                var gen0 = list.Select(r => r.Gen0PerOp).OrderBy(v => v).ToArray();
+                int mid = runs / 2;
+                medians.Add(new ScenarioResult(name, ops[mid], ns[mid], bytes[mid], gen0[mid]));
+            }
+            return medians;
+        }
+        finally
+        {
+            foreach (var file in tmpFiles)
+            {
+                if (file is not null && File.Exists(file))
+                    File.Delete(file);
+            }
+        }
+    }
+
+    static void RegisterScenarios()
+    {
         Run("ColumnAdd 1M x float", 5, 200,
             () =>
             {
@@ -132,22 +255,6 @@ static class Program
             });
 
         RunBatchedAttentionScenarios();
-
-        var results = new List<ScenarioResult>();
-        foreach (var scenario in s_scenarios)
-        {
-            var result = MeasureScenario(scenario, runs);
-            results.Add(result);
-            PrintRow(result);
-        }
-
-        if (jsonPath is not null)
-            WriteJson(jsonPath, results, runs);
-
-        if (comparePath is not null)
-            return Compare(comparePath, results, minOpsFraction);
-
-        return 0;
     }
 
     static void RunBatchedAttentionScenarios()
