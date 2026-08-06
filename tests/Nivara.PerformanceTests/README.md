@@ -39,15 +39,23 @@ tests/Nivara.PerformanceTests/bin/Release/net10.0/Nivara.PerformanceTests.exe
 The harness doubles as an executable perf gate (`ADR-002` P4). Two modes:
 
 - `--json <path>` — emit each scenario's `ops/s`, `ns/op`, `B/op`, `gen0/op`
-  as JSON (median across `--runs n`, default 1).
+  as JSON (median across `n` separate child-process runs via `--runs n`,
+  default 1).
 - `--compare <baseline.json>` — run, compare against a saved `--json` baseline,
   and exit non-zero when any scenario regresses beyond tolerance.
+
+`--runs n` spawns `n` independent child processes (each a single cold pass via
+`--runs 1`) and takes the per-scenario median of their JSON reports. This is
+deliberate: an in-process repeat loop is skewed by JIT tiering (later passes
+run warmed code — TransformerBlock read 1,256 ops/s in-process vs ~130 honest
+across processes), so all `--runs > 1` baselines recorded before commit
+`e3ac8b7` must be re-verified with the fixed harness.
 
 | Flag | Default | Meaning |
 |---|---|---|
 | `--json <path>` | — | write results JSON to `<path>` |
 | `--compare <baseline.json>` | — | gate against `<baseline.json>`; exit 1 on regression, 2 on unreadable baseline |
-| `--runs <n>` | 1 | take the median of `n` runs per scenario |
+| `--runs <n>` | 1 | spawn `n` independent single-pass child processes and take the per-scenario median |
 | `--tolerance <pct>` | 90 | ops/s floor as a percent of baseline |
 
 Gate criteria (tolerance constants in `Program.cs`):
@@ -67,80 +75,73 @@ Per-phase workflow (on an idle machine — see the load caveat below):
   timing so JIT/type-init effects settle before the baseline is taken.
 - **Allocation accounting** starts after warmup, so setup allocations (module
   and column construction) are excluded.
-- Compare **on the same machine/config**; run each build 3 times and take the
-  median — run-to-run variance is ~±10% for these scenarios.
+- Compare **on the same machine/config**; use `--runs 3` (three independent
+  child processes, per-scenario median) rather than re-running in-process —
+  in-process repeats are JIT-tiering-skewed (see the `--runs` note above) and
+  run-to-run variance is ~±10% for these scenarios under load.
 
 ### Baseline policy (do not re-litigate)
 
 - The **Results** table below is the canonical baseline (**point A**) for
-  future A/B comparisons — last recorded 2026-08-04 against the then-current
-  HEAD.
-- **Never rebuild past commits to re-derive point A.** The previous A/B table
-  (built in a git worktree at `549c6cc`) is superseded; its findings still
-  hold (the ColumnAdd branch-removal win and the AutoDiff allocation
-  reductions are the reason this harness exists), but the numbers are no
-  longer the comparison point.
+  future A/B comparisons — last recorded 2026-08-06 against the current HEAD
+  with the fixed `--runs` harness (commit `e3ac8b7`).
+- **Never rebuild past commits to re-derive point A.** The previous A/B tables
+  (built in git worktrees at `549c6cc` and recorded 2026-08-04/05) are
+  superseded; their findings still hold (the ColumnAdd branch-removal win, the
+  AutoDiff allocation reductions, and the batched-attention fusion are the
+  reason this harness exists), but the numbers are no longer the comparison
+  point and the 2026-08-05 table is from a different machine.
 - When measuring a change: record new results on the same machine, compare
   against the **Results** table, and replace it with the new numbers. That
   keeps point A rolling forward and avoids hunting through git history.
 
 ## Results
 
-**Baseline (point A)** recorded **2026-08-05** on the current HEAD (post-v1.2.0
-release prep). Supersedes the 2026-08-04 point A that was recorded after the
-AutoDiff refactor; the numbers below are the canonical reference going forward.
-The four batched-attention scenarios (fused `MultiHeadAttention` /
-`BatchedMultiHeadAttention` kernels, issue #86) were already in the harness but
-are now documented here for the first time.
+**Baseline (point A)** recorded **2026-08-06** on the current HEAD (post-v1.2.0
+release prep, ADR-002 P0–P4 complete). **Medians of 3 independent child-process
+runs** (`--runs 3` on the fixed harness, commit `e3ac8b7`). This replaces the
+2026-08-05 point A, which was recorded on a different machine and is **not
+comparable** to this machine's numbers (e.g. ColumnAdd 1,672 there vs ~620
+here) — compare only within this table from here on. The four batched-attention
+scenarios (fused `MultiHeadAttention` / `BatchedMultiHeadAttention` kernels,
+issue #86) were already in the harness but are now documented here for the
+first time.
 
-Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 6 runs.
+Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 3 child processes.
 
 | Scenario | ops/s | B/op | gen0/op |
 |---|---|---|---|
-| ColumnAdd 1M x float | 1,672 | 4,000,537 | 0.33 |
-| ColumnSigmoid 1M x float | 599 | 0 | 0.00 |
-| Span chain 1M x 3 ops (raw) | 409 | 0 | 0.00 |
-| Column chain 1M x 3 ops (wrapper) | 193 | 12,001,888 | 0.48 |
-| Linear forward [32x256] | 369 | 69,920 | 0.00 |
-| Linear forward+backward [32x256] | 171 | 1,492,187 | 0.35 |
-| TransformerBlock forward [32x64, 4 heads] | 135 | 196,159 | 0.07 |
-| Attn per-seq forward [B16 L128 D64 H4] | 90 | 2,137,638 | 0.17 |
-| Attn batched forward [B16 L128 D64 H4] | 405 | 528,686 | 0.00 |
-| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 31 | 7,963,817 | 1.17 |
-| Attn batched fwd+bwd [B16 L128 D64 H4] | 137 | 7,878,336 | 0.33 |
+| ColumnAdd 1M x float | 620 | 4,000,525 | 0.24 |
+| ColumnSigmoid 1M x float | 386 | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 360 | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 182 | 12,001,719 | 0.33 |
+| Linear forward [32x256] | 420 | 69,257 | 0.00 |
+| Linear forward+backward [32x256] | 103 | 670,159 | 0.10 |
+| TransformerBlock forward [32x64, 4 heads] | 124 | 188,283 | 0.00 |
+| Attn per-seq forward [B16 L128 D64 H4] | 30 | 2,137,638 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | 137 | 529,029 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 12 | 7,962,735 | 1.08 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 71 | 7,876,743 | 0.25 |
 
 ### Notes
 
-- **Linear forward is the one outlier vs the 2026-08-04 point A** (369 vs 427
-  ops/s, −14%): it also showed the widest run-to-run spread of any scenario
-  (245–442 ops/s across the six runs), so this is machine-load noise rather than
-  a code regression. Every other core scenario is within ±7% of point A
-  (ColumnAdd 1,672 vs 1,755, ColumnSigmoid 599 vs 642, Linear forward+backward
-  171 vs 166, TransformerBlock 135 vs 137).
+- **This table is the first current-machine point A.** The 2026-08-05 point A
+  was recorded on a different machine; its shape still holds (ColumnSigmoid and
+  the raw span chain are allocation-free, batched attention outruns per-seq,
+  Linear forward+backward allocation is the ArrayPool-backed `61ff968` number),
+  but its ops/s are not comparable to this machine. Do not mix numbers across
+  machines.
+- **ops/s remain load-sensitive on this machine.** The table above was recorded
+  with the machine busy-ish (idle CPU ~4–9%): ColumnAdd ~620 here. Under heavier
+  load the same harness reads ~2× lower, so treat ops/s as order-of-magnitude
+  until measured under comparable load; **B/op and gen0/op are allocation-driven
+  and stable** and are the reliable regression signals for the `--compare` gate.
 - **ColumnSigmoid is not comparable to the 2026-08-03 point A.** Task 8
   stripped the `NivaraColumn<float>.Sigmoid()` extension, so the scenario now
   measures the raw kernel with the destination array allocated up front —
   B/op is 0 and gen0/op is 0 by construction. The old ~8 MB/op / 0.66 gen0
   signal (issue #109) is obsolete; the conclusion from that issue (gen0/op is
   GC-scheduling-sensitive, not allocation-proportional) still holds.
-- **ColumnAdd still dominates the table.** The single-`ColumnStorage<T>`
-  layout removed the pre-consolidation pooled-copy branch from
-  `applyElementwiseBinary` — that win is the reason this harness exists.
-  Throughput holds at ~1,672 ops/s (vs 1,755 at the 2026-08-04 point A) with the
-  same 4 MB/op allocation profile, within the documented ±10% variance.
-- **Batched attention is the fast path for transformers.** `BatchedMultiHeadAttention`
-  forward runs ~4.5× per-op faster than looping `MultiHeadAttention` per
-  sequence (405 vs 90 ops/s) with ~4× the allocation (528,686 vs 2,137,638
-  B/op): heads are packed once per forward and QK^T/softmax/PV run as a single
-  per-head pass with no per-head `Slice`/`Transpose` graph nodes. The fused
-  forward+backward row (137 ops/s, 7,878,336 B/op) is the number that matters
-  for `TransformerBlock` training pipelines.
-- **Linear forward+backward** allocates ~295 KB/op less than the 2026-08-04
-  point A (1,492,187 vs 1,787,036 B/op) at parity throughput (171 vs 166 ops/s):
-  the drop is the rank-2 MatMul backward transpose buffers now rented from
-  `ArrayPool<T>.Shared` (commit `61ff968`, merged 2026-08-05 via PR #121), on
-  top of the refactor's span-kernel and zero-copy column-wrap work. gen0/op is
-  down accordingly (0.35 vs 0.45).
 - **The two `1M x 3 ops` rows are the ADR-002 P3 wrapper-cost isolation** (added
   2026-08-06). Both run the identical `Add`/`Multiply`/`Subtract` chain over 1M
   floats; the raw row reuses pre-allocated destinations (0 B/op by construction)
@@ -151,9 +152,3 @@ Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 6 runs.
   the immutable result-column allocation itself (each op must produce a new
   column), not an overhead that Option B's raw `Tensor<T>` backing would remove
   — closing F7 with evidence on hand (no ADR-002 amendment filed).
-- **2026-08-06 caveat:** these new rows (and any ops/s column this session) were
-  recorded under elevated machine load — columnar throughput ran ~2× below the
-  canonical point A (e.g. ColumnAdd 815 vs 1,672 ops/s) even though no
-  production code changed since P1c. B/op and gen0/op are allocation-driven and
-  stable across runs; treat the new rows' ops/s as order-of-magnitude only until
-  re-measured on an idle machine.
