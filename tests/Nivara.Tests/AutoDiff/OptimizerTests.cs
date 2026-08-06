@@ -432,4 +432,102 @@ public class OptimizerTests
         Assert.That(() => SGD<float>.SgdUpdate(param, -0.1f),
             Throws.ArgumentException.With.Message.Contains("positive"));
     }
+
+    [Test]
+    public void Adam_StateDict_LoadStateDict_FreshOptimizer_RestoresState()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adam = new Adam<float>(0.01f);
+        adam.AddParameterGroup(param);
+
+        for (int i = 0; i < 3; i++)
+        {
+            var loss = ReverseGradOperations.Sum(param.Tensor);
+            loss.Backward();
+            adam.Step();
+            adam.ZeroGrad();
+        }
+
+        var state = adam.StateDict();
+
+        var freshParam = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var restored = new Adam<float>(0.01f);
+        restored.AddParameterGroup(freshParam);
+        restored.LoadStateDict(state);
+
+        var reloadedState = restored.StateDict();
+
+        Assert.That(reloadedState.Keys, Is.EquivalentTo(state.Keys));
+        Assert.That(reloadedState["step"][0], Is.EqualTo(state["step"][0]));
+        int bufIdx = 0;
+        while (state.ContainsKey($"expAvg_{bufIdx}"))
+        {
+            Assert.That(reloadedState[$"expAvg_{bufIdx}"], Is.EqualTo(state[$"expAvg_{bufIdx}"]).Within(1e-6f));
+            Assert.That(reloadedState[$"expAvgSq_{bufIdx}"], Is.EqualTo(state[$"expAvgSq_{bufIdx}"]).Within(1e-6f));
+            bufIdx++;
+        }
+    }
+
+    [Test]
+    public void AdamW_StateDict_LoadStateDict_FreshOptimizer_RestoresState()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adamw = new AdamW<float>(0.01f);
+        adamw.AddParameterGroup(param);
+
+        for (int i = 0; i < 3; i++)
+        {
+            var loss = ReverseGradOperations.Sum(param.Tensor);
+            loss.Backward();
+            adamw.Step();
+            adamw.ZeroGrad();
+        }
+
+        var state = adamw.StateDict();
+
+        var freshParam = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var restored = new AdamW<float>(0.01f);
+        restored.AddParameterGroup(freshParam);
+        restored.LoadStateDict(state);
+
+        var reloadedState = restored.StateDict();
+
+        Assert.That(reloadedState.Keys, Is.EquivalentTo(state.Keys));
+        Assert.That(reloadedState["step"][0], Is.EqualTo(state["step"][0]));
+        int bufIdx = 0;
+        while (state.ContainsKey($"expAvg_{bufIdx}"))
+        {
+            Assert.That(reloadedState[$"expAvg_{bufIdx}"], Is.EqualTo(state[$"expAvg_{bufIdx}"]).Within(1e-6f));
+            Assert.That(reloadedState[$"expAvgSq_{bufIdx}"], Is.EqualTo(state[$"expAvgSq_{bufIdx}"]).Within(1e-6f));
+            bufIdx++;
+        }
+    }
+
+    [Test]
+    public void Sgd_StateDict_LoadStateDict_FreshOptimizer_RestoresMomentum()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.01f, momentum: 0.9);
+        sgd.AddParameterGroup(param);
+
+        for (int i = 0; i < 3; i++)
+        {
+            var loss = ReverseGradOperations.Sum(param.Tensor);
+            loss.Backward();
+            sgd.Step();
+            sgd.ZeroGrad();
+        }
+
+        var state = sgd.StateDict();
+        Assert.That(state, Does.ContainKey("velocity_0"));
+
+        var freshParam = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var restored = new SGD<float>(0.01f, momentum: 0.9);
+        restored.AddParameterGroup(freshParam);
+        restored.LoadStateDict(state);
+
+        var reloadedState = restored.StateDict();
+        Assert.That(reloadedState.Keys, Is.EquivalentTo(state.Keys));
+        Assert.That(reloadedState["velocity_0"], Is.EqualTo(state["velocity_0"]).Within(1e-6f));
+    }
 }

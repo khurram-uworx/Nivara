@@ -152,10 +152,12 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
 
     public override void LoadStateDict(Dictionary<string, T[]> state)
     {
-        for (int i = 0; i < velocityBuffers.Count; i++)
+        int i = 0;
+        while (state.TryGetValue($"velocity_{i}", out var buf))
         {
-            if (state.TryGetValue($"velocity_{i}", out var buf))
-                buf.AsSpan(0, Math.Min(buf.Length, velocityBuffers[i].Length)).CopyTo(velocityBuffers[i]);
+            ensureVelocityBuffer(i, buf.Length);
+            buf.AsSpan(0, Math.Min(buf.Length, velocityBuffers[i].Length)).CopyTo(velocityBuffers[i]);
+            i++;
         }
     }
 

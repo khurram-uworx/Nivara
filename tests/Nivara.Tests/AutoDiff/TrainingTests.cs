@@ -428,6 +428,45 @@ public class TrainingTests
             "Multi-layer model should converge (all layers training)");
     }
 
+    [Test]
+    public void TrainingLoop_SaveCheckpoint_LoadCheckpoint_Continue_ResumesTraining()
+    {
+        var frame = CreateTestFrame(40);
+        var dataset = new TensorDataset<float>(frame, ["f1"], "label");
+        var loader = new DataLoader<float>(dataset, 10, shuffle: false);
+        var path = Path.Combine(Path.GetTempPath(), $"training_loop_checkpoint_{Guid.NewGuid():N}.json");
+
+        var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>().Forward(pred, tgt);
+        float checkpointLoss;
+
+        using (var model = new Linear<float>(1, 1))
+        {
+            var optimizer = new Adam<float>(0.01f);
+            optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
+
+            using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 3);
+            var result = loop.Run();
+            var last = result.Epochs[^1];
+            loop.SaveCheckpoint(path, last.Epoch, last.Loss);
+            checkpointLoss = last.Loss;
+        }
+
+        using var resumedModel = new Linear<float>(1, 1);
+        var resumedOptimizer = new Adam<float>(0.01f);
+        resumedOptimizer.AddParameterGroup(resumedModel.GetParameters().Values);
+
+        using var resumedLoop = new TrainingLoop<float>(resumedModel, loader, lossFn, resumedOptimizer, epochs: 3);
+        resumedLoop.LoadCheckpoint(path);
+        var continued = resumedLoop.Continue(2);
+
+        Assert.That(continued.Epochs.Select(e => e.Epoch), Is.EqualTo(new[] { 4, 5 }));
+        Assert.That(continued.Epochs[^1].Loss, Is.GreaterThan(0f));
+        Assert.That(continued.Epochs[^1].Loss, Is.LessThan(checkpointLoss),
+            "Resumed training should continue reducing loss from the checkpointed value");
+
+        File.Delete(path);
+    }
+
     private sealed class HookTrackingTrainingLoop : TrainingLoop<float>
     {
         public int EpochStarts { get; private set; }

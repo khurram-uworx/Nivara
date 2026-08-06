@@ -87,7 +87,7 @@ dotnet run --project samples/NivaraChat -- --online-learning --ollama
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
-| `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` mode |
+| `--threshold <float>` | `0.8` | Confidence threshold for `--handoff` and `--online-learning` modes |
 | `--docs-dir <path>` | `docs/` | Documents directory for `--rag` and `--rag-agent` modes |
 | `--top-k <int>` | `3` | Number of chunks to retrieve for RAG modes |
 
@@ -250,7 +250,7 @@ Tested examples:
 Uses: `IntentClassifier`, `FactualExecutor`, `QuestionExecutor`, `CommandExecutor`, `EscalationExecutor`, `ChitchatExecutor`, `AddEdge<string>` conditional routing.
 
 ### Online learning (`--online-learning`)
-Demonstrates online learning from LLM feedback. The intent classifier runs first; when confidence is below the threshold (default 0.8), the LLM provides a corrected intent which is added to a training buffer. When the buffer reaches 10 examples, the model is incrementally retrained using `IntentTrainer.TrainIncremental()` with a lower learning rate (0.0005). The updated model is saved and continues classifying. Requires `--ollama`.
+Demonstrates online learning from LLM feedback. The intent classifier runs first; when confidence is below the threshold (default 0.8), the LLM provides a corrected intent which is added to a training buffer. When the buffer reaches 10 examples, the model is incrementally retrained using `IntentTrainer.TrainIncremental()` with a lower learning rate (0.0005). The retrain resumes from the saved checkpoint — model weights *and* Adam optimizer state (`step`, `expAvg`, `expAvgSq`) — so momentum history isn't lost between retrains. The updated model and checkpoint are saved and classification continues. Requires `--ollama`.
 
 ```
 User input
@@ -258,9 +258,9 @@ User input
     v
 [IntentClassifier]           Nivara TextClassifierModel, 5 classes
     │
-    ├── confidence >= 0.8    ──> Return Nivara classification (no LLM needed)
+    ├── confidence >= threshold (default 0.8)  ──> Return Nivara classification (no LLM needed)
     │
-    └── confidence < 0.8     ──> [Ollama LLM]
+    └── confidence < threshold  ──> [Ollama LLM]
                                     │
                                     v
                               LLM provides corrected intent
@@ -272,8 +272,9 @@ User input
                               Buffer full (10 examples)?
                                     │
                                yes ──> IntentTrainer.TrainIncremental()
-                                    │   loads existing model, trains 5 epochs
-                                    │   at lr=0.0005, saves updated model
+                                    │   loads checkpoint (weights + optimizer state)
+                                    │   continues 5 epochs at lr=0.0005
+                                    │   saves updated model + checkpoint
                                     v
                               Continue with updated model
 ```
@@ -286,7 +287,7 @@ Tested examples:
 | `"what is the capital of France"` | 0.8 | LLM-corrected to question (confidence: 0.550) |
 | `"turn on the lights"` | 0.8 | LLM-corrected to command (confidence: 0.493) |
 
-Uses: `FeedbackCollector`, `IntentTrainer.TrainIncremental()`, `TrainingLoop.Run()`, `Optimizer.StateDict()/LoadStateDict()`.
+Uses: `FeedbackCollector`, `IntentTrainer.TrainIncremental()`, `TrainingLoop.SaveCheckpoint()/LoadCheckpoint()/Continue()`, `Optimizer.StateDict()/LoadStateDict()`.
 
 ## Agents pipeline architecture
 
@@ -385,7 +386,7 @@ NivaraChat/
 │   ├── EntityTrainer.cs              # Train entity NER model
 │   ├── ValidatorTrainer.cs           # Train workflow validator model
 │   ├── AgentsValidatorTrainer.cs     # Train agents validator model
-│   └── IntentTrainer.cs              # Train intent classifier + incremental retrain
+│   └── IntentTrainer.cs              # Train intent classifier + checkpoint/resume incremental retrain
 ├── Data/
 │   ├── SyntheticDataGenerator.cs     # Generate all four datasets
 │   └── IntentDataGenerator.cs        # Generate 5-class intent data
@@ -458,9 +459,10 @@ Embedding(vocab, 32) → MeanPool → Linear(32, 64) → ReLU → Linear(64, 5)
 | `AsAIAgent()` | Program.cs | Convert `IChatClient` to `ChatClientAgent` |
 | `ChatClientAgent` | Program.cs | Agent Framework participant from `IChatClient` |
 | `NivaraEmbeddingGenerator<T>` | Nivara.Extensions | `IEmbeddingGenerator<TInput, Embedding<float>>` implementation for local models |
-| `TrainingLoop.Run(startEpoch)` | IntentTrainer.cs | Resume training from checkpoint |
-| `Optimizer.StateDict()/LoadStateDict()` | IntentTrainer.cs | Save/restore optimizer state for incremental training |
-| `ModelSerializer` (optimizer state) | IntentTrainer.cs | Persist optimizer state in checkpoints |
+| `TrainingLoop.SaveCheckpoint()` | IntentTrainer.cs | Persist model weights + Adam optimizer state (`StateDict()`) to `intent_checkpoint.json` |
+| `TrainingLoop.LoadCheckpoint()` | IntentTrainer.cs | Restore weights + optimizer state before incremental retrain |
+| `TrainingLoop.Continue()` | IntentTrainer.cs | Resume training from the checkpointed epoch at a lower LR (0.0005) |
+| `Optimizer.StateDict()/LoadStateDict()` | IntentTrainer.cs | Save/restore Adam momentum buffers across retrains |
 
 ## Requirements
 
