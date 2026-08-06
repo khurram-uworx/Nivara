@@ -1,141 +1,130 @@
-# Nivara Retraining (Online Learning) — How It Works
+# Online & Incremental Retraining in Nivara
 
-Reference for how NivaraChat's `--online-learning` mode performs incremental
-retraining of a deployed model. Powers the Act 8b example in `EXAMPLES.md` and
-any future docs on continuous learning.
+`docs/AUTODIFF.md` documents the training stack — modules, loss functions,
+optimizers, `DataLoader`, `TrainingLoop`, and serialization — for training from
+scratch. This guide covers what happens *after* deployment: keeping a deployed
+model learning from new validated examples as they arrive, entirely in .NET.
 
-## The problem
+The idea, stated up front:
 
-Deployed classifiers drift as inputs change. Retraining from scratch is expensive
-and discards the serving model's learned behavior. Online learning instead:
+> Retrain incrementally, don't retrain from scratch. Warm-start the deployed
+> weights, add the new validated examples to the original dataset, fine-tune at a
+> lower learning rate, and carry the optimizer's state across sessions via a
+> checkpoint. A fine-tune, not a re-train.
 
-1. Warm-starts from the saved model weights.
-2. Accumulates validated `(text, label)` examples into a buffer.
-3. Periodically retrains on the original dataset **plus** the buffer at a lower
-   learning rate (fine-tune, not fresh training).
-4. Re-saves the model and keeps serving.
+It assumes you have read `docs/AUTODIFF.md` and covers only what that document
+does not.
 
-## The feedback loop (`--online-learning`)
+## When you need this
 
+- **Distribution drift** — the serving inputs shift and accuracy decays.
+- **Feedback loops** — human review, LLM correction, or A/B results produce
+  `(input, corrected-label)` pairs you can trust.
+- **Scheduled refreshes** — periodic retraining on accumulated data without the
+  cost (and forgetting) of a full re-train.
+
+## The pattern
+
+| Step | What you do | Nivara API |
+|------|-------------|------------|
+| 1. Warm-start | Load the deployed weights and optimizer state | `TrainingLoop.LoadCheckpoint` (weights-only fallback: `ModelSerializer.Load`, AUTODIFF.md §Serialization) |
+| 2. Buffer | Accumulate validated `(input, label)` examples | your code — a list, frame, or file |
+| 3. Append | Retrain on original data **plus** the buffer | `TensorDataset` + `DataLoader` (AUTODIFF.md §Training) |
+| 4. Fine-tune | Lower learning rate, few epochs | `TrainingLoop` + `Continue(additionalEpochs)` |
+| 5. Persist | Re-save weights + a fresh checkpoint | `ModelSerializer.Save` + `TrainingLoop.SaveCheckpoint` |
+
+## Why optimizer state matters
+
+Adam (and momentum-based SGD) keep per-parameter buffers — `m`, `v`, and the
+bias-correction step `t`. A fresh optimizer on every retrain resets those
+buffers to zero, so the first epochs are a cold start: the fine-tune wastes
+epochs and can disturb a well-tuned model.
+
+A checkpoint persists the optimizer state alongside the weights, so a resume
+picks up exactly where training left off. Two properties make this clean:
+
+- **The learning rate is constructor state**, not part of the optimizer state.
+  Your resume loop can apply a *lower* fine-tune LR (say `0.0005` vs `0.001`)
+  while the restored moments carry over.
+- **The epoch counter travels with the checkpoint.** After `LoadCheckpoint`, the
+  loop's `MaxEpoch` reflects the saved epoch, so `Continue(additionalEpochs)`
+  resumes at `savedEpoch + 1` instead of renumbering from 1.
+
+## Retraining-specific APIs
+
+These are the only members `docs/AUTODIFF.md` does not document. Everything else
+(`ModelSerializer`, `Checkpoint<T>`, `DataLoader`, `TensorDataset`, optimizer
+registration) is unchanged from that guide.
+
+| API | What it adds |
+|-----|--------------|
+| `TrainingLoop<T>.SaveCheckpoint(path, epoch, loss)` | Persists weights + optimizer state + epoch (`nivara-ckpt-v2`) |
+| `TrainingLoop<T>.LoadCheckpoint(path)` | Restores weights + optimizer state + the epoch counter |
+| `TrainingLoop<T>.Continue(int additionalEpochs)` | Resumes training, continuing epoch numbering past the saved epoch |
+| `TrainingLoop<T>.Run(int startEpoch = 1)` | Train from an arbitrary starting epoch (used by `Continue`) |
+
+## A self-contained example
+
+Model, data, and loader are built exactly as in `docs/AUTODIFF.md` examples 7
+and 12 — the retraining flow adds only the steps below. The first full training
+is assumed to have ended with `SaveCheckpoint(...)`, so the deployment is
+resumable from day one.
+
+```csharp
+// Retrain on original data + new validated examples at a lower LR.
+using var optimizer = new Adam<float>(learningRate: 0.0005f);
+optimizer.AddParameterGroup(model.GetParameters().Values);
+
+var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 5);
+
+// 1. Warm-start: weights AND optimizer state from the checkpoint.
+loop.LoadCheckpoint("churn_checkpoint.json");
+
+// 2. Fine-tune: continues at savedEpoch + 1.
+var result = loop.Continue(additionalEpochs: 5);
+result.PrintSummary();
+// Epoch   6 | Loss:   0.041200 | Batches:  1 | Time: 0.02s
+// Epoch  10 | Loss:   0.037100 | Batches:  1 | Time: 0.02s
+
+// 3. Persist: updated weights + a fresh checkpoint for the next round.
+ModelSerializer.Save(model, "churn_model.json");
+loop.SaveCheckpoint("churn_checkpoint.json", result.Epochs[^1].Epoch, result.Epochs[^1].Loss);
+model.Eval();   // back to inference mode
 ```
-User input
-    │
-    v
-[IntentClassifier]           Nivara TextClassifierModel<float>, 5 classes
-    │
-    ├── confidence >= threshold ──> Return Nivara classification (no LLM needed)
-    │
-    └── confidence < threshold  ──> [Ollama LLM]
-                                        │
-                                        v
-                                  LLM provides corrected intent
-                                        │
-                                        v
-                                  Add (text, intent) to training buffer
-                                        │
-                                        v
-                                  Buffer full (retrainThreshold)?
-                                        │
-                                   yes ──> IntentTrainer.TrainIncremental()
-                                        │   loads checkpoint (weights + optimizer state)
-                                        │   resumes 5 epochs at lr=0.0005 via Continue()
-                                        │   saves updated model + checkpoint
-                                        v
-                                  Continue with updated model
-```
 
-Mechanics:
+Two caveats that are easy to get wrong:
 
-- `FeedbackCollector.ClassifyAsync` (`samples/NivaraChat/FeedbackCollector.cs:42`)
-  runs the classifier; only when confidence is below the threshold does it call
-  the LLM for a corrected intent and append it to the buffer.
-- The buffer threshold for the mode is 10 (`samples/NivaraChat/Program.cs:370`);
-  the `FeedbackCollector` default is 50.
-- When the buffer fills, `FeedbackCollector.Retrain` (`FeedbackCollector.cs:92`)
-  flushes it into `IntentTrainer.TrainIncremental`, then the serving process
-  rebuilds the collector with the fresh model (`Program.cs:393-402`).
-
-## The retrain step
-
-### Variant A — fallback: fresh optimizer warm-start (no checkpoint)
-
-Used only when no checkpoint is present. `IntentTrainer.TrainIncremental`
-(`samples/NivaraChat/Training/IntentTrainer.cs:90`):
-
-1. Load the saved tokenizer (`TextTokenizer.Load`) and reconstruct the model
-   architecture; `ModelSerializer.Load` restores the weights.
-2. Build the appended dataset: the original seed-500 intent set **plus** the
-   feedback buffer, re-tokenized with the *saved* tokenizer (vocab/indices stay
-   stable across sessions).
-3. Build a `TensorDataset`/`DataLoader` from the combined frame.
-4. Construct a **fresh** `Adam<float>` at `lr = 0.0005` and run a new
-   `TrainingLoop` for `additionalEpochs` (5).
-5. `ModelSerializer.Save` the updated weights and return the model.
-
-Limitation: a fresh optimizer means Adam's moment buffers (`m`, `v`, bias-correction
-step `t`) are reset on every retrain — "warm-start weights, cold optimizer". Fine
-for coarse fine-tunes, but it discards training dynamics.
-
-### Variant B — primary path (this branch): checkpoint resume
-
-Same warm-start + appended dataset, but the optimizer state carries across
-sessions via a checkpoint:
-
-1. `IntentTrainer.Train` also calls `TrainingLoop.SaveCheckpoint(...)` after the
-   initial full training, persisting weights **and** `Adam<float>.StateDict()`
-   (`TrainingLoop.cs:135-140`; checkpoint format `nivara-ckpt-v2`).
-2. `TrainIncremental` constructs its loop with the lower-LR Adam, then
-   `TrainingLoop.LoadCheckpoint(path)` restores both weights and optimizer state
-   (`TrainingLoop.cs:142-152`).
-3. `TrainingLoop.Continue(additionalEpochs)` resumes training instead of
-   restarting, keeping Adam moments and (with the `_maxEpoch` fix) correct epoch
-   numbering.
-4. Re-save model + updated checkpoint.
-
-Key property: the learning rate is **constructor state**, not part of
-`Optimizer.StateDict()`. So the incremental loop can apply `lr = 0.0005` while
-the restored moments carry over — exactly the fine-tuning behavior we want.
-
-## Core APIs involved
-
-| API | Location | Role in retraining |
-|-----|----------|--------------------|
-| `TrainingLoop.Run(int startEpoch = 1)` | `src/Nivara/AutoDiff/Training/TrainingLoop.cs:81` | Initial training and arbitrary-start runs |
-| `TrainingLoop.Continue(int additionalEpochs)` | `TrainingLoop.cs:125` | Resume training after a checkpoint, continuing epoch numbering |
-| `TrainingLoop.SaveCheckpoint(path, epoch, loss)` | `TrainingLoop.cs:135` | Persist weights + optimizer state |
-| `TrainingLoop.LoadCheckpoint(path)` | `TrainingLoop.cs:142` | Restore weights + optimizer state |
-| `Optimizer<T>.StateDict()` / `LoadStateDict(...)` | `src/Nivara/AutoDiff/Optimizer/Optimizer.cs:93,95` | Raw optimizer-state serialization (SGD, Adam, AdamW) |
-| `ModelSerializer.Save` / `Load` | `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs:17,28` | Weights-only JSON round-trip (`nivara-ss-v2`) |
-| `ModelSerializer.SaveCheckpoint` / `LoadCheckpoint` | `ModelSerializer.cs:68,83` | Checkpoint JSON round-trip incl. optimizer state (`nivara-ckpt-v2`) |
-| `Checkpoint<T>` / `ParameterData<T>` | `src/Nivara/AutoDiff/Serialization/Checkpoint.cs` | Checkpoint payload shape (Epoch, Loss, Parameters, OptimizerState) |
-| `Adam<float>` | `src/Nivara/AutoDiff/Optimizer/Adam.cs` | Bias-corrected adaptive optimizer; state restored on resume |
+- `TrainingLoop` implements `IDisposable` and disposes the model and optimizer.
+  If you keep using the model after training (the normal serving flow), do **not**
+  dispose the loop; dispose the model yourself when you're done.
+- `LoadCheckpoint` restores both weights and optimizer state, so no separate
+  `ModelSerializer.Load` is needed when a checkpoint exists. If you only have a
+  weights file (e.g., an older model directory), fall back to
+  `ModelSerializer.Load` + a fresh optimizer — just be aware the optimizer
+  starts cold.
 
 ## Design decisions worth preserving
 
-- **Tokenizer is fixed across sessions** — saved once, reloaded on retrain, so
-  vocab indices never shift between the original dataset and feedback examples.
-- **Lower LR on retrain** — `0.0005` vs `0.001` initial; a small step so new
-  examples refine rather than overwrite the learned distribution.
-- **Appended dataset, not pure feedback** — retraining runs on original data +
-  buffer to avoid catastrophic forgetting of the seed distribution.
-- **Checkpoint format includes optimizer state** — `Optimizer.StateDict()` gives
-  plain `Dictionary<string, T[]>` buffers (Adam: `m`, `v`, `t` per parameter
-  group), which serialize directly.
+These trade-offs were validated in a production sample (an LLM-feedback intent
+classifier). You should have reasons to deviate.
 
-## Files
+- **Append, don't replace.** Retraining runs on the original dataset **plus** the
+  new examples. Training on feedback alone causes *catastrophic forgetting* of
+  the seed distribution.
+- **Lower learning rate on retrain.** A small step (`0.0005` vs `0.001`) so new
+  examples refine rather than overwrite what the model learned.
+- **Keep preprocessing stable across sessions.** For text models, save the
+  tokenizer with the model and reload it on retrain; vocab indices must not shift
+  between the original dataset and the feedback examples.
+- **Buffer, then batch.** Collect validated examples into a buffer and retrain in
+  batches when the buffer reaches a threshold, rather than one-example-at-a-time
+  updates.
 
-- `samples/NivaraChat/FeedbackCollector.cs` — LLM fallback + feedback buffer
-- `samples/NivaraChat/Training/IntentTrainer.cs` — initial train + `TrainIncremental`
-- `samples/NivaraChat/Program.cs` — `--online-learning` orchestration (lines ~350-408)
-- `src/Nivara/AutoDiff/Training/TrainingLoop.cs` — loop, `Continue`, checkpoints
-- `src/Nivara/AutoDiff/Optimizer/Adam.cs` — optimizer state
-- `src/Nivara/AutoDiff/Serialization/ModelSerializer.cs` / `Checkpoint.cs` — persistence
+## Where you've seen this in action
 
-## Relationship to EXAMPLES.md Act 8b
-
-Act 8b ("Online training — keep a deployed model learning") in `EXAMPLES.md`
-(after Act 8) showcases this pattern with the Act 8 FraudNet: warm-start saved
-weights, appended original + feedback rows → `TensorDataset`/`DataLoader`,
-lower-LR `TrainingLoop`, and `SaveCheckpoint`/`LoadCheckpoint`/`Continue` for
-Adam-moment carryover. It cross-links to `--online-learning`
-(`samples/NivaraChat/README.md:259`).
+- **`EXAMPLES.md` Act 8b** — a worked FraudNet example (the same model from
+  Act 8, later in production) covering this exact pattern.
+- **`samples/NivaraChat --online-learning`** — the full feedback loop end to end:
+  classify → low-confidence input routed to an LLM for a corrected label →
+  buffered → incremental retrain → keep serving.
+- **`docs/AUTODIFF.md`** — the underlying training stack this guide builds on.
