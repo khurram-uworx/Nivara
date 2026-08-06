@@ -132,6 +132,44 @@ public class SerializationTests
     }
 
     [Test]
+    public void LoadCheckpoint_Continue_ResumesEpochNumbering()
+    {
+        var frame = NivaraFrame.Create(
+            ("f1", NivaraColumn<float>.Create([1f, 2f, 3f, 4f])),
+            ("f2", NivaraColumn<float>.Create([5f, 6f, 7f, 8f])),
+            ("label", NivaraColumn<float>.Create([10f, 20f, 30f, 40f])));
+
+        var lossFn = (ReverseGradTensor<float> pred, ReverseGradTensor<float> tgt) => new MSELoss<float>().Forward(pred, tgt);
+
+        var dataset = new TensorDataset<float>(frame, ["f1", "f2"], "label");
+        var loader = new DataLoader<float>(dataset, 4, shuffle: false);
+
+        var path = Path.Combine(TestDir, "checkpoint_resume.json");
+        using (var model = new Linear<float>(2, 1))
+        {
+            var optimizer = new SGD<float>(0.01f);
+            optimizer.AddParameterGroup(model.GetParameters().Values, 0.01f);
+            using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 5);
+            loop.Run();
+            loop.SaveCheckpoint(path, epoch: 5, loss: 0.25f);
+        }
+
+        using var resumedModel = new Linear<float>(2, 1);
+        var resumed = new SGD<float>(0.01f);
+        resumed.AddParameterGroup(resumedModel.GetParameters().Values, 0.01f);
+        using var resumedLoop = new TrainingLoop<float>(resumedModel, loader, lossFn, resumed, epochs: 5);
+        resumedLoop.LoadCheckpoint(path);
+
+        var result = resumedLoop.Continue(additionalEpochs: 2);
+
+        Assert.That(result.Epochs[0].Epoch, Is.EqualTo(6));
+        Assert.That(result.Epochs[1].Epoch, Is.EqualTo(7));
+        Assert.That(resumedLoop.MaxEpoch, Is.EqualTo(7));
+
+        File.Delete(path);
+    }
+
+    [Test]
     public void StateDict_LoadStateDict_RoundTrip()
     {
         using var source = new Linear<float>(2, 3);
