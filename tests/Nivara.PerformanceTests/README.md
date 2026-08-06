@@ -34,6 +34,33 @@ dotnet run --project tests/Nivara.PerformanceTests -c Release
 tests/Nivara.PerformanceTests/bin/Release/net10.0/Nivara.PerformanceTests.exe
 ```
 
+### No-regression gate (P4)
+
+The harness doubles as an executable perf gate (`ADR-002` P4). Two modes:
+
+- `--json <path>` — emit each scenario's `ops/s`, `ns/op`, `B/op`, `gen0/op`
+  as JSON (median across `--runs n`, default 1).
+- `--compare <baseline.json>` — run, compare against a saved `--json` baseline,
+  and exit non-zero when any scenario regresses beyond tolerance.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--json <path>` | — | write results JSON to `<path>` |
+| `--compare <baseline.json>` | — | gate against `<baseline.json>`; exit 1 on regression, 2 on unreadable baseline |
+| `--runs <n>` | 1 | take the median of `n` runs per scenario |
+| `--tolerance <pct>` | 90 | ops/s floor as a percent of baseline |
+
+Gate criteria (tolerance constants in `Program.cs`):
+- `ops/s` ≥ `--tolerance`% of baseline (default 90%)
+- `B/op` ≤ baseline × 1.01 (allocation slack absorbs run-to-run jitter)
+- `gen0/op` ≤ baseline + 0.05 (GC scheduling is not allocation-proportional)
+
+Per-phase workflow (on an idle machine — see the load caveat below):
+1. **Baseline** before the phase: `--json baseline.json --runs 3`
+2. **Measure** after the phase: `--compare baseline.json --runs 3`
+3. `--compare` exits 0 on pass; on FAIL, bisect to the offending change before
+   proceeding (ADR-002 no-regression gate).
+
 ## Methodology
 
 - **No forced GC** in measurements; steady-state warmup (5 iterations) before
