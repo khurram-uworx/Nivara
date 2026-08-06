@@ -444,6 +444,10 @@ public static class GradKernels
         where T : struct, IFloatingPointIeee754<T>
         => TensorsHelper.MultiplyCore(a, b, output, aRows, aCols, bCols);
 
+    public static void MatMulTransposedB<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] output, int aRows, int aCols, int bCols)
+        where T : struct, IFloatingPointIeee754<T>
+        => TensorsHelper.MultiplyCore(a, b, output, aRows, aCols, bCols, bTransposed: true);
+
     public static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
         where T : struct, IFloatingPointIeee754<T>
         => TensorsHelper.Transpose(src, dst, rows, cols);

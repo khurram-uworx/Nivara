@@ -346,7 +346,7 @@ public static class ReverseGradOperations
                 a.Data.TryGetSpan(out var aSpan);
                 b.Data.TryGetSpan(out var bSpan);
                 var resultArr = new T[aRows * bCols];
-                TensorsHelper.MultiplyCore(aSpan, bSpan, resultArr, aRows, aCols, bCols, bTransposed: true);
+                GradKernels.MatMulTransposedB(aSpan, bSpan, resultArr, aRows, aCols, bCols);
 
                 var shouldTrack = GradientUtils.ShouldTrackGrad(a, b);
                 var resultTensor = new ReverseGradTensor<T>(
@@ -480,7 +480,7 @@ public static class ReverseGradOperations
                         var kh = kHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
                         var vh = vHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
 
-                        TensorsHelper.MultiplyCore(qh, kh, scores, qLen, headDim, kvLen, bTransposed: true);
+                        GradKernels.MatMulTransposedB(qh, kh, scores, qLen, headDim, kvLen);
                         var scoresSpan = scores.AsSpan(0, scoreLen);
                         TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
                         if (!maskSpan.IsEmpty)
@@ -718,7 +718,7 @@ public static class ReverseGradOperations
                                 var kh = kvhBatch.Slice(h * kvLen * headDim, kvLen * headDim);
                                 var vh = vBatch.Slice(h * kvLen * headDim, kvLen * headDim);
 
-                                TensorsHelper.MultiplyCore(qh, kh, scores, qLen, headDim, kvLen, bTransposed: true);
+                                GradKernels.MatMulTransposedB(qh, kh, scores, qLen, headDim, kvLen);
                                 var scoresSpan = scores.AsSpan(0, scoreLen);
                                 TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
                                 if (!maskSpan.IsEmpty)
