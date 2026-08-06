@@ -46,46 +46,12 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     }
 
     /// <summary>
-    /// In-place row-wise softmax (max subtraction, exp, normalize). Uses
-    /// <see cref="TensorPrimitives"/> for float/double; a scalar fallback covers
-    /// Half/BFloat16.
+    /// In-place row-wise softmax (max subtraction, exp, normalize). Delegates to
+    /// <see cref="GradKernels.SoftmaxRowsInPlace{T}"/> so attention and the
+    /// Softmax op share one kernel.
     /// </summary>
     public static void SoftmaxRows(Span<T> x, int rows, int cols)
-    {
-        for (int r = 0; r < rows; r++)
-            SoftmaxRow(x.Slice(r * cols, cols));
-    }
-
-    static void SoftmaxRow(Span<T> row)
-    {
-        if (typeof(T) == typeof(float) || typeof(T) == typeof(double))
-        {
-            T max = T.NegativeInfinity;
-            for (int i = 0; i < row.Length; i++)
-                if (row[i] > max) max = row[i];
-            TensorPrimitives.Subtract(row, max, row);
-            TensorPrimitives.Exp(row, row);
-            TensorPrimitives.Divide(row, TensorPrimitives.Sum(row), row);
-            return;
-        }
-
-        double maxVal = double.NegativeInfinity;
-        for (int i = 0; i < row.Length; i++)
-        {
-            var v = double.CreateChecked(row[i]);
-            if (v > maxVal) maxVal = v;
-        }
-        double sum = 0.0;
-        for (int i = 0; i < row.Length; i++)
-        {
-            var e = Math.Exp(double.CreateChecked(row[i]) - maxVal);
-            row[i] = T.CreateChecked(e);
-            sum += e;
-        }
-        if (sum > 0)
-            for (int i = 0; i < row.Length; i++)
-                row[i] = T.CreateChecked(double.CreateChecked(row[i]) / sum);
-    }
+        => GradKernels.SoftmaxRowsInPlace(x, rows, cols);
 
     /// <summary>
     /// In-place softmax backward: dS[i,j] = P[i,j] * (dP[i,j] - dot(P_i, dP_i)).

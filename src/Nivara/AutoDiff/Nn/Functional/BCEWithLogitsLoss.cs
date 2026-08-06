@@ -1,6 +1,5 @@
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Tensors;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
@@ -16,22 +15,20 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, IFloatingPointIeee754
         if (targets == null) throw new ArgumentNullException(nameof(targets));
 
         int n = logits.Length;
-        var logitsData = new T[n];
-        logits.Data.CopyTo(logitsData, default(T)!);
-        var targetsData = new T[n];
-        targets.Data.CopyTo(targetsData, default(T)!);
+        var logitsSpan = ModuleHelpers<T>.GetSpan(logits);
+        var targetsSpan = ModuleHelpers<T>.GetSpan(targets);
 
         var lossData = new T[n];
         for (int i = 0; i < n; i++)
         {
-            T x = logitsData[i];
-            T z = targetsData[i];
+            T x = logitsSpan[i];
+            T z = targetsSpan[i];
             T maxVal = T.Max(T.Zero, x);
             T negAbsX = -T.Abs(x);
             lossData[i] = maxVal - x * z + SoftPlus(negAbsX);
         }
 
-        var lossCol = NivaraColumn<T>.Create(lossData);
+        var lossCol = NivaraColumn<T>.CreateFromOwnedArray(lossData);
         bool shouldTrack = GradientUtils.ShouldTrackGrad(logits, targets);
         var lossTensor = new ReverseGradTensor<T>(lossCol, shouldTrack, logits.shape);
 
@@ -43,20 +40,23 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, IFloatingPointIeee754
                 var grad = new T[n];
                 gradOutput.CopyTo(grad.AsSpan(), default(T)!);
 
+                var logitsSpanBwd = ModuleHelpers<T>.GetSpan(logits);
+                var targetsSpanBwd = ModuleHelpers<T>.GetSpan(targets);
+
                 var sigmoidX = new T[n];
-                TensorsHelper.Sigmoid(logitsData.AsSpan(), sigmoidX.AsSpan());
+                GradKernels.Sigmoid(logitsSpanBwd, sigmoidX.AsSpan());
 
                 var logitsGrad = new T[n];
                 for (int i = 0; i < n; i++)
-                    logitsGrad[i] = (sigmoidX[i] - targetsData[i]) * grad[i];
-                ReverseGradOperations.AccumulateGradient(logits, NivaraColumn<T>.Create(logitsGrad));
+                    logitsGrad[i] = (sigmoidX[i] - targetsSpanBwd[i]) * grad[i];
+                ReverseGradOperations.AccumulateGradient(logits, NivaraColumn<T>.CreateFromOwnedArray(logitsGrad));
 
                 if (trackTargets)
                 {
                     var targetsGrad = new T[n];
                     for (int i = 0; i < n; i++)
-                        targetsGrad[i] = -logitsData[i] * grad[i];
-                    ReverseGradOperations.AccumulateGradient(targets, NivaraColumn<T>.Create(targetsGrad));
+                        targetsGrad[i] = -logitsSpanBwd[i] * grad[i];
+                    ReverseGradOperations.AccumulateGradient(targets, NivaraColumn<T>.CreateFromOwnedArray(targetsGrad));
                 }
             });
             ComputationGraph.AddNode(lossTensor, gradFn);

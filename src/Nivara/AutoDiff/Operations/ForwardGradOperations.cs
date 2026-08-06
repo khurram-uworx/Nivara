@@ -308,14 +308,15 @@ public static class ForwardGradOperations
             throw new InvalidOperationException("Cannot compute sum of empty tensor");
         }
 
-        var sumValue = a.Data.Sum();
-        var resultData = NivaraColumn<T>.Create(new T[] { sumValue });
+        var sumValue = TensorPrimitives.Sum(a.AsSpan());
+        var resultData = NivaraColumn<T>.CreateFromOwnedArray(new T[] { sumValue });
 
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            var tanSum = a.Tangent!.Sum();
-            tangent = NivaraColumn<T>.Create(new T[] { tanSum });
+            a.Tangent.TryGetSpan(out var tanSpan);
+            var tanSum = TensorPrimitives.Sum(tanSpan);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(new T[] { tanSum });
         }
 
         return new ForwardGradTensor<T>(resultData, tangent, ScalarShape());
@@ -335,16 +336,16 @@ public static class ForwardGradOperations
             throw new InvalidOperationException("Cannot compute mean of empty tensor");
         }
 
-        var series = a.ToSeries();
-        var meanValue = series.Average();
-        var resultData = NivaraColumn<T>.Create(new T[] { meanValue });
+        var meanValue = TensorPrimitives.Sum(a.AsSpan()) / T.CreateChecked(a.Length);
+        var resultData = NivaraColumn<T>.CreateFromOwnedArray(new T[] { meanValue });
 
         NivaraColumn<T>? tangent = null;
         if (a.RequiresTangent && a.Tangent != null)
         {
-            var tanSum = a.Tangent!.Sum();
+            a.Tangent.TryGetSpan(out var tanSpan);
+            var tanSum = TensorPrimitives.Sum(tanSpan);
             var tanMean = tanSum / T.CreateChecked(a.Length);
-            tangent = NivaraColumn<T>.Create(new T[] { tanMean });
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(new T[] { tanMean });
         }
 
         return new ForwardGradTensor<T>(resultData, tangent, ScalarShape());
@@ -726,8 +727,9 @@ public static class ForwardGradOperations
                 nameof(logVar));
 
         var klElements = ApplyKlElementWise(mean.Data, logVar.Data);
-        var klSum = klElements.Sum();
-        var resultData = NivaraColumn<T>.Create(new T[] { klSum });
+        klElements.TryGetSpan(out var klSpan);
+        var klSum = TensorPrimitives.Sum(klSpan);
+        var resultData = NivaraColumn<T>.CreateFromOwnedArray(new T[] { klSum });
 
         NivaraColumn<T>? tangent = null;
         if (mean.RequiresTangent || logVar.RequiresTangent)
@@ -756,7 +758,7 @@ public static class ForwardGradOperations
                 tanValue += TensorPrimitives.Sum(dLogVarArr);
             }
 
-            tangent = NivaraColumn<T>.Create(new T[] { tanValue });
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(new T[] { tanValue });
         }
 
         return new ForwardGradTensor<T>(resultData, tangent, ScalarShape());
@@ -779,7 +781,7 @@ public static class ForwardGradOperations
 
         int n = mean.Length;
         var epsilon = RandomGeneration.GenerateStandardNormal<T>(n, seed);
-        var epsilonCol = NivaraColumn<T>.Create(epsilon.AsSpan());
+        var epsilonCol = NivaraColumn<T>.CreateFromOwnedArray(epsilon);
         var primal = ApplySampleNormalForward(mean.Data, logVar.Data, epsilonCol);
 
         NivaraColumn<T>? tangent = null;
@@ -884,7 +886,7 @@ public static class ForwardGradOperations
         TensorPrimitives.Subtract(tmp, m2, tmp);
         TensorPrimitives.Subtract(tmp, expLv, tmp);
         TensorPrimitives.Multiply(tmp, T.CreateChecked(-0.5), result);
-        return NivaraColumn<T>.Create(result);
+        return NivaraColumn<T>.CreateFromOwnedArray(result);
     }
 
     private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon)
@@ -899,7 +901,7 @@ public static class ForwardGradOperations
         TensorPrimitives.Exp(result, result);
         TensorPrimitives.Multiply(result, eSpan, result);
         TensorPrimitives.Add(result, mSpan, result);
-        return NivaraColumn<T>.Create(result);
+        return NivaraColumn<T>.CreateFromOwnedArray(result);
     }
 
     private static NivaraColumn<T> ApplySampleNormalLogVarTangent<T>(
@@ -918,7 +920,7 @@ public static class ForwardGradOperations
         TensorPrimitives.Multiply(result, eSpan, result);
         TensorPrimitives.Multiply(result, gSpan, result);
         TensorPrimitives.Multiply(result, T.CreateChecked(0.5), result);
-        return NivaraColumn<T>.Create(result);
+        return NivaraColumn<T>.CreateFromOwnedArray(result);
     }
 
     #endregion

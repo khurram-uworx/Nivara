@@ -58,7 +58,7 @@ internal static class ModuleHelpers<T> where T : struct, IFloatingPointIeee754<T
             }
         }
 
-        var maskCol = NivaraColumn<T>.Create(maskData);
+        var maskCol = NivaraColumn<T>.CreateFromOwnedArray(maskData);
         var tensor = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
         tensor.Reshape(N, N);
         return tensor;
@@ -77,7 +77,7 @@ internal static class ModuleHelpers<T> where T : struct, IFloatingPointIeee754<T
                 if (j > i)
                     maskData[i * kvLen + j] = T.CreateChecked(double.NegativeInfinity);
 
-        var col = NivaraColumn<T>.Create(maskData);
+        var col = NivaraColumn<T>.CreateFromOwnedArray(maskData);
         var tensor = new ReverseGradTensor<T>(col, requiresGrad: false);
         tensor.Reshape(qLen, kvLen);
         return tensor;

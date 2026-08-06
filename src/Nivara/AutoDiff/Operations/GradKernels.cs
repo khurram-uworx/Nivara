@@ -306,6 +306,50 @@ public static class GradKernels
             SoftmaxSingle(input.Slice(r * classCount, classCount), output.Slice(r * classCount, classCount));
     }
 
+    /// <summary>
+    /// In-place row-wise softmax (max subtraction, exp, normalize). float/double
+    /// use a <see cref="TensorPrimitives"/> chain; Half/BFloat16 use a scalar
+    /// double-based fallback. Allocates nothing, so it can run on rented buffers.
+    /// </summary>
+    public static void SoftmaxRowsInPlace<T>(Span<T> x, int rows, int cols)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        for (int r = 0; r < rows; r++)
+            SoftmaxRowInPlace(x.Slice(r * cols, cols));
+    }
+
+    static void SoftmaxRowInPlace<T>(Span<T> row)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (typeof(T) == typeof(float) || typeof(T) == typeof(double))
+        {
+            T max = T.NegativeInfinity;
+            for (int i = 0; i < row.Length; i++)
+                if (row[i] > max) max = row[i];
+            TensorPrimitives.Subtract(row, max, row);
+            TensorPrimitives.Exp(row, row);
+            TensorPrimitives.Divide(row, TensorPrimitives.Sum(row), row);
+            return;
+        }
+
+        double maxVal = double.NegativeInfinity;
+        for (int i = 0; i < row.Length; i++)
+        {
+            var v = double.CreateChecked(row[i]);
+            if (v > maxVal) maxVal = v;
+        }
+        double sum = 0.0;
+        for (int i = 0; i < row.Length; i++)
+        {
+            var e = Math.Exp(double.CreateChecked(row[i]) - maxVal);
+            row[i] = T.CreateChecked(e);
+            sum += e;
+        }
+        if (sum > 0)
+            for (int i = 0; i < row.Length; i++)
+                row[i] = T.CreateChecked(double.CreateChecked(row[i]) / sum);
+    }
+
     public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -443,6 +487,10 @@ public static class GradKernels
     public static void MatMul<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] output, int aRows, int aCols, int bCols)
         where T : struct, IFloatingPointIeee754<T>
         => TensorsHelper.MultiplyCore(a, b, output, aRows, aCols, bCols);
+
+    public static void MatMulTransposedB<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] output, int aRows, int aCols, int bCols)
+        where T : struct, IFloatingPointIeee754<T>
+        => TensorsHelper.MultiplyCore(a, b, output, aRows, aCols, bCols, bTransposed: true);
 
     public static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
         where T : struct, IFloatingPointIeee754<T>

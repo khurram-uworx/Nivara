@@ -79,3 +79,18 @@ Three options were considered (maintainer decision, 2026-08-03):
 This decision is recorded so agents do not re-open the architecture fork. To
 revisit, file an issue referencing ADR-002 with profiling evidence or a concrete
 API-pressure case.
+
+## Implementation notes (2026-08-06)
+
+- **Layering:** `TensorsHelper` is the shared matrix-kernel store (with BCL
+  swap-target annotations, see ADR-003) and is callable directly by
+  matrix-heavy reverse ops; `GradKernels` is the AutoDiff facade that
+  forward-mode and elementwise/softmax ops route through. Reverse-op direct
+  `TensorsHelper` calls are accepted divergence, not drift. `GradKernels.MatMul`
+  takes its output as `T[]` (not `Span<T>`) because the underlying parallel
+  tiled kernel requires a captured array — spans cannot cross `Parallel` lambda
+  boundaries (documented in `GradKernels.cs`).
+- **Safety rule for zero-copy wraps:** `NivaraColumn<T>.CreateFromOwnedArray`
+  may only wrap a freshly allocated `new T[...]` that is not reused or returned
+  after wrapping. Never wrap `ArrayPool<T>.Shared`-rented scratch buffers (e.g.
+  transpose temporaries) — hand them back to the pool instead.

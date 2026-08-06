@@ -36,7 +36,7 @@ public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, IFloating
         AdaptiveAvgForwardKernel(inputSpan, outputData, n, c, h, w, outH, outW);
 
         var outShape = new[] { n, c, outH, outW };
-        var result = NivaraColumn<T>.Create(outputData);
+        var result = NivaraColumn<T>.CreateFromOwnedArray(outputData);
         bool shouldTrack = GradientUtils.ShouldTrackGrad(input);
         var resultTensor = new ReverseGradTensor<T>(result, shouldTrack, outShape);
 
@@ -50,7 +50,7 @@ public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, IFloating
 
                 AdaptiveAvgBackwardKernel(gradOutData, inputGrad, n, c, h, w, outH, outW);
 
-                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
+                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.CreateFromOwnedArray(inputGrad));
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);

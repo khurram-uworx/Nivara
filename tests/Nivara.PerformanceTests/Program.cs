@@ -4,12 +4,67 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using System.Diagnostics;
 using System.Numerics.Tensors;
+using System.Text.Encodings.Web;
+using System.Text.Json;
 
 namespace Nivara.PerformanceTests;
 
 static class Program
 {
-    static int Main()
+    static readonly List<ScenarioDefinition> s_scenarios = [];
+
+    const double DefaultMinOpsFraction = 0.90;
+    const double MaxAllocationFraction = 1.01;
+    const double Gen0Tolerance = 0.05;
+
+    static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = true,
+    };
+
+    static int Main(string[] args)
+    {
+        var (jsonPath, comparePath, runs, minOpsFraction) = ParseArgs(args);
+
+        if (runs > 1)
+        {
+            var results = MeasureAcrossProcesses(runs);
+            if (results is null)
+                return 2;
+
+            PrintTable(results);
+
+            if (jsonPath is not null)
+                WriteJson(jsonPath, results, runs);
+
+            if (comparePath is not null)
+                return Compare(comparePath, results, minOpsFraction);
+
+            return 0;
+        }
+
+        PrintHeader();
+        RegisterScenarios();
+
+        var singleResults = new List<ScenarioResult>();
+        foreach (var scenario in s_scenarios)
+        {
+            var result = MeasureScenario(scenario, 1);
+            singleResults.Add(result);
+            PrintRow(result);
+        }
+
+        if (jsonPath is not null)
+            WriteJson(jsonPath, singleResults, 1);
+
+        if (comparePath is not null)
+            return Compare(comparePath, singleResults, minOpsFraction);
+
+        return 0;
+    }
+
+    static void PrintHeader()
     {
         Console.WriteLine("Nivara storage plan benchmark");
         Console.WriteLine($"  Runtime : {Environment.Version}");
@@ -17,7 +72,93 @@ static class Program
         Console.WriteLine();
         Console.WriteLine($"{"Scenario",-46} {"ops/s",12} {"ns/op",8} {"B/op",12} {"gen0/op",7}");
         Console.WriteLine(new string('-', 92));
+    }
 
+    static void PrintTable(List<ScenarioResult> results)
+    {
+        PrintHeader();
+        foreach (var r in results)
+            PrintRow(r);
+    }
+
+    static List<ScenarioResult>? MeasureAcrossProcesses(int runs)
+    {
+        var exe = Environment.ProcessPath;
+        if (exe is null)
+        {
+            Console.Error.WriteLine("Cannot resolve harness executable path.");
+            return null;
+        }
+
+        var tmpFiles = new string[runs];
+        try
+        {
+            for (int i = 0; i < runs; i++)
+            {
+                tmpFiles[i] = Path.Combine(Path.GetTempPath(), $"nivara-perf-{Guid.NewGuid():N}.json");
+                var psi = new ProcessStartInfo
+                {
+                    FileName = exe,
+                    UseShellExecute = false,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                };
+                psi.ArgumentList.Add("--runs");
+                psi.ArgumentList.Add("1");
+                psi.ArgumentList.Add("--json");
+                psi.ArgumentList.Add(tmpFiles[i]);
+                using var child = Process.Start(psi);
+                if (child is null)
+                {
+                    Console.Error.WriteLine($"Failed to start measurement process {i + 1}.");
+                    return null;
+                }
+                child.WaitForExit();
+                if (child.ExitCode != 0)
+                {
+                    Console.Error.WriteLine($"Measurement process {i + 1} exited with {child.ExitCode}.");
+                    return null;
+                }
+            }
+
+            var runsByName = new Dictionary<string, List<ScenarioResult>>();
+            foreach (var file in tmpFiles)
+            {
+                var report = JsonSerializer.Deserialize<HarnessReport>(File.ReadAllText(file), s_jsonOptions);
+                if (report is null)
+                    return null;
+                foreach (var r in report.Results)
+                {
+                    if (!runsByName.TryGetValue(r.Name, out var list))
+                        runsByName[r.Name] = list = new List<ScenarioResult>();
+                    list.Add(r);
+                }
+            }
+
+            var medians = new List<ScenarioResult>();
+            foreach (var (name, list) in runsByName)
+            {
+                var ops = list.Select(r => r.OpsPerSec).OrderBy(v => v).ToArray();
+                var ns = list.Select(r => r.NsPerOp).OrderBy(v => v).ToArray();
+                var bytes = list.Select(r => r.BytesPerOp).OrderBy(v => v).ToArray();
+                var gen0 = list.Select(r => r.Gen0PerOp).OrderBy(v => v).ToArray();
+                int mid = runs / 2;
+                medians.Add(new ScenarioResult(name, ops[mid], ns[mid], bytes[mid], gen0[mid]));
+            }
+            return medians;
+        }
+        finally
+        {
+            foreach (var file in tmpFiles)
+            {
+                if (file is not null && File.Exists(file))
+                    File.Delete(file);
+            }
+        }
+    }
+
+    static void RegisterScenarios()
+    {
         Run("ColumnAdd 1M x float", 5, 200,
             () =>
             {
@@ -32,6 +173,39 @@ static class Program
                 var a = Fill(new float[1_000_000]);
                 var dest = new float[1_000_000];
                 return () => TensorPrimitives.Sigmoid(a, dest);
+            });
+
+        Run("Span chain 1M x 3 ops (raw)", 5, 100,
+            () =>
+            {
+                var a = Fill(new float[1_000_000]);
+                var b = Fill(new float[1_000_000]);
+                var c = Fill(new float[1_000_000]);
+                var d = Fill(new float[1_000_000]);
+                var t1 = new float[1_000_000];
+                var t2 = new float[1_000_000];
+                var result = new float[1_000_000];
+                return () =>
+                {
+                    TensorPrimitives.Add(a, b, t1);
+                    TensorPrimitives.Multiply(t1, c, t2);
+                    TensorPrimitives.Subtract(t2, d, result);
+                };
+            });
+
+        Run("Column chain 1M x 3 ops (wrapper)", 5, 100,
+            () =>
+            {
+                var a = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                var b = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                var c = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                var d = NivaraColumn<float>.Create(Fill(new float[1_000_000]));
+                return () =>
+                {
+                    var t1 = a.Add(b);
+                    var t2 = t1.Multiply(c);
+                    _ = t2.Subtract(d);
+                };
             });
 
         Run("Linear forward [32x256] -> [32x256]", 5, 100,
@@ -81,8 +255,6 @@ static class Program
             });
 
         RunBatchedAttentionScenarios();
-
-        return 0;
     }
 
     static void RunBatchedAttentionScenarios()
@@ -199,27 +371,167 @@ static class Program
     }
 
     static void Run(string name, int warmup, int iterations, Func<Action> createOp)
-    {
-        var op = createOp();
+        => s_scenarios.Add(new ScenarioDefinition(name, warmup, iterations, createOp));
 
-        for (int i = 0; i < warmup; i++)
+    static ScenarioResult MeasureScenario(ScenarioDefinition scenario, int runs)
+    {
+        if (runs <= 1)
+            return MeasureOnce(scenario);
+
+        var ops = new double[runs];
+        var ns = new double[runs];
+        var bytes = new double[runs];
+        var gen0 = new double[runs];
+        for (int i = 0; i < runs; i++)
+        {
+            var r = MeasureOnce(scenario);
+            ops[i] = r.OpsPerSec;
+            ns[i] = r.NsPerOp;
+            bytes[i] = r.BytesPerOp;
+            gen0[i] = r.Gen0PerOp;
+        }
+
+        Array.Sort(ops);
+        Array.Sort(ns);
+        Array.Sort(bytes);
+        Array.Sort(gen0);
+        return new ScenarioResult(scenario.Name, ops[runs / 2], ns[runs / 2], bytes[runs / 2], gen0[runs / 2]);
+    }
+
+    static ScenarioResult MeasureOnce(ScenarioDefinition scenario)
+    {
+        var op = scenario.Create();
+
+        for (int i = 0; i < scenario.Warmup; i++)
             op();
 
         long bytesBefore = GC.GetAllocatedBytesForCurrentThread();
         int gen0Before = GC.CollectionCount(0);
         var sw = Stopwatch.StartNew();
-        for (int i = 0; i < iterations; i++)
+        for (int i = 0; i < scenario.Iterations; i++)
             op();
         sw.Stop();
         long bytesAfter = GC.GetAllocatedBytesForCurrentThread();
         int gen0After = GC.CollectionCount(0);
 
-        double nsPerOp = sw.Elapsed.TotalNanoseconds / iterations;
+        double nsPerOp = sw.Elapsed.TotalNanoseconds / scenario.Iterations;
         double opsPerSec = 1e9 / nsPerOp;
-        double bytesPerOp = (double)(bytesAfter - bytesBefore) / iterations;
-        double gen0PerOp = (double)(gen0After - gen0Before) / iterations;
+        double bytesPerOp = (double)(bytesAfter - bytesBefore) / scenario.Iterations;
+        double gen0PerOp = (double)(gen0After - gen0Before) / scenario.Iterations;
 
-        Console.WriteLine($"{name,-46} {opsPerSec,12:N0} {nsPerOp,8:N0} {bytesPerOp,12:N0} {gen0PerOp,7:N2}");
+        return new ScenarioResult(scenario.Name, opsPerSec, nsPerOp, bytesPerOp, gen0PerOp);
+    }
+
+    static void PrintRow(ScenarioResult r)
+        => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
+
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction) ParseArgs(string[] args)
+    {
+        string? jsonPath = null, comparePath = null;
+        int runs = 1;
+        double minOpsFraction = DefaultMinOpsFraction;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--json" when i + 1 < args.Length:
+                    jsonPath = args[++i];
+                    break;
+                case "--compare" when i + 1 < args.Length:
+                    comparePath = args[++i];
+                    break;
+                case "--runs" when i + 1 < args.Length:
+                    runs = int.Parse(args[++i]);
+                    break;
+                case "--tolerance" when i + 1 < args.Length:
+                    minOpsFraction = double.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture) / 100.0;
+                    break;
+                default:
+                    Console.Error.WriteLine($"Unknown argument: {args[i]}");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Environment.Exit(2);
+                    break;
+            }
+        }
+
+        return (jsonPath, comparePath, runs, minOpsFraction);
+    }
+
+    static void WriteJson(string path, List<ScenarioResult> results, int runs)
+    {
+        var report = new HarnessReport
+        {
+            Runtime = Environment.Version.ToString(),
+            Machine = $"{Environment.ProcessorCount} logical processors, {(Environment.Is64BitProcess ? "x64" : "x86")}",
+            Timestamp = DateTimeOffset.UtcNow,
+            Runs = runs,
+            Results = results,
+        };
+        File.WriteAllText(path, JsonSerializer.Serialize(report, s_jsonOptions));
+        Console.WriteLine($"Wrote {path}");
+    }
+
+    static int Compare(string baselinePath, List<ScenarioResult> results, double minOpsFraction)
+    {
+        HarnessReport baseline;
+        try
+        {
+            baseline = JsonSerializer.Deserialize<HarnessReport>(File.ReadAllText(baselinePath), s_jsonOptions)
+                ?? throw new InvalidDataException("empty baseline");
+        }
+        catch (Exception e)
+        {
+            Console.Error.WriteLine($"Cannot read baseline {baselinePath}: {e.Message}");
+            return 2;
+        }
+
+        var baselineByName = baseline.Results.ToDictionary(r => r.Name);
+        Console.WriteLine();
+        Console.WriteLine($"No-regression gate vs {Path.GetFileName(baselinePath)} (minOps {minOpsFraction:P0}, maxAlloc {(1 - MaxAllocationFraction):P0} slack, gen0 +{Gen0Tolerance:N2}):");
+
+        int failures = 0;
+        foreach (var r in results)
+        {
+            if (!baselineByName.TryGetValue(r.Name, out var b))
+            {
+                Console.WriteLine($"  {r.Name,-46}  NEW   (no baseline row; not gated)");
+                continue;
+            }
+
+            bool opsOk = r.OpsPerSec >= b.OpsPerSec * minOpsFraction;
+            bool bytesOk = r.BytesPerOp <= b.BytesPerOp * MaxAllocationFraction;
+            bool gen0Ok = r.Gen0PerOp <= b.Gen0PerOp + Gen0Tolerance;
+            bool ok = opsOk && bytesOk && gen0Ok;
+            if (!ok)
+                failures++;
+
+            Console.WriteLine(
+                $"  {(ok ? "PASS" : "FAIL")}  {r.Name,-46}  ops/s {r.OpsPerSec,9:N0} vs {b.OpsPerSec,9:N0}  B/op {r.BytesPerOp,12:N0} vs {b.BytesPerOp,12:N0}  gen0 {r.Gen0PerOp,5:N2} vs {b.Gen0PerOp,5:N2}");
+        }
+
+        Console.WriteLine();
+        if (failures == 0)
+        {
+            Console.WriteLine("Gate PASS — no regressions.");
+            return 0;
+        }
+
+        Console.WriteLine($"Gate FAIL — {failures} scenario(s) outside tolerance.");
+        return 1;
+    }
+
+    internal sealed record ScenarioDefinition(string Name, int Warmup, int Iterations, Func<Action> Create);
+
+    internal sealed record ScenarioResult(string Name, double OpsPerSec, double NsPerOp, double BytesPerOp, double Gen0PerOp);
+
+    internal sealed class HarnessReport
+    {
+        public string Runtime { get; set; } = "";
+        public string Machine { get; set; } = "";
+        public DateTimeOffset Timestamp { get; set; }
+        public int Runs { get; set; }
+        public List<ScenarioResult> Results { get; set; } = [];
     }
 
     static float[] Fill(float[] values)
