@@ -241,12 +241,16 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
         if (state.TryGetValue("step", out var stepVal))
             step = int.CreateChecked(stepVal[0]);
 
-        for (int i = 0; i < expAvgBuffers.Count; i++)
+        int i = 0;
+        while (state.TryGetValue($"expAvg_{i}", out var buf))
         {
-            if (state.TryGetValue($"expAvg_{i}", out var buf))
-                buf.AsSpan(0, Math.Min(buf.Length, expAvgBuffers[i].Length)).CopyTo(expAvgBuffers[i]);
+            EnsureBuffer(i, buf.Length);
+            buf.AsSpan(0, Math.Min(buf.Length, expAvgBuffers[i].Length)).CopyTo(expAvgBuffers[i]);
+
             if (state.TryGetValue($"expAvgSq_{i}", out var sqBuf))
                 sqBuf.AsSpan(0, Math.Min(sqBuf.Length, expAvgSqBuffers[i].Length)).CopyTo(expAvgSqBuffers[i]);
+
+            i++;
         }
     }
 
