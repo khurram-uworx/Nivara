@@ -1,8 +1,8 @@
 # Nivara Retraining (Online Learning) — How It Works
 
 Reference for how NivaraChat's `--online-learning` mode performs incremental
-retraining of a deployed model. Intended to inform the Act 8b example in
-`EXAMPLES.md` and any future docs on continuous learning.
+retraining of a deployed model. Powers the Act 8b example in `EXAMPLES.md` and
+any future docs on continuous learning.
 
 ## The problem
 
@@ -37,8 +37,9 @@ User input
                                   Buffer full (retrainThreshold)?
                                         │
                                    yes ──> IntentTrainer.TrainIncremental()
-                                        │   loads existing model, trains 5 epochs
-                                        │   at lr=0.0005, saves updated model
+                                        │   loads checkpoint (weights + optimizer state)
+                                        │   resumes 5 epochs at lr=0.0005 via Continue()
+                                        │   saves updated model + checkpoint
                                         v
                                   Continue with updated model
 ```
@@ -56,9 +57,10 @@ Mechanics:
 
 ## The retrain step
 
-### Variant A — current implementation: fresh optimizer warm-start
+### Variant A — fallback: fresh optimizer warm-start (no checkpoint)
 
-`IntentTrainer.TrainIncremental` (`samples/NivaraChat/Training/IntentTrainer.cs:90`):
+Used only when no checkpoint is present. `IntentTrainer.TrainIncremental`
+(`samples/NivaraChat/Training/IntentTrainer.cs:90`):
 
 1. Load the saved tokenizer (`TextTokenizer.Load`) and reconstruct the model
    architecture; `ModelSerializer.Load` restores the weights.
@@ -71,10 +73,10 @@ Mechanics:
 5. `ModelSerializer.Save` the updated weights and return the model.
 
 Limitation: a fresh optimizer means Adam's moment buffers (`m`, `v`, bias-correction
-step `t`) are reset on every retrain. This is the "warm-start weights, cold
-optimizer" form — fine for coarse fine-tunes, but it discards training dynamics.
+step `t`) are reset on every retrain — "warm-start weights, cold optimizer". Fine
+for coarse fine-tunes, but it discards training dynamics.
 
-### Variant B — target (this branch): checkpoint resume
+### Variant B — primary path (this branch): checkpoint resume
 
 Same warm-start + appended dataset, but the optimizer state carries across
 sessions via a checkpoint:
@@ -131,9 +133,9 @@ the restored moments carry over — exactly the fine-tuning behavior we want.
 
 ## Relationship to EXAMPLES.md Act 8b
 
-Act 8b ("Online training — keep a deployed model learning") will showcase this
-pattern in `EXAMPLES.md` after Act 8: warm-start via `ModelSerializer.Load` +
-`TextTokenizer.Load`, appended feedback dataset → `TensorDataset`/`DataLoader`,
+Act 8b ("Online training — keep a deployed model learning") in `EXAMPLES.md`
+(after Act 8) showcases this pattern with the Act 8 FraudNet: warm-start saved
+weights, appended original + feedback rows → `TensorDataset`/`DataLoader`,
 lower-LR `TrainingLoop`, and `SaveCheckpoint`/`LoadCheckpoint`/`Continue` for
-Adam-moment carryover. It will cross-link to `--online-learning`
-(`samples/NivaraChat/README.md:259`). Planned only — not yet written.
+Adam-moment carryover. It cross-links to `--online-learning`
+(`samples/NivaraChat/README.md:259`).
