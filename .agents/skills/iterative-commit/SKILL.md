@@ -1,6 +1,6 @@
 ---
 name: iterative-commit
-description: Use when completing discrete steps of multi-step work. Suggests/asks for a feature branch and switches to it, writes the plan to docs/TODO.md first, commits locally after each logical change unit (does NOT push), asks before running tests, and deletes docs/TODO.md once the plan is fully executed. Push is always controlled by the human.
+description: Use when completing discrete steps of multi-step work. Suggests/asks for a feature branch and switches to it, writes the plan to docs/TODO.md first, commits locally after each logical change unit (does NOT push), asks before running tests, deletes docs/TODO.md once the plan is fully executed, then offers to push and create/update a PR. Push and PRs are always human-confirmed.
 ---
 
 # Iterative Commit Workflow
@@ -25,7 +25,7 @@ Persist the plan before executing so it is saved at highest fidelity, even if co
 2. **Write the plan to `docs/TODO.md` first** — document the problem, proposed changes (with code sketches where useful), verification steps, planned commit list, and follow-ups. Commit it as its own logical unit (`docs: plan <work> in TODO.md`).
 3. **Execute iteratively** — complete one logical change at a time, committing after each (see Workflow below). Ask before running `dotnet test`.
 4. **Review `docs/TODO.md` when the plan is complete** — read it over and confirm every item is taken care of. If so, remove it and commit the removal (`git rm docs/TODO.md` → `docs: remove TODO.md — plan executed`). Only leave it in place if an item is still pending.
-5. **Report** — the branch stays local and unpushed; pushing and PRs are controlled by the human.
+5. **Offer push + PR** — report the completed work, then offer to push the branch and create (or update) a pull request. Ask explicitly; do not push or open a PR without the human's confirmation. Push remains human-controlled by default.
 
 ## Commit Message Format
 
