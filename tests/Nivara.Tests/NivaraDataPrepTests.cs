@@ -1,5 +1,6 @@
 using NUnit.Framework;
 using System.Numerics;
+using System.Runtime.InteropServices;
 
 namespace Nivara.Tests;
 
@@ -202,6 +203,89 @@ public class NivaraDataPrepTests
 
         Assert.That(nonNull.Average(), Is.EqualTo(0d).Within(1e-9));
         Assert.That(Math.Sqrt(nonNull.Select(x => Math.Pow(x - nonNull.Average(), 2)).Average()), Is.EqualTo(1d).Within(1e-9));
+    }
+
+    [Test]
+    public void Normalize_UIntColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new uint[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_UShortColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new ushort[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_SByteColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new sbyte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_NIntColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new nint[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_NUIntColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new nuint[] { 1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u, 9u, 10u });
+
+    [Test]
+    public void Normalize_DoubleColumn_ProducesZeroMeanUnitVariance()
+    {
+        var data = new double[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+        var frame = NivaraFrame.Create(("Values", NivaraColumn<double>.Create(data)));
+
+        AssertNormalizedDoubleColumn(frame.Normalize("Values"), "Values");
+    }
+
+    [Test]
+    public void Normalize_NFloatColumn_ProducesZeroMeanUnitVariance()
+    {
+        var data = new NFloat[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f };
+        var frame = NivaraFrame.Create(("Values", NivaraColumn<NFloat>.Create(data)));
+
+        var col = frame.Normalize("Values").GetColumn<NFloat>("Values");
+        var floats = col.ToArray().Select(x => (float)x).ToArray();
+
+        Assert.That(floats.Average(), Is.EqualTo(0f).Within(1e-5f));
+        Assert.That(Math.Sqrt(floats.Select(x => Math.Pow(x - floats.Average(), 2)).Average()), Is.EqualTo(1f).Within(1e-5f));
+    }
+
+    [Test]
+    public void Standardize_IntColumnZeroVariance_LeavesValuesUnchanged()
+    {
+        var data = new int[] { 5, 5, 5 };
+        var frame = NivaraFrame.Create(("Values", NivaraColumn<int>.Create(data)));
+
+        var resultCol = frame.Standardize("Values").GetColumn<int>("Values");
+
+        Assert.That(resultCol.ToArray(), Is.EqualTo(new[] { 5, 5, 5 }));
+    }
+
+    [Test]
+    public void Normalize_ExplicitUnsupportedTypes_ThrowNotSupported()
+    {
+        var frame = NivaraFrame.Create(new (string, IColumn)[]
+        {
+            ("Flag", NivaraColumn<bool>.Create(new bool[] { true, false, true })),
+            ("When", NivaraColumn<DateTime>.Create(new DateTime[] { DateTime.Now, DateTime.Now.AddDays(1), DateTime.Now.AddDays(2) })),
+        });
+
+        Assert.Throws<NotSupportedException>(() => frame.Normalize("Flag"));
+        Assert.Throws<NotSupportedException>(() => frame.Standardize("Flag"));
+        Assert.Throws<NotSupportedException>(() => frame.Normalize("When"));
+        Assert.Throws<NotSupportedException>(() => frame.Standardize("When"));
+    }
+
+    [Test]
+    public void Normalize_CrossFamilyParity_FloatAndIntMatch()
+    {
+        var intData = new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 };
+        var floatData = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f };
+        var intFrame = NivaraFrame.Create(("Values", NivaraColumn<int>.Create(intData)));
+        var floatFrame = NivaraFrame.Create(("Values", NivaraColumn<float>.Create(floatData)));
+
+        var fromInt = intFrame.Normalize("Values").GetColumn<double>("Values");
+        var fromFloat = floatFrame.Normalize("Values").GetColumn<float>("Values");
+
+        for (int i = 0; i < intData.Length; i++)
+            Assert.That(fromInt[i], Is.EqualTo((double)fromFloat[i]).Within(1e-5));
     }
 
     private static void AssertNormalizedFloatColumn(NivaraFrame frame, string columnName)
