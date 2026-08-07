@@ -1,4 +1,5 @@
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests;
 
@@ -86,8 +87,8 @@ public class NivaraDataPrepTests
         var numValues = result.GetColumn<float>("Num").ToArray();
         Assert.That(numValues.Average(), Is.EqualTo(0f).Within(1e-6f));
 
-        // Unsupported numeric and non-numeric columns are left untouched
-        Assert.That(result.GetColumn<int>("Count").ToArray(), Is.EqualTo(new[] { 10, 20, 30 }));
+        // Every INumber column is normalized; non-numeric columns are left untouched
+        AssertNormalizedDoubleColumn(result, "Count");
         Assert.That(result.GetColumn<string>("Text").ToArray(), Is.EqualTo(new[] { "a", "b", "c" }));
     }
 
@@ -130,14 +131,14 @@ public class NivaraDataPrepTests
     [Test]
     public void Normalize_ExplicitUnsupportedColumn_ThrowsNotSupported()
     {
-        var frame = NivaraFrame.Create(("Count", NivaraColumn<int>.Create(new int[] { 1, 2, 3 })));
+        var frame = NivaraFrame.Create(("Text", NivaraColumn<string>.Create(new string[] { "a", "b", "c" })));
 
-        Assert.Throws<NotSupportedException>(() => frame.Normalize("Count"));
-        Assert.Throws<NotSupportedException>(() => frame.Standardize("Count"));
+        Assert.Throws<NotSupportedException>(() => frame.Normalize("Text"));
+        Assert.Throws<NotSupportedException>(() => frame.Standardize("Text"));
     }
 
     [Test]
-    public void Normalize_AutoSelect_SkipsUnsupportedNumericColumns()
+    public void Normalize_AutoSelect_NormalizesAllNumericColumns()
     {
         var frame = NivaraFrame.Create(new (string, IColumn)[]
         {
@@ -147,7 +148,78 @@ public class NivaraDataPrepTests
 
         var result = frame.Normalize();
 
-        Assert.That(result.GetColumn<int>("Count").ToArray(), Is.EqualTo(new[] { 10, 20, 30 }));
-        Assert.That(result.GetColumn<float>("Num").ToArray().Average(), Is.EqualTo(0f).Within(1e-6f));
+        AssertNormalizedFloatColumn(result, "Num");
+        AssertNormalizedDoubleColumn(result, "Count");
+    }
+
+    [Test]
+    public void Normalize_IntColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new int[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_LongColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new long[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_ShortColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new short[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_ByteColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new byte[] { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 });
+
+    [Test]
+    public void Normalize_DecimalColumn_ProducesZeroMeanUnitVariance()
+        => AssertIntegerColumnNormalizes(new decimal[] { 1m, 2m, 3m, 4m, 5m, 6m, 7m, 8m, 9m, 10m });
+
+    [Test]
+    public void Normalize_HalfColumn_ProducesZeroMeanUnitVariance()
+    {
+        var values = new Half[] { (Half)1, (Half)2, (Half)3, (Half)4, (Half)5, (Half)6, (Half)7, (Half)8, (Half)9, (Half)10 };
+        var frame = NivaraFrame.Create(("Values", NivaraColumn<Half>.Create(values)));
+
+        var col = frame.Normalize("Values").GetColumn<Half>("Values");
+        var floats = col.ToArray().Select(x => (float)x).ToArray();
+
+        Assert.That(floats.Average(), Is.EqualTo(0f).Within(1e-2f));
+        Assert.That(Math.Sqrt(floats.Select(x => Math.Pow(x - floats.Average(), 2)).Average()), Is.EqualTo(1f).Within(1e-2f));
+    }
+
+    [Test]
+    public void Standardize_IntColumnWithNulls_SkipsNulls_PreservesNullMask()
+    {
+        var data = new int?[] { 1, 2, null, 4, 5 };
+        var frame = NivaraFrame.Create(("Values", NivaraColumn<int>.CreateFromNullable(data)));
+
+        var resultCol = frame.Standardize("Values").GetColumn<double>("Values");
+
+        for (int i = 0; i < data.Length; i++)
+            Assert.That(resultCol.IsNull(i), Is.EqualTo(data[i] == null));
+
+        AssertNormalizedDoubleColumn(frame.Standardize("Values"), "Values");
+    }
+
+    private static void AssertNormalizedFloatColumn(NivaraFrame frame, string columnName)
+    {
+        var col = frame.GetColumn<float>(columnName);
+        var values = col.ToArray();
+        Assert.That(values.Average(), Is.EqualTo(0f).Within(1e-6f));
+        Assert.That(Math.Sqrt(values.Select(x => Math.Pow(x - values.Average(), 2)).Average()), Is.EqualTo(1f).Within(1e-6f));
+    }
+
+    private static void AssertNormalizedDoubleColumn(NivaraFrame frame, string columnName)
+    {
+        var col = frame.GetColumn<double>(columnName);
+        var values = col.ToArray();
+        Assert.That(values.Average(), Is.EqualTo(0d).Within(1e-9));
+        Assert.That(Math.Sqrt(values.Select(x => Math.Pow(x - values.Average(), 2)).Average()), Is.EqualTo(1d).Within(1e-9));
+    }
+
+    private static void AssertIntegerColumnNormalizes<T>(T[] data)
+        where T : struct, INumber<T>
+    {
+        var frame = NivaraFrame.Create(("Values", NivaraColumn<T>.Create(data)));
+
+        AssertNormalizedDoubleColumn(frame.Normalize("Values"), "Values");
     }
 }
