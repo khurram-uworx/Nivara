@@ -1,5 +1,4 @@
 using System.Numerics;
-using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Operations;
 
@@ -55,29 +54,10 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
 
     /// <summary>
     /// In-place softmax backward: dS[i,j] = P[i,j] * (dP[i,j] - dot(P_i, dP_i)).
-    /// float/double use a two-pass <see cref="TensorPrimitives"/> chain
-    /// (Multiply then MultiplyAdd); Half/BFloat16 use a scalar loop.
+    /// Delegates to <see cref="GradKernels.SoftmaxGradient{T}"/> with the
+    /// gradient span aliasing the output span (the per-row dot is computed
+    /// before any write), so attention and the Softmax op share one kernel.
     /// </summary>
     public static void SoftmaxBackwardRows(ReadOnlySpan<T> weights, Span<T> dS, int rows, int cols)
-    {
-        for (int r = 0; r < rows; r++)
-        {
-            var w = weights.Slice(r * cols, cols);
-            var g = dS.Slice(r * cols, cols);
-
-            if (typeof(T) == typeof(float) || typeof(T) == typeof(double))
-            {
-                T dot = TensorPrimitives.Dot(w, g);
-                TensorPrimitives.Subtract(g, dot, g);
-                TensorPrimitives.Multiply(g, w, g);
-                continue;
-            }
-
-            double dotAcc = 0.0;
-            for (int i = 0; i < cols; i++)
-                dotAcc += double.CreateChecked(w[i]) * double.CreateChecked(g[i]);
-            for (int i = 0; i < cols; i++)
-                g[i] = T.CreateChecked(double.CreateChecked(w[i]) * (double.CreateChecked(g[i]) - dotAcc));
-        }
-    }
+        => GradKernels.SoftmaxGradient(weights, dS, dS, cols);
 }
