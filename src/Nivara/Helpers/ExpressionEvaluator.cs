@@ -47,6 +47,7 @@ sealed class ExpressionEvaluator
                 BinaryExpression binary => EvaluateBinaryExpression(binary, input),
                 ComparisonExpression comparison => EvaluateComparisonExpression(comparison, input),
                 ScalarExpression scalar => EvaluateScalarExpression(scalar, input),
+                NotExpression not => EvaluateNotExpression(not, input),
                 _ => throw new NotSupportedException($"Expression type {expression.GetType().Name} is not supported")
             };
         }
@@ -374,6 +375,45 @@ sealed class ExpressionEvaluator
         var array = new object[length];
         Array.Fill(array, value);
         return NivaraColumn<object>.Create(array);
+    }
+
+    /// <summary>
+    /// Evaluates a logical negation expression element-wise, propagating the operand null mask
+    /// (a null operand yields a masked null result, SQL-like semantics).
+    /// </summary>
+    /// <param name="not">The negation expression</param>
+    /// <param name="input">The input columns</param>
+    /// <returns>A boolean column with the negated results</returns>
+    /// <exception cref="QueryExecutionException">Thrown when the operand is not boolean</exception>
+    NivaraColumn<bool> EvaluateNotExpression(NotExpression not, IReadOnlyDictionary<string, IColumn> input)
+    {
+        var operand = Evaluate(not.Operand, input);
+        if (operand is not NivaraColumn<bool> boolColumn)
+        {
+            throw new QueryExecutionException($"Not expression requires a boolean operand, got {operand.ElementType.Name}");
+        }
+
+        var resultArray = new bool[boolColumn.Length];
+        var nullMask = new bool[boolColumn.Length];
+        bool hasNulls = false;
+
+        for (int i = 0; i < boolColumn.Length; i++)
+        {
+            if (boolColumn.IsNull(i))
+            {
+                nullMask[i] = true;
+                resultArray[i] = false;
+                hasNulls = true;
+            }
+            else
+            {
+                resultArray[i] = !boolColumn[i];
+            }
+        }
+
+        return hasNulls
+            ? NivaraColumn<bool>.CreateFromSpans(resultArray, nullMask)
+            : NivaraColumn<bool>.Create(resultArray);
     }
 
     /// <summary>
