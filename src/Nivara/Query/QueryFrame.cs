@@ -560,6 +560,165 @@ public sealed class QueryFrame : IDisposable
         return new QueryFrame(source, newOperations);
     }
 
+    // ── Window functions ──
+
+    /// <summary>
+    /// Adds a rolling-sum window operation that appends a result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="windowSize">The rolling window size</param>
+    /// <param name="minPeriods">The minimum number of valid observations required (defaults to the full window)</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the rolling-sum operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame RollingSum(string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Sum));
+
+    /// <summary>
+    /// Adds a rolling-mean window operation that appends a double result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="windowSize">The rolling window size</param>
+    /// <param name="minPeriods">The minimum number of valid observations required (defaults to the full window)</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the rolling-mean operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame RollingMean(string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Mean));
+
+    /// <summary>
+    /// Adds a rolling-minimum window operation that appends a result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="windowSize">The rolling window size</param>
+    /// <param name="minPeriods">The minimum number of valid observations required (defaults to the full window)</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the rolling-minimum operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame RollingMin(string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Min));
+
+    /// <summary>
+    /// Adds a rolling-maximum window operation that appends a result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="windowSize">The rolling window size</param>
+    /// <param name="minPeriods">The minimum number of valid observations required (defaults to the full window)</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the rolling-maximum operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame RollingMax(string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Max));
+
+    /// <summary>
+    /// Adds a cumulative-sum operation that appends a result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the cumulative-sum operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame CumulativeSum(string source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Sum));
+
+    /// <summary>
+    /// Adds a cumulative-maximum operation that appends a result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the cumulative-maximum operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame CumulativeMax(string source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Max));
+
+    /// <summary>
+    /// Adds a cumulative-minimum operation that appends a result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the cumulative-minimum operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame CumulativeMin(string source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Min));
+
+    /// <summary>
+    /// Adds a cumulative-product operation that appends a result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the cumulative-product operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame CumulativeProduct(string source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Product));
+
+    /// <summary>
+    /// Adds a running count-of-non-null operation that appends a long result column.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <returns>A new QueryFrame with the cumulative-count operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame CumulativeCount(string source, string resultColumn)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, null, NivaraFrameExtensions.CumulativeKind.Sum, isCount: true));
+
+    /// <summary>
+    /// Adds a shift (lag) operation that appends a result column. Boundary positions are null, or <paramref name="fillValue"/> when provided.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="periods">The number of positions to shift by</param>
+    /// <param name="fillValue">Optional fill value for boundary positions</param>
+    /// <returns>A new QueryFrame with the shift operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame Shift(string source, string resultColumn, int periods, object? fillValue = null)
+        => AddWindowOperation(new ShiftOperation(source, resultColumn, periods, fillValue));
+
+    /// <summary>
+    /// Adds a lead operation that appends a result column. Boundary positions are null, or <paramref name="fillValue"/> when provided.
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="periods">The number of positions to lead by</param>
+    /// <param name="fillValue">Optional fill value for boundary positions</param>
+    /// <returns>A new QueryFrame with the lead operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
+    public QueryFrame Lead(string source, string resultColumn, int periods, object? fillValue = null)
+        => AddWindowOperation(new ShiftOperation(source, resultColumn, -periods, fillValue));
+
+    QueryFrame AddWindowOperation(IQueryOperation operation)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (operation is WindowOperationBase windowOp)
+        {
+            if (string.IsNullOrWhiteSpace(windowOp.Source))
+                throw new ArgumentException("Source column name cannot be null or whitespace", nameof(windowOp.Source));
+            if (string.IsNullOrWhiteSpace(windowOp.ResultColumn))
+                throw new ArgumentException("Result column name cannot be null or whitespace", nameof(windowOp.ResultColumn));
+        }
+
+        var newOperations = operations.Concat(new[] { operation });
+        return new QueryFrame(source, newOperations);
+    }
+
     /// <summary>
     /// Extracts the query plan for inspection or custom execution via <see cref="Execution.ExecutionEngine"/>.
     /// </summary>

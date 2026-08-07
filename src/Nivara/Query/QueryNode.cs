@@ -311,6 +311,75 @@ public sealed class GroupByNode : QueryNode
 }
 
 /// <summary>
+/// Represents a window-function operation node in the query plan
+/// </summary>
+public sealed class WindowNode : QueryNode
+{
+    /// <summary>
+    /// Initializes a new instance of WindowNode
+    /// </summary>
+    /// <param name="outputSchema">The output schema after the window operation</param>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The appended result column name</param>
+    /// <param name="functionType">The window function type (e.g., RollingSum, CumulativeSum, Shift)</param>
+    public WindowNode(Schema outputSchema, string source, string resultColumn, string functionType) : base(outputSchema)
+    {
+        Source = source ?? throw new ArgumentNullException(nameof(source));
+        ResultColumn = resultColumn ?? throw new ArgumentNullException(nameof(resultColumn));
+        FunctionType = functionType ?? throw new ArgumentNullException(nameof(functionType));
+    }
+
+    /// <summary>
+    /// Gets the source column name
+    /// </summary>
+    public string Source { get; }
+
+    /// <summary>
+    /// Gets the appended result column name
+    /// </summary>
+    public string ResultColumn { get; }
+
+    /// <summary>
+    /// Gets the window function type
+    /// </summary>
+    public string FunctionType { get; }
+
+    /// <inheritdoc />
+    public override string NodeType => "Window";
+
+    /// <inheritdoc />
+    public override void Accept(IQueryNodeVisitor visitor)
+    {
+        visitor.Visit(this);
+    }
+
+    /// <inheritdoc />
+    public override T Accept<T>(IQueryNodeVisitor<T> visitor)
+    {
+        return visitor.Visit(this);
+    }
+
+    /// <inheritdoc />
+    public override QueryNode WithChildren(IEnumerable<QueryNode> newChildren)
+    {
+        var newNode = new WindowNode(OutputSchema, Source, ResultColumn, FunctionType)
+        {
+            EstimatedRowCount = EstimatedRowCount,
+            EstimatedExecutionTime = EstimatedExecutionTime
+        };
+        newNode.Children.AddRange(newChildren);
+        return newNode;
+    }
+
+    /// <inheritdoc />
+    public override string ToString()
+    {
+        var rowCountStr = EstimatedRowCount >= 0 ? EstimatedRowCount.ToString("N0") : "Unknown";
+        return $"Window [Function: {FunctionType}, Source: {Source}, Result: {ResultColumn}, Rows: {rowCountStr}, Schema: {OutputSchema.ColumnNames.Count} columns]";
+    }
+}
+
+/// <summary>
 /// Visitor interface for traversing query node trees
 /// </summary>
 public interface IQueryNodeVisitor
@@ -338,6 +407,12 @@ public interface IQueryNodeVisitor
     /// </summary>
     /// <param name="node">The group by node to visit</param>
     void Visit(GroupByNode node);
+
+    /// <summary>
+    /// Visits a window node
+    /// </summary>
+    /// <param name="node">The window node to visit</param>
+    void Visit(WindowNode node);
 }
 
 /// <summary>
@@ -373,4 +448,11 @@ public interface IQueryNodeVisitor<T>
     /// <param name="node">The group by node to visit</param>
     /// <returns>The result of visiting the node</returns>
     T Visit(GroupByNode node);
+
+    /// <summary>
+    /// Visits a window node and returns a result
+    /// </summary>
+    /// <param name="node">The window node to visit</param>
+    /// <returns>The result of visiting the node</returns>
+    T Visit(WindowNode node);
 }

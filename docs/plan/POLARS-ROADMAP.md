@@ -85,9 +85,11 @@ The query *expression* path is the weak spot: `ExpressionEvaluator` interprets e
 
 **Motivation:** The largest analytical feature gap versus Polars. No `Over`/rolling/cumulative/lag/rank exists anywhere in `src/`.
 
-**Scope:**
+**Status (core set delivered, #135):** Rolling min/max/mean/sum over fixed windows, cumulative sum/max/min/product/count, and `Shift`/`Lead` now ship on `NivaraColumn<T>` (`src/Nivara/Tensors/WindowFunctions.cs`), eager `NivaraFrame` extensions (`src/Nivara/WindowFrameExtensions.cs`), and the lazy `QueryFrame` pipeline (`src/Nivara/Operations/WindowOperations.cs`, `OperationType.Rolling`/`.Cumulative`/`.Shift`, `WindowNode`). Semantics: nulls ignored by default with output gated on `minPeriods` (default full window); cumulative ops skip nulls with carry-forward; `Shift`/`Lead` boundary positions are null or `fillValue`; an optional `nullHandler` replaces nulls so every position satisfies the window. Documented in `docs/LINQ.md`; covered by `tests/Nivara.Tests/Tensors/WindowFunctionsTests.cs` and `tests/Nivara.Tests/Query/WindowOperationTests.cs`.
+
+**Scope (remaining):**
 - `Over(...)` partition/order semantics integrated into the plan as a first-class operation (`OperationType` additions).
-- Rolling min/max/mean/sum over fixed windows; cumulative sum/mean/count; `Lag`/`Lead`; `Rank`/`DenseRank`.
+- `Rank`/`DenseRank`.
 - Null-aware windowing consistent with the project's explicit null-mask model (ADR-001 boundary, no NaN semantics).
 - Built on the Phase 2 fused expression engine so window expressions compose with ordinary expressions.
 
@@ -168,7 +170,8 @@ The query *expression* path is the weak spot: `ExpressionEvaluator` interprets e
 | `OrderBy` computed keys (Phase 2) | Small | Phase 2 |
 | Generic-math collapse of column arithmetic (Phase 2) | Medium | Phase 2 |
 | Fused single-pass kernels (Phase 2) | Medium-High | Phase 2 |
-| Window functions, core set (Phase 3) | High | Phase 3 |
+| Window functions, core set (Phase 3) | High | ✅ Delivered (#135) |
+| `Over`/`Rank`/`DenseRank` (Phase 3 remainder) | High | Follow-up issue |
 | Async-native streaming (Phase 4) | Medium | Phase 4 |
 | Source generators (Phase 5) | High, splittable | Phase 5 |
 

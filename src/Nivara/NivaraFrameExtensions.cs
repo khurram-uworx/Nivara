@@ -9,7 +9,7 @@ namespace Nivara;
 /// <summary>
 /// Extension methods for NivaraFrame to support transformations and projections
 /// </summary>
-public static class NivaraFrameExtensions
+public static partial class NivaraFrameExtensions
 {
     /// <summary>
     /// Converts a typed column to a single-column NivaraFrame.

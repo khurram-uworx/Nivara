@@ -120,6 +120,9 @@ The `ExpressionEvaluator` (in `Helpers/ExpressionEvaluator.cs`) walks the tree a
 | **Distinct** | `"Distinct"` | `DistinctOperation` | Removes duplicate rows (all columns or specified subset) |
 | **SelectRows** | `"SelectRows"` | `SelectRowsOperation` | Selects specific rows by positional index |
 | **Concatenate** | `"ConcatenateVertical"` / `"ConcatenateHorizontal"` | `ConcatenationOperation` | Vertical (row append) or horizontal (column append) concatenation |
+| **Rolling** | `"Rolling"` | `RollingOperation` | Appends a rolling sum/mean/min/max column over a fixed trailing window |
+| **Cumulative** | `"Cumulative"` | `CumulativeOperation` | Appends a cumulative sum/max/min/product/count column |
+| **Shift** | `"Shift"` | `ShiftOperation` | Appends a lag (`Shift`) or lead (`Lead`) column |
 
 Each operation implements `IQueryOperation`:
 ```csharp
@@ -208,6 +211,34 @@ Selects specific rows by positional index.
 ```csharp
 public QueryFrame SelectRows(params int[] indices)
 ```
+
+### Window functions
+
+Whole-column window operations append a computed result column while preserving all input columns. Rolling/cumulative/shift operations are **non-parallelizable** and **non-streamable** (they require the full column).
+
+```csharp
+public QueryFrame RollingSum(source, resultColumn, windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+public QueryFrame RollingMean(source, resultColumn, windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+public QueryFrame RollingMin(source, resultColumn, windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+public QueryFrame RollingMax(source, resultColumn, windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+public QueryFrame CumulativeSum(source, resultColumn, Func<object?>? nullHandler = null)
+public QueryFrame CumulativeMax / CumulativeMin / CumulativeProduct(source, resultColumn, Func<object?>? nullHandler = null)
+public QueryFrame CumulativeCount(source, resultColumn)          // long result, type-agnostic
+public QueryFrame Shift(source, resultColumn, periods, object? fillValue = null)
+public QueryFrame Lead(source, resultColumn, periods, object? fillValue = null)
+```
+
+Rolling output is null until the window holds at least `minPeriods` valid values (default: the full window). Cumulative ops skip nulls (value carries forward); null positions stay null. `Shift`/`Lead` move in nulls (or `fillValue`) at the boundaries. When `nullHandler` is set, nulls are replaced by the handler output and every position satisfies the window. `RollingMean` returns a `double` column.
+
+```csharp
+var result = frame.AsQueryFrame()
+    .RollingSum("Price", "priceSum3", 3)
+    .CumulativeCount("Price", "tickCount")
+    .Shift("Price", "prevPrice", 1)
+    .Collect();
+```
+
+The same signatures are available directly on `NivaraFrame` (see `src/Nivara/Tensors/WindowFunctions.cs` and `src/Nivara/WindowFrameExtensions.cs`).
 
 ### Skip / Take / Slice
 
@@ -479,6 +510,9 @@ var suggestions = query.AnalyzeOptimizations();
 | DistinctOperation | `src/Nivara/Operations/DistinctOperation.cs` |
 | SelectRowsOperation | `src/Nivara/Operations/SelectRowsOperation.cs` |
 | ConcatenationOperation | `src/Nivara/Operations/ConcatenationOperation.cs` |
+| WindowOperationBase / RollingOperation / CumulativeOperation / ShiftOperation | `src/Nivara/Operations/WindowOperations.cs` |
+| Column window primitives | `src/Nivara/Tensors/WindowFunctions.cs` |
+| NivaraFrame window extensions | `src/Nivara/WindowFrameExtensions.cs` |
 | AggregationFunction | `src/Nivara/Operations/AggregationFunction.cs` |
 | ColumnExpression | `src/Nivara/Expressions/ColumnExpression.cs` |
 | ExpressionEvaluator | `src/Nivara/Helpers/ExpressionEvaluator.cs` |
