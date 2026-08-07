@@ -2,6 +2,7 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Tensors;
 using System.Diagnostics;
 using System.Numerics.Tensors;
 using System.Text.Encodings.Web;
@@ -255,6 +256,78 @@ static class Program
             });
 
         RunBatchedAttentionScenarios();
+        RunRowScoringScenarios();
+    }
+
+    static void RunRowScoringScenarios()
+    {
+        const int rows = 10_000, cols = 128;
+
+        Run("RowScore per-row copy+dot [10k x 128]", 5, 20,
+            () =>
+            {
+                var frame = BuildScoreFrame(rows, cols);
+                var columns = frame.ColumnNames.Select(frame.GetColumn<float>).ToArray();
+                var query = Fill(new float[cols]);
+                var scratch = new float[cols];
+                return () =>
+                {
+                    for (int r = 0; r < rows; r++)
+                    {
+                        for (int c = 0; c < cols; c++)
+                            scratch[c] = columns[c][r];
+                        _ = TensorPrimitives.Dot(scratch, query);
+                    }
+                };
+            });
+
+        Run("Frame RowDot [10k x 128]", 5, 20,
+            () =>
+            {
+                var frame = BuildScoreFrame(rows, cols);
+                var query = NivaraSeries<float>.Create(Fill(new float[cols]));
+                return () => frame.RowDot(query);
+            });
+
+        Run("RowDot kernel raw [10k x 128]", 5, 50,
+            () =>
+            {
+                var buffer = Fill(new float[rows * cols]);
+                var query = Fill(new float[cols]);
+                var output = new float[rows];
+                var outputMask = new bool[rows];
+                var fullMask = new bool[rows * cols];
+                return () => TensorsHelper.RowDot(
+                    buffer, fullMask,
+                    query, ReadOnlySpan<bool>.Empty,
+                    output, outputMask, rows, cols);
+            });
+
+        Run("RowCosineSimilarity kernel raw [10k x 128]", 5, 50,
+            () =>
+            {
+                var buffer = Fill(new float[rows * cols]);
+                var query = Fill(new float[cols]);
+                var output = new float[rows];
+                var outputMask = new bool[rows];
+                return () => TensorsHelper.RowCosineSimilarity(
+                    buffer, ReadOnlySpan<bool>.Empty,
+                    query, ReadOnlySpan<bool>.Empty,
+                    output, outputMask, rows, cols);
+            });
+    }
+
+    static NivaraFrame BuildScoreFrame(int rows, int cols)
+    {
+        var columns = new (string Name, IColumn Column)[cols];
+        for (int c = 0; c < cols; c++)
+        {
+            var data = new float[rows];
+            for (int r = 0; r < rows; r++)
+                data[r] = (r * cols + c) * 0.001f;
+            columns[c] = ($"C{c}", NivaraColumn<float>.Create(data));
+        }
+        return new NivaraFrame(columns);
     }
 
     static void RunBatchedAttentionScenarios()

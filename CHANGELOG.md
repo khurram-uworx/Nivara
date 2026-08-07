@@ -6,7 +6,12 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Row-wise frame scoring (`NivaraFrame.RowDot` / `RowCosineSimilarity`, #138/#141/#142)** — a scoped tensor interop convenience: each row of a frame is scored against a `NivaraSeries<T>` query vector. `TensorsHelper` gains internal row-slice `TensorPrimitives` kernels (`RowDot`, `RowCosineSimilarity`, `RowNorms`, `ValidateRowKernelArgs`, `AnyTrue`) over a row-major buffer + null mask; the public frame methods materialize row-major through a pooled blocked transpose and return a `NivaraSeries<T>`. SQL-like null semantics: a null in a row masks only that row's score, a null in the query masks all scores, and the result always carries a null mask. `Nivara.PerformanceTests` gains four row-scoring scenarios (per-row status quo, frame API, raw kernels) as the regression gate; the frame API runs ~2.5× faster than the per-row status quo on the 10k × 128 benchmark. No public `RowNorms`/`ColumnNorms`/`Dot`/`CosineSimilarity` were re-added — the removed tensor-axis APIs stay removed (see 1.2.0).
 - **`NivaraFrameExtensions.Standardize` (z-score alias, #143)** — data-prep promoted from `Nivara.MLNet` into core frame extensions (`src/Nivara/NivaraFrameExtensions.cs`). `Normalize`/`Standardize` now use `TensorPrimitives` (`Average`/`StdDev`/`Subtract`/`Divide`) for SIMD statistics and transform, compute mean/stddev over non-null values only, and preserve the null mask in the result (`CreateFromSpans`). Auto-select (`Normalize()`/`Standardize()` with no arguments) now normalizes all float/double columns instead of returning an unchanged frame (a latent bug in the old `??=` fallback). `IsNumericColumn` narrowed to float/double; explicitly naming an unsupported column throws `NotSupportedException`.
+
+### Fixed
+
+- **Row-major hot loops no longer re-evaluate `NivaraFrame.RowCount`** (`columns.Values.FirstOrDefault()` LINQ allocates ~40 B per access): `CopyToRowMajor`, `ToNullableTensor`, and the new `materializeRowMajor` cache `RowCount`/`ColumnCount` in locals. On a 10k × 128 frame this was ~51 MB/op of pure garbage; the fix drops `Frame RowDot` allocation to ~452 KB/op (dominated by result-series construction, not the kernel).
 
 ### Breaking changes
 

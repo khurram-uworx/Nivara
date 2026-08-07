@@ -288,4 +288,236 @@ public class TensorsHelperTests
     }
 
     #endregion
+
+    #region Row-slice scoring kernels
+
+    [Test]
+    public void RowDot_NoNulls_MatchesPerRowScalar()
+    {
+        const int rows = 6, cols = 5;
+        var rowMajor = FillRowMajor(rows, cols, seed: 1);
+        var query = new[] { 0.5f, -0.25f, 0.75f, 0.1f, -0.9f };
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowDot(rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
+            output, outputMask, rows, cols);
+
+        for (int r = 0; r < rows; r++)
+            Assert.That(output[r], Is.EqualTo(TensorPrimitives.Dot(rowMajor.AsSpan(r * cols, cols), query)), $"row {r}");
+        Assert.That(outputMask, Is.EqualTo(new bool[rows]));
+    }
+
+    [Test]
+    public void RowDot_Int_MatchesPerRowScalar()
+    {
+        const int rows = 4, cols = 4;
+        var rowMajor = new[] { 1, 2, 3, 4, 2, 1, 0, 1, 5, 0, 2, 1, 0, 1, 1, 3 };
+        var query = new[] { 1, -1, 2, 0 };
+        var output = new int[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowDot(rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
+            output, outputMask, rows, cols);
+
+        for (int r = 0; r < rows; r++)
+            Assert.That(output[r], Is.EqualTo(TensorPrimitives.Dot(rowMajor.AsSpan(r * cols, cols), query)), $"row {r}");
+        Assert.That(outputMask, Is.EqualTo(new bool[rows]));
+    }
+
+    [Test]
+    public void RowDot_WithRowNulls_MasksOnlyNullRows()
+    {
+        const int rows = 4, cols = 3;
+        var rowMajor = new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f };
+        var rowMask = new[]
+        {
+            false, false, false,
+            true, false, false,   // row 1 null
+            false, false, false,
+            false, true, false    // row 3 null
+        };
+        var query = new[] { 1f, -1f, 2f };
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowDot(rowMajor, rowMask, query, ReadOnlySpan<bool>.Empty, output, outputMask, rows, cols);
+
+        Assert.That(outputMask, Is.EqualTo(new[] { false, true, false, true }));
+        Assert.That(output[0], Is.EqualTo(TensorPrimitives.Dot(rowMajor.AsSpan(0, cols), query)));
+        Assert.That(output[2], Is.EqualTo(TensorPrimitives.Dot(rowMajor.AsSpan(2 * cols, cols), query)));
+        Assert.That(output[1], Is.EqualTo(0f));
+        Assert.That(output[3], Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void RowDot_WithQueryNulls_MasksAllRows()
+    {
+        const int rows = 3, cols = 3;
+        var rowMajor = new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f };
+        var query = new[] { 1f, 0f, 1f };
+        var queryMask = new[] { false, true, false };
+
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+        TensorsHelper.RowDot(rowMajor, ReadOnlySpan<bool>.Empty, query, queryMask, output, outputMask, rows, cols);
+
+        Assert.That(outputMask, Is.EqualTo(new[] { true, true, true }));
+        Assert.That(output, Is.EqualTo(new[] { 0f, 0f, 0f }));
+    }
+
+    [Test]
+    public void RowDot_EmptyMasks_TreatedAsNoNulls()
+    {
+        const int rows = 3, cols = 2;
+        var rowMajor = new[] { 1f, 2f, 3f, 4f, 5f, 6f };
+        var query = new[] { 1f, 1f };
+        var output = new float[rows];
+        var outputMask = new[] { true, true, true };
+
+        TensorsHelper.RowDot(rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
+            output, outputMask, rows, cols);
+
+        Assert.That(outputMask, Is.EqualTo(new[] { false, false, false }));
+        Assert.That(output, Is.EqualTo(new[] { 3f, 7f, 11f }));
+    }
+
+    [Test]
+    public void RowDot_QueryLengthMismatch_Throws()
+    {
+        var rowMajor = new float[6];
+        var query = new float[4];
+        Assert.That(() => TensorsHelper.RowDot(
+                rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
+                new float[2], new bool[2], rows: 2, cols: 3),
+            Throws.ArgumentException.With.Message.Contains("Query length"));
+    }
+
+    [Test]
+    public void RowDot_ShortOutput_Throws()
+    {
+        var rowMajor = new float[6];
+        var query = new float[3];
+        Assert.That(() => TensorsHelper.RowDot(
+                rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
+                new float[1], new bool[2], rows: 2, cols: 3),
+            Throws.ArgumentException);
+    }
+
+    [Test]
+    public void RowCosineSimilarity_NoNulls_MatchesPerRowScalar()
+    {
+        const int rows = 5, cols = 4;
+        var rowMajor = FillRowMajor(rows, cols, seed: 7);
+        var query = new[] { 0.2f, -0.8f, 0.6f, 0.1f };
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowCosineSimilarity(rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
+            output, outputMask, rows, cols);
+
+        for (int r = 0; r < rows; r++)
+            Assert.That(output[r], Is.EqualTo(TensorPrimitives.CosineSimilarity(rowMajor.AsSpan(r * cols, cols), query)), $"row {r}");
+        Assert.That(outputMask, Is.EqualTo(new bool[rows]));
+    }
+
+    [Test]
+    public void RowCosineSimilarity_WithRowNulls_MasksOnlyNullRows()
+    {
+        const int rows = 3, cols = 3;
+        var rowMajor = new[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f };
+        var rowMask = new[]
+        {
+            false, false, false,
+            false, true, false,   // row 1 null
+            false, false, false
+        };
+        var query = new[] { 1f, 0f, -1f };
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowCosineSimilarity(rowMajor, rowMask, query, ReadOnlySpan<bool>.Empty,
+            output, outputMask, rows, cols);
+
+        Assert.That(outputMask, Is.EqualTo(new[] { false, true, false }));
+        Assert.That(output[0], Is.EqualTo(TensorPrimitives.CosineSimilarity(rowMajor.AsSpan(0, cols), query)));
+        Assert.That(output[2], Is.EqualTo(TensorPrimitives.CosineSimilarity(rowMajor.AsSpan(2 * cols, cols), query)));
+        Assert.That(output[1], Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void RowCosineSimilarity_WithQueryNulls_MasksAllRows()
+    {
+        const int rows = 2, cols = 3;
+        var rowMajor = new[] { 1f, 2f, 3f, 4f, 5f, 6f };
+        var query = new[] { 1f, 1f, 1f };
+        var queryMask = new[] { true, false, false };
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowCosineSimilarity(rowMajor, ReadOnlySpan<bool>.Empty, query, queryMask,
+            output, outputMask, rows, cols);
+
+        Assert.That(outputMask, Is.EqualTo(new[] { true, true }));
+        Assert.That(output, Is.EqualTo(new[] { 0f, 0f }));
+    }
+
+    [Test]
+    public void RowCosineSimilarity_ZeroColumns_Throws()
+    {
+        var rowMajor = new float[0];
+        var query = new float[0];
+        Assert.That(() => TensorsHelper.RowCosineSimilarity(
+                rowMajor, ReadOnlySpan<bool>.Empty, query, ReadOnlySpan<bool>.Empty,
+                new float[1], new bool[1], rows: 1, cols: 0),
+            Throws.ArgumentException);
+    }
+
+    [Test]
+    public void RowNorms_NoNulls_MatchesPerRowScalar()
+    {
+        const int rows = 5, cols = 3;
+        var rowMajor = FillRowMajor(rows, cols, seed: 42);
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowNorms(rowMajor, ReadOnlySpan<bool>.Empty, output, outputMask, rows, cols);
+
+        for (int r = 0; r < rows; r++)
+            Assert.That(output[r], Is.EqualTo(TensorPrimitives.Norm(rowMajor.AsSpan(r * cols, cols))), $"row {r}");
+        Assert.That(outputMask, Is.EqualTo(new bool[rows]));
+    }
+
+    [Test]
+    public void RowNorms_WithRowNulls_MasksOnlyNullRows()
+    {
+        const int rows = 3, cols = 2;
+        var rowMajor = new[] { 3f, 4f, 6f, 8f, 1f, 1f };
+        var rowMask = new[]
+        {
+            false, false,
+            true, false,   // row 1 null
+            false, false
+        };
+        var output = new float[rows];
+        var outputMask = new bool[rows];
+
+        TensorsHelper.RowNorms(rowMajor, rowMask, output, outputMask, rows, cols);
+
+        Assert.That(outputMask, Is.EqualTo(new[] { false, true, false }));
+        Assert.That(output[0], Is.EqualTo(5f));
+        Assert.That(output[1], Is.EqualTo(0f));
+        Assert.That(output[2], Is.EqualTo((float)Math.Sqrt(2.0)));
+    }
+
+    static float[] FillRowMajor(int rows, int cols, int seed)
+    {
+        var rng = new Random(seed);
+        var data = new float[rows * cols];
+        for (int i = 0; i < data.Length; i++)
+            data[i] = (float)(rng.NextDouble() * 2 - 1.0);
+        return data;
+    }
+
+    #endregion
 }
