@@ -1356,9 +1356,8 @@ public static partial class NivaraFrameExtensions
         if (!IsSupportedNumericType(columnType))
             throw new NotSupportedException($"Normalization for type {columnType} is not supported. Only INumber<T> columns can be normalized.");
 
-        var coreName = typeof(IFloatingPointIeee754<>).MakeGenericType(columnType).IsAssignableFrom(columnType)
-            ? nameof(NormalizeFloatCore)
-            : nameof(NormalizeIntegerCore);
+        var isFloatType = columnType.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IFloatingPointIeee754<>));
+        var coreName = isFloatType ? nameof(NormalizeFloatCore) : nameof(NormalizeIntegerCore);
 
         var coreMethod = typeof(NivaraFrameExtensions)
             .GetMethod(coreName, BindingFlags.Static | BindingFlags.NonPublic)!
