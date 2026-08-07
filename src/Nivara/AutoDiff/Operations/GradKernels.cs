@@ -307,47 +307,18 @@ public static class GradKernels
     }
 
     /// <summary>
-    /// In-place row-wise softmax (max subtraction, exp, normalize). float/double
-    /// use a <see cref="TensorPrimitives"/> chain; Half/BFloat16 use a scalar
-    /// double-based fallback. Allocates nothing, so it can run on rented buffers.
+    /// In-place row-wise softmax (max subtraction, exp, normalize) over a
+    /// row-major span with <paramref name="cols"/> elements per row. Delegates
+    /// per row to <see cref="SoftmaxSingle{T}"/> with overlapping input/output
+    /// spans — safe because the max scan precedes any mutation and the
+    /// TensorPrimitives ops are in-place capable. Allocates nothing, so it can
+    /// run on rented buffers.
     /// </summary>
     public static void SoftmaxRowsInPlace<T>(Span<T> x, int rows, int cols)
         where T : struct, IFloatingPointIeee754<T>
     {
         for (int r = 0; r < rows; r++)
-            SoftmaxRowInPlace(x.Slice(r * cols, cols));
-    }
-
-    static void SoftmaxRowInPlace<T>(Span<T> row)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        if (typeof(T) == typeof(float) || typeof(T) == typeof(double))
-        {
-            T max = T.NegativeInfinity;
-            for (int i = 0; i < row.Length; i++)
-                if (row[i] > max) max = row[i];
-            TensorPrimitives.Subtract(row, max, row);
-            TensorPrimitives.Exp(row, row);
-            TensorPrimitives.Divide(row, TensorPrimitives.Sum(row), row);
-            return;
-        }
-
-        double maxVal = double.NegativeInfinity;
-        for (int i = 0; i < row.Length; i++)
-        {
-            var v = double.CreateChecked(row[i]);
-            if (v > maxVal) maxVal = v;
-        }
-        double sum = 0.0;
-        for (int i = 0; i < row.Length; i++)
-        {
-            var e = Math.Exp(double.CreateChecked(row[i]) - maxVal);
-            row[i] = T.CreateChecked(e);
-            sum += e;
-        }
-        if (sum > 0)
-            for (int i = 0; i < row.Length; i++)
-                row[i] = T.CreateChecked(double.CreateChecked(row[i]) / sum);
+            SoftmaxSingle(x.Slice(r * cols, cols), x.Slice(r * cols, cols));
     }
 
     public static void SoftmaxGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int classCount)
