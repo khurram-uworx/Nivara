@@ -177,44 +177,6 @@ public static class MLNetExtensions
         return (trainingFrame, testingFrame);
     }
 
-    /// <summary>
-    /// Normalizes numeric columns in a NivaraFrame for ML.NET processing.
-    /// </summary>
-    /// <param name="frame">The source NivaraFrame</param>
-    /// <param name="columns">The columns to normalize (null for all numeric columns)</param>
-    /// <returns>A new NivaraFrame with normalized columns</returns>
-    public static NivaraFrame Normalize(this NivaraFrame frame, params string[]? columns)
-    {
-        if (frame == null) throw new ArgumentNullException(nameof(frame));
-
-        // If no columns specified, normalize all numeric columns
-        columns ??= frame.ColumnNames.Where(name => IsNumericColumn(frame, name)).ToArray();
-
-        // Create a set of columns to normalize for quick lookup
-        var columnsToNormalize = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
-
-        // Build a new list of columns, normalizing as needed
-        var newColumns = new List<(string Name, IColumn Column)>();
-
-        foreach (var columnName in frame.ColumnNames)
-        {
-            IColumn resultColumn;
-
-            if (columnsToNormalize.Contains(columnName) && IsNumericColumn(frame, columnName))
-            {
-                resultColumn = NormalizeColumn(frame, columnName);
-            }
-            else
-            {
-                resultColumn = frame.GetColumn(columnName);
-            }
-
-            newColumns.Add((columnName, resultColumn));
-        }
-
-        return new NivaraFrame(newColumns);
-    }
-
     // Private helper methods
 
     private static float ConvertToFloat(object? value)
@@ -231,60 +193,6 @@ public static class MLNetExtensions
             short s => s,
             _ => throw new InvalidOperationException($"Cannot convert {value?.GetType()} to float")
         };
-    }
-
-    private static bool IsNumericColumn(NivaraFrame frame, string columnName)
-    {
-        var columnType = frame.Schema.GetColumnType(columnName);
-        return columnType == typeof(int) || columnType == typeof(long) ||
-               columnType == typeof(float) || columnType == typeof(double) ||
-               columnType == typeof(decimal) || columnType == typeof(byte) ||
-               columnType == typeof(short);
-    }
-
-    private static IColumn NormalizeColumn(NivaraFrame frame, string columnName)
-    {
-        var columnType = frame.Schema.GetColumnType(columnName);
-
-        if (columnType == typeof(float))
-        {
-            var column = frame.GetColumn<float>(columnName);
-            var values = new float[column.Length];
-            for (int i = 0; i < column.Length; i++)
-            {
-                values[i] = column[i];
-            }
-            var mean = values.Average();
-            var stdDev = Math.Sqrt(values.Select(x => Math.Pow(x - mean, 2)).Average());
-
-            if (stdDev > 0)
-            {
-                var normalized = values.Select(x => (float)((x - mean) / stdDev)).ToArray();
-                return NivaraColumn<float>.Create(normalized);
-            }
-            return NivaraColumn<float>.Create(values);
-        }
-
-        if (columnType == typeof(double))
-        {
-            var column = frame.GetColumn<double>(columnName);
-            var values = new double[column.Length];
-            for (int i = 0; i < column.Length; i++)
-            {
-                values[i] = column[i];
-            }
-            var mean = values.Average();
-            var stdDev = Math.Sqrt(values.Select(x => Math.Pow(x - mean, 2)).Average());
-
-            if (stdDev > 0)
-            {
-                var normalized = values.Select(x => (x - mean) / stdDev).ToArray();
-                return NivaraColumn<double>.Create(normalized);
-            }
-            return NivaraColumn<double>.Create(values);
-        }
-
-        throw new NotSupportedException($"Normalization for type {columnType} is not yet implemented");
     }
 
     /// <summary>

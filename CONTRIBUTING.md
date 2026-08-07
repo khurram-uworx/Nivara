@@ -35,7 +35,7 @@ src/Nivara/
 ├── NivaraColumn.cs            # Column implementation
 ├── NivaraSeries.cs            # Series implementation
 ├── NivaraFrame.cs             # DataFrame implementation
-├── NivaraFrameExtensions.cs   # DataFrame extension methods
+├── NivaraFrameExtensions.cs   # DataFrame extension methods + data-prep (Normalize/Standardize)
 ├── IColumn.cs                 # Column interface
 ├── IColumnStorage.cs          # Column storage interface
 └── IFrame.cs                  # DataFrame interface

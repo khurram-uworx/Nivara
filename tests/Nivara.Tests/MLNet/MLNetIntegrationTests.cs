@@ -286,35 +286,6 @@ public class MLNetIntegrationTests
     }
 
     [Test]
-    public void Normalization_ProducesZeroMeanUnitVariance()
-    {
-        // Create test data with known statistics
-        var data = new float[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f, 7.0f, 8.0f, 9.0f, 10.0f };
-        var col = NivaraColumn<float>.Create(data);
-        var frame = NivaraFrame.Create(("Values", col));
-
-        // Normalize the data
-        var normalizedFrame = frame.Normalize("Values");
-
-        // Extract normalized values
-        var normalizedValues = new float[normalizedFrame.RowCount];
-        var normalizedCol = normalizedFrame.GetColumn<float>("Values");
-        for (int i = 0; i < normalizedFrame.RowCount; i++)
-        {
-            normalizedValues[i] = normalizedCol[i];
-        }
-
-        // Verify zero mean (within floating point precision)
-        var mean = normalizedValues.Average();
-        Assert.That(mean, Is.EqualTo(0.0f).Within(1e-6f));
-
-        // Verify unit variance
-        var variance = normalizedValues.Select(x => Math.Pow(x - mean, 2)).Average();
-        var stdDev = Math.Sqrt(variance);
-        Assert.That(stdDev, Is.EqualTo(1.0f).Within(1e-6f));
-    }
-
-    [Test]
     public void ToMLNetBatchTensors_ConvertsSeriesToVBuffers()
     {
         // Create test series
