@@ -193,10 +193,15 @@ public class NivaraDataPrepTests
 
         var resultCol = frame.Standardize("Values").GetColumn<double>("Values");
 
+        var nonNull = new List<double>();
         for (int i = 0; i < data.Length; i++)
+        {
             Assert.That(resultCol.IsNull(i), Is.EqualTo(data[i] == null));
+            if (data[i].HasValue) nonNull.Add(resultCol[i]);
+        }
 
-        AssertNormalizedDoubleColumn(frame.Standardize("Values"), "Values");
+        Assert.That(nonNull.Average(), Is.EqualTo(0d).Within(1e-9));
+        Assert.That(Math.Sqrt(nonNull.Select(x => Math.Pow(x - nonNull.Average(), 2)).Average()), Is.EqualTo(1d).Within(1e-9));
     }
 
     private static void AssertNormalizedFloatColumn(NivaraFrame frame, string columnName)
