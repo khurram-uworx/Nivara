@@ -482,4 +482,146 @@ static class TensorsHelper
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  Row-slice scoring kernels (#141)
+    //  Score each row of a row-major buffer with the platform
+    //  TensorPrimitives kernels. Row slices are contiguous spans into
+    //  the materialized buffer — no per-row copy. Mask-first null
+    //  semantics: a null in a row masks only that row's score; a null
+    //  in the query masks all scores. The output mask is authoritative;
+    //  placeholder output at masked positions is not valid.
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Computes <c>output[r] = dot(rowMajor[r, :], query)</c> for each row of a
+    /// row-major buffer. Nulls in a row mask only that row; nulls in the query
+    /// mask all scores.
+    /// </summary>
+    public static void RowDot<T>(
+        ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
+        ReadOnlySpan<T> query, ReadOnlySpan<bool> queryNullMask,
+        Span<T> output, Span<bool> outputMask, int rows, int cols)
+        where T : struct, INumber<T>
+    {
+        ValidateRowKernelArgs(rowMajor, rowMajorNullMask, query, queryNullMask, output, outputMask, rows, cols, requireQuery: true);
+
+        if (AnyTrue(queryNullMask))
+        {
+            outputMask.Fill(true);
+            output.Clear();
+            return;
+        }
+
+        if (rowMajorNullMask.Length == 0)
+        {
+            outputMask.Clear();
+            for (int r = 0; r < rows; r++)
+                output[r] = TensorPrimitives.Dot(rowMajor.Slice(r * cols, cols), query);
+            return;
+        }
+
+        for (int r = 0; r < rows; r++)
+        {
+            int off = r * cols;
+            bool nullRow = AnyTrue(rowMajorNullMask.Slice(off, cols));
+            outputMask[r] = nullRow;
+            output[r] = nullRow ? default : TensorPrimitives.Dot(rowMajor.Slice(off, cols), query);
+        }
+    }
+
+    /// <summary>
+    /// Computes <c>output[r] = cosineSimilarity(rowMajor[r, :], query)</c> for each
+    /// row of a row-major buffer. Nulls in a row mask only that row; nulls in the
+    /// query mask all scores.
+    /// </summary>
+    public static void RowCosineSimilarity<T>(
+        ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
+        ReadOnlySpan<T> query, ReadOnlySpan<bool> queryNullMask,
+        Span<T> output, Span<bool> outputMask, int rows, int cols)
+        where T : struct, IRootFunctions<T>
+    {
+        ValidateRowKernelArgs(rowMajor, rowMajorNullMask, query, queryNullMask, output, outputMask, rows, cols,
+            requireQuery: true, requireNonZeroCols: true);
+
+        if (AnyTrue(queryNullMask))
+        {
+            outputMask.Fill(true);
+            output.Clear();
+            return;
+        }
+
+        if (rowMajorNullMask.Length == 0)
+        {
+            outputMask.Clear();
+            for (int r = 0; r < rows; r++)
+                output[r] = TensorPrimitives.CosineSimilarity(rowMajor.Slice(r * cols, cols), query);
+            return;
+        }
+
+        for (int r = 0; r < rows; r++)
+        {
+            int off = r * cols;
+            bool nullRow = AnyTrue(rowMajorNullMask.Slice(off, cols));
+            outputMask[r] = nullRow;
+            output[r] = nullRow ? default : TensorPrimitives.CosineSimilarity(rowMajor.Slice(off, cols), query);
+        }
+    }
+
+    /// <summary>
+    /// Computes <c>output[r] = norm(rowMajor[r, :])</c> for each row of a row-major
+    /// buffer. Nulls in a row mask only that row's norm.
+    /// </summary>
+    public static void RowNorms<T>(
+        ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
+        Span<T> output, Span<bool> outputMask, int rows, int cols)
+        where T : struct, IRootFunctions<T>
+    {
+        ValidateRowKernelArgs(rowMajor, rowMajorNullMask, default, default, output, outputMask, rows, cols,
+            requireQuery: false, requireNonZeroCols: true);
+
+        if (rowMajorNullMask.Length == 0)
+        {
+            outputMask.Clear();
+            for (int r = 0; r < rows; r++)
+                output[r] = TensorPrimitives.Norm(rowMajor.Slice(r * cols, cols));
+            return;
+        }
+
+        for (int r = 0; r < rows; r++)
+        {
+            int off = r * cols;
+            bool nullRow = AnyTrue(rowMajorNullMask.Slice(off, cols));
+            outputMask[r] = nullRow;
+            output[r] = nullRow ? default : TensorPrimitives.Norm(rowMajor.Slice(off, cols));
+        }
+    }
+
+    static void ValidateRowKernelArgs<T>(
+        ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
+        ReadOnlySpan<T> query, ReadOnlySpan<bool> queryNullMask,
+        Span<T> output, Span<bool> outputMask, int rows, int cols,
+        bool requireQuery, bool requireNonZeroCols = false)
+    {
+        if (rows < 0) throw new ArgumentOutOfRangeException(nameof(rows), "Row count must be non-negative.");
+        if (cols < 0) throw new ArgumentOutOfRangeException(nameof(cols), "Column count must be non-negative.");
+        if (requireNonZeroCols && cols <= 0) throw new ArgumentException("Column count must be at least 1 for this kernel.", nameof(cols));
+        if ((long)rows * cols > rowMajor.Length)
+            throw new ArgumentException($"Row-major span length ({rowMajor.Length}) must be at least {rows * cols}.", nameof(rowMajor));
+        if (requireQuery && query.Length != cols)
+            throw new ArgumentException($"Query length ({query.Length}) must equal the row width ({cols}).", nameof(query));
+        if (requireQuery && queryNullMask.Length > 0 && queryNullMask.Length != cols)
+            throw new ArgumentException($"Query null mask length ({queryNullMask.Length}) must equal the query length ({cols}).", nameof(queryNullMask));
+        if (output.Length < rows)
+            throw new ArgumentException($"Output span length ({output.Length}) must be at least {rows}.", nameof(output));
+        if (outputMask.Length < rows)
+            throw new ArgumentException($"Output mask length ({outputMask.Length}) must be at least {rows}.", nameof(outputMask));
+    }
+
+    static bool AnyTrue(ReadOnlySpan<bool> mask)
+    {
+        for (int i = 0; i < mask.Length; i++)
+            if (mask[i]) return true;
+        return false;
+    }
+
 }
