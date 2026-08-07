@@ -288,6 +288,64 @@ Console.WriteLine(query.ExplainPlan());
 // SchemaValidationException: Column 'Deprtment' not found. Available: Name, Department, Salary, IsActive
 ```
 
+#### 5c. Typed object LINQ — `frame.Query<T>()`
+
+Query with strongly typed C# lambdas instead of column-name strings. `Query<T>()` maps each property of `T` to a column (case-insensitive) and validates the mapping eagerly — no data access needed to catch a typo or a type mismatch.
+
+**Python**
+```python
+employees = pd.DataFrame({
+    "Name": ["Alice", "Bob", "Carol", "Dan", "Eve"],
+    "City": ["NYC", "LA", "NYC", "SF", "LA"],
+    "Age": [34, 28, 41, 25, 33],
+    "Salary": [90000, 65000, 120000, 55000, 78000],
+})
+stats = employees[employees["Age"] > 30].groupby("City")["Salary"].mean()
+```
+
+**Nivara** — typed predicates/projections, no string column names:
+```csharp
+using Nivara.Linq;
+
+public sealed class Employee
+{
+    public string Name { get; set; }
+    public string City { get; set; }
+    public int Age { get; set; }
+    public double Salary { get; set; }
+}
+
+var employees = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob", "Carol", "Dan", "Eve"])),
+    ("City", NivaraColumn<string>.CreateForReferenceType(["NYC", "LA", "NYC", "SF", "LA"])),
+    ("Age", NivaraColumn<int>.Create([34, 28, 41, 25, 33])),
+    ("Salary", NivaraColumn<double>.Create([90000, 65000, 120000, 55000, 78000]))
+);
+
+// Filter → project → materialize. Builds a lazy, inspectable query plan.
+var query = employees.Query<Employee>()
+    .Where(e => e.Age > 30 && e.City != "SF")
+    .OrderByDescending(e => e.Salary)
+    .Select(e => new { e.Name, e.Salary });
+
+Console.WriteLine(query.ExplainPlan());
+var frame = query.Collect();    // NivaraFrame (Name, Salary) — Carol, Alice, Eve
+var rows = query.ToObjects();   // IReadOnlyList<anonymous>
+
+// GroupBy aggregates: g.Key, g.Average/Sum/Count/Min/Max
+var byCity = employees.Query<Employee>()
+    .Where(e => e.Age > 30)
+    .GroupBy(e => e.City)
+    .Select(g => new { g.Key, AvgSalary = g.Average(e => e.Salary) })
+    .ToObjects();
+// NYC → 105000, LA → 78000
+```
+
+Notes:
+- `Query<T>()` requires `T : class, new()`. `Collect()`/`ToList()` return a `NivaraFrame`; `ToObjects()`/`ToRows()` return `IReadOnlyList<TResult>`.
+- Supported: property access, literals, `+ - * /`, comparisons, `&&`/`||`/`!`. Method calls, captured variables/closures, nested property access, and ternary throw `UnsupportedQueryExpressionException` at translation time.
+- `GroupBy` accepts an aggregate `Select` (`g.Key` + `g.Average`/`Sum`/`Count`/`Min`/`Max`) or a bare `Collect` of distinct keys; anything else after `GroupBy` fails fast.
+
 ---
 
 ### Act 6: Scale — Query Engine and Execution Strategies

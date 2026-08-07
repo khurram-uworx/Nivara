@@ -55,13 +55,20 @@ var frame = NivaraFrame.Create(
 );
 
 // Query with lazy evaluation
-// Query with lazy evaluation (LINQ-like)
 var adults = frame.AsQueryFrame()
     .Where(x => x["Age"] > 30)
     .Select(x => x["Name"])
     .ToNivaraFrame();
 
 Console.WriteLine(adults.RowCount); // 1 (Charlie)
+
+// Or with the typed object model — strongly typed lambdas over a POCO
+public sealed class Person { public string Name { get; set; } public int Age { get; set; } }
+
+var typed = frame.Query<Person>()
+    .Where(p => p.Age > 30)
+    .Select(p => new { p.Name })
+    .ToObjects();   // IReadOnlyList<anonymous> — { Name = "Charlie" }
 ```
 
 ---
@@ -75,6 +82,7 @@ Console.WriteLine(adults.RowCount); // 1 (Charlie)
 
 ### Query Engine
 - Lazy query construction with true LINQ-like syntax (Where, Select, OrderBy/ThenBy)
+- Typed object LINQ — `frame.Query<T>()` maps a POCO to the frame schema and compiles typed lambdas into query plans (predicates, projections, `OrderBy`/`ThenBy`, `Skip`/`Take`, `GroupBy` with `g.Key` + `Average`/`Sum`/`Count`/`Min`/`Max` aggregates), materializing to a `NivaraFrame` or `IReadOnlyList<TResult>`
 - Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
 - Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with integrated performance diagnostics
 
@@ -134,6 +142,7 @@ Nivara currently supports:
 - **Performance**: Vectorized arithmetic and comparisons where semantics are safe
 - **Storage**: High-performance tensor-backed storage for numeric types, memory-based storage for reference types
 - **Query Engine**: Schema-aware lazy query construction with automatic optimization, `OperationType` constants, diagnostics and plan inspection
+- **Typed Object LINQ**: `frame.Query<T>()` with eager POCO→column mapping, typed predicates/projections, GroupBy aggregates, and row-factory materialization (`Collect`/`ToList` → `NivaraFrame`, `ToObjects`/`ToRows` → `IReadOnlyList<TResult>`); unsupported expressions fail fast with `UnsupportedQueryExpressionException`
 - **Data Sources**: CSV and JSON lazy data sources with automatic schema inference
 - **Row Operations**: Filtering with boolean masks, slicing with Take/Skip operations, and arbitrary row range selection
 - **Sorting Operations**: Multi-column sorting with configurable direction, null ordering, and stable sort semantics
