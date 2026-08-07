@@ -105,7 +105,7 @@ public static class WindowFunctions
         where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(column);
-        var min = resolveWindowArgs(windowSize, minPeriods);
+        var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
         var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
@@ -142,7 +142,7 @@ public static class WindowFunctions
         where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(column);
-        var min = resolveWindowArgs(windowSize, minPeriods);
+        var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
         var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
@@ -179,7 +179,7 @@ public static class WindowFunctions
         where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(column);
-        var min = resolveWindowArgs(windowSize, minPeriods);
+        var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
         var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
@@ -198,7 +198,7 @@ public static class WindowFunctions
         where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(column);
-        var min = resolveWindowArgs(windowSize, minPeriods);
+        var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
         var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
@@ -255,16 +255,20 @@ public static class WindowFunctions
 
     // ── Shared kernels ──
 
-    static int resolveWindowArgs(int windowSize, int? minPeriods)
+    static int resolveWindowArgs(int windowSize, int? minPeriods, bool relaxWhenHandler = false)
     {
         if (windowSize < 1)
             throw new ArgumentOutOfRangeException(nameof(windowSize), "Window size must be at least 1");
 
-        int min = minPeriods ?? windowSize;
-        if (min < 1 || min > windowSize)
-            throw new ArgumentOutOfRangeException(nameof(minPeriods), "minPeriods must be in [1, windowSize]");
+        if (minPeriods is int min)
+        {
+            if (min < 1 || min > windowSize)
+                throw new ArgumentOutOfRangeException(nameof(minPeriods), "minPeriods must be in [1, windowSize]");
 
-        return min;
+            return min;
+        }
+
+        return relaxWhenHandler ? 1 : windowSize;
     }
 
     static (T[] Effective, bool[] Valid) buildEffective<T>(NivaraColumn<T> column, Func<T>? nullHandler)

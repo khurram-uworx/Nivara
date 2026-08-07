@@ -132,9 +132,9 @@ public class WindowFunctionsTests
 
         Assert.That(result.IsNull(0), Is.True);
         Assert.That(result[1], Is.EqualTo(3));
-        Assert.That(result[2], Is.EqualTo(5));
-        Assert.That(result[3], Is.EqualTo(7));
-        Assert.That(result[4], Is.EqualTo(9));
+        Assert.That(result[2], Is.EqualTo(6));
+        Assert.That(result[3], Is.EqualTo(9));
+        Assert.That(result[4], Is.EqualTo(12));
     }
 
     [Test]
@@ -189,13 +189,13 @@ public class WindowFunctionsTests
         var expectedMax = new[] { 3, 3, 4, 4, 5, 9, 9, 9 };
         var expectedMin = new[] { 3, 1, 1, 1, 1, 1, 2, 2 };
 
-        for (int i = 0; i < 3; i++)
+        for (int i = 0; i < 2; i++)
         {
             Assert.That(max.IsNull(i), Is.True);
             Assert.That(min.IsNull(i), Is.True);
         }
 
-        for (int i = 3; i < column.Length; i++)
+        for (int i = 2; i < column.Length; i++)
         {
             Assert.That(max[i], Is.EqualTo(expectedMax[i]));
             Assert.That(min[i], Is.EqualTo(expectedMin[i]));
@@ -260,8 +260,8 @@ public class WindowFunctionsTests
         var result = column.Shift(1, 0);
 
         Assert.That(result[0], Is.EqualTo(0));
-        Assert.That(result.IsNull(1), Is.True);
-        Assert.That(result[2], Is.EqualTo(1));
+        Assert.That(result[1], Is.EqualTo(1));
+        Assert.That(result.IsNull(2), Is.True);
     }
 
     [Test]
