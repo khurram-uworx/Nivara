@@ -1,6 +1,8 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Operations;
+using System.Numerics;
+using System.Numerics.Tensors;
 
 namespace Nivara;
 
@@ -1249,6 +1251,144 @@ public static class NivaraFrameExtensions
         var result = new NivaraFrame(namedColumns);
         result.SortKeys = sortKeys;
         return result;
+    }
+
+    #endregion
+
+    #region Data Preparation
+
+    /// <summary>
+    /// Standardizes (z-score normalizes) numeric columns in a NivaraFrame to zero mean and unit variance.
+    /// This is an alias for <see cref="Normalize(NivaraFrame, string[])"/>.
+    /// </summary>
+    /// <param name="frame">The source NivaraFrame</param>
+    /// <param name="columns">The columns to standardize (null for all float/double numeric columns)</param>
+    /// <returns>A new NivaraFrame with standardized columns</returns>
+    public static NivaraFrame Standardize(this NivaraFrame frame, params string[]? columns)
+        => Normalize(frame, columns);
+
+    /// <summary>
+    /// Normalizes numeric columns in a NivaraFrame to zero mean and unit variance (z-score).
+    /// Null values are skipped when computing statistics and remain null in the result.
+    /// </summary>
+    /// <param name="frame">The source NivaraFrame</param>
+    /// <param name="columns">The columns to normalize (null for all float/double numeric columns)</param>
+    /// <returns>A new NivaraFrame with normalized columns</returns>
+    public static NivaraFrame Normalize(this NivaraFrame frame, params string[]? columns)
+    {
+        if (frame == null) throw new ArgumentNullException(nameof(frame));
+
+        // If no columns specified, normalize all supported numeric columns
+        columns ??= frame.ColumnNames.Where(name => IsNumericColumn(frame, name)).ToArray();
+
+        // Create a set of columns to normalize for quick lookup
+        var columnsToNormalize = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
+
+        // Build a new list of columns, normalizing as needed
+        var newColumns = new List<(string Name, IColumn Column)>();
+
+        foreach (var columnName in frame.ColumnNames)
+        {
+            IColumn resultColumn;
+
+            if (columnsToNormalize.Contains(columnName))
+            {
+                if (!IsNumericColumn(frame, columnName))
+                    throw new NotSupportedException($"Normalization for column '{columnName}' of type {frame.Schema.GetColumnType(columnName)} is not supported. Only float and double columns can be normalized.");
+
+                resultColumn = NormalizeColumn(frame, columnName);
+            }
+            else
+            {
+                resultColumn = frame.GetColumn(columnName);
+            }
+
+            newColumns.Add((columnName, resultColumn));
+        }
+
+        return new NivaraFrame(newColumns);
+    }
+
+    /// <summary>
+    /// Determines whether a column is a supported numeric type for normalization.
+    /// </summary>
+    private static bool IsNumericColumn(NivaraFrame frame, string columnName)
+    {
+        var columnType = frame.Schema.GetColumnType(columnName);
+        return columnType == typeof(float) || columnType == typeof(double);
+    }
+
+    /// <summary>
+    /// Normalizes a single column to zero mean and unit variance, skipping null values.
+    /// </summary>
+    private static IColumn NormalizeColumn(NivaraFrame frame, string columnName)
+    {
+        var columnType = frame.Schema.GetColumnType(columnName);
+
+        if (columnType == typeof(float))
+            return NormalizeCore(frame.GetColumn<float>(columnName));
+
+        if (columnType == typeof(double))
+            return NormalizeCore(frame.GetColumn<double>(columnName));
+
+        throw new NotSupportedException($"Normalization for type {columnType} is not yet implemented");
+    }
+
+    /// <summary>
+    /// Core z-score normalization for a typed column. Uses <see cref="TensorPrimitives"/> for
+    /// SIMD-accelerated statistics and transform; null values are excluded from the statistics
+    /// and preserved in the result via the null mask.
+    /// </summary>
+    private static NivaraColumn<T> NormalizeCore<T>(NivaraColumn<T> column)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (column.TryGetSpan(out var span))
+        {
+            var mean = TensorPrimitives.Average<T>(span);
+            var stdDev = TensorPrimitives.StdDev<T>(span);
+
+            if (stdDev == T.Zero) return column;
+
+            var normalized = new T[span.Length];
+            TensorPrimitives.Subtract(span, mean, normalized);
+            TensorPrimitives.Divide(normalized, stdDev, normalized);
+            return NivaraColumn<T>.Create(normalized);
+        }
+
+        // Column has nulls: compute statistics over non-null values and preserve the null mask.
+        var length = column.Length;
+        var values = new T[length];
+        var nullMask = new bool[length];
+        var packed = new T[length];
+        int count = 0;
+
+        for (int i = 0; i < length; i++)
+        {
+            if (column.IsNull(i)) { nullMask[i] = true; continue; }
+
+            var value = column[i];
+            values[i] = value;
+            packed[count++] = value;
+        }
+
+        if (count > 0)
+        {
+            var packedSpan = packed.AsSpan(0, count);
+            var packedMean = TensorPrimitives.Average<T>(packedSpan);
+            var packedStdDev = TensorPrimitives.StdDev<T>(packedSpan);
+
+            if (packedStdDev > T.Zero)
+            {
+                TensorPrimitives.Subtract(packedSpan, packedMean, packedSpan);
+                TensorPrimitives.Divide(packedSpan, packedStdDev, packedSpan);
+
+                int d = 0;
+                for (int i = 0; i < length; i++)
+                    if (!nullMask[i]) values[i] = packed[d++];
+            }
+        }
+
+        return NivaraColumn<T>.CreateFromSpans(values, nullMask);
     }
 
     #endregion
