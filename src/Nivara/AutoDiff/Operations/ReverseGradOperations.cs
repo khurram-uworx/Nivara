@@ -1290,7 +1290,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        TensorPrimitives.Negate(a.AsSpan(), resultArr.AsSpan());
+        GradKernels.Negate(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1300,7 +1300,7 @@ public static class ReverseGradOperations
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                TensorPrimitives.Negate(gSpan, gradArr.AsSpan());
+                GradKernels.Negate(gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
@@ -1315,7 +1315,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        TensorPrimitives.Abs(a.AsSpan(), resultArr.AsSpan());
+        GradKernels.Abs(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1323,10 +1323,9 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("Abs", new object[] { a }, (typedGradOutput) =>
             {
-                var aSpan = a.AsSpan();
+                typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                    gradArr[i] = T.CreateChecked(T.Sign(aSpan[i])) * typedGradOutput[i];
+                GradKernels.AbsGradient(a.AsSpan(), gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
@@ -1342,7 +1341,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        TensorPrimitives.Clamp(a.AsSpan(), min, max, resultArr.AsSpan());
+        GradKernels.Clamp(a.AsSpan(), min, max, resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1350,10 +1349,9 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("Clip", new object[] { a, min, max }, (typedGradOutput) =>
             {
-                var aSpan = a.AsSpan();
+                typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                    gradArr[i] = aSpan[i] > min && aSpan[i] < max ? typedGradOutput[i] : T.Zero;
+                GradKernels.ClipGradient(a.AsSpan(), gSpan, min, max, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
@@ -1397,7 +1395,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        TensorPrimitives.Exp(a.AsSpan(), resultArr.AsSpan());
+        GradKernels.Exp(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1422,7 +1420,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        TensorPrimitives.Log(a.AsSpan(), resultArr.AsSpan());
+        GradKernels.Log(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1431,10 +1429,8 @@ public static class ReverseGradOperations
             var gradFn = new OpNode<T>("Log", new object[] { a }, (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
-                var aSpan = a.AsSpan();
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                    gradArr[i] = gSpan[i] / aSpan[i];
+                GradKernels.LogGradient(a.AsSpan(), gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
