@@ -596,6 +596,59 @@ static class TensorsHelper
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    //  Normalize / Standardize (population z-score)
+    //  .NET future: TensorPrimitives.Mean&lt;T&gt; / StdDev&lt;T&gt; (net-11 names)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// In-place population z-score normalization for IEEE-754 float types.
+    /// Computes mean/stddev over the whole span and subtracts/divides in
+    /// place. Returns <c>false</c> when the population standard deviation is
+    /// zero (caller keeps the data unchanged).
+    /// <see cref="TensorPrimitives.StdDev{T}"/> requires <c>IRootFunctions&lt;T&gt;</c>,
+    /// satisfied by <c>IFloatingPointIeee754&lt;T&gt;</c>.
+    /// </summary>
+    public static bool TryNormalizeInPlace<T>(Span<T> values)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var mean = TensorPrimitives.Average<T>(values);
+        var stdDev = TensorPrimitives.StdDev<T>(values);
+        if (stdDev == T.Zero) return false;
+
+        TensorPrimitives.Subtract(values, mean, values);
+        TensorPrimitives.Divide(values, stdDev, values);
+        return true;
+    }
+
+    /// <summary>
+    /// Population z-score normalization of any <c>INumber</c> span into a
+    /// <c>double</c> destination. Converts via
+    /// <see cref="TensorPrimitives.ConvertChecked{TFrom,TTo}"/> (vectorized
+    /// <c>CreateChecked</c>), then reuses the double SIMD chain for statistics
+    /// and transform. <c>INumber&lt;T&gt;</c> does not satisfy
+    /// <c>IRootFunctions&lt;T&gt;</c>, so <c>StdDev</c> cannot run on the source
+    /// type (and integer arithmetic would truncate); the double conversion
+    /// gives both correctness and BCL-tuned numerical stability. Returns
+    /// <c>false</c> when the population standard deviation is zero (the caller
+    /// keeps the column); on success the destination holds the z-scores.
+    /// </summary>
+    public static bool TryNormalizeToDouble<T>(ReadOnlySpan<T> values, Span<double> destination)
+        where T : struct, INumber<T>
+    {
+        if (destination.Length < values.Length)
+            throw new ArgumentException($"Destination length ({destination.Length}) must be at least {values.Length}.", nameof(destination));
+
+        TensorPrimitives.ConvertChecked<T, double>(values, destination);
+        var mean = TensorPrimitives.Average<double>(destination);
+        var stdDev = TensorPrimitives.StdDev<double>(destination);
+        if (stdDev == 0.0) return false;
+
+        TensorPrimitives.Subtract(destination, mean, destination);
+        TensorPrimitives.Divide(destination, stdDev, destination);
+        return true;
+    }
+
     static void ValidateRowKernelArgs<T>(
         ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
         ReadOnlySpan<T> query, ReadOnlySpan<bool> queryNullMask,
