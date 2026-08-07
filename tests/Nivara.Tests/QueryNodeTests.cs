@@ -211,6 +211,7 @@ public class QueryNodeTests
         public void Visit(FilterNode node) => VisitedNodes.Add("Filter");
         public void Visit(ProjectionNode node) => VisitedNodes.Add("Projection");
         public void Visit(GroupByNode node) => VisitedNodes.Add("GroupBy");
+        public void Visit(WindowNode node) => VisitedNodes.Add("Window");
     }
 
     [Test]
@@ -222,14 +223,33 @@ public class QueryNodeTests
         var filterNode = new FilterNode(testSchema, "test", 0.5);
         var projectionNode = new ProjectionNode(testSchema, new[] { "Id" });
         var groupByNode = new GroupByNode(testSchema, new[] { "Name" }, new[] { "COUNT(*)" });
+        var windowNode = new WindowNode(testSchema, "Id", "RollingSum", "RollingSum");
 
         // Act
         sourceNode.Accept(visitor);
         filterNode.Accept(visitor);
         projectionNode.Accept(visitor);
         groupByNode.Accept(visitor);
+        windowNode.Accept(visitor);
 
         // Assert
-        Assert.That(visitor.VisitedNodes, Is.EqualTo(new[] { "Source", "Filter", "Projection", "GroupBy" }));
+        Assert.That(visitor.VisitedNodes, Is.EqualTo(new[] { "Source", "Filter", "Projection", "GroupBy", "Window" }));
+    }
+
+    [Test]
+    public void WindowNode_Constructor_SetsProperties()
+    {
+        // Arrange
+        var outputSchema = new Schema(new[] { ("Id", typeof(int)), ("RollingSum", typeof(int)) });
+
+        // Act
+        var node = new WindowNode(outputSchema, "Id", "RollingSum", "RollingSum");
+
+        // Assert
+        Assert.That(node.Source, Is.EqualTo("Id"));
+        Assert.That(node.ResultColumn, Is.EqualTo("RollingSum"));
+        Assert.That(node.FunctionType, Is.EqualTo("RollingSum"));
+        Assert.That(node.OutputSchema, Is.EqualTo(outputSchema));
+        Assert.That(node.NodeType, Is.EqualTo("Window"));
     }
 }
