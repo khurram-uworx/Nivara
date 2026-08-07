@@ -22,6 +22,10 @@ is available.
 | `Attn batched forward [B16 L128 D64 H4]` | `ReverseGradOperations.BatchedMultiHeadAttention` — heads packed once, fused QK^T/softmax/PV per-head `TensorPrimitives` row kernels (issue #86) |
 | `Attn per-seq fwd+bwd [B16 L128 D64 H4]` | Per-seq `MultiHeadAttention` forward + `Backward` inside `GradientUtils.Grad()` |
 | `Attn batched fwd+bwd [B16 L128 D64 H4]` | `BatchedMultiHeadAttention` forward + `Backward` inside `GradientUtils.Grad()` |
+| `RowScore per-row copy+dot [10k x 128]` | Status-quo row scoring — per row, copy 128 column values into scratch then `TensorPrimitives.Dot` (10k dots) |
+| `Frame RowDot [10k x 128]` | Public `NivaraFrame.RowDot` — row-major materialization + `TensorsHelper.RowDot` (#138, #141) |
+| `RowDot kernel raw [10k x 128]` | Raw `TensorsHelper.RowDot` over a pre-built row-major buffer + null mask — the kernel floor (#141) |
+| `RowCosineSimilarity kernel raw [10k x 128]` | Raw `TensorsHelper.RowCosineSimilarity` over a pre-built row-major buffer — kernel floor with norm (#141) |
 
 Each scenario reports **ops/s**, **ns/op**, **bytes/op** (`GC.GetAllocatedBytesForCurrentThread`
 delta), and **gen0/op** (`GC.CollectionCount(0)` delta).
@@ -122,8 +126,21 @@ Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 3 child p
 | Attn batched forward [B16 L128 D64 H4] | 137 | 529,029 | 0.00 |
 | Attn per-seq fwd+bwd [B16 L128 D64 H4] | 12 | 7,962,735 | 1.08 |
 | Attn batched fwd+bwd [B16 L128 D64 H4] | 71 | 7,876,743 | 0.25 |
+| RowScore per-row copy+dot [10k x 128] | 61 | 2 | 0.00 |
+| Frame RowDot [10k x 128] | 151 | 452,639 | 0.10 |
+| RowDot kernel raw [10k x 128] | 438 | 1 | 0.00 |
+| RowCosineSimilarity kernel raw [10k x 128] | 336 | 1 | 0.00 |
 
 ### Notes
+
+- **The four row-scoring rows were recorded 2026-08-07 on a different machine
+  (8 logical processors) and are not ops/s-comparable to the rows above
+  (recorded on the 16-processor machine).** `Frame RowDot`'s B/op is dominated
+  by result construction (`NivaraSeries` materializes a boxed default index),
+  not by the kernel — the raw `RowDot`/`RowCosineSimilarity` kernels are 1 B/op,
+  and the frame API beats the per-row status quo ~2.5× on this machine (151 vs
+  61 ops/s). New scenario rows are seeded as `NEW` in the gate and become gated
+  once a `--json` baseline captures them.
 
 - **This table is the first current-machine point A.** The 2026-08-05 point A
   was recorded on a different machine; its shape still holds (ColumnSigmoid and
