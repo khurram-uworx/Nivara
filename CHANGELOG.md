@@ -2,6 +2,16 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
+## [Unreleased]
+
+### Added
+
+- **`NivaraFrameExtensions.Standardize` (z-score alias, #143)** — data-prep promoted from `Nivara.MLNet` into core frame extensions (`src/Nivara/NivaraFrameExtensions.cs`). `Normalize`/`Standardize` now use `TensorPrimitives` (`Average`/`StdDev`/`Subtract`/`Divide`) for SIMD statistics and transform, compute mean/stddev over non-null values only, and preserve the null mask in the result (`CreateFromSpans`). Auto-select (`Normalize()`/`Standardize()` with no arguments) now normalizes all float/double columns instead of returning an unchanged frame (a latent bug in the old `??=` fallback). `IsNumericColumn` narrowed to float/double; explicitly naming an unsupported column throws `NotSupportedException`.
+
+### Breaking changes
+
+- **`MLNetExtensions.Normalize` removed from `Nivara.MLNet`** — moved to core `NivaraFrameExtensions.Normalize`/`Standardize` (same signature, namespace `Nivara`). Update `using` if you relied on `Nivara.MLNet` for this helper.
+
 ## [1.2.0] - 2026-08-05
 
 ### Breaking changes

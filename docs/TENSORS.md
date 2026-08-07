@@ -218,11 +218,10 @@ re-wrap what `TensorPrimitives` already does, and the tensor surface is interop,
 
 ### Scoped tensor ambitions (GitHub issues)
 
-Row-wise frame scoring (#138), row-slice `TensorPrimitives` kernels (#141), benchmark coverage
-(#142), and a `Standardize` data-prep alias (#143) are tracked as standalone issues to pick up
-opportunistically between releases — **before** the committed roadmaps. They are scoped as
-**interop conveniences** — not a change to the column-first storage model, not BLAS-level matrix
-multiplication in core.
+Row-wise frame scoring (#138), row-slice `TensorPrimitives` kernels (#141), and benchmark coverage
+(#142) are tracked as standalone issues to pick up opportunistically between releases — **before**
+the committed roadmaps. They are scoped as **interop conveniences** — not a change to the
+column-first storage model, not BLAS-level matrix multiplication in core.
 
 ### Explicit non-goals
 
@@ -242,7 +241,7 @@ BLAS-level matrix multiplication in core
 - `docs/plan/POLARS-ROADMAP.md` / `docs/plan/POLARS-REVIEW.md` — columnar engine lens
 - `docs/plan/ARROW-ROADMAP.md` / `docs/plan/ARROW-REVIEW.md` — columnar physics lens
 - `docs/plan/AISTACK-ROADMAP.md` / `docs/plan/AISTACK-REVIEW.md` — local .NET AI stack lens
-- Scoped tensor ambitions are tracked as standalone GitHub issues: [row-wise scoring #138](https://github.com/khurram-uworx/Nivara/issues/138), [row-slice kernels #141](https://github.com/khurram-uworx/Nivara/issues/141), [benchmarks #142](https://github.com/khurram-uworx/Nivara/issues/142), [Standardize #143](https://github.com/khurram-uworx/Nivara/issues/143)
+- Scoped tensor ambitions are tracked as standalone GitHub issues: [row-wise scoring #138](https://github.com/khurram-uworx/Nivara/issues/138), [row-slice kernels #141](https://github.com/khurram-uworx/Nivara/issues/141), [benchmarks #142](https://github.com/khurram-uworx/Nivara/issues/142)
 - `docs/adr/001-autodiff-nonnullable-domain.md` — the null-boundary rule
 - `docs/adr/002-autodiff-span-boundary.md` — the AutoDiff span boundary
 - `docs/adr/003-batch-fused-ops-not-rank-n-primitives.md` — the batch-dimension rule
