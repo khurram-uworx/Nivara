@@ -21,6 +21,9 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             Query.OperationType.Slice => true,
             Query.OperationType.SelectRows => true,
             Query.OperationType.Distinct => false,
+            Query.OperationType.Rolling => false,
+            Query.OperationType.Cumulative => false,
+            Query.OperationType.Shift => false,
             _ when operationType.StartsWith(Query.OperationType.ConcatenationPrefix, StringComparison.Ordinal) => true,
             _ => false
         };

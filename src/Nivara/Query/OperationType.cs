@@ -13,4 +13,7 @@ public static class OperationType
     public const string SelectRows = "SelectRows";
     public const string Distinct = "Distinct";
     public const string ConcatenationPrefix = "Concatenate";
+    public const string Rolling = "Rolling";
+    public const string Cumulative = "Cumulative";
+    public const string Shift = "Shift";
 }

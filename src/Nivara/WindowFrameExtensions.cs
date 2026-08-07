@@ -18,25 +18,25 @@ public static partial class NivaraFrameExtensions
     /// Adds a rolling sum column.
     /// </summary>
     public static NivaraFrame RollingSum(this NivaraFrame frame, string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Sum));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Sum));
 
     /// <summary>
     /// Adds a rolling mean column.
     /// </summary>
     public static NivaraFrame RollingMean(this NivaraFrame frame, string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Mean));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Mean));
 
     /// <summary>
     /// Adds a rolling minimum column.
     /// </summary>
     public static NivaraFrame RollingMin(this NivaraFrame frame, string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Min));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Min));
 
     /// <summary>
     /// Adds a rolling maximum column.
     /// </summary>
     public static NivaraFrame RollingMax(this NivaraFrame frame, string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Max));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Max));
 
     // ── Cumulative ──
 
@@ -44,31 +44,31 @@ public static partial class NivaraFrameExtensions
     /// Adds a cumulative sum column.
     /// </summary>
     public static NivaraFrame CumulativeSum(this NivaraFrame frame, string source, string resultColumn, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateCumulative(c, nullHandler, CumulativeKind.Sum));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateCumulative(c, nullHandler, CumulativeKind.Sum));
 
     /// <summary>
     /// Adds a cumulative maximum column.
     /// </summary>
     public static NivaraFrame CumulativeMax(this NivaraFrame frame, string source, string resultColumn, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateCumulative(c, nullHandler, CumulativeKind.Max));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateCumulative(c, nullHandler, CumulativeKind.Max));
 
     /// <summary>
     /// Adds a cumulative minimum column.
     /// </summary>
     public static NivaraFrame CumulativeMin(this NivaraFrame frame, string source, string resultColumn, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateCumulative(c, nullHandler, CumulativeKind.Min));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateCumulative(c, nullHandler, CumulativeKind.Min));
 
     /// <summary>
     /// Adds a cumulative product column.
     /// </summary>
     public static NivaraFrame CumulativeProduct(this NivaraFrame frame, string source, string resultColumn, Func<object?>? nullHandler = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateCumulative(c, nullHandler, CumulativeKind.Product));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateCumulative(c, nullHandler, CumulativeKind.Product));
 
     /// <summary>
     /// Adds a running count-of-non-null column.
     /// </summary>
     public static NivaraFrame CumulativeCount(this NivaraFrame frame, string source, string resultColumn)
-        => addWindowColumn(frame, source, resultColumn, calculateCumulativeCount);
+        => addWindowColumn(frame, source, resultColumn, CalculateCumulativeCount);
 
     // ── Shift / Lead ──
 
@@ -76,13 +76,13 @@ public static partial class NivaraFrameExtensions
     /// Adds a shifted (lag) column. Boundary positions are null, or <paramref name="fillValue"/> when provided.
     /// </summary>
     public static NivaraFrame Shift(this NivaraFrame frame, string source, string resultColumn, int periods, object? fillValue = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateShift(c, periods, fillValue));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateShift(c, periods, fillValue));
 
     /// <summary>
     /// Adds a lead column (negative shift). Boundary positions are null, or <paramref name="fillValue"/> when provided.
     /// </summary>
     public static NivaraFrame Lead(this NivaraFrame frame, string source, string resultColumn, int periods, object? fillValue = null)
-        => addWindowColumn(frame, source, resultColumn, c => calculateShift(c, -periods, fillValue));
+        => addWindowColumn(frame, source, resultColumn, c => CalculateShift(c, -periods, fillValue));
 
     // ── Shared dispatch ──
 
@@ -94,7 +94,7 @@ public static partial class NivaraFrameExtensions
         return frame.WithColumn(resultColumn, result);
     }
 
-    static IColumn calculateRolling(IColumn column, int windowSize, int? minPeriods, Func<object?>? nullHandler, RollingKind kind)
+    internal static IColumn CalculateRolling(IColumn column, int windowSize, int? minPeriods, Func<object?>? nullHandler, RollingKind kind)
         => column switch
         {
             NivaraColumn<int> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
@@ -105,7 +105,7 @@ public static partial class NivaraFrameExtensions
             _ => throw new NotSupportedException($"Rolling window requires a numeric column, but {column.ElementType.Name} is not supported")
         };
 
-    static IColumn calculateCumulative(IColumn column, Func<object?>? nullHandler, CumulativeKind kind)
+    internal static IColumn CalculateCumulative(IColumn column, Func<object?>? nullHandler, CumulativeKind kind)
         => column switch
         {
             NivaraColumn<int> c => cumulative(c, nullHandler, kind),
@@ -116,7 +116,7 @@ public static partial class NivaraFrameExtensions
             _ => throw new NotSupportedException($"Cumulative requires a numeric column, but {column.ElementType.Name} is not supported")
         };
 
-    static IColumn calculateCumulativeCount(IColumn column)
+    internal static IColumn CalculateCumulativeCount(IColumn column)
         => column switch
         {
             NivaraColumn<int> c => c.CumulativeCount(),
@@ -129,7 +129,7 @@ public static partial class NivaraFrameExtensions
             _ => throw new NotSupportedException($"CumulativeCount does not support column type {column.ElementType.Name}")
         };
 
-    static IColumn calculateShift(IColumn column, int periods, object? fillValue)
+    internal static IColumn CalculateShift(IColumn column, int periods, object? fillValue)
         => column switch
         {
             NivaraColumn<int> c => shift(c, periods, fillValue),
@@ -182,7 +182,7 @@ public static partial class NivaraFrameExtensions
     static T convertFillValue<T>(object? fillValue)
         => (T)Convert.ChangeType(fillValue, typeof(T), CultureInfo.InvariantCulture)!;
 
-    enum RollingKind { Sum, Mean, Min, Max }
+    internal enum RollingKind { Sum, Mean, Min, Max }
 
-    enum CumulativeKind { Sum, Max, Min, Product }
+    internal enum CumulativeKind { Sum, Max, Min, Product }
 }
