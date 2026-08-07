@@ -1,8 +1,12 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Operations;
+using Nivara.Tensors;
+using System.Collections.Concurrent;
+using System.Linq.Expressions;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Reflection;
 
 namespace Nivara;
 
@@ -1295,7 +1299,7 @@ public static partial class NivaraFrameExtensions
             if (columnsToNormalize.Contains(columnName))
             {
                 if (!IsNumericColumn(frame, columnName))
-                    throw new NotSupportedException($"Normalization for column '{columnName}' of type {frame.Schema.GetColumnType(columnName)} is not supported. Only float and double columns can be normalized.");
+                    throw new NotSupportedException($"Normalization for column '{columnName}' of type {frame.Schema.GetColumnType(columnName)} is not supported. Only INumber<T> columns can be normalized.");
 
                 resultColumn = NormalizeColumn(frame, columnName);
             }
@@ -1311,52 +1315,80 @@ public static partial class NivaraFrameExtensions
     }
 
     /// <summary>
-    /// Determines whether a column is a supported numeric type for normalization.
+    /// Determines whether a column is a supported numeric type for normalization
+    /// (implements <see cref="INumber{T}"/>, excluding a small blocklist).
     /// </summary>
     private static bool IsNumericColumn(NivaraFrame frame, string columnName)
-    {
-        var columnType = frame.Schema.GetColumnType(columnName);
-        return columnType == typeof(float) || columnType == typeof(double);
-    }
+        => IsSupportedNumericType(frame.Schema.GetColumnType(columnName));
+
+    private static bool IsSupportedNumericType(Type columnType)
+        => !columnType.IsEnum &&
+           !ExcludedNumericTypes.Contains(columnType) &&
+           columnType.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(INumber<>));
+
+    /// <summary>
+    /// <see cref="INumber{T}"/> implementers that should not be normalized: <c>char</c> is a
+    /// surprising candidate, and <c>BigInteger</c>/<c>Int128</c>/<c>UInt128</c> are not common
+    /// frame columns. Kept explicit so the interface predicate stays predictable.
+    /// </summary>
+    private static readonly HashSet<Type> ExcludedNumericTypes = [typeof(char), typeof(BigInteger), typeof(Int128), typeof(UInt128)];
 
     /// <summary>
     /// Normalizes a single column to zero mean and unit variance, skipping null values.
+    /// Dispatches through a per-type cached compiled delegate: the interface predicate runs
+    /// once per column type, after which every call is a direct delegate invocation.
     /// </summary>
     private static IColumn NormalizeColumn(NivaraFrame frame, string columnName)
     {
         var columnType = frame.Schema.GetColumnType(columnName);
+        if (!_normalizeDispatch.TryGetValue(columnType, out var normalizer))
+        {
+            normalizer = BuildNormalizer(columnType);
+            _normalizeDispatch[columnType] = normalizer;
+        }
+        return normalizer(frame, columnName);
+    }
 
-        if (columnType == typeof(float))
-            return NormalizeCore(frame.GetColumn<float>(columnName));
+    private static readonly ConcurrentDictionary<Type, Func<NivaraFrame, string, IColumn>> _normalizeDispatch = new();
 
-        if (columnType == typeof(double))
-            return NormalizeCore(frame.GetColumn<double>(columnName));
+    private static Func<NivaraFrame, string, IColumn> BuildNormalizer(Type columnType)
+    {
+        if (!IsSupportedNumericType(columnType))
+            throw new NotSupportedException($"Normalization for type {columnType} is not supported. Only INumber<T> columns can be normalized.");
 
-        throw new NotSupportedException($"Normalization for type {columnType} is not yet implemented");
+        var isFloatType = columnType.GetInterfaces().Any(i => i.IsGenericType && i.GetGenericTypeDefinition() == typeof(IFloatingPointIeee754<>));
+        var coreName = isFloatType ? nameof(NormalizeFloatCore) : nameof(NormalizeIntegerCore);
+
+        var coreMethod = typeof(NivaraFrameExtensions)
+            .GetMethod(coreName, BindingFlags.Static | BindingFlags.NonPublic)!
+            .MakeGenericMethod(columnType);
+
+        var frame = Expression.Parameter(typeof(NivaraFrame), "frame");
+        var name = Expression.Parameter(typeof(string), "name");
+        var typedGetColumn = typeof(NivaraFrame)
+            .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+            .First(m => m.Name == nameof(NivaraFrame.GetColumn) && m.IsGenericMethodDefinition)
+            .MakeGenericMethod(columnType);
+
+        var call = Expression.Call(null, coreMethod, Expression.Call(frame, typedGetColumn, name));
+        return Expression.Lambda<Func<NivaraFrame, string, IColumn>>(call, frame, name).Compile();
     }
 
     /// <summary>
-    /// Core z-score normalization for a typed column. Uses <see cref="TensorPrimitives"/> for
-    /// SIMD-accelerated statistics and transform; null values are excluded from the statistics
-    /// and preserved in the result via the null mask.
+    /// SIMD z-score core for IEEE-754 float types. Uses <see cref="TensorPrimitives"/> for
+    /// statistics and transform; null values are excluded from the statistics and preserved in
+    /// the result via the null mask.
     /// </summary>
-    private static NivaraColumn<T> NormalizeCore<T>(NivaraColumn<T> column)
+    private static IColumn NormalizeFloatCore<T>(NivaraColumn<T> column)
         where T : struct, IFloatingPointIeee754<T>
     {
         if (column.TryGetSpan(out var span))
         {
-            var mean = TensorPrimitives.Average<T>(span);
-            var stdDev = TensorPrimitives.StdDev<T>(span);
-
-            if (stdDev == T.Zero) return column;
-
             var normalized = new T[span.Length];
-            TensorPrimitives.Subtract(span, mean, normalized);
-            TensorPrimitives.Divide(normalized, stdDev, normalized);
-            return NivaraColumn<T>.Create(normalized);
+            span.CopyTo(normalized);
+            return TensorsHelper.TryNormalizeInPlace(normalized) ? NivaraColumn<T>.Create(normalized) : column;
         }
 
-        // Column has nulls: compute statistics over non-null values and preserve the null mask.
         var length = column.Length;
         var values = new T[length];
         var nullMask = new bool[length];
@@ -1372,24 +1404,57 @@ public static partial class NivaraFrameExtensions
             packed[count++] = value;
         }
 
-        if (count > 0)
+        if (count > 0 && TensorsHelper.TryNormalizeInPlace(packed.AsSpan(0, count)))
         {
-            var packedSpan = packed.AsSpan(0, count);
-            var packedMean = TensorPrimitives.Average<T>(packedSpan);
-            var packedStdDev = TensorPrimitives.StdDev<T>(packedSpan);
-
-            if (packedStdDev > T.Zero)
-            {
-                TensorPrimitives.Subtract(packedSpan, packedMean, packedSpan);
-                TensorPrimitives.Divide(packedSpan, packedStdDev, packedSpan);
-
-                int d = 0;
-                for (int i = 0; i < length; i++)
-                    if (!nullMask[i]) values[i] = packed[d++];
-            }
+            int d = 0;
+            for (int i = 0; i < length; i++)
+                if (!nullMask[i]) values[i] = packed[d++];
         }
 
         return NivaraColumn<T>.CreateFromSpans(values, nullMask);
+    }
+
+    /// <summary>
+    /// Generic z-score core for any <see cref="INumber{T}"/> column. The output promotes to
+    /// <c>NivaraColumn&lt;double&gt;</c> because z-scores are fractional; conversion and
+    /// statistics run in <c>double</c> via <see cref="TensorsHelper.TryNormalizeToDouble{T}"/>.
+    /// </summary>
+    private static IColumn NormalizeIntegerCore<T>(NivaraColumn<T> column)
+        where T : struct, INumber<T>
+    {
+        if (column.TryGetSpan(out var span))
+        {
+            var normalized = new double[span.Length];
+            return TensorsHelper.TryNormalizeToDouble(span, normalized) ? NivaraColumn<double>.Create(normalized) : column;
+        }
+
+        var length = column.Length;
+        var values = new double[length];
+        var nullMask = new bool[length];
+        var packed = new T[length];
+        int count = 0;
+
+        for (int i = 0; i < length; i++)
+        {
+            if (column.IsNull(i)) { nullMask[i] = true; continue; }
+
+            var value = column[i];
+            values[i] = double.CreateChecked(value);
+            packed[count++] = value;
+        }
+
+        if (count > 0)
+        {
+            var destination = new double[count];
+            if (TensorsHelper.TryNormalizeToDouble(packed.AsSpan(0, count), destination))
+            {
+                int d = 0;
+                for (int i = 0; i < length; i++)
+                    if (!nullMask[i]) values[i] = destination[d++];
+            }
+        }
+
+        return NivaraColumn<double>.CreateFromSpans(values, nullMask);
     }
 
     #endregion
