@@ -135,8 +135,8 @@ sealed class ExpressionEvaluator
             BinaryOperator.Subtract => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => SubtractValues(l, r)),
             BinaryOperator.Multiply => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => MultiplyValues(l, r)),
             BinaryOperator.Divide => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => DivideValues(l, r)),
-            BinaryOperator.And => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => AndValues(l, r)),
-            BinaryOperator.Or => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => OrValues(l, r)),
+            BinaryOperator.And => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => (bool)l! && (bool)r!),
+            BinaryOperator.Or => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => (bool)l! || (bool)r!),
             _ => throw new NotSupportedException($"Binary operator {binary.Operator} is not supported")
         };
     }
@@ -201,8 +201,8 @@ sealed class ExpressionEvaluator
             BinaryOperator.Subtract => ApplyBinaryOperation(column, scalarColumn, (l, r) => SubtractValues(l, r)),
             BinaryOperator.Multiply => ApplyBinaryOperation(column, scalarColumn, (l, r) => MultiplyValues(l, r)),
             BinaryOperator.Divide => ApplyBinaryOperation(column, scalarColumn, (l, r) => DivideValues(l, r)),
-            BinaryOperator.And => ApplyBinaryOperation(column, scalarColumn, (l, r) => AndValues(l, r)),
-            BinaryOperator.Or => ApplyBinaryOperation(column, scalarColumn, (l, r) => OrValues(l, r)),
+            BinaryOperator.And => ApplyComparisonOperation(column, scalarColumn, (l, r) => (bool)l! && (bool)r!),
+            BinaryOperator.Or => ApplyComparisonOperation(column, scalarColumn, (l, r) => (bool)l! || (bool)r!),
             _ => throw new NotSupportedException($"Scalar operator {scalar.Operator} is not supported")
         };
     }
@@ -539,28 +539,6 @@ sealed class ExpressionEvaluator
             (long l, long r) => r != 0 ? (double)l / r : throw new DivideByZeroException(),
             (decimal l, decimal r) => r != 0 ? l / r : throw new DivideByZeroException(),
             _ => Convert.ToDouble(right) != 0 ? Convert.ToDouble(left) / Convert.ToDouble(right) : throw new DivideByZeroException()
-        };
-    }
-
-    static object? AndValues(object? left, object? right)
-    {
-        if (left == null || right == null) return null;
-
-        return (left, right) switch
-        {
-            (bool l, bool r) => l && r,
-            _ => Convert.ToBoolean(left) && Convert.ToBoolean(right)
-        };
-    }
-
-    static object? OrValues(object? left, object? right)
-    {
-        if (left == null || right == null) return null;
-
-        return (left, right) switch
-        {
-            (bool l, bool r) => l || r,
-            _ => Convert.ToBoolean(left) || Convert.ToBoolean(right)
         };
     }
 

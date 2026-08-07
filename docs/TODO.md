@@ -96,15 +96,22 @@ signatures for C# type inference (never invoked).
 - `dotnet test` only after explicit human confirmation (repo convention).
 
 ## Planned commits (logical units)
-1. `docs: plan typed LINQ object model (issue #130) in TODO.md`
-2. Add `UnsupportedQueryExpressionException` + `NotExpression` + evaluator branch
-3. Extend `GroupByOperation` with aggregations + key output names; add `RowCountAggregation`
-4. `QueryFrame.WithOperation` internal helper
-5. Typed LINQ layer (`Grouping`, `TypedExpressionTranslator`, `NivaraQuery<T>`, `Query<T>()`, row factory)
-6. Document typed API in `docs/LINQ.md`
-7. Tests
+1. ✓ `docs: plan typed LINQ object model (issue #130) in TODO.md` — `f68519f`
+2. ✓ Add `UnsupportedQueryExpressionException` + `NotExpression` + evaluator branch — `31134a0`
+3. ✓ Extend `GroupByOperation` with aggregations + key output names; add `RowCountAggregation` — `369a660`
+4. ✓ `QueryFrame.WithOperation` internal helper — `7c442a6`
+5. ✓ Typed LINQ layer (`Grouping`, `TypedExpressionTranslator`, `NivaraQuery<T>`, `Query<T>()`, row factory) — done; 2298 tests pass
+6. Document typed API in `docs/LINQ.md` — pending
+7. ✓ Tests — `tests/Nivara.Tests/Query/TypedLinqTests.cs` (28 tests: entry validation, Where, unsupported expressions, Select, OrderBy/ThenBy, Skip/Take, GroupBy aggregates, distinct keys, nullable columns, Schema/ExplainPlan)
 8. `docs: remove TODO.md — plan executed`
 9. Offer push + PR (human-confirmed)
+
+## Notes from implementation
+- `NivaraQuery<T>` and `NivaraGroupedQuery<TKey,T>` live in `src/Nivara/Linq/NivaraQuery.cs`; grouping marker in `Grouping.cs`; translator in `TypedExpressionTranslator.cs`; metadata/validation in `TypedLinqMetadata.cs`; projection building in `TypedProjectionBuilder.cs`; compiled row factory in `TypedRowFactory.cs`; `Query<T>()` entry in `TypedLinqExtensions.cs`.
+- Grouped query holds the base frame without a GroupBy op; `Select` appends `GroupByOperation(keys, keyNames, aggregations)` + `SelectOperation`, bare `Collect` appends a key-only `GroupByOperation`.
+- Aggregate result column name = projection member name; `g.Key` → `ColumnReference(keyColumnName)`; aggregate pass-through uses `ColumnReference(memberName)`.
+- `Grouping<TKey,T>` deliberately omits `Count(Func<T,bool>)` so count-with-predicate is a compile error; Sum overloads limited to types `SumAggregation.Apply` supports.
+- `p.City == null` comparisons fail at Collect (literal coercion only supports `lit.Value != null`) — follow-up for null-check semantics.
 
 ## Follow-ups (out of scope)
 - Ops after GroupBy other than aggregate-`Select`/`Collect` (Where/OrderBy on groups).
