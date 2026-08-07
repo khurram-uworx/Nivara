@@ -507,30 +507,32 @@ public sealed class NivaraFrame : IFrame
 
         T[]? pooledTemp = null;
         Span<T> temp = default;
-        var rowStride = ColumnCount;
+        var rowCount = RowCount;
+        var colCount = ColumnCount;
+        var rowStride = colCount;
 
         try
         {
-            for (int col = 0; col < ColumnCount; col++)
+            for (int col = 0; col < colCount; col++)
             {
                 var colData = GetColumn<T>(ColumnNames[col]);
 
                 if (colData.TryGetSpan(out var span))
                 {
-                    for (int row = 0; row < RowCount; row++)
+                    for (int row = 0; row < rowCount; row++)
                         destination[row * rowStride + col] = span[row];
                 }
                 else
                 {
                     if (temp.IsEmpty)
                     {
-                        temp = RowCount >= 1024
-                            ? (pooledTemp = ArrayPool<T>.Shared.Rent(RowCount))
-                            : new T[RowCount];
+                        temp = rowCount >= 1024
+                            ? (pooledTemp = ArrayPool<T>.Shared.Rent(rowCount))
+                            : new T[rowCount];
                     }
 
                     colData.CopyTo(temp, fillValue);
-                    for (int row = 0; row < RowCount; row++)
+                    for (int row = 0; row < rowCount; row++)
                         destination[row * rowStride + col] = temp[row];
                 }
             }
@@ -665,51 +667,78 @@ public sealed class NivaraFrame : IFrame
     /// </summary>
     void materializeRowMajor<T>(Span<T> data, Span<bool> mask) where T : unmanaged
     {
-        var rowStride = ColumnCount;
+        var rowCount = RowCount;
+        var colCount = ColumnCount;
+        var rowStride = colCount;
+        const int blockRows = 64;
+
+        var columns = new NivaraColumn<T>[colCount];
+        for (int col = 0; col < colCount; col++)
+            columns[col] = GetColumn<T>(ColumnNames[col]);
+
         T[]? pooledTemp = null;
         bool[]? pooledMaskTemp = null;
         Span<T> temp = default;
         Span<bool> maskTemp = default;
 
+        T[]? pooledScratch = null;
+        bool[]? pooledScratchMask = null;
+        var scratchSize = blockRows * colCount;
+        Span<T> scratch = scratchSize >= 1024
+            ? (pooledScratch = ArrayPool<T>.Shared.Rent(scratchSize)).AsSpan(0, scratchSize)
+            : new T[scratchSize];
+        Span<bool> scratchMask = scratchSize >= 1024
+            ? (pooledScratchMask = ArrayPool<bool>.Shared.Rent(scratchSize)).AsSpan(0, scratchSize)
+            : new bool[scratchSize];
+
         try
         {
-            for (int col = 0; col < ColumnCount; col++)
+            for (int blockStart = 0; blockStart < rowCount; blockStart += blockRows)
             {
-                var colData = GetColumn<T>(ColumnNames[col]);
+                var rowsInBlock = Math.Min(blockRows, rowCount - blockStart);
 
-                if (colData.TryGetSpan(out var span))
+                for (int col = 0; col < colCount; col++)
                 {
-                    for (int row = 0; row < RowCount; row++)
+                    var colData = columns[col];
+
+                    if (colData.TryGetSpan(out var span))
                     {
-                        data[row * rowStride + col] = span[row];
-                        mask[row * rowStride + col] = false;
-                    }
-                }
-                else
-                {
-                    if (temp.IsEmpty)
-                    {
-                        if (RowCount >= 1024)
+                        for (int r = 0; r < rowsInBlock; r++)
                         {
-                            pooledTemp = ArrayPool<T>.Shared.Rent(RowCount);
-                            pooledMaskTemp = ArrayPool<bool>.Shared.Rent(RowCount);
-                            temp = pooledTemp.AsSpan(0, RowCount);
-                            maskTemp = pooledMaskTemp.AsSpan(0, RowCount);
-                        }
-                        else
-                        {
-                            temp = new T[RowCount];
-                            maskTemp = new bool[RowCount];
+                            scratch[r * colCount + col] = span[blockStart + r];
+                            scratchMask[r * colCount + col] = false;
                         }
                     }
-
-                    colData.CopyTo(temp, default, maskTemp);
-                    for (int row = 0; row < RowCount; row++)
+                    else
                     {
-                        data[row * rowStride + col] = temp[row];
-                        mask[row * rowStride + col] = maskTemp[row];
+                        if (temp.IsEmpty)
+                        {
+                            if (rowCount >= 1024)
+                            {
+                                pooledTemp = ArrayPool<T>.Shared.Rent(rowCount);
+                                pooledMaskTemp = ArrayPool<bool>.Shared.Rent(rowCount);
+                                temp = pooledTemp.AsSpan(0, rowCount);
+                                maskTemp = pooledMaskTemp.AsSpan(0, rowCount);
+                            }
+                            else
+                            {
+                                temp = new T[rowCount];
+                                maskTemp = new bool[rowCount];
+                            }
+                        }
+
+                        colData.CopyTo(temp, default, maskTemp);
+                        for (int r = 0; r < rowsInBlock; r++)
+                        {
+                            scratch[r * colCount + col] = temp[blockStart + r];
+                            scratchMask[r * colCount + col] = maskTemp[blockStart + r];
+                        }
                     }
                 }
+
+                var blockLength = rowsInBlock * colCount;
+                scratch.Slice(0, blockLength).CopyTo(data.Slice(blockStart * rowStride, blockLength));
+                scratchMask.Slice(0, blockLength).CopyTo(mask.Slice(blockStart * rowStride, blockLength));
             }
         }
         finally
@@ -718,6 +747,10 @@ public sealed class NivaraFrame : IFrame
                 ArrayPool<T>.Shared.Return(pooledTemp);
             if (pooledMaskTemp != null)
                 ArrayPool<bool>.Shared.Return(pooledMaskTemp);
+            if (pooledScratch != null)
+                ArrayPool<T>.Shared.Return(pooledScratch);
+            if (pooledScratchMask != null)
+                ArrayPool<bool>.Shared.Return(pooledScratchMask);
         }
     }
 
@@ -762,15 +795,17 @@ public sealed class NivaraFrame : IFrame
         var data = new T[length];
         var mask = new bool[length];
         var hasNulls = false;
-        var rowStride = ColumnCount;
+        var rowCount = RowCount;
+        var colCount = ColumnCount;
+        var rowStride = colCount;
 
-        for (int col = 0; col < ColumnCount; col++)
+        for (int col = 0; col < colCount; col++)
         {
             var column = GetColumn<T>(ColumnNames[col]);
             var rawValues = column.AsSpan();
             column.TryGetNullMask(out var columnMask);
 
-            for (int row = 0; row < RowCount; row++)
+            for (int row = 0; row < rowCount; row++)
             {
                 var index = row * rowStride + col;
                 data[index] = rawValues[row];
