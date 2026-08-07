@@ -1279,7 +1279,8 @@ public static class NivaraFrameExtensions
         if (frame == null) throw new ArgumentNullException(nameof(frame));
 
         // If no columns specified, normalize all supported numeric columns
-        columns ??= frame.ColumnNames.Where(name => IsNumericColumn(frame, name)).ToArray();
+        if (columns is null || columns.Length == 0)
+            columns = frame.ColumnNames.Where(name => IsNumericColumn(frame, name)).ToArray();
 
         // Create a set of columns to normalize for quick lookup
         var columnsToNormalize = new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
