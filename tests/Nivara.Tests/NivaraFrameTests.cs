@@ -684,6 +684,207 @@ public class NivaraFrameTests
 
     #endregion
 
+    #region Row-wise scoring (#138)
+
+    [Test]
+    public void RowDot_WithoutNulls_MatchesPerRowDotProducts()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 2f, 5f })),
+            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 3f, 6f })),
+        });
+        var query = NivaraSeries<float>.Create([10f, 20f, 30f]);
+
+        var result = frame.RowDot(query);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result.HasNulls, Is.False);
+        Assert.That(result[0], Is.EqualTo(140f).Within(1e-5));
+        Assert.That(result[1], Is.EqualTo(320f).Within(1e-5));
+    }
+
+    [Test]
+    public void RowDot_IntegerColumns_ProducesIntegerScores()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1, 3 })),
+            ("B", (IColumn)NivaraColumn<int>.Create(new[] { 2, 4 })),
+        });
+        var query = NivaraSeries<int>.Create([10, 100]);
+
+        var result = frame.RowDot(query);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result[0], Is.EqualTo(210));
+        Assert.That(result[1], Is.EqualTo(430));
+    }
+
+    [Test]
+    public void RowDot_RowNull_MasksOnlyThatRow()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
+            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 5f })),
+            ("C", (IColumn)NivaraColumn<float>.Create(new[] { 3f, 6f })),
+        });
+        var query = NivaraSeries<float>.Create([10f, 20f, 30f]);
+
+        var result = frame.RowDot(query);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result.HasNulls, Is.True);
+        Assert.That(result.IsNull(0), Is.True);
+        Assert.That(result.IsNull(1), Is.False);
+        Assert.That(result[1], Is.EqualTo(320f).Within(1e-5));
+    }
+
+    [Test]
+    public void RowDot_QueryNull_MasksAllScores()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 2f, 5f })),
+        });
+        var query = new NivaraSeries<float>(NivaraColumn<float>.CreateFromNullable(new float?[] { 10f, null }));
+
+        var result = frame.RowDot(query);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result.HasNulls, Is.True);
+        Assert.That(result.IsNull(0), Is.True);
+        Assert.That(result.IsNull(1), Is.True);
+    }
+
+    [Test]
+    public void RowCosineSimilarity_WithoutNulls_MatchesOrthogonalRows()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 0f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 0f, 1f })),
+        });
+        var query = NivaraSeries<float>.Create([1f, 0f]);
+
+        var result = frame.RowCosineSimilarity(query);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result.HasNulls, Is.False);
+        Assert.That(result[0], Is.EqualTo(1f).Within(1e-5));
+        Assert.That(result[1], Is.EqualTo(0f).Within(1e-5));
+    }
+
+    [Test]
+    public void RowCosineSimilarity_RowNull_MasksOnlyThatRow()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 0f })),
+            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 1f })),
+        });
+        var query = NivaraSeries<float>.Create([1f, 0f]);
+
+        var result = frame.RowCosineSimilarity(query);
+
+        Assert.That(result.HasNulls, Is.True);
+        Assert.That(result.IsNull(0), Is.True);
+        Assert.That(result.IsNull(1), Is.False);
+        Assert.That(result[1], Is.EqualTo(0f).Within(1e-5));
+    }
+
+    [Test]
+    public void RowDot_QueryLengthMismatch_Throws()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 2f, 5f })),
+        });
+        var query = NivaraSeries<float>.Create([1f, 2f, 3f]);
+
+        var ex = Assert.Throws<ArgumentException>(() => frame.RowDot(query));
+        Assert.That(ex.Message, Does.Contain("must match the frame column count"));
+    }
+
+    [Test]
+    public void RowDot_LabelsLengthMismatch_Throws()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
+        });
+        var query = NivaraSeries<float>.Create([1f]);
+        var labels = NivaraColumn<string>.Create(new[] { "one" });
+
+        var ex = Assert.Throws<ArgumentException>(() => frame.RowDot(query, labels));
+        Assert.That(ex.Message, Does.Contain("must match the frame row count"));
+    }
+
+    [Test]
+    public void RowDot_NullQuery_ThrowsArgumentNullException()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 2f })),
+        });
+
+        Assert.Throws<ArgumentNullException>(() => frame.RowDot<float>(null!));
+    }
+
+    [Test]
+    public void RowDot_WithLabels_ReturnsLabeledSeries()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
+            ("B", (IColumn)NivaraColumn<float>.Create(new[] { 2f, 5f })),
+        });
+        var query = NivaraSeries<float>.Create([10f, 20f]);
+        var labels = NivaraColumn<string>.Create(new[] { "first", "second" });
+
+        var result = frame.RowDot(query, labels);
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result.GetLabel(0), Is.EqualTo("first"));
+        Assert.That(result["first"], Is.EqualTo(50f).Within(1e-5));
+        Assert.That(result["second"], Is.EqualTo(140f).Within(1e-5));
+    }
+
+    [Test]
+    public void RowDot_EmptyFrame_ReturnsEmptySeries()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+            ("B", (IColumn)NivaraColumn<float>.Create(Array.Empty<float>())),
+        });
+        var query = NivaraSeries<float>.Create([1f, 2f]);
+
+        var result = frame.RowDot(query);
+
+        Assert.That(result.Length, Is.EqualTo(0));
+        Assert.That(result.HasNulls, Is.False);
+    }
+
+    [Test]
+    public void RowDot_DisposedFrame_ThrowsObjectDisposedException()
+    {
+        var frame = new NivaraFrame(new[]
+        {
+            ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 2f })),
+        });
+        frame.Dispose();
+        var query = NivaraSeries<float>.Create([1f]);
+
+        Assert.Throws<ObjectDisposedException>(() => frame.RowDot(query));
+    }
+
+    #endregion
+
     // ── Create<T> overloads (Task 3) ──
 
     [Test]

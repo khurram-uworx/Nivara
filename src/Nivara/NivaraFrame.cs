@@ -3,8 +3,10 @@ using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Operations;
 using Nivara.Query;
+using Nivara.Storage;
 using Nivara.Tensors;
 using System.Buffers;
+using System.Numerics;
 using System.Numerics.Tensors;
 
 namespace Nivara;
@@ -538,6 +540,206 @@ public sealed class NivaraFrame : IFrame
             if (pooledTemp != null)
                 ArrayPool<T>.Shared.Return(pooledTemp);
         }
+    }
+
+    /// <summary>
+    /// Scores each row of the frame against <paramref name="query"/> using the dot product.
+    /// Each row is treated as a vector of length <see cref="ColumnCount"/>; the query must
+    /// have one element per column. Nulls in a row mask only that row's score; nulls in the
+    /// query mask all scores.
+    /// </summary>
+    /// <typeparam name="T">The unmanaged numeric type of the frame columns and query</typeparam>
+    /// <param name="query">The query vector, one element per column</param>
+    /// <param name="labels">Optional labels for the resulting series; defaults to positional labels</param>
+    /// <returns>A series of length <see cref="RowCount"/> with one score per frame row</returns>
+    /// <exception cref="ArgumentException">Thrown when the query length does not match <see cref="ColumnCount"/> or the labels length does not match <see cref="RowCount"/></exception>
+    public NivaraSeries<T> RowDot<T>(NivaraSeries<T> query, IColumn? labels = null)
+        where T : unmanaged, INumber<T>
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (query.Length != ColumnCount)
+            throw new ArgumentException($"Query length ({query.Length}) must match the frame column count ({ColumnCount}).", nameof(query));
+        if (labels != null && labels.Length != RowCount)
+            throw new ArgumentException($"Labels length ({labels.Length}) must match the frame row count ({RowCount}).", nameof(labels));
+
+        return DiagnosticsTracker.MeasureOperation(
+            "FrameRowDot",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            columns.Values.Any(column => column.HasNulls) || query.Values.HasNulls,
+            () =>
+            {
+                var scores = new T[RowCount];
+                var mask = new bool[RowCount];
+                rowScoring<T>((data, dataMask) =>
+                {
+                    query.Values.TryGetNullMask(out var queryMask);
+                    TensorsHelper.RowDot(data, dataMask, query.Values.AsSpan(), queryMask, scores, mask, RowCount, ColumnCount);
+                });
+                return createScoreSeries(scores, mask, labels);
+            },
+            "FrameBatch=RowDot;RowMajorMaterialization");
+    }
+
+    /// <summary>
+    /// Scores each row of the frame against <paramref name="query"/> using cosine similarity.
+    /// Each row is treated as a vector of length <see cref="ColumnCount"/>; the query must
+    /// have one element per column. Nulls in a row mask only that row's score; nulls in the
+    /// query mask all scores.
+    /// </summary>
+    /// <typeparam name="T">The unmanaged numeric type of the frame columns and query</typeparam>
+    /// <param name="query">The query vector, one element per column</param>
+    /// <param name="labels">Optional labels for the resulting series; defaults to positional labels</param>
+    /// <returns>A series of length <see cref="RowCount"/> with one score per frame row</returns>
+    /// <exception cref="ArgumentException">Thrown when the query length does not match <see cref="ColumnCount"/> or the labels length does not match <see cref="RowCount"/></exception>
+    public NivaraSeries<T> RowCosineSimilarity<T>(NivaraSeries<T> query, IColumn? labels = null)
+        where T : unmanaged, IRootFunctions<T>
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        ArgumentNullException.ThrowIfNull(query);
+
+        if (query.Length != ColumnCount)
+            throw new ArgumentException($"Query length ({query.Length}) must match the frame column count ({ColumnCount}).", nameof(query));
+        if (ColumnCount == 0)
+            throw new ArgumentException("Cosine similarity requires at least one column.", nameof(query));
+        if (labels != null && labels.Length != RowCount)
+            throw new ArgumentException($"Labels length ({labels.Length}) must match the frame row count ({RowCount}).", nameof(labels));
+
+        return DiagnosticsTracker.MeasureOperation(
+            "FrameRowCosineSimilarity",
+            KernelSelector.DetermineBatchKernelType<T>(),
+            RowCount,
+            typeof(T),
+            columns.Values.Any(column => column.HasNulls) || query.Values.HasNulls,
+            () =>
+            {
+                var scores = new T[RowCount];
+                var mask = new bool[RowCount];
+                rowScoring<T>((data, dataMask) =>
+                {
+                    query.Values.TryGetNullMask(out var queryMask);
+                    TensorsHelper.RowCosineSimilarity(data, dataMask, query.Values.AsSpan(), queryMask, scores, mask, RowCount, ColumnCount);
+                });
+                return createScoreSeries(scores, mask, labels);
+            },
+            "FrameBatch=RowCosineSimilarity;RowMajorMaterialization");
+    }
+
+    /// <summary>
+    /// Materializes the frame as a row-major buffer (values + null mask) and runs the given
+    /// row-slice scoring kernel over it. Row-major buffers are pooled when they exceed the
+    /// array-pool threshold.
+    /// </summary>
+    void rowScoring<U>(Action<Span<U>, Span<bool>> kernel) where U : unmanaged
+    {
+        var totalLength = RowCount * ColumnCount;
+        U[]? pooledData = null;
+        bool[]? pooledMask = null;
+        try
+        {
+            var data = totalLength >= 1024
+                ? (pooledData = ArrayPool<U>.Shared.Rent(totalLength)).AsSpan(0, totalLength)
+                : new U[totalLength].AsSpan();
+            var mask = totalLength >= 1024
+                ? (pooledMask = ArrayPool<bool>.Shared.Rent(totalLength)).AsSpan(0, totalLength)
+                : new bool[totalLength].AsSpan();
+
+            materializeRowMajor(data, mask);
+            kernel(data, mask);
+        }
+        finally
+        {
+            if (pooledData != null)
+                ArrayPool<U>.Shared.Return(pooledData);
+            if (pooledMask != null)
+                ArrayPool<bool>.Shared.Return(pooledMask);
+        }
+    }
+
+    /// <summary>
+    /// Copies every column of type T into a row-major destination span and its null mask,
+    /// writing both the value and mask for each position.
+    /// </summary>
+    void materializeRowMajor<T>(Span<T> data, Span<bool> mask) where T : unmanaged
+    {
+        var rowStride = ColumnCount;
+        T[]? pooledTemp = null;
+        bool[]? pooledMaskTemp = null;
+        Span<T> temp = default;
+        Span<bool> maskTemp = default;
+
+        try
+        {
+            for (int col = 0; col < ColumnCount; col++)
+            {
+                var colData = GetColumn<T>(ColumnNames[col]);
+
+                if (colData.TryGetSpan(out var span))
+                {
+                    for (int row = 0; row < RowCount; row++)
+                    {
+                        data[row * rowStride + col] = span[row];
+                        mask[row * rowStride + col] = false;
+                    }
+                }
+                else
+                {
+                    if (temp.IsEmpty)
+                    {
+                        if (RowCount >= 1024)
+                        {
+                            pooledTemp = ArrayPool<T>.Shared.Rent(RowCount);
+                            pooledMaskTemp = ArrayPool<bool>.Shared.Rent(RowCount);
+                            temp = pooledTemp.AsSpan(0, RowCount);
+                            maskTemp = pooledMaskTemp.AsSpan(0, RowCount);
+                        }
+                        else
+                        {
+                            temp = new T[RowCount];
+                            maskTemp = new bool[RowCount];
+                        }
+                    }
+
+                    colData.CopyTo(temp, default, maskTemp);
+                    for (int row = 0; row < RowCount; row++)
+                    {
+                        data[row * rowStride + col] = temp[row];
+                        mask[row * rowStride + col] = maskTemp[row];
+                    }
+                }
+            }
+        }
+        finally
+        {
+            if (pooledTemp != null)
+                ArrayPool<T>.Shared.Return(pooledTemp);
+            if (pooledMaskTemp != null)
+                ArrayPool<bool>.Shared.Return(pooledMaskTemp);
+        }
+    }
+
+    /// <summary>
+    /// Builds a labeled series from per-row scores and their null mask, attaching positional
+    /// labels when <paramref name="labels"/> is null.
+    /// </summary>
+    NivaraSeries<T> createScoreSeries<T>(T[] scores, bool[] mask, IColumn? labels) where T : unmanaged
+    {
+        var hasNullScores = mask.AsSpan().Contains(true);
+        var values = ColumnStorageFactory.CreateFromOwnedArray(scores, hasNullScores ? mask : null);
+        var valuesColumn = new NivaraColumn<T>(values);
+
+        if (labels == null)
+            return new NivaraSeries<T>(valuesColumn);
+
+        var index = new object[RowCount];
+        for (int i = 0; i < RowCount; i++)
+            index[i] = labels.GetValue(i)!;
+
+        var indexColumn = new NivaraColumn<object>(ColumnStorageFactory.Create<object>(index.AsSpan()));
+        return new NivaraSeries<T>(valuesColumn, indexColumn);
     }
 
     /// <summary>
