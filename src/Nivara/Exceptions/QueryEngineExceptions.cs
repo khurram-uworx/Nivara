@@ -165,3 +165,26 @@ public sealed class QueryExecutionException : Exception
     /// </summary>
     public string? OperationType { get; }
 }
+
+/// <summary>
+/// Exception thrown when a typed LINQ expression contains a construct that is not supported
+/// by the Nivara typed query model (method calls, closures, side effects, nested access, etc).
+/// Thrown at build time (fail fast), before any data is touched.
+/// </summary>
+public sealed class UnsupportedQueryExpressionException : Exception
+{
+    /// <summary>
+    /// Initializes a new instance of UnsupportedQueryExpressionException
+    /// </summary>
+    /// <param name="message">The error message</param>
+    public UnsupportedQueryExpressionException(string message) : base(message)
+    { }
+
+    /// <summary>
+    /// Initializes a new instance of UnsupportedQueryExpressionException with an inner exception
+    /// </summary>
+    /// <param name="message">The error message</param>
+    /// <param name="innerException">The inner exception</param>
+    public UnsupportedQueryExpressionException(string message, Exception innerException) : base(message, innerException)
+    { }
+}

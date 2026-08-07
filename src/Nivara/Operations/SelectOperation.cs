@@ -17,6 +17,19 @@ sealed class SelectOperation : IQueryOperation
     /// <exception cref="ArgumentNullException">Thrown when columns is null</exception>
     /// <exception cref="ArgumentException">Thrown when no columns are specified</exception>
     public SelectOperation(ColumnExpression[] columns)
+        : this(columns, outputNames: null)
+    { }
+
+    /// <summary>
+    /// Initializes a new instance of SelectOperation with explicit output column names
+    /// </summary>
+    /// <param name="columns">The column expressions to select</param>
+    /// <param name="outputNames">Optional explicit output column names (one per column); when null,
+    /// names are derived from the expressions themselves</param>
+    /// <exception cref="ArgumentNullException">Thrown when columns is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no columns are specified, or when outputNames
+    /// does not match the number of columns</exception>
+    public SelectOperation(ColumnExpression[] columns, string[]? outputNames)
     {
         if (columns == null)
             throw new ArgumentNullException(nameof(columns));
@@ -24,13 +37,22 @@ sealed class SelectOperation : IQueryOperation
         if (columns.Length == 0)
             throw new ArgumentException("Must specify at least one column expression", nameof(columns));
 
+        if (outputNames != null && outputNames.Length != columns.Length)
+            throw new ArgumentException("outputNames must contain one entry per column expression", nameof(outputNames));
+
         Columns = columns.ToArray(); // Create a defensive copy
+        OutputNames = outputNames?.ToArray();
     }
 
     /// <summary>
     /// Gets the column expressions to select
     /// </summary>
     public IReadOnlyList<ColumnExpression> Columns { get; }
+
+    /// <summary>
+    /// Gets the explicit output column names, when provided (one per column)
+    /// </summary>
+    public IReadOnlyList<string>? OutputNames { get; }
 
     public string OperationType => Query.OperationType.Select;
 
@@ -55,12 +77,14 @@ sealed class SelectOperation : IQueryOperation
 
         // Build the new schema with selected columns
         var selectedColumns = new List<(string Name, Type Type)>();
+        var index = 0;
 
         foreach (var column in Columns)
         {
-            var columnName = GetColumnName(column, inputSchema);
+            var columnName = GetColumnName(column, index, inputSchema);
             var columnType = GetColumnType(column, inputSchema);
             selectedColumns.Add((columnName, columnType));
+            index++;
         }
 
         return new Schema(selectedColumns);
@@ -76,12 +100,14 @@ sealed class SelectOperation : IQueryOperation
         {
             var selectedColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
             var evaluator = new ExpressionEvaluator();
+            var index = 0;
 
             foreach (var columnExpr in Columns)
             {
-                var columnName = GetColumnName(columnExpr, input);
+                var columnName = GetColumnName(columnExpr, index, input);
                 var resultColumn = evaluator.Evaluate(columnExpr, input);
                 selectedColumns[columnName] = resultColumn;
+                index++;
             }
 
             return selectedColumns;
@@ -108,6 +134,36 @@ sealed class SelectOperation : IQueryOperation
 
         // For complex expressions, use the expression's display name
         return expression.Name;
+    }
+
+    /// <summary>
+    /// Gets the name for a column expression in the result schema
+    /// </summary>
+    /// <param name="expression">The column expression</param>
+    /// <param name="index">The index of the column expression</param>
+    /// <param name="inputSchema">The input schema (for validation)</param>
+    /// <returns>The column name to use in the result</returns>
+    private string GetColumnName(ColumnExpression expression, int index, Schema inputSchema)
+    {
+        if (OutputNames != null)
+            return OutputNames[index];
+
+        return GetColumnName(expression, inputSchema);
+    }
+
+    /// <summary>
+    /// Gets the name for a column expression in the result (runtime version)
+    /// </summary>
+    /// <param name="expression">The column expression</param>
+    /// <param name="index">The index of the column expression</param>
+    /// <param name="input">The input columns</param>
+    /// <returns>The column name to use in the result</returns>
+    private string GetColumnName(ColumnExpression expression, int index, IReadOnlyDictionary<string, IColumn> input)
+    {
+        if (OutputNames != null)
+            return OutputNames[index];
+
+        return GetColumnName(expression, input);
     }
 
     /// <summary>

@@ -261,6 +261,54 @@ var bonusQuery = frame.AsQueryFrame()
     .ToNivaraFrame();
 ```
 
+### Typed Object LINQ (`frame.Query<T>()`)
+
+The typed object model layers strongly typed lambdas over the same query engine — no string column names and no `RowExpressionBuilder`:
+
+```csharp
+// Define a row type whose properties map to columns (case-insensitive)
+public sealed class Person
+{
+    public string Name { get; set; }
+    public string Department { get; set; }
+    public int Age { get; set; }
+    public double Salary { get; set; }
+}
+
+var people = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
+    ("Department", NivaraColumn<string>.CreateForReferenceType(new[] { "IT", "HR", "IT", "Finance" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 40 })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000, 80000 }))
+);
+
+// Typed predicates and projections — validated eagerly at Query<T>()
+var result = people.Query<Person>()
+    .Where(p => p.Age > 30 && p.Salary > 55000)
+    .OrderByDescending(p => p.Salary)
+    .Select(p => new { p.Name, AnnualBonus = p.Salary * 0.1 })
+    .ToObjects();
+// IReadOnlyList<anonymous>: Diana (8000), Charlie (7000)
+
+// Materialize as a NivaraFrame instead (lazy, ExplainPlan available)
+var resultFrame = people.Query<Person>()
+    .Where(p => p.Age > 30)
+    .Select(p => new { p.Name, p.Age })
+    .Collect();
+
+// GroupBy aggregates via Grouping<TKey,T>: g.Key, g.Average/Sum/Count/Min/Max
+var byDept = people.Query<Person>()
+    .GroupBy(p => p.Department)
+    .Select(g => new { g.Key, AvgSalary = g.Average(p => p.Salary), People = g.Count() })
+    .ToObjects();
+```
+
+Notes:
+- `Query<T>()` requires `T : class, new()`. `Collect()`/`ToList()` return a `NivaraFrame`; `ToObjects()`/`ToRows()` return `IReadOnlyList<TResult>`.
+- Supported: property access, literals, `+ - * /`, comparisons, `&&`/`||`/`!`. Method calls, captured variables/closures, nested property access, and ternary fail fast with `UnsupportedQueryExpressionException` at translation time.
+- `GroupBy` accepts an aggregate `Select` or a bare `Collect` of distinct keys; any other operation after `GroupBy` fails fast.
+- See the full typed-query example in [EXAMPLES.md](EXAMPLES.md#5c-typed-object-linq--framequeryt).
+
 ### Lazy Evaluation
 
 Queries are planned and validated before execution:

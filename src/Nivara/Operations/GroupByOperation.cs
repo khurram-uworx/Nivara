@@ -138,11 +138,19 @@ public sealed class GroupKey : IEquatable<GroupKey>
 }
 
 /// <summary>
+/// Describes a single aggregation applied to grouped rows: the source expression to aggregate,
+/// the aggregation function, and the name of the result column in the grouped output.
+/// </summary>
+public sealed record GroupedAggregation(string ResultColumnName, ColumnExpression Source, AggregationFunction Function);
+
+/// <summary>
 /// Represents a group by operation that groups rows by specified columns with hash-based grouping
 /// </summary>
 public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperation
 {
     readonly ColumnExpression[] groupByColumns;
+    readonly string[]? keyOutputNames;
+    readonly IReadOnlyList<GroupedAggregation>? aggregations;
 
     /// <summary>
     /// Initializes a new instance of GroupByOperation
@@ -151,17 +159,86 @@ public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperatio
     /// <exception cref="ArgumentNullException">Thrown when groupByColumns is null</exception>
     /// <exception cref="ArgumentException">Thrown when no columns are specified</exception>
     public GroupByOperation(ColumnExpression[] groupByColumns)
+        : this(groupByColumns, null, null)
+    {
+    }
+
+    /// <summary>
+    /// Initializes a new instance of GroupByOperation with optional aggregation definitions and
+    /// explicit key output names. When <paramref name="keyOutputNames"/> is null, key columns are
+    /// named after their source expressions (existing behavior). When aggregations are present they
+    /// are computed per group and appended to the key columns.
+    /// </summary>
+    /// <param name="groupByColumns">The column expressions to group by</param>
+    /// <param name="keyOutputNames">Optional explicit names for the key result columns</param>
+    /// <param name="aggregations">Optional per-group aggregations to compute</param>
+    /// <exception cref="ArgumentNullException">Thrown when groupByColumns is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no columns are specified, key output names do
+    /// not match the key column count, or result column names collide</exception>
+    public GroupByOperation(ColumnExpression[] groupByColumns, string[]? keyOutputNames, IReadOnlyList<GroupedAggregation>? aggregations)
     {
         this.groupByColumns = groupByColumns ?? throw new ArgumentNullException(nameof(groupByColumns));
 
         if (groupByColumns.Length == 0)
             throw new ArgumentException("Must specify at least one column expression for grouping", nameof(groupByColumns));
+
+        if (keyOutputNames != null)
+        {
+            if (keyOutputNames.Length != groupByColumns.Length)
+                throw new ArgumentException("Key output names must match the group-by column count", nameof(keyOutputNames));
+
+            if (keyOutputNames.Any(string.IsNullOrWhiteSpace))
+                throw new ArgumentException("Key output names cannot be null or whitespace", nameof(keyOutputNames));
+
+            this.keyOutputNames = keyOutputNames.ToArray();
+        }
+
+        if (aggregations is { Count: > 0 })
+        {
+            var resultNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var keyNames = this.keyOutputNames ?? groupByColumns.Select(c => c.Name).ToArray();
+
+            foreach (var keyName in keyNames)
+                resultNames.Add(keyName);
+
+            foreach (var aggregation in aggregations)
+            {
+                if (string.IsNullOrWhiteSpace(aggregation.ResultColumnName))
+                    throw new ArgumentException("Aggregation result column name cannot be null or whitespace", nameof(aggregations));
+
+                if (aggregation.Source is null)
+                    throw new ArgumentException($"Aggregation '{aggregation.ResultColumnName}' has a null source expression", nameof(aggregations));
+
+                if (aggregation.Function is null)
+                    throw new ArgumentException($"Aggregation '{aggregation.ResultColumnName}' has a null aggregation function", nameof(aggregations));
+
+                if (!resultNames.Add(aggregation.ResultColumnName))
+                    throw new ArgumentException($"Duplicate result column name '{aggregation.ResultColumnName}' in group-by aggregations", nameof(aggregations));
+            }
+
+            this.aggregations = aggregations.ToList();
+        }
     }
 
     /// <summary>
     /// Gets the column expressions to group by
     /// </summary>
     public IReadOnlyList<ColumnExpression> GroupByColumns => groupByColumns;
+
+    /// <summary>
+    /// Gets the explicit key result column names, or null when keys are named after their sources
+    /// </summary>
+    public IReadOnlyList<string>? KeyOutputNames => keyOutputNames;
+
+    /// <summary>
+    /// Gets the per-group aggregations to compute, or null when none are defined
+    /// </summary>
+    public IReadOnlyList<GroupedAggregation>? Aggregations => aggregations;
+
+    /// <summary>
+    /// Gets a value indicating whether this operation computes per-group aggregations
+    /// </summary>
+    public bool HasAggregations => aggregations is { Count: > 0 };
 
     public string OperationType => Query.OperationType.GroupBy;
 
@@ -184,15 +261,24 @@ public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperatio
             }
         }
 
-        // For now, GroupBy returns only the grouped columns
-        // In a full implementation, this would include aggregation columns
         var groupedColumns = new List<(string Name, Type Type)>();
 
-        foreach (var column in GroupByColumns)
+        for (int i = 0; i < GroupByColumns.Count; i++)
         {
-            var columnName = GetColumnName(column, inputSchema);
+            var column = GroupByColumns[i];
+            var columnName = GetKeyOutputName(i, column, inputSchema);
             var columnType = GetColumnType(column, inputSchema);
             groupedColumns.Add((columnName, columnType));
+        }
+
+        if (aggregations != null)
+        {
+            foreach (var aggregation in aggregations)
+            {
+                aggregation.Source.Validate(inputSchema);
+                var sourceType = GetColumnType(aggregation.Source, inputSchema);
+                groupedColumns.Add((aggregation.ResultColumnName, aggregation.Function.GetResultType(sourceType)));
+            }
         }
 
         return new Schema(groupedColumns);
@@ -216,11 +302,24 @@ public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperatio
             // Create result columns with distinct key values
             var resultColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var keyColumnName in keyColumnNames)
+            for (int i = 0; i < keyColumnNames.Length; i++)
             {
+                var keyColumnName = keyColumnNames[i];
+                var outputName = GetKeyOutputName(i, GroupByColumns[i], input);
                 var sourceColumn = input[keyColumnName];
                 var distinctValues = ExtractDistinctKeyValues(groupedData, keyColumnName, sourceColumn);
-                resultColumns[keyColumnName] = distinctValues;
+                resultColumns[outputName] = distinctValues;
+            }
+
+            if (aggregations != null)
+            {
+                foreach (var aggregation in aggregations)
+                {
+                    var sourceName = GetColumnName(aggregation.Source, input);
+                    var sourceColumn = input[sourceName];
+                    resultColumns[aggregation.ResultColumnName] =
+                        aggregation.Function.ApplyToGroups(sourceColumn, groupedData.GetAllGroups());
+                }
             }
 
             return resultColumns;
@@ -359,6 +458,31 @@ public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperatio
 
         // For other expressions, use the expression's result type
         return expression.ResultType;
+    }
+
+    /// <summary>
+    /// Gets the output name for a key column at the given index, honoring explicit key output
+    /// names when provided and falling back to the expression's source name otherwise.
+    /// </summary>
+    /// <param name="index">The key column index</param>
+    /// <param name="expression">The key column expression</param>
+    /// <param name="inputSchema">The input schema (for validation)</param>
+    /// <returns>The key result column name</returns>
+    string GetKeyOutputName(int index, ColumnExpression expression, Schema inputSchema)
+    {
+        return keyOutputNames?[index] ?? GetColumnName(expression, inputSchema);
+    }
+
+    /// <summary>
+    /// Gets the output name for a key column at the given index (runtime version)
+    /// </summary>
+    /// <param name="index">The key column index</param>
+    /// <param name="expression">The key column expression</param>
+    /// <param name="input">The input columns</param>
+    /// <returns>The key result column name</returns>
+    string GetKeyOutputName(int index, ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
+    {
+        return keyOutputNames?[index] ?? GetColumnName(expression, input);
     }
 
     /// <inheritdoc />

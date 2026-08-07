@@ -691,6 +691,47 @@ public sealed class ScalarExpression : ColumnExpression
 }
 
 /// <summary>
+/// Represents a logical negation (NOT) of a boolean expression
+/// </summary>
+public sealed class NotExpression : ColumnExpression
+{
+    /// <summary>
+    /// Initializes a new instance of NotExpression
+    /// </summary>
+    /// <param name="operand">The boolean expression to negate</param>
+    public NotExpression(ColumnExpression operand)
+    {
+        Operand = operand ?? throw new ArgumentNullException(nameof(operand));
+    }
+
+    /// <summary>
+    /// Gets the negated operand expression
+    /// </summary>
+    public ColumnExpression Operand { get; }
+
+    /// <inheritdoc />
+    public override Type ResultType => typeof(bool);
+
+    /// <inheritdoc />
+    public override string Name => $"!({Operand.Name})";
+
+    /// <inheritdoc />
+    public override void Validate(Schema schema)
+    {
+        Operand.Validate(schema);
+
+        if (Operand.ResultType != typeof(bool))
+        {
+            throw new SchemaValidationException(
+                $"Not operation requires a boolean operand, got {Operand.ResultType.Name}");
+        }
+    }
+
+    /// <inheritdoc />
+    public override string ToString() => $"!({Operand})";
+}
+
+/// <summary>
 /// Global function for creating column references
 /// </summary>
 public static class ColumnExpressions
@@ -724,5 +765,15 @@ public static class ColumnExpressions
     public static ColumnExpression Lit(object? value)
     {
         return new LiteralExpression(value);
+    }
+
+    /// <summary>
+    /// Creates a logical negation expression
+    /// </summary>
+    /// <param name="operand">The boolean expression to negate</param>
+    /// <returns>A not expression</returns>
+    public static ColumnExpression Not(ColumnExpression operand)
+    {
+        return new NotExpression(operand);
     }
 }

@@ -75,6 +75,8 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             return executeSortParallelSync(sortOp, input, ranges, maxDop, context.CancellationToken);
         if (operation is SortByExpressionOperation expressionSortOp)
             return executeExpressionSortParallelSync(expressionSortOp, input, ranges, maxDop, context.CancellationToken);
+        if (operation is GroupByOperation aggregateGroupBy && aggregateGroupBy.HasAggregations)
+            return operation.Execute(input);
         if (operation is IParallelGroupByOperation groupByOp)
             return executeGroupByParallelSync(groupByOp, input, ranges, maxDop, context.CancellationToken);
         if (operation is IParallelJoinOperation joinOp)
@@ -339,6 +341,8 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             return await Task.Run(() => executeSortParallelSync(sortOp, input, ranges, maxDop, context.CancellationToken), context.CancellationToken).ConfigureAwait(false);
         if (operation is SortByExpressionOperation expressionSortOp)
             return await Task.Run(() => executeExpressionSortParallelSync(expressionSortOp, input, ranges, maxDop, context.CancellationToken), context.CancellationToken).ConfigureAwait(false);
+        if (operation is GroupByOperation aggregateGroupBy && aggregateGroupBy.HasAggregations)
+            return await Task.Run(() => operation.Execute(input), context.CancellationToken).ConfigureAwait(false);
         if (operation is IParallelGroupByOperation groupByOp)
             return executeGroupByParallelAsync(groupByOp, input, ranges, maxDop, context.CancellationToken);
         if (operation is IParallelJoinOperation joinOp)

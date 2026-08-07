@@ -729,6 +729,22 @@ public sealed class QueryFrame : IDisposable
         return new QueryPlan(source, operations);
     }
 
+    /// <summary>
+    /// Appends a single operation to the pipeline, returning a new QueryFrame. Used by the typed
+    /// LINQ layer to compose group-by aggregations that depend on deferred grouping state.
+    /// </summary>
+    /// <param name="operation">The operation to append</param>
+    /// <returns>A new QueryFrame with the operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when operation is null</exception>
+    internal QueryFrame WithOperation(IQueryOperation operation)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        ArgumentNullException.ThrowIfNull(operation);
+
+        return new QueryFrame(source, operations.Concat(new[] { operation }));
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {

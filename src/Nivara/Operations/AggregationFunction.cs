@@ -149,6 +149,28 @@ public sealed class CountAggregation : AggregationFunction
 }
 
 /// <summary>
+/// Row-count aggregation function that counts every row in each group regardless of nulls.
+/// Maps to LINQ's <c>group.Count()</c> without a selector.
+/// </summary>
+public sealed class RowCountAggregation : AggregationFunction
+{
+    /// <inheritdoc />
+    public override string Name => "Count";
+
+    /// <inheritdoc />
+    public override Type GetResultType(Type inputType) => typeof(long);
+
+    /// <inheritdoc />
+    public override object? Apply(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        if (groupIndices == null)
+            throw new ArgumentNullException(nameof(groupIndices));
+
+        return (long)groupIndices.Count;
+    }
+}
+
+/// <summary>
 /// Sum aggregation function that sums numeric values in each group using vectorized operations
 /// </summary>
 public sealed class SumAggregation : AggregationFunction
@@ -504,6 +526,12 @@ public static class AggregationFunctions
     /// </summary>
     /// <returns>A new CountAggregation instance</returns>
     public static CountAggregation Count() => new();
+
+    /// <summary>
+    /// Creates a row-count aggregation function that counts every row in a group
+    /// </summary>
+    /// <returns>A new RowCountAggregation instance</returns>
+    public static RowCountAggregation RowCount() => new();
 
     /// <summary>
     /// Creates a Sum aggregation function

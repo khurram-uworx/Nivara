@@ -315,6 +315,58 @@ var fullOuter = left.FullOuterJoin(right, "Id");
 
 All join methods accept additional optional parameters: `ColumnDisambiguationStrategy`, `leftPrefix`, and `rightPrefix`.
 
+### 4. Typed Object LINQ API (`frame.Query<T>()`)
+
+`NivaraFrame.Query<T>()` (requires `T : class, new()`; `using Nivara.Linq;`) returns an immutable
+`NivaraQuery<T>`. Every property of `T` maps to a column with the same name (case-insensitive) and an
+exact or nullable-underlying type, validated eagerly at `Query<T>()` (no data access) with
+`SchemaValidationException` on mismatch.
+
+```csharp
+public sealed class Person
+{
+    public string Name { get; set; }
+    public string City { get; set; }
+    public int Age { get; set; }
+    public double Salary { get; set; }
+}
+
+var result = frame.Query<Person>()
+    .Where(p => p.Age > 30 && p.City == "NYC")
+    .OrderByDescending(p => p.Salary)
+    .Select(p => new { p.Name, SalaryRaised = p.Salary * 1.1 })
+    .ToObjects();   // IReadOnlyList<anonymous>
+```
+
+Supported operators: property access, constant literals, `+ - * /` arithmetic, comparisons,
+`&&`/`||`/`!` boolean logic. Method calls, captured variables/closures, nested property access,
+array/index access, ternary, `%`, and string `+` fail fast at build time with
+`UnsupportedQueryExpressionException`.
+
+Materialization:
+- `Collect()` / `ToList()` → `NivaraFrame` (pipeline runs lazily like the expression API).
+- `ToObjects()` / `ToRows()` → `IReadOnlyList<TResult>` via a compiled, cached per-type row factory.
+- `Schema` / `ExplainPlan()` behave like the expression API.
+- `AsQueryFrame()` exposes the underlying expression pipeline for further composition.
+
+Grouping:
+- `GroupBy(key)` returns `NivaraGroupedQuery<TKey,T>`; bare `Collect()` yields the distinct keys.
+- Aggregate `Select` reads `g.Key` plus `g.Average/Sum/Count/Min/Max(p => ...)` (the `Grouping<TKey,T>`
+  marker exposes these for C# type inference; they are never invoked at runtime).
+- Any operation other than an aggregate `Select`/`Collect` after `GroupBy` fails fast.
+
+```csharp
+var stats = frame.Query<Person>()
+    .Where(p => p.Age > 18)
+    .GroupBy(p => p.City)
+    .Select(g => new { g.Key, AvgSalary = g.Average(p => p.Salary), People = g.Count() })
+    .ToObjects();
+```
+
+Row factories require a public parameterless constructor (anonymous types via `Select` work
+automatically); a null cell materialized into a non-nullable value-type property throws at
+materialization time.
+
 ---
 
 ## Execution Pipeline
@@ -447,6 +499,25 @@ var groups = items.AsQueryFrame()
 // Category: ["A", "B", "C"]
 ```
 
+### Typed object LINQ (issue end-to-end)
+
+```csharp
+var frame = NivaraFrame.Create(
+    ("Name", NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Carol", "Dan", "Eve" })),
+    ("City", NivaraColumn<string>.Create(new[] { "NYC", "LA", "NYC", "SF", "LA" })),
+    ("Age", NivaraColumn<int>.Create(new[] { 34, 28, 41, 25, 33 })),
+    ("Salary", NivaraColumn<double>.Create(new[] { 90000, 65000, 120000, 55000, 78000 }))
+);
+
+var query = frame.Query<Person>()
+    .Where(p => p.Age > 30)
+    .GroupBy(p => p.City)
+    .Select(g => new { g.Key, AvgSalary = g.Average(p => p.Salary) });
+
+var stats = query.Collect();             // NivaraFrame: Key | AvgSalary
+var objects = query.ToObjects();         // IReadOnlyList<anonymous>: NYC -> 105000, LA -> 78000
+```
+
 ### Multi-column sort
 
 ```csharp
@@ -518,6 +589,12 @@ var suggestions = query.AnalyzeOptimizations();
 | ExpressionEvaluator | `src/Nivara/Helpers/ExpressionEvaluator.cs` |
 | RowExpressionBuilder | `src/Nivara/Linq/RowExpressionBuilder.cs` |
 | NivaraLinqExtensions | `src/Nivara/Linq/NivaraLinqExtensions.cs` |
+| NivaraQuery<T> / NivaraGroupedQuery<TKey,T> | `src/Nivara/Linq/NivaraQuery.cs` |
+| Grouping<TKey,T> marker | `src/Nivara/Linq/Grouping.cs` |
+| TypedExpressionTranslator | `src/Nivara/Linq/TypedExpressionTranslator.cs` |
+| TypedLinqMetadata / TypedProjectionBuilder | `src/Nivara/Linq/TypedLinqMetadata.cs` / `TypedProjectionBuilder.cs` |
+| TypedRowFactory | `src/Nivara/Linq/TypedRowFactory.cs` |
+| Query<T>() entry | `src/Nivara/Linq/TypedLinqExtensions.cs` |
 | ExecutionEngine | `src/Nivara/Execution/ExecutionEngine.cs` |
 | QueryOptimizer | `src/Nivara/Query/QueryOptimizer.cs` |
 | QueryPlanAnalyzer | `src/Nivara/Query/QueryPlan.cs` |
