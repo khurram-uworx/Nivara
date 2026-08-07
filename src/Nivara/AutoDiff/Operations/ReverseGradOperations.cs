@@ -491,7 +491,7 @@ public static class ReverseGradOperations
                         if (savedWeights != null)
                             scoresSpan.CopyTo(savedWeights.AsSpan(h * scoreLen, scoreLen));
 
-                        TensorsHelper.MultiplyCore(scores, vh, outHead, qLen, kvLen, headDim);
+                        GradKernels.MatMul(scores, vh, outHead, qLen, kvLen, headDim);
                         AttentionKernels<T>.ScatterHead(
                             outHead.AsSpan(0, qLen * headDim), output.AsSpan(), qLen, D, h, headDim);
                     }
@@ -544,7 +544,7 @@ public static class ReverseGradOperations
                                     var pHead = weights.AsSpan(h * scoreLen, scoreLen);
                                     var dPSpan = dP.AsSpan(0, scoreLen);
 
-                                    TensorsHelper.MultiplyCore(dOH, vhSpan, dP, qLen, headDim, kvLen, bTransposed: true);
+                                    GradKernels.MatMulTransposedB(dOH, vhSpan, dP, qLen, headDim, kvLen);
                                     AttentionKernels<T>.SoftmaxBackwardRows(pHead, dPSpan, qLen, kvLen);
                                     TensorPrimitives.Multiply(dPSpan, scale, dPSpan);
 
@@ -552,11 +552,11 @@ public static class ReverseGradOperations
                                     var dKH = dKHead.AsSpan(0, kvLen * headDim);
                                     var dVH = dVHead.AsSpan(0, kvLen * headDim);
 
-                                    TensorsHelper.MultiplyCore(dP, khSpan, dQHead, qLen, kvLen, headDim);
-                                    TensorsHelper.Transpose(dPSpan, dPT.AsSpan(0, scoreLen), qLen, kvLen);
-                                    TensorsHelper.MultiplyCore(dPT, qhSpan, dKHead, kvLen, qLen, headDim);
-                                    TensorsHelper.Transpose(pHead, pT.AsSpan(0, scoreLen), qLen, kvLen);
-                                    TensorsHelper.MultiplyCore(pT, dOH, dVHead, kvLen, qLen, headDim);
+                                    GradKernels.MatMul(dP, khSpan, dQHead, qLen, kvLen, headDim);
+                                    GradKernels.Transpose(dPSpan, dPT.AsSpan(0, scoreLen), qLen, kvLen);
+                                    GradKernels.MatMul(dPT, qhSpan, dKHead, kvLen, qLen, headDim);
+                                    GradKernels.Transpose(pHead, pT.AsSpan(0, scoreLen), qLen, kvLen);
+                                    GradKernels.MatMul(pT, dOH, dVHead, kvLen, qLen, headDim);
 
                                     AttentionKernels<T>.ScatterHead(dQH, dQ.AsSpan(), qLen, D, h, headDim);
                                     AttentionKernels<T>.ScatterHead(dKH, dK.AsSpan(), kvLen, D, h, headDim);
@@ -729,7 +729,7 @@ public static class ReverseGradOperations
                                 if (savedWeights != null)
                                     scoresSpan.CopyTo(savedWeights.AsSpan(wOff + h * scoreLen, scoreLen));
 
-                                TensorsHelper.MultiplyCore(scores, vh, outHead, qLen, kvLen, headDim);
+                                GradKernels.MatMul(scores, vh, outHead, qLen, kvLen, headDim);
                                 AttentionKernels<T>.ScatterHead(
                                     outHead.AsSpan(0, qLen * headDim), output.AsSpan(outOff, qLen * D), qLen, D, h, headDim);
                             }
@@ -820,7 +820,7 @@ public static class ReverseGradOperations
                                         var pHead = weights.AsSpan(wOff + h * scoreLen, scoreLen);
                                         var dPSpan = dP.AsSpan(0, scoreLen);
 
-                                        TensorsHelper.MultiplyCore(dOH, vhSpan, dP, qLen, headDim, kvLen, bTransposed: true);
+                                        GradKernels.MatMulTransposedB(dOH, vhSpan, dP, qLen, headDim, kvLen);
                                         AttentionKernels<T>.SoftmaxBackwardRows(pHead, dPSpan, qLen, kvLen);
                                         TensorPrimitives.Multiply(dPSpan, scale, dPSpan);
 
@@ -828,11 +828,11 @@ public static class ReverseGradOperations
                                         var dKH = dKHead.AsSpan(0, kvLen * headDim);
                                         var dVH = dVHead.AsSpan(0, kvLen * headDim);
 
-                                        TensorsHelper.MultiplyCore(dP, khSpan, dQHead, qLen, kvLen, headDim);
-                                        TensorsHelper.Transpose(dPSpan, dPT.AsSpan(0, scoreLen), qLen, kvLen);
-                                        TensorsHelper.MultiplyCore(dPT, qhSpan, dKHead, kvLen, qLen, headDim);
-                                        TensorsHelper.Transpose(pHead, pT.AsSpan(0, scoreLen), qLen, kvLen);
-                                        TensorsHelper.MultiplyCore(pT, dOH, dVHead, kvLen, qLen, headDim);
+                                        GradKernels.MatMul(dP, khSpan, dQHead, qLen, kvLen, headDim);
+                                        GradKernels.Transpose(dPSpan, dPT.AsSpan(0, scoreLen), qLen, kvLen);
+                                        GradKernels.MatMul(dPT, qhSpan, dKHead, kvLen, qLen, headDim);
+                                        GradKernels.Transpose(pHead, pT.AsSpan(0, scoreLen), qLen, kvLen);
+                                        GradKernels.MatMul(pT, dOH, dVHead, kvLen, qLen, headDim);
 
                                         AttentionKernels<T>.ScatterHead(dQH, dQ.AsSpan(dQOff, qLen * D), qLen, D, h, headDim);
                                         AttentionKernels<T>.ScatterHead(dKH, dK.AsSpan(dKOff, kvLen * D), kvLen, D, h, headDim);
