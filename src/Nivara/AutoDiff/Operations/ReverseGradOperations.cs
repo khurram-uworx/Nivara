@@ -1,6 +1,5 @@
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Utilities;
-using Nivara.Tensors;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
@@ -398,8 +397,8 @@ public static class ReverseGradOperations
     /// Fused multi-head scaled dot-product attention as a single graph node.
     ///
     /// Computes, per head, softmax(scale * (Q_h @ K_h^T) + mask) @ V_h using
-    /// SIMD <see cref="TensorsHelper.MultiplyCore{T}"/> row kernels and a
-    /// transpose-free QK^T path (the transposed-B layout the kernel consumes
+    /// SIMD <see cref="GradKernels.MatMulTransposedB{T}"/> QK^T row kernels and a
+    /// transpose-free path (the transposed-B layout the kernel consumes
     /// equals K's raw layout). The attention scale and the additive
     /// padding/causal mask fold into the per-row score softmax over a single
     /// [qLen, kvLen] pass — no separate Scale/Mask/Add nodes. In training one
