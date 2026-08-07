@@ -1158,9 +1158,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        var aSpan = a.AsSpan();
-        for (int i = 0; i < a.Length; i++)
-            resultArr[i] = T.Max(aSpan[i], T.Zero);
+        GradKernels.Relu(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1168,10 +1166,9 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput) =>
             {
-                var aSpan = a.AsSpan();
+                typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                    gradArr[i] = aSpan[i] > T.Zero ? typedGradOutput[i] : T.Zero;
+                GradKernels.ReluGradient(a.AsSpan(), gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
@@ -1188,31 +1185,17 @@ public static class ReverseGradOperations
         bool trackGrad = GradientUtils.ShouldTrackGrad(a);
 
         var resultArr = new T[a.Length];
-        var source = a.AsSpan();
-        for (int i = 0; i < a.Length; i++)
-        {
-            double x = double.CreateChecked(source[i]);
-            resultArr[i] = T.CreateChecked(0.5 * x * (1.0 + Math.Tanh(Math.Sqrt(2.0 / Math.PI) * (x + 0.044715 * x * x * x))));
-        }
+        GradKernels.Gelu(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, trackGrad);
 
         if (trackGrad)
         {
-            var aArr = new T[a.Length];
-            a.AsSpan().CopyTo(aArr.AsSpan());
-
             var gradFn = new OpNode<T>("Gelu", new object[] { a }, (typedGradOutput) =>
             {
+                typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                {
-                    double x = double.CreateChecked(aArr[i]);
-                    double cdf = 0.5 * (1.0 + Math.Tanh(Math.Sqrt(2.0 / Math.PI) * (x + 0.044715 * x * x * x)));
-                    double pdf = Math.Exp(-0.5 * x * x) / Math.Sqrt(2.0 * Math.PI);
-                    double grad = cdf + x * pdf;
-                    gradArr[i] = T.CreateChecked(grad * double.CreateChecked(typedGradOutput[i]));
-                }
+                GradKernels.GeluGradient(a.AsSpan(), gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
@@ -1257,7 +1240,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        TensorPrimitives.Sigmoid(a.AsSpan(), resultArr.AsSpan());
+        GradKernels.Sigmoid(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1265,12 +1248,9 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput) =>
             {
+                typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                {
-                    var s = resultArr[i];
-                    gradArr[i] = s * (T.One - s) * typedGradOutput[i];
-                }
+                GradKernels.SigmoidGradient(resultArr, gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
@@ -1285,7 +1265,7 @@ public static class ReverseGradOperations
         if (a == null) throw new ArgumentNullException(nameof(a));
 
         var resultArr = new T[a.Length];
-        TensorPrimitives.Tanh(a.AsSpan(), resultArr.AsSpan());
+        GradKernels.Tanh(a.AsSpan(), resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1293,12 +1273,9 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput) =>
             {
+                typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                {
-                    var t = resultArr[i];
-                    gradArr[i] = (T.One - t * t) * typedGradOutput[i];
-                }
+                GradKernels.TanhGradient(resultArr, gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
@@ -1395,9 +1372,7 @@ public static class ReverseGradOperations
             negativeSlope = T.CreateChecked(0.01);
 
         var resultArr = new T[a.Length];
-        var aSpan = a.AsSpan();
-        for (int i = 0; i < a.Length; i++)
-            resultArr[i] = aSpan[i] >= T.Zero ? aSpan[i] : aSpan[i] * negativeSlope;
+        GradKernels.LeakyRelu(a.AsSpan(), negativeSlope, resultArr);
 
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
@@ -1405,10 +1380,9 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("LeakyRelu", new object[] { a, negativeSlope }, (typedGradOutput) =>
             {
-                var aSpanInner = a.AsSpan();
+                typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                    gradArr[i] = aSpanInner[i] >= T.Zero ? typedGradOutput[i] : typedGradOutput[i] * negativeSlope;
+                GradKernels.LeakyReluGradient(a.AsSpan(), gSpan, negativeSlope, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 
