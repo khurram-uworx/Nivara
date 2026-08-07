@@ -1,8 +1,8 @@
 # 143-PLAN — interface-based Normalize/Standardize kernels
 
-**Status:** draft for team review · **Tracks:** khurram-uworx/Nivara issues #143 (delivered), #144 (this work) · **Scope:** `src/Nivara` data-prep (`NivaraFrameExtensions`) + `src/Nivara/Tensors/TensorsHelper.cs` · **Branch (proposed):** `khurram/144`
+**Status:** implemented on `khurram/143` · **Tracks:** khurram-uworx/Nivara issues #143 (delivered), #144 (this work) · **Scope:** `src/Nivara` data-prep (`NivaraFrameExtensions`) + `src/Nivara/Tensors/TensorsHelper.cs` · **Branch:** `khurram/143`
 
-This plan is the second act of issue #143. #143 (add `Standardize` z-score alias + promote data-prep to core) is delivered and merged. This plan captures design feedback on how the promoted code dispatches on column type, and extends it to the full generic-math numeric surface. It is written for discussion before any implementation starts.
+This plan is the second act of issue #143. #143 (add `Standardize` z-score alias + promote data-prep to core) is delivered and merged. This plan captures design feedback on how the promoted code dispatches on column type, and extends it to the full generic-math numeric surface. Executed on `khurram/143` (see `docs/TODO.md` history).
 
 ---
 

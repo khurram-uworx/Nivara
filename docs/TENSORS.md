@@ -186,6 +186,15 @@ AutoDiff is constrained to `IFloatingPointIeee754<T>` (float, double, Half). `BF
 net11-only (not testable at the net10.0 TFM); today's BFloat16 support is load-time BF16→F32
 widening in `SafeTensorsLoader`. Kernel tests for BFloat16 are deferred to the net11 migration.
 
+### Data-prep numeric surface
+
+`NivaraFrameExtensions.Normalize` / `Standardize` (data-prep, not AutoDiff) accept any
+`INumber<T>` column: `int`/`long`/`short`/`byte`/`uint`/`ushort`/`sbyte`/`nint`/`nuint`/
+`decimal` are converted via `TensorPrimitives.ConvertChecked<T,double>` and z-scored in
+`double` (output `NivaraColumn<double>`); `float`/`double`/`Half` use the in-place SIMD
+`TensorsHelper.TryNormalizeInPlace`. `char`, `BigInteger`, `Int128`, `UInt128` are excluded
+by design (see `docs/143-PLAN.md`).
+
 ---
 
 ## Committed direction
