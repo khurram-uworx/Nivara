@@ -124,7 +124,7 @@ already *is* its `Tensor<T>`.
 Columns otherwise interop with BCL tensors element-wise via `TensorInteropExtensions`
 (`Series`/`Frame` ↔ `Tensor<T>`), never by pretending columnar ops are tensor ops.
 
-### What was removed, and why
+### What was removed, and why (and what came back as scoped interop)
 
 The deprecated tensor APIs on `NivaraFrame`/`NivaraSeries`
 (`Dot`, `CosineSimilarity`, `ColumnNorms`, `RowNorms`, `DotProduct`, `Norm`) were **removed**
@@ -133,6 +133,20 @@ callers, and the platform `TensorPrimitives` kernels are the sanctioned replacem
 `NivaraTensorExtensions` was stripped to null-aware column reductions (`Sum`, `Mean`, `Min`, `Max`).
 Column math is done on spans via `TryGetSpan`; row-major operations assemble spans with
 `CopyToRowMajor`.
+
+Row-wise frame scoring **came back** as a scoped interop convenience (#138/#141), with a
+deliberately narrower surface than the removed tensor-axis APIs:
+
+- `TensorsHelper.RowDot` / `RowCosineSimilarity` / `RowNorms` — internal row-slice
+  `TensorPrimitives` kernels over a row-major buffer + null mask (`internal static class`, public
+  methods, namespace `Nivara.Tensors`).
+- `NivaraFrame.RowDot<T>(query, labels)` / `RowCosineSimilarity<T>(query, labels)` — **public**
+  frame API that scores each row against a query series. SQL-like null semantics: a null in a row
+  masks only that row's score; a null in the query masks all scores; the result always carries a
+  null mask. The implementation materializes row-major via a pooled blocked transpose and returns
+  a `NivaraSeries<T>`.
+- No public `RowNorms`/`ColumnNorms`/`Dot`/`CosineSimilarity` on the frame — those stay removed;
+  the frame row-wise surface is exactly the two scoring methods above.
 
 No custom tensor ecosystem. No tensor operators. No tensor hierarchy.
 
@@ -219,9 +233,12 @@ re-wrap what `TensorPrimitives` already does, and the tensor surface is interop,
 ### Scoped tensor ambitions (GitHub issues)
 
 Row-wise frame scoring (#138), row-slice `TensorPrimitives` kernels (#141), and benchmark coverage
-(#142) are tracked as standalone issues to pick up opportunistically between releases — **before**
-the committed roadmaps. They are scoped as **interop conveniences** — not a change to the
-column-first storage model, not BLAS-level matrix multiplication in core.
+(#142) are **delivered** — implemented as **interop conveniences**, not a change to the
+column-first storage model, not BLAS-level matrix multiplication in core. The kernels live in the
+internal `TensorsHelper` class (row-slice `Dot`/`CosineSimilarity`/`Norm` with null-mask support);
+the public surface is `NivaraFrame.RowDot` / `RowCosineSimilarity` (see "What Nivara actually
+exposes"). The `Nivara.PerformanceTests` harness carries four row-scoring scenarios (per-row
+status quo, frame API, raw kernels) as the regression gate.
 
 ### Explicit non-goals
 
