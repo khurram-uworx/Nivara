@@ -21,7 +21,7 @@ Concretely, when this roadmap is done:
 
 The column path is already native and fast: `NivaraColumn<T>` arithmetic is typed and vectorized (`TensorPrimitives` in `src/Nivara/NivaraColumn.cs`), storage is tensor/memory-backed and pooled, and the optimizer (`QueryOptimizer` + pushdown/fusion rules in `src/Nivara/Optimization/`) is real.
 
-The query *expression* hot path is now typed and fused: the boxed `object?` interpreter in `ExpressionEvaluator` was replaced by a fused evaluator (compiled-first `Expression.Compile` target over `T[]` arrays with a generic node-tree fallback in `src/Nivara/Expressions/`), `Filter`/`Select`/`SortByExpression` route through it, `OrderBy` computes typed keys, `MultiColumnComparer` compares without boxing, and unsupported type/operator combinations throw a clear `NotSupportedException` instead of silently boxing. No `object?` per-element dispatch remains on the numeric/vectorizable query path.
+The query *expression* hot path is now typed and fused: the boxed `object?` interpreter in `ExpressionEvaluator` was replaced by a fused evaluator (compiled-first `Expression.Compile` target over `T[]` arrays with a generic node-tree fallback in `src/Nivara/Expressions/`), `Filter`/`Select`/`SortByExpression` route through it, `OrderBy` computes typed keys, `MultiColumnComparer` compares without boxing, and unsupported type/operator combinations throw a clear `NotSupportedException` instead of silently boxing. No `object?` per-element dispatch remains on the numeric/vectorizable query path. The legacy `ExpressionEvaluator` interpreter file was fully removed in #152; the fused evaluator is the sole expression engine.
 
 Row-level filters are typed too: the last public `dynamic` surface in the core (`frame.Where(Func<dynamic,bool>)` via `ExpandoObject` + reflection) was removed (#154) in favor of `frame.Where(Func<NivaraRow,bool>)`, where `NivaraRow` is an allocation-free readonly struct over the frame's columns with `GetValue<T>`/`TryGetValue<T>`/`IsNull` accessors. The row view is a bridge for user predicates; the engine's own filter kernels stay columnar and fused.
 
@@ -40,7 +40,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 
 **Motivation:** The boxed interpreter is the single largest contradiction to the vision. Both front ends (`ColumnExpression` operators and `RowExpressionBuilder`) already produce the same AST, so fixing the back end fixes both surfaces at once — the highest-leverage change in the project.
 
-**Status (delivered, #153):** The boxed interpreter is gone. `ExpressionEvaluator` is now typed and vectorized per operator via a typed fast path plus a typed numeric-promotion path, with no `object?` per-element dispatch on the numeric/vectorizable query path. The public front ends are unchanged; `OrderBy` computed keys feed the fused evaluator (Phase 2).
+**Status (delivered, #153):** The boxed interpreter is gone. A typed fast path plus a typed numeric-promotion path replaced it, with no `object?` per-element dispatch on the numeric/vectorizable query path. The typed interpreter (then `ExpressionEvaluator`) was superseded by the fused evaluator and its file removed in #152; the public front ends are unchanged and `OrderBy` computed keys feed the fused evaluator (Phase 2).
 
 **Scope:**
 - Replace the interpreter in `ExpressionEvaluator` with a typed lowering pass: `ColumnExpression` AST → typed evaluation that produces `NivaraColumn<T>` results by reusing the existing typed column kernels (no `object?` result columns on the happy path).
@@ -75,7 +75,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 
 **Scope (remaining):** `BFloat16`-typed kernels stay deferred to the net11 migration (#137); the fused compiled target runs over `T[]` arrays rather than spans (ref-structs are excluded from expression trees — span-capable target tracked as #155); `NivaraColumn<T>` arithmetic generic-math collapse tracked as #157.
 
-**Key files:** `src/Nivara/Helpers/ExpressionEvaluator.cs` (or successor), `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraLinqExtensions.cs`, `src/Nivara/Optimization/OperationFusionRule.cs`, `src/Nivara/KernelSelector.cs`.
+**Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraLinqExtensions.cs`, `src/Nivara/Optimization/OperationFusionRule.cs`, `src/Nivara/KernelSelector.cs`.
 
 **Dependencies:** Phase 1.
 

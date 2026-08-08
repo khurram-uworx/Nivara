@@ -216,9 +216,6 @@ static class Program
         Run("Fused chain 1M x (Salary*1.1)+1000-Tax", 5, 50,
             () => CreateFusedChainScenario(1_000_000));
 
-        Run("Multi-pass chain 1M x (Salary*1.1)+1000-Tax", 5, 50,
-            () => CreateMultiPassChainScenario(1_000_000));
-
         Run("Linear forward [32x256] -> [32x256]", 5, 100,
             () =>
             {
@@ -619,9 +616,8 @@ static class Program
 
     /// <summary>
     /// Builds the fused-evaluator chain scenario for (Salary * 1.1) + 1000 - Tax. The scenario
-    /// gates on the vectorized kernel heuristic (KernelSelector length >= vectorSize * 4) and
-    /// asserts the single-pass fused evaluation beats the multi-pass legacy evaluator at the
-    /// chosen length, throwing loudly if it does not.
+    /// gates on the vectorized kernel heuristic (KernelSelector length >= vectorSize * 4) so the
+    /// fused compiled target is exercised at a vectorized length.
     /// </summary>
     static Action CreateFusedChainScenario(int length)
     {
@@ -637,38 +633,13 @@ static class Program
         }
 
         var fused = new FusedExpressionEvaluator();
-        var legacy = new ExpressionEvaluator();
 
         for (int i = 0; i < 3; i++)
         {
             fused.Evaluate(expression, input);
-            legacy.Evaluate(expression, input);
-        }
-
-        var fusedNs = MeasureNs(() => fused.Evaluate(expression, input), 3, 30);
-        var legacyNs = MeasureNs(() => legacy.Evaluate(expression, input), 3, 30);
-
-        if (fusedNs >= legacyNs)
-        {
-            throw new InvalidOperationException(
-                $"Fused chain must beat multi-pass at length {length}: fused {fusedNs:N0} ns/op vs multi-pass {legacyNs:N0} ns/op");
         }
 
         return () => fused.Evaluate(expression, input);
-    }
-
-    /// <summary>
-    /// Builds the multi-pass legacy-evaluator chain scenario for (Salary * 1.1) + 1000 - Tax,
-    /// materializing an intermediate column per operator.
-    /// </summary>
-    static Action CreateMultiPassChainScenario(int length)
-    {
-        var salary = NivaraColumn<double>.Create(Fill(new double[length]));
-        var tax = NivaraColumn<double>.Create(Fill(new double[length]));
-        var input = new Dictionary<string, IColumn> { ["Salary"] = salary, ["Tax"] = tax };
-        var expression = ColumnExpressions.Col("Salary") * 1.1 + 1000 - ColumnExpressions.Col("Tax");
-        var legacy = new ExpressionEvaluator();
-        return () => legacy.Evaluate(expression, input);
     }
 
     /// <summary>
