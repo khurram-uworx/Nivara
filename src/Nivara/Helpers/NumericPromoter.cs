@@ -66,9 +66,14 @@ internal static class NumericPromoter
         if (left == typeof(long) || right == typeof(long))
             return typeof(long);
 
-        // C# rule 6: uint + signed integral promotes both to long.
+        // C# rule 7: uint + byte/ushort/char promotes to uint.
         if (left == typeof(uint) || right == typeof(uint))
-            return typeof(long);
+        {
+            var other = left == typeof(uint) ? right : left;
+            return other == typeof(byte) || other == typeof(ushort) || other == typeof(char)
+                ? typeof(uint)
+                : typeof(long);
+        }
 
         // Remaining small integral pairs promote to int.
         return typeof(int);

@@ -83,6 +83,7 @@ public class ColumnStorageFactoryTests
     [TestCase(new uint[] { 0, 1, uint.MaxValue })]
     [TestCase(new long[] { long.MinValue, 0, long.MaxValue })]
     [TestCase(new ulong[] { 0, 1, ulong.MaxValue })]
+    [TestCase(new char[] { (char)1, (char)2, (char)3 })]
     public void ColumnStorageFactory_Create_VectorizableNumericTypes_SelectsVectorizableStorage<T>(T[] values) where T : unmanaged
     {
         var storage = ColumnStorageFactory.Create<T>(values);
@@ -197,6 +198,7 @@ public class ColumnStorageFactoryTests
         Assert.That(ColumnStorageFactory.IsVectorizable<float>(), Is.True, "float should be vectorizable");
         Assert.That(ColumnStorageFactory.IsVectorizable<double>(), Is.True, "double should be vectorizable");
         Assert.That(ColumnStorageFactory.IsVectorizable<bool>(), Is.True, "bool should be vectorizable");
+        Assert.That(ColumnStorageFactory.IsVectorizable<char>(), Is.True, "char should be vectorizable");
     }
 
     [Test]

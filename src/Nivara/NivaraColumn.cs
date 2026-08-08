@@ -53,6 +53,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Multiply(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Multiply(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), reinterpretWritable<char>(destination)); return; }
 
         throw new NotSupportedException(
             $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
@@ -78,6 +79,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Multiply(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Multiply(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
 
         throw new NotSupportedException(
             $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
@@ -103,6 +105,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Add(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Add(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Add(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Add(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
 
         throw new NotSupportedException(
             $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
@@ -128,6 +131,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Subtract(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Subtract(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Subtract(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Subtract(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
 
         throw new NotSupportedException(
             $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
@@ -153,6 +157,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Divide(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Divide(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
 
         throw new NotSupportedException(
             $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
@@ -178,6 +183,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Divide(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Divide(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), reinterpretWritable<char>(destination)); return; }
 
         throw new NotSupportedException(
             $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
@@ -202,6 +208,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Equals(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), destination); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Equals(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), destination); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Equals(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), destination); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Equals(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), destination); return; }
 
         var comparer = EqualityComparer<T>.Default;
         for (int i = 0; i < x.Length; i++)
@@ -229,6 +236,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Equals(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), destination); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Equals(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), destination); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Equals(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), destination); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.Equals(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), destination); return; }
 
         var comparer = EqualityComparer<T>.Default;
         for (int i = 0; i < x.Length; i++)
@@ -256,6 +264,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.GreaterThan(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), destination); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.GreaterThan(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), destination); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.GreaterThan(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), destination); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.GreaterThan(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), destination); return; }
 
         var comparer = Comparer<T>.Default;
         for (int i = 0; i < x.Length; i++)
@@ -283,6 +292,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.GreaterThan(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), destination); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.GreaterThan(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), destination); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.GreaterThan(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), destination); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.GreaterThan(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), destination); return; }
 
         var comparer = Comparer<T>.Default;
         for (int i = 0; i < x.Length; i++)
@@ -310,6 +320,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.LessThan(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), destination); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.LessThan(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), destination); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.LessThan(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), destination); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.LessThan(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), destination); return; }
 
         var comparer = Comparer<T>.Default;
         for (int i = 0; i < x.Length; i++)
@@ -337,6 +348,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) { NumericTensorKernels<ulong>.LessThan(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), destination); return; }
         if (type == typeof(byte)) { NumericTensorKernels<byte>.LessThan(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), destination); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.LessThan(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), destination); return; }
+        if (type == typeof(char)) { NumericTensorKernels<char>.LessThan(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), destination); return; }
 
         var comparer = Comparer<T>.Default;
         for (int i = 0; i < x.Length; i++)

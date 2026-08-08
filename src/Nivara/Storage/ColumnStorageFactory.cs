@@ -108,6 +108,7 @@ static class ColumnStorageFactory
                type == typeof(ulong) ||
                type == typeof(ushort) ||
                type == typeof(sbyte) ||
+               type == typeof(char) ||
                type == typeof(bool);
     }
 }

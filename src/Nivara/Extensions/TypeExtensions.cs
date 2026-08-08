@@ -18,6 +18,7 @@ static class TypeExtensions
             underlying == typeof(uint) ||
             underlying == typeof(ulong) ||
             underlying == typeof(ushort) ||
+            underlying == typeof(char) ||
             underlying == typeof(decimal) ||
             underlying == typeof(bool);
     }

@@ -203,6 +203,25 @@ public class NivaraSeriesAggregateTests
         Assert.That(result, Is.EqualTo(4)); // (2 + 4 + 6) / 3
     }
 
+    /// <summary>
+    /// Feature: nivara-series, Property: Average computation on char
+    /// For a char series, Average should compute the mean using char division semantics.
+    /// Validates: char support in the small integral type domain (issue #164)
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Average computation on char")]
+    public void Average_CharValues_ReturnsCorrectAverage()
+    {
+        // Arrange
+        var series = NivaraSeries<char>.Create(new[] { (char)2, (char)4, (char)6 });
+
+        // Act
+        var result = series.Average();
+
+        // Assert
+        Assert.That(result, Is.EqualTo((char)4)); // (2 + 4 + 6) / 3
+    }
+
     #endregion
 
     #region Min Tests
@@ -336,6 +355,7 @@ public class NivaraSeriesAggregateTests
         verifyIntegerAggregate(new uint[] { 3, 1, 2 }, 6u, 1u, 3u);
         verifyIntegerAggregate(new ulong[] { 3, 1, 2 }, 6ul, 1ul, 3ul);
         verifyIntegerAggregate(new sbyte[] { 3, 1, 2 }, (sbyte)6, (sbyte)1, (sbyte)3);
+        verifyIntegerAggregate(new char[] { (char)3, (char)1, (char)2 }, (char)6, (char)1, (char)3);
     }
 
     static void verifyIntegerAggregate<T>(T[] values, T expectedSum, T expectedMin, T expectedMax)
