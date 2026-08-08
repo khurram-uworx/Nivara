@@ -980,37 +980,27 @@ public static partial class NivaraFrameExtensions
     #region Fluent API Operations
 
     /// <summary>
-    /// Filters rows based on a predicate expression
+    /// Filters rows based on a predicate over a typed <see cref="NivaraRow"/>
     /// </summary>
     /// <param name="frame">The source DataFrame</param>
     /// <param name="predicate">The predicate expression to filter by</param>
     /// <returns>A new DataFrame containing only rows where the predicate is true</returns>
     /// <exception cref="ArgumentNullException">Thrown when frame or predicate is null</exception>
-    public static NivaraFrame Where(this NivaraFrame frame, Func<dynamic, bool> predicate)
+    public static NivaraFrame Where(this NivaraFrame frame, Func<NivaraRow, bool> predicate)
     {
-        if (frame == null)
-            throw new ArgumentNullException(nameof(frame));
-        if (predicate == null)
-            throw new ArgumentNullException(nameof(predicate));
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(predicate);
 
-        // Create a boolean mask by evaluating the predicate for each row
+        var columns = frame.ColumnNames.Select(name => frame.GetColumn(name)).ToArray();
+        var map = new Dictionary<string, int>(frame.ColumnNames.Count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < frame.ColumnNames.Count; i++)
+            map[frame.ColumnNames[i]] = i;
+
         var mask = new bool[frame.RowCount];
         for (int i = 0; i < frame.RowCount; i++)
-        {
-            try
-            {
-                // Create a dynamic row object for predicate evaluation
-                var row = CreateDynamicRow(frame, i);
-                mask[i] = predicate(row);
-            }
-            catch (Exception ex)
-            {
-                throw new InvalidOperationException($"Predicate evaluation failed at row {i}: {ex.Message}", ex);
-            }
-        }
+            mask[i] = predicate(new NivaraRow(columns, map, i));
 
-        var boolColumn = NivaraColumn<bool>.Create(mask);
-        return frame.FilterByMask(boolColumn);
+        return frame.FilterByMask(NivaraColumn<bool>.Create(mask));
     }
 
     /// <summary>
@@ -1201,38 +1191,6 @@ public static partial class NivaraFrameExtensions
 
         // For materialized frames, Collect() is a no-op
         return frame;
-    }
-
-    /// <summary>
-    /// Helper method to create a dynamic row object for predicate evaluation
-    /// </summary>
-    /// <param name="frame">The DataFrame</param>
-    /// <param name="rowIndex">The row index</param>
-    /// <returns>A dynamic object representing the row</returns>
-    private static dynamic CreateDynamicRow(NivaraFrame frame, int rowIndex)
-    {
-        var row = new System.Dynamic.ExpandoObject() as IDictionary<string, object?>;
-
-        foreach (var columnName in frame.ColumnNames)
-        {
-            var column = frame.GetColumn(columnName);
-            object? value;
-
-            if (column.IsNull(rowIndex))
-            {
-                value = null;
-            }
-            else
-            {
-                // Get the value using reflection to handle different column types
-                var indexer = column.GetType().GetProperty("Item");
-                value = indexer?.GetValue(column, new object[] { rowIndex });
-            }
-
-            row[columnName] = value;
-        }
-
-        return row;
     }
 
     /// <summary>

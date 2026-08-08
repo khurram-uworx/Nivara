@@ -998,7 +998,7 @@ var result = DiagnosticHelper.ExecuteWithDiagnostics(
     diagnostics,
     "ComplexQuery",
     () => frame
-        .Filter(row => row.GetValue<int>("Age") > 25)
+        .Where(row => row.GetValue<int>("Age") > 25)
         .Sort("Name")
         .GroupBy("Department"),
     frame.RowCount);
