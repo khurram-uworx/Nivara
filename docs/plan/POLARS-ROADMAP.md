@@ -21,7 +21,7 @@ Concretely, when this roadmap is done:
 
 The column path is already native and fast: `NivaraColumn<T>` arithmetic is typed and vectorized (`TensorPrimitives` in `src/Nivara/NivaraColumn.cs`), storage is tensor/memory-backed and pooled, and the optimizer (`QueryOptimizer` + pushdown/fusion rules in `src/Nivara/Optimization/`) is real.
 
-The query *expression* path is the weak spot: `ExpressionEvaluator` interprets every expression by boxing each element to `object?` and dispatching per value (`src/Nivara/Helpers/ExpressionEvaluator.cs:220-259`), `OrderBy` rejects computed keys (`src/Nivara/Linq/NivaraLinqExtensions.cs:64-88`), and both expression front ends converge on that one interpreter. Everything else on this roadmap either builds on fixing that or exploits seams that already exist.
+The query *expression* hot path is now typed and fused: the boxed `object?` interpreter in `ExpressionEvaluator` was replaced by a fused evaluator (compiled-first `Expression.Compile` target over `T[]` arrays with a generic node-tree fallback in `src/Nivara/Expressions/`), `Filter`/`Select`/`SortByExpression` route through it, `OrderBy` computes typed keys, `MultiColumnComparer` compares without boxing, and unsupported type/operator combinations throw a clear `NotSupportedException` instead of silently boxing. No `object?` per-element dispatch remains on the numeric/vectorizable query path.
 
 ### Non-goals (explicit)
 
@@ -37,6 +37,8 @@ The query *expression* path is the weak spot: `ExpressionEvaluator` interprets e
 ### Phase 1 — Unified typed expression engine *(make-or-break)*
 
 **Motivation:** The boxed interpreter is the single largest contradiction to the vision. Both front ends (`ColumnExpression` operators and `RowExpressionBuilder`) already produce the same AST, so fixing the back end fixes both surfaces at once — the highest-leverage change in the project.
+
+**Status (delivered, #153):** The boxed interpreter is gone. `ExpressionEvaluator` is now typed and vectorized per operator via a typed fast path plus a typed numeric-promotion path, with no `object?` per-element dispatch on the numeric/vectorizable query path. The public front ends are unchanged; `OrderBy` computed keys feed the fused evaluator (Phase 2).
 
 **Scope:**
 - Replace the interpreter in `ExpressionEvaluator` with a typed lowering pass: `ColumnExpression` AST → typed evaluation that produces `NivaraColumn<T>` results by reusing the existing typed column kernels (no `object?` result columns on the happy path).
@@ -60,12 +62,16 @@ The query *expression* path is the weak spot: `ExpressionEvaluator` interprets e
 
 **Motivation:** Fixing the interpreter gets us *typed* and *vectorized per operator*, but an expression like `(Salary * 1.1) + 1000` still materializes intermediate columns. Native design fuses it into one span pass. In parallel, collapse the column layer's `float`/`double` type-switches onto generic math — AutoDiff already proves the pattern.
 
+**Status (delivered):** Expression trees fuse into a single pass through `FusedExpressionEvaluator` (`src/Nivara/Expressions/FusedExpressionEvaluator.cs`, `FusedKernel.cs`, `ExpressionTypeInferer.cs`) with a compiled-first `Expression.Compile` target over `T[]` arrays plus a generic sealed node-tree fallback; `Filter`/`Select`/`SortByExpression` and the parallel sort route through it. The boxed/`dynamic` fallbacks in `ExpressionEvaluator`, `NivaraColumn<T>` arithmetic, and `NivaraSeries` Sum/Average are removed (unsupported combinations throw), the numeric domain is extended (`Half`, `decimal`, `nint`/`nuint`, `Int128`/`UInt128`), and `MultiColumnComparer` sorts without boxing. Fused vs multi-pass benchmark at 1M rows: ~11.6x faster, ~44% less allocation.
+
 **Scope:**
 - **Kernel fusion:** lower expression trees to fused single-pass kernels over `ReadOnlySpan<T>`, with two compile targets:
   - Generic `INumber<T>` / `IFloatingPointIeee754<T>` static kernels via SAIS (the native monomorphization).
   - `Expression.Compile` to a span-consuming delegate as the fallback for non-generic-math types.
 - **OrderBy computed keys:** teach the sort layer to accept an evaluated key column (remove the `NotSupportedException` in `NivaraLinqExtensions.OrderBy`), routing complex expressions through the fused evaluator.
 - **Generic-math collapse:** replace the explicit `float`/`double` branches in `NivaraColumn<T>` arithmetic (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`, and operator overloads) with `INumber<T>` generic paths, keeping `TensorPrimitives` on the vectorizable fast path.
+
+**Scope (remaining):** `BFloat16`-typed kernels stay deferred to the net11 migration (#137); the fused compiled target runs over `T[]` arrays rather than spans (ref-structs are excluded from expression trees — span-capable target tracked as #155).
 
 **Key files:** `src/Nivara/Helpers/ExpressionEvaluator.cs` (or successor), `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraLinqExtensions.cs`, `src/Nivara/Optimization/OperationFusionRule.cs`, `src/Nivara/KernelSelector.cs`.
 
@@ -166,12 +172,12 @@ The query *expression* path is the weak spot: `ExpressionEvaluator` interprets e
 
 | Item | Effort | When |
 | --- | --- | --- |
-| Kill the boxed interpreter (Phase 1) | Medium | Phase 1 |
-| `OrderBy` computed keys (Phase 2) | Small | Phase 2 |
-| Generic-math collapse of column arithmetic (Phase 2) | Medium | Phase 2 |
-| Fused single-pass kernels (Phase 2) | Medium-High | Phase 2 |
+| Kill the boxed interpreter (Phase 1) | Medium | ✅ Delivered (#153) |
+| `OrderBy` computed keys (Phase 2) | Small | ✅ Delivered |
+| Generic-math collapse of column arithmetic (Phase 2) | Medium | ✅ Delivered |
+| Fused single-pass kernels (Phase 2) | Medium-High | ✅ Delivered |
 | Window functions, core set (Phase 3) | High | ✅ Delivered (#135) |
-| `Over`/`Rank`/`DenseRank` (Phase 3 remainder) | High | Follow-up issue |
+| `Over`/`Rank`/`DenseRank` (Phase 3 remainder) | High | Follow-up (#156) |
 | Async-native streaming (Phase 4) | Medium | Phase 4 |
 | Source generators (Phase 5) | High, splittable | Phase 5 |
 
