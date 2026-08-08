@@ -23,6 +23,8 @@ The column path is already native and fast: `NivaraColumn<T>` arithmetic is type
 
 The query *expression* hot path is now typed and fused: the boxed `object?` interpreter in `ExpressionEvaluator` was replaced by a fused evaluator (compiled-first `Expression.Compile` target over `T[]` arrays with a generic node-tree fallback in `src/Nivara/Expressions/`), `Filter`/`Select`/`SortByExpression` route through it, `OrderBy` computes typed keys, `MultiColumnComparer` compares without boxing, and unsupported type/operator combinations throw a clear `NotSupportedException` instead of silently boxing. No `object?` per-element dispatch remains on the numeric/vectorizable query path.
 
+Row-level filters are typed too: the last public `dynamic` surface in the core (`frame.Where(Func<dynamic,bool>)` via `ExpandoObject` + reflection) was removed (#154) in favor of `frame.Where(Func<NivaraRow,bool>)`, where `NivaraRow` is an allocation-free readonly struct over the frame's columns with `GetValue<T>`/`TryGetValue<T>`/`IsNull` accessors. The row view is a bridge for user predicates; the engine's own filter kernels stay columnar and fused.
+
 ### Non-goals (explicit)
 
 - **No Arrow-internal storage rewrite.** Internal stays `Tensor<T>`/`Memory<T>`; Arrow stays an interchange boundary (Pillar 7).

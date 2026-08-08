@@ -448,8 +448,8 @@ Operations integrate seamlessly with the query system:
 Extension methods provide fluent APIs that delegate to core operations:
 
 ```csharp
-// Extension method delegates to FilterOperation
-var filtered = frame.Where(row => row.Age > 25);
+// Extension method delegates to FilterOperation; the predicate receives a typed NivaraRow
+var filtered = frame.Where(row => row.GetValue<int>("Age") > 25);
 
 // Extension method delegates to SortOperation  
 var sorted = frame.OrderBy("Name").ThenByDescending("Age");
@@ -980,7 +980,7 @@ This appendix summarizes key architecture decisions in concise form. See the rel
 - **Joins**: Hash-based with composite keys, exclude nulls from matching, coalesce join keys for outer joins.
 - **Sorting**: Sort indices first, then reorder columns; explicit null ordering (`NullsFirst`/`NullsLast`).
 - **Grouping**: Dedicated composite key class with proper equality/hashing; handle nulls explicitly.
-- **Fluent API**: Extension methods over core operations. Use `ExpandoObject` for `Where()` predicates. Clear execution semantics: immediate on DataFrame, lazy via `AsQueryFrame()`.
+- **Fluent API**: Extension methods over core operations. `Where()` predicates receive a typed `NivaraRow` (readonly struct with `GetValue<T>`/`TryGetValue<T>`/`IsNull` accessors). Clear execution semantics: immediate on DataFrame, lazy via `AsQueryFrame()`.
 
 ### Execution & Error Handling
 
