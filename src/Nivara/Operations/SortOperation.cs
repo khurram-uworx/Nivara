@@ -291,11 +291,63 @@ public sealed class MultiColumnComparer : IComparer<int>
     /// <param name="sortKey">The sort key defining how to compare</param>
     /// <returns>A comparison result</returns>
     static int compareValues(IColumn column, int indexX, int indexY, SortKey sortKey)
+        => column switch
+        {
+            NivaraColumn<bool> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<char> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<byte> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<sbyte> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<short> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<ushort> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<int> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<uint> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<long> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<ulong> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<nint> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<nuint> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<Int128> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<UInt128> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<float> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<double> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<Half> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<decimal> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<string> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<Guid> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<DateTime> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<DateTimeOffset> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<TimeSpan> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<DateOnly> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<TimeOnly> c => compareTyped(c, indexX, indexY, sortKey),
+            _ => compareBoxed(column, indexX, indexY, sortKey)
+        };
+
+    /// <summary>
+    /// Compares two values from a typed column without boxing, via <see cref="Comparer{T}.Default"/>.
+    /// Nulls are read from the column's null mask and honor the sort key's <see cref="NullOrdering"/>.
+    /// </summary>
+    static int compareTyped<T>(NivaraColumn<T> column, int indexX, int indexY, SortKey sortKey)
+        where T : IComparable<T>
+    {
+        bool xNull = column.IsNull(indexX);
+        bool yNull = column.IsNull(indexY);
+
+        if (xNull && yNull) return 0;
+        if (xNull) return sortKey.NullOrdering == NullOrdering.NullsFirst ? -1 : 1;
+        if (yNull) return sortKey.NullOrdering == NullOrdering.NullsFirst ? 1 : -1;
+
+        int comparison = Comparer<T>.Default.Compare(column[indexX], column[indexY]);
+        return sortKey.Direction == SortDirection.Ascending ? comparison : -comparison;
+    }
+
+    /// <summary>
+    /// Boxed fallback for non-<see cref="NivaraColumn{T}"/> object columns and custom element types:
+    /// compares via <see cref="IComparable"/> and falls back to ordinal string comparison.
+    /// </summary>
+    static int compareBoxed(IColumn column, int indexX, int indexY, SortKey sortKey)
     {
         var valueX = column.GetValue(indexX);
         var valueY = column.GetValue(indexY);
 
-        // Handle null values according to null ordering
         if (valueX == null && valueY == null)
             return 0;
 
@@ -305,15 +357,12 @@ public sealed class MultiColumnComparer : IComparer<int>
         if (valueY == null)
             return sortKey.NullOrdering == NullOrdering.NullsFirst ? 1 : -1;
 
-        // Both values are non-null, compare them
         int comparison;
         if (valueX is IComparable comparableX)
             comparison = comparableX.CompareTo(valueY);
         else
-            // Fallback to string comparison
             comparison = string.Compare(valueX.ToString(), valueY.ToString(), StringComparison.Ordinal);
 
-        // Apply sort direction
         return sortKey.Direction == SortDirection.Ascending ? comparison : -comparison;
     }
 
