@@ -123,6 +123,7 @@ The `ExpressionEvaluator` (in `Helpers/ExpressionEvaluator.cs`) walks the tree a
 | **Rolling** | `"Rolling"` | `RollingOperation` | Appends a rolling sum/mean/min/max column over a fixed trailing window |
 | **Cumulative** | `"Cumulative"` | `CumulativeOperation` | Appends a cumulative sum/max/min/product/count column |
 | **Shift** | `"Shift"` | `ShiftOperation` | Appends a lag (`Shift`) or lead (`Lead`) column |
+| **Rank** | `"Rank"` | `RankOperation` | Appends a row_number / rank / dense_rank / percent_rank column over partitions with ordered keys |
 
 Each operation implements `IQueryOperation`:
 ```csharp
@@ -214,7 +215,7 @@ public QueryFrame SelectRows(params int[] indices)
 
 ### Window functions
 
-Whole-column window operations append a computed result column while preserving all input columns. Rolling/cumulative/shift operations are **non-parallelizable** and **non-streamable** (they require the full column).
+Whole-column window operations append a computed result column while preserving all input columns. Rolling/cumulative/shift/rank operations are **non-parallelizable** and **non-streamable** (they require the full column).
 
 ```csharp
 public QueryFrame RollingSum(source, resultColumn, windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
@@ -226,9 +227,15 @@ public QueryFrame CumulativeMax / CumulativeMin / CumulativeProduct(source, resu
 public QueryFrame CumulativeCount(source, resultColumn)          // long result, type-agnostic
 public QueryFrame Shift(source, resultColumn, periods, object? fillValue = null)
 public QueryFrame Lead(source, resultColumn, periods, object? fillValue = null)
+public QueryFrame RowNumber(resultColumn, string[]? partitionBy = null, IReadOnlyList<SortKey>? orderBy = null)   // long result
+public QueryFrame Rank(resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)                  // long result
+public QueryFrame DenseRank(resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)             // long result
+public QueryFrame PercentRank(resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)            // double result
 ```
 
 Rolling output is null until the window holds at least `minPeriods` valid values (default: the full window). Cumulative ops skip nulls (value carries forward); null positions stay null. `Shift`/`Lead` move in nulls (or `fillValue`) at the boundaries. When `nullHandler` is set, nulls are replaced by the handler output and every position satisfies the window. `RollingMean` returns a `double` column.
+
+Rank windows follow SQL `OVER (PARTITION BY ... ORDER BY ...)` semantics: each partition is ordered by the `SortKey`s (direction and null ordering supported) and assigned `RowNumber` (sequential 1..n), `Rank` (with gaps on ties), `DenseRank` (no gaps on ties), or `PercentRank` (`(rank - 1) / (partitionSize - 1)`). `Rank`/`DenseRank`/`PercentRank` require at least one order key; `RowNumber` allows none (sequential over row order). A null order key produces null output for that row and it is excluded from numbering and the percent-rank denominator.
 
 ```csharp
 var result = frame.AsQueryFrame()

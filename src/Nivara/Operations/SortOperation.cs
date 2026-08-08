@@ -249,7 +249,7 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
     /// </summary>
     /// <param name="type">The type to check</param>
     /// <returns>True if the type is comparable</returns>
-    private static bool IsComparableType(Type type)
+    internal static bool IsComparableType(Type type)
     {
         // Handle nullable types
         var underlyingType = Nullable.GetUnderlyingType(type) ?? type;

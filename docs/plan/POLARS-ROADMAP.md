@@ -93,11 +93,9 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 
 **Motivation:** The largest analytical feature gap versus Polars. No `Over`/rolling/cumulative/lag/rank exists anywhere in `src/`.
 
-**Status (core set delivered, #135):** Rolling min/max/mean/sum over fixed windows, cumulative sum/max/min/product/count, and `Shift`/`Lead` now ship on `NivaraColumn<T>` (`src/Nivara/Tensors/WindowFunctions.cs`), eager `NivaraFrame` extensions (`src/Nivara/WindowFrameExtensions.cs`), and the lazy `QueryFrame` pipeline (`src/Nivara/Operations/WindowOperations.cs`, `OperationType.Rolling`/`.Cumulative`/`.Shift`, `WindowNode`). Semantics: nulls ignored by default with output gated on `minPeriods` (default full window); cumulative ops skip nulls with carry-forward; `Shift`/`Lead` boundary positions are null or `fillValue`; an optional `nullHandler` replaces nulls so every position satisfies the window. Documented in `docs/LINQ.md`; covered by `tests/Nivara.Tests/Tensors/WindowFunctionsTests.cs` and `tests/Nivara.Tests/Query/WindowOperationTests.cs`.
+**Status (core set + rank family delivered, #135/#156):** Rolling min/max/mean/sum over fixed windows, cumulative sum/max/min/product/count, `Shift`/`Lead`, and the rank family (`RowNumber`/`Rank`/`DenseRank`/`PercentRank` over partitions with `SortKey` ordering) now ship on `NivaraColumn<T>` (`src/Nivara/Tensors/WindowFunctions.cs`, `src/Nivara/Tensors/RankFunctions.cs`), eager `NivaraFrame` extensions (`src/Nivara/WindowFrameExtensions.cs`), and the lazy `QueryFrame` pipeline (`src/Nivara/Operations/WindowOperations.cs` and `src/Nivara/Operations/RankOperation.cs`, `OperationType.Rolling`/`.Cumulative`/`.Shift`/`.Rank`). Semantics: nulls ignored by default with output gated on `minPeriods` (default full window); cumulative ops skip nulls with carry-forward; `Shift`/`Lead` boundary positions are null or `fillValue`; an optional `nullHandler` replaces nulls so every position satisfies the window; a null rank order key yields null output and is excluded from numbering/denominator. Documented in `docs/LINQ.md`; covered by `tests/Nivara.Tests/Tensors/WindowFunctionsTests.cs`, `tests/Nivara.Tests/Tensors/RankFunctionsTests.cs`, `tests/Nivara.Tests/Query/WindowOperationTests.cs`, and `tests/Nivara.Tests/Query/RankOperationTests.cs`.
 
 **Scope (remaining):**
-- `Over(...)` partition/order semantics integrated into the plan as a first-class operation (`OperationType` additions).
-- `Rank`/`DenseRank`.
 - Null-aware windowing consistent with the project's explicit null-mask model (ADR-001 boundary, no NaN semantics).
 - Built on the Phase 2 fused expression engine so window expressions compose with ordinary expressions.
 
@@ -179,7 +177,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 | Generic-math collapse of column arithmetic (Phase 2) | Medium | ✅ Delivered |
 | Fused single-pass kernels (Phase 2) | Medium-High | ✅ Delivered |
 | Window functions, core set (Phase 3) | High | ✅ Delivered (#135) |
-| `Over`/`Rank`/`DenseRank` (Phase 3 remainder) | High | Follow-up (#156) |
+| `Over`/`Rank`/`DenseRank` (Phase 3 remainder) | High | ✅ Delivered (#156) |
 | Async-native streaming (Phase 4) | Medium | Phase 4 |
 | Source generators (Phase 5) | High, splittable | Phase 5 |
 

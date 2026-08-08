@@ -2,6 +2,7 @@ using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Helpers;
 using Nivara.Operations;
+using Nivara.Tensors;
 
 namespace Nivara.Query;
 
@@ -702,6 +703,55 @@ public sealed class QueryFrame : IDisposable
     /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
     public QueryFrame Lead(string source, string resultColumn, int periods, object? fillValue = null)
         => AddWindowOperation(new ShiftOperation(source, resultColumn, -periods, fillValue));
+
+    /// <summary>
+    /// Adds a row-number operation that appends a long result column. With no partition keys the
+    /// numbering is sequential over all rows; with no order keys the numbering follows row order.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="partitionBy">The partition key column names (null = single partition)</param>
+    /// <param name="orderBy">The order keys (null = row order within each partition)</param>
+    /// <returns>A new QueryFrame with the row-number operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when resultColumn is whitespace</exception>
+    public QueryFrame RowNumber(string resultColumn, string[]? partitionBy = null, IReadOnlyList<SortKey>? orderBy = null)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.RowNumber, orderBy ?? Array.Empty<SortKey>(), partitionBy));
+
+    /// <summary>
+    /// Adds a standard rank operation (gaps on ties) that appends a long result column.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="orderBy">The order keys (at least one is required)</param>
+    /// <param name="partitionBy">The partition key column names</param>
+    /// <returns>A new QueryFrame with the rank operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when resultColumn or orderBy is null</exception>
+    /// <exception cref="ArgumentException">Thrown when resultColumn is whitespace or no order keys are provided</exception>
+    public QueryFrame Rank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.Rank, orderBy, partitionBy));
+
+    /// <summary>
+    /// Adds a dense-rank operation (no gaps on ties) that appends a long result column.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="orderBy">The order keys (at least one is required)</param>
+    /// <param name="partitionBy">The partition key column names</param>
+    /// <returns>A new QueryFrame with the dense-rank operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when resultColumn or orderBy is null</exception>
+    /// <exception cref="ArgumentException">Thrown when resultColumn is whitespace or no order keys are provided</exception>
+    public QueryFrame DenseRank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.DenseRank, orderBy, partitionBy));
+
+    /// <summary>
+    /// Adds a percent-rank operation that appends a double result column: (rank - 1) / (partitionSize - 1).
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="orderBy">The order keys (at least one is required)</param>
+    /// <param name="partitionBy">The partition key column names</param>
+    /// <returns>A new QueryFrame with the percent-rank operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when resultColumn or orderBy is null</exception>
+    /// <exception cref="ArgumentException">Thrown when resultColumn is whitespace or no order keys are provided</exception>
+    public QueryFrame PercentRank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.PercentRank, orderBy, partitionBy));
 
     QueryFrame AddWindowOperation(IQueryOperation operation)
     {
