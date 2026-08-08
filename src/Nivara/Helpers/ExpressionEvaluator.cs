@@ -1,7 +1,9 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Expressions;
+using System.Collections.Concurrent;
 using System.Numerics;
+using System.Reflection;
 
 namespace Nivara.Helpers;
 
@@ -230,20 +232,27 @@ sealed class ExpressionEvaluator
     /// <summary>
     /// Attempts to evaluate a binary operation through typed column kernels, returning null when the
     /// typed path is not applicable so callers can fall back to the boxed implementation.
+    /// Same-type operands use the typed same-type kernel; numerically promotable mixed operands
+    /// (C# binary numeric promotion) use the typed promoted kernel.
     /// </summary>
     static IColumn? TryEvaluateTypedBinary(BinaryOperator op, IColumn left, IColumn right)
     {
-        if (left.Length != right.Length || left.ElementType != right.ElementType)
+        if (left.Length != right.Length)
             return null;
 
-        return left.ElementType switch
+        if (left.ElementType == right.ElementType)
         {
-            Type t when t == typeof(int) => TryBinaryTyped<int>(op, left, right),
-            Type t when t == typeof(long) => TryBinaryTyped<long>(op, left, right),
-            Type t when t == typeof(float) => TryBinaryTyped<float>(op, left, right),
-            Type t when t == typeof(double) => TryBinaryTyped<double>(op, left, right),
-            _ => null
-        };
+            return left.ElementType switch
+            {
+                Type t when t == typeof(int) => TryBinaryTyped<int>(op, left, right),
+                Type t when t == typeof(long) => TryBinaryTyped<long>(op, left, right),
+                Type t when t == typeof(float) => TryBinaryTyped<float>(op, left, right),
+                Type t when t == typeof(double) => TryBinaryTyped<double>(op, left, right),
+                _ => null
+            };
+        }
+
+        return TryEvaluatePromotedBinary(op, left, right);
     }
 
     /// <summary>
@@ -273,28 +282,73 @@ sealed class ExpressionEvaluator
     }
 
     /// <summary>
+    /// Attempts to evaluate a binary operation through the typed promoted kernel when the operand
+    /// element types differ but are numerically promotable (C# binary numeric promotion).
+    /// Returns null when the promoted path is not applicable so callers can fall back to boxed.
+    /// </summary>
+    static IColumn? TryEvaluatePromotedBinary(BinaryOperator op, IColumn left, IColumn right)
+    {
+        var resultType = NumericPromoter.GetPromotedType(left.ElementType, right.ElementType);
+        if (resultType == null)
+            return null;
+
+        var kernel = GetPromotedKernel(nameof(TryBinaryPromoted), left.ElementType, right.ElementType, resultType);
+        return InvokePromotedKernel(kernel, op, left, right);
+    }
+
+    /// <summary>
+    /// Applies a binary operation to two typed columns of different, numerically promotable element
+    /// types. Both operands are widened to the promoted type (via <c>INumber.CreateChecked</c>) and
+    /// the operation runs in the promoted type with null-OR propagation (SQL-like semantics).
+    /// </summary>
+    static IColumn? TryBinaryPromoted<TLeft, TRight, TResult>(BinaryOperator op, IColumn left, IColumn right)
+        where TLeft : struct, INumber<TLeft>
+        where TRight : struct, INumber<TRight>
+        where TResult : struct, INumber<TResult>
+    {
+        if (left is not NivaraColumn<TLeft> l || right is not NivaraColumn<TRight> r)
+            return null;
+
+        return op switch
+        {
+            BinaryOperator.Add => l.Zip(r, static (a, b) => TResult.CreateChecked(a) + TResult.CreateChecked(b)),
+            BinaryOperator.Subtract => l.Zip(r, static (a, b) => TResult.CreateChecked(a) - TResult.CreateChecked(b)),
+            BinaryOperator.Multiply => l.Zip(r, static (a, b) => TResult.CreateChecked(a) * TResult.CreateChecked(b)),
+            BinaryOperator.Divide => l.Zip(r, static (a, b) => TResult.CreateChecked(a) / TResult.CreateChecked(b)),
+            _ => null
+        };
+    }
+
+    /// <summary>
     /// Attempts to evaluate a comparison operation through typed column kernels, returning null when the
     /// typed path is not applicable so callers can fall back to the boxed implementation.
+    /// Same-type operands use the typed same-type kernel; numerically promotable mixed operands
+    /// (C# binary numeric promotion) use the typed promoted comparison kernel.
     /// </summary>
     static IColumn? TryEvaluateTypedComparison(ComparisonOperator op, IColumn left, IColumn right)
     {
-        if (left.Length != right.Length || left.ElementType != right.ElementType)
+        if (left.Length != right.Length)
             return null;
 
-        return left.ElementType switch
+        if (left.ElementType == right.ElementType)
         {
-            Type t when t == typeof(int) => TryComparisonTyped<int>(op, left, right),
-            Type t when t == typeof(long) => TryComparisonTyped<long>(op, left, right),
-            Type t when t == typeof(short) => TryComparisonTyped<short>(op, left, right),
-            Type t when t == typeof(byte) => TryComparisonTyped<byte>(op, left, right),
-            Type t when t == typeof(float) => TryComparisonTyped<float>(op, left, right),
-            Type t when t == typeof(double) => TryComparisonTyped<double>(op, left, right),
-            Type t when t == typeof(string) => TryComparisonTyped<string>(op, left, right),
-            Type t when t == typeof(bool) => TryComparisonTyped<bool>(op, left, right),
-            Type t when t == typeof(decimal) => TryComparisonTyped<decimal>(op, left, right),
-            Type t when t == typeof(DateTime) => TryComparisonTyped<DateTime>(op, left, right),
-            _ => null
-        };
+            return left.ElementType switch
+            {
+                Type t when t == typeof(int) => TryComparisonTyped<int>(op, left, right),
+                Type t when t == typeof(long) => TryComparisonTyped<long>(op, left, right),
+                Type t when t == typeof(short) => TryComparisonTyped<short>(op, left, right),
+                Type t when t == typeof(byte) => TryComparisonTyped<byte>(op, left, right),
+                Type t when t == typeof(float) => TryComparisonTyped<float>(op, left, right),
+                Type t when t == typeof(double) => TryComparisonTyped<double>(op, left, right),
+                Type t when t == typeof(string) => TryComparisonTyped<string>(op, left, right),
+                Type t when t == typeof(bool) => TryComparisonTyped<bool>(op, left, right),
+                Type t when t == typeof(decimal) => TryComparisonTyped<decimal>(op, left, right),
+                Type t when t == typeof(DateTime) => TryComparisonTyped<DateTime>(op, left, right),
+                _ => null
+            };
+        }
+
+        return TryEvaluatePromotedComparison(op, left, right);
     }
 
     /// <summary>
@@ -320,6 +374,77 @@ sealed class ExpressionEvaluator
             };
         }
         catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Attempts to evaluate a comparison operation through the typed promoted kernel when the operand
+    /// element types differ but are numerically promotable (C# binary numeric promotion).
+    /// Returns null when the promoted path is not applicable so callers can fall back to boxed.
+    /// </summary>
+    static IColumn? TryEvaluatePromotedComparison(ComparisonOperator op, IColumn left, IColumn right)
+    {
+        var resultType = NumericPromoter.GetPromotedType(left.ElementType, right.ElementType);
+        if (resultType == null)
+            return null;
+
+        var kernel = GetPromotedKernel(nameof(TryComparisonPromoted), left.ElementType, right.ElementType, resultType);
+        return InvokePromotedKernel(kernel, op, left, right);
+    }
+
+    /// <summary>
+    /// Applies a comparison operation to two typed columns of different, numerically promotable element
+    /// types. Both operands are widened to the promoted type (via <c>INumber.CreateChecked</c>) and the
+    /// comparison runs in the promoted type with null-OR propagation (SQL-like semantics).
+    /// </summary>
+    static IColumn? TryComparisonPromoted<TLeft, TRight, TResult>(ComparisonOperator op, IColumn left, IColumn right)
+        where TLeft : struct, INumber<TLeft>
+        where TRight : struct, INumber<TRight>
+        where TResult : struct, INumber<TResult>
+    {
+        if (left is not NivaraColumn<TLeft> l || right is not NivaraColumn<TRight> r)
+            return null;
+
+        return op switch
+        {
+            ComparisonOperator.Equal => l.Zip(r, static (a, b) => TResult.CreateChecked(a) == TResult.CreateChecked(b)),
+            ComparisonOperator.NotEqual => l.Zip(r, static (a, b) => TResult.CreateChecked(a) != TResult.CreateChecked(b)),
+            ComparisonOperator.GreaterThan => l.Zip(r, static (a, b) => TResult.CreateChecked(a) > TResult.CreateChecked(b)),
+            ComparisonOperator.LessThan => l.Zip(r, static (a, b) => TResult.CreateChecked(a) < TResult.CreateChecked(b)),
+            ComparisonOperator.GreaterThanOrEqual => l.Zip(r, static (a, b) => TResult.CreateChecked(a) >= TResult.CreateChecked(b)),
+            ComparisonOperator.LessThanOrEqual => l.Zip(r, static (a, b) => TResult.CreateChecked(a) <= TResult.CreateChecked(b)),
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Cache of reflection-built generic promoted kernels keyed by kernel name and the
+    /// (left, right, result) element type triple.
+    /// </summary>
+    static readonly ConcurrentDictionary<(string Name, Type Left, Type Right, Type Result), MethodInfo> promotedKernelCache = new();
+
+    static MethodInfo GetPromotedKernel(string methodName, Type leftType, Type rightType, Type resultType)
+    {
+        return promotedKernelCache.GetOrAdd((methodName, leftType, rightType, resultType), static key =>
+        {
+            var method = typeof(ExpressionEvaluator).GetMethod(key.Name, BindingFlags.Static | BindingFlags.NonPublic);
+            return method!.MakeGenericMethod(key.Left, key.Right, key.Result);
+        });
+    }
+
+    /// <summary>
+    /// Invokes a cached promoted kernel, mapping an inner <see cref="InvalidOperationException"/> or
+    /// <see cref="ArgumentException"/> to a null result so callers fall back to the boxed implementation.
+    /// </summary>
+    static IColumn? InvokePromotedKernel(MethodInfo kernel, object op, IColumn left, IColumn right)
+    {
+        try
+        {
+            return (IColumn?)kernel.Invoke(null, new object[] { op, left, right });
+        }
+        catch (TargetInvocationException tie) when (tie.InnerException is InvalidOperationException or ArgumentException)
         {
             return null;
         }
