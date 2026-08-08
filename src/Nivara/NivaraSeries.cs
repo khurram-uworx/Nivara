@@ -71,7 +71,9 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
+        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
+        // through the same typed kernels instead of a dynamic fallback.
         if (type == typeof(float)) return reinterpretBack(NumericTensorKernels<float>.Sum(SpanReinterpret.ReadOnly<T, float>(values)));
         if (type == typeof(double)) return reinterpretBack(NumericTensorKernels<double>.Sum(SpanReinterpret.ReadOnly<T, double>(values)));
         if (type == typeof(int)) return reinterpretBack(NumericTensorKernels<int>.Sum(SpanReinterpret.ReadOnly<T, int>(values)));
@@ -82,14 +84,15 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Sum(SpanReinterpret.ReadOnly<T, ulong>(values)));
         if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Sum(SpanReinterpret.ReadOnly<T, byte>(values)));
         if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Sum(SpanReinterpret.ReadOnly<T, sbyte>(values)));
+        if (type == typeof(decimal)) return reinterpretBack(NumericTensorKernels<decimal>.Sum(SpanReinterpret.ReadOnly<T, decimal>(values)));
+        if (type == typeof(Half)) return reinterpretBack(NumericTensorKernels<Half>.Sum(SpanReinterpret.ReadOnly<T, Half>(values)));
+        if (type == typeof(nint)) return reinterpretBack(NumericTensorKernels<nint>.Sum(SpanReinterpret.ReadOnly<T, nint>(values)));
+        if (type == typeof(nuint)) return reinterpretBack(NumericTensorKernels<nuint>.Sum(SpanReinterpret.ReadOnly<T, nuint>(values)));
+        if (type == typeof(Int128)) return reinterpretBack(NumericTensorKernels<Int128>.Sum(SpanReinterpret.ReadOnly<T, Int128>(values)));
+        if (type == typeof(UInt128)) return reinterpretBack(NumericTensorKernels<UInt128>.Sum(SpanReinterpret.ReadOnly<T, UInt128>(values)));
 
-        // Fall back to scalar sum for other types
-        T result = default(T)!;
-        for (int i = 0; i < values.Length; i++)
-        {
-            result = (T)(object)((dynamic)result! + (dynamic)values[i]!)!;
-        }
-        return result;
+        throw new NotSupportedException(
+            $"Sum on type {typeof(T).Name} is not supported by the typed kernel dispatch");
     }
 
     /// <summary>
@@ -123,10 +126,52 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             var result = longSum / count;
             return (T)(object)result;
         }
+        else if (type == typeof(short))
+        {
+            var shortSum = (short)(object)sum!;
+            var result = (short)(shortSum / count);
+            return (T)(object)result;
+        }
+        else if (type == typeof(byte))
+        {
+            var byteSum = (byte)(object)sum!;
+            var result = (byte)(byteSum / count);
+            return (T)(object)result;
+        }
+        else if (type == typeof(sbyte))
+        {
+            var sbyteSum = (sbyte)(object)sum!;
+            var result = (sbyte)(sbyteSum / count);
+            return (T)(object)result;
+        }
+        else if (type == typeof(ushort))
+        {
+            var ushortSum = (ushort)(object)sum!;
+            var result = (ushort)(ushortSum / count);
+            return (T)(object)result;
+        }
+        else if (type == typeof(uint))
+        {
+            var uintSum = (uint)(object)sum!;
+            var result = (uint)(uintSum / count);
+            return (T)(object)result;
+        }
+        else if (type == typeof(ulong))
+        {
+            var ulongSum = (ulong)(object)sum!;
+            var result = ulongSum / (ulong)count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(decimal))
+        {
+            var decimalSum = (decimal)(object)sum!;
+            var result = decimalSum / count;
+            return (T)(object)result;
+        }
         else
         {
-            // Fall back to dynamic division for other types
-            return (T)(object)((dynamic)sum! / count)!;
+            throw new NotSupportedException(
+                $"Average on type {typeof(T).Name} is not supported by the typed kernel dispatch");
         }
     }
 

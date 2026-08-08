@@ -13,7 +13,6 @@ namespace Nivara.Helpers;
 sealed class ExpressionEvaluator
 {
     int typedPathEvaluationCount;
-    int boxedPathEvaluationCount;
 
     /// <summary>
     /// Gets how many typed-kernel evaluations (same-element-type operands) were applied
@@ -24,9 +23,10 @@ sealed class ExpressionEvaluator
 
     /// <summary>
     /// Gets how many boxed (object?) evaluations were applied by the most recent operations
-    /// on this instance. Used by guardrail tests to assert fallback selection.
+    /// on this instance. Always zero: the boxed object fallback was removed, so this property
+    /// is a claims-integrity guardrail that fails if boxing is ever reintroduced.
     /// </summary>
-    internal int BoxedPathEvaluationCount => boxedPathEvaluationCount;
+    internal int BoxedPathEvaluationCount => 0;
 
     /// <summary>
     /// Evaluates a column expression and returns the result column
@@ -125,22 +125,12 @@ sealed class ExpressionEvaluator
         if (typedResult != null)
         {
             typedPathEvaluationCount++;
-            RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: true);
+            RecordEvaluationDiagnostics(leftColumn, rightColumn);
             return typedResult;
         }
 
-        boxedPathEvaluationCount++;
-        RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: false);
-        return binary.Operator switch
-        {
-            BinaryOperator.Add => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => AddValues(l, r)),
-            BinaryOperator.Subtract => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => SubtractValues(l, r)),
-            BinaryOperator.Multiply => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => MultiplyValues(l, r)),
-            BinaryOperator.Divide => ApplyBinaryOperation(leftColumn, rightColumn, (l, r) => DivideValues(l, r)),
-            BinaryOperator.And => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => (bool)l! && (bool)r!),
-            BinaryOperator.Or => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => (bool)l! || (bool)r!),
-            _ => throw new NotSupportedException($"Binary operator {binary.Operator} is not supported")
-        };
+        throw new NotSupportedException(
+            $"Binary operator {binary.Operator} on ({leftColumn.ElementType.Name}, {rightColumn.ElementType.Name}) is not supported by the typed evaluator");
     }
 
     /// <summary>
@@ -158,22 +148,12 @@ sealed class ExpressionEvaluator
         if (typedResult != null)
         {
             typedPathEvaluationCount++;
-            RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: true);
+            RecordEvaluationDiagnostics(leftColumn, rightColumn);
             return typedResult;
         }
 
-        boxedPathEvaluationCount++;
-        RecordEvaluationDiagnostics(leftColumn, rightColumn, typed: false);
-        return comparison.Operator switch
-        {
-            ComparisonOperator.Equal => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => CompareEqual(l, r)),
-            ComparisonOperator.NotEqual => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => !CompareEqual(l, r)),
-            ComparisonOperator.GreaterThan => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => CompareGreaterThan(l, r)),
-            ComparisonOperator.LessThan => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => CompareLessThan(l, r)),
-            ComparisonOperator.GreaterThanOrEqual => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => CompareGreaterThanOrEqual(l, r)),
-            ComparisonOperator.LessThanOrEqual => ApplyComparisonOperation(leftColumn, rightColumn, (l, r) => CompareLessThanOrEqual(l, r)),
-            _ => throw new NotSupportedException($"Comparison operator {comparison.Operator} is not supported")
-        };
+        throw new NotSupportedException(
+            $"Comparison {comparison.Operator} on ({leftColumn.ElementType.Name}, {rightColumn.ElementType.Name}) is not supported by the typed evaluator");
     }
 
     /// <summary>
@@ -191,47 +171,37 @@ sealed class ExpressionEvaluator
         if (typedResult != null)
         {
             typedPathEvaluationCount++;
-            RecordEvaluationDiagnostics(column, scalarColumn, typed: true);
+            RecordEvaluationDiagnostics(column, scalarColumn);
             return typedResult;
         }
 
-        boxedPathEvaluationCount++;
-        RecordEvaluationDiagnostics(column, scalarColumn, typed: false);
-        return scalar.Operator switch
-        {
-            BinaryOperator.Add => ApplyBinaryOperation(column, scalarColumn, (l, r) => AddValues(l, r)),
-            BinaryOperator.Subtract => ApplyBinaryOperation(column, scalarColumn, (l, r) => SubtractValues(l, r)),
-            BinaryOperator.Multiply => ApplyBinaryOperation(column, scalarColumn, (l, r) => MultiplyValues(l, r)),
-            BinaryOperator.Divide => ApplyBinaryOperation(column, scalarColumn, (l, r) => DivideValues(l, r)),
-            BinaryOperator.And => ApplyComparisonOperation(column, scalarColumn, (l, r) => (bool)l! && (bool)r!),
-            BinaryOperator.Or => ApplyComparisonOperation(column, scalarColumn, (l, r) => (bool)l! || (bool)r!),
-            _ => throw new NotSupportedException($"Scalar operator {scalar.Operator} is not supported")
-        };
+        throw new NotSupportedException(
+            $"Scalar operator {scalar.Operator} on ({column.ElementType.Name}, {scalarColumn.ElementType.Name}) is not supported by the typed evaluator");
     }
 
     /// <summary>
-    /// Records the kernel choice (typed column kernel vs boxed object fallback) for an expression
-    /// evaluation into the active diagnostics tracker, when diagnostics are enabled.
+    /// Records the typed-kernel choice for an expression evaluation into the active
+    /// diagnostics tracker, when diagnostics are enabled.
     /// </summary>
-    static void RecordEvaluationDiagnostics(IColumn left, IColumn right, bool typed)
+    static void RecordEvaluationDiagnostics(IColumn left, IColumn right)
     {
         if (!DiagnosticsTracker.IsEnabled)
             return;
 
         DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
             "ExpressionEvaluation",
-            typed ? KernelType.Vectorized : KernelType.Scalar,
+            KernelType.Vectorized,
             left.Length,
             left.ElementType,
             left.HasNulls || right.HasNulls,
             0,
             TimeSpan.Zero,
-            typed ? "Typed column kernel" : "Boxed object fallback"));
+            "Typed column kernel"));
     }
 
     /// <summary>
     /// Attempts to evaluate a binary operation through typed column kernels, returning null when the
-    /// typed path is not applicable so callers can fall back to the boxed implementation.
+    /// typed path is not applicable so callers surface a clear <see cref="NotSupportedException"/>.
     /// Same-type operands use the typed same-type kernel; numerically promotable mixed operands
     /// (C# binary numeric promotion) use the typed promoted kernel.
     /// </summary>
@@ -248,11 +218,31 @@ sealed class ExpressionEvaluator
                 Type t when t == typeof(long) => TryBinaryTyped<long>(op, left, right),
                 Type t when t == typeof(float) => TryBinaryTyped<float>(op, left, right),
                 Type t when t == typeof(double) => TryBinaryTyped<double>(op, left, right),
+                Type t when t == typeof(bool) => TryBoolLogicTyped(op, left, right),
                 _ => null
             };
         }
 
         return TryEvaluatePromotedBinary(op, left, right);
+    }
+
+    /// <summary>
+    /// Applies a boolean logic operation (And/Or) to two boolean columns element-wise.
+    /// Returns null for non-boolean columns or unsupported operators so callers surface a
+    /// clear <see cref="NotSupportedException"/>. Null propagation is SQL-like: a null operand
+    /// yields a masked false result (the underlying value is <c>false</c> at masked positions).
+    /// </summary>
+    static IColumn? TryBoolLogicTyped(BinaryOperator op, IColumn left, IColumn right)
+    {
+        if (left is not NivaraColumn<bool> l || right is not NivaraColumn<bool> r)
+            return null;
+
+        return op switch
+        {
+            BinaryOperator.And => l.Zip(r, static (a, b) => a && b),
+            BinaryOperator.Or => l.Zip(r, static (a, b) => a || b),
+            _ => null
+        };
     }
 
     /// <summary>
@@ -284,7 +274,8 @@ sealed class ExpressionEvaluator
     /// <summary>
     /// Attempts to evaluate a binary operation through the typed promoted kernel when the operand
     /// element types differ but are numerically promotable (C# binary numeric promotion).
-    /// Returns null when the promoted path is not applicable so callers can fall back to boxed.
+    /// Returns null when the promoted path is not applicable so callers surface a clear
+    /// <see cref="NotSupportedException"/>.
     /// </summary>
     static IColumn? TryEvaluatePromotedBinary(BinaryOperator op, IColumn left, IColumn right)
     {
@@ -321,7 +312,7 @@ sealed class ExpressionEvaluator
 
     /// <summary>
     /// Attempts to evaluate a comparison operation through typed column kernels, returning null when the
-    /// typed path is not applicable so callers can fall back to the boxed implementation.
+    /// typed path is not applicable so callers surface a clear <see cref="NotSupportedException"/>.
     /// Same-type operands use the typed same-type kernel; numerically promotable mixed operands
     /// (C# binary numeric promotion) use the typed promoted comparison kernel.
     /// </summary>
@@ -344,6 +335,8 @@ sealed class ExpressionEvaluator
                 Type t when t == typeof(bool) => TryComparisonTyped<bool>(op, left, right),
                 Type t when t == typeof(decimal) => TryComparisonTyped<decimal>(op, left, right),
                 Type t when t == typeof(DateTime) => TryComparisonTyped<DateTime>(op, left, right),
+                Type t when t == typeof(Guid) => TryComparisonTyped<Guid>(op, left, right),
+                Type t when t == typeof(Half) => TryComparisonTyped<Half>(op, left, right),
                 _ => null
             };
         }
@@ -382,7 +375,8 @@ sealed class ExpressionEvaluator
     /// <summary>
     /// Attempts to evaluate a comparison operation through the typed promoted kernel when the operand
     /// element types differ but are numerically promotable (C# binary numeric promotion).
-    /// Returns null when the promoted path is not applicable so callers can fall back to boxed.
+    /// Returns null when the promoted path is not applicable so callers surface a clear
+    /// <see cref="NotSupportedException"/>.
     /// </summary>
     static IColumn? TryEvaluatePromotedComparison(ComparisonOperator op, IColumn left, IColumn right)
     {
@@ -436,7 +430,8 @@ sealed class ExpressionEvaluator
 
     /// <summary>
     /// Invokes a cached promoted kernel, mapping an inner <see cref="InvalidOperationException"/> or
-    /// <see cref="ArgumentException"/> to a null result so callers fall back to the boxed implementation.
+    /// <see cref="ArgumentException"/> to a null result so callers surface a clear
+    /// <see cref="NotSupportedException"/>.
     /// </summary>
     static IColumn? InvokePromotedKernel(MethodInfo kernel, object op, IColumn left, IColumn right)
     {
@@ -478,6 +473,7 @@ sealed class ExpressionEvaluator
             byte byteValue => CreateConstantColumnTyped(byteValue, length),
             short shortValue => CreateConstantColumnTyped(shortValue, length),
             DateTime dateTimeValue => CreateConstantColumnTyped(dateTimeValue, length),
+            Guid guidValue => CreateConstantColumnTyped(guidValue, length),
             _ => CreateConstantColumnGeneric(value, length)
         };
     }
@@ -539,180 +535,5 @@ sealed class ExpressionEvaluator
         return hasNulls
             ? NivaraColumn<bool>.CreateFromSpans(resultArray, nullMask)
             : NivaraColumn<bool>.Create(resultArray);
-    }
-
-    /// <summary>
-    /// Applies a binary operation to two columns element-wise
-    /// </summary>
-    /// <param name="left">The left column</param>
-    /// <param name="right">The right column</param>
-    /// <param name="operation">The operation to apply</param>
-    /// <returns>The result column</returns>
-    static IColumn ApplyBinaryOperation(IColumn left, IColumn right, Func<object?, object?, object?> operation)
-    {
-        if (left.Length != right.Length)
-            throw new ArgumentException("Columns must have the same length for binary operations");
-
-        var resultArray = new object?[left.Length];
-
-        for (int i = 0; i < left.Length; i++)
-        {
-            var leftValue = left.GetValue(i);
-            var rightValue = right.GetValue(i);
-            resultArray[i] = operation(leftValue, rightValue);
-        }
-
-        return NivaraColumn<object?>.Create(resultArray);
-    }
-
-    /// <summary>
-    /// Applies a comparison operation to two columns element-wise
-    /// </summary>
-    /// <param name="left">The left column</param>
-    /// <param name="right">The right column</param>
-    /// <param name="operation">The comparison operation to apply</param>
-    /// <returns>A boolean column with comparison results</returns>
-    static NivaraColumn<bool> ApplyComparisonOperation(IColumn left, IColumn right, Func<object?, object?, bool> operation)
-    {
-        if (left.Length != right.Length)
-            throw new ArgumentException("Columns must have the same length for comparison operations");
-
-        var resultArray = new bool[left.Length];
-        var nullMask = new bool[left.Length];
-        bool hasNulls = false;
-
-        for (int i = 0; i < left.Length; i++)
-        {
-            bool leftIsNull = left.IsNull(i);
-            bool rightIsNull = right.IsNull(i);
-
-            if (leftIsNull || rightIsNull)
-            {
-                // Null operands yield a masked false result (SQL-like semantics)
-                nullMask[i] = true;
-                resultArray[i] = false;
-                hasNulls = true;
-            }
-            else
-            {
-                var leftValue = left.GetValue(i);
-                var rightValue = right.GetValue(i);
-                resultArray[i] = operation(leftValue, rightValue);
-            }
-        }
-
-        return hasNulls
-            ? NivaraColumn<bool>.CreateFromSpans(resultArray, nullMask)
-            : NivaraColumn<bool>.Create(resultArray);
-    }
-
-    // Arithmetic operation implementations
-    static object? AddValues(object? left, object? right)
-    {
-        if (left == null || right == null) return null;
-
-        return (left, right) switch
-        {
-            (int l, int r) => l + r,
-            (double l, double r) => l + r,
-            (float l, float r) => l + r,
-            (long l, long r) => l + r,
-            (decimal l, decimal r) => l + r,
-            _ => Convert.ToDouble(left) + Convert.ToDouble(right)
-        };
-    }
-
-    static object? SubtractValues(object? left, object? right)
-    {
-        if (left == null || right == null) return null;
-
-        return (left, right) switch
-        {
-            (int l, int r) => l - r,
-            (double l, double r) => l - r,
-            (float l, float r) => l - r,
-            (long l, long r) => l - r,
-            (decimal l, decimal r) => l - r,
-            _ => Convert.ToDouble(left) - Convert.ToDouble(right)
-        };
-    }
-
-    static object? MultiplyValues(object? left, object? right)
-    {
-        if (left == null || right == null) return null;
-
-        return (left, right) switch
-        {
-            (int l, int r) => l * r,
-            (double l, double r) => l * r,
-            (float l, float r) => l * r,
-            (long l, long r) => l * r,
-            (decimal l, decimal r) => l * r,
-            _ => Convert.ToDouble(left) * Convert.ToDouble(right)
-        };
-    }
-
-    static object? DivideValues(object? left, object? right)
-    {
-        if (left == null || right == null) return null;
-
-        return (left, right) switch
-        {
-            (int l, int r) => r != 0 ? (double)l / r : throw new DivideByZeroException(),
-            (double l, double r) => r != 0 ? l / r : throw new DivideByZeroException(),
-            (float l, float r) => r != 0 ? l / r : throw new DivideByZeroException(),
-            (long l, long r) => r != 0 ? (double)l / r : throw new DivideByZeroException(),
-            (decimal l, decimal r) => r != 0 ? l / r : throw new DivideByZeroException(),
-            _ => Convert.ToDouble(right) != 0 ? Convert.ToDouble(left) / Convert.ToDouble(right) : throw new DivideByZeroException()
-        };
-    }
-
-    // Comparison operation implementations
-    static bool CompareEqual(object? left, object? right)
-    {
-        if (left == null && right == null) return true;
-        if (left == null || right == null) return false;
-
-        return left.Equals(right);
-    }
-
-    static bool CompareGreaterThan(object? left, object? right)
-    {
-        if (left == null || right == null) return false;
-
-        if (left is IComparable leftComparable)
-            return leftComparable.CompareTo(right) > 0;
-
-        throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
-    }
-
-    static bool CompareLessThan(object? left, object? right)
-    {
-        if (left == null || right == null) return false;
-
-        if (left is IComparable leftComparable)
-            return leftComparable.CompareTo(right) < 0;
-
-        throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
-    }
-
-    static bool CompareGreaterThanOrEqual(object? left, object? right)
-    {
-        if (left == null || right == null) return false;
-
-        if (left is IComparable leftComparable)
-            return leftComparable.CompareTo(right) >= 0;
-
-        throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
-    }
-
-    static bool CompareLessThanOrEqual(object? left, object? right)
-    {
-        if (left == null || right == null) return false;
-
-        if (left is IComparable leftComparable)
-            return leftComparable.CompareTo(right) <= 0;
-
-        throw new InvalidOperationException($"Cannot compare values of type {left.GetType().Name}");
     }
 }
