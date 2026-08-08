@@ -2115,6 +2115,34 @@ public class NivaraColumnTests
         VerifyIntegerKernels<ulong>(new[] { 2ul, 4ul, 6ul }, 3ul);
         VerifyIntegerKernels<byte>(new[] { (byte)2, (byte)4, (byte)6 }, (byte)3);
         VerifyIntegerKernels<sbyte>(new[] { (sbyte)2, (sbyte)4, (sbyte)6 }, (sbyte)3);
+        VerifyIntegerKernels<char>(new[] { (char)2, (char)4, (char)6 }, (char)3);
+    }
+
+    [Test]
+    public void ArithmeticOperations_OnCharColumns_ComputeCorrectly()
+    {
+        var values = new[] { (char)10, (char)20, (char)30 };
+        var column = NivaraColumn<char>.Create(values);
+        var other = NivaraColumn<char>.Create(new[] { (char)1, (char)2, (char)3 });
+
+        var subtractEw = column.Subtract(other);
+        var divideScalar = column.Divide((char)5);
+        var divideEw = column.Divide(other);
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(subtractEw[i], Is.EqualTo((char)(values[i] - (i + 1))));
+            Assert.That(divideScalar[i], Is.EqualTo((char)(values[i] / 5)));
+            Assert.That(divideEw[i], Is.EqualTo((char)(values[i] / (i + 1))));
+        }
+
+        var operatorAdd = column + other;
+        var operatorMul = column * other;
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(operatorAdd[i], Is.EqualTo((char)(values[i] + (i + 1))));
+            Assert.That(operatorMul[i], Is.EqualTo((char)(values[i] * (i + 1))));
+        }
     }
 
     static void VerifyIntegerKernels<T>(T[] values, T scalar)
