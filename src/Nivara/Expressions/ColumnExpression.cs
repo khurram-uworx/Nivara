@@ -466,20 +466,12 @@ public sealed class BinaryExpression : ColumnExpression
 
     private static Type DetermineResultType(Type leftType, Type rightType)
     {
-        // Simple type promotion rules
-        if (leftType == rightType)
-            return leftType;
+        var promoted = NumericPromoter.GetPromotedType(leftType, rightType);
+        if (promoted != null)
+            return promoted;
 
-        // Numeric type promotion
-        var numericTypes = new[] { typeof(double), typeof(float), typeof(long), typeof(int), typeof(short), typeof(byte) };
-
-        var leftIndex = Array.IndexOf(numericTypes, leftType);
-        var rightIndex = Array.IndexOf(numericTypes, rightType);
-
-        if (leftIndex >= 0 && rightIndex >= 0)
-            return numericTypes[Math.Min(leftIndex, rightIndex)];
-
-        return typeof(object);
+        // Non-numeric pairs: same-type keeps its type (bool And/Or -> bool, etc.); mixed pairs -> object.
+        return leftType == rightType ? leftType : typeof(object);
     }
 
     private static string GetOperatorSymbol(BinaryOperator op)
@@ -629,7 +621,7 @@ public sealed class ScalarExpression : ColumnExpression
         Operator = @operator;
         Column = column ?? throw new ArgumentNullException(nameof(column));
         Scalar = scalar;
-        ResultType = column.ResultType; // Result type is same as column type
+        ResultType = ComputeResultType(column.ResultType, scalar);
     }
 
     /// <summary>
@@ -660,7 +652,7 @@ public sealed class ScalarExpression : ColumnExpression
 
         // The column's result type resolves against the schema during validation (an untyped
         // column reference starts as object), so recompute our result type after it resolves.
-        ResultType = Column.ResultType;
+        ResultType = ComputeResultType(Column.ResultType, Scalar);
 
         // Validate type compatibility for scalar operations
         if (Scalar != null && (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
@@ -673,6 +665,14 @@ public sealed class ScalarExpression : ColumnExpression
                     $"Column type: {Column.ResultType.Name}, Scalar type: {Scalar.GetType().Name}");
             }
         }
+    }
+
+    static Type ComputeResultType(Type columnType, object? scalar)
+    {
+        if (scalar == null)
+            return columnType;
+
+        return NumericPromoter.GetPromotedType(columnType, scalar.GetType()) ?? columnType;
     }
 
     private static string GetOperatorSymbol(BinaryOperator op)
