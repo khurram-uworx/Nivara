@@ -99,4 +99,5 @@ fused path**:
 
 - [ ] #152 — Remove legacy ExpressionEvaluator + fix byte+byte promotion + add modulo (this plan).
 - [ ] #157 — NivaraColumn arithmetic kernels not yet collapsed onto generic math (pre-existing, referenced in POLARS-ROADMAP).
+- [ ] #164 — char operand pairs excluded from numeric promotion (`GetPromotedType` returns null for char+char; discovered while verifying the promotion fix — `NumericPromoterTests.GetPromotedType_ReturnsCSharpPromotedType` Char+Char case fails).
 - (Create any newly discovered issues here as work proceeds.)
