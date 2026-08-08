@@ -135,9 +135,9 @@ public class ExpressionEvaluatorTests
     }
 
     [Test]
-    public void Evaluate_MixedTypeNumeric_FallsBackToBoxedPath()
+    public void Evaluate_MixedTypeNumericBinary_UsesTypedPromotedPath()
     {
-        // Arrange
+        // double + int promotes to double and uses the typed promoted kernel (C# binary numeric promotion)
         var doubles = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
         var ints = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 30, 40 });
         var input = new Dictionary<string, IColumn>
@@ -152,16 +152,154 @@ public class ExpressionEvaluatorTests
         var result = evaluator.Evaluate(expression, input);
 
         // Assert
-        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(0), "mixed element types must skip the typed path");
-        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(1), "mixed element types must use the boxed fallback");
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1), "mixed promotable numerics must use the typed promoted path");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0), "typed promoted path must not fall back to boxed");
+        Assert.That(result.ElementType, Is.EqualTo(typeof(double)), "double + int must promote to double");
 
         for (int i = 0; i < result.Length; i++)
         {
             var expectedNull = doubles.IsNull(i) || ints.IsNull(i);
             Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
             if (!expectedNull)
-                Assert.That(result.GetValue(i), Is.EqualTo(Convert.ToDouble(doubles.GetValue(i)) + Convert.ToDouble(ints.GetValue(i))),
-                    $"value at {i} must match boxed Convert.ToDouble addition");
+                Assert.That(result.GetValue(i), Is.EqualTo(doubles[i] + ints[i]),
+                    $"value at {i} must match C# promoted addition");
+        }
+    }
+
+    [Test]
+    public void Evaluate_MixedTypeNumericBinary_PromotesToLong()
+    {
+        // int + long promotes to long
+        var ints = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, 2, null, 4 });
+        var longs = NivaraColumn<long>.CreateFromNullable(new long?[] { 100, null, 300, 400 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = ints,
+            ["B"] = longs
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(long)), "int + long must promote to long");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = ints.IsNull(i) || longs.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo(ints[i] + longs[i]),
+                    $"value at {i} must match C# promoted addition");
+        }
+    }
+
+    [Test]
+    public void Evaluate_ScalarMixedType_UsesTypedPromotedPath()
+    {
+        // double column + int literal promotes to double
+        var doubles = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null });
+        var input = new Dictionary<string, IColumn> { ["A"] = doubles };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") + 1;
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1), "column + int literal must use the typed promoted path");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(double)), "double column + int literal must promote to double");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = doubles.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must propagate from the column");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo((double)doubles.GetValue(i)! + 1),
+                    $"value at {i} must match C# promoted addition");
+        }
+    }
+
+    [Test]
+    public void Evaluate_MixedTypeNumericComparison_UsesTypedPromotedPath()
+    {
+        // double column vs int literal promotes to double and compares via the typed kernel
+        var doubles = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
+        var input = new Dictionary<string, IColumn> { ["A"] = doubles };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") > 1;
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1), "double column vs int literal must use the typed promoted comparison path");
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(bool)), "comparison result must be bool");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = doubles.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must propagate from the column");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo((double)doubles.GetValue(i)! > 1),
+                    $"value at {i} must match C# promoted comparison");
+        }
+    }
+
+    [Test]
+    public void Evaluate_DecimalInt_PromotesToDecimal()
+    {
+        // decimal + int promotes to decimal
+        var decimals = NivaraColumn<decimal>.CreateFromNullable(new decimal?[] { 1.5m, null, 3.5m });
+        var ints = NivaraColumn<int>.Create(new[] { 10, 20, 30 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = decimals,
+            ["B"] = ints
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(decimal)), "decimal + int must promote to decimal");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            var expectedNull = decimals.IsNull(i) || ints.IsNull(i);
+            Assert.That(result.IsNull(i), Is.EqualTo(expectedNull), $"null mask at {i} must be left-OR-right");
+            if (!expectedNull)
+                Assert.That(result.GetValue(i), Is.EqualTo(decimals[i] + ints[i]),
+                    $"value at {i} must match C# promoted addition");
+        }
+    }
+
+    [Test]
+    public void Evaluate_ByteInt_PromotesToInt()
+    {
+        // byte + int promotes to int (C# integral promotion)
+        var bytes = NivaraColumn<byte>.Create(new byte[] { 1, 2, 3 });
+        var ints = NivaraColumn<int>.Create(new[] { 100, 200, 300 });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = bytes,
+            ["B"] = ints
+        };
+        var evaluator = new ExpressionEvaluator();
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var result = evaluator.Evaluate(expression, input);
+
+        Assert.That(evaluator.TypedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(evaluator.BoxedPathEvaluationCount, Is.EqualTo(0));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)), "byte + int must promote to int");
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            Assert.That(result.IsNull(i), Is.False);
+            Assert.That(result.GetValue(i), Is.EqualTo(bytes[i] + ints[i]), $"value at {i} must match C# promoted addition");
         }
     }
 

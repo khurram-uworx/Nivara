@@ -307,10 +307,47 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void Select_MixedElementTypeColumns_RecordsBoxedKernelDiagnostics()
+    public void Select_MixedPromotableColumns_RecordsTypedKernelDiagnostics()
     {
+        // double + int is numerically promotable (C# binary numeric promotion), so it must use the
+        // typed promoted kernel and record typed diagnostics, not the boxed fallback.
         using var frame = CreateFrame();
         var queryFrame = frame.AsQueryFrame().Select(ColumnExpressions.Col("Score") + ColumnExpressions.Col("Bonus"));
+        var plan = queryFrame.ToQueryPlan();
+
+        var diagnostics = new ExecutionDiagnostics();
+        var context = new NivaraExecutionContext(ExecutionStrategy.Lazy) { ExecutionDiagnostics = diagnostics };
+
+        DiagnosticsTracker.IsEnabled = true;
+        try
+        {
+            var engine = new ExecutionEngine();
+            using var result = engine.Execute(plan, context);
+
+            var typedEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
+                .ToList();
+
+            Assert.That(typedEvaluations, Is.Not.Empty, "mixed double+int expression should record a typed (promoted) expression evaluation");
+            Assert.That(typedEvaluations[0].Notes, Is.EqualTo("Typed column kernel"));
+        }
+        finally
+        {
+            DiagnosticsTracker.IsEnabled = false;
+            DiagnosticsTracker.ClearRecordedOperations();
+        }
+    }
+
+    [Test]
+    public void Select_NonPromotableGuidComparison_RecordsBoxedKernelDiagnostics()
+    {
+        // Guid is not numerically promotable, so this comparison must still use the boxed fallback
+        // and record scalar diagnostics (boxed-path preservation).
+        var g1 = Guid.NewGuid();
+        var g2 = Guid.NewGuid();
+        var guids = NivaraColumn<Guid>.Create(new[] { g1, g2, g1, g2, g1 });
+        using var frame = NivaraFrame.Create(("G", guids));
+        var queryFrame = frame.AsQueryFrame().Select(ColumnExpressions.Col("G") == g1);
         var plan = queryFrame.ToQueryPlan();
 
         var diagnostics = new ExecutionDiagnostics();
@@ -326,7 +363,7 @@ public class ExpressionEvaluatorTypedFastPathTests
                 .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Scalar)
                 .ToList();
 
-            Assert.That(boxedEvaluations, Is.Not.Empty, "mixed double+int expression should record a boxed expression evaluation");
+            Assert.That(boxedEvaluations, Is.Not.Empty, "non-promotable Guid comparison should record a boxed expression evaluation");
             Assert.That(boxedEvaluations[0].Notes, Is.EqualTo("Boxed object fallback"));
         }
         finally
