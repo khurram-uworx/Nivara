@@ -164,4 +164,118 @@ public class RankOperationTests
 
         Assert.Throws<QueryExecutionException>(() => op.Execute(input));
     }
+
+    // ── QueryFrame pipeline ──
+
+    static NivaraFrame FrameWith(params (string Name, IColumn Column)[] columns)
+        => new(columns);
+
+    [Test]
+    public void QueryFrame_Rank_Collect_AddsResultColumn()
+    {
+        using var frame = FrameWith(("v", IntColumn(10, 20, 20, 30)));
+        using var result = frame.AsQueryFrame().Rank("rnk", new[] { new SortKey("v") }).Collect();
+
+        Assert.That(result.HasColumn("v"), Is.True);
+        Assert.That(result.HasColumn("rnk"), Is.True);
+        var rnk = result.GetColumn<long>("rnk");
+        Assert.That(rnk[0], Is.EqualTo(1));
+        Assert.That(rnk[1], Is.EqualTo(2));
+        Assert.That(rnk[2], Is.EqualTo(2));
+        Assert.That(rnk[3], Is.EqualTo(4));
+    }
+
+    [Test]
+    public void QueryFrame_DenseRankAndPercentRank_AddColumns()
+    {
+        using var frame = FrameWith(("v", IntColumn(10, 20, 20, 30)));
+        using var result = frame.AsQueryFrame()
+            .DenseRank("dense", new[] { new SortKey("v") })
+            .PercentRank("pct", new[] { new SortKey("v") })
+            .Collect();
+
+        var dense = result.GetColumn<long>("dense");
+        var pct = result.GetColumn<double>("pct");
+        Assert.That(dense[0], Is.EqualTo(1));
+        Assert.That(dense[1], Is.EqualTo(2));
+        Assert.That(dense[2], Is.EqualTo(2));
+        Assert.That(dense[3], Is.EqualTo(3));
+        Assert.That(pct[0], Is.EqualTo(0.0));
+        Assert.That(pct[3], Is.EqualTo(1.0));
+    }
+
+    [Test]
+    public void QueryFrame_RowNumber_NoOrderBy_Sequential()
+    {
+        using var frame = FrameWith(("v", IntColumn(5, 1, 3)));
+        using var result = frame.AsQueryFrame().RowNumber("rn").Collect();
+
+        var rn = result.GetColumn<long>("rn");
+        Assert.That(rn[0], Is.EqualTo(1));
+        Assert.That(rn[1], Is.EqualTo(2));
+        Assert.That(rn[2], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void QueryFrame_RowNumber_WithPartitionAndOrder_ResetsPerGroup()
+    {
+        using var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "A" })),
+            ("v", IntColumn(30, 10, 20, 20)));
+        using var result = frame.AsQueryFrame()
+            .RowNumber("rn", new[] { "g" }, new[] { new SortKey("v", SortDirection.Descending) })
+            .Collect();
+
+        var rn = result.GetColumn<long>("rn");
+        Assert.That(rn[0], Is.EqualTo(1));
+        Assert.That(rn[1], Is.EqualTo(3));
+        Assert.That(rn[2], Is.EqualTo(1));
+        Assert.That(rn[3], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void QueryFrame_Rank_SchemaReflectsColumnTypes()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        var queryFrame = frame.AsQueryFrame()
+            .Rank("rnk", new[] { new SortKey("v") })
+            .PercentRank("pct", new[] { new SortKey("v") });
+
+        var schema = queryFrame.Schema;
+        Assert.That(schema.HasColumn("rnk"), Is.True);
+        Assert.That(schema.GetColumnType("rnk"), Is.EqualTo(typeof(long)));
+        Assert.That(schema.HasColumn("pct"), Is.True);
+        Assert.That(schema.GetColumnType("pct"), Is.EqualTo(typeof(double)));
+    }
+
+    [Test]
+    public void QueryFrame_Rank_ComposesWithOtherWindowOps()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        using var result = frame.AsQueryFrame()
+            .CumulativeCount("v", "count")
+            .Rank("rnk", new[] { new SortKey("v") })
+            .Collect();
+
+        Assert.That(result.HasColumn("count"), Is.True);
+        Assert.That(result.HasColumn("rnk"), Is.True);
+        Assert.That(result.GetColumn<long>("count")[2], Is.EqualTo(3));
+        Assert.That(result.GetColumn<long>("rnk")[0], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void QueryFrame_Rank_MissingPartitionColumn_Throws()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+
+        Assert.Throws<QueryExecutionException>(() => frame.AsQueryFrame().Rank("rnk", new[] { new SortKey("v") }, "missing").Collect());
+    }
+
+    [Test]
+    public void QueryFrame_Rank_NoOrderKeys_Throws()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+
+        Assert.Throws<ArgumentException>(() => frame.AsQueryFrame().Rank("rnk", Array.Empty<SortKey>()));
+    }
 }
