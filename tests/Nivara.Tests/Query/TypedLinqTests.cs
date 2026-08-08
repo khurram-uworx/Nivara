@@ -128,6 +128,16 @@ public class TypedLinqTests
     }
 
     [Test]
+    public void Where_Modulo_FiltersByRemainder()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>().Where(p => p.Age % 2 == 1).ToObjects();
+
+        Assert.That(rows.Select(p => p.Name), Is.EqualTo(new[] { "Alice", "Carol" }));
+    }
+
+    [Test]
     public void Where_NumericLiteral_ImplicitCoercionWorks()
     {
         using var frame = CreatePeopleFrame();
@@ -193,6 +203,18 @@ public class TypedLinqTests
         Assert.That(rows[0].Name, Is.EqualTo("Alice"));
         Assert.That(rows[0].DoubleAge, Is.EqualTo(50));
         Assert.That(rows[4].DoubleAge, Is.EqualTo(100));
+    }
+
+    [Test]
+    public void Select_Modulo_ComputesRemainder()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .Select(p => new { p.Name, OddParity = p.Age % 2 })
+            .ToObjects();
+
+        Assert.That(rows.Select(p => p.OddParity), Is.EqualTo(new[] { 1, 0, 1, 0, 0 }));
     }
 
     [Test]

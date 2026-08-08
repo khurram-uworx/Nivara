@@ -345,9 +345,9 @@ var result = frame.Query<Person>()
     .ToObjects();   // IReadOnlyList<anonymous>
 ```
 
-Supported operators: property access, constant literals, `+ - * /` arithmetic, comparisons,
+Supported operators: property access, constant literals, `+ - * / %` arithmetic, comparisons,
 `&&`/`||`/`!` boolean logic. Method calls, captured variables/closures, nested property access,
-array/index access, ternary, `%`, and string `+` fail fast at build time with
+array/index access, ternary, and string `+` fail fast at build time with
 `UnsupportedQueryExpressionException`.
 
 Materialization:

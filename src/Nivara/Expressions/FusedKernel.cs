@@ -91,6 +91,7 @@ internal static class FusedKernel
             BinaryOperator.Subtract => left - right,
             BinaryOperator.Multiply => left * right,
             BinaryOperator.Divide => left / right,
+            BinaryOperator.Modulo => left % right,
             _ => throw new NotSupportedException($"Binary operator {op} is not supported by the generic node-tree kernel")
         };
     }

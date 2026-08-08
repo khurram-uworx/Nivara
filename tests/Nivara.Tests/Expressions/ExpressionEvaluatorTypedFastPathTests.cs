@@ -135,6 +135,31 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
+    public void ModuloFilter_TypedPath_FiltersCorrectly()
+    {
+        using var frame = CreateFrame();
+
+        using var filtered = frame.AsQueryFrame()
+            .Filter(ColumnExpressions.Col("ID") % 200 == 0)
+            .Collect();
+
+        Assert.That(filtered.RowCount, Is.EqualTo(2), "% 200 == 0 should keep 200 and 400");
+    }
+
+    [Test]
+    public void ModuloSelect_TypedPath_ProducesTypedElementType()
+    {
+        using var frame = CreateFrame();
+
+        using var selected = frame.AsQueryFrame()
+            .Select(ColumnExpressions.Col("ID") % 3)
+            .Collect();
+
+        var remainders = selected.GetColumn<int>("(ID % 3)");
+        Assert.That(remainders.ToArray(), Is.EqualTo(new[] { 1, 2, 0, 1, 2 }));
+    }
+
+    [Test]
     public void ColumnAddition_TypedPath_ProducesCorrectValues()
     {
         using var frame = CreateFrame();

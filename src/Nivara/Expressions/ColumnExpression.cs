@@ -12,6 +12,7 @@ public enum BinaryOperator
     Subtract,
     Multiply,
     Divide,
+    Modulo,
     And,
     Or
 }
@@ -94,6 +95,17 @@ public abstract class ColumnExpression
     public static ColumnExpression operator /(ColumnExpression left, ColumnExpression right)
     {
         return new BinaryExpression(BinaryOperator.Divide, left, right);
+    }
+
+    /// <summary>
+    /// Modulo operator for column expressions
+    /// </summary>
+    /// <param name="left">The left operand</param>
+    /// <param name="right">The right operand</param>
+    /// <returns>A binary expression representing modulo</returns>
+    public static ColumnExpression operator %(ColumnExpression left, ColumnExpression right)
+    {
+        return new BinaryExpression(BinaryOperator.Modulo, left, right);
     }
 
     /// <summary>
@@ -204,6 +216,17 @@ public abstract class ColumnExpression
     public static ColumnExpression operator /(ColumnExpression left, object scalar)
     {
         return new ScalarExpression(BinaryOperator.Divide, left, scalar);
+    }
+
+    /// <summary>
+    /// Scalar modulo operator
+    /// </summary>
+    /// <param name="left">The column expression</param>
+    /// <param name="scalar">The scalar value</param>
+    /// <returns>A scalar expression representing modulo</returns>
+    public static ColumnExpression operator %(ColumnExpression left, object scalar)
+    {
+        return new ScalarExpression(BinaryOperator.Modulo, left, scalar);
     }
 
     /// <summary>
@@ -453,7 +476,8 @@ public sealed class BinaryExpression : ColumnExpression
 
         // Validate type compatibility for arithmetic operations
         if (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
-            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide)
+            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide ||
+            Operator == BinaryOperator.Modulo)
         {
             if (!TypeCompatibilityValidator.AreArithmeticCompatible(Left.ResultType, Right.ResultType))
             {
@@ -482,6 +506,7 @@ public sealed class BinaryExpression : ColumnExpression
             BinaryOperator.Subtract => "-",
             BinaryOperator.Multiply => "*",
             BinaryOperator.Divide => "/",
+            BinaryOperator.Modulo => "%",
             BinaryOperator.And => "&&",
             BinaryOperator.Or => "||",
             _ => op.ToString()
@@ -656,7 +681,8 @@ public sealed class ScalarExpression : ColumnExpression
 
         // Validate type compatibility for scalar operations
         if (Scalar != null && (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
-            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide))
+            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide ||
+            Operator == BinaryOperator.Modulo))
         {
             if (!TypeCompatibilityValidator.AreArithmeticCompatible(Column.ResultType, Scalar.GetType()))
             {
@@ -683,6 +709,7 @@ public sealed class ScalarExpression : ColumnExpression
             BinaryOperator.Subtract => "-",
             BinaryOperator.Multiply => "*",
             BinaryOperator.Divide => "/",
+            BinaryOperator.Modulo => "%",
             BinaryOperator.And => "&&",
             BinaryOperator.Or => "||",
             _ => op.ToString()

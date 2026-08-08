@@ -170,6 +170,125 @@ public class FusedExpressionEvaluatorTests
     }
 
     [Test]
+    public void Infer_ByteSameType_UnifiesToInt()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<byte>.Create(new byte[] { 1, 2, 3 }),
+            ["B"] = NivaraColumn<byte>.Create(new byte[] { 4, 5, 6 })
+        };
+        var plan = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + ColumnExpressions.Col("B"), input);
+
+        Assert.That(plan, Is.Not.Null);
+        Assert.That(plan.ResultType, Is.EqualTo(typeof(int)), "byte + byte must unify to int (C# rule 1)");
+    }
+
+    [Test]
+    public void Evaluate_ByteSameType_PromotesToInt()
+    {
+        var left = NivaraColumn<byte>.Create(new byte[] { 10, 20, 30 });
+        var right = NivaraColumn<byte>.Create(new byte[] { 1, 2, 3 });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)), "byte + byte must produce a NivaraColumn<int>");
+        AssertColumn(result, new int?[] { 11, 22, 33 });
+    }
+
+    [Test]
+    public void Evaluate_ByteScalar_PromotesToInt()
+    {
+        var column = NivaraColumn<byte>.Create(new byte[] { 10, 20, 30 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") * 2;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)), "byte column * int scalar must produce int");
+        AssertColumn(result, new int?[] { 20, 40, 60 });
+    }
+
+    [Test]
+    public void Infer_UintSameType_UnifiesToUint()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<uint>.Create(new uint[] { 1u, 2u }),
+            ["B"] = NivaraColumn<uint>.Create(new uint[] { 3u, 4u })
+        };
+        var plan = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + ColumnExpressions.Col("B"), input);
+
+        Assert.That(plan, Is.Not.Null);
+        Assert.That(plan.ResultType, Is.EqualTo(typeof(uint)));
+    }
+
+    [Test]
+    public void Evaluate_UintSameType_StaysUint()
+    {
+        var left = NivaraColumn<uint>.Create(new uint[] { 1u, 2u, 3u });
+        var right = NivaraColumn<uint>.Create(new uint[] { 10u, 20u, 30u });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(uint)));
+        AssertColumn(result, new uint?[] { 11u, 22u, 33u });
+    }
+
+    [Test]
+    public void Evaluate_DecimalBinary_StaysDecimal()
+    {
+        var left = NivaraColumn<decimal>.Create(new decimal[] { 1.5m, 2.5m });
+        var right = NivaraColumn<decimal>.Create(new decimal[] { 0.5m, 0.25m });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(decimal)));
+        AssertColumn(result, new decimal?[] { 2.0m, 2.75m });
+    }
+
+    [Test]
+    public void Evaluate_ModuloBinary_ComputesRemainder_WithNullMasks()
+    {
+        var left = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 25, 30 });
+        var right = NivaraColumn<int>.CreateFromNullable(new int?[] { 3, 4, 7, 9 });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") % ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)));
+        AssertColumn(result, new int?[] { 1, null, 4, 3 });
+    }
+
+    [Test]
+    public void Evaluate_ModuloScalar_ComputesRemainder()
+    {
+        var column = NivaraColumn<double>.Create(new[] { 5.5, 10.0, 3.25 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") % 2.0;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(double)));
+        AssertColumn(result, new double?[] { 1.5, 0.0, 1.25 });
+    }
+
+    [Test]
     public void Evaluate_UnsupportedMixedComparison_Throws()
     {
         var strings = NivaraColumn<string>.Create(new[] { "a", "b" });
