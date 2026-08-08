@@ -84,6 +84,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Sum(SpanReinterpret.ReadOnly<T, ulong>(values)));
         if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Sum(SpanReinterpret.ReadOnly<T, byte>(values)));
         if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Sum(SpanReinterpret.ReadOnly<T, sbyte>(values)));
+        if (type == typeof(char)) return reinterpretBack(NumericTensorKernels<char>.Sum(SpanReinterpret.ReadOnly<T, char>(values)));
         if (type == typeof(decimal)) return reinterpretBack(NumericTensorKernels<decimal>.Sum(SpanReinterpret.ReadOnly<T, decimal>(values)));
         if (type == typeof(Half)) return reinterpretBack(NumericTensorKernels<Half>.Sum(SpanReinterpret.ReadOnly<T, Half>(values)));
         if (type == typeof(nint)) return reinterpretBack(NumericTensorKernels<nint>.Sum(SpanReinterpret.ReadOnly<T, nint>(values)));
@@ -148,6 +149,12 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         {
             var ushortSum = (ushort)(object)sum!;
             var result = (ushort)(ushortSum / count);
+            return (T)(object)result;
+        }
+        else if (type == typeof(char))
+        {
+            var charSum = (char)(object)sum!;
+            var result = (char)(charSum / count);
             return (T)(object)result;
         }
         else if (type == typeof(uint))
