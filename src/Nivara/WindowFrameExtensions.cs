@@ -1,4 +1,5 @@
 using Nivara.Tensors;
+using SortKey = Nivara.Operations.SortKey;
 using System.Globalization;
 using System.Numerics;
 
@@ -83,6 +84,53 @@ public static partial class NivaraFrameExtensions
     /// </summary>
     public static NivaraFrame Lead(this NivaraFrame frame, string source, string resultColumn, int periods, object? fillValue = null)
         => addWindowColumn(frame, source, resultColumn, c => CalculateShift(c, -periods, fillValue));
+
+    // ── Rank family ──
+
+    /// <summary>
+    /// Adds a row-number column. With no partition keys the numbering is sequential over all rows;
+    /// with no order keys the numbering follows row order.
+    /// </summary>
+    public static NivaraFrame RowNumber(this NivaraFrame frame, string resultColumn, string[]? partitionBy = null, IReadOnlyList<SortKey>? orderBy = null)
+        => addRankColumn(frame, resultColumn, RankKind.RowNumber, partitionBy ?? Array.Empty<string>(), orderBy ?? Array.Empty<SortKey>());
+
+    /// <summary>
+    /// Adds a standard rank column (gaps on ties).
+    /// </summary>
+    public static NivaraFrame Rank(this NivaraFrame frame, string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => addRankColumn(frame, resultColumn, RankKind.Rank, partitionBy, orderBy);
+
+    /// <summary>
+    /// Adds a dense-rank column (no gaps on ties).
+    /// </summary>
+    public static NivaraFrame DenseRank(this NivaraFrame frame, string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => addRankColumn(frame, resultColumn, RankKind.DenseRank, partitionBy, orderBy);
+
+    /// <summary>
+    /// Adds a percent-rank column: (rank - 1) / (partitionSize - 1).
+    /// </summary>
+    public static NivaraFrame PercentRank(this NivaraFrame frame, string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => addRankColumn(frame, resultColumn, RankKind.PercentRank, partitionBy, orderBy);
+
+    static NivaraFrame addRankColumn(NivaraFrame frame, string resultColumn, RankKind kind, string[] partitionBy, IReadOnlyList<SortKey> orderBy)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+
+        if (kind != RankKind.RowNumber && orderBy.Count == 0)
+            throw new ArgumentException($"'{kind}' requires at least one order key", nameof(orderBy));
+
+        foreach (var partition in partitionBy)
+            if (!frame.HasColumn(partition))
+                throw new ArgumentException($"Partition column '{partition}' not found", nameof(partitionBy));
+
+        foreach (var key in orderBy)
+            if (!frame.HasColumn(key.ColumnName))
+                throw new ArgumentException($"Order column '{key.ColumnName}' not found", nameof(orderBy));
+
+        var columns = frame.ColumnNames.ToDictionary(n => n, n => frame.GetColumn(n), StringComparer.OrdinalIgnoreCase);
+        var result = RankKernel.Compute(columns, partitionBy, orderBy, kind);
+        return frame.WithColumn(resultColumn, result);
+    }
 
     // ── Shared dispatch ──
 
