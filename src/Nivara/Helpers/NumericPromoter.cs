@@ -19,12 +19,12 @@ internal static class NumericPromoter
         ArgumentNullException.ThrowIfNull(left);
         ArgumentNullException.ThrowIfNull(right);
 
-        if (left == right)
-            return left;
-
         var numericTypes = TypeCompatibilityValidator.GetNumericTypes();
         if (!numericTypes.Contains(left) || !numericTypes.Contains(right))
             return null;
+
+        if (left == right)
+            return left;
 
         // C# rule 1: decimal wins over integrals. float/double has no implicit
         // conversion to decimal (a binding-time error in C#); resolve to double.
