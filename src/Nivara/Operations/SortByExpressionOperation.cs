@@ -1,6 +1,5 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
-using Nivara.Helpers;
 using Nivara.Query;
 
 namespace Nivara.Operations;

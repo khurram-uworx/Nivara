@@ -150,21 +150,21 @@ sealed class FusedExpressionEvaluator
         {
             // Trivial passthroughs: a bare column reference or literal needs no kernel.
             case ColumnReference columnRef:
-            {
-                var direct = input[columnRef.ColumnName];
-                fusedPathEvaluationCount++;
-                RecordDiagnostics(direct.Length, direct.ElementType, direct.HasNulls, ColumnStorageFactory.IsVectorizable(direct.ElementType), "Direct column passthrough");
-                return direct;
-            }
+                {
+                    var direct = input[columnRef.ColumnName];
+                    fusedPathEvaluationCount++;
+                    RecordDiagnostics(direct.Length, direct.ElementType, direct.HasNulls, ColumnStorageFactory.IsVectorizable(direct.ElementType), "Direct column passthrough");
+                    return direct;
+                }
 
             case LiteralExpression literal:
-            {
-                var constantLength = input.Values.FirstOrDefault()?.Length ?? 1;
-                var constant = CreateConstantColumn(literal.Value, constantLength);
-                fusedPathEvaluationCount++;
-                RecordDiagnostics(constantLength, constant.ElementType, constant.HasNulls, ColumnStorageFactory.IsVectorizable(constant.ElementType), "Constant column");
-                return constant;
-            }
+                {
+                    var constantLength = input.Values.FirstOrDefault()?.Length ?? 1;
+                    var constant = CreateConstantColumn(literal.Value, constantLength);
+                    fusedPathEvaluationCount++;
+                    RecordDiagnostics(constantLength, constant.ElementType, constant.HasNulls, ColumnStorageFactory.IsVectorizable(constant.ElementType), "Constant column");
+                    return constant;
+                }
         }
 
         var plan = ExpressionTypeInferer.TryInfer(expression, input);
@@ -470,31 +470,31 @@ sealed class FusedExpressionEvaluator
         switch (node)
         {
             case ColumnReference columnRef:
-            {
-                var leafParam = leafParams[leafIndex[columnRef]];
-                return Expression.ArrayAccess(leafParam, indexVar);
-            }
+                {
+                    var leafParam = leafParams[leafIndex[columnRef]];
+                    return Expression.ArrayAccess(leafParam, indexVar);
+                }
 
             case LiteralExpression literal:
                 return Expression.Constant(literal.Value, literal.Value!.GetType());
 
             case ScalarExpression scalar:
-            {
-                var columnValue = BuildNode(scalar.Column, leafParams, leafIndex, indexVar);
-                var scalarType = scalar.Scalar!.GetType();
-                var promoted = NumericPromoter.GetPromotedType(columnValue.Type, scalarType)!;
-                var left = ConvertTo(columnValue, promoted);
-                var right = ConvertTo(Expression.Constant(scalar.Scalar, scalarType), promoted);
-                return ApplyArithmetic(scalar.Operator, left, right);
-            }
+                {
+                    var columnValue = BuildNode(scalar.Column, leafParams, leafIndex, indexVar);
+                    var scalarType = scalar.Scalar!.GetType();
+                    var promoted = NumericPromoter.GetPromotedType(columnValue.Type, scalarType)!;
+                    var left = ConvertTo(columnValue, promoted);
+                    var right = ConvertTo(Expression.Constant(scalar.Scalar, scalarType), promoted);
+                    return ApplyArithmetic(scalar.Operator, left, right);
+                }
 
             case BinaryExpression binary when binary.Operator is not (BinaryOperator.And or BinaryOperator.Or):
-            {
-                var left = BuildNode(binary.Left, leafParams, leafIndex, indexVar);
-                var right = BuildNode(binary.Right, leafParams, leafIndex, indexVar);
-                var promoted = NumericPromoter.GetPromotedType(left.Type, right.Type)!;
-                return ApplyArithmetic(binary.Operator, ConvertTo(left, promoted), ConvertTo(right, promoted));
-            }
+                {
+                    var left = BuildNode(binary.Left, leafParams, leafIndex, indexVar);
+                    var right = BuildNode(binary.Right, leafParams, leafIndex, indexVar);
+                    var promoted = NumericPromoter.GetPromotedType(left.Type, right.Type)!;
+                    return ApplyArithmetic(binary.Operator, ConvertTo(left, promoted), ConvertTo(right, promoted));
+                }
 
             case BinaryExpression binary:
                 return binary.Operator == BinaryOperator.And
@@ -502,12 +502,12 @@ sealed class FusedExpressionEvaluator
                     : Expression.OrElse(BuildNode(binary.Left, leafParams, leafIndex, indexVar), BuildNode(binary.Right, leafParams, leafIndex, indexVar));
 
             case ComparisonExpression comparison:
-            {
-                var left = BuildNode(comparison.Left, leafParams, leafIndex, indexVar);
-                var right = BuildNode(comparison.Right, leafParams, leafIndex, indexVar);
-                var operandType = NumericPromoter.GetPromotedType(left.Type, right.Type) ?? left.Type;
-                return BuildComparison(comparison.Operator, ConvertTo(left, operandType), ConvertTo(right, operandType));
-            }
+                {
+                    var left = BuildNode(comparison.Left, leafParams, leafIndex, indexVar);
+                    var right = BuildNode(comparison.Right, leafParams, leafIndex, indexVar);
+                    var operandType = NumericPromoter.GetPromotedType(left.Type, right.Type) ?? left.Type;
+                    return BuildComparison(comparison.Operator, ConvertTo(left, operandType), ConvertTo(right, operandType));
+                }
 
             case NotExpression not:
                 return Expression.Not(BuildNode(not.Operand, leafParams, leafIndex, indexVar));
