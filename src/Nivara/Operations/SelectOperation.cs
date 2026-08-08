@@ -99,7 +99,7 @@ sealed class SelectOperation : IQueryOperation
         try
         {
             var selectedColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-            var evaluator = new ExpressionEvaluator();
+            var evaluator = new FusedExpressionEvaluator();
             var index = 0;
 
             foreach (var columnExpr in Columns)

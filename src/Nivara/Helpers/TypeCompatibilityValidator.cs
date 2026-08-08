@@ -232,7 +232,8 @@ public static class TypeCompatibilityValidator
         {
             typeof(byte), typeof(sbyte), typeof(short), typeof(ushort),
             typeof(int), typeof(uint), typeof(long), typeof(ulong),
-            typeof(float), typeof(double), typeof(decimal)
+            typeof(nint), typeof(nuint), typeof(Int128), typeof(UInt128),
+            typeof(float), typeof(double), typeof(Half), typeof(decimal)
         };
     }
 

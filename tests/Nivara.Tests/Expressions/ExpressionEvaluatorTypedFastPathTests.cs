@@ -161,7 +161,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void BoxedFallback_GuidComparison_StillWorks()
+    public void GuidComparison_CompiledComparer_FiltersCorrectly()
     {
         var g1 = Guid.NewGuid();
         var g2 = Guid.NewGuid();
@@ -172,7 +172,7 @@ public class ExpressionEvaluatorTypedFastPathTests
             .Filter(ColumnExpressions.Col("G") == g1)
             .Collect();
 
-        Assert.That(filtered.RowCount, Is.EqualTo(3), "Guid equality should fall back to boxed path and still filter");
+        Assert.That(filtered.RowCount, Is.EqualTo(3), "Guid equality should run through the compiled comparer kernel and still filter");
     }
 
     [Test]
@@ -247,7 +247,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void MixedStorage_NullableColumnComparison_RecordsTypedKernelDiagnostics()
+    public void MixedStorage_NullableColumnComparison_RecordsFusedKernelDiagnostics()
     {
         var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         using var frame = NivaraFrame.Create(("ID", ids));
@@ -263,11 +263,11 @@ public class ExpressionEvaluatorTypedFastPathTests
             var engine = new ExecutionEngine();
             using var result = engine.Execute(plan, context);
 
-            var typedEvaluations = diagnostics.KernelOperations
-                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
+            var fusedEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "FusedExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
                 .ToList();
 
-            Assert.That(typedEvaluations, Is.Not.Empty, "mixed Tensor/Memory comparison should record a typed (vectorized) expression evaluation");
+            Assert.That(fusedEvaluations, Is.Not.Empty, "mixed Tensor/Memory comparison should record a fused (vectorized) expression evaluation");
             Assert.That(result.RowCount, Is.EqualTo(3), "null row must be excluded and 3, 4, 5 kept");
         }
         finally
@@ -278,7 +278,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void Filter_SameTypeNumericColumns_RecordsTypedKernelDiagnostics()
+    public void Filter_SameTypeNumericColumns_RecordsFusedKernelDiagnostics()
     {
         using var frame = CreateFrame();
         var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("Score") < 90.0);
@@ -293,11 +293,11 @@ public class ExpressionEvaluatorTypedFastPathTests
             var engine = new ExecutionEngine();
             using var result = engine.Execute(plan, context);
 
-            var typedEvaluations = diagnostics.KernelOperations
-                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
+            var fusedEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "FusedExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
                 .ToList();
 
-            Assert.That(typedEvaluations, Is.Not.Empty, "same-type numeric filter should record a typed expression evaluation");
+            Assert.That(fusedEvaluations, Is.Not.Empty, "same-type numeric filter should record a fused expression evaluation");
         }
         finally
         {
@@ -307,10 +307,10 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void Select_MixedPromotableColumns_RecordsTypedKernelDiagnostics()
+    public void Select_MixedPromotableColumns_RecordsFusedKernelDiagnostics()
     {
         // double + int is numerically promotable (C# binary numeric promotion), so it must use the
-        // typed promoted kernel and record typed diagnostics, not the boxed fallback.
+        // fused compiled kernel and record fused vectorized diagnostics.
         using var frame = CreateFrame();
         var queryFrame = frame.AsQueryFrame().Select(ColumnExpressions.Col("Score") + ColumnExpressions.Col("Bonus"));
         var plan = queryFrame.ToQueryPlan();
@@ -324,12 +324,12 @@ public class ExpressionEvaluatorTypedFastPathTests
             var engine = new ExecutionEngine();
             using var result = engine.Execute(plan, context);
 
-            var typedEvaluations = diagnostics.KernelOperations
-                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
+            var fusedEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "FusedExpressionEvaluation" && k.KernelUsed == KernelType.Vectorized)
                 .ToList();
 
-            Assert.That(typedEvaluations, Is.Not.Empty, "mixed double+int expression should record a typed (promoted) expression evaluation");
-            Assert.That(typedEvaluations[0].Notes, Is.EqualTo("Typed column kernel"));
+            Assert.That(fusedEvaluations, Is.Not.Empty, "mixed double+int expression should record a fused (promoted) expression evaluation");
+            Assert.That(fusedEvaluations[0].Notes, Is.EqualTo("Compiled fused kernel"));
         }
         finally
         {
@@ -339,10 +339,10 @@ public class ExpressionEvaluatorTypedFastPathTests
     }
 
     [Test]
-    public void Select_NonPromotableGuidComparison_RecordsBoxedKernelDiagnostics()
+    public void Select_NonPromotableGuidComparison_RecordsFusedScalarKernelDiagnostics()
     {
-        // Guid is not numerically promotable, so this comparison must still use the boxed fallback
-        // and record scalar diagnostics (boxed-path preservation).
+        // Guid is not numerically promotable or SIMD-vectorizable, so this comparison runs through
+        // the fused compiled comparer kernel (no boxing) and records scalar diagnostics.
         var g1 = Guid.NewGuid();
         var g2 = Guid.NewGuid();
         var guids = NivaraColumn<Guid>.Create(new[] { g1, g2, g1, g2, g1 });
@@ -359,12 +359,12 @@ public class ExpressionEvaluatorTypedFastPathTests
             var engine = new ExecutionEngine();
             using var result = engine.Execute(plan, context);
 
-            var boxedEvaluations = diagnostics.KernelOperations
-                .Where(k => k.OperationType == "ExpressionEvaluation" && k.KernelUsed == KernelType.Scalar)
+            var fusedScalarEvaluations = diagnostics.KernelOperations
+                .Where(k => k.OperationType == "FusedExpressionEvaluation" && k.KernelUsed == KernelType.Scalar)
                 .ToList();
 
-            Assert.That(boxedEvaluations, Is.Not.Empty, "non-promotable Guid comparison should record a boxed expression evaluation");
-            Assert.That(boxedEvaluations[0].Notes, Is.EqualTo("Boxed object fallback"));
+            Assert.That(fusedScalarEvaluations, Is.Not.Empty, "non-promotable Guid comparison should record a fused scalar expression evaluation");
+            Assert.That(fusedScalarEvaluations[0].Notes, Is.EqualTo("Compiled fused kernel"));
         }
         finally
         {

@@ -88,10 +88,15 @@ static class ColumnStorageFactory
     /// </summary>
     /// <typeparam name="T">The type to check</typeparam>
     /// <returns>True if the type supports vectorization, false otherwise</returns>
-    public static bool IsVectorizable<T>()
-    {
-        var type = typeof(T);
+    public static bool IsVectorizable<T>() => IsVectorizable(typeof(T));
 
+    /// <summary>
+    /// Determines if a type supports vectorized operations
+    /// </summary>
+    /// <param name="type">The type to check</param>
+    /// <returns>True if the type supports vectorization, false otherwise</returns>
+    public static bool IsVectorizable(Type type)
+    {
         // Check for specific vectorizable numeric types
         return type == typeof(int) ||
                type == typeof(float) ||

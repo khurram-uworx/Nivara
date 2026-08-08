@@ -26,6 +26,14 @@ internal static class NumericPromoter
         if (left == right)
             return left;
 
+        // Half implicitly converts to float/double; it has no implicit conversion to/from
+        // integrals or decimal, so promote those pairs to double (safe superset).
+        if (left == typeof(Half) || right == typeof(Half))
+        {
+            var other = left == typeof(Half) ? right : left;
+            return other == typeof(float) || other == typeof(double) ? other : typeof(double);
+        }
+
         // C# rule 1: decimal wins over integrals. float/double has no implicit
         // conversion to decimal (a binding-time error in C#); resolve to double.
         if (left == typeof(decimal) || right == typeof(decimal))

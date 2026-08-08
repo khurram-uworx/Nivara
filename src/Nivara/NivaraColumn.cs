@@ -41,7 +41,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
+        // so a type that reaches here without a dispatch branch is unsupported.
         if (type == typeof(float)) { NumericTensorKernels<float>.Multiply(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Multiply(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Multiply(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -53,10 +54,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
 
-        for (int i = 0; i < x.Length; i++)
-        {
-            destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y!)!;
-        }
+        throw new NotSupportedException(
+            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
     }
 
     /// <summary>
@@ -67,7 +66,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
+        // so a type that reaches here without a dispatch branch is unsupported.
         if (type == typeof(float)) { NumericTensorKernels<float>.Multiply(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Multiply(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Multiply(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -79,10 +79,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
 
-        for (int i = 0; i < x.Length; i++)
-        {
-            destination[i] = (T)(object)((dynamic)x[i]! * (dynamic)y[i]!)!;
-        }
+        throw new NotSupportedException(
+            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
     }
 
     /// <summary>
@@ -93,7 +91,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
+        // so a type that reaches here without a dispatch branch is unsupported.
         if (type == typeof(float)) { NumericTensorKernels<float>.Add(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Add(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Add(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -105,10 +104,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Add(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Add(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
 
-        for (int i = 0; i < x.Length; i++)
-        {
-            destination[i] = (T)(object)((dynamic)x[i]! + (dynamic)y[i]!)!;
-        }
+        throw new NotSupportedException(
+            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
     }
 
     /// <summary>
@@ -119,7 +116,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
+        // so a type that reaches here without a dispatch branch is unsupported.
         if (type == typeof(float)) { NumericTensorKernels<float>.Subtract(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Subtract(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Subtract(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -131,10 +129,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Subtract(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Subtract(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
 
-        for (int i = 0; i < x.Length; i++)
-        {
-            destination[i] = (T)(object)((dynamic)x[i]! - (dynamic)y[i]!)!;
-        }
+        throw new NotSupportedException(
+            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
     }
 
     /// <summary>
@@ -145,7 +141,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
+        // so a type that reaches here without a dispatch branch is unsupported.
         if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -157,10 +154,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
 
-        for (int i = 0; i < x.Length; i++)
-        {
-            destination[i] = (T)(object)((dynamic)x[i]! / (dynamic)y[i]!)!;
-        }
+        throw new NotSupportedException(
+            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
     }
 
     /// <summary>
@@ -171,7 +166,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives; fall back to scalar for other types
+        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
+        // so a type that reaches here without a dispatch branch is unsupported.
         if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -183,10 +179,8 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
 
-        for (int i = 0; i < x.Length; i++)
-        {
-            destination[i] = (T)(object)((dynamic)x[i]! / (dynamic)y!)!;
-        }
+        throw new NotSupportedException(
+            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
     }
 
     /// <summary>
