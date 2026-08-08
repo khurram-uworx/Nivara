@@ -5,7 +5,7 @@ namespace Nivara.Execution;
 
 sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 {
-    static readonly HashSet<string> NonStreamableOperations = new() { Query.OperationType.Sort, Query.OperationType.SortByExpression, Query.OperationType.GroupBy, Query.OperationType.Join, Query.OperationType.Distinct, Query.OperationType.Rolling, Query.OperationType.Cumulative, Query.OperationType.Shift };
+    static readonly HashSet<string> NonStreamableOperations = new() { Query.OperationType.Sort, Query.OperationType.SortByExpression, Query.OperationType.GroupBy, Query.OperationType.Join, Query.OperationType.Distinct, Query.OperationType.Rolling, Query.OperationType.Cumulative, Query.OperationType.Shift, Query.OperationType.Rank };
 
     static bool isSuitableForStreaming(QueryPlan plan)
     {

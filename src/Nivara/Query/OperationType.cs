@@ -16,4 +16,5 @@ public static class OperationType
     public const string Rolling = "Rolling";
     public const string Cumulative = "Cumulative";
     public const string Shift = "Shift";
+    public const string Rank = "Rank";
 }
