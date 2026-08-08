@@ -31,7 +31,16 @@ public class NumericPromoterTests
             (typeof(byte), typeof(ulong), typeof(ulong)),
             (typeof(uint), typeof(ulong), typeof(ulong)),
             (typeof(int), typeof(ulong), typeof(double)),
-            (typeof(long), typeof(ulong), typeof(double))
+            (typeof(long), typeof(ulong), typeof(double)),
+            (typeof(sbyte), typeof(sbyte), typeof(int)),
+            (typeof(byte), typeof(byte), typeof(int)),
+            (typeof(short), typeof(short), typeof(int)),
+            (typeof(ushort), typeof(ushort), typeof(int)),
+            (typeof(char), typeof(char), typeof(int)),
+            (typeof(uint), typeof(uint), typeof(uint)),
+            (typeof(decimal), typeof(decimal), typeof(decimal)),
+            (typeof(float), typeof(float), typeof(float)),
+            (typeof(Half), typeof(Half), typeof(Half))
         };
 
         foreach (var (left, right, expected) in cases)
