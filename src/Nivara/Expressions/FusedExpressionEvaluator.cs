@@ -528,6 +528,7 @@ sealed class FusedExpressionEvaluator
             BinaryOperator.Subtract => Expression.Subtract(left, right),
             BinaryOperator.Multiply => Expression.Multiply(left, right),
             BinaryOperator.Divide => Expression.Divide(left, right),
+            BinaryOperator.Modulo => Expression.Modulo(left, right),
             _ => throw new NotSupportedException($"Binary operator {op} is not supported by the fused evaluator")
         };
     }

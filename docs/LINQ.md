@@ -102,7 +102,7 @@ ColumnExpressions.Col("Qty") * ColumnExpressions.Col("Price")  // BinaryExpressi
 ColumnExpressions.Col("Score") + 10                     // ScalarExpression
 ```
 
-The `ExpressionEvaluator` (in `Helpers/ExpressionEvaluator.cs`) walks the tree at execution time and produces result `IColumn` instances from input column dictionaries.
+The `FusedExpressionEvaluator` (in `Expressions/FusedExpressionEvaluator.cs`) walks the tree at execution time and produces result `IColumn` instances from input column dictionaries. It is compiled-first (`Expression.Compile` over `T[]` arrays) with a generic node-tree fallback; the legacy per-operator interpreter was removed.
 
 ---
 
@@ -144,7 +144,7 @@ public QueryFrame Filter(ColumnExpression condition)
 ```
 
 Execution:
-1. `ExpressionEvaluator.EvaluateBoolean(condition, input)` → `NivaraColumn<bool>`
+1. `FusedExpressionEvaluator.EvaluateBoolean(condition, input)` → `NivaraColumn<bool>`
 2. Iterates rows, collecting indices where mask is `true`
 3. Creates new columns from those indices (type-dispatched per element type)
 
@@ -345,9 +345,9 @@ var result = frame.Query<Person>()
     .ToObjects();   // IReadOnlyList<anonymous>
 ```
 
-Supported operators: property access, constant literals, `+ - * /` arithmetic, comparisons,
+Supported operators: property access, constant literals, `+ - * / %` arithmetic, comparisons,
 `&&`/`||`/`!` boolean logic. Method calls, captured variables/closures, nested property access,
-array/index access, ternary, `%`, and string `+` fail fast at build time with
+array/index access, ternary, and string `+` fail fast at build time with
 `UnsupportedQueryExpressionException`.
 
 Materialization:
@@ -593,7 +593,7 @@ var suggestions = query.AnalyzeOptimizations();
 | NivaraFrame window extensions | `src/Nivara/WindowFrameExtensions.cs` |
 | AggregationFunction | `src/Nivara/Operations/AggregationFunction.cs` |
 | ColumnExpression | `src/Nivara/Expressions/ColumnExpression.cs` |
-| ExpressionEvaluator | `src/Nivara/Helpers/ExpressionEvaluator.cs` |
+| FusedExpressionEvaluator | `src/Nivara/Expressions/FusedExpressionEvaluator.cs` |
 | RowExpressionBuilder | `src/Nivara/Linq/RowExpressionBuilder.cs` |
 | NivaraLinqExtensions | `src/Nivara/Linq/NivaraLinqExtensions.cs` |
 | NivaraQuery<T> / NivaraGroupedQuery<TKey,T> | `src/Nivara/Linq/NivaraQuery.cs` |

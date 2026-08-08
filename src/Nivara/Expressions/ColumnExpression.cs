@@ -12,6 +12,7 @@ public enum BinaryOperator
     Subtract,
     Multiply,
     Divide,
+    Modulo,
     And,
     Or
 }
@@ -94,6 +95,17 @@ public abstract class ColumnExpression
     public static ColumnExpression operator /(ColumnExpression left, ColumnExpression right)
     {
         return new BinaryExpression(BinaryOperator.Divide, left, right);
+    }
+
+    /// <summary>
+    /// Modulo operator for column expressions
+    /// </summary>
+    /// <param name="left">The left operand</param>
+    /// <param name="right">The right operand</param>
+    /// <returns>A binary expression representing modulo</returns>
+    public static ColumnExpression operator %(ColumnExpression left, ColumnExpression right)
+    {
+        return new BinaryExpression(BinaryOperator.Modulo, left, right);
     }
 
     /// <summary>
@@ -204,6 +216,17 @@ public abstract class ColumnExpression
     public static ColumnExpression operator /(ColumnExpression left, object scalar)
     {
         return new ScalarExpression(BinaryOperator.Divide, left, scalar);
+    }
+
+    /// <summary>
+    /// Scalar modulo operator
+    /// </summary>
+    /// <param name="left">The column expression</param>
+    /// <param name="scalar">The scalar value</param>
+    /// <returns>A scalar expression representing modulo</returns>
+    public static ColumnExpression operator %(ColumnExpression left, object scalar)
+    {
+        return new ScalarExpression(BinaryOperator.Modulo, left, scalar);
     }
 
     /// <summary>
@@ -453,7 +476,8 @@ public sealed class BinaryExpression : ColumnExpression
 
         // Validate type compatibility for arithmetic operations
         if (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
-            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide)
+            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide ||
+            Operator == BinaryOperator.Modulo)
         {
             if (!TypeCompatibilityValidator.AreArithmeticCompatible(Left.ResultType, Right.ResultType))
             {
@@ -466,20 +490,12 @@ public sealed class BinaryExpression : ColumnExpression
 
     private static Type DetermineResultType(Type leftType, Type rightType)
     {
-        // Simple type promotion rules
-        if (leftType == rightType)
-            return leftType;
+        var promoted = NumericPromoter.GetPromotedType(leftType, rightType);
+        if (promoted != null)
+            return promoted;
 
-        // Numeric type promotion
-        var numericTypes = new[] { typeof(double), typeof(float), typeof(long), typeof(int), typeof(short), typeof(byte) };
-
-        var leftIndex = Array.IndexOf(numericTypes, leftType);
-        var rightIndex = Array.IndexOf(numericTypes, rightType);
-
-        if (leftIndex >= 0 && rightIndex >= 0)
-            return numericTypes[Math.Min(leftIndex, rightIndex)];
-
-        return typeof(object);
+        // Non-numeric pairs: same-type keeps its type (bool And/Or -> bool, etc.); mixed pairs -> object.
+        return leftType == rightType ? leftType : typeof(object);
     }
 
     private static string GetOperatorSymbol(BinaryOperator op)
@@ -490,6 +506,7 @@ public sealed class BinaryExpression : ColumnExpression
             BinaryOperator.Subtract => "-",
             BinaryOperator.Multiply => "*",
             BinaryOperator.Divide => "/",
+            BinaryOperator.Modulo => "%",
             BinaryOperator.And => "&&",
             BinaryOperator.Or => "||",
             _ => op.ToString()
@@ -629,7 +646,7 @@ public sealed class ScalarExpression : ColumnExpression
         Operator = @operator;
         Column = column ?? throw new ArgumentNullException(nameof(column));
         Scalar = scalar;
-        ResultType = column.ResultType; // Result type is same as column type
+        ResultType = ComputeResultType(column.ResultType, scalar);
     }
 
     /// <summary>
@@ -660,11 +677,12 @@ public sealed class ScalarExpression : ColumnExpression
 
         // The column's result type resolves against the schema during validation (an untyped
         // column reference starts as object), so recompute our result type after it resolves.
-        ResultType = Column.ResultType;
+        ResultType = ComputeResultType(Column.ResultType, Scalar);
 
         // Validate type compatibility for scalar operations
         if (Scalar != null && (Operator == BinaryOperator.Add || Operator == BinaryOperator.Subtract ||
-            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide))
+            Operator == BinaryOperator.Multiply || Operator == BinaryOperator.Divide ||
+            Operator == BinaryOperator.Modulo))
         {
             if (!TypeCompatibilityValidator.AreArithmeticCompatible(Column.ResultType, Scalar.GetType()))
             {
@@ -675,6 +693,14 @@ public sealed class ScalarExpression : ColumnExpression
         }
     }
 
+    static Type ComputeResultType(Type columnType, object? scalar)
+    {
+        if (scalar == null)
+            return columnType;
+
+        return NumericPromoter.GetPromotedType(columnType, scalar.GetType()) ?? columnType;
+    }
+
     private static string GetOperatorSymbol(BinaryOperator op)
     {
         return op switch
@@ -683,6 +709,7 @@ public sealed class ScalarExpression : ColumnExpression
             BinaryOperator.Subtract => "-",
             BinaryOperator.Multiply => "*",
             BinaryOperator.Divide => "/",
+            BinaryOperator.Modulo => "%",
             BinaryOperator.And => "&&",
             BinaryOperator.Or => "||",
             _ => op.ToString()

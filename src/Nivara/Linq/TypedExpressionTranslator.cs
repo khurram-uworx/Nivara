@@ -10,10 +10,10 @@ namespace Nivara.Linq;
 /// <summary>
 /// Converts typed LINQ expression trees into the expression engine's <see cref="ColumnExpression"/>
 /// model, enforcing the supported/unsupported expression rules (IDEA §6.2) at query-build time.
-/// Allowed: property access, constant literals, arithmetic, comparisons, boolean logic, and unary
-/// negation. Rejected (with a clear diagnostic): method calls, captured variables/closures, nested
-/// property access, array/index access, invocations, ternaries, modulo, string concatenation, and
-/// nested lambdas.
+/// Allowed: property access, constant literals, arithmetic (incl. modulo), comparisons, boolean
+/// logic, and unary negation. Rejected (with a clear diagnostic): method calls, captured
+/// variables/closures, nested property access, array/index access, invocations, ternaries, string
+/// concatenation, and nested lambdas.
 /// </summary>
 sealed class TypedExpressionTranslator
 {
@@ -80,7 +80,7 @@ sealed class TypedExpressionTranslator
 
     /// <summary>
     /// Translates a binary expression, mapping arithmetic, boolean-logic, and comparison operators
-    /// onto the expression model and rejecting string concatenation, modulo, and coalescing.
+    /// onto the expression model and rejecting string concatenation and coalescing.
     /// </summary>
     ColumnExpression TranslateBinary(SystemBinaryExpression binary)
     {
@@ -105,7 +105,7 @@ sealed class TypedExpressionTranslator
             ExpressionType.LessThan => new ComparisonExpression(ComparisonOperator.LessThan, left, right),
             ExpressionType.LessThanOrEqual => new ComparisonExpression(ComparisonOperator.LessThanOrEqual, left, right),
             ExpressionType.Coalesce => throw Unsupported(binary, "null-coalescing (??) expressions are not supported"),
-            ExpressionType.Modulo => throw Unsupported(binary, "modulo (%) arithmetic is not supported"),
+            ExpressionType.Modulo => new NivaraBinaryExpression(BinaryOperator.Modulo, left, right),
             _ => throw Unsupported(binary, $"binary operator '{binary.NodeType}' is not supported")
         };
     }

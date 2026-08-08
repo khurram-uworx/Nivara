@@ -1,5 +1,4 @@
 using Nivara.Expressions;
-using Nivara.Helpers;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Query;
@@ -8,8 +7,10 @@ namespace Nivara.Tests.Query;
 /// Guardrails for the fused expression evaluator (POLARS-ROADMAP Phase 2).
 /// These tests fail if the fused path is reverted to per-operator materialization or boxing:
 /// - the fused evaluator is actually selected for fusable expressions;
-/// - fused output is bit-equivalent to the legacy evaluator, including null masks;
+/// - fused output carries the correct values and null masks;
 /// - unsupported/opaque expressions throw instead of degrading to boxed evaluation.
+/// The legacy per-operator <c>ExpressionEvaluator</c> was removed; expectations are asserted
+/// against hand-computed values (see issue #152).
 /// </summary>
 [TestFixture]
 public class FusedExpressionEvaluatorTests
@@ -48,7 +49,7 @@ public class FusedExpressionEvaluatorTests
     }
 
     [Test]
-    public void Evaluate_ChainedArithmetic_MatchesLegacyReference_WithNullMasks()
+    public void Evaluate_ChainedArithmetic_ComputesCorrectValues_WithNullMasks()
     {
         var left = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.5, 2.5, null, 4.0 });
         var right = NivaraColumn<double>.CreateFromNullable(new double?[] { null, 10.0, 30.0, 40.0 });
@@ -59,34 +60,32 @@ public class FusedExpressionEvaluatorTests
         };
         var expression = ColumnExpressions.Col("A") * 1.1 + 1000 - ColumnExpressions.Col("B");
 
-        var legacy = new ExpressionEvaluator().Evaluate(expression, input);
         var fused = new FusedExpressionEvaluator();
-
         var result = fused.Evaluate(expression, input);
 
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1), "chained arithmetic must run through the fused evaluator");
         Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "chained arithmetic must use the compiled target");
-        AssertEquivalent(legacy, result);
+        AssertColumn(result, new double?[] { null, 992.75, null, 964.4 });
     }
 
     [Test]
-    public void Evaluate_Comparison_MatchesLegacyReference_WithNullsMaskedFalse()
+    public void Evaluate_Comparison_WithNullsMaskedFalse()
     {
         var column = NivaraColumn<double>.CreateFromNullable(new double?[] { 50.0, 250.0, null, 400.0 });
         var input = new Dictionary<string, IColumn> { ["A"] = column };
         var expression = ColumnExpressions.Col("A") > 100;
 
-        var legacy = new ExpressionEvaluator().Evaluate(expression, input);
         var fused = new FusedExpressionEvaluator();
-
         var result = fused.Evaluate(expression, input);
 
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
         Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1));
-        AssertEquivalent(legacy, result);
         Assert.That(result.ElementType, Is.EqualTo(typeof(bool)));
         Assert.That(result.IsNull(2), Is.True, "null operand must yield a masked null result");
         Assert.That(((NivaraColumn<bool>)result)[2], Is.False, "masked comparison position must hold false (SQL semantics)");
+        Assert.That(((NivaraColumn<bool>)result)[0], Is.False, "50 > 100 is false");
+        Assert.That(((NivaraColumn<bool>)result)[1], Is.True, "250 > 100 is true");
+        Assert.That(((NivaraColumn<bool>)result)[3], Is.True, "400 > 100 is true");
     }
 
     [Test]
@@ -101,17 +100,15 @@ public class FusedExpressionEvaluatorTests
         };
         var expression = ColumnExpressions.Col("I") + ColumnExpressions.Col("D");
 
-        var legacy = new ExpressionEvaluator().Evaluate(expression, input);
         var fused = new FusedExpressionEvaluator();
-
         var result = fused.Evaluate(expression, input);
 
         Assert.That(result.ElementType, Is.EqualTo(typeof(double)));
-        AssertEquivalent(legacy, result);
+        AssertColumn(result, new double?[] { 11.5, null, null, 44.5 });
     }
 
     [Test]
-    public void Evaluate_AndOrNot_MatchesLegacyReference()
+    public void Evaluate_AndOrNot_PropagatesNullMasks()
     {
         var a = NivaraColumn<bool>.CreateFromNullable(new bool?[] { true, false, null, true });
         var b = NivaraColumn<bool>.CreateFromNullable(new bool?[] { false, false, true, null });
@@ -125,9 +122,9 @@ public class FusedExpressionEvaluatorTests
         var not = new NotExpression(ColumnExpressions.Col("A"));
         var fused = new FusedExpressionEvaluator();
 
-        AssertEquivalent(new ExpressionEvaluator().Evaluate(and, input), fused.Evaluate(and, input));
-        AssertEquivalent(new ExpressionEvaluator().Evaluate(or, input), fused.Evaluate(or, input));
-        AssertEquivalent(new ExpressionEvaluator().Evaluate(not, input), fused.Evaluate(not, input));
+        AssertColumn(fused.Evaluate(and, input), new bool?[] { false, false, null, null });
+        AssertColumn(fused.Evaluate(or, input), new bool?[] { true, false, null, null });
+        AssertColumn(fused.Evaluate(not, input), new bool?[] { false, true, null, false });
     }
 
     [Test]
@@ -154,7 +151,7 @@ public class FusedExpressionEvaluatorTests
         var result = fused.Evaluate(expression, input);
 
         Assert.That(result.ElementType, Is.EqualTo(typeof(decimal)));
-        AssertEquivalent(new ExpressionEvaluator().Evaluate(expression, input), result);
+        AssertColumn(result, new decimal?[] { 3.0m, null, 7.0m });
     }
 
     [Test]
@@ -170,6 +167,125 @@ public class FusedExpressionEvaluatorTests
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
         Assert.That(result.ElementType, Is.EqualTo(typeof(Half)));
         Assert.That((float)(Half)result.GetValue(0)!, Is.EqualTo(3.0f));
+    }
+
+    [Test]
+    public void Infer_ByteSameType_UnifiesToInt()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<byte>.Create(new byte[] { 1, 2, 3 }),
+            ["B"] = NivaraColumn<byte>.Create(new byte[] { 4, 5, 6 })
+        };
+        var plan = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + ColumnExpressions.Col("B"), input);
+
+        Assert.That(plan, Is.Not.Null);
+        Assert.That(plan.ResultType, Is.EqualTo(typeof(int)), "byte + byte must unify to int (C# rule 1)");
+    }
+
+    [Test]
+    public void Evaluate_ByteSameType_PromotesToInt()
+    {
+        var left = NivaraColumn<byte>.Create(new byte[] { 10, 20, 30 });
+        var right = NivaraColumn<byte>.Create(new byte[] { 1, 2, 3 });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)), "byte + byte must produce a NivaraColumn<int>");
+        AssertColumn(result, new int?[] { 11, 22, 33 });
+    }
+
+    [Test]
+    public void Evaluate_ByteScalar_PromotesToInt()
+    {
+        var column = NivaraColumn<byte>.Create(new byte[] { 10, 20, 30 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") * 2;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)), "byte column * int scalar must produce int");
+        AssertColumn(result, new int?[] { 20, 40, 60 });
+    }
+
+    [Test]
+    public void Infer_UintSameType_UnifiesToUint()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<uint>.Create(new uint[] { 1u, 2u }),
+            ["B"] = NivaraColumn<uint>.Create(new uint[] { 3u, 4u })
+        };
+        var plan = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + ColumnExpressions.Col("B"), input);
+
+        Assert.That(plan, Is.Not.Null);
+        Assert.That(plan.ResultType, Is.EqualTo(typeof(uint)));
+    }
+
+    [Test]
+    public void Evaluate_UintSameType_StaysUint()
+    {
+        var left = NivaraColumn<uint>.Create(new uint[] { 1u, 2u, 3u });
+        var right = NivaraColumn<uint>.Create(new uint[] { 10u, 20u, 30u });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(uint)));
+        AssertColumn(result, new uint?[] { 11u, 22u, 33u });
+    }
+
+    [Test]
+    public void Evaluate_DecimalBinary_StaysDecimal()
+    {
+        var left = NivaraColumn<decimal>.Create(new decimal[] { 1.5m, 2.5m });
+        var right = NivaraColumn<decimal>.Create(new decimal[] { 0.5m, 0.25m });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(decimal)));
+        AssertColumn(result, new decimal?[] { 2.0m, 2.75m });
+    }
+
+    [Test]
+    public void Evaluate_ModuloBinary_ComputesRemainder_WithNullMasks()
+    {
+        var left = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 25, 30 });
+        var right = NivaraColumn<int>.CreateFromNullable(new int?[] { 3, 4, 7, 9 });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") % ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)));
+        AssertColumn(result, new int?[] { 1, null, 4, 3 });
+    }
+
+    [Test]
+    public void Evaluate_ModuloScalar_ComputesRemainder()
+    {
+        var column = NivaraColumn<double>.Create(new[] { 5.5, 10.0, 3.25 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") % 2.0;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(double)));
+        AssertColumn(result, new double?[] { 1.5, 0.0, 1.25 });
     }
 
     [Test]
@@ -214,15 +330,16 @@ public class FusedExpressionEvaluatorTests
         Assert.That(result[2], Is.EqualTo(15.0));
     }
 
-    static void AssertEquivalent(IColumn expected, IColumn actual)
+    static void AssertColumn<T>(IColumn actual, IReadOnlyList<T?> expected)
+        where T : struct
     {
-        Assert.That(actual.Length, Is.EqualTo(expected.Length));
-        Assert.That(actual.ElementType, Is.EqualTo(expected.ElementType));
-        for (int i = 0; i < expected.Length; i++)
+        Assert.That(actual.Length, Is.EqualTo(expected.Count));
+        Assert.That(actual.ElementType, Is.EqualTo(typeof(T)));
+        for (int i = 0; i < expected.Count; i++)
         {
-            Assert.That(actual.IsNull(i), Is.EqualTo(expected.IsNull(i)), $"null mask at {i} must match legacy evaluator");
-            if (!expected.IsNull(i))
-                Assert.That(actual.GetValue(i), Is.EqualTo(expected.GetValue(i)), $"value at {i} must be bit-equivalent to legacy evaluator");
+            Assert.That(actual.IsNull(i), Is.EqualTo(!expected[i].HasValue), $"null mask at {i}");
+            if (expected[i].HasValue)
+                Assert.That(actual.GetValue(i), Is.EqualTo(expected[i]!.Value), $"value at {i}");
         }
     }
 }

@@ -24,7 +24,7 @@ internal static class NumericPromoter
             return null;
 
         if (left == right)
-            return left;
+            return IsSmallIntegralType(left) ? typeof(int) : left;
 
         // Half implicitly converts to float/double; it has no implicit conversion to/from
         // integrals or decimal, so promote those pairs to double (safe superset).
@@ -72,5 +72,16 @@ internal static class NumericPromoter
 
         // Remaining small integral pairs promote to int.
         return typeof(int);
+    }
+
+    static bool IsSmallIntegralType(Type type)
+    {
+        // C# spec §12.4.7.3 rule 1: when both operands share one of these types, the
+        // promoted type is int (the operands are converted to int before the operation).
+        return type == typeof(sbyte)
+            || type == typeof(byte)
+            || type == typeof(short)
+            || type == typeof(ushort)
+            || type == typeof(char);
     }
 }
