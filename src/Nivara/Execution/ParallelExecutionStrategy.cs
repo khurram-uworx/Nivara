@@ -1,5 +1,6 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
+using Nivara.Expressions;
 using Nivara.Helpers;
 using Nivara.Operations;
 using Nivara.Query;
@@ -139,7 +140,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         int maxDop,
         CancellationToken cancellationToken)
     {
-        var evaluator = new ExpressionEvaluator();
+        var evaluator = new FusedExpressionEvaluator();
         var (syntheticInput, sortKeys) = operation.MaterializeKeys(input, evaluator);
         var sortOperation = new SortOperation(sortKeys, operation.IsStable);
         var sorted = executeSortParallelSync(sortOperation, syntheticInput, ranges, maxDop, cancellationToken);

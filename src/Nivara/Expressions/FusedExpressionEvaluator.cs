@@ -1,6 +1,7 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Helpers;
+using Nivara.Storage;
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Numerics;
@@ -82,6 +83,9 @@ sealed class FusedExpressionEvaluator
     /// <exception cref="QueryExecutionException">Thrown when evaluation fails or result is not boolean</exception>
     public NivaraColumn<bool> EvaluateBoolean(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
     {
+        if (IsVacuousOverEmptyColumns(expression, input))
+            return NivaraColumn<bool>.Create(Array.Empty<bool>());
+
         var result = Evaluate(expression, input);
 
         if (result is not NivaraColumn<bool> boolColumn)
@@ -90,6 +94,54 @@ sealed class FusedExpressionEvaluator
         }
 
         return boolColumn;
+    }
+
+    /// <summary>
+    /// Determines whether a boolean expression is vacuously empty because every column it references
+    /// exists and has zero rows. The legacy evaluator produced an empty boolean column through its
+    /// boxed loop in this case; the fused evaluator would reject non-fusable operand combinations
+    /// (e.g. a string vs int comparison on an empty CSV column) even though there is no data to
+    /// compare, so short-circuit to an empty result to preserve legacy semantics.
+    /// </summary>
+    static bool IsVacuousOverEmptyColumns(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
+    {
+        var references = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        CollectColumnReferences(expression, references);
+
+        if (references.Count == 0)
+            return false;
+
+        foreach (var name in references)
+        {
+            if (!input.TryGetValue(name, out var column) || column.Length != 0)
+                return false;
+        }
+
+        return true;
+    }
+
+    static void CollectColumnReferences(ColumnExpression node, HashSet<string> references)
+    {
+        switch (node)
+        {
+            case ColumnReference columnRef:
+                references.Add(columnRef.ColumnName);
+                break;
+            case ScalarExpression scalar:
+                CollectColumnReferences(scalar.Column, references);
+                break;
+            case BinaryExpression binary:
+                CollectColumnReferences(binary.Left, references);
+                CollectColumnReferences(binary.Right, references);
+                break;
+            case ComparisonExpression comparison:
+                CollectColumnReferences(comparison.Left, references);
+                CollectColumnReferences(comparison.Right, references);
+                break;
+            case NotExpression not:
+                CollectColumnReferences(not.Operand, references);
+                break;
+        }
     }
 
     IColumn EvaluateCore(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
@@ -101,7 +153,7 @@ sealed class FusedExpressionEvaluator
             {
                 var direct = input[columnRef.ColumnName];
                 fusedPathEvaluationCount++;
-                RecordDiagnostics(direct.Length, direct.ElementType, direct.HasNulls, "Direct column passthrough");
+                RecordDiagnostics(direct.Length, direct.ElementType, direct.HasNulls, ColumnStorageFactory.IsVectorizable(direct.ElementType), "Direct column passthrough");
                 return direct;
             }
 
@@ -110,7 +162,7 @@ sealed class FusedExpressionEvaluator
                 var constantLength = input.Values.FirstOrDefault()?.Length ?? 1;
                 var constant = CreateConstantColumn(literal.Value, constantLength);
                 fusedPathEvaluationCount++;
-                RecordDiagnostics(constantLength, constant.ElementType, constant.HasNulls, "Constant column");
+                RecordDiagnostics(constantLength, constant.ElementType, constant.HasNulls, ColumnStorageFactory.IsVectorizable(constant.ElementType), "Constant column");
                 return constant;
             }
         }
@@ -140,8 +192,18 @@ sealed class FusedExpressionEvaluator
         var resultArray = ExecuteCompiled(action, leafArrays, plan.ResultType, length);
         var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
 
+        if (mask != null && plan.ResultType == typeof(bool))
+        {
+            var boolResult = (bool[])resultArray;
+            for (int i = 0; i < length; i++)
+                if (mask[i])
+                    boolResult[i] = false;
+        }
+
         fusedPathEvaluationCount++;
-        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, "Compiled fused kernel");
+        var vectorizable = plan.Columns.All(l => ColumnStorageFactory.IsVectorizable(l.Column.ElementType))
+            && ColumnStorageFactory.IsVectorizable(plan.ResultType);
+        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, vectorizable, "Compiled fused kernel");
         return CreateResultColumn(plan.ResultType, resultArray, mask);
     }
 
@@ -184,7 +246,7 @@ sealed class FusedExpressionEvaluator
         var result = kernel.Invoke(null, new object?[] { expression, plan.Columns, mask });
         nodeTreePathEvaluationCount++;
         fusedPathEvaluationCount++;
-        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, "Generic node-tree kernel");
+        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Generic node-tree kernel");
         return (IColumn)result!;
     }
 
@@ -351,14 +413,14 @@ sealed class FusedExpressionEvaluator
     /// <summary>
     /// Records the kernel route for an evaluation into the active diagnostics tracker.
     /// </summary>
-    static void RecordDiagnostics(int length, Type elementType, bool hasNulls, string message)
+    static void RecordDiagnostics(int length, Type elementType, bool hasNulls, bool vectorizable, string message)
     {
         if (!DiagnosticsTracker.IsEnabled)
             return;
 
         DiagnosticsTracker.RecordOperation(new OperationDiagnostics(
             "FusedExpressionEvaluation",
-            KernelType.Vectorized,
+            vectorizable ? KernelType.Vectorized : KernelType.Scalar,
             length,
             elementType,
             hasNulls,

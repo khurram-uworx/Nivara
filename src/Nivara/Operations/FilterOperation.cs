@@ -59,7 +59,7 @@ sealed class FilterOperation : IQueryOperation
         try
         {
             // Evaluate the condition to get a boolean mask
-            var evaluator = new ExpressionEvaluator();
+            var evaluator = new FusedExpressionEvaluator();
             var mask = evaluator.EvaluateBoolean(Condition, input);
 
             // Apply the mask to all columns

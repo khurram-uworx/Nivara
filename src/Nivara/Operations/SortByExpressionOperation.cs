@@ -149,7 +149,7 @@ sealed class SortByExpressionOperation : IQueryOperation
 
         try
         {
-            var evaluator = new ExpressionEvaluator();
+            var evaluator = new FusedExpressionEvaluator();
             var (syntheticInput, syntheticSortKeys) = MaterializeKeys(input, evaluator);
             var sortOperation = new SortOperation(syntheticSortKeys, stable);
             return StripSyntheticKeys(sortOperation.Execute(syntheticInput));
@@ -169,7 +169,7 @@ sealed class SortByExpressionOperation : IQueryOperation
     /// <param name="evaluator">The evaluator used to materialize the key expressions</param>
     /// <returns>The synthetic input dictionary and the sort keys referencing the synthetic columns</returns>
     internal (IReadOnlyDictionary<string, IColumn> SyntheticInput, IReadOnlyList<SortKey> SortKeys)
-        MaterializeKeys(IReadOnlyDictionary<string, IColumn> input, ExpressionEvaluator evaluator)
+        MaterializeKeys(IReadOnlyDictionary<string, IColumn> input, FusedExpressionEvaluator evaluator)
     {
         ArgumentNullException.ThrowIfNull(input);
         ArgumentNullException.ThrowIfNull(evaluator);
