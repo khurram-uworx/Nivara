@@ -2,6 +2,10 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Diagnostics;
+using Nivara.Expressions;
+using Nivara.Helpers;
+using Nivara.Storage;
 using Nivara.Tensors;
 using System.Diagnostics;
 using System.Numerics.Tensors;
@@ -208,6 +212,12 @@ static class Program
                     _ = t2.Subtract(d);
                 };
             });
+
+        Run("Fused chain 1M x (Salary*1.1)+1000-Tax", 5, 50,
+            () => CreateFusedChainScenario(1_000_000));
+
+        Run("Multi-pass chain 1M x (Salary*1.1)+1000-Tax", 5, 50,
+            () => CreateMultiPassChainScenario(1_000_000));
 
         Run("Linear forward [32x256] -> [32x256]", 5, 100,
             () =>
@@ -607,10 +617,87 @@ static class Program
         public List<ScenarioResult> Results { get; set; } = [];
     }
 
+    /// <summary>
+    /// Builds the fused-evaluator chain scenario for (Salary * 1.1) + 1000 - Tax. The scenario
+    /// gates on the vectorized kernel heuristic (KernelSelector length >= vectorSize * 4) and
+    /// asserts the single-pass fused evaluation beats the multi-pass legacy evaluator at the
+    /// chosen length, throwing loudly if it does not.
+    /// </summary>
+    static Action CreateFusedChainScenario(int length)
+    {
+        var salary = NivaraColumn<double>.Create(Fill(new double[length]));
+        var tax = NivaraColumn<double>.Create(Fill(new double[length]));
+        var input = new Dictionary<string, IColumn> { ["Salary"] = salary, ["Tax"] = tax };
+        var expression = ColumnExpressions.Col("Salary") * 1.1 + 1000 - ColumnExpressions.Col("Tax");
+
+        if (KernelSelector.DetermineKernelType(length, ColumnStorageFactory.IsVectorizable<double>()) != KernelType.Vectorized)
+        {
+            throw new InvalidOperationException(
+                $"Fused-chain gate requires the vectorized kernel heuristic at length {length} (length >= vectorSize * 4)");
+        }
+
+        var fused = new FusedExpressionEvaluator();
+        var legacy = new ExpressionEvaluator();
+
+        for (int i = 0; i < 3; i++)
+        {
+            fused.Evaluate(expression, input);
+            legacy.Evaluate(expression, input);
+        }
+
+        var fusedNs = MeasureNs(() => fused.Evaluate(expression, input), 3, 30);
+        var legacyNs = MeasureNs(() => legacy.Evaluate(expression, input), 3, 30);
+
+        if (fusedNs >= legacyNs)
+        {
+            throw new InvalidOperationException(
+                $"Fused chain must beat multi-pass at length {length}: fused {fusedNs:N0} ns/op vs multi-pass {legacyNs:N0} ns/op");
+        }
+
+        return () => fused.Evaluate(expression, input);
+    }
+
+    /// <summary>
+    /// Builds the multi-pass legacy-evaluator chain scenario for (Salary * 1.1) + 1000 - Tax,
+    /// materializing an intermediate column per operator.
+    /// </summary>
+    static Action CreateMultiPassChainScenario(int length)
+    {
+        var salary = NivaraColumn<double>.Create(Fill(new double[length]));
+        var tax = NivaraColumn<double>.Create(Fill(new double[length]));
+        var input = new Dictionary<string, IColumn> { ["Salary"] = salary, ["Tax"] = tax };
+        var expression = ColumnExpressions.Col("Salary") * 1.1 + 1000 - ColumnExpressions.Col("Tax");
+        var legacy = new ExpressionEvaluator();
+        return () => legacy.Evaluate(expression, input);
+    }
+
+    /// <summary>
+    /// Measures the mean execution time of an operation after a warmup phase.
+    /// </summary>
+    static double MeasureNs(Action op, int warmup, int iterations)
+    {
+        for (int i = 0; i < warmup; i++)
+            op();
+
+        var sw = Stopwatch.StartNew();
+        for (int i = 0; i < iterations; i++)
+            op();
+        sw.Stop();
+
+        return sw.Elapsed.TotalNanoseconds / iterations;
+    }
+
     static float[] Fill(float[] values)
     {
         for (int i = 0; i < values.Length; i++)
             values[i] = i * 0.001f;
+        return values;
+    }
+
+    static double[] Fill(double[] values)
+    {
+        for (int i = 0; i < values.Length; i++)
+            values[i] = i * 0.001;
         return values;
     }
 }
