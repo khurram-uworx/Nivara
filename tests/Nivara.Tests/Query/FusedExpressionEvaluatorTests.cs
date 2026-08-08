@@ -214,6 +214,65 @@ public class FusedExpressionEvaluatorTests
     }
 
     [Test]
+    public void Infer_CharSameType_UnifiesToInt()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<char>.Create(new char[] { (char)1, (char)2, (char)3 }),
+            ["B"] = NivaraColumn<char>.Create(new char[] { (char)4, (char)5, (char)6 })
+        };
+        var plan = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + ColumnExpressions.Col("B"), input);
+
+        Assert.That(plan, Is.Not.Null);
+        Assert.That(plan.ResultType, Is.EqualTo(typeof(int)), "char + char must unify to int (C# rule 1)");
+    }
+
+    [Test]
+    public void Evaluate_CharSameType_PromotesToInt()
+    {
+        var left = NivaraColumn<char>.Create(new char[] { (char)10, (char)20, (char)30 });
+        var right = NivaraColumn<char>.Create(new char[] { (char)1, (char)2, (char)3 });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)), "char + char must produce a NivaraColumn<int>");
+        AssertColumn(result, new int?[] { 11, 22, 33 });
+    }
+
+    [Test]
+    public void Evaluate_CharScalar_PromotesToInt()
+    {
+        var column = NivaraColumn<char>.Create(new char[] { (char)10, (char)20, (char)30 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") * 2;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)), "char column * int scalar must produce int");
+        AssertColumn(result, new int?[] { 20, 40, 60 });
+    }
+
+    [Test]
+    public void Evaluate_UintByte_PromotesToUint()
+    {
+        var left = NivaraColumn<uint>.Create(new uint[] { 1u, 2u, 3u });
+        var right = NivaraColumn<byte>.Create(new byte[] { 10, 20, 30 });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(uint)), "uint + byte must promote to uint (C# rule 7)");
+        AssertColumn(result, new uint?[] { 11u, 22u, 33u });
+    }
+
+    [Test]
     public void Infer_UintSameType_UnifiesToUint()
     {
         var input = new Dictionary<string, IColumn>
