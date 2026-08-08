@@ -81,4 +81,4 @@ No change needed in the `IsSmallIntegralType` branch — `char` is already liste
 
 ## GitHub issues log
 
-- [ ] (none yet) — create issues as concerns surface during execution
+- [x] #168 — NivaraColumn<T> arithmetic kernels do not support char element type (created while working on #164: char is now validator-numeric but direct column arithmetic still throws)
