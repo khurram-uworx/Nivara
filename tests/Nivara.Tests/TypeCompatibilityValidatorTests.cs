@@ -260,7 +260,7 @@ public class TypeCompatibilityValidatorTests
         {
             typeof(byte), typeof(sbyte), typeof(short), typeof(ushort),
             typeof(int), typeof(uint), typeof(long), typeof(ulong),
-            typeof(float), typeof(double), typeof(decimal)
+            typeof(float), typeof(double), typeof(Half), typeof(decimal)
         };
 
         Assert.That(numericTypes.Count, Is.EqualTo(expectedNumericTypes.Length),
