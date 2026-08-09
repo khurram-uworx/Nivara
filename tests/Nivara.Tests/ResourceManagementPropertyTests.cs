@@ -13,6 +13,20 @@ namespace Nivara.Tests;
 [TestFixture]
 public class ResourceManagementPropertyTests
 {
+    [OneTimeSetUp]
+    public void OneTimeSetUp()
+    {
+        // Resource tracking is opt-in by default; enable it for the tracking assertions below
+        NivaraResourceManager.Enable();
+    }
+
+    [OneTimeTearDown]
+    public void OneTimeTearDown()
+    {
+        // Restore the performance-first default so other fixtures don't pay tracking cost
+        NivaraResourceManager.Disable();
+    }
+
     [SetUp]
     public void Setup()
     {
@@ -25,6 +39,39 @@ public class ResourceManagementPropertyTests
     {
         // Force cleanup after each test to prevent resource leaks
         NivaraResourceManager.ForceCleanup();
+    }
+
+    /// <summary>
+    /// Property 18: Resource tracking is opt-in
+    /// With tracking disabled (the default), constructing columns and frames must not
+    /// register anything in the resource manager and must not grow the tracking dictionary.
+    /// </summary>
+    [Test]
+    public void ResourceTrackingDisabledByDefault_ShouldNotTrackResources()
+    {
+        // Arrange - ensure tracking is in the disabled (default) state
+        NivaraResourceManager.Disable();
+
+        try
+        {
+            // Act - create resources through the normal public surface
+            var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+            var frame = new NivaraFrame(new[] { ("data", (IColumn)column) });
+
+            // Assert - nothing is tracked
+            Assert.That(NivaraResourceManager.IsEnabled, Is.False,
+                "Resource tracking should be disabled by default");
+            var stats = NivaraResourceManager.GetResourceStatistics();
+            Assert.That(stats.TotalTrackedResources, Is.EqualTo(0),
+                "No resources should be tracked when tracking is disabled");
+            Assert.That(stats.TrackedResourcesByType.Count, Is.EqualTo(0),
+                "No resource types should appear when tracking is disabled");
+        }
+        finally
+        {
+            // Restore the enabled state for the tracking tests in this fixture
+            NivaraResourceManager.Enable();
+        }
     }
 
     /// <summary>

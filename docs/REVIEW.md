@@ -97,6 +97,16 @@ reflection needed.
 
 ### 3. Global hidden resource-manager overhead on every construction
 
+> **Resolved 2026-08-09 (issue #174, branch khurram/174):** `NivaraResourceManager`
+> tracking is now opt-in via `NivaraResourceManager.Enable()` / `IsEnabled` (default
+> OFF). The 30-second cleanup timer is created lazily only on `Enable()`, so default
+> hosts never run a timer thread; `TrackResource` / `UntrackResource` / the timer
+> callback are guarded no-ops when disabled. Column ctor only computes
+> `estimateMemoryUsage()` inside the enabled branch. Public surface unchanged
+> (`MemoryRecommendations`, `ResourceStatistics`, `NivaraFrame.GetMemoryRecommendations`).
+> Covered by `tests/Nivara.Tests/ResourceManagementPropertyTests.cs` including a
+> default-off assertion.
+
 Every `NivaraColumn<T>` ctor (and frame, presumably) calls
 `NivaraResourceManager.TrackResource` — inserting into a
 `ConcurrentDictionary<WeakReference, ResourceInfo>` with a `DateTime`, plus a
@@ -324,7 +334,9 @@ whether the change is safe (no breaking change) or requires a major bump.
     Parquet/Arrow/ML.NET extension APIs.
 16. Decide the query-paradigm story (one primary API; obsolete or remove the other
     two).
-17. Decide the `NivaraResourceManager` overhead: opt-in telemetry or removal.
+17. ~~Decide the `NivaraResourceManager` overhead: opt-in telemetry or removal.~~ —
+    Decided 2026-08-09 (issue #174): opt-in telemetry via
+    `NivaraResourceManager.Enable()` / `IsEnabled`, default OFF, lazy timer.
 18. Reconsider whether the DataFrame engine, query engine, and AutoDiff should be
     one package or separate packages.
 

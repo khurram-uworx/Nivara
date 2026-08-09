@@ -26,8 +26,8 @@ public sealed class QueryFrame : IDisposable
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         operations = new List<IQueryOperation>();
 
-        // Track lazy queries for abandoned resource cleanup
-        if (source.IsLazy)
+        // Track lazy queries for abandoned resource cleanup (opt-in via NivaraResourceManager.Enable)
+        if (source.IsLazy && NivaraResourceManager.IsEnabled)
         {
             NivaraResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
             {
@@ -55,8 +55,8 @@ public sealed class QueryFrame : IDisposable
         this.source = source ?? throw new ArgumentNullException(nameof(source));
         this.operations = operations?.ToList() ?? throw new ArgumentNullException(nameof(operations));
 
-        // Track lazy queries for abandoned resource cleanup
-        if (source.IsLazy)
+        // Track lazy queries for abandoned resource cleanup (opt-in via NivaraResourceManager.Enable)
+        if (source.IsLazy && NivaraResourceManager.IsEnabled)
         {
             NivaraResourceManager.TrackResource(this, "LazyQueryFrame", 0, () =>
             {

@@ -18,6 +18,17 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`NivaraResourceManager` tracking is now opt-in (#174)** — column/frame/QueryFrame
+  construction no longer registers a `WeakReference` + boxed `ResourceInfo` in a global
+  `ConcurrentDictionary`, and the process-lifetime 30-second cleanup `Timer` is gone from
+  default hosts. Tracking is disabled by default (performance-first); hosts that want
+  resource diagnostics opt in via `NivaraResourceManager.Enable()` (internal), which lazily
+  creates the timer. `TrackResource` / `UntrackResource` / the timer callback are guarded
+  no-ops when disabled, and the column ctor only computes `estimateMemoryUsage()` inside the
+  enabled branch. Public surface (`MemoryRecommendations`, `ResourceStatistics`,
+  `NivaraFrame.GetMemoryRecommendations`) is unchanged. Behavioral note: `QueryFrame`
+  abandoned-lazy-source cleanup (its `CleanupAction`) is now opt-in too.
+
 - **Same-type small-integral promotion in `NumericPromoter` (#152)** — `GetPromotedType` returned the operand type for equal operand pairs, so `byte + byte` produced `byte` instead of the C# spec §12.4.7.3 rule 1 result `int`. Same-type `sbyte`/`byte`/`short`/`ushort`/`char` pairs now promote to `int`; other same-type pairs (`decimal`, `uint`, `float`, `double`, `Half`, …) keep their type. This flows through `ExpressionTypeInferer` plan types and the compiled kernel target, fixing schema/result divergence for small-integral expressions.
 
 - **Row-major hot loops no longer re-evaluate `NivaraFrame.RowCount`** (`columns.Values.FirstOrDefault()` LINQ allocates ~40 B per access): `CopyToRowMajor`, `ToNullableTensor`, and the new `materializeRowMajor` cache `RowCount`/`ColumnCount` in locals. On a 10k × 128 frame this was ~51 MB/op of pure garbage; the fix drops `Frame RowDot` allocation to ~452 KB/op (dominated by result-series construction, not the kernel).

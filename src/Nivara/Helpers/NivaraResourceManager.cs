@@ -9,13 +9,41 @@ namespace Nivara.Helpers;
 static class NivaraResourceManager
 {
     private static readonly ConcurrentDictionary<WeakReference, ResourceInfo> _trackedResources = new();
-    private static readonly Timer _cleanupTimer;
     private static readonly object _lock = new object();
+    private static volatile bool _isEnabled;
+    private static Timer? _cleanupTimer;
 
-    static NivaraResourceManager()
+    /// <summary>
+    /// Gets a value indicating whether resource tracking is enabled.
+    /// Disabled by default so the hot path stays allocation-free; enable explicitly to opt in.
+    /// </summary>
+    public static bool IsEnabled => _isEnabled;
+
+    /// <summary>
+    /// Enables resource tracking and starts the background cleanup timer (idempotent).
+    /// The timer is created lazily here, so a host that never opts in never runs a timer thread.
+    /// </summary>
+    public static void Enable()
     {
-        // Run cleanup every 30 seconds
-        _cleanupTimer = new Timer(CleanupAbandonedResources, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        lock (_lock)
+        {
+            _isEnabled = true;
+            _cleanupTimer ??= new Timer(CleanupAbandonedResources, null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+        }
+    }
+
+    /// <summary>
+    /// Disables resource tracking, stops the background cleanup timer, and clears tracked resources (idempotent).
+    /// </summary>
+    public static void Disable()
+    {
+        lock (_lock)
+        {
+            _isEnabled = false;
+            _cleanupTimer?.Dispose();
+            _cleanupTimer = null;
+            _trackedResources.Clear();
+        }
     }
 
     /// <summary>
@@ -38,7 +66,7 @@ static class NivaraResourceManager
     /// <param name="cleanupAction">Optional cleanup action to perform when resource is abandoned</param>
     public static void TrackResource(object resource, string resourceType, long estimatedMemoryUsage = 0, Action? cleanupAction = null)
     {
-        if (resource == null) return;
+        if (!_isEnabled || resource == null) return;
 
         var weakRef = new WeakReference(resource);
         var info = new ResourceInfo
@@ -58,7 +86,7 @@ static class NivaraResourceManager
     /// <param name="resource">The resource to untrack</param>
     public static void UntrackResource(object resource)
     {
-        if (resource == null) return;
+        if (!_isEnabled || resource == null) return;
 
         lock (_lock)
         {
@@ -191,6 +219,8 @@ static class NivaraResourceManager
     /// <param name="state">Timer state (unused)</param>
     private static void CleanupAbandonedResources(object? state)
     {
+        if (!_isEnabled) return;
+
         lock (_lock)
         {
             var keysToRemove = new List<WeakReference>();
