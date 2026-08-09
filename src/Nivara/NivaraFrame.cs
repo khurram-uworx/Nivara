@@ -276,8 +276,11 @@ public sealed class NivaraFrame : IFrame
         columns = columnDict;
         schema = new Schema(schemaColumns);
 
-        // Track this frame for resource management
-        NivaraResourceManager.TrackResource(this, "NivaraFrame", estimatedMemoryUsage);
+        // Track this frame for resource management only when opted in
+        if (NivaraResourceManager.IsEnabled)
+        {
+            NivaraResourceManager.TrackResource(this, "NivaraFrame", estimatedMemoryUsage);
+        }
     }
 
     /// <summary>

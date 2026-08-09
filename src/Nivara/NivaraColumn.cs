@@ -607,9 +607,11 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     {
         this.storage = storage ?? throw new ArgumentNullException(nameof(storage));
 
-        // Track column for resource management
-        var estimatedSize = estimateMemoryUsage();
-        NivaraResourceManager.TrackResource(this, $"NivaraColumn<{typeof(T).Name}>", estimatedSize);
+        // Track column for resource management only when opted in
+        if (NivaraResourceManager.IsEnabled)
+        {
+            NivaraResourceManager.TrackResource(this, $"NivaraColumn<{typeof(T).Name}>", estimateMemoryUsage());
+        }
     }
 
     /// <summary>
