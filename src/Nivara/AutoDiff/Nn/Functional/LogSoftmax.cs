@@ -15,6 +15,6 @@ public sealed class LogSoftmax<T> where T : struct, IFloatingPointIeee754<T>
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
-        return ReverseGradOperations.LogSoftmax(input);
+        return ReverseGradOperations.LogSoftmax(input, dim);
     }
 }

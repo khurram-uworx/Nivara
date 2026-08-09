@@ -1805,13 +1805,21 @@ public static class ReverseGradOperations
             $"AutoDiff=Concat;Axis={axis};Count={tensors.Length}");
     }
 
-    public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
+    public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> a, int dim = -1) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        int classCount = a.Rank >= 2 ? a.shape[1] : a.Length;
+        ResolveDim(a, dim, "Softmax", out int outer, out int classCount, out int inner);
         var resultArr = new T[a.Length];
-        GradKernels.Softmax(a.AsSpan(), resultArr, classCount);
+        if (inner == 1)
+        {
+            GradKernels.Softmax(a.AsSpan(), resultArr, classCount);
+        }
+        else
+        {
+            GradKernels.SoftmaxDim(a.AsSpan(), resultArr, outer, classCount, inner);
+        }
+
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
         if (GradientUtils.ShouldTrackGrad(a))
@@ -1820,7 +1828,15 @@ public static class ReverseGradOperations
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var aGradArr = new T[a.Length];
-                GradKernels.SoftmaxGradient(resultArr, gSpan, aGradArr, classCount);
+                if (inner == 1)
+                {
+                    GradKernels.SoftmaxGradient(resultArr, gSpan, aGradArr, classCount);
+                }
+                else
+                {
+                    GradKernels.SoftmaxDimGradient(resultArr, gSpan, aGradArr, outer, classCount, inner);
+                }
+
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(aGradArr));
             });
 
@@ -1830,13 +1846,21 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
-    public static ReverseGradTensor<T> LogSoftmax<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
+    public static ReverseGradTensor<T> LogSoftmax<T>(ReverseGradTensor<T> a, int dim = -1) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        int classCount = a.Rank >= 2 ? a.shape[1] : a.Length;
+        ResolveDim(a, dim, "LogSoftmax", out int outer, out int classCount, out int inner);
         var resultArr = new T[a.Length];
-        GradKernels.LogSoftmax(a.AsSpan(), resultArr, classCount);
+        if (inner == 1)
+        {
+            GradKernels.LogSoftmax(a.AsSpan(), resultArr, classCount);
+        }
+        else
+        {
+            GradKernels.LogSoftmaxDim(a.AsSpan(), resultArr, outer, classCount, inner);
+        }
+
         var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
 
         if (GradientUtils.ShouldTrackGrad(a))
@@ -1845,7 +1869,15 @@ public static class ReverseGradOperations
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var aGradArr = new T[a.Length];
-                GradKernels.LogSoftmaxGradient(a.AsSpan(), gSpan, aGradArr, classCount);
+                if (inner == 1)
+                {
+                    GradKernels.LogSoftmaxGradient(a.AsSpan(), gSpan, aGradArr, classCount);
+                }
+                else
+                {
+                    GradKernels.LogSoftmaxDimGradient(a.AsSpan(), gSpan, aGradArr, outer, classCount, inner);
+                }
+
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(aGradArr));
             });
 
@@ -1853,6 +1885,34 @@ public static class ReverseGradOperations
         }
 
         return resultTensor;
+    }
+
+    /// <summary>
+    /// Resolves a (possibly negative) softmax dimension into a strided layout:
+    /// <c>outer</c> blocks, <c>classCount</c> elements per slice spaced <c>inner</c>
+    /// apart. When <c>inner == 1</c> the layout is row-major contiguous.
+    /// </summary>
+    static void ResolveDim<T>(ReverseGradTensor<T> a, int dim, string operationName, out int outer, out int classCount, out int inner)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int rank = a.Rank;
+        int originalDim = dim;
+        if (dim < 0)
+            dim += rank;
+        if (dim < 0 || dim >= rank)
+            throw new ArgumentOutOfRangeException(
+                nameof(dim),
+                $"{operationName} dim {originalDim} is out of range for a {rank}D tensor.");
+
+        outer = 1;
+        for (int i = 0; i < dim; i++)
+            outer *= a.shape[i];
+
+        classCount = a.shape[dim];
+
+        inner = 1;
+        for (int i = dim + 1; i < rank; i++)
+            inner *= a.shape[i];
     }
 
     public static ReverseGradTensor<T> RMSNorm<T>(ReverseGradTensor<T> a, double eps = 1e-5)

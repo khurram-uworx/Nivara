@@ -374,14 +374,49 @@ public static class GradientUtils
     }
 
     /// <summary>
-    /// Validates that a tensor is ready for backward pass.
+    /// Validates that a scalar tensor is ready for a seed-less backward pass.
     /// </summary>
+    /// <remarks>
+    /// A seed-less <c>Backward()</c> requires the tensor to track gradients and be
+    /// scalar (<c>Length == 1</c>). For non-scalar tensors use
+    /// <see cref="CanBackward{T}(ReverseGradTensor{T}, ReverseGradTensor{T})"/> with an
+    /// explicit gradient seed.
+    /// </remarks>
     public static bool CanBackward<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
 
         return tensor.RequiresGrad && tensor.Length == 1;
+    }
+
+    /// <summary>
+    /// Validates that a tensor is ready for a backward pass with an explicit gradient seed.
+    /// </summary>
+    /// <remarks>
+    /// The seed must match the tensor's length and shape. This is the correct readiness
+    /// check for non-scalar backward passes.
+    /// </remarks>
+    public static bool CanBackward<T>(ReverseGradTensor<T> tensor, ReverseGradTensor<T> gradient) where T : struct, IFloatingPointIeee754<T>
+    {
+        if (tensor == null)
+            throw new ArgumentNullException(nameof(tensor));
+        if (gradient == null)
+            throw new ArgumentNullException(nameof(gradient));
+
+        if (!tensor.RequiresGrad || tensor.Length != gradient.Length)
+            return false;
+
+        var tensorShape = tensor.Shape;
+        var gradientShape = gradient.Shape;
+        if (tensorShape.Length != gradientShape.Length)
+            return false;
+        for (int i = 0; i < tensorShape.Length; i++)
+        {
+            if (tensorShape[i] != gradientShape[i])
+                return false;
+        }
+        return true;
     }
 
     /// <summary>
@@ -397,6 +432,7 @@ public static class GradientUtils
         sb.AppendLine($"  Length: {tensor.Length}");
         sb.AppendLine($"  Requires Grad: {tensor.RequiresGrad}");
         sb.AppendLine($"  Has Gradient: {tensor.Grad != null}");
+        sb.AppendLine($"  Can Backward (no seed): {CanBackward(tensor)}");
         sb.AppendLine($"  Is Leaf: {tensor.IsLeaf}");
 
         if (tensor.Grad != null)

@@ -1092,6 +1092,50 @@ public class NnTests
     }
 
     [Test]
+    public void BatchNorm1d_NoRunningStats_RunningMeanThrows()
+    {
+        using var bn = new BatchNorm1d<float>(2, trackRunningStats: false);
+
+        Assert.That(bn.TrackRunningStats, Is.False);
+        Assert.That(() => bn.RunningMean, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.RunningVar, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.NumBatchesTracked, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+    }
+
+    [Test]
+    public void BatchNorm2d_NoRunningStats_RunningMeanThrows()
+    {
+        using var bn = new BatchNorm2d<float>(2, trackRunningStats: false);
+
+        Assert.That(bn.TrackRunningStats, Is.False);
+        Assert.That(() => bn.RunningMean, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.RunningVar, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.NumBatchesTracked, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+    }
+
+    [Test]
+    public void BatchNorm1d_TrackRunningStats_ExposesRunningStats()
+    {
+        using var bn = new BatchNorm1d<float>(3, trackRunningStats: true);
+
+        Assert.That(bn.TrackRunningStats, Is.True);
+        Assert.That(bn.RunningMean.Length, Is.EqualTo(3));
+        Assert.That(bn.RunningVar.Length, Is.EqualTo(3));
+        Assert.That(bn.NumBatchesTracked[0], Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void BatchNorm2d_TrackRunningStats_ExposesRunningStats()
+    {
+        using var bn = new BatchNorm2d<float>(3, trackRunningStats: true);
+
+        Assert.That(bn.TrackRunningStats, Is.True);
+        Assert.That(bn.RunningMean.Length, Is.EqualTo(3));
+        Assert.That(bn.RunningVar.Length, Is.EqualTo(3));
+        Assert.That(bn.NumBatchesTracked[0], Is.EqualTo(0f));
+    }
+
+    [Test]
     public void BatchNorm1d_3DInput_TrainMode_UpdatesRunningStats()
     {
         using var bn = new BatchNorm1d<float>(3);
@@ -3427,6 +3471,71 @@ public class NnTests
         input.Reshape(1, 5, 10);
 
         Assert.Throws<ArgumentException>(() => conv.Forward(input));
+    }
+
+    [Test]
+    public void RMSNormKernel_Half_Forward_MatchesScalarReference()
+    {
+        var rng = new Random(7);
+        const int rows = 4, cols = 8;
+        var src = new Half[rows * cols];
+        for (int i = 0; i < src.Length; i++)
+            src[i] = (Half)(rng.NextDouble() * 2 - 1);
+        var actual = new Half[src.Length];
+        RMSNormKernel<Half>.PerRowRMSNormForwardKernel(src, actual, rows, cols, 1e-5);
+
+        for (int r = 0; r < rows; r++)
+        {
+            double sumSq = 0;
+            for (int j = 0; j < cols; j++)
+            {
+                double v = (double)src[r * cols + j];
+                sumSq += v * v;
+            }
+            double rms = Math.Sqrt(sumSq / cols + 1e-5);
+            for (int j = 0; j < cols; j++)
+                Assert.That((double)actual[r * cols + j], Is.EqualTo((double)src[r * cols + j] / rms).Within(1e-3), $"({r},{j})");
+        }
+    }
+
+    [Test]
+    public void RMSNormKernel_Half_Backward_MatchesScalarReference()
+    {
+        var rng = new Random(11);
+        const int rows = 4, cols = 8;
+        var src = new Half[rows * cols];
+        var gradOut = new Half[rows * cols];
+        for (int i = 0; i < src.Length; i++)
+        {
+            src[i] = (Half)(rng.NextDouble() * 2 - 1);
+            gradOut[i] = (Half)(rng.NextDouble() * 2 - 1);
+        }
+        var gradResult = new Half[src.Length];
+        RMSNormKernel<Half>.PerRowRMSNormBackwardKernel(src, gradOut, gradResult, rows, cols, 1e-5);
+
+        for (int r = 0; r < rows; r++)
+        {
+            int baseIdx = r * cols;
+            double sumSq = 0;
+            for (int j = 0; j < cols; j++)
+            {
+                double v = (double)src[baseIdx + j];
+                sumSq += v * v;
+            }
+            double rms = Math.Sqrt(sumSq / cols + 1e-5);
+            double invRms = 1.0 / rms;
+            double rms3 = rms * rms * rms;
+            double sumGradX = 0;
+            for (int j = 0; j < cols; j++)
+                sumGradX += (double)gradOut[baseIdx + j] * (double)src[baseIdx + j];
+            double scale = sumGradX / (cols * rms3);
+            for (int j = 0; j < cols; j++)
+            {
+                double g = (double)gradOut[baseIdx + j];
+                double v = (double)src[baseIdx + j];
+                Assert.That((double)gradResult[baseIdx + j], Is.EqualTo(g * invRms - v * scale).Within(1e-3), $"({r},{j})");
+            }
+        }
     }
 
     #region TransformerBlock NormType Tests

@@ -84,6 +84,20 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
             return;
         }
 
+        if (typeof(T) == typeof(Half))
+        {
+            ApplyAdam_Kernel_Half(
+                MemoryMarshal.Cast<T, Half>(expAvg.AsSpan())[..n],
+                MemoryMarshal.Cast<T, Half>(expAvgSq.AsSpan())[..n],
+                MemoryMarshal.Cast<T, Half>(writable),
+                MemoryMarshal.Cast<T, Half>(dataSpan),
+                MemoryMarshal.Cast<T, Half>(gradSpan),
+                n, (Half)(object)lr!, (Half)(object)wd!,
+                (Half)(object)biasCorr1!, (Half)(object)biasCorr2!,
+                (Half)(object)beta1T!, (Half)(object)beta2T!, (Half)(object)epsT!);
+            return;
+        }
+
         for (int i = 0; i < n; i++)
         {
             expAvg[i] = beta1T * expAvg[i] + (T.One - beta1T) * gradSpan[i];
@@ -188,6 +202,51 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
         {
             ArrayPool<double>.Shared.Return(tempArr);
             ArrayPool<double>.Shared.Return(updateArr);
+        }
+    }
+
+    static void ApplyAdam_Kernel_Half(
+        Span<Half> expAvg, Span<Half> expAvgSq, Span<Half> writable,
+        ReadOnlySpan<Half> dataSpan, ReadOnlySpan<Half> gradSpan,
+        int n, Half lr, Half wd, Half biasCorr1, Half biasCorr2,
+        Half beta1T, Half beta2T, Half epsT)
+    {
+        Half oneMinusBeta1 = (Half)(1f - (float)beta1T);
+        Half oneMinusBeta2 = (Half)(1f - (float)beta2T);
+        var tempArr = ArrayPool<Half>.Shared.Rent(n);
+        var updateArr = ArrayPool<Half>.Shared.Rent(n);
+        try
+        {
+            var temp = tempArr.AsSpan(0, n);
+            var update = updateArr.AsSpan(0, n);
+
+            TensorPrimitives.Multiply(gradSpan, gradSpan, temp);
+            TensorPrimitives.Multiply(temp, oneMinusBeta2, temp);
+            TensorPrimitives.MultiplyAdd(expAvgSq, beta2T, temp, expAvgSq);
+
+            TensorPrimitives.Multiply(gradSpan, oneMinusBeta1, temp);
+            TensorPrimitives.MultiplyAdd(expAvg, beta1T, temp, expAvg);
+
+            TensorPrimitives.Divide(expAvg, biasCorr1, update);
+            TensorPrimitives.Divide(expAvgSq, biasCorr2, temp);
+            TensorPrimitives.Sqrt(temp, temp);
+            TensorPrimitives.Add(temp, epsT, temp);
+            TensorPrimitives.Divide(update, temp, update);
+            TensorPrimitives.Multiply(update, lr, update);
+
+            if ((float)wd != 0f)
+            {
+                TensorPrimitives.Multiply(dataSpan, (Half)((float)lr * (float)wd), temp);
+                TensorPrimitives.Add(update, temp, update);
+            }
+
+            for (int i = 0; i < n; i++)
+                writable[i] = (Half)((float)dataSpan[i] - (float)update[i]);
+        }
+        finally
+        {
+            ArrayPool<Half>.Shared.Return(tempArr);
+            ArrayPool<Half>.Shared.Return(updateArr);
         }
     }
 

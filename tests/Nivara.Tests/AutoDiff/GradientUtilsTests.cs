@@ -506,6 +506,54 @@ public class GradientUtilsTests
     }
 
     [Test]
+    public void CanBackward_WithSeed_SameShape_ReturnsTrue()
+    {
+        // Arrange
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }), requiresGrad: true);
+        a.Reshape(1, 3);
+        var seed = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 0.1f, 0.2f, 0.3f }), requiresGrad: false);
+        seed.Reshape(1, 3);
+
+        // Act & Assert
+        Assert.That(GradientUtils.CanBackward(a, seed), Is.True);
+    }
+
+    [Test]
+    public void CanBackward_WithSeed_MismatchedLength_ReturnsFalse()
+    {
+        // Arrange
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }), requiresGrad: true);
+        var seed = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f }), requiresGrad: false);
+
+        // Act & Assert
+        Assert.That(GradientUtils.CanBackward(a, seed), Is.False);
+    }
+
+    [Test]
+    public void CanBackward_WithSeed_MismatchedShape_ReturnsFalse()
+    {
+        // Arrange
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }), requiresGrad: true);
+        a.Reshape(1, 3);
+        var seed = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 0.1f, 0.2f, 0.3f }), requiresGrad: false);
+        seed.Reshape(3, 1);
+
+        // Act & Assert
+        Assert.That(GradientUtils.CanBackward(a, seed), Is.False);
+    }
+
+    [Test]
+    public void CanBackward_WithSeed_TensorWithoutGrad_ReturnsFalse()
+    {
+        // Arrange
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f }), requiresGrad: false);
+        var seed = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 0.1f, 0.2f, 0.3f }), requiresGrad: false);
+
+        // Act & Assert
+        Assert.That(GradientUtils.CanBackward(a, seed), Is.False);
+    }
+
+    [Test]
     public void DescribeTensor_ReturnsFormattedDescription()
     {
         // Arrange
@@ -519,6 +567,7 @@ public class GradientUtilsTests
         Assert.That(description, Does.Contain("ReverseGradTensor<Single>"));
         Assert.That(description, Does.Contain("Length: 3"));
         Assert.That(description, Does.Contain("Requires Grad: True"));
+        Assert.That(description, Does.Contain("Can Backward (no seed): False"));
         Assert.That(description, Does.Contain("Is Leaf: True"));
     }
 

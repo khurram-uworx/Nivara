@@ -221,7 +221,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
 | `Detach()` | Returns new tensor without gradient tracking |
 | `ZeroGrad()` | Clears gradient |
 | `ConvertTo<TTarget>()` | Converts to different numeric type |
-| `ToFloat()` / `ToDouble()` | Convenience conversion methods |
+| `ToFloat()` / `ToDouble()` / `ToHalf()` | Convenience conversion methods |
 
 **Factory methods:**
 
@@ -839,8 +839,8 @@ All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Each has a `Forward(
 | `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability |
 | `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed. `Forward(logits, targets, reduceToMean)` divides by element count when true. Backward uses fused `sigmoid(x) - z` via custom OpNode (fixes subgradient error at x=0). |
 | `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + one-hot targets |
-| `Softmax<T>` | dim-aware softmax | Wrapper around `ReverseGradOperations.Softmax` |
-| `LogSoftmax<T>` | dim-aware log-softmax | Wrapper around `ReverseGradOperations.LogSoftmax` |
+| `Softmax<T>` | dim-aware softmax | Wrapper around `ReverseGradOperations.Softmax`. Ctor `Softmax(dim = -1)`; `-1` is the last dim. |
+| `LogSoftmax<T>` | dim-aware log-softmax | Wrapper around `ReverseGradOperations.LogSoftmax`. Ctor `LogSoftmax(dim = -1)`; `-1` is the last dim. |
 
 ---
 
@@ -1151,7 +1151,8 @@ null participation, and operation-specific notes such as shape metadata.
 | `HasGradient(tensor)` | Whether `Grad != null` |
 | `GetGradientNorm(tensor)` | L2 norm of gradient (uses `TensorPrimitives.SumOfSquares`) |
 | `GetGlobalGradientNorm(tensors)` | Combined L2 norm across tensors |
-| `CanBackward(tensor)` | Whether `Backward()` can be called (scalar + requiresGrad) |
+| `CanBackward(tensor)` | Whether `Backward()` can be called with no seed (scalar + requiresGrad) |
+| `CanBackward(tensor, gradient)` | Whether `Backward(gradient)` is valid (requiresGrad, matching length and shape) |
 
 ---
 
@@ -1171,6 +1172,7 @@ null participation, and operation-specific notes such as shape metadata.
 | `Convert<TSource, TTarget>(source, requiresGrad?)` | Converts between supported types |
 | `ToFloat(source, requiresGrad?)` | Converts to float |
 | `ToDouble(source, requiresGrad?)` | Converts to double |
+| `ToHalf(source, requiresGrad?)` | Converts to Half |
 | `TryConvert<TSource, TTarget>(...)` | Returns null on failure |
 | `CanConvert<TSource, TTarget>()` | Checks if both types are supported |
 
@@ -1211,7 +1213,8 @@ var gradFrame = tensors.ToGradientFrame();   // Gradients as NivaraFrame (null i
 ### Batch Operations
 
 ```csharp
-tensors.BatchBackward(loss);    // Calls loss.Backward()
+tensors.BatchBackward(loss);    // Runs loss.Backward(), then verifies every listed
+                                // requires-grad tensor received a gradient
 tensors.BatchZeroGrad();        // Calls ZeroGrad() on all tensors
 ```
 

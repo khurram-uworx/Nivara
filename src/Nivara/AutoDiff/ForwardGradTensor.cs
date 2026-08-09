@@ -10,7 +10,7 @@ namespace Nivara.AutoDiff;
 /// automatic differentiation: tangent propagation through operations without a
 /// computation graph or backward pass.
 /// </summary>
-/// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
+/// <typeparam name="T">The numeric type that implements IFloatingPointIeee754&lt;T&gt;</typeparam>
 public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloatingPointIeee754<T>
 {
     /// <summary>

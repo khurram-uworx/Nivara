@@ -149,6 +149,10 @@ public static class NivaraAutoGradExtensions
 
     /// <summary>
     /// Performs batch gradient computation on multiple ReverseGradTensors.
+    /// Runs <paramref name="loss"/>.Backward(), then verifies that every listed
+    /// requires-grad tensor received a gradient. Throws listing the keys whose
+    /// tensors got no gradient (e.g. they are not reachable from the loss graph).
+    /// Tensors with <c>RequiresGrad == false</c> (constants) are exempt.
     /// </summary>
     public static void BatchBackward<T>(
         this Dictionary<string, ReverseGradTensor<T>> tensors,
@@ -164,6 +168,18 @@ public static class NivaraAutoGradExtensions
             throw new ArgumentException("Tensors dictionary cannot be empty", nameof(tensors));
 
         loss.Backward();
+
+        var missing = new List<string>();
+        foreach (var (key, tensor) in tensors)
+        {
+            if (tensor.RequiresGrad && tensor.Grad == null)
+                missing.Add(key);
+        }
+
+        if (missing.Count > 0)
+            throw new InvalidOperationException(
+                $"BatchBackward completed but the following requires-grad tensors received no gradient: {string.Join(", ", missing)}. " +
+                "They are not connected to the loss graph.");
     }
 
     /// <summary>
@@ -199,6 +215,10 @@ public static class NivaraAutoGradExtensions
 
     /// <summary>
     /// Extracts gradients from a batch of ReverseGradTensors and returns them as a NivaraFrame.
+    /// Unlike <see cref="ToFrame"/>, this skips tensors whose <c>Grad</c> is null (no gradient
+    /// computed), so the result is a <c>NivaraFrame?</c> and may be null when no tensor has a
+    /// gradient. This intentional asymmetry means the column set may differ from
+    /// <see cref="ToFrame"/>, which always returns one column per listed tensor.
     /// </summary>
     public static NivaraFrame? ToGradientFrame<T>(
         this Dictionary<string, ReverseGradTensor<T>> tensors) where T : struct, IFloatingPointIeee754<T>

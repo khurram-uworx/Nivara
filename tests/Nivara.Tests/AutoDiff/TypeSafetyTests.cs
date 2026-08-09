@@ -202,6 +202,60 @@ public class TypeSafetyTests
     }
 
     [Test]
+    public void TypeConverter_ToHalf_ConvertsCorrectly()
+    {
+        // Arrange
+        var data = new float[] { 1.5f, 2.5f, 3.5f };
+        var column = NivaraColumn<float>.Create(data);
+        var floatTensor = new ReverseGradTensor<float>(column, requiresGrad: true);
+
+        // Act
+        var halfTensor = TypeConverter.ToHalf(floatTensor);
+
+        // Assert
+        Assert.That(halfTensor, Is.Not.Null);
+        Assert.That(halfTensor.Length, Is.EqualTo(3));
+        Assert.That((double)halfTensor[0], Is.EqualTo(1.5).Within(0.0001));
+        Assert.That((double)halfTensor[1], Is.EqualTo(2.5).Within(0.0001));
+        Assert.That((double)halfTensor[2], Is.EqualTo(3.5).Within(0.0001));
+        Assert.That(halfTensor.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void TypeConverter_ToHalf_FromDouble_PreservesRequiresGrad()
+    {
+        // Arrange
+        var data = new double[] { 1.5, 2.5 };
+        var column = NivaraColumn<double>.Create(data);
+        var doubleTensor = new ReverseGradTensor<double>(column, requiresGrad: false);
+
+        // Act
+        var halfTensor = TypeConverter.ToHalf(doubleTensor);
+
+        // Assert
+        Assert.That(halfTensor.RequiresGrad, Is.False);
+        Assert.That((double)halfTensor[0], Is.EqualTo(1.5).Within(0.0001));
+    }
+
+    [Test]
+    public void ReverseGradTensor_ToHalf_ConvertsCorrectly()
+    {
+        // Arrange
+        var data = new double[] { 1.5, 2.5, 3.5 };
+        var column = NivaraColumn<double>.Create(data);
+        var doubleTensor = new ReverseGradTensor<double>(column, requiresGrad: true);
+
+        // Act
+        var halfTensor = doubleTensor.ToHalf();
+
+        // Assert
+        Assert.That(halfTensor, Is.Not.Null);
+        Assert.That(halfTensor.Length, Is.EqualTo(3));
+        Assert.That((double)halfTensor[0], Is.EqualTo(1.5).Within(0.0001));
+        Assert.That(halfTensor.RequiresGrad, Is.True);
+    }
+
+    [Test]
     public void NivaraColumn_ToReverseGradTensor_Float_Works()
     {
         // Arrange

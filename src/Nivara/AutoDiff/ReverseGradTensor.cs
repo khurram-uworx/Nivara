@@ -10,7 +10,7 @@ namespace Nivara.AutoDiff;
 /// Built on top of GradTensor&lt;T&gt; to add reverse-mode automatic differentiation:
 /// computation graph tracking, backward pass, and accumulated gradient storage.
 /// </summary>
-/// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
+/// <typeparam name="T">The numeric type that implements IFloatingPointIeee754&lt;T&gt;</typeparam>
 public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloatingPointIeee754<T>
 {
     /// <summary>
@@ -263,6 +263,17 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return TypeConverter.ToDouble(this, requiresGrad);
+    }
+
+    /// <summary>
+    /// Converts this ReverseGradTensor to Half (16-bit floating point).
+    /// </summary>
+    /// <param name="requiresGrad">Optional override for gradient tracking. If null, preserves current setting</param>
+    /// <returns>A new ReverseGradTensor with Half type</returns>
+    public ReverseGradTensor<Half> ToHalf(bool? requiresGrad = null)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return TypeConverter.ToHalf(this, requiresGrad);
     }
 
     public static ReverseGradTensor<T> operator +(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
