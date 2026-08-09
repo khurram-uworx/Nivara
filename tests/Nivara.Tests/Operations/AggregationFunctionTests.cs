@@ -1,5 +1,6 @@
 using Nivara;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.Operations;
 
@@ -194,6 +195,194 @@ public class AggregationFunctionTests
 
             // Assert
             Assert.That(resultType, Is.EqualTo(typeof(double)));
+        }
+
+        [Test]
+        public void Apply_WithUIntValues_ReturnsWidenedLongSum()
+        {
+            var values = new uint[] { 4_000_000_000, 1_000_000_000 };
+            var column = NivaraColumn<uint>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(5_000_000_000L));
+        }
+
+        [Test]
+        public void Apply_WithUShortValues_ReturnsWidenedLongSum()
+        {
+            var values = new ushort[] { 65535, 1 };
+            var column = NivaraColumn<ushort>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(65536L));
+        }
+
+        [Test]
+        public void Apply_WithSByteValues_ReturnsWidenedLongSum()
+        {
+            var values = new sbyte[] { -128, 127 };
+            var column = NivaraColumn<sbyte>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(-1L));
+        }
+
+        [Test]
+        public void Apply_WithCharValues_ReturnsWidenedLongSum()
+        {
+            var values = new char[] { 'a', 'b' };
+            var column = NivaraColumn<char>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(195L)); // 97 + 98
+        }
+
+        [Test]
+        public void Apply_WithBoolValues_ReturnsTrueCount()
+        {
+            var values = new bool[] { true, false, true, true };
+            var column = NivaraColumn<bool>.Create(values);
+            var indices = new List<int> { 0, 1, 2, 3 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(3L));
+        }
+
+        [Test]
+        public void Apply_WithUInt64Values_ReturnsUInt64Sum()
+        {
+            var values = new ulong[] { 10_000_000_000, 20_000_000_000 };
+            var column = NivaraColumn<ulong>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(30_000_000_000UL));
+        }
+
+        [Test]
+        public void Apply_WithNIntValues_ReturnsInt128Sum()
+        {
+            var values = new nint[] { 5, 10 };
+            var column = NivaraColumn<nint>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo((Int128)15));
+        }
+
+        [Test]
+        public void Apply_WithNUIntValues_ReturnsUInt128Sum()
+        {
+            var values = new nuint[] { 5, 10 };
+            var column = NivaraColumn<nuint>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo((UInt128)15));
+        }
+
+        [Test]
+        public void Apply_WithInt128Values_ReturnsInt128Sum()
+        {
+            var values = new Int128[] { 5, 10 };
+            var column = NivaraColumn<Int128>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo((Int128)15));
+        }
+
+        [Test]
+        public void Apply_WithUInt128Values_ReturnsUInt128Sum()
+        {
+            var values = new UInt128[] { 5, 10 };
+            var column = NivaraColumn<UInt128>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo((UInt128)15));
+        }
+
+        [Test]
+        public void Apply_WithHalfValues_ReturnsWidenedDoubleSum()
+        {
+            var values = new Half[] { (Half)1.5, (Half)2.5, (Half)3.0 };
+            var column = NivaraColumn<Half>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(7.0).Within(0.001));
+        }
+
+        [Test]
+        public void Apply_WithNullableUIntValues_IgnoresNulls()
+        {
+            var values = new uint?[] { 4_000_000_000, null, 1_000_000_000 };
+            var column = NivaraColumn<uint?>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Sum();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(5_000_000_000L));
+        }
+
+        [Test]
+        public void Apply_WithEmptyIndices_ReturnsTypedZeroForNewTypes()
+        {
+            var ulongColumn = NivaraColumn<ulong>.Create(new ulong[] { 1, 2 });
+            var int128Column = NivaraColumn<Int128>.Create(new Int128[] { 1, 2 });
+            var uint128Column = NivaraColumn<UInt128>.Create(new UInt128[] { 1, 2 });
+            var aggregation = AggregationFunctions.Sum();
+            var indices = new List<int>();
+
+            Assert.That(aggregation.Apply(ulongColumn, indices), Is.EqualTo(0UL));
+            Assert.That(aggregation.Apply(int128Column, indices), Is.EqualTo(Int128.Zero));
+            Assert.That(aggregation.Apply(uint128Column, indices), Is.EqualTo(UInt128.Zero));
+        }
+
+        [Test]
+        public void GetResultType_WithNewNumericTypes_ReturnsPromotedTypes()
+        {
+            var aggregation = AggregationFunctions.Sum();
+
+            Assert.That(aggregation.GetResultType(typeof(uint)), Is.EqualTo(typeof(long)));
+            Assert.That(aggregation.GetResultType(typeof(ushort)), Is.EqualTo(typeof(long)));
+            Assert.That(aggregation.GetResultType(typeof(sbyte)), Is.EqualTo(typeof(long)));
+            Assert.That(aggregation.GetResultType(typeof(char)), Is.EqualTo(typeof(long)));
+            Assert.That(aggregation.GetResultType(typeof(bool)), Is.EqualTo(typeof(long)));
+            Assert.That(aggregation.GetResultType(typeof(ulong)), Is.EqualTo(typeof(ulong)));
+            Assert.That(aggregation.GetResultType(typeof(nint)), Is.EqualTo(typeof(Int128)));
+            Assert.That(aggregation.GetResultType(typeof(nuint)), Is.EqualTo(typeof(UInt128)));
+            Assert.That(aggregation.GetResultType(typeof(Int128)), Is.EqualTo(typeof(Int128)));
+            Assert.That(aggregation.GetResultType(typeof(UInt128)), Is.EqualTo(typeof(UInt128)));
+            Assert.That(aggregation.GetResultType(typeof(Half)), Is.EqualTo(typeof(double)));
         }
     }
 
@@ -442,6 +631,97 @@ public class AggregationFunctionTests
             // Assert
             Assert.That(resultType, Is.EqualTo(typeof(double)));
         }
+
+        [Test]
+        public void Apply_WithUIntValues_ReturnsCorrectMean()
+        {
+            var values = new uint[] { 2, 4, 6 };
+            var column = NivaraColumn<uint>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Mean();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(4.0).Within(0.001));
+        }
+
+        [Test]
+        public void Apply_WithUInt64Values_ReturnsCorrectMean()
+        {
+            var values = new ulong[] { 2, 4, 6 };
+            var column = NivaraColumn<ulong>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Mean();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(4.0).Within(0.001));
+        }
+
+        [Test]
+        public void Apply_WithInt128Values_ReturnsCorrectMean()
+        {
+            var values = new Int128[] { 2, 4, 6 };
+            var column = NivaraColumn<Int128>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Mean();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(4.0).Within(0.001));
+        }
+
+        [Test]
+        public void Apply_WithUInt128Values_ReturnsCorrectMean()
+        {
+            var values = new UInt128[] { 2, 4, 6 };
+            var column = NivaraColumn<UInt128>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Mean();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(4.0).Within(0.001));
+        }
+
+        [Test]
+        public void Apply_WithHalfValues_ReturnsCorrectMean()
+        {
+            var values = new Half[] { (Half)1.5, (Half)2.5, (Half)3.5 };
+            var column = NivaraColumn<Half>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Mean();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(2.5).Within(0.001));
+        }
+
+        [Test]
+        public void Apply_WithBoolValues_ReturnsTrueProportion()
+        {
+            var values = new bool[] { true, false, true };
+            var column = NivaraColumn<bool>.Create(values);
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Mean();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(2.0 / 3.0).Within(0.001));
+        }
+
+        [Test]
+        public void Apply_WithCharValues_ReturnsCorrectMean()
+        {
+            var values = new char[] { 'a', 'c' };
+            var column = NivaraColumn<char>.Create(values);
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Mean();
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(98.0).Within(0.001)); // (97 + 99) / 2
+        }
     }
 
     [TestFixture]
@@ -499,6 +779,57 @@ public class AggregationFunctionTests
             Assert.That(result.Length, Is.EqualTo(2));
             Assert.That(result.GetValue(0), Is.EqualTo(60L)); // 10 + 20 + 30
             Assert.That(result.GetValue(1), Is.EqualTo(150L)); // 40 + 50 + 60
+        }
+
+        [Test]
+        public void ApplyToGroups_WithUInt64Values_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<ulong>.Create(new ulong[] { 10, 20, 30 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Sum().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<ulong>>());
+            Assert.That(result.GetValue(0), Is.EqualTo(30UL));
+            Assert.That(result.GetValue(1), Is.EqualTo(30UL));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithInt128Values_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<Int128>.Create(new Int128[] { 10, 20, 30 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Sum().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<Int128>>());
+            Assert.That(result.GetValue(0), Is.EqualTo((Int128)30));
+            Assert.That(result.GetValue(1), Is.EqualTo((Int128)30));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithUInt128Values_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<UInt128>.Create(new UInt128[] { 10, 20, 30 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Sum().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<UInt128>>());
+            Assert.That(result.GetValue(0), Is.EqualTo((UInt128)30));
+            Assert.That(result.GetValue(1), Is.EqualTo((UInt128)30));
         }
     }
 }
