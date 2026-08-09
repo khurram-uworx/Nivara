@@ -48,20 +48,7 @@ public sealed class NivaraFrame : IFrame
     /// <param name="length">The number of elements to include</param>
     /// <returns>A sliced column</returns>
     static IColumn sliceColumn(IColumn column, int start, int length)
-    {
-        // Use reflection to call the Slice method on the typed column
-        var columnType = column.GetType();
-        var sliceMethod = columnType.GetMethod("Slice", new[] { typeof(int), typeof(int) });
-
-        if (sliceMethod != null)
-        {
-            return (IColumn)sliceMethod.Invoke(column, new object[] { start, length })!;
-        }
-
-        // Fallback: create filtered column using indices
-        var indices = Enumerable.Range(start, length).ToList();
-        return ColumnFilterHelper.CreateFilteredColumn(column, indices);
-    }
+        => column.Slice(start, length);
 
     static int getTypeSize(Type type)
     {
