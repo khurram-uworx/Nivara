@@ -446,6 +446,179 @@ public static class GradKernels
         }
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  Dim-aware (strided) Softmax / LogSoftmax
+    //
+    //  A row-major tensor of shape S, normalized along dimension d,
+    //  splits into `outer` * `inner` slices, each with `classCount`
+    //  elements spaced `inner` apart:
+    //    outer     = Π S[0..d)
+    //    classCount= S[d]
+    //    inner     = Π S[d+1..)
+    //    slice(b,o) = input[b * classCount * inner + o + k * inner]
+    //  When inner == 1 the contiguous kernels above are the fast path.
+    // ─────────────────────────────────────────────────────────────
+
+    static void ValidateDimLayout(int inputLength, int outer, int classCount, int inner)
+    {
+        if (outer < 1 || classCount < 1 || inner < 1)
+            throw new ArgumentException("outer, classCount, and inner must all be positive.", nameof(inner));
+        long sliceLength = (long)classCount * inner;
+        if ((long)outer * sliceLength != inputLength)
+            throw new ArgumentException(
+                $"Dim layout mismatch: input length {inputLength} does not equal outer ({outer}) * classCount ({classCount}) * inner ({inner}).");
+    }
+
+    public static void SoftmaxDim<T>(ReadOnlySpan<T> input, Span<T> output, int outer, int classCount, int inner)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (output.Length < input.Length)
+            throw new ArgumentException($"Output span length ({output.Length}) must be at least the input length ({input.Length}).", nameof(output));
+        ValidateDimLayout(input.Length, outer, classCount, inner);
+
+        var temp = classCount <= 1024 ? new T[classCount] : ArrayPool<T>.Shared.Rent(classCount);
+        try
+        {
+            int sliceLength = classCount * inner;
+            for (int b = 0; b < outer; b++)
+            {
+                int baseIndex = b * sliceLength;
+                for (int o = 0; o < inner; o++)
+                    SoftmaxSingleStrided(input, output, temp, baseIndex + o, inner, classCount);
+            }
+        }
+        finally
+        {
+            if (classCount > 1024)
+                ArrayPool<T>.Shared.Return(temp);
+        }
+    }
+
+    static void SoftmaxSingleStrided<T>(ReadOnlySpan<T> input, Span<T> output, T[] temp, int start, int stride, int count)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        T max = input[start];
+        for (int k = 1; k < count; k++)
+        {
+            T value = input[start + k * stride];
+            if (value > max) max = value;
+        }
+        for (int k = 0; k < count; k++)
+            temp[k] = input[start + k * stride] - max;
+        TensorPrimitives.Exp(temp.AsSpan(0, count), temp.AsSpan(0, count));
+        T sum = TensorPrimitives.Sum(temp.AsSpan(0, count));
+        for (int k = 0; k < count; k++)
+            output[start + k * stride] = temp[k] / sum;
+    }
+
+    public static void SoftmaxDimGradient<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int outer, int classCount, int inner)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (softmaxOutput.Length != gradOutput.Length || output.Length < gradOutput.Length)
+            throw new ArgumentException("All spans must have the same length.");
+        ValidateDimLayout(softmaxOutput.Length, outer, classCount, inner);
+
+        int sliceLength = classCount * inner;
+        for (int b = 0; b < outer; b++)
+        {
+            int baseIndex = b * sliceLength;
+            for (int o = 0; o < inner; o++)
+                SoftmaxGradientSingleStrided(softmaxOutput, gradOutput, output, baseIndex + o, inner, classCount);
+        }
+    }
+
+    static void SoftmaxGradientSingleStrided<T>(ReadOnlySpan<T> softmaxOutput, ReadOnlySpan<T> gradOutput, Span<T> output, int start, int stride, int count)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        double dot = 0.0;
+        for (int k = 0; k < count; k++)
+        {
+            int idx = start + k * stride;
+            dot += double.CreateChecked(softmaxOutput[idx]) * double.CreateChecked(gradOutput[idx]);
+        }
+        for (int k = 0; k < count; k++)
+        {
+            int idx = start + k * stride;
+            double s = double.CreateChecked(softmaxOutput[idx]);
+            double dy = double.CreateChecked(gradOutput[idx]);
+            output[idx] = T.CreateChecked(s * (dy - dot));
+        }
+    }
+
+    public static void LogSoftmaxDim<T>(ReadOnlySpan<T> input, Span<T> output, int outer, int classCount, int inner)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (output.Length < input.Length)
+            throw new ArgumentException($"Output span length ({output.Length}) must be at least the input length ({input.Length}).", nameof(output));
+        ValidateDimLayout(input.Length, outer, classCount, inner);
+
+        int sliceLength = classCount * inner;
+        for (int b = 0; b < outer; b++)
+        {
+            int baseIndex = b * sliceLength;
+            for (int o = 0; o < inner; o++)
+                LogSoftmaxSingleStrided(input, output, baseIndex + o, inner, classCount);
+        }
+    }
+
+    static void LogSoftmaxSingleStrided<T>(ReadOnlySpan<T> input, Span<T> output, int start, int stride, int count)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        double max = double.NegativeInfinity;
+        for (int k = 0; k < count; k++)
+        {
+            double val = double.CreateChecked(input[start + k * stride]);
+            if (val > max) max = val;
+        }
+        double sum = 0.0;
+        for (int k = 0; k < count; k++)
+            sum += Math.Exp(double.CreateChecked(input[start + k * stride]) - max);
+        double logSum = Math.Log(sum);
+        for (int k = 0; k < count; k++)
+            output[start + k * stride] = T.CreateChecked(double.CreateChecked(input[start + k * stride]) - max - logSum);
+    }
+
+    public static void LogSoftmaxDimGradient<T>(ReadOnlySpan<T> input, ReadOnlySpan<T> gradOutput, Span<T> output, int outer, int classCount, int inner)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (input.Length != gradOutput.Length || output.Length < gradOutput.Length)
+            throw new ArgumentException("All spans must have the same length.");
+        ValidateDimLayout(input.Length, outer, classCount, inner);
+
+        int sliceLength = classCount * inner;
+        for (int b = 0; b < outer; b++)
+        {
+            int baseIndex = b * sliceLength;
+            for (int o = 0; o < inner; o++)
+                LogSoftmaxGradientSingleStrided(input, gradOutput, output, baseIndex + o, inner, classCount);
+        }
+    }
+
+    static void LogSoftmaxGradientSingleStrided<T>(ReadOnlySpan<T> input, ReadOnlySpan<T> gradOutput, Span<T> output, int start, int stride, int count)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        double max = double.NegativeInfinity;
+        for (int k = 0; k < count; k++)
+        {
+            double val = double.CreateChecked(input[start + k * stride]);
+            if (val > max) max = val;
+        }
+        double sumExp = 0.0;
+        double sumGrad = 0.0;
+        for (int k = 0; k < count; k++)
+        {
+            int idx = start + k * stride;
+            sumExp += Math.Exp(double.CreateChecked(input[idx]) - max);
+            sumGrad += double.CreateChecked(gradOutput[idx]);
+        }
+        for (int k = 0; k < count; k++)
+        {
+            int idx = start + k * stride;
+            double soft = Math.Exp(double.CreateChecked(input[idx]) - max) / sumExp;
+            output[idx] = T.CreateChecked(double.CreateChecked(gradOutput[idx]) - soft * sumGrad);
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════
     //  Matrix operations
     // ═══════════════════════════════════════════════════════════════

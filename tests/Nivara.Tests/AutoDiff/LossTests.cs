@@ -316,6 +316,80 @@ public class LossTests
     }
 
     [Test]
+    public void Softmax_DimZero_On2D_SoftmaxesOverRows()
+    {
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 1.5f, 0.5f, 2.5f, 3.5f, -1f, 0f, 1f, 2f }),
+            requiresGrad: false);
+        input.Reshape(3, 4);
+
+        var softmax = new Softmax<float>(dim: 0);
+        var output = softmax.Forward(input);
+
+        for (int col = 0; col < 4; col++)
+        {
+            float sum = output[col] + output[col + 4] + output[col + 8];
+            Assert.That(sum, Is.EqualTo(1f).Within(1e-5f), $"Column {col}");
+        }
+    }
+
+    [Test]
+    public void LogSoftmax_DimZero_On2D_MatchesColumnWise()
+    {
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 1.5f, 0.5f, 2.5f, 3.5f, -1f, 0f, 1f, 2f }),
+            requiresGrad: false);
+        input.Reshape(3, 4);
+
+        var logSoftmax = new LogSoftmax<float>(dim: 0);
+        var output = logSoftmax.Forward(input);
+
+        for (int col = 0; col < 4; col++)
+        {
+            float max = Math.Max(input[col], Math.Max(input[col + 4], input[col + 8]));
+            float sum = MathF.Exp(input[col] - max) + MathF.Exp(input[col + 4] - max) + MathF.Exp(input[col + 8] - max);
+            Assert.That(output[col], Is.EqualTo(input[col] - max - MathF.Log(sum)).Within(1e-5f), $"Column {col}");
+            Assert.That(output[col + 4], Is.EqualTo(input[col + 4] - max - MathF.Log(sum)).Within(1e-5f), $"Column {col}");
+            Assert.That(output[col + 8], Is.EqualTo(input[col + 8] - max - MathF.Log(sum)).Within(1e-5f), $"Column {col}");
+        }
+    }
+
+    [Test]
+    public void Softmax_DimZero_Backward_FlowsGradients()
+    {
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 1.5f, 0.5f, 2.5f, 3.5f, -1f, 0f, 1f, 2f }),
+            requiresGrad: true);
+        input.Reshape(3, 4);
+
+        var softmax = new Softmax<float>(dim: 0);
+        var output = softmax.Forward(input);
+
+        var seed = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.1f, -0.2f, 0.3f, 0.4f, -0.5f, 0.6f, 0.7f, -0.8f, 0.9f, 1.1f, 1.2f, 1.3f }),
+            requiresGrad: false);
+        seed.Reshape(3, 4);
+        output.Backward(seed);
+
+        Assert.That(input.Grad, Is.Not.Null);
+        Assert.That(input.Grad!.Length, Is.EqualTo(12));
+        for (int i = 0; i < 12; i++)
+            Assert.That(float.IsNaN(input.Grad[i]), Is.False);
+    }
+
+    [Test]
+    public void Softmax_DimOutOfRange_Throws()
+    {
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f }), requiresGrad: false);
+        input.Reshape(2, 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Softmax<float>(dim: 2).Forward(input));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new Softmax<float>(dim: -3).Forward(input));
+        Assert.Throws<ArgumentOutOfRangeException>(() => new LogSoftmax<float>(dim: 2).Forward(input));
+    }
+
+    [Test]
     public void MSELoss_BatchInput_ComputesCorrectShape()
     {
         var predictions = new ReverseGradTensor<float>(

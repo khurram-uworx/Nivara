@@ -324,6 +324,172 @@ public class GradKernelsTests
         return 0.5f * x * (1f + MathF.Tanh(z));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    //  Dim-aware (strided) Softmax / LogSoftmax
+    // ─────────────────────────────────────────────────────────────
+
+    static void AssertStridedSoftmax(float[] input, float[] actual, int outer, int classCount, int inner, double tolerance = 1e-5)
+    {
+        int sliceLength = classCount * inner;
+        for (int b = 0; b < outer; b++)
+        {
+            for (int o = 0; o < inner; o++)
+            {
+                int start = b * sliceLength + o;
+                double max = input[start];
+                for (int k = 1; k < classCount; k++)
+                    max = Math.Max(max, input[start + k * inner]);
+                double sum = 0.0;
+                for (int k = 0; k < classCount; k++)
+                    sum += Math.Exp(input[start + k * inner] - max);
+                for (int k = 0; k < classCount; k++)
+                {
+                    int idx = start + k * inner;
+                    Assert.That(actual[idx], Is.EqualTo((float)(Math.Exp(input[idx] - max) / sum)).Within(tolerance),
+                        $"Slice ({b},{o}) index {idx}");
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void SoftmaxDim_2D_Dim0_MatchesColumnWise()
+    {
+        // Shape [3, 4]: dim 0 → outer=1, classCount=3, inner=4 (strided by 4).
+        var input = new float[]
+        {
+            1.0f, 2.0f, 3.0f, 4.0f,
+            1.5f, 0.5f, 2.5f, 3.5f,
+            -1.0f, 0.0f, 1.0f, 2.0f,
+        };
+        var actual = new float[input.Length];
+        GradKernels.SoftmaxDim<float>(input, actual, 1, 3, 4);
+        AssertStridedSoftmax(input, actual, 1, 3, 4);
+    }
+
+    [Test]
+    public void SoftmaxDim_3D_Dim1_MatchesExpected()
+    {
+        // Shape [2, 3, 4]: dim 1 → outer=2, classCount=3, inner=4.
+        var input = new float[24];
+        for (int i = 0; i < input.Length; i++)
+            input[i] = (i % 7) - 3f;
+        var actual = new float[input.Length];
+        GradKernels.SoftmaxDim<float>(input, actual, 2, 3, 4);
+        AssertStridedSoftmax(input, actual, 2, 3, 4);
+    }
+
+    [Test]
+    public void SoftmaxDimGradient_2D_Dim0_KnownValues()
+    {
+        var input = new float[]
+        {
+            1.0f, 2.0f, 3.0f, 4.0f,
+            1.5f, 0.5f, 2.5f, 3.5f,
+            -1.0f, 0.0f, 1.0f, 2.0f,
+        };
+        var grad = new float[] { 0.1f, -0.2f, 0.3f, 0.4f, -0.5f, 0.6f, 0.7f, -0.8f, 0.9f, 1.1f, 1.2f, 1.3f };
+        var softmax = new float[input.Length];
+        GradKernels.SoftmaxDim<float>(input, softmax, 1, 3, 4);
+        var actual = new float[input.Length];
+        GradKernels.SoftmaxDimGradient<float>(softmax, grad, actual, 1, 3, 4);
+
+        const int classCount = 3, inner = 4;
+        for (int o = 0; o < inner; o++)
+        {
+            double dot = 0.0;
+            for (int k = 0; k < classCount; k++)
+                dot += softmax[o + k * inner] * grad[o + k * inner];
+            for (int k = 0; k < classCount; k++)
+            {
+                int idx = o + k * inner;
+                double expected = softmax[idx] * (grad[idx] - dot);
+                Assert.That(actual[idx], Is.EqualTo((float)expected).Within(1e-5), $"Column {o} index {idx}");
+            }
+        }
+    }
+
+    [Test]
+    public void LogSoftmaxDim_2D_Dim0_MatchesColumnWise()
+    {
+        var input = new float[]
+        {
+            1.0f, 2.0f, 3.0f, 4.0f,
+            1.5f, 0.5f, 2.5f, 3.5f,
+            -1.0f, 0.0f, 1.0f, 2.0f,
+        };
+        var actual = new float[input.Length];
+        GradKernels.LogSoftmaxDim<float>(input, actual, 1, 3, 4);
+
+        const int classCount = 3, inner = 4;
+        for (int o = 0; o < inner; o++)
+        {
+            double max = input[o];
+            for (int k = 1; k < classCount; k++)
+                max = Math.Max(max, input[o + k * inner]);
+            double sum = 0.0;
+            for (int k = 0; k < classCount; k++)
+                sum += Math.Exp(input[o + k * inner] - max);
+            for (int k = 0; k < classCount; k++)
+            {
+                int idx = o + k * inner;
+                Assert.That(actual[idx], Is.EqualTo((float)(input[idx] - max - Math.Log(sum))).Within(1e-5),
+                    $"Column {o} index {idx}");
+            }
+        }
+    }
+
+    [Test]
+    public void LogSoftmaxDimGradient_3D_Dim2_KnownValues()
+    {
+        // Shape [2, 3, 4]: dim 2 → outer=6, classCount=4, inner=1 (contiguous fast path).
+        var input = new float[] { 1.0f, 2.0f, 3.0f, 4.0f, 1.5f, 0.5f, 2.5f, 3.5f, -1.0f, 0.0f, 1.0f, 2.0f, 0.5f, -0.5f, 1.5f, 2.5f, 3.0f, 1.0f, 0.0f, -1.0f, 2.0f, 3.0f, 4.0f, 5.0f };
+        var grad = new float[input.Length];
+        for (int i = 0; i < grad.Length; i++)
+            grad[i] = (i % 5) * 0.1f - 0.2f;
+        var actual = new float[input.Length];
+        GradKernels.LogSoftmaxDimGradient<float>(input, grad, actual, 6, 4, 1);
+
+        const int classCount = 4;
+        int rows = input.Length / classCount;
+        for (int r = 0; r < rows; r++)
+        {
+            double max = input[r * classCount];
+            for (int j = 1; j < classCount; j++)
+                max = Math.Max(max, input[r * classCount + j]);
+            double sumExp = 0.0;
+            double sumGrad = 0.0;
+            for (int j = 0; j < classCount; j++)
+            {
+                sumExp += Math.Exp(input[r * classCount + j] - max);
+                sumGrad += grad[r * classCount + j];
+            }
+            for (int j = 0; j < classCount; j++)
+            {
+                int idx = r * classCount + j;
+                double soft = Math.Exp(input[idx] - max) / sumExp;
+                Assert.That(actual[idx], Is.EqualTo((float)(grad[idx] - soft * sumGrad)).Within(1e-5), $"Row {r} index {idx}");
+            }
+        }
+    }
+
+    [Test]
+    public void SoftmaxDim_2D_DimLast_MatchesRowWise()
+    {
+        var input = new float[] { 1.0f, 2.0f, 3.0f, 1.5f, 0.5f, 2.5f, -1.0f, 0.0f, 1.0f };
+        var viaDim = new float[input.Length];
+        GradKernels.SoftmaxDim<float>(input, viaDim, 3, 3, 1);
+        var viaRow = new float[input.Length];
+        GradKernels.Softmax<float>(input, viaRow, 3);
+        Assert.That(viaDim, Is.EqualTo(viaRow).Within(1e-6));
+    }
+
+    [Test]
+    public void SoftmaxDim_InvalidLayout_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => GradKernels.SoftmaxDim<float>(new float[12], new float[12], 2, 3, 4));
+    }
+
     static float GeluGradientExpected(float x)
     {
         const float sqrt2OverPi = 0.7978845608028654f;
