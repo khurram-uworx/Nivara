@@ -191,6 +191,18 @@ consumer and every serialization path.
 - **`NivaraAutoGradExtensions.BatchBackward(tensors, loss)` ignores `tensors`** —
   calls only `loss.Backward()`.
 
+> **Resolved 2026-08-09 (issue #179, branch khurram/179):** all five lies fixed.
+> `Softmax`/`LogSoftmax` now implement real dim support via strided kernels
+> (`GradKernels.SoftmaxDim`/`LogSoftmaxDim`, `dim = -1` = true last dim) in
+> `feat(autodiff)` commit a6d0ff7; `Half` gained `ToHalf` conversions, corrected
+> `IFloatingPointIeee754<T>` docs, and SIMD fast paths in RMSNorm/Adam/AdamW
+> (commits 32cafcc, 89951c0); `CanBackward` gained a gradient-seed overload and
+> `DescribeTensor` reports seed-less backward readiness (43a9ba8); BatchNorm
+> running-stats access throws a clear `InvalidOperationException` when
+> `trackRunningStats: false` and exposes `TrackRunningStats` (7065f35); and
+> `BatchBackward` now verifies every listed requires-grad tensor received a
+> gradient, listing offending keys (15dd996).
+
 ### 9. Loss API is a grab bag
 
 `BCELoss`/`L1Loss` (no reduction option), `MSELoss`/`BCEWithLogitsLoss`
@@ -323,9 +335,12 @@ whether the change is safe (no breaking change) or requires a major bump.
 4. Mark `QueryFrame.ToList()` `[Obsolete]` in favor of `ToNivaraFrame()`.
 5. Delete the legacy static initializer API (`KaimingNormal.Init`, etc.) and
    `DefaultInitializers.Bias<T>()`.
-6. Fix `NivaraAutoGradExtensions.BatchBackward` to honor `tensors` (or remove it).
-7. Remove the dead `dim` field behavior in `Softmax<T>`/`LogSoftmax<T>` — either
-   implement dim support or drop the parameter.
+6. ~~Fix `NivaraAutoGradExtensions.BatchBackward` to honor `tensors` (or remove it).~~ —
+   Done 2026-08-09 (issue #179): now verifies every listed requires-grad tensor
+   received a gradient, listing offending keys.
+7. ~~Remove the dead `dim` field behavior in `Softmax<T>`/`LogSoftmax<T>` — either
+   implement dim support or drop the parameter.~~ — Done 2026-08-09 (issue #179):
+   real dim support implemented (`dim = -1` = true last dim).
 8. Correct AGENTS.md's stale `RowNorms` claim.
 
 ### Breaking-change items (2.0 candidate)
