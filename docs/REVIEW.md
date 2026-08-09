@@ -73,6 +73,11 @@ yet tracked as issues.
 
 ### 1. `NivaraSeries<T>.Average()` throws for 5 of 17 supported numeric types
 
+> **Resolved 2026-08-09 (issue #172, PR #182):** `divideByCount` gained the 5 missing
+> arms and the public `Average()` guard now accepts the full `GetNumericTypes()` domain
+> (bool remains rejected by the sum dispatch). Covered by
+> `tests/Nivara.Tests/NivaraSeriesAggregateTests.cs`.
+
 `sumTensorPrimitive` (`NivaraSeries.cs:69-97`) dispatches 17 types, but
 `divideByCount` (`NivaraSeries.cs:102-183`) covers only 12 and throws
 `NotSupportedException` for **`Half`/`nint`/`nuint`/`Int128`/`UInt128`** — after

@@ -1,5 +1,5 @@
 using Nivara.Extensions;
-using System.Globalization;
+using Nivara.Helpers;
 using System.Numerics;
 using System.Numerics.Tensors;
 
@@ -72,6 +72,9 @@ public abstract class AggregationFunction
             Type t when t == typeof(string) => NivaraColumn<string>.Create(values.Cast<string>().ToArray()),
             Type t when t == typeof(bool) => NivaraColumn<bool>.Create(values.Cast<bool>().ToArray()),
             Type t when t == typeof(decimal) => NivaraColumn<decimal>.Create(values.Cast<decimal>().ToArray()),
+            Type t when t == typeof(ulong) => NivaraColumn<ulong>.Create(values.Cast<ulong>().ToArray()),
+            Type t when t == typeof(Int128) => NivaraColumn<Int128>.Create(values.Cast<Int128>().ToArray()),
+            Type t when t == typeof(UInt128) => NivaraColumn<UInt128>.Create(values.Cast<UInt128>().ToArray()),
             Type t when t == typeof(byte) => NivaraColumn<byte>.Create(values.Cast<byte>().ToArray()),
             Type t when t == typeof(short) => NivaraColumn<short>.Create(values.Cast<short>().ToArray()),
             Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.Create(values.Cast<DateTime>().ToArray()),
@@ -186,17 +189,28 @@ public sealed class SumAggregation : AggregationFunction
         // Handle nullable types by checking the underlying type
         var underlyingType = Nullable.GetUnderlyingType(inputType) ?? inputType;
 
-        // Return appropriate sum type based on input - follow NivaraSeries patterns
+        // Follow NivaraSeries result-type promotion rules for the full numeric domain
         return underlyingType switch
         {
-            Type t when t == typeof(int) => typeof(long),
             Type t when t == typeof(byte) => typeof(long),
+            Type t when t == typeof(sbyte) => typeof(long),
             Type t when t == typeof(short) => typeof(long),
+            Type t when t == typeof(ushort) => typeof(long),
+            Type t when t == typeof(int) => typeof(long),
+            Type t when t == typeof(uint) => typeof(long),
+            Type t when t == typeof(char) => typeof(long),
+            Type t when t == typeof(bool) => typeof(long),
             Type t when t == typeof(long) => typeof(long),
+            Type t when t == typeof(ulong) => typeof(ulong),
+            Type t when t == typeof(nint) => typeof(Int128),
+            Type t when t == typeof(nuint) => typeof(UInt128),
+            Type t when t == typeof(Int128) => typeof(Int128),
+            Type t when t == typeof(UInt128) => typeof(UInt128),
             Type t when t == typeof(float) => typeof(double),
+            Type t when t == typeof(Half) => typeof(double),
             Type t when t == typeof(double) => typeof(double),
             Type t when t == typeof(decimal) => typeof(decimal),
-            _ => inputType
+            _ => throw new ArgumentException($"Sum aggregation not supported for type {inputType.Name}")
         };
     }
 
@@ -220,12 +234,23 @@ public sealed class SumAggregation : AggregationFunction
 
         return elementType switch
         {
-            Type t when t == typeof(int) => SumVectorized<long>(validValues),
-            Type t when t == typeof(byte) => SumVectorized<long>(validValues),
-            Type t when t == typeof(short) => SumVectorized<long>(validValues),
-            Type t when t == typeof(long) => SumVectorized<long>(validValues),
-            Type t when t == typeof(float) => SumVectorized<double>(validValues),
-            Type t when t == typeof(double) => SumVectorized<double>(validValues),
+            Type t when t == typeof(int) => SumVectorized<int, long>(validValues),
+            Type t when t == typeof(byte) => SumVectorized<byte, long>(validValues),
+            Type t when t == typeof(sbyte) => SumVectorized<sbyte, long>(validValues),
+            Type t when t == typeof(short) => SumVectorized<short, long>(validValues),
+            Type t when t == typeof(ushort) => SumVectorized<ushort, long>(validValues),
+            Type t when t == typeof(uint) => SumVectorized<uint, long>(validValues),
+            Type t when t == typeof(char) => SumVectorized<char, long>(validValues),
+            Type t when t == typeof(bool) => SumVectorizedBool<long>(validValues),
+            Type t when t == typeof(long) => SumVectorized<long, long>(validValues),
+            Type t when t == typeof(ulong) => SumVectorized<ulong, ulong>(validValues),
+            Type t when t == typeof(nint) => SumVectorized<nint, Int128>(validValues),
+            Type t when t == typeof(nuint) => SumVectorized<nuint, UInt128>(validValues),
+            Type t when t == typeof(Int128) => SumVectorized<Int128, Int128>(validValues),
+            Type t when t == typeof(UInt128) => SumVectorized<UInt128, UInt128>(validValues),
+            Type t when t == typeof(float) => SumVectorized<float, double>(validValues),
+            Type t when t == typeof(Half) => SumVectorized<Half, double>(validValues),
+            Type t when t == typeof(double) => SumVectorized<double, double>(validValues),
             Type t when t == typeof(decimal) => SumScalarDecimal(validValues),
             _ => throw new ArgumentException($"Sum aggregation not supported for type {column.ElementType.Name}")
         };
@@ -234,7 +259,9 @@ public sealed class SumAggregation : AggregationFunction
     /// <inheritdoc />
     protected override void ValidateInputType(Type inputType)
     {
-        if (!inputType.IsNumericType())
+        var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
+        var supported = TypeCompatibilityValidator.GetNumericTypes().Append(typeof(bool));
+        if (!supported.Contains(underlying))
             throw new ArgumentException($"Sum aggregation requires numeric type, got {inputType.Name}");
     }
 
@@ -255,15 +282,31 @@ public sealed class SumAggregation : AggregationFunction
 
     /// <summary>
     /// Performs vectorized sum for numeric values using generic TensorPrimitives after
-    /// widening each boxed value into the promoted result type (int/byte/short/long → long,
-    /// float → double), preserving the documented result-type promotion rules.
+    /// widening each boxed value into the promoted result type via typed CreateChecked
+    /// conversion (byte/sbyte/short/ushort/int/uint/char → long, nint → Int128, nuint →
+    /// UInt128, float/Half → double), preserving the documented result-type promotion rules.
     /// </summary>
-    static object SumVectorized<TResult>(List<object> validValues)
+    static object SumVectorized<TSource, TResult>(List<object> validValues)
+        where TSource : INumberBase<TSource>
         where TResult : unmanaged, INumber<TResult>
     {
         var widened = new TResult[validValues.Count];
         for (int i = 0; i < validValues.Count; i++)
-            widened[i] = (TResult)Convert.ChangeType(validValues[i], typeof(TResult), CultureInfo.InvariantCulture);
+            widened[i] = TResult.CreateChecked((TSource)validValues[i]);
+
+        return TensorPrimitives.Sum(widened.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs vectorized sum of boolean values, counting true values as ones (bool is not an
+    /// INumberBase type, so it is converted explicitly before widening into the result type).
+    /// </summary>
+    static object SumVectorizedBool<TResult>(List<object> validValues)
+        where TResult : unmanaged, INumber<TResult>
+    {
+        var widened = new TResult[validValues.Count];
+        for (int i = 0; i < validValues.Count; i++)
+            widened[i] = TResult.CreateChecked((bool)validValues[i] ? 1 : 0);
 
         return TensorPrimitives.Sum(widened.AsSpan());
     }
@@ -288,6 +331,9 @@ public sealed class SumAggregation : AggregationFunction
         return type switch
         {
             Type t when t == typeof(long) => 0L,
+            Type t when t == typeof(ulong) => 0UL,
+            Type t when t == typeof(Int128) => Int128.Zero,
+            Type t when t == typeof(UInt128) => UInt128.Zero,
             Type t when t == typeof(double) => 0.0,
             Type t when t == typeof(decimal) => 0m,
             _ => Activator.CreateInstance(type)!
@@ -504,14 +550,34 @@ public sealed class MeanAggregation : AggregationFunction
             return null;
 
         // Convert sum to double and divide by count
-        var doubleSum = Convert.ToDouble(sum);
+        var doubleSum = ToDouble(sum);
         return doubleSum / validValues.Count;
+    }
+
+    /// <summary>
+    /// Converts a boxed aggregation sum to double. Int128/UInt128 (and thus nint/nuint, whose
+    /// sums are Int128/UInt128) do not implement IConvertible, so Convert.ChangeType would throw.
+    /// </summary>
+    static double ToDouble(object sum)
+    {
+        return sum switch
+        {
+            long value => value,
+            ulong value => value,
+            Int128 value => (double)value,
+            UInt128 value => (double)value,
+            double value => value,
+            decimal value => (double)value,
+            _ => throw new ArgumentException($"Cannot convert sum of type {sum.GetType().Name} to double")
+        };
     }
 
     /// <inheritdoc />
     protected override void ValidateInputType(Type inputType)
     {
-        if (!inputType.IsNumericType())
+        var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
+        var supported = TypeCompatibilityValidator.GetNumericTypes().Append(typeof(bool));
+        if (!supported.Contains(underlying))
             throw new ArgumentException($"Mean aggregation requires numeric type, got {inputType.Name}");
     }
 }

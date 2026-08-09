@@ -175,6 +175,36 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             var result = decimalSum / count;
             return (T)(object)result;
         }
+        else if (type == typeof(Half))
+        {
+            var halfSum = (Half)(object)sum!;
+            var result = halfSum / (Half)count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(nint))
+        {
+            var nintSum = (nint)(object)sum!;
+            var result = nintSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(nuint))
+        {
+            var nuintSum = (nuint)(object)sum!;
+            var result = nuintSum / (nuint)count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(Int128))
+        {
+            var int128Sum = (Int128)(object)sum!;
+            var result = int128Sum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(UInt128))
+        {
+            var uint128Sum = (UInt128)(object)sum!;
+            var result = uint128Sum / (UInt128)count;
+            return (T)(object)result;
+        }
         else
         {
             throw new NotSupportedException(
@@ -773,8 +803,10 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         if (Length == 0)
             throw new InvalidOperationException("Cannot compute average of empty series. Series must contain at least one element.");
 
-        // Check if T is a supported numeric type
-        if (!typeof(T).IsNumericType())
+        // Check if T is a supported numeric type (full numeric domain; bool is rejected by
+        // the sum dispatch, preserving prior behavior)
+        var supported = TypeCompatibilityValidator.GetNumericTypes().Append(typeof(bool));
+        if (!supported.Contains(typeof(T)))
             throw new InvalidOperationException($"Average operation is not supported for type {typeof(T).Name}. Only numeric types support average operations.");
 
         return averageVectorized();
