@@ -64,9 +64,13 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
         }
     }
 
-    public ReverseGradTensor<T> RunningMean => _runningMean!;
-    public ReverseGradTensor<T> RunningVar => _runningVar!;
-    public ReverseGradTensor<T> NumBatchesTracked => _numBatchesTracked!;
+    public ReverseGradTensor<T> RunningMean => _runningMean
+        ?? throw new InvalidOperationException("RunningMean is unavailable because this BatchNorm1d was created with trackRunningStats: false.");
+    public ReverseGradTensor<T> RunningVar => _runningVar
+        ?? throw new InvalidOperationException("RunningVar is unavailable because this BatchNorm1d was created with trackRunningStats: false.");
+    public ReverseGradTensor<T> NumBatchesTracked => _numBatchesTracked
+        ?? throw new InvalidOperationException("NumBatchesTracked is unavailable because this BatchNorm1d was created with trackRunningStats: false.");
+    public bool TrackRunningStats => _trackRunningStats;
     public Parameter<T>? Weight => _weight;
     public Parameter<T>? Bias => _bias;
 
@@ -275,9 +279,13 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
         }
     }
 
-    public ReverseGradTensor<T> RunningMean => _runningMean!;
-    public ReverseGradTensor<T> RunningVar => _runningVar!;
-    public ReverseGradTensor<T> NumBatchesTracked => _numBatchesTracked!;
+    public ReverseGradTensor<T> RunningMean => _runningMean
+        ?? throw new InvalidOperationException("RunningMean is unavailable because this BatchNorm2d was created with trackRunningStats: false.");
+    public ReverseGradTensor<T> RunningVar => _runningVar
+        ?? throw new InvalidOperationException("RunningVar is unavailable because this BatchNorm2d was created with trackRunningStats: false.");
+    public ReverseGradTensor<T> NumBatchesTracked => _numBatchesTracked
+        ?? throw new InvalidOperationException("NumBatchesTracked is unavailable because this BatchNorm2d was created with trackRunningStats: false.");
+    public bool TrackRunningStats => _trackRunningStats;
     public Parameter<T>? Weight => _weight;
     public Parameter<T>? Bias => _bias;
 

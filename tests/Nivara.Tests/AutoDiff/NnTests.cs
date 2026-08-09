@@ -1092,6 +1092,50 @@ public class NnTests
     }
 
     [Test]
+    public void BatchNorm1d_NoRunningStats_RunningMeanThrows()
+    {
+        using var bn = new BatchNorm1d<float>(2, trackRunningStats: false);
+
+        Assert.That(bn.TrackRunningStats, Is.False);
+        Assert.That(() => bn.RunningMean, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.RunningVar, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.NumBatchesTracked, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+    }
+
+    [Test]
+    public void BatchNorm2d_NoRunningStats_RunningMeanThrows()
+    {
+        using var bn = new BatchNorm2d<float>(2, trackRunningStats: false);
+
+        Assert.That(bn.TrackRunningStats, Is.False);
+        Assert.That(() => bn.RunningMean, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.RunningVar, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+        Assert.That(() => bn.NumBatchesTracked, Throws.InvalidOperationException.With.Message.Contains("trackRunningStats: false"));
+    }
+
+    [Test]
+    public void BatchNorm1d_TrackRunningStats_ExposesRunningStats()
+    {
+        using var bn = new BatchNorm1d<float>(3, trackRunningStats: true);
+
+        Assert.That(bn.TrackRunningStats, Is.True);
+        Assert.That(bn.RunningMean.Length, Is.EqualTo(3));
+        Assert.That(bn.RunningVar.Length, Is.EqualTo(3));
+        Assert.That(bn.NumBatchesTracked[0], Is.EqualTo(0f));
+    }
+
+    [Test]
+    public void BatchNorm2d_TrackRunningStats_ExposesRunningStats()
+    {
+        using var bn = new BatchNorm2d<float>(3, trackRunningStats: true);
+
+        Assert.That(bn.TrackRunningStats, Is.True);
+        Assert.That(bn.RunningMean.Length, Is.EqualTo(3));
+        Assert.That(bn.RunningVar.Length, Is.EqualTo(3));
+        Assert.That(bn.NumBatchesTracked[0], Is.EqualTo(0f));
+    }
+
+    [Test]
     public void BatchNorm1d_3DInput_TrainMode_UpdatesRunningStats()
     {
         using var bn = new BatchNorm1d<float>(3);
