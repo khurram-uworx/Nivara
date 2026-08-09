@@ -39,6 +39,20 @@ internal static class RMSNormKernel<T> where T : struct, IFloatingPointIeee754<T
                 TensorPrimitives.Multiply(row, 1.0 / rms, dst);
             }
         }
+        else if (typeof(T) == typeof(Half))
+        {
+            var srcHalf = Unsafe.As<T[], Half[]>(ref srcData);
+            var resHalf = Unsafe.As<T[], Half[]>(ref resultData);
+            for (int i = 0; i < rows; i++)
+            {
+                int baseIdx = i * cols;
+                var row = srcHalf.AsSpan(baseIdx, cols);
+                var dst = resHalf.AsSpan(baseIdx, cols);
+                float sumSq = float.CreateChecked(TensorPrimitives.Dot(row, row));
+                float rms = MathF.Sqrt(sumSq / cols + (float)eps);
+                TensorPrimitives.Multiply(row, (Half)(1.0f / rms), dst);
+            }
+        }
         else
         {
             for (int i = 0; i < rows; i++)
@@ -117,6 +131,35 @@ internal static class RMSNormKernel<T> where T : struct, IFloatingPointIeee754<T
             finally
             {
                 ArrayPool<double>.Shared.Return(tempArr);
+            }
+        }
+        else if (typeof(T) == typeof(Half))
+        {
+            var tempArr = ArrayPool<Half>.Shared.Rent(cols);
+            try
+            {
+                var tempH = tempArr.AsSpan(0, cols);
+                for (int i = 0; i < rows; i++)
+                {
+                    int baseIdx = i * cols;
+                    var sH = MemoryMarshal.Cast<T, Half>(savedInput.AsSpan(baseIdx, cols));
+                    var gH = MemoryMarshal.Cast<T, Half>(gradOut.AsSpan(baseIdx, cols));
+                    var dH = MemoryMarshal.Cast<T, Half>(gradResult.AsSpan(baseIdx, cols));
+
+                    float sumSq = float.CreateChecked(TensorPrimitives.Dot(sH, sH));
+                    float rms = MathF.Sqrt(sumSq / cols + (float)eps);
+                    float invRms = 1f / rms;
+                    float rms3 = rms * rms * rms;
+                    float sumGradX = float.CreateChecked(TensorPrimitives.Dot(gH, sH));
+                    float scale = sumGradX / (cols * rms3);
+
+                    TensorPrimitives.Multiply(sH, (Half)(-scale), tempH);
+                    TensorPrimitives.MultiplyAdd(gH, (Half)invRms, tempH, dH);
+                }
+            }
+            finally
+            {
+                ArrayPool<Half>.Shared.Return(tempArr);
             }
         }
         else

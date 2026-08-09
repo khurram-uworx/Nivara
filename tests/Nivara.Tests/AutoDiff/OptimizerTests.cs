@@ -569,6 +569,44 @@ public class OptimizerTests
     }
 
     [Test]
+    public void Adam_Step_Half_ProducesValuesCloseToFloat()
+    {
+        var paramF = new Parameter<float>("wf", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adamF = new Adam<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamF.AddParameterGroup(paramF);
+        ReverseGradOperations.Sum(paramF.Tensor).Backward();
+        adamF.Step();
+
+        var paramH = new Parameter<Half>("wh", new Half[] { (Half)1f, (Half)2f, (Half)3f }, requiresGrad: true);
+        var adamH = new Adam<Half>((Half)0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamH.AddParameterGroup(paramH);
+        ReverseGradOperations.Sum(paramH.Tensor).Backward();
+        adamH.Step();
+
+        for (int i = 0; i < 3; i++)
+            Assert.That((double)paramH.Tensor[i], Is.EqualTo((double)paramF.Tensor[i]).Within(1e-3));
+    }
+
+    [Test]
+    public void AdamW_Step_Half_ProducesValuesCloseToFloat()
+    {
+        var paramF = new Parameter<float>("wf", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adamwF = new AdamW<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamwF.AddParameterGroup(paramF);
+        ReverseGradOperations.Sum(paramF.Tensor).Backward();
+        adamwF.Step();
+
+        var paramH = new Parameter<Half>("wh", new Half[] { (Half)1f, (Half)2f, (Half)3f }, requiresGrad: true);
+        var adamwH = new AdamW<Half>((Half)0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamwH.AddParameterGroup(paramH);
+        ReverseGradOperations.Sum(paramH.Tensor).Backward();
+        adamwH.Step();
+
+        for (int i = 0; i < 3; i++)
+            Assert.That((double)paramH.Tensor[i], Is.EqualTo((double)paramF.Tensor[i]).Within(1e-3));
+    }
+
+    [Test]
     public void Adam_StateDict_LoadStateDict_FreshOptimizer_RestoresState()
     {
         var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
