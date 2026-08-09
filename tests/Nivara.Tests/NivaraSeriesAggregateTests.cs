@@ -222,6 +222,97 @@ public class NivaraSeriesAggregateTests
         Assert.That(result, Is.EqualTo((char)4)); // (2 + 4 + 6) / 3
     }
 
+    /// <summary>
+    /// Feature: nivara-series, Property: Average on extended numeric domain
+    /// For Half/nint/nuint/Int128/UInt128 series, Average should compute the mean instead of
+    /// throwing NotSupportedException after the SIMD sum succeeds (issue #172).
+    /// Validates: full numeric domain for average
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Average on extended numeric domain")]
+    public void Average_HalfValues_ReturnsCorrectAverage()
+    {
+        // Arrange
+        var series = NivaraSeries<Half>.Create(new[] { (Half)1.5, (Half)2.5, (Half)3.5 });
+
+        // Act
+        var result = series.Average();
+
+        // Assert
+        Assert.That(result, Is.EqualTo((Half)2.5));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Average on extended numeric domain")]
+    public void Average_NIntValues_ReturnsCorrectAverage()
+    {
+        // Arrange
+        var series = NivaraSeries<nint>.Create(new nint[] { 2, 4, 6 });
+
+        // Act
+        var result = series.Average();
+
+        // Assert
+        Assert.That(result, Is.EqualTo((nint)4)); // (2 + 4 + 6) / 3
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Average on extended numeric domain")]
+    public void Average_NUIntValues_ReturnsCorrectAverage()
+    {
+        // Arrange
+        var series = NivaraSeries<nuint>.Create(new nuint[] { 2, 4, 6 });
+
+        // Act
+        var result = series.Average();
+
+        // Assert
+        Assert.That(result, Is.EqualTo((nuint)4)); // (2 + 4 + 6) / 3
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Average on extended numeric domain")]
+    public void Average_Int128Values_ReturnsCorrectAverage()
+    {
+        // Arrange
+        var series = NivaraSeries<Int128>.Create(new Int128[] { 2, 4, 6 });
+
+        // Act
+        var result = series.Average();
+
+        // Assert
+        Assert.That(result, Is.EqualTo((Int128)4)); // (2 + 4 + 6) / 3
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Average on extended numeric domain")]
+    public void Average_UInt128Values_ReturnsCorrectAverage()
+    {
+        // Arrange
+        var series = NivaraSeries<UInt128>.Create(new UInt128[] { 2, 4, 6 });
+
+        // Act
+        var result = series.Average();
+
+        // Assert
+        Assert.That(result, Is.EqualTo((UInt128)4)); // (2 + 4 + 6) / 3
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Average on extended numeric domain")]
+    public void Average_Int128WithNulls_ReturnsValidAverage()
+    {
+        // Arrange
+        var column = NivaraColumn<Int128>.CreateFromNullable(new Int128?[] { 2, null, 4, null, 6 });
+        var series = new NivaraSeries<Int128>(column);
+
+        // Act
+        var result = series.Average();
+
+        // Assert
+        Assert.That(result, Is.EqualTo((Int128)4)); // (2 + 4 + 6) / 3
+    }
+
     #endregion
 
     #region Min Tests
