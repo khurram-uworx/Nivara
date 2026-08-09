@@ -550,8 +550,26 @@ public sealed class MeanAggregation : AggregationFunction
             return null;
 
         // Convert sum to double and divide by count
-        var doubleSum = Convert.ToDouble(sum);
+        var doubleSum = ToDouble(sum);
         return doubleSum / validValues.Count;
+    }
+
+    /// <summary>
+    /// Converts a boxed aggregation sum to double. Int128/UInt128 (and thus nint/nuint, whose
+    /// sums are Int128/UInt128) do not implement IConvertible, so Convert.ChangeType would throw.
+    /// </summary>
+    static double ToDouble(object sum)
+    {
+        return sum switch
+        {
+            long value => value,
+            ulong value => value,
+            Int128 value => (double)value,
+            UInt128 value => (double)value,
+            double value => value,
+            decimal value => (double)value,
+            _ => throw new ArgumentException($"Cannot convert sum of type {sum.GetType().Name} to double")
+        };
     }
 
     /// <inheritdoc />
