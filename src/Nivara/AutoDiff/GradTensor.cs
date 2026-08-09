@@ -10,7 +10,7 @@ namespace Nivara.AutoDiff;
 /// Serves as the shared foundation for all automatic differentiation flavors
 /// (reverse-mode, forward-mode, etc.).
 /// </summary>
-/// <typeparam name="T">The numeric type that implements INumber&lt;T&gt;</typeparam>
+/// <typeparam name="T">The numeric type that implements IFloatingPointIeee754&lt;T&gt;</typeparam>
 public class GradTensor<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     internal const string Adr001Message =

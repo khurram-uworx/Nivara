@@ -73,6 +73,15 @@ public static class TypeConverter
     }
 
     /// <summary>
+    /// Converts a ReverseGradTensor to Half (16-bit floating point).
+    /// </summary>
+    public static ReverseGradTensor<Half> ToHalf<T>(ReverseGradTensor<T> source, bool? requiresGrad = null)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        return Convert<T, Half>(source, requiresGrad);
+    }
+
+    /// <summary>
     /// Attempts to convert a ReverseGradTensor from one type to another, returning null on failure.
     /// </summary>
     public static ReverseGradTensor<TTarget>? TryConvert<TSource, TTarget>(
