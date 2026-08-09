@@ -803,8 +803,10 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         if (Length == 0)
             throw new InvalidOperationException("Cannot compute average of empty series. Series must contain at least one element.");
 
-        // Check if T is a supported numeric type
-        if (!typeof(T).IsNumericType())
+        // Check if T is a supported numeric type (full numeric domain; bool is rejected by
+        // the sum dispatch, preserving prior behavior)
+        var supported = TypeCompatibilityValidator.GetNumericTypes().Append(typeof(bool));
+        if (!supported.Contains(typeof(T)))
             throw new InvalidOperationException($"Average operation is not supported for type {typeof(T).Name}. Only numeric types support average operations.");
 
         return averageVectorized();
