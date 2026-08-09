@@ -175,6 +175,36 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             var result = decimalSum / count;
             return (T)(object)result;
         }
+        else if (type == typeof(Half))
+        {
+            var halfSum = (Half)(object)sum!;
+            var result = halfSum / (Half)count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(nint))
+        {
+            var nintSum = (nint)(object)sum!;
+            var result = nintSum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(nuint))
+        {
+            var nuintSum = (nuint)(object)sum!;
+            var result = nuintSum / (nuint)count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(Int128))
+        {
+            var int128Sum = (Int128)(object)sum!;
+            var result = int128Sum / count;
+            return (T)(object)result;
+        }
+        else if (type == typeof(UInt128))
+        {
+            var uint128Sum = (UInt128)(object)sum!;
+            var result = uint128Sum / (UInt128)count;
+            return (T)(object)result;
+        }
         else
         {
             throw new NotSupportedException(
