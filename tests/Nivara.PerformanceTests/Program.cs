@@ -296,6 +296,13 @@ static class Program
                 return () => frame.RowDot(query);
             });
 
+        Run("Frame Slice [10k x 128]", 5, 100,
+            () =>
+            {
+                var frame = BuildScoreFrame(rows, cols);
+                return () => frame.Slice(0, 5_000);
+            });
+
         Run("RowDot kernel raw [10k x 128]", 5, 50,
             () =>
             {

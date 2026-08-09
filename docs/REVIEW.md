@@ -88,6 +88,14 @@ inconsistency between sibling APIs.)
 
 ### 2. Every frame slice/take/skip is reflection-based
 
+> **Resolved 2026-08-09 (issue #173, branch khurram/173):** `NivaraFrame.sliceColumn`
+> now calls `IColumn.Slice(int, int)` directly (`NivaraFrame.cs:50`). The same
+> reflection pattern in the query engine's `SliceOperation.SliceColumn` was fixed
+> as well. Both unreachable `ColumnFilterHelper.CreateFilteredColumn` fallbacks
+> were deleted; the helper remains for the Distinct/Filter/SelectRows/FilterByMask
+> paths. A `Frame Slice [10k x 128]` scenario was added to the perf harness so the
+> removed per-call `object[]` allocations are measurable.
+
 `NivaraFrame.sliceColumn` (`NivaraFrame.cs:50`) calls
 `columnType.GetMethod("Slice", ...)` + `MethodInfo.Invoke` on the `IColumn` for
 **every** `Take`/`Skip`/`Slice` (`NivaraFrame.cs:1018,1063,1106`). This is a hot
@@ -306,8 +314,9 @@ whether the change is safe (no breaking change) or requires a major bump.
 1. Fix the `NivaraSeries<T>.Average()` divide-by-count coverage gap (add
    `Half`/`nint`/`nuint`/`Int128`/`UInt128` cases or route through a shared
    kernel). Add a `NivaraSeries<Half>` test.
-2. Replace the reflection-based `NivaraFrame.sliceColumn` with a direct
-   `IColumn.Slice(int, int)` call.
+2. ~~Replace the reflection-based `NivaraFrame.sliceColumn` with a direct
+   `IColumn.Slice(int, int)` call.~~ — Done 2026-08-09 (issue #173): direct call in
+   both `NivaraFrame.sliceColumn` and `SliceOperation.SliceColumn`.
 3. Internalize `GradKernels`, `ComputationGraph`, `AutoDiffDiagnostics`, and the
    orphaned `TensorsHelper.RowNorms`; tighten `public` members on already-internal
    classes (`ColumnStorageFactory`, `RankKernel`, etc.).
