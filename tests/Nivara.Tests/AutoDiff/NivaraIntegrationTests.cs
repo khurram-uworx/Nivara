@@ -1,5 +1,6 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Extensions;
+using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
 
@@ -346,6 +347,83 @@ public class NivaraIntegrationTests
 
         // Act & Assert
         Assert.Throws<ArgumentException>(() => tensors.ToGradientFrame());
+    }
+
+    [Test]
+    public void BatchBackward_ConnectedTensors_ComputesAllGradients()
+    {
+        // Arrange
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
+        var loss = ReverseGradOperations.Sum(ReverseGradOperations.Multiply(a, b));
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>
+        {
+            { "A", a },
+            { "B", b }
+        };
+
+        // Act
+        tensors.BatchBackward(loss);
+
+        // Assert
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(b.Grad, Is.Not.Null);
+        Assert.That(a.Grad![0], Is.EqualTo(3.0f).Within(1e-5f));
+        Assert.That(a.Grad[1], Is.EqualTo(4.0f).Within(1e-5f));
+        Assert.That(b.Grad![0], Is.EqualTo(1.0f).Within(1e-5f));
+        Assert.That(b.Grad[1], Is.EqualTo(2.0f).Within(1e-5f));
+    }
+
+    [Test]
+    public void BatchBackward_DisconnectedTensor_ThrowsListingKey()
+    {
+        // Arrange
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
+        var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
+        var loss = ReverseGradOperations.Sum(a);
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>
+        {
+            { "A", a },
+            { "B", b }
+        };
+
+        // Act & Assert
+        var ex = Assert.Throws<InvalidOperationException>(() => tensors.BatchBackward(loss));
+        Assert.That(ex!.Message, Does.Contain("B"));
+    }
+
+    [Test]
+    public void BatchBackward_ConstantTensors_AreExemptFromGradientCheck()
+    {
+        // Arrange
+        var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
+        var constant = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 5.0f, 6.0f }), requiresGrad: false);
+        var loss = ReverseGradOperations.Sum(ReverseGradOperations.Multiply(a, constant));
+        var tensors = new Dictionary<string, ReverseGradTensor<float>>
+        {
+            { "A", a },
+            { "Constant", constant }
+        };
+
+        // Act
+        tensors.BatchBackward(loss);
+
+        // Assert
+        Assert.That(a.Grad, Is.Not.Null);
+    }
+
+    [Test]
+    public void BatchBackward_WithNullTensors_ThrowsArgumentNullException()
+    {
+        // Arrange
+        ReverseGradTensor<float> a = ReverseGradTensor<float>.FromArray(new float[] { 1.0f }, requiresGrad: true);
+        var loss = ReverseGradOperations.Sum(a);
+
+        // Act & Assert
+        Assert.Throws<ArgumentNullException>(() => BatchBackwardNull(loss));
+
+        static void BatchBackwardNull(ReverseGradTensor<float> l)
+            => ((Dictionary<string, ReverseGradTensor<float>>?)null)!.BatchBackward(l);
     }
 
     [Test]
