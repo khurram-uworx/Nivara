@@ -709,7 +709,7 @@ public class NivaraColumnTests
 
         var halfValues = new Half?[] { (Half)1.5f, null, (Half)3.5f };
         var halfColumn = NivaraColumn<Half>.CreateFromNullable(halfValues);
-        var halfResult = halfColumn.Add((Half)0.5f);
+        var halfResult = halfColumn.Multiply((Half)2.0f);
         for (int i = 0; i < halfValues.Length; i++)
             Assert.That(halfResult.IsNull(i), Is.EqualTo(halfValues[i] == null));
 
