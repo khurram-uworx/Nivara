@@ -142,6 +142,13 @@ organic growth.
 
 ### 5. `QueryFrame.ToList()` returns `NivaraFrame`
 
+> **Resolved 2026-08-10 (issue #176, branch khurram/176):** `ToList(this QueryFrame)`
+> was removed outright (no `[Obsolete]` shim). `ToNivaraFrame()` remains the
+> materialize-to-frame entry point, and a genuinely-named `ToRowList()` was added
+> (`NivaraLinqExtensions.cs`) returning `IReadOnlyList<NivaraRow>` row views so
+> callers have a real row-list replacement. The single test caller was updated to
+> `ToNivaraFrame()` and `ToRowList()` is covered by a new test.
+
 `NivaraLinqExtensions.ToList(this QueryFrame)` (`NivaraLinqExtensions.cs:140`)
 returns a `NivaraFrame` — `ToList` universally means "materialize to a list" in
 .NET. This is a naming trap; callers will read it as a collection of rows. It's a
@@ -332,7 +339,9 @@ whether the change is safe (no breaking change) or requires a major bump.
 3. Internalize `GradKernels`, `ComputationGraph`, `AutoDiffDiagnostics`, and the
    orphaned `TensorsHelper.RowNorms`; tighten `public` members on already-internal
    classes (`ColumnStorageFactory`, `RankKernel`, etc.).
-4. Mark `QueryFrame.ToList()` `[Obsolete]` in favor of `ToNivaraFrame()`.
+4. ~~Mark `QueryFrame.ToList()` `[Obsolete]` in favor of `ToNivaraFrame()`.~~ —
+   Done 2026-08-10 (issue #176): `ToList(this QueryFrame)` removed; `ToRowList()`
+   added as the row-list replacement.
 5. Delete the legacy static initializer API (`KaimingNormal.Init`, etc.) and
    `DefaultInitializers.Bias<T>()`.
 6. ~~Fix `NivaraAutoGradExtensions.BatchBackward` to honor `tensors` (or remove it).~~ —
