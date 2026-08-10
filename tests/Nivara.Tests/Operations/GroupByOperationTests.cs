@@ -161,6 +161,65 @@ public class GroupByOperationTests
     }
 
     [Test]
+    public void Execute_WithHalfKeyColumn_ReturnsTypedDistinctColumn()
+    {
+        var column = NivaraColumn<Half>.Create(new Half[] { (Half)1.5, (Half)2.5, (Half)1.5 });
+        var input = new Dictionary<string, IColumn> { ["Rate"] = column };
+        var operation = new GroupByOperation(new[] { ColumnExpressions.Col("Rate") });
+
+        var result = operation.Execute(input);
+
+        var resultColumn = result["Rate"];
+        Assert.That(resultColumn, Is.InstanceOf<NivaraColumn<Half>>());
+        Assert.That(resultColumn.Length, Is.EqualTo(2));
+        Assert.That(resultColumn.GetValue(0), Is.EqualTo((Half)1.5).Or.EqualTo((Half)2.5));
+        Assert.That(resultColumn.GetValue(1), Is.EqualTo((Half)1.5).Or.EqualTo((Half)2.5));
+        Assert.That(resultColumn.GetValue(0), Is.Not.EqualTo(resultColumn.GetValue(1)));
+    }
+
+    [Test]
+    public void Execute_WithNIntKeyColumn_ReturnsTypedDistinctColumn()
+    {
+        var column = NivaraColumn<nint>.Create(new nint[] { 10, 20, 10, 30 });
+        var input = new Dictionary<string, IColumn> { ["Id"] = column };
+        var operation = new GroupByOperation(new[] { ColumnExpressions.Col("Id") });
+
+        var result = operation.Execute(input);
+
+        var resultColumn = result["Id"];
+        Assert.That(resultColumn, Is.InstanceOf<NivaraColumn<nint>>());
+        Assert.That(resultColumn.Length, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Execute_WithUIntKeyColumn_ReturnsTypedDistinctColumn()
+    {
+        var column = NivaraColumn<uint>.Create(new uint[] { 1u, 2u, 1u });
+        var input = new Dictionary<string, IColumn> { ["Id"] = column };
+        var operation = new GroupByOperation(new[] { ColumnExpressions.Col("Id") });
+
+        var result = operation.Execute(input);
+
+        var resultColumn = result["Id"];
+        Assert.That(resultColumn, Is.InstanceOf<NivaraColumn<uint>>());
+        Assert.That(resultColumn.Length, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Execute_WithCharKeyColumn_ReturnsTypedDistinctColumn()
+    {
+        var column = NivaraColumn<char>.Create(new char[] { 'a', 'b', 'a' });
+        var input = new Dictionary<string, IColumn> { ["Code"] = column };
+        var operation = new GroupByOperation(new[] { ColumnExpressions.Col("Code") });
+
+        var result = operation.Execute(input);
+
+        var resultColumn = result["Code"];
+        Assert.That(resultColumn, Is.InstanceOf<NivaraColumn<char>>());
+        Assert.That(resultColumn.Length, Is.EqualTo(2));
+    }
+
+    [Test]
     public void TransformSchema_WithValidSchema_ReturnsCorrectSchema()
     {
         // Arrange

@@ -831,5 +831,127 @@ public class AggregationFunctionTests
             Assert.That(result.GetValue(0), Is.EqualTo((UInt128)30));
             Assert.That(result.GetValue(1), Is.EqualTo((UInt128)30));
         }
+
+        [Test]
+        public void ApplyToGroups_WithHalfValues_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<Half>.Create(new Half[] { (Half)10, (Half)20, (Half)30 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<Half>>());
+            Assert.That(result.GetValue(0), Is.EqualTo((Half)10));
+            Assert.That(result.GetValue(1), Is.EqualTo((Half)30));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithNIntValues_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<nint>.Create(new nint[] { 10, 20, 30 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Max().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<nint>>());
+            Assert.That(result.GetValue(0), Is.EqualTo((nint)20));
+            Assert.That(result.GetValue(1), Is.EqualTo((nint)30));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithCharValues_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<char>.Create(new char[] { 'c', 'a', 'b' });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<char>>());
+            Assert.That(result.GetValue(0), Is.EqualTo('a'));
+            Assert.That(result.GetValue(1), Is.EqualTo('b'));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithSByteValues_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<sbyte>.Create(new sbyte[] { -5, 3, 7 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<sbyte>>());
+            Assert.That(result.GetValue(0), Is.EqualTo((sbyte)-5));
+            Assert.That(result.GetValue(1), Is.EqualTo((sbyte)7));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithUShortValues_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<ushort>.Create(new ushort[] { 10, 20, 30 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Max().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<ushort>>());
+            Assert.That(result.GetValue(0), Is.EqualTo((ushort)20));
+            Assert.That(result.GetValue(1), Is.EqualTo((ushort)30));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithUIntValues_ReturnsTypedColumn()
+        {
+            var column = NivaraColumn<uint>.Create(new uint[] { 10, 20, 30 });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<uint>>());
+            Assert.That(result.GetValue(0), Is.EqualTo(10u));
+            Assert.That(result.GetValue(1), Is.EqualTo(30u));
+        }
+
+        [Test]
+        public void ApplyToGroups_WithDateTimeOffsetValues_ReturnsTypedColumn()
+        {
+            var first = new DateTimeOffset(2024, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            var second = new DateTimeOffset(2024, 1, 2, 0, 0, 0, TimeSpan.Zero);
+            var third = new DateTimeOffset(2024, 1, 3, 0, 0, 0, TimeSpan.Zero);
+            var column = NivaraColumn<DateTimeOffset>.Create(new[] { first, second, third });
+            var groups = new[]
+            {
+                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+            };
+
+            var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
+
+            Assert.That(result, Is.InstanceOf<NivaraColumn<DateTimeOffset>>());
+            Assert.That(result.GetValue(0), Is.EqualTo(first));
+            Assert.That(result.GetValue(1), Is.EqualTo(third));
+        }
     }
 }
