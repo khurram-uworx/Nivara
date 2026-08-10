@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Numerics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace Nivara.Expressions;
 
@@ -279,8 +280,10 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Snapshots each leaf column into a typed array (default values at null positions; the null mask
-    /// is computed separately), so the compiled delegate can index the backing arrays directly.
+    /// Snaps each leaf column to a typed array the compiled delegate can index, reading zero-copy
+    /// when the leaf's backing array is contiguous at offset 0. Null positions hold <c>default(T)</c>
+    /// in the backing data, so a zero-copy view is always value-correct; the null mask is computed
+    /// separately. Only sliced columns (offset &gt; 0) require a snapshot copy.
     /// </summary>
     static object[] SnapshotLeaves(FusedExpressionPlan plan)
     {
@@ -304,17 +307,11 @@ sealed class FusedExpressionEvaluator
 
     static T[] SnapshotLeaf<T>(NivaraColumn<T> column)
     {
-        var array = new T[column.Length];
-        if (column.TryGetSpan(out var span))
-        {
-            span.CopyTo(array);
-        }
-        else
-        {
-            for (int i = 0; i < column.Length; i++)
-                array[i] = column[i];
-        }
+        if (MemoryMarshal.TryGetArray(column.Storage.Data, out var segment) && segment.Array is not null && segment.Offset == 0)
+            return segment.Array;
 
+        var array = new T[column.Length];
+        column.AsSpan().CopyTo(array);
         return array;
     }
 

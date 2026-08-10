@@ -109,6 +109,15 @@ internal interface IColumnStorage<T> : IDisposable
     IColumnStorage<T> Slice(int start, int length);
 
     /// <summary>
+    /// Gets the underlying data memory for operations.
+    /// </summary>
+    /// <remarks>
+    /// A true zero-copy view over the backing array (offset 0 when not sliced). Used by the fused
+    /// evaluator to recover the backing <typeparamref name="T"/>[] for zero-copy leaf reads.
+    /// </remarks>
+    ReadOnlyMemory<T> Data { get; }
+
+    /// <summary>
     /// Gets a read-only span over the underlying data.
     /// </summary>
     /// <remarks>

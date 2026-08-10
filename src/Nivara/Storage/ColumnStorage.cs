@@ -184,7 +184,7 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     /// <summary>
     /// Gets the underlying data memory for operations
     /// </summary>
-    internal ReadOnlyMemory<T> Data
+    public ReadOnlyMemory<T> Data
     {
         get
         {
