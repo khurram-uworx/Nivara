@@ -1,5 +1,6 @@
 using Nivara.Execution;
-using Nivara.Linq;
+using Nivara.Expressions;
+using Nivara.Operations;
 using NUnit.Framework;
 
 namespace Nivara.Tests;
@@ -8,7 +9,7 @@ namespace Nivara.Tests;
 public class LinqQueryTests
 {
     [Test]
-    public void Where_WithLambda_FiltersCorrectly()
+    public void Where_WithFilterExpression_FiltersCorrectly()
     {
         // Arrange
         var col1 = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
@@ -17,8 +18,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Where(x => x["Numbers"] > 3)
-            .ToNivaraFrame();
+            .Filter(ColumnExpressions.Col("Numbers") > 3)
+            .Collect();
 
         // Assert
         Assert.That(result.RowCount, Is.EqualTo(2));
@@ -28,7 +29,7 @@ public class LinqQueryTests
     }
 
     [Test]
-    public void Select_WithLambda_ProjectsCorrectly()
+    public void Select_WithExpression_ProjectsCorrectly()
     {
         // Arrange
         var col1 = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
@@ -37,8 +38,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Select(x => x["Letters"])
-            .ToNivaraFrame();
+            .Select(ColumnExpressions.Col("Letters"))
+            .Collect();
 
         // Assert
         Assert.That(result.ColumnCount, Is.EqualTo(1));
@@ -47,7 +48,7 @@ public class LinqQueryTests
     }
 
     [Test]
-    public void Select_WithMultipleLambdas_ProjectsCorrectly()
+    public void Select_WithMultipleExpressions_ProjectsCorrectly()
     {
         // Arrange
         var col1 = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
@@ -56,8 +57,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Select(x => x["Letters"], x => x["Numbers"])
-            .ToNivaraFrame();
+            .Select(ColumnExpressions.Col("Letters"), ColumnExpressions.Col("Numbers"))
+            .Collect();
 
         // Assert
         Assert.That(result.ColumnCount, Is.EqualTo(2));
@@ -65,7 +66,7 @@ public class LinqQueryTests
     }
 
     [Test]
-    public void OrderBy_WithLambda_SortsCorrectly()
+    public void OrderBy_WithColumnReference_SortsCorrectly()
     {
         // Arrange
         var col1 = NivaraColumn<int>.Create(new[] { 3, 1, 2 });
@@ -73,8 +74,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["Numbers"])
-            .ToNivaraFrame();
+            .Sort("Numbers")
+            .Collect();
 
         // Assert
         var numbers = result.GetColumn<int>("Numbers");
@@ -84,7 +85,7 @@ public class LinqQueryTests
     }
 
     [Test]
-    public void OrderByDescending_WithLambda_SortsCorrectly()
+    public void OrderByDescending_WithColumnReference_SortsCorrectly()
     {
         // Arrange
         var col1 = NivaraColumn<int>.Create(new[] { 1, 3, 2 });
@@ -92,8 +93,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderByDescending(x => x["Numbers"])
-            .ToNivaraFrame();
+            .Sort("Numbers", SortDirection.Descending)
+            .Collect();
 
         // Assert
         var numbers = result.GetColumn<int>("Numbers");
@@ -103,7 +104,7 @@ public class LinqQueryTests
     }
 
     [Test]
-    public void ChainedLinqOperations_RunCorrectly()
+    public void ChainedOperations_RunCorrectly()
     {
         // Arrange
         var col1 = NivaraColumn<int>.Create(new[] { 5, 1, 4, 2, 3 });
@@ -112,10 +113,10 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Where(x => x["Numbers"] > 2)
-            .OrderBy(x => x["Numbers"])
-            .Select(x => x["Letters"])
-            .ToNivaraFrame();
+            .Filter(ColumnExpressions.Col("Numbers") > 2)
+            .Sort("Numbers")
+            .Select(ColumnExpressions.Col("Letters"))
+            .Collect();
 
         // Assert
         // Expected: 5, 4, 3 -> Sorted: 3, 4, 5 -> Letters: c, d, e
@@ -129,7 +130,7 @@ public class LinqQueryTests
     }
 
     [Test]
-    public void ToRowList_WithFilter_MaterializesRowViews()
+    public void Filter_WithNullableColumn_PreservesNullPositions()
     {
         // Arrange
         var numbers = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
@@ -137,17 +138,19 @@ public class LinqQueryTests
         var frame = NivaraFrame.Create(("Numbers", numbers), ("Scores", scores));
 
         // Act
-        var rows = frame.AsQueryFrame()
-            .Where(x => x["Numbers"] > 1)
-            .ToRowList();
+        var result = frame.AsQueryFrame()
+            .Filter(ColumnExpressions.Col("Numbers") > 1)
+            .Collect();
 
         // Assert
-        Assert.That(rows, Has.Count.EqualTo(2));
-        Assert.That(rows[0].GetValue<int>("Numbers"), Is.EqualTo(2));
-        Assert.That(rows[0].IsNull("Scores"), Is.True);
-        Assert.That(rows[1].GetValue<int>("Numbers"), Is.EqualTo(3));
-        Assert.That(rows[1].GetValue<int>("Scores"), Is.EqualTo(30));
-        Assert.That(rows[1].IsNull("Scores"), Is.False);
+        Assert.That(result.RowCount, Is.EqualTo(2));
+        var resultNumbers = result.GetColumn<int>("Numbers");
+        var resultScores = result.GetColumn<int>("Scores");
+        Assert.That(resultNumbers[0], Is.EqualTo(2));
+        Assert.That(resultScores.IsNull(0), Is.True);
+        Assert.That(resultNumbers[1], Is.EqualTo(3));
+        Assert.That(resultScores[1], Is.EqualTo(30));
+        Assert.That(resultScores.IsNull(1), Is.False);
     }
 
     [Test]
@@ -160,8 +163,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["Numbers"] * 2)
-            .ToNivaraFrame();
+            .SortByExpression(ColumnExpressions.Col("Numbers") * 2)
+            .Collect();
 
         // Assert
         var numbers = result.GetColumn<int>("Numbers");
@@ -180,8 +183,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["A"] + x["B"])
-            .ToNivaraFrame();
+            .SortByExpression(ColumnExpressions.Col("A") + ColumnExpressions.Col("B"))
+            .Collect();
 
         // Assert
         // Sums: 11, 7, 6 -> sorted order: (3,3), (5,2), (1,10)
@@ -200,8 +203,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["Score"] + x["ID"])
-            .ToNivaraFrame();
+            .SortByExpression(ColumnExpressions.Col("Score") + ColumnExpressions.Col("ID"))
+            .Collect();
 
         // Assert
         // Keys: 86.5, 94.0, 81.5 -> sorted: 3, 1, 2
@@ -219,8 +222,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderByDescending(x => x["Numbers"] * 2)
-            .ToNivaraFrame();
+            .SortByExpression(ColumnExpressions.Col("Numbers") * 2, SortDirection.Descending)
+            .Collect();
 
         // Assert
         var numbers = result.GetColumn<int>("Numbers");
@@ -239,8 +242,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["Age"] * 2)
-            .ToNivaraFrame();
+            .SortByExpression(ColumnExpressions.Col("Age") * 2)
+            .Collect();
 
         // Assert
         // Keys: 60, null, 40, 80, null -> ascending with NullsLast: 20, 30, 40, null, null
@@ -262,9 +265,9 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .Where(x => x["ID"] > 1)
-            .OrderBy(x => x["Val"] / 10)
-            .ToNivaraFrame();
+            .Filter(ColumnExpressions.Col("ID") > 1)
+            .SortByExpression(ColumnExpressions.Col("Val") / 10)
+            .Collect();
 
         // Assert
         // IDs 2..5, keys 5,2,4,3 -> sorted: 3, 5, 4, 2
@@ -283,8 +286,8 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x.Lit(5))
-            .ToNivaraFrame();
+            .SortByExpression(ColumnExpressions.Lit(5))
+            .Collect();
 
         // Assert
         // A constant key leaves rows in their original relative order (stable sort)
@@ -303,7 +306,7 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .SortByExpression(Nivara.Expressions.ColumnExpressions.Col("Val") * 3)
+            .SortByExpression(ColumnExpressions.Col("Val") * 3)
             .Collect();
 
         // Assert
@@ -321,7 +324,7 @@ public class LinqQueryTests
         var vals = NivaraColumn<int>.Create(new[] { 50, 30, 10, 40, 20 });
         var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
 
-        var queryFrame = frame.AsQueryFrame().OrderBy(x => x["Val"] * 2);
+        var queryFrame = frame.AsQueryFrame().SortByExpression(ColumnExpressions.Col("Val") * 2);
         var plan = queryFrame.ToQueryPlan();
 
         // Act
@@ -345,7 +348,7 @@ public class LinqQueryTests
         var vals = NivaraColumn<int>.Create(new[] { 50, 30, 10, 40, 20 });
         var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
 
-        var queryFrame = frame.AsQueryFrame().OrderBy(x => x["Val"] + x["ID"]);
+        var queryFrame = frame.AsQueryFrame().SortByExpression(ColumnExpressions.Col("Val") + ColumnExpressions.Col("ID"));
         var plan = queryFrame.ToQueryPlan();
 
         // Act
@@ -372,9 +375,9 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["Name"])
-            .ThenBy(x => x["Age"])
-            .ToNivaraFrame();
+            .Sort("Name")
+            .ThenBy(ColumnExpressions.Col("Age"))
+            .Collect();
 
         // Assert
         // Name asc, then Age asc within each name: a20, a40, b10, b25, b30
@@ -392,9 +395,9 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["ID"])
-            .ThenBy(x => x["Val"] * 2)
-            .ToNivaraFrame();
+            .Sort("ID")
+            .ThenBy(ColumnExpressions.Col("Val") * 2)
+            .Collect();
 
         // Assert
         // ID asc, Val*2 asc within each ID: (1,10), (1,30), (2,20), (2,40)
@@ -412,9 +415,9 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["ID"] * 2)
-            .ThenBy(x => x["Val"])
-            .ToNivaraFrame();
+            .SortByExpression(ColumnExpressions.Col("ID") * 2)
+            .ThenBy(ColumnExpressions.Col("Val"))
+            .Collect();
 
         // Assert
         // ID*2 asc, then Val asc within ties: (2,3),(2,4),(6,1),(6,2) -> ID:1,1,3,3; Val:3,4,1,2
@@ -432,9 +435,9 @@ public class LinqQueryTests
 
         // Act
         var result = frame.AsQueryFrame()
-            .OrderBy(x => x["ID"])
-            .ThenByDescending(x => x["Val"])
-            .ToNivaraFrame();
+            .Sort("ID")
+            .ThenBy(ColumnExpressions.Col("Val"), SortDirection.Descending)
+            .Collect();
 
         // Assert
         // ID asc, Val desc within each ID: (1,30),(1,10),(2,40),(2,20)
@@ -451,7 +454,7 @@ public class LinqQueryTests
         var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
 
         // Act & Assert
-        var result = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"]).ToNivaraFrame();
+        var result = frame.AsQueryFrame().Sort("ID").ThenBy(ColumnExpressions.Col("Val")).Collect();
         Assert.That(result.GetColumn<int>("ID").ToArray(), Is.EqualTo(new[] { 1, 2, 3 }));
         Assert.That(result.GetColumn<int>("Val").ToArray(), Is.EqualTo(new[] { 30, 10, 20 }));
     }
@@ -464,7 +467,7 @@ public class LinqQueryTests
         var vals = NivaraColumn<int>.Create(new[] { 10, 30, 20, 40 });
         var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
 
-        var queryFrame = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"] * 2);
+        var queryFrame = frame.AsQueryFrame().Sort("ID").ThenBy(ColumnExpressions.Col("Val") * 2);
         var plan = queryFrame.ToQueryPlan();
 
         // Act
@@ -484,7 +487,7 @@ public class LinqQueryTests
         var vals = NivaraColumn<int>.Create(new[] { 10, 30, 20, 40 });
         var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
 
-        var queryFrame = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"] + x["ID"]);
+        var queryFrame = frame.AsQueryFrame().Sort("ID").ThenBy(ColumnExpressions.Col("Val") + ColumnExpressions.Col("ID"));
         var plan = queryFrame.ToQueryPlan();
 
         // Act
