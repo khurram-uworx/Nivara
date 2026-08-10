@@ -115,7 +115,7 @@ public class LinqQueryTests
             .Where(x => x["Numbers"] > 2)
             .OrderBy(x => x["Numbers"])
             .Select(x => x["Letters"])
-            .ToList();
+            .ToNivaraFrame();
 
         // Assert
         // Expected: 5, 4, 3 -> Sorted: 3, 4, 5 -> Letters: c, d, e
@@ -126,6 +126,28 @@ public class LinqQueryTests
         Assert.That(letters[0], Is.EqualTo("c")); // 3
         Assert.That(letters[1], Is.EqualTo("d")); // 4
         Assert.That(letters[2], Is.EqualTo("e")); // 5
+    }
+
+    [Test]
+    public void ToRowList_WithFilter_MaterializesRowViews()
+    {
+        // Arrange
+        var numbers = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+        var scores = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 30 });
+        var frame = NivaraFrame.Create(("Numbers", numbers), ("Scores", scores));
+
+        // Act
+        var rows = frame.AsQueryFrame()
+            .Where(x => x["Numbers"] > 1)
+            .ToRowList();
+
+        // Assert
+        Assert.That(rows, Has.Count.EqualTo(2));
+        Assert.That(rows[0].GetValue<int>("Numbers"), Is.EqualTo(2));
+        Assert.That(rows[0].IsNull("Scores"), Is.True);
+        Assert.That(rows[1].GetValue<int>("Numbers"), Is.EqualTo(3));
+        Assert.That(rows[1].GetValue<int>("Scores"), Is.EqualTo(30));
+        Assert.That(rows[1].IsNull("Scores"), Is.False);
     }
 
     [Test]
