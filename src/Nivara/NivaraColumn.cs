@@ -369,8 +369,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             case "arithmetic":
                 if (!typeof(T).IsNumericType())
                     throw new InvalidOperationException($"Arithmetic operations are not supported for type {typeof(T).Name}. Only numeric types (int, float, double, long, etc.) support arithmetic operations.");
-                if (!ColumnStorageFactory.IsVectorizable<T>())
-                    throw new InvalidOperationException($"Arithmetic operations are not supported for non-vectorizable type {typeof(T).Name}. Only numeric primitive types support vectorized arithmetic.");
                 break;
             case "comparison":
                 if (!typeof(T).IsComparableType())

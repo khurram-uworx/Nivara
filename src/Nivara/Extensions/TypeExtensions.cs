@@ -20,7 +20,12 @@ static class TypeExtensions
             underlying == typeof(ushort) ||
             underlying == typeof(char) ||
             underlying == typeof(decimal) ||
-            underlying == typeof(bool);
+            underlying == typeof(bool) ||
+            underlying == typeof(Half) ||
+            underlying == typeof(nint) ||
+            underlying == typeof(nuint) ||
+            underlying == typeof(Int128) ||
+            underlying == typeof(UInt128);
     }
 
     /// <summary>
