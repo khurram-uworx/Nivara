@@ -1,3 +1,4 @@
+using Nivara.Linq;
 using Nivara.Query;
 
 namespace Nivara.IO;
@@ -128,5 +129,37 @@ public static class Csv
     {
         var columns = ReadCsv(filePath, options);
         return NivaraFrame.Create(columns);
+    }
+
+    /// <summary>
+    /// Creates a lazy typed query that scans a CSV file without immediately reading it
+    /// </summary>
+    /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map
+    /// (case-insensitively) to the file's columns with exact or nullable-compatible types.</typeparam>
+    /// <param name="filePath">The path to the CSV file</param>
+    /// <param name="options">Optional CSV reading options</param>
+    /// <returns>A lazy typed query that will read the CSV when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
+    public static NivaraQuery<T> ScanAsQuery<T>(string filePath, CsvOptions? options = null)
+        where T : class, new()
+    {
+        return ScanCsvAsQuery<T>(filePath, options);
+    }
+
+    /// <summary>
+    /// Creates a lazy typed query that scans a CSV file without immediately reading it
+    /// </summary>
+    /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map
+    /// (case-insensitively) to the file's columns with exact or nullable-compatible types.</typeparam>
+    /// <param name="filePath">The path to the CSV file</param>
+    /// <param name="options">Optional CSV reading options</param>
+    /// <returns>A lazy typed query that will read the CSV when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
+    public static NivaraQuery<T> ScanCsvAsQuery<T>(string filePath, CsvOptions? options = null)
+        where T : class, new()
+    {
+        return NivaraTypedLinqExtensions.FromFrame<T>(ScanCsvAsQueryFrame(filePath, options));
     }
 }
