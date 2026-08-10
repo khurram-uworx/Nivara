@@ -310,7 +310,7 @@ public sealed class NivaraFrame : IFrame
     /// Creates a QueryFrame from an existing NivaraFrame for lazy query operations
     /// </summary>
     /// <returns>A QueryFrame that can be used to build query chains</returns>
-    public QueryFrame AsQueryFrame()
+    internal QueryFrame AsQueryFrame()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 

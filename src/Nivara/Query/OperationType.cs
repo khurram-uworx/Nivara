@@ -1,6 +1,6 @@
 namespace Nivara.Query;
 
-public static class OperationType
+internal static class OperationType
 {
     public const string Filter = "Filter";
     public const string Select = "Select";

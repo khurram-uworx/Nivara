@@ -1,6 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Execution;
-using Nivara.Linq;
+using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
 using NUnit.Framework;
@@ -656,7 +656,9 @@ public class ParallelExecutionStrategyTests
         var vals = NivaraColumn<int>.Create(Enumerable.Range(0, 1200).Select(i => (i * 7919) % 1200).ToArray());
         using var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
 
-        var plan = frame.AsQueryFrame().OrderBy(x => x["Val"] * 2 + x["ID"]).ToQueryPlan();
+        var plan = frame.AsQueryFrame()
+            .SortByExpression(ColumnExpressions.Col("Val") * 2 + ColumnExpressions.Col("ID"))
+            .ToQueryPlan();
 
         var engine = new ExecutionEngine();
         var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
@@ -679,7 +681,10 @@ public class ParallelExecutionStrategyTests
         var vals = NivaraColumn<int>.Create(Enumerable.Range(0, 1200).Select(i => (i * 7919) % 1200).ToArray());
         using var frame = NivaraFrame.Create(("ID", ids), ("Val", vals));
 
-        var plan = frame.AsQueryFrame().OrderBy(x => x["ID"]).ThenBy(x => x["Val"] * 2).ToQueryPlan();
+        var plan = frame.AsQueryFrame()
+            .Sort("ID")
+            .ThenBy(ColumnExpressions.Col("Val") * 2)
+            .ToQueryPlan();
 
         var engine = new ExecutionEngine();
         using var parallelResult = engine.Execute(plan, new NivaraExecutionContext(ExecutionStrategy.Parallel));

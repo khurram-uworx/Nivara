@@ -6,7 +6,7 @@ namespace Nivara.Optimization;
 /// <summary>
 /// Optimization rule that fuses compatible operations to reduce intermediate allocations
 /// </summary>
-public sealed class OperationFusionRule : OptimizationRule
+internal sealed class OperationFusionRule : OptimizationRule
 {
     /// <inheritdoc />
     public override string Name => "Operation Fusion";

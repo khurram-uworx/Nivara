@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Query;
 
 namespace Nivara.Linq;
 
@@ -23,5 +24,19 @@ public static class NivaraTypedLinqExtensions
 
         TypedLinqMetadata.ValidateRowType(typeof(T), frame.Schema);
         return new NivaraQuery<T>(frame.AsQueryFrame());
+    }
+
+    /// <summary>
+    /// Creates a typed query over an existing lazy query frame, validating the row type against the
+    /// frame's inferred schema. Used by the lazy file-source entries in <c>Nivara.IO.Json</c> and
+    /// <c>Nivara.Extensions.IO.Csv</c> (friend-accessible).
+    /// </summary>
+    internal static NivaraQuery<T> FromFrame<T>(QueryFrame frame)
+        where T : class, new()
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+
+        TypedLinqMetadata.ValidateRowType(typeof(T), frame.Schema);
+        return new NivaraQuery<T>(frame);
     }
 }

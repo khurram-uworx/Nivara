@@ -280,7 +280,7 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
 /// <summary>
 /// Comparer that handles multiple sort keys with proper null handling
 /// </summary>
-public sealed class MultiColumnComparer : IComparer<int>
+internal sealed class MultiColumnComparer : IComparer<int>
 {
     /// <summary>
     /// Compares two values from a column at the specified indices

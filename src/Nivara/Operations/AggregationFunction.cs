@@ -36,7 +36,7 @@ public abstract class AggregationFunction
     /// <param name="column">The source column</param>
     /// <param name="groups">The groups with their indices</param>
     /// <returns>A column containing the aggregated values for each group</returns>
-    public virtual IColumn ApplyToGroups(IColumn column, IEnumerable<(GroupKey Key, IReadOnlyList<int> Indices)> groups)
+    internal virtual IColumn ApplyToGroups(IColumn column, IEnumerable<(GroupKey Key, IReadOnlyList<int> Indices)> groups)
     {
         if (column == null)
             throw new ArgumentNullException(nameof(column));

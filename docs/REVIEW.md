@@ -131,10 +131,19 @@ feature would be better as opt-in telemetry or dropped.
 
 ### 4. Three parallel query paradigms with overlapping surface
 
-- `QueryFrame` fluent API (string + `ColumnExpression` based)
-- `NivaraLinqExtensions.Where/Select/OrderBy` on `QueryFrame` via
-  `Func<RowExpressionBuilder, ColumnExpression>` — a *third* DSL
-- `NivaraTypedLinqExtensions.Query<T>()` → `NivaraQuery<T>` expression-tree layer
+> **Resolved 2026-08-10 (issue #175, branch khurram/175):** the typed `NivaraQuery<T>` layer is now
+> the single public query API. The `NivaraLinqExtensions` DSL and `RowExpressionBuilder` were
+> deleted; the `QueryFrame` engine and its expression tree (`Query/`, `Expressions/`, `Operations/`)
+> were internalized and are plumbing only. `NivaraQuery<T>` gained `Distinct`/`DistinctBy`,
+> `SelectRows`, per-key `SortDirection`/`NullOrdering` multi-key sort, and lazy typed file-source
+> entries (`Json.ScanAsQuery<T>` / `ScanJsonAsQuery<T>` in core,
+> `Csv.ScanAsQuery<T>` / `ScanCsvAsQuery<T>` in Extensions). Package version bumped to 2.0.0 for the
+> breaking public-surface change. `docs/LINQ.md` rewritten to the typed-only API.
+
+`QueryFrame` fluent API (string + `ColumnExpression` based)
+`NivaraLinqExtensions.Where/Select/OrderBy` on `QueryFrame` via
+`Func<RowExpressionBuilder, ColumnExpression>` — a *third* DSL
+`NivaraTypedLinqExtensions.Query<T>()` → `NivaraQuery<T>` expression-tree layer
 
 Three ways to filter a frame, with different laziness, discoverability, and error
 models. This needs a deliberate story (one primary, others relegated), not

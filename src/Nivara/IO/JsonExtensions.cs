@@ -1,3 +1,4 @@
+using Nivara.Linq;
 using Nivara.Query;
 
 namespace Nivara.IO;
@@ -15,7 +16,7 @@ public static class Json
     /// <returns>A query source that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static IQuerySource Scan(string filePath, JsonOptions? options = null)
+    internal static IQuerySource Scan(string filePath, JsonOptions? options = null)
     {
         return ScanJson(filePath, options);
     }
@@ -42,7 +43,7 @@ public static class Json
     /// <returns>A QueryFrame that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static QueryFrame ScanAsQueryFrame(string filePath, JsonOptions? options = null)
+    internal static QueryFrame ScanAsQueryFrame(string filePath, JsonOptions? options = null)
     {
         return ScanJsonAsQueryFrame(filePath, options);
     }
@@ -69,7 +70,7 @@ public static class Json
     /// <returns>A QueryFrame that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static IQuerySource ScanJson(string filePath, JsonOptions? options = null)
+    internal static IQuerySource ScanJson(string filePath, JsonOptions? options = null)
     {
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentNullException(nameof(filePath));
@@ -109,7 +110,7 @@ public static class Json
     /// <returns>A QueryFrame that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static QueryFrame ScanJsonAsQueryFrame(string filePath, JsonOptions? options = null)
+    internal static QueryFrame ScanJsonAsQueryFrame(string filePath, JsonOptions? options = null)
     {
         var source = ScanJson(filePath, options);
         return new QueryFrame(source);
@@ -128,5 +129,37 @@ public static class Json
     {
         var columns = ReadJson(filePath, options);
         return NivaraFrame.Create(columns);
+    }
+
+    /// <summary>
+    /// Creates a lazy typed query that scans a JSON file without immediately reading it
+    /// </summary>
+    /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map
+    /// (case-insensitively) to the file's columns with exact or nullable-compatible types.</typeparam>
+    /// <param name="filePath">The path to the JSON file</param>
+    /// <param name="options">Optional JSON reading options</param>
+    /// <returns>A lazy typed query that will read the JSON when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
+    public static NivaraQuery<T> ScanAsQuery<T>(string filePath, JsonOptions? options = null)
+        where T : class, new()
+    {
+        return ScanJsonAsQuery<T>(filePath, options);
+    }
+
+    /// <summary>
+    /// Creates a lazy typed query that scans a JSON file without immediately reading it
+    /// </summary>
+    /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map
+    /// (case-insensitively) to the file's columns with exact or nullable-compatible types.</typeparam>
+    /// <param name="filePath">The path to the JSON file</param>
+    /// <param name="options">Optional JSON reading options</param>
+    /// <returns>A lazy typed query that will read the JSON when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
+    public static NivaraQuery<T> ScanJsonAsQuery<T>(string filePath, JsonOptions? options = null)
+        where T : class, new()
+    {
+        return NivaraTypedLinqExtensions.FromFrame<T>(ScanJsonAsQueryFrame(filePath, options));
     }
 }

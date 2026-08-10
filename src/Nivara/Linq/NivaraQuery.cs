@@ -42,7 +42,7 @@ public sealed class NivaraQuery<T>
     /// <summary>
     /// Returns the underlying lazy query frame for advanced composition
     /// </summary>
-    public QueryFrame AsQueryFrame() => frame;
+    internal QueryFrame AsQueryFrame() => frame;
 
     /// <summary>
     /// Filters the rows using the given predicate
@@ -80,49 +80,93 @@ public sealed class NivaraQuery<T>
     /// Sorts the rows by the given key in ascending order
     /// </summary>
     /// <param name="keySelector">The sort key selector</param>
+    /// <param name="direction">The sort direction (ascending or descending)</param>
+    /// <param name="nullOrdering">How to order null values</param>
     /// <returns>A new query with the sort applied</returns>
-    public NivaraQuery<T> OrderBy(Expression<Func<T, object?>> keySelector)
-        => SortByCore(keySelector, SortDirection.Ascending);
+    public NivaraQuery<T> OrderBy(Expression<Func<T, object?>> keySelector,
+        SortDirection direction = SortDirection.Ascending,
+        NullOrdering nullOrdering = NullOrdering.NullsLast)
+        => SortByCore(keySelector, direction, nullOrdering);
 
     /// <summary>
     /// Sorts the rows by the given key in descending order
     /// </summary>
     /// <param name="keySelector">The sort key selector</param>
+    /// <param name="nullOrdering">How to order null values</param>
     /// <returns>A new query with the sort applied</returns>
-    public NivaraQuery<T> OrderByDescending(Expression<Func<T, object?>> keySelector)
-        => SortByCore(keySelector, SortDirection.Descending);
+    public NivaraQuery<T> OrderByDescending(Expression<Func<T, object?>> keySelector,
+        NullOrdering nullOrdering = NullOrdering.NullsLast)
+        => SortByCore(keySelector, SortDirection.Descending, nullOrdering);
 
     /// <summary>
     /// Appends a secondary ascending sort key
     /// </summary>
     /// <param name="keySelector">The sort key selector</param>
+    /// <param name="direction">The sort direction (ascending or descending)</param>
+    /// <param name="nullOrdering">How to order null values</param>
     /// <returns>A new query with the secondary sort applied</returns>
-    public NivaraQuery<T> ThenBy(Expression<Func<T, object?>> keySelector)
-        => ThenByCore(keySelector, SortDirection.Ascending);
+    public NivaraQuery<T> ThenBy(Expression<Func<T, object?>> keySelector,
+        SortDirection direction = SortDirection.Ascending,
+        NullOrdering nullOrdering = NullOrdering.NullsLast)
+        => ThenByCore(keySelector, direction, nullOrdering);
 
     /// <summary>
     /// Appends a secondary descending sort key
     /// </summary>
     /// <param name="keySelector">The sort key selector</param>
+    /// <param name="nullOrdering">How to order null values</param>
     /// <returns>A new query with the secondary sort applied</returns>
-    public NivaraQuery<T> ThenByDescending(Expression<Func<T, object?>> keySelector)
-        => ThenByCore(keySelector, SortDirection.Descending);
+    public NivaraQuery<T> ThenByDescending(Expression<Func<T, object?>> keySelector,
+        NullOrdering nullOrdering = NullOrdering.NullsLast)
+        => ThenByCore(keySelector, SortDirection.Descending, nullOrdering);
 
-    NivaraQuery<T> SortByCore(Expression<Func<T, object?>> keySelector, SortDirection direction)
+    NivaraQuery<T> SortByCore(Expression<Func<T, object?>> keySelector, SortDirection direction, NullOrdering nullOrdering)
     {
         ArgumentNullException.ThrowIfNull(keySelector);
 
         var key = CreateTranslator().Translate(keySelector.Body);
-        return new NivaraQuery<T>(frame.SortByExpression(key, direction));
+        return new NivaraQuery<T>(frame.SortByExpression(key, direction, nullOrdering));
     }
 
-    NivaraQuery<T> ThenByCore(Expression<Func<T, object?>> keySelector, SortDirection direction)
+    NivaraQuery<T> ThenByCore(Expression<Func<T, object?>> keySelector, SortDirection direction, NullOrdering nullOrdering)
     {
         ArgumentNullException.ThrowIfNull(keySelector);
 
         var key = CreateTranslator().Translate(keySelector.Body);
-        return new NivaraQuery<T>(frame.ThenBy(key, direction));
+        return new NivaraQuery<T>(frame.ThenBy(key, direction, nullOrdering));
     }
+
+    /// <summary>
+    /// Removes duplicate rows across all columns
+    /// </summary>
+    /// <returns>A new query with duplicate rows removed</returns>
+    public NivaraQuery<T> Distinct() => new(frame.Distinct());
+
+    /// <summary>
+    /// Removes duplicate rows based on the given key, keeping the first occurrence of each key
+    /// </summary>
+    /// <param name="keySelector">The key selector identifying the columns to deduplicate on</param>
+    /// <returns>A new query with duplicate keys removed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when keySelector is null</exception>
+    /// <exception cref="UnsupportedQueryExpressionException">Thrown when the key is not a direct column reference</exception>
+    public NivaraQuery<T> DistinctBy(Expression<Func<T, object?>> keySelector)
+    {
+        ArgumentNullException.ThrowIfNull(keySelector);
+
+        var key = CreateTranslator().Translate(keySelector.Body);
+        if (key is not ColumnReference columnReference)
+            throw new UnsupportedQueryExpressionException(
+                "DistinctBy requires a direct column reference; computed keys are not supported.");
+
+        return new NivaraQuery<T>(frame.Distinct(columnReference.ColumnName));
+    }
+
+    /// <summary>
+    /// Selects the rows at the given positions, preserving the specified order
+    /// </summary>
+    /// <param name="indices">The zero-based row positions to select</param>
+    /// <returns>A new query producing only the selected rows</returns>
+    public NivaraQuery<T> SelectRows(params int[] indices) => new(frame.SelectRows(indices));
 
     /// <summary>
     /// Groups the rows by the given key, returning a grouped query on which a final Select (with

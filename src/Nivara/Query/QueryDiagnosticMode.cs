@@ -4,7 +4,7 @@ namespace Nivara.Query;
 /// Defines the diagnostic modes available for query analysis and debugging.
 /// Controls the level of detail and type of diagnostic information provided.
 /// </summary>
-public enum QueryDiagnosticMode
+internal enum QueryDiagnosticMode
 {
     /// <summary>
     /// No diagnostic information is collected or provided
@@ -37,7 +37,7 @@ public enum QueryDiagnosticMode
 /// Provides diagnostic information and analysis for queries.
 /// Supports different levels of detail based on the diagnostic mode.
 /// </summary>
-public static class QueryDiagnostics
+internal static class QueryDiagnostics
 {
     /// <summary>
     /// Gets or sets the global diagnostic mode for all queries

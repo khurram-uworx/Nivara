@@ -228,9 +228,9 @@ var ranking = documents.GetColumn<string>("DocumentId")
 
 ---
 
-### Act 5: Querying with LINQ — The QueryFrame
+### Act 5: Querying with LINQ — `NivaraQuery<T>`
 
-> Column-wise query pipeline with deferred execution and plan inspection. Familiar `Where().OrderBy().Select()` syntax — but operates on columns, builds a plan you can inspect before touching data.
+> Typed query pipeline with deferred execution and plan inspection. Familiar `Where().OrderBy().Select()` syntax — strongly typed predicates/projections that build a plan you can inspect before touching data.
 
 #### 5a. Employee Directory
 
@@ -249,8 +249,18 @@ result = employees[
 ].sort_values("Salary")[["Name", "Salary"]]
 ```
 
-**Nivara** — lazy plan with ExplainPlan(), schema errors caught at plan time:
+**Nivara** — lazy plan with ExplainPlan(), schema errors caught at `Query<T>()`:
 ```csharp
+using Nivara.Linq;
+
+public sealed class Employee
+{
+    public string Name { get; set; }
+    public string Department { get; set; }
+    public int Salary { get; set; }
+    public bool IsActive { get; set; }
+}
+
 var employees = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(["Alice", "Bob", "Charlie", "Diana"])),
     ("Department", NivaraColumn<string>.CreateForReferenceType(["Engineering", "Sales", "Engineering", "Engineering"])),
@@ -258,14 +268,14 @@ var employees = NivaraFrame.Create(
     ("IsActive", NivaraColumn<bool>.Create([true, true, false, true]))
 );
 
-var query = employees.AsQueryFrame()
-    .Where(x => x["Department"] == "Engineering" && x["IsActive"])
-    .OrderBy(x => x["Salary"])
-    .Select(x => x["Name"], x => x["Salary"]);
+var query = employees.Query<Employee>()
+    .Where(e => e.Department == "Engineering" && e.IsActive)
+    .OrderBy(e => e.Salary)
+    .Select(e => new { e.Name, e.Salary });
 
 Console.WriteLine(query.ExplainPlan());
 // Schema errors surface here, not at runtime
-var result = query.ToNivaraFrame();
+var result = query.Collect();
 ```
 
 Sample `ExplainPlan()` output:
@@ -279,13 +289,24 @@ Query Execution Plan:
 └─ Result Schema: Name (String), Salary (Int32)
 ```
 
-#### 5b. Plan-time validation catches typos
+#### 5b. Eager validation catches type mismatches
 
 **Nivara**
 ```csharp
-var query = employees.AsQueryFrame().Where(x => x["Deprtment"] == "Engineering");
-Console.WriteLine(query.ExplainPlan());
-// SchemaValidationException: Column 'Deprtment' not found. Available: Name, Department, Salary, IsActive
+using Nivara.Linq;
+
+// Property-name typos are compile errors in the typed API. Schema *type*
+// mismatches surface at Query<T>() — no data access needed:
+public sealed class Employee
+{
+    public string Name { get; set; }
+    public string Department { get; set; }
+    public string Salary { get; set; } // wrong type — the frame column is Int32
+    public bool IsActive { get; set; }
+}
+
+var query = employees.Query<Employee>();
+// SchemaValidationException: Column 'Salary' type mismatch: expected Int32, found String
 ```
 
 #### 5c. Typed object LINQ — `frame.Query<T>()`
@@ -348,9 +369,9 @@ Notes:
 
 ---
 
-### Act 6: Scale — Query Engine and Execution Strategies
+### Act 6: Scale — Lazy Optimized Queries
 
-> Swap execution strategies (Lazy, Parallel, Streaming) without changing the query. Same pipeline, different throughput/memory trade-offs.
+> Build a typed query once, execute lazily. The engine optimizes the plan (predicate pushdown, operation fusion, projection pushdown) before execution.
 
 #### Risk scoring pipeline
 
@@ -367,8 +388,17 @@ active["RiskScore"] = scores
 top = active.nlargest(100, "RiskScore")[["CustomerId", "RiskScore"]]
 ```
 
-**Nivara** — build once, swap strategies:
+**Nivara** — build once, query lazily:
 ```csharp
+using Nivara.Linq;
+
+public sealed class Customer
+{
+    public string CustomerId { get; set; }
+    public string Segment { get; set; }
+    public float RiskScore { get; set; }
+}
+
 var vectors = NivaraFrame.FromRows(
     [
         ("C001", new[] { 0.9f, 0.2f, 0.5f, 0.4f }),
@@ -391,26 +421,14 @@ for (int i = 0; i < customers.RowCount; i++)
 
 var withScores = customers.WithColumn("RiskScore", NivaraColumn<float>.Create(riskScores));
 
-var query = withScores.AsQueryFrame()
-    .Where(x => x["Segment"] != "vip")
-    .OrderByDescending(x => x["RiskScore"])
-    .Select(x => x["CustomerId"], x => x["RiskScore"]);
+// Lazy, optimized typed query
+var query = withScores.Query<Customer>()
+    .Where(c => c.Segment != "vip")
+    .OrderByDescending(c => c.RiskScore)
+    .Select(c => new { c.CustomerId, c.RiskScore });
 
-// Execute with different strategies
-var plan = query.ToQueryPlan();
-var engine = new ExecutionEngine();
-
-var lazyResult = engine.Execute(plan);
-
-var parallelCtx = new NivaraExecutionContext(ExecutionStrategy.Parallel)
-{
-    MaxDegreeOfParallelism = Environment.ProcessorCount,
-    ExecutionDiagnostics = new ExecutionDiagnostics()
-};
-var parallelResult = engine.Execute(plan, parallelCtx);
-
-Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
-// Strategy: Parallel | Elapsed: 142ms | Parallelism: 8 threads
+Console.WriteLine(query.ExplainPlan());
+var result = query.Collect();
 ```
 
 ---

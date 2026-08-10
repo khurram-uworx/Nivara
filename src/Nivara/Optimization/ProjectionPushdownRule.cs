@@ -6,7 +6,7 @@ namespace Nivara.Optimization;
 /// <summary>
 /// Optimization rule that pushes column projections closer to data sources to reduce data movement
 /// </summary>
-public sealed class ProjectionPushdownRule : OptimizationRule
+internal sealed class ProjectionPushdownRule : OptimizationRule
 {
     /// <inheritdoc />
     public override string Name => "Projection Pushdown";

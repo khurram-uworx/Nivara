@@ -3,7 +3,7 @@ namespace Nivara.Query;
 /// <summary>
 /// Abstract base class for query plan nodes that represent operations in a query tree
 /// </summary>
-public abstract class QueryNode
+internal abstract class QueryNode
 {
     /// <summary>
     /// Initializes a new instance of QueryNode
@@ -77,7 +77,7 @@ public abstract class QueryNode
 /// <summary>
 /// Represents a data source node in the query plan
 /// </summary>
-public sealed class SourceNode : QueryNode
+internal sealed class SourceNode : QueryNode
 {
     /// <summary>
     /// Initializes a new instance of SourceNode
@@ -126,7 +126,7 @@ public sealed class SourceNode : QueryNode
 /// <summary>
 /// Represents a filter operation node in the query plan
 /// </summary>
-public sealed class FilterNode : QueryNode
+internal sealed class FilterNode : QueryNode
 {
     /// <summary>
     /// Initializes a new instance of FilterNode
@@ -188,7 +188,7 @@ public sealed class FilterNode : QueryNode
 /// <summary>
 /// Represents a projection (select) operation node in the query plan
 /// </summary>
-public sealed class ProjectionNode : QueryNode
+internal sealed class ProjectionNode : QueryNode
 {
     /// <summary>
     /// Initializes a new instance of ProjectionNode
@@ -249,7 +249,7 @@ public sealed class ProjectionNode : QueryNode
 /// <summary>
 /// Represents a group by operation node in the query plan
 /// </summary>
-public sealed class GroupByNode : QueryNode
+internal sealed class GroupByNode : QueryNode
 {
     /// <summary>
     /// Initializes a new instance of GroupByNode
@@ -313,7 +313,7 @@ public sealed class GroupByNode : QueryNode
 /// <summary>
 /// Represents a window-function operation node in the query plan
 /// </summary>
-public sealed class WindowNode : QueryNode
+internal sealed class WindowNode : QueryNode
 {
     /// <summary>
     /// Initializes a new instance of WindowNode
@@ -382,7 +382,7 @@ public sealed class WindowNode : QueryNode
 /// <summary>
 /// Visitor interface for traversing query node trees
 /// </summary>
-public interface IQueryNodeVisitor
+internal interface IQueryNodeVisitor
 {
     /// <summary>
     /// Visits a source node
@@ -419,7 +419,7 @@ public interface IQueryNodeVisitor
 /// Generic visitor interface for transforming query node trees
 /// </summary>
 /// <typeparam name="T">The result type of the transformation</typeparam>
-public interface IQueryNodeVisitor<T>
+internal interface IQueryNodeVisitor<T>
 {
     /// <summary>
     /// Visits a source node and returns a result

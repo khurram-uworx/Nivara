@@ -8,7 +8,7 @@ namespace Nivara;
 /// <summary>
 /// Represents grouped data with efficient access to groups and their indices
 /// </summary>
-public sealed class GroupedData
+internal sealed class GroupedData
 {
     readonly Dictionary<GroupKey, List<int>> groups;
     readonly string[] keyColumnNames;
@@ -75,7 +75,7 @@ public sealed class GroupedData
 /// <summary>
 /// Represents a composite key for grouping operations with proper equality and hashing
 /// </summary>
-public sealed class GroupKey : IEquatable<GroupKey>
+internal sealed class GroupKey : IEquatable<GroupKey>
 {
     readonly object?[] values;
     readonly int hashCode;
@@ -141,12 +141,12 @@ public sealed class GroupKey : IEquatable<GroupKey>
 /// Describes a single aggregation applied to grouped rows: the source expression to aggregate,
 /// the aggregation function, and the name of the result column in the grouped output.
 /// </summary>
-public sealed record GroupedAggregation(string ResultColumnName, ColumnExpression Source, AggregationFunction Function);
+internal sealed record GroupedAggregation(string ResultColumnName, ColumnExpression Source, AggregationFunction Function);
 
 /// <summary>
 /// Represents a group by operation that groups rows by specified columns with hash-based grouping
 /// </summary>
-public sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperation
+internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperation
 {
     readonly ColumnExpression[] groupByColumns;
     readonly string[]? keyOutputNames;

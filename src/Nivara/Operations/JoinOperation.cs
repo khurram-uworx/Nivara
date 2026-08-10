@@ -104,7 +104,7 @@ public sealed class JoinKey
 /// <summary>
 /// Represents the result of computing join indices
 /// </summary>
-public sealed class JoinIndices
+internal sealed class JoinIndices
 {
     /// <summary>
     /// Initializes a new instance of JoinIndices
@@ -941,7 +941,7 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 /// <summary>
 /// Represents a composite key for join operations with proper equality and hashing
 /// </summary>
-public sealed class CompositeKey : IEquatable<CompositeKey>
+internal sealed class CompositeKey : IEquatable<CompositeKey>
 {
     readonly object?[] values;
     readonly int hashCode;

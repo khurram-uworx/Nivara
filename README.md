@@ -54,21 +54,18 @@ var frame = NivaraFrame.Create(
     ("Age", ages)
 );
 
-// Query with lazy evaluation
-var adults = frame.AsQueryFrame()
-    .Where(x => x["Age"] > 30)
-    .Select(x => x["Name"])
-    .ToNivaraFrame();
-
-Console.WriteLine(adults.RowCount); // 1 (Charlie)
-
-// Or with the typed object model — strongly typed lambdas over a POCO
+// Query with lazy evaluation — strongly typed lambdas over a POCO
 public sealed class Person { public string Name { get; set; } public int Age { get; set; } }
 
 var typed = frame.Query<Person>()
     .Where(p => p.Age > 30)
     .Select(p => new { p.Name })
     .ToObjects();   // IReadOnlyList<anonymous> — { Name = "Charlie" }
+
+// Or materialize to a NivaraFrame
+var adults = frame.Query<Person>()
+    .Where(p => p.Age > 30)
+    .Collect();     // NivaraFrame — 1 row (Charlie)
 ```
 
 ---
@@ -81,8 +78,8 @@ var typed = frame.Query<Person>()
 - Explicit null handling using validity masks (no NaN semantics)
 
 ### Query Engine
-- Lazy query construction with true LINQ-like syntax (Where, Select, OrderBy/ThenBy)
-- Typed object LINQ — `frame.Query<T>()` maps a POCO to the frame schema and compiles typed lambdas into query plans (predicates, projections, `OrderBy`/`ThenBy`, `Skip`/`Take`, `GroupBy` with `g.Key` + `Average`/`Sum`/`Count`/`Min`/`Max` aggregates), materializing to a `NivaraFrame` or `IReadOnlyList<TResult>`
+- Typed object LINQ — `frame.Query<T>()` maps a POCO to the frame schema and compiles typed lambdas into query plans (predicates, projections, `OrderBy`/`ThenBy` with per-key `SortDirection`/`NullOrdering`, `Distinct`/`DistinctBy`, `SelectRows`, `Skip`/`Take`, `GroupBy` with `g.Key` + `Average`/`Sum`/`Count`/`Min`/`Max` aggregates), materializing to a `NivaraFrame` or `IReadOnlyList<TResult>`
+- Lazy typed file-source queries — `Json.ScanAsQuery<T>()`/`ScanJsonAsQuery<T>()` (core) and `Csv.ScanAsQuery<T>()`/`ScanCsvAsQuery<T>()` (Extensions) defer I/O until execution
 - Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
 - Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with integrated performance diagnostics
 
@@ -155,7 +152,7 @@ Nivara currently supports:
 - **Parquet I/O**: Full read/write support with compression, streaming, and batch operations (via `Nivara.Extensions`)
 - **Apache Arrow**: Bidirectional conversion (via `Nivara.Extensions`)
 - **ML.NET Integration**: ML.NET conversion helpers for machine learning workflows (via `Nivara.Extensions`)
-- **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics via `ExecutionEngine.LastDiagnostics`
+- **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics (plan inspection via `ExplainPlan()`, per-operation timings)
 - **Automatic Differentiation**: Reverse-mode autodiff with inference by default, explicit manual training via `GradientUtils.Grad()`. Type constraint broadened to `IFloatingPointIeee754<T>` — `Half`/F16 and BFloat16 supported alongside `float`/`double`. Full training stack: module system (`Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d` (im2col + Dot, PyTorch-compatible layout), `Conv2d` (grouped conv, 1×1 fast path, PatchLocation, InputGrad specializations), `ConvTranspose2d`, `BatchNorm1d`/`2d` (fused span-kernel, 3D input support), `LayerNorm` (SIMD `TensorPrimitives.Dot`), `DepthwiseSeparableConv2d`, `TransformerBlock` (RMSNorm/LayerNorm + GELU), `MultiheadAttention`, `ConvVAE`, `VAE` (optional conditioning), `MaxPool2d`, `AdaptiveAvgPool2d`), NLP utilities (`TextTokenizer`, `Sampler`), activations (`GELU`), operations (`MeanPool`, `TransposeAxes`, `SparseEmbeddingBag`, `Gather` with zero-copy forward, `Softmax`, `LogSoftmax`, `Dropout`), optimizers (`SGD`, `Adam`, `AdamW`) with SIMD-accelerated kernels, training loops, data-parallel training, model serialization, and 55 PyTorch-validated functional tests
 
 ---

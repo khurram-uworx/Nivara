@@ -7,7 +7,7 @@ namespace Nivara.Optimization;
 /// <summary>
 /// Optimization rule that pushes filter predicates closer to data sources
 /// </summary>
-public sealed class PredicatePushdownRule : OptimizationRule
+internal sealed class PredicatePushdownRule : OptimizationRule
 {
     /// <inheritdoc />
     public override string Name => "Predicate Pushdown";

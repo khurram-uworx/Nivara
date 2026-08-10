@@ -5,7 +5,7 @@ namespace Nivara.Query;
 /// <summary>
 /// Optimizes query plans by applying various optimization techniques
 /// </summary>
-public sealed class QueryOptimizer
+internal sealed class QueryOptimizer
 {
     readonly OptimizationEngine engine;
 

@@ -29,7 +29,7 @@ public abstract class DataFrameException : Exception
     /// <param name="message">The error message</param>
     /// <param name="failedPlan">The query plan that failed</param>
     /// <param name="failedOperation">The operation that failed</param>
-    protected DataFrameException(string message, QueryPlan? failedPlan, IQueryOperation? failedOperation) : base(message)
+    internal DataFrameException(string message, QueryPlan? failedPlan, IQueryOperation? failedOperation) : base(message)
     {
         FailedPlan = failedPlan;
         FailedOperation = failedOperation;
@@ -42,7 +42,7 @@ public abstract class DataFrameException : Exception
     /// <param name="failedPlan">The query plan that failed</param>
     /// <param name="failedOperation">The operation that failed</param>
     /// <param name="innerException">The inner exception</param>
-    protected DataFrameException(string message, QueryPlan? failedPlan, IQueryOperation? failedOperation, Exception innerException)
+    internal DataFrameException(string message, QueryPlan? failedPlan, IQueryOperation? failedOperation, Exception innerException)
         : base(message, innerException)
     {
         FailedPlan = failedPlan;
@@ -52,12 +52,12 @@ public abstract class DataFrameException : Exception
     /// <summary>
     /// Gets the query plan that failed, if available
     /// </summary>
-    public QueryPlan? FailedPlan { get; }
+    internal QueryPlan? FailedPlan { get; }
 
     /// <summary>
     /// Gets the operation that failed, if available
     /// </summary>
-    public IQueryOperation? FailedOperation { get; }
+    internal IQueryOperation? FailedOperation { get; }
 
     /// <summary>
     /// Gets detailed context information about the failure
@@ -117,7 +117,7 @@ public sealed class DataFrameSchemaValidationException : DataFrameException
     /// <param name="actualSchema">The actual schema</param>
     /// <param name="failedPlan">The query plan that failed</param>
     /// <param name="failedOperation">The operation that failed</param>
-    public DataFrameSchemaValidationException(string message, Schema expectedSchema, Schema actualSchema,
+    internal DataFrameSchemaValidationException(string message, Schema expectedSchema, Schema actualSchema,
         QueryPlan? failedPlan, IQueryOperation? failedOperation)
         : base(message, failedPlan, failedOperation)
     {
@@ -251,7 +251,7 @@ public sealed class JoinException : DataFrameException
     /// <param name="conflictReason">The reason for the join failure</param>
     /// <param name="failedPlan">The query plan that failed</param>
     /// <param name="failedOperation">The operation that failed</param>
-    public JoinException(string message, JoinType joinType, string[] leftKeys, string[] rightKeys, string conflictReason,
+    internal JoinException(string message, JoinType joinType, string[] leftKeys, string[] rightKeys, string conflictReason,
         QueryPlan? failedPlan, IQueryOperation? failedOperation)
         : base(message, failedPlan, failedOperation)
     {
