@@ -208,7 +208,7 @@ catch (InvalidCastException ex)
 ### Basic Queries
 
 ```csharp
-using Nivara.Expressions;
+using Nivara.Linq;
 
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Diana" })),
@@ -216,49 +216,46 @@ var frame = NivaraFrame.Create(
     ("Salary", NivaraColumn<double>.Create(new[] { 50000, 60000, 70000, 80000 }))
 );
 
-// Using LINQ extensions (Recommended)
-using Nivara.Linq;
+// Row type whose properties map to columns (case-insensitive, validated eagerly)
+public sealed class Person
+{
+    public string Name { get; set; }
+    public int Age { get; set; }
+    public double Salary { get; set; }
+}
 
-// Filter rows
-var adults = frame.AsQueryFrame()
-    .Where(x => x["Age"] > 30)
-    .ToNivaraFrame();
+// Filter rows with typed predicates
+var adults = frame.Query<Person>()
+    .Where(p => p.Age > 30)
+    .Collect();
 // Result: Charlie (35) and Diana (40)
 
-// Select columns
-var names = frame.AsQueryFrame()
-    .Select(x => x["Name"])
-    .ToNivaraFrame();
+// Project columns
+var names = frame.Query<Person>()
+    .Select(p => new { p.Name })
+    .Collect();
 // Result: DataFrame with only Name column
 
 // Chain operations
-var result = frame.AsQueryFrame()
-    .Where(x => x["Salary"] > 55000)
-    .Select(x => x["Name"], x => x["Age"])
-    .ToNivaraFrame();
-// Result: Bob, Charlie, Diana with Name and Age columns
-
-// Legacy Fluent API
-var legacyResult = frame.AsQueryFrame()
-    .Filter(ColumnExpressions.Col("Salary") > 55000)
-    .Select("Name", "Age")
+var result = frame.Query<Person>()
+    .Where(p => p.Salary > 55000)
+    .Select(p => new { p.Name, p.Age })
     .Collect();
-
+// Result: Bob, Charlie, Diana with Name and Age columns
 ```
 
 ### Complex Expressions
 
 ```csharp
 // Multiple conditions
-// Multiple conditions using LINQ
-var complexFilter = frame.AsQueryFrame()
-    .Where(x => x["Age"] > 25 & x["Salary"] < 75000)
-    .ToNivaraFrame();
+var complexFilter = frame.Query<Person>()
+    .Where(p => p.Age > 25 && p.Salary < 75000)
+    .Collect();
 
 // Arithmetic in expressions
-var bonusQuery = frame.AsQueryFrame()
-    .Where(x => x["Salary"] * 0.1 > 6000) // 10% bonus > $6000
-    .ToNivaraFrame();
+var bonusQuery = frame.Query<Person>()
+    .Where(p => p.Salary * 0.1 > 6000) // 10% bonus > $6000
+    .Collect();
 ```
 
 ### Typed Object LINQ (`frame.Query<T>()`)
@@ -314,14 +311,13 @@ Notes:
 Queries are planned and validated before execution:
 
 ```csharp
-// Build query (no execution yet)
-var query = frame.AsQueryFrame()
-    .Filter(ColumnExpressions.Col("Age") > 30)
-    .Select("Name", "Salary");
+// Build query (no execution yet) — typed queries are lazy and inspectable
+var query = frame.Query<Person>()
+    .Where(p => p.Age > 30)
+    .Select(p => new { p.Name, p.Salary });
 
 // Inspect the query plan
-var plan = query.GetQueryPlan();
-Console.WriteLine(plan.ToString());
+Console.WriteLine(query.ExplainPlan());
 
 // Execute the query
 var result = query.Collect();
@@ -336,33 +332,49 @@ var result = query.Collect();
 ```csharp
 using Nivara.IO;
 
-// Lazy CSV scanning with schema inference
-var csvQuery = Csv.ScanAsQueryFrame("employees.csv")
-    .Filter(ColumnExpressions.Col("Salary") > 70000)
-    .Select("Name", "Department", "Salary");
+public sealed class Employee
+{
+    public string Name { get; set; }
+    public string Department { get; set; }
+    public int Salary { get; set; }
+}
+
+// Lazy CSV scanning with schema inference (CSV integers infer as int)
+var csvQuery = Csv.ScanAsQuery<Employee>("employees.csv")
+    .Where(e => e.Salary > 70000)
+    .Select(e => new { e.Name, e.Department, e.Salary });
 
 var result = csvQuery.Collect();
 
 // Custom CSV options
-var csvOptions = new CsvScanOptions
+var csvOptions = new CsvOptions
 {
-    HasHeader = true,
-    Delimiter = ',',
-    Quote = '"',
-    NullValue = "NULL"
+    HasHeaderRecord = true,
+    Delimiter = ",",
+    TrimOptions = true
 };
 
-var customCsv = Csv.ScanAsQueryFrame("data.csv", csvOptions)
+var customCsv = Csv.ScanCsvAsQuery<Employee>("data.csv", csvOptions)
     .Collect();
 ```
 
 ### JSON Data Sources
 
 ```csharp
-// Lazy JSON scanning
-var jsonQuery = Json.ScanAsQueryFrame("data.json")
-    .Filter(ColumnExpressions.Col("active") == true)
-    .Select("id", "name", "email");
+using Nivara.IO;
+
+public sealed class User
+{
+    public string Id { get; set; }
+    public string Name { get; set; }
+    public string Email { get; set; }
+    public bool Active { get; set; }
+}
+
+// Lazy JSON scanning (JSON numbers infer as double)
+var jsonQuery = Json.ScanAsQuery<User>("data.json")
+    .Where(u => u.Active)
+    .Select(u => new { u.Id, u.Name, u.Email });
 
 var jsonResult = jsonQuery.Collect();
 ```
@@ -429,48 +441,50 @@ var slice = frame.Slice(1, 2); // Start at index 1, take 2 rows
 ### Sorting
 
 ```csharp
+using Nivara.Linq;
 using Nivara.Operations;
 
 // Single column sorting
-// Single column sorting
-var sortedByAge = frame.AsQueryFrame()
-    .OrderBy(x => x["Age"])
-    .ToNivaraFrame();
+var sortedByAge = frame.Query<Person>()
+    .OrderBy(p => p.Age)
+    .Collect();
 // Result: Alice (25), Bob (30), Charlie (35), Diana (40)
 
 // Descending sort
-// Descending sort
-var sortedBySalaryDesc = frame.AsQueryFrame()
-    .OrderByDescending(x => x["Salary"])
-    .ToNivaraFrame();
+var sortedBySalaryDesc = frame.Query<Person>()
+    .OrderByDescending(p => p.Salary)
+    .Collect();
 
-// Multi-column sorting
-var multiSorted = frame.AsQueryFrame()
-    .Sort(new[]
-    {
-        new SortKey("Department", SortDirection.Ascending),
-        new SortKey("Salary", SortDirection.Descending)
-    })
+// Multi-column sorting with per-key direction
+var multiSorted = frame.Query<Person>()
+    .OrderBy(p => p.Name, direction: SortDirection.Ascending)
+    .ThenBy(p => p.Salary, direction: SortDirection.Descending)
     .Collect();
 ```
 
 ### Null Handling in Sorting
 
 ```csharp
+public sealed class Player
+{
+    public string Name { get; set; }
+    public int? Score { get; set; }
+}
+
 var frameWithNulls = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie" })),
     ("Score", NivaraColumn<int>.CreateFromNullable(new int?[] { 85, null, 92 }))
 );
 
 // Nulls first
-var nullsFirst = frameWithNulls.AsQueryFrame()
-    .Sort("Score", SortDirection.Ascending, NullOrdering.NullsFirst)
+var nullsFirst = frameWithNulls.Query<Player>()
+    .OrderBy(p => p.Score, nullOrdering: NullOrdering.NullsFirst)
     .Collect();
 // Result: Bob (null), Alice (85), Charlie (92)
 
 // Nulls last (default)
-var nullsLast = frameWithNulls.AsQueryFrame()
-    .Sort("Score", SortDirection.Ascending, NullOrdering.NullsLast)
+var nullsLast = frameWithNulls.Query<Player>()
+    .OrderBy(p => p.Score, nullOrdering: NullOrdering.NullsLast)
     .Collect();
 // Result: Alice (85), Charlie (92), Bob (null)
 ```
@@ -758,7 +772,14 @@ var combined = names.Combine(details);
 ### GroupBy Operations
 
 ```csharp
-using Nivara.Expressions;
+using Nivara.Linq;
+
+public sealed class Employee
+{
+    public string Name { get; set; }
+    public string Department { get; set; }
+    public double Salary { get; set; }
+}
 
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Alice", "Charlie" })),
@@ -766,21 +787,22 @@ var frame = NivaraFrame.Create(
     ("Salary", NivaraColumn<double>.Create(new[] { 75000, 65000, 78000, 85000 }))
 );
 
-// Group by single column
-var groupedByName = frame.AsQueryFrame()
-    .GroupBy("Name")
+// Group by a single key column — collect the distinct keys
+var groupedByName = frame.Query<Employee>()
+    .GroupBy(e => e.Name)
     .Collect();
 
-// Group by multiple columns
-var groupedByNameAndDept = frame.AsQueryFrame()
-    .GroupBy("Name", "Department")
-    .Collect();
-
-// Access group information
-foreach (var group in groupedByName.Groups)
-{
-    Console.WriteLine($"Group: {group.Key}, Count: {group.Indices.Count}");
-}
+// Group by with aggregation: g.Key, g.Average/Sum/Count/Min/Max
+var byDept = frame.Query<Employee>()
+    .GroupBy(e => e.Department)
+    .Select(g => new
+    {
+        g.Key,
+        EmployeeCount = g.Count(),
+        TotalSalary = g.Sum(e => e.Salary),
+        AvgSalary = g.Average(e => e.Salary)
+    })
+    .ToObjects();
 ```
 
 ### Aggregation Functions
@@ -802,11 +824,13 @@ Console.WriteLine($"Average salary: {avgAgg.Apply(salaryColumn, allIndices)}");
 Console.WriteLine($"Employee count: {countAgg.Apply(salaryColumn, allIndices)}");
 
 // Apply to groups
-var grouped = frame.AsQueryFrame().GroupBy("Department").Collect();
-foreach (var group in grouped.Groups)
+var grouped = frame.Query<Employee>()
+    .GroupBy(e => e.Department)
+    .Select(g => new { g.Key, AvgSalary = g.Average(e => e.Salary) })
+    .ToObjects();
+foreach (var group in grouped)
 {
-    var groupSalaries = group.Indices.Select(i => salaryColumn.GetValue(i)).Cast<double>();
-    Console.WriteLine($"{group.Key}: Avg = {groupSalaries.Average():C}");
+    Console.WriteLine($"{group.Key}: Avg = {group.AvgSalary:C}");
 }
 ```
 
@@ -873,105 +897,72 @@ Console.WriteLine(series.ValidCount()); // 3 (excludes nulls)
 ### Fluent API
 
 ```csharp
+using Nivara.Linq;
+using Nivara.Operations;
+
+public sealed class Contestant
+{
+    public string Name { get; set; }
+    public int Age { get; set; }
+    public double Score { get; set; }
+}
+
 var frame = NivaraFrame.Create(
     ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "Alice", "Bob", "Charlie", "Alice" })),
     ("Age", NivaraColumn<int>.Create(new[] { 25, 30, 35, 28 })),
     ("Score", NivaraColumn<double>.Create(new[] { 85.5, 92.0, 78.5, 88.0 }))
 );
 
-// Chain operations fluently
-var result = frame
-    .Where(row => row.GetValue<int>("Age") > 25)
-    .OrderBy("Score", ascending: false)
-    .GroupBy("Name")
-    .Take(10);
-
-// Mix materialized and lazy operations
-var queryResult = frame
-    .AsQueryFrame()
-    .Filter(ColumnExpressions.Col("Age") > 27)
-    .Sort("Score", SortDirection.Descending)
+// Chain operations fluently — typed predicates and projections
+var result = frame.Query<Contestant>()
+    .Where(c => c.Age > 25)
+    .OrderByDescending(c => c.Score)
+    .Select(c => new { c.Name, c.Score })
     .Collect();
 ```
 
 ### Query Optimization
 
 ```csharp
-using Nivara.Expressions;
+using Nivara.IO;
 
-// Query with optimization opportunities
-var query = Csv.ScanAsQueryFrame("employees.csv")
-    .Select("Name", "Age", "Salary", "Department")  // Select all first
-    .Filter(ColumnExpressions.Col("Age") > 25)      // Filter after selection
-    .Filter(ColumnExpressions.Col("Salary") > 50000) // Multiple filters
-    .Select("Name", "Salary");                       // Final projection
+public sealed class Employee
+{
+    public string Name { get; set; }
+    public int Age { get; set; }
+    public int Salary { get; set; }
+    public string Department { get; set; }
+}
 
-// The optimizer automatically:
-// 1. Pushes filters closer to data source (predicate pushdown)
-// 2. Combines multiple filters (operation fusion)
-// 3. Eliminates unused columns early (projection pushdown)
+// Queries are optimized automatically before execution:
+// 1. Filters are pushed closer to the data source (predicate pushdown)
+// 2. Multiple filters are combined (operation fusion)
+// 3. Unused columns are eliminated early (projection pushdown)
+
+var query = Csv.ScanAsQuery<Employee>("employees.csv")
+    .Where(e => e.Age > 25)
+    .Where(e => e.Salary > 50000)
+    .Select(e => new { e.Name, e.Salary });
 
 var result = query.Collect(); // Optimizations applied during execution
 
-// Get optimization details
-var optimizer = new QueryOptimizer();
-var plan = query.GetQueryPlan();
-var optimizationResult = optimizer.OptimizeWithStatistics(plan);
-Console.WriteLine(optimizationResult.GenerateReport());
+// Inspect the optimized plan
+Console.WriteLine(query.ExplainPlan());
 ```
 
-### Execution Strategies
+### Execution
 
 ```csharp
-using Nivara;
-using Nivara.Execution;
+// Execution is lazy by default. The engine optimizes the plan (predicate
+// pushdown, operation fusion, projection pushdown) before any data is
+// touched, and the plan can be inspected with ExplainPlan().
 
-var engine = new ExecutionEngine();
-var plan = query.GetQueryPlan();
+var query = frame.Query<Contestant>()
+    .Where(c => c.Age > 25)
+    .Select(c => new { c.Name, c.Score });
 
-// Lazy execution (default) - optimal for most cases
-var lazyContext = new NivaraExecutionContext(ExecutionStrategy.Lazy);
-var lazyResult = engine.Execute(plan, lazyContext);
-
-// Parallel execution - for CPU-intensive operations
-var parallelContext = NivaraExecutionContext.WithParallelism(Environment.ProcessorCount);
-var parallelResult = engine.Execute(plan, parallelContext);
-
-// Streaming execution - for large datasets
-var streamingContext = NivaraExecutionContext.WithMemoryBudget(512 * 1024 * 1024); // 512MB
-streamingContext.Strategy = ExecutionStrategy.Streaming;
-var streamingResult = engine.Execute(plan, streamingContext);
-
-// Async execution with progress reporting
-var cancellationTokenSource = new CancellationTokenSource();
-var progress = new Progress<ExecutionProgress>(p => 
-{
-    Console.WriteLine($"{p.OperationName}: {p.PercentComplete:P1}");
-});
-
-var asyncContext = new NivaraExecutionContext
-{
-    Strategy = ExecutionStrategy.Parallel,
-    CancellationToken = cancellationTokenSource.Token,
-    Progress = progress
-};
-
-var asyncResult = await engine.ExecuteAsync(plan, asyncContext);
-
-// Diagnostics integration — wire ExecutionDiagnostics into the context
-var diagnostics = new ExecutionDiagnostics();
-var diagContext = new NivaraExecutionContext
-{
-    Strategy = ExecutionStrategy.Parallel,
-    ExecutionDiagnostics = diagnostics
-};
-
-var diagResult = engine.Execute(plan, diagContext);
-
-// Inspect results after execution
-Console.WriteLine(engine.LastDiagnostics?.GenerateReport());
-// Or use the diagnostics instance directly:
-Console.WriteLine(diagnostics.KernelOperations.Count); // per-operation timings
+Console.WriteLine(query.ExplainPlan());
+var result = query.Collect();
 ```
 
 ### Error Handling and Diagnostics
@@ -991,23 +982,14 @@ catch (JoinException ex)
     Console.WriteLine(ex.GetDetailedContext());
 }
 
-// Performance diagnostics
-var diagnostics = new ExecutionDiagnostics();
+// Query diagnostics — inspect the optimized plan before execution
+var query = frame.Query<Contestant>()
+    .Where(c => c.Age > 25)
+    .OrderBy(c => c.Name)
+    .Select(c => new { c.Name, c.Score });
 
-var result = DiagnosticHelper.ExecuteWithDiagnostics(
-    diagnostics,
-    "ComplexQuery",
-    () => frame
-        .Where(row => row.GetValue<int>("Age") > 25)
-        .Sort("Name")
-        .GroupBy("Department"),
-    frame.RowCount);
-
-Console.WriteLine(diagnostics.GenerateReport());
-
-var summary = diagnostics.GetSummary();
-Console.WriteLine($"Processed {summary.TotalRowsProcessed:N0} rows in {summary.TotalExecutionTime.TotalMilliseconds:F2}ms");
-Console.WriteLine($"Throughput: {summary.AverageThroughput:F0} rows/sec");
+Console.WriteLine(query.ExplainPlan());
+var result = query.Collect();
 ```
 
 ---
@@ -1419,16 +1401,17 @@ NivaraFrameExtensions.WriteParquetBatch("batch.parquet", frames, parquetOptions)
 Nivara's performance tuning is built into the core APIs:
 
 ```csharp
-// Streaming execution with memory budget for large datasets
-var result = frame.AsQueryFrame()
-    .Filter(condition)
-    .CollectStreaming(memoryBudgetBytes: 256 * 1024 * 1024); // 256 MB
+// Queries are lazy and optimized automatically (predicate pushdown,
+// operation fusion, projection pushdown)
+var query = frame.Query<Person>()
+    .Where(p => p.Age > 30)
+    .Select(p => new { p.Name, p.Salary });
 
-// Execution diagnostics for performance analysis
-Console.WriteLine(query.GetDiagnosticInfo());
+// Inspect the optimized plan
+Console.WriteLine(query.ExplainPlan());
 
-// Query optimization analysis
-var suggestions = query.AnalyzeOptimizations();
+// Execute
+var result = query.Collect();
 ```
 
 ---
