@@ -22,6 +22,27 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **Dynamic column creation covers the extended CLR domain (#158)** - the five
+  dynamic column-creation dispatch sites used fixed type switches that fell through to a
+  `NivaraColumn<object>` for less common types: `AggregationFunction.CreateColumnFromValues`
+  and `GroupByOperation.CreateColumnFromValues` missed `Half`, `nint`/`nuint`,
+  `Int128`/`UInt128`, `sbyte`/`ushort`/`uint`/`char`, `DateOnly`/`TimeOnly`,
+  `DateTimeOffset`, `Guid`, and `TimeSpan`; `JoinOperation` coalesce/gather and
+  `FusedExpressionEvaluator.CreateConstantColumn` had the same gap. A new `ColumnFactory`
+  (`src/Nivara/Helpers/ColumnFactory.cs`) centralizes dispatch behind a cached
+  `MakeGenericMethod` over null-safe kernels (`CreateFromNullable` for value types,
+  `CreateForReferenceType` for reference types, `Nullable<T>` unwrapping) and is used by all
+  four sites; join coalesce/gather dispatch directly onto the existing generic kernels, and
+  the object-column fallbacks were removed. The existing `Cast<T>()`-based creation also
+  threw on null values - the new kernel is null-mask safe. Window operations
+  (`WindowFrameExtensions` rolling/cumulative/count/shift) now accept the full `INumber<T>`
+  numeric domain (`byte`..`Half`, `nint`/`nuint`, `Int128`/`UInt128`, `char`) instead of
+  throwing `NotSupportedException`, and `adaptNullHandler`/`convertFillValue` no longer use
+  `Convert.ChangeType` (which throws for `Half`/`nint`/`nuint`/`Int128`/`UInt128`); typed
+  fill/null values use a direct cast and string values use a cached `TryParse`. Out of scope:
+  Parquet/Arrow/ML interop and CSV/JSON value conversion keep their format-specific type
+  systems.
+
 - **`NivaraResourceManager` tracking is now opt-in (#174)** — column/frame/QueryFrame
   construction no longer registers a `WeakReference` + boxed `ResourceInfo` in a global
   `ConcurrentDictionary`, and the process-lifetime 30-second cleanup `Timer` is gone from
