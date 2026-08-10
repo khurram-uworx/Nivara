@@ -64,7 +64,7 @@ public class FusedExpressionEvaluatorTests
         var result = fused.Evaluate(expression, input);
 
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1), "chained arithmetic must run through the fused evaluator");
-        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "chained arithmetic must use the compiled target");
+        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(1), "null-bearing uniform arithmetic must run through the span kernel");
         AssertColumn(result, new double?[] { null, 992.75, null, 964.4 });
     }
 
@@ -328,7 +328,7 @@ public class FusedExpressionEvaluatorTests
         var result = fused.Evaluate(expression, input);
 
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
-        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(1), "null-bearing uniform modulo must run through the span kernel");
         Assert.That(result.ElementType, Is.EqualTo(typeof(int)));
         AssertColumn(result, new int?[] { 1, null, 4, 3 });
     }
@@ -382,11 +382,73 @@ public class FusedExpressionEvaluatorTests
         var binding = new FusedColumnBinding(columnRef, column);
         var expression = columnRef * 2 + 3;
 
-        var result = (NivaraColumn<double>)FusedKernel.Evaluate<double>(expression, new[] { binding }, new[] { false, true, false });
+        var result = (NivaraColumn<double>)FusedKernel.Evaluate<double>(expression, new[] { binding });
 
         Assert.That(result.IsNull(1), Is.True);
         Assert.That(result[0], Is.EqualTo(7.0));
         Assert.That(result[2], Is.EqualTo(15.0));
+    }
+
+    [Test]
+    public void SpanKernel_TwoLeafNullMasks_OrPropagatesToOutput()
+    {
+        var leftRef = new ColumnReference("A");
+        var rightRef = new ColumnReference("B");
+        var left = NivaraColumn<double>.CreateFromNullable(new double?[] { 2.0, null, 6.0 });
+        var right = NivaraColumn<double>.CreateFromNullable(new double?[] { null, 5.0, 7.0 });
+        var expression = leftRef + rightRef;
+        var leaves = new[]
+        {
+            new FusedColumnBinding(leftRef, left),
+            new FusedColumnBinding(rightRef, right)
+        };
+
+        var output = new double[3];
+        var outputMask = new bool[3];
+        FusedKernel.Execute<double>(expression, leaves,
+            new[] { left.Storage.Data, right.Storage.Data },
+            new[]
+            {
+                left.Storage.NullMaskMemory ?? default,
+                right.Storage.NullMaskMemory ?? default
+            },
+            output, outputMask);
+
+        Assert.That(outputMask[0], Is.True, "right leaf null at 0 must propagate");
+        Assert.That(outputMask[1], Is.True, "left leaf null at 1 must propagate");
+        Assert.That(outputMask[2], Is.False, "position 2 has no nulls");
+        Assert.That(output[0], Is.EqualTo(0.0), "masked positions write default(T)");
+        Assert.That(output[2], Is.EqualTo(13.0));
+    }
+
+    [Test]
+    public void Evaluate_NullBearingUniformPlan_RoutesToSpanKernel()
+    {
+        var column = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.0, null, 3.0 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") * 2.0;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(1), "null-bearing uniform arithmetic must use the span kernel");
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(0), "null-bearing uniform arithmetic must not use the compiled target");
+        AssertColumn(result, new double?[] { 2.0, null, 6.0 });
+    }
+
+    [Test]
+    public void Evaluate_NullFreeUniformPlan_StaysOnCompiledPath()
+    {
+        var column = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") * 2.0;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "null-free uniform arithmetic must stay on the compiled path");
+        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(0), "null-free uniform arithmetic must not route to the span kernel");
+        AssertColumn(result, new double?[] { 2.0, 4.0, 6.0 });
     }
 
     static void AssertColumn<T>(IColumn actual, IReadOnlyList<T?> expected)

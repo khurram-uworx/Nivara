@@ -92,6 +92,12 @@ internal interface IColumnStorage<T> : IDisposable
     ReadOnlySpan<bool> NullMask { get; }
 
     /// <summary>
+    /// Gets the null mask as memory, or null when the storage has no mask.
+    /// Used by the fused span kernel to fuse the OR'd output mask in the same pass.
+    /// </summary>
+    internal ReadOnlyMemory<bool>? NullMaskMemory { get; }
+
+    /// <summary>
     /// Gets the element at the specified index
     /// </summary>
     /// <param name="index">The zero-based index of the element to get</param>

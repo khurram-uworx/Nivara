@@ -177,6 +177,19 @@ sealed class FusedExpressionEvaluator
 
         ValidateLeafLengths(plan);
         var length = plan.Columns[0].Column.Length;
+
+        // Span kernel first: null-bearing uniform generic-math plans fuse values and the OR'd null
+        // mask in a single zero-copy pass — no leaf snapshots, no separate mask pass. Everything else
+        // (null-free uniform, heterogeneous, and every bool-result plan) stays on the compiled path,
+        // preserving the JIT-vectorized fused win for the common null-free case.
+        if (plan.IsGenericMath
+            && plan.ResultType != typeof(bool)
+            && plan.HasNulls
+            && plan.Columns.All(l => l.Column.ElementType == plan.ResultType))
+        {
+            return EvaluateNodeTree(expression, plan, length);
+        }
+
         var leafArrays = SnapshotLeaves(plan);
 
         Func<object[], int, Array> action;
@@ -219,8 +232,10 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Evaluates through the generic node-tree kernel when the compiled target could not be built.
-    /// Requires generic math and leaf columns already sharing the result element type.
+    /// Evaluates through the generic span kernel: primary path for null-bearing uniform generic-math
+    /// plans, and fallback when the expression-tree-compiled target cannot be built. Requires generic
+    /// math and leaf columns already sharing the result element type. The null mask is fused into the
+    /// kernel (OR semantics), so no separate <see cref="ComputeMask"/> pass runs.
     /// </summary>
     IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, int length)
     {
@@ -239,29 +254,33 @@ sealed class FusedExpressionEvaluator
             }
         }
 
-        var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
-        var kernel = GetNodeTreeRunner(plan.ResultType);
-        var result = kernel.Invoke(null, new object?[] { expression, plan.Columns, mask });
+        var runner = GetNodeTreeRunner(plan.ResultType);
+        var result = runner(expression, plan.Columns);
         nodeTreePathEvaluationCount++;
         fusedPathEvaluationCount++;
-        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Generic node-tree kernel");
-        return (IColumn)result!;
+        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Span fused kernel");
+        return result;
     }
 
     static class FusedNodeTreeRunner<T>
         where T : struct, INumber<T>
     {
-        internal static IColumn Run(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves, bool[]? mask)
-            => FusedKernel.Evaluate<T>(expression, leaves, mask);
+        internal static IColumn Run(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves)
+            => FusedKernel.Evaluate<T>(expression, leaves);
     }
 
-    static readonly ConcurrentDictionary<Type, MethodInfo> nodeTreeRunnerCache = new();
+    delegate IColumn FusedNodeTreeInvoker(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves);
 
-    static MethodInfo GetNodeTreeRunner(Type elementType)
+    static readonly ConcurrentDictionary<Type, FusedNodeTreeInvoker> nodeTreeRunnerCache = new();
+
+    static FusedNodeTreeInvoker GetNodeTreeRunner(Type elementType)
     {
         return nodeTreeRunnerCache.GetOrAdd(elementType, static t =>
-            typeof(FusedNodeTreeRunner<>).MakeGenericType(t)
-                .GetMethod(nameof(FusedNodeTreeRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!);
+        {
+            var method = typeof(FusedNodeTreeRunner<>).MakeGenericType(t)
+                .GetMethod(nameof(FusedNodeTreeRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!;
+            return (FusedNodeTreeInvoker)method.CreateDelegate(typeof(FusedNodeTreeInvoker));
+        });
     }
 
     /// <summary>

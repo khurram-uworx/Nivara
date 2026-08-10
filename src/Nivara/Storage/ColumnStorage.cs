@@ -205,6 +205,8 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
         }
     }
 
+    ReadOnlyMemory<bool>? IColumnStorage<T>.NullMaskMemory => NullMaskMemory;
+
     /// <summary>
     /// Gets a lazy zero-copy <see cref="Tensor{T}"/> view over this storage's data.
     /// </summary>
