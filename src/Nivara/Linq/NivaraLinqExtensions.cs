@@ -133,12 +133,24 @@ public static class NivaraLinqExtensions
     }
 
     /// <summary>
-    /// Executes the query and returns a materialized NivaraFrame (Alias for Collect, matching LINQ's ToList)
+    /// Executes the query and materializes each result row as a typed <see cref="NivaraRow"/> view
     /// </summary>
     /// <param name="source">The source query frame</param>
-    /// <returns>A materialized NivaraFrame</returns>
-    public static NivaraFrame ToList(this QueryFrame source)
+    /// <returns>A read-only list of row views over the materialized frame</returns>
+    public static IReadOnlyList<NivaraRow> ToRowList(this QueryFrame source)
     {
-        return source.ToNivaraFrame();
+        ArgumentNullException.ThrowIfNull(source);
+
+        var frame = source.Collect();
+        var columns = frame.ColumnNames.Select(name => frame.GetColumn(name)).ToArray();
+        var map = new Dictionary<string, int>(frame.ColumnNames.Count, StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < frame.ColumnNames.Count; i++)
+            map[frame.ColumnNames[i]] = i;
+
+        var rows = new List<NivaraRow>(frame.RowCount);
+        for (int i = 0; i < frame.RowCount; i++)
+            rows.Add(new NivaraRow(columns, map, i));
+
+        return rows;
     }
 }
