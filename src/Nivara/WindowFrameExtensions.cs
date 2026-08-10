@@ -1,7 +1,9 @@
-using Nivara.Tensors;
-using SortKey = Nivara.Operations.SortKey;
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Numerics;
+using System.Reflection;
+using Nivara.Tensors;
+using SortKey = Nivara.Operations.SortKey;
 
 namespace Nivara;
 
@@ -150,6 +152,18 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<float> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
             NivaraColumn<double> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
             NivaraColumn<decimal> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<byte> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<sbyte> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<short> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<ushort> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<uint> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<ulong> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<char> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<nint> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<nuint> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<Int128> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<UInt128> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<Half> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
             _ => throw new NotSupportedException($"Rolling window requires a numeric column, but {column.ElementType.Name} is not supported")
         };
 
@@ -161,6 +175,18 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<float> c => cumulative(c, nullHandler, kind),
             NivaraColumn<double> c => cumulative(c, nullHandler, kind),
             NivaraColumn<decimal> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<byte> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<sbyte> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<short> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<ushort> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<uint> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<ulong> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<char> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<nint> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<nuint> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<Int128> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<UInt128> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<Half> c => cumulative(c, nullHandler, kind),
             _ => throw new NotSupportedException($"Cumulative requires a numeric column, but {column.ElementType.Name} is not supported")
         };
 
@@ -172,6 +198,18 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<float> c => c.CumulativeCount(),
             NivaraColumn<double> c => c.CumulativeCount(),
             NivaraColumn<decimal> c => c.CumulativeCount(),
+            NivaraColumn<byte> c => c.CumulativeCount(),
+            NivaraColumn<sbyte> c => c.CumulativeCount(),
+            NivaraColumn<short> c => c.CumulativeCount(),
+            NivaraColumn<ushort> c => c.CumulativeCount(),
+            NivaraColumn<uint> c => c.CumulativeCount(),
+            NivaraColumn<ulong> c => c.CumulativeCount(),
+            NivaraColumn<char> c => c.CumulativeCount(),
+            NivaraColumn<nint> c => c.CumulativeCount(),
+            NivaraColumn<nuint> c => c.CumulativeCount(),
+            NivaraColumn<Int128> c => c.CumulativeCount(),
+            NivaraColumn<UInt128> c => c.CumulativeCount(),
+            NivaraColumn<Half> c => c.CumulativeCount(),
             NivaraColumn<string> c => c.CumulativeCount(),
             NivaraColumn<bool> c => c.CumulativeCount(),
             _ => throw new NotSupportedException($"CumulativeCount does not support column type {column.ElementType.Name}")
@@ -185,10 +223,24 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<float> c => shift(c, periods, fillValue),
             NivaraColumn<double> c => shift(c, periods, fillValue),
             NivaraColumn<decimal> c => shift(c, periods, fillValue),
+            NivaraColumn<byte> c => shift(c, periods, fillValue),
+            NivaraColumn<sbyte> c => shift(c, periods, fillValue),
+            NivaraColumn<short> c => shift(c, periods, fillValue),
+            NivaraColumn<ushort> c => shift(c, periods, fillValue),
+            NivaraColumn<uint> c => shift(c, periods, fillValue),
+            NivaraColumn<ulong> c => shift(c, periods, fillValue),
+            NivaraColumn<char> c => shift(c, periods, fillValue),
+            NivaraColumn<nint> c => shift(c, periods, fillValue),
+            NivaraColumn<nuint> c => shift(c, periods, fillValue),
+            NivaraColumn<Int128> c => shift(c, periods, fillValue),
+            NivaraColumn<UInt128> c => shift(c, periods, fillValue),
+            NivaraColumn<Half> c => shift(c, periods, fillValue),
             NivaraColumn<string> c => shift(c, periods, fillValue),
             NivaraColumn<bool> c => shift(c, periods, fillValue),
             _ => throw new NotSupportedException($"Shift does not support column type {column.ElementType.Name}")
         };
+
+    static readonly ConcurrentDictionary<Type, MethodInfo?> parseCache = new();
 
     static IColumn rolling<T>(NivaraColumn<T> column, int windowSize, int? minPeriods, Func<object?>? nullHandler, RollingKind kind)
         where T : struct, INumber<T>
@@ -225,10 +277,32 @@ public static partial class NivaraFrameExtensions
         where T : struct
         => nullHandler is null
             ? null
-            : () => (T)Convert.ChangeType(nullHandler() ?? default(T), typeof(T), CultureInfo.InvariantCulture);
+            : () => convertValue<T>(nullHandler() ?? default(T));
 
     static T convertFillValue<T>(object? fillValue)
-        => (T)Convert.ChangeType(fillValue, typeof(T), CultureInfo.InvariantCulture)!;
+        => convertValue<T>(fillValue!);
+
+    static T convertValue<T>(object value)
+    {
+        if (value is T typed)
+            return typed;
+
+        if (value is string text)
+        {
+            var parse = parseCache.GetOrAdd(typeof(T), static t =>
+                t.GetMethod(nameof(int.TryParse), BindingFlags.Public | BindingFlags.Static, null,
+                    new[] { typeof(string), t.MakeByRefType() }, null));
+            if (parse is not null)
+            {
+                var args = new object?[] { text, null };
+                if ((bool)parse.Invoke(null, args)!)
+                    return (T)args[1]!;
+                throw new InvalidOperationException($"Cannot convert '{text}' to {typeof(T).Name}");
+            }
+        }
+
+        return (T)Convert.ChangeType(value, typeof(T), CultureInfo.InvariantCulture)!;
+    }
 
     internal enum RollingKind { Sum, Mean, Min, Max }
 
