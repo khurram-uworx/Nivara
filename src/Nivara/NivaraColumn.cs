@@ -41,8 +41,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
-        // so a type that reaches here without a dispatch branch is unsupported.
+        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
+        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
+        // through the same typed kernels instead of a dynamic fallback.
         if (type == typeof(float)) { NumericTensorKernels<float>.Multiply(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Multiply(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Multiply(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -54,9 +55,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
         if (type == typeof(char)) { NumericTensorKernels<char>.Multiply(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), reinterpretWritable<char>(destination)); return; }
+        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Multiply(reinterpretReadOnly<decimal>(x), reinterpretScalar<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
+        if (type == typeof(Half)) { NumericTensorKernels<Half>.Multiply(reinterpretReadOnly<Half>(x), reinterpretScalar<Half>(y), reinterpretWritable<Half>(destination)); return; }
+        if (type == typeof(nint)) { NumericTensorKernels<nint>.Multiply(reinterpretReadOnly<nint>(x), reinterpretScalar<nint>(y), reinterpretWritable<nint>(destination)); return; }
+        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Multiply(reinterpretReadOnly<nuint>(x), reinterpretScalar<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
+        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Multiply(reinterpretReadOnly<Int128>(x), reinterpretScalar<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
+        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Multiply(reinterpretReadOnly<UInt128>(x), reinterpretScalar<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
 
         throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
+            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
     }
 
     /// <summary>
@@ -67,8 +74,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
-        // so a type that reaches here without a dispatch branch is unsupported.
+        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
+        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
+        // through the same typed kernels instead of a dynamic fallback.
         if (type == typeof(float)) { NumericTensorKernels<float>.Multiply(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Multiply(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Multiply(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -80,9 +88,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
         if (type == typeof(char)) { NumericTensorKernels<char>.Multiply(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
+        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Multiply(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
+        if (type == typeof(Half)) { NumericTensorKernels<Half>.Multiply(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
+        if (type == typeof(nint)) { NumericTensorKernels<nint>.Multiply(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
+        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Multiply(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
+        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Multiply(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
+        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Multiply(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
 
         throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
+            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
     }
 
     /// <summary>
@@ -93,8 +107,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
-        // so a type that reaches here without a dispatch branch is unsupported.
+        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
+        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
+        // through the same typed kernels instead of a dynamic fallback.
         if (type == typeof(float)) { NumericTensorKernels<float>.Add(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Add(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Add(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -106,9 +121,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Add(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Add(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
         if (type == typeof(char)) { NumericTensorKernels<char>.Add(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
+        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Add(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
+        if (type == typeof(Half)) { NumericTensorKernels<Half>.Add(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
+        if (type == typeof(nint)) { NumericTensorKernels<nint>.Add(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
+        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Add(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
+        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Add(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
+        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Add(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
 
         throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
+            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
     }
 
     /// <summary>
@@ -119,8 +140,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
-        // so a type that reaches here without a dispatch branch is unsupported.
+        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
+        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
+        // through the same typed kernels instead of a dynamic fallback.
         if (type == typeof(float)) { NumericTensorKernels<float>.Subtract(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Subtract(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Subtract(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -132,9 +154,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Subtract(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Subtract(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
         if (type == typeof(char)) { NumericTensorKernels<char>.Subtract(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
+        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Subtract(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
+        if (type == typeof(Half)) { NumericTensorKernels<Half>.Subtract(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
+        if (type == typeof(nint)) { NumericTensorKernels<nint>.Subtract(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
+        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Subtract(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
+        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Subtract(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
+        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Subtract(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
 
         throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
+            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
     }
 
     /// <summary>
@@ -145,8 +173,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
-        // so a type that reaches here without a dispatch branch is unsupported.
+        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
+        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
+        // through the same typed kernels instead of a dynamic fallback.
         if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -158,9 +187,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
         if (type == typeof(char)) { NumericTensorKernels<char>.Divide(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
+        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Divide(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
+        if (type == typeof(Half)) { NumericTensorKernels<Half>.Divide(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
+        if (type == typeof(nint)) { NumericTensorKernels<nint>.Divide(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
+        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Divide(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
+        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Divide(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
+        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Divide(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
 
         throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
+            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
     }
 
     /// <summary>
@@ -171,8 +206,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var type = typeof(T);
 
         // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. Callers guard with IsVectorizable,
-        // so a type that reaches here without a dispatch branch is unsupported.
+        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
+        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
+        // through the same typed kernels instead of a dynamic fallback.
         if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), reinterpretWritable<float>(destination)); return; }
         if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), reinterpretWritable<double>(destination)); return; }
         if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), reinterpretWritable<int>(destination)); return; }
@@ -184,9 +220,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
         if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
         if (type == typeof(char)) { NumericTensorKernels<char>.Divide(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), reinterpretWritable<char>(destination)); return; }
+        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Divide(reinterpretReadOnly<decimal>(x), reinterpretScalar<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
+        if (type == typeof(Half)) { NumericTensorKernels<Half>.Divide(reinterpretReadOnly<Half>(x), reinterpretScalar<Half>(y), reinterpretWritable<Half>(destination)); return; }
+        if (type == typeof(nint)) { NumericTensorKernels<nint>.Divide(reinterpretReadOnly<nint>(x), reinterpretScalar<nint>(y), reinterpretWritable<nint>(destination)); return; }
+        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Divide(reinterpretReadOnly<nuint>(x), reinterpretScalar<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
+        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Divide(reinterpretReadOnly<Int128>(x), reinterpretScalar<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
+        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Divide(reinterpretReadOnly<UInt128>(x), reinterpretScalar<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
 
         throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the vectorized kernel dispatch");
+            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
     }
 
     /// <summary>
