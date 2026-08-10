@@ -63,23 +63,7 @@ public abstract class AggregationFunction
     /// <returns>A new column</returns>
     protected static IColumn CreateColumnFromValues(Type elementType, object?[] values)
     {
-        return elementType switch
-        {
-            Type t when t == typeof(int) => NivaraColumn<int>.Create(values.Cast<int>().ToArray()),
-            Type t when t == typeof(double) => NivaraColumn<double>.Create(values.Cast<double>().ToArray()),
-            Type t when t == typeof(float) => NivaraColumn<float>.Create(values.Cast<float>().ToArray()),
-            Type t when t == typeof(long) => NivaraColumn<long>.Create(values.Cast<long>().ToArray()),
-            Type t when t == typeof(string) => NivaraColumn<string>.Create(values.Cast<string>().ToArray()),
-            Type t when t == typeof(bool) => NivaraColumn<bool>.Create(values.Cast<bool>().ToArray()),
-            Type t when t == typeof(decimal) => NivaraColumn<decimal>.Create(values.Cast<decimal>().ToArray()),
-            Type t when t == typeof(ulong) => NivaraColumn<ulong>.Create(values.Cast<ulong>().ToArray()),
-            Type t when t == typeof(Int128) => NivaraColumn<Int128>.Create(values.Cast<Int128>().ToArray()),
-            Type t when t == typeof(UInt128) => NivaraColumn<UInt128>.Create(values.Cast<UInt128>().ToArray()),
-            Type t when t == typeof(byte) => NivaraColumn<byte>.Create(values.Cast<byte>().ToArray()),
-            Type t when t == typeof(short) => NivaraColumn<short>.Create(values.Cast<short>().ToArray()),
-            Type t when t == typeof(DateTime) => NivaraColumn<DateTime>.Create(values.Cast<DateTime>().ToArray()),
-            _ => NivaraColumn<object>.Create(values.Where(v => v != null).ToArray()!)
-        };
+        return ColumnFactory.Create(elementType, values);
     }
 
     /// <summary>
