@@ -569,6 +569,162 @@ public class NivaraColumnTests
 
     #endregion
 
+    #region Extended numeric domain arithmetic
+
+    /// <summary>
+    /// Scalar and column arithmetic on decimal columns (non-vectorizable, INumber-constrained
+    /// TensorPrimitives software-fallback path).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnDecimalColumn_ShouldExecuteScalarAndColumnOps()
+    {
+        var column = NivaraColumn<decimal>.Create(new[] { 1.5m, 2.5m, 3.5m });
+
+        Assert.That(column.Multiply(2m)[0], Is.EqualTo(3.0m));
+        Assert.That(column.Multiply(2m)[2], Is.EqualTo(7.0m));
+        Assert.That(column.Divide(2m)[0], Is.EqualTo(0.75m));
+        Assert.That(column.Divide(2m)[2], Is.EqualTo(1.75m));
+
+        var other = NivaraColumn<decimal>.Create(new[] { 10m, 20m, 30m });
+        Assert.That(column.Add(other)[0], Is.EqualTo(11.5m));
+        Assert.That(column.Subtract(other)[0], Is.EqualTo(-8.5m));
+        Assert.That(column.Multiply(other)[0], Is.EqualTo(15.0m));
+        Assert.That(column.Divide(other)[0], Is.EqualTo(0.15m));
+    }
+
+    /// <summary>
+    /// Scalar and column arithmetic on Half columns (SIMD-capable on .NET 10 TensorPrimitives).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnHalfColumn_ShouldExecuteScalarAndColumnOps()
+    {
+        var column = NivaraColumn<Half>.Create(new[] { (Half)1.5f, (Half)2.5f, (Half)3.5f });
+
+        Assert.That(column.Multiply((Half)2.0f)[0], Is.EqualTo((Half)3.0f));
+        Assert.That(column.Multiply((Half)2.0f)[2], Is.EqualTo((Half)7.0f));
+        Assert.That(column.Divide((Half)2.0f)[0], Is.EqualTo((Half)0.75f));
+        Assert.That(column.Divide((Half)2.0f)[2], Is.EqualTo((Half)1.75f));
+
+        var other = NivaraColumn<Half>.Create(new[] { (Half)0.5f, (Half)1.0f, (Half)2.0f });
+        Assert.That(column.Add(other)[0], Is.EqualTo((Half)2.0f));
+        Assert.That(column.Subtract(other)[0], Is.EqualTo((Half)1.0f));
+        Assert.That(column.Multiply(other)[2], Is.EqualTo((Half)7.0f));
+        Assert.That(column.Divide(other)[0], Is.EqualTo((Half)3.0f));
+    }
+
+    /// <summary>
+    /// Scalar and column arithmetic on nint columns (SIMD-capable via generic TensorPrimitives).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnNintColumn_ShouldExecuteScalarAndColumnOps()
+    {
+        var column = NivaraColumn<nint>.Create(new nint[] { 10, 15, 20 });
+
+        Assert.That(column.Multiply((nint)2)[0], Is.EqualTo((nint)20));
+        Assert.That(column.Multiply((nint)2)[2], Is.EqualTo((nint)40));
+        Assert.That(column.Divide((nint)2)[0], Is.EqualTo((nint)5));
+        Assert.That(column.Divide((nint)2)[1], Is.EqualTo((nint)7));
+
+        var other = NivaraColumn<nint>.Create(new nint[] { 5, 5, 5 });
+        Assert.That(column.Add(other)[0], Is.EqualTo((nint)15));
+        Assert.That(column.Subtract(other)[0], Is.EqualTo((nint)5));
+        Assert.That(column.Multiply(other)[2], Is.EqualTo((nint)100));
+        Assert.That(column.Divide(other)[1], Is.EqualTo((nint)3));
+    }
+
+    /// <summary>
+    /// Scalar and column arithmetic on nuint columns (SIMD-capable via generic TensorPrimitives).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnNuintColumn_ShouldExecuteScalarAndColumnOps()
+    {
+        var column = NivaraColumn<nuint>.Create(new nuint[] { 10, 15, 20 });
+
+        Assert.That(column.Multiply((nuint)2)[0], Is.EqualTo((nuint)20));
+        Assert.That(column.Multiply((nuint)2)[2], Is.EqualTo((nuint)40));
+        Assert.That(column.Divide((nuint)2)[0], Is.EqualTo((nuint)5));
+        Assert.That(column.Divide((nuint)2)[1], Is.EqualTo((nuint)7));
+
+        var other = NivaraColumn<nuint>.Create(new nuint[] { 5, 5, 5 });
+        Assert.That(column.Add(other)[0], Is.EqualTo((nuint)15));
+        Assert.That(column.Subtract(other)[0], Is.EqualTo((nuint)5));
+        Assert.That(column.Multiply(other)[2], Is.EqualTo((nuint)100));
+        Assert.That(column.Divide(other)[1], Is.EqualTo((nuint)3));
+    }
+
+    /// <summary>
+    /// Scalar and column arithmetic on Int128 columns (software-fallback TensorPrimitives path).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnInt128Column_ShouldExecuteScalarAndColumnOps()
+    {
+        var column = NivaraColumn<Int128>.Create(new Int128[] { 10, 15, 20 });
+
+        Assert.That(column.Multiply((Int128)2)[0], Is.EqualTo((Int128)20));
+        Assert.That(column.Multiply((Int128)2)[2], Is.EqualTo((Int128)40));
+        Assert.That(column.Divide((Int128)2)[0], Is.EqualTo((Int128)5));
+        Assert.That(column.Divide((Int128)2)[1], Is.EqualTo((Int128)7));
+
+        var other = NivaraColumn<Int128>.Create(new Int128[] { 5, 5, 5 });
+        Assert.That(column.Add(other)[0], Is.EqualTo((Int128)15));
+        Assert.That(column.Subtract(other)[0], Is.EqualTo((Int128)5));
+        Assert.That(column.Multiply(other)[2], Is.EqualTo((Int128)100));
+        Assert.That(column.Divide(other)[1], Is.EqualTo((Int128)3));
+    }
+
+    /// <summary>
+    /// Scalar and column arithmetic on UInt128 columns (software-fallback TensorPrimitives path).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnUInt128Column_ShouldExecuteScalarAndColumnOps()
+    {
+        var column = NivaraColumn<UInt128>.Create(new UInt128[] { 10, 15, 20 });
+
+        Assert.That(column.Multiply((UInt128)2)[0], Is.EqualTo((UInt128)20));
+        Assert.That(column.Multiply((UInt128)2)[2], Is.EqualTo((UInt128)40));
+        Assert.That(column.Divide((UInt128)2)[0], Is.EqualTo((UInt128)5));
+        Assert.That(column.Divide((UInt128)2)[1], Is.EqualTo((UInt128)7));
+
+        var other = NivaraColumn<UInt128>.Create(new UInt128[] { 5, 5, 5 });
+        Assert.That(column.Add(other)[0], Is.EqualTo((UInt128)15));
+        Assert.That(column.Subtract(other)[0], Is.EqualTo((UInt128)5));
+        Assert.That(column.Multiply(other)[2], Is.EqualTo((UInt128)100));
+        Assert.That(column.Divide(other)[1], Is.EqualTo((UInt128)3));
+    }
+
+    /// <summary>
+    /// Null-mask propagation for extended-domain arithmetic: scalar ops propagate the left
+    /// mask, column ops OR the two masks, matching the SQL-like null semantics.
+    /// </summary>
+    [Test]
+    public void NullMaskMaintenance_ExtendedDomainArithmetic_PreservesNullPositions()
+    {
+        var decimalValues = new decimal?[] { 1.5m, null, 3.5m };
+        var decimalColumn = NivaraColumn<decimal>.CreateFromNullable(decimalValues);
+        var decimalResult = decimalColumn.Multiply(2m);
+        for (int i = 0; i < decimalValues.Length; i++)
+            Assert.That(decimalResult.IsNull(i), Is.EqualTo(decimalValues[i] == null));
+        Assert.That(decimalResult[0], Is.EqualTo(3.0m));
+        Assert.That(decimalResult[2], Is.EqualTo(7.0m));
+
+        var halfValues = new Half?[] { (Half)1.5f, null, (Half)3.5f };
+        var halfColumn = NivaraColumn<Half>.CreateFromNullable(halfValues);
+        var halfResult = halfColumn.Add((Half)0.5f);
+        for (int i = 0; i < halfValues.Length; i++)
+            Assert.That(halfResult.IsNull(i), Is.EqualTo(halfValues[i] == null));
+
+        var leftValues = new Int128?[] { 5, null, 9 };
+        var rightValues = new Int128?[] { null, 3, 4 };
+        var leftColumn = NivaraColumn<Int128>.CreateFromNullable(leftValues);
+        var rightColumn = NivaraColumn<Int128>.CreateFromNullable(rightValues);
+        var sumResult = leftColumn.Add(rightColumn);
+        for (int i = 0; i < leftValues.Length; i++)
+            Assert.That(sumResult.IsNull(i), Is.EqualTo(leftValues[i] == null || rightValues[i] == null));
+        Assert.That(sumResult[2], Is.EqualTo((Int128)13));
+    }
+
+    #endregion
+
     #region Property 9: Comprehensive comparison operations
 
     /// <summary>
