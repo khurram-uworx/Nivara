@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Reflection;
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Query;
@@ -141,6 +143,14 @@ internal sealed class JoinIndices
 /// </summary>
 sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
 {
+    static readonly MethodInfo coalesceKernel = typeof(JoinOperation)
+        .GetMethod(nameof(CreateCoalescedJoinKeyColumnTyped), BindingFlags.Static | BindingFlags.NonPublic)!;
+    static readonly MethodInfo gatherKernel = typeof(JoinOperation)
+        .GetMethod(nameof(GatherColumnTyped), BindingFlags.Static | BindingFlags.NonPublic)!;
+
+    static readonly ConcurrentDictionary<Type, MethodInfo> coalesceKernelCache = new();
+    static readonly ConcurrentDictionary<Type, MethodInfo> gatherKernelCache = new();
+
     readonly IReadOnlyDictionary<string, IColumn> leftColumns;
     readonly IReadOnlyDictionary<string, IColumn> rightColumns;
     readonly JoinType joinType;
@@ -684,23 +694,9 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// </summary>
     private IColumn CreateCoalescedJoinKeyColumn(IColumn leftColumn, IColumn rightColumn, JoinIndices joinIndices)
     {
-        var elementType = leftColumn.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => CreateCoalescedJoinKeyColumnTyped<int>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(double) => CreateCoalescedJoinKeyColumnTyped<double>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(float) => CreateCoalescedJoinKeyColumnTyped<float>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(long) => CreateCoalescedJoinKeyColumnTyped<long>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(string) => CreateCoalescedJoinKeyColumnTyped<string>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(bool) => CreateCoalescedJoinKeyColumnTyped<bool>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(decimal) => CreateCoalescedJoinKeyColumnTyped<decimal>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(byte) => CreateCoalescedJoinKeyColumnTyped<byte>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(short) => CreateCoalescedJoinKeyColumnTyped<short>(leftColumn, rightColumn, joinIndices),
-            Type t when t == typeof(DateTime) => CreateCoalescedJoinKeyColumnTyped<DateTime>(leftColumn, rightColumn, joinIndices),
-            _ => CreateCoalescedJoinKeyColumnGeneric(leftColumn, rightColumn, joinIndices)
-        };
+        var elementType = Nullable.GetUnderlyingType(leftColumn.ElementType) ?? leftColumn.ElementType;
+        var kernel = coalesceKernelCache.GetOrAdd(elementType, static t => coalesceKernel.MakeGenericMethod(t));
+        return (IColumn)kernel.Invoke(null, new object[] { leftColumn, rightColumn, joinIndices })!;
     }
 
     /// <summary>
@@ -771,30 +767,6 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     }
 
     /// <summary>
-    /// Creates a coalesced join key column for unknown types using object column
-    /// </summary>
-    static IColumn CreateCoalescedJoinKeyColumnGeneric(IColumn leftColumn, IColumn rightColumn, JoinIndices joinIndices)
-    {
-        var coalescedArray = new object[joinIndices.Count];
-
-        for (int i = 0; i < joinIndices.Count; i++)
-        {
-            // Use left value if available, otherwise use right value
-            if (joinIndices.LeftIndices[i] >= 0)
-            {
-                coalescedArray[i] = leftColumn.GetValue(joinIndices.LeftIndices[i])!;
-            }
-            else if (joinIndices.RightIndices[i] >= 0)
-            {
-                coalescedArray[i] = rightColumn.GetValue(joinIndices.RightIndices[i])!;
-            }
-            // null values remain null in the array
-        }
-
-        return NivaraColumn<object>.Create(coalescedArray);
-    }
-
-    /// <summary>
     /// Resolves column name conflicts using the disambiguation strategy
     /// </summary>
     private string ResolveColumnName(string originalName, bool isLeft, List<string> leftColumnNames, List<string> rightColumnNames)
@@ -823,23 +795,9 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
     /// </summary>
     private static IColumn GatherColumn(IColumn sourceColumn, int[] indices)
     {
-        var elementType = sourceColumn.ElementType;
-
-        // Use dynamic dispatch to create the appropriate column type
-        return elementType switch
-        {
-            Type t when t == typeof(int) => GatherColumnTyped<int>(sourceColumn, indices),
-            Type t when t == typeof(double) => GatherColumnTyped<double>(sourceColumn, indices),
-            Type t when t == typeof(float) => GatherColumnTyped<float>(sourceColumn, indices),
-            Type t when t == typeof(long) => GatherColumnTyped<long>(sourceColumn, indices),
-            Type t when t == typeof(string) => GatherColumnTyped<string>(sourceColumn, indices),
-            Type t when t == typeof(bool) => GatherColumnTyped<bool>(sourceColumn, indices),
-            Type t when t == typeof(decimal) => GatherColumnTyped<decimal>(sourceColumn, indices),
-            Type t when t == typeof(byte) => GatherColumnTyped<byte>(sourceColumn, indices),
-            Type t when t == typeof(short) => GatherColumnTyped<short>(sourceColumn, indices),
-            Type t when t == typeof(DateTime) => GatherColumnTyped<DateTime>(sourceColumn, indices),
-            _ => GatherColumnGeneric(sourceColumn, indices)
-        };
+        var elementType = Nullable.GetUnderlyingType(sourceColumn.ElementType) ?? sourceColumn.ElementType;
+        var kernel = gatherKernelCache.GetOrAdd(elementType, static t => gatherKernel.MakeGenericMethod(t));
+        return (IColumn)kernel.Invoke(null, new object[] { sourceColumn, indices })!;
     }
 
     /// <summary>
@@ -893,25 +851,6 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
                 .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
                 .Invoke(null, new object[] { gatheredArray })!;
         }
-    }
-
-    /// <summary>
-    /// Gathers values from a column for unknown types using object column
-    /// </summary>
-    static IColumn GatherColumnGeneric(IColumn sourceColumn, int[] indices)
-    {
-        var gatheredArray = new object[indices.Length];
-
-        for (int i = 0; i < indices.Length; i++)
-        {
-            if (indices[i] >= 0) // -1 indicates null (no match in join)
-            {
-                gatheredArray[i] = sourceColumn.GetValue(indices[i])!;
-            }
-            // null values remain null in the array
-        }
-
-        return NivaraColumn<object>.Create(gatheredArray);
     }
 
     /// <summary>
