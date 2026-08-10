@@ -44,7 +44,7 @@ sealed class FusedExpressionEvaluator
     /// </summary>
     internal int NodeTreePathEvaluationCount => nodeTreePathEvaluationCount;
 
-    static readonly ConcurrentDictionary<string, Delegate> compiledKernelCache = new();
+    static readonly ConcurrentDictionary<string, Func<object[], int, Array>> compiledKernelCache = new();
 
     static readonly ConcurrentDictionary<Type, MethodInfo> snapshotKernelCache = new();
 
@@ -178,7 +178,7 @@ sealed class FusedExpressionEvaluator
         var length = plan.Columns[0].Column.Length;
         var leafArrays = SnapshotLeaves(plan);
 
-        Delegate action;
+        Func<object[], int, Array> action;
         try
         {
             action = compiledKernelCache.GetOrAdd(plan.Signature, key => BuildCompiledDelegate(expression, plan));
@@ -189,7 +189,7 @@ sealed class FusedExpressionEvaluator
             return EvaluateNodeTree(expression, plan, length);
         }
 
-        var resultArray = ExecuteCompiled(action, leafArrays, plan.ResultType, length);
+        var resultArray = ExecuteCompiled(action, leafArrays, length);
         var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
 
         if (mask != null && plan.ResultType == typeof(bool))
@@ -208,16 +208,13 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Runs the compiled delegate, writing results into a freshly allocated typed array.
+    /// Runs the compiled delegate through its typed invocation wrapper, writing results into a
+    /// freshly allocated typed array. The wrapper casts the leaf arrays and invokes the concrete
+    /// <c>Action&lt;T1[], ..., TN[], R[]&gt;</c> directly — no <see cref="Delegate.DynamicInvoke"/>.
     /// </summary>
-    static Array ExecuteCompiled(Delegate action, object[] leafArrays, Type resultType, int length)
+    static Array ExecuteCompiled(Func<object[], int, Array> action, object[] leafArrays, int length)
     {
-        var result = Array.CreateInstance(resultType, length);
-        var args = new object[leafArrays.Length + 1];
-        Array.Copy(leafArrays, args, leafArrays.Length);
-        args[leafArrays.Length] = result;
-        action.DynamicInvoke(args);
-        return result;
+        return action(leafArrays, length);
     }
 
     /// <summary>
@@ -431,9 +428,12 @@ sealed class FusedExpressionEvaluator
 
     /// <summary>
     /// Builds a compiled <c>Action&lt;T1[], ..., TN[], R[]&gt;</c> delegate that runs the whole
-    /// expression over the leaf arrays in a single loop, writing into the result array.
+    /// expression over the leaf arrays in a single loop, writing into the result array, plus a
+    /// cached typed invocation wrapper (<c>Func&lt;object[], int, Array&gt;</c>) that casts the
+    /// leaf arrays and calls the concrete action directly (no per-evaluation
+    /// <see cref="Delegate.DynamicInvoke"/>).
     /// </summary>
-    static Delegate BuildCompiledDelegate(ColumnExpression expression, FusedExpressionPlan plan)
+    static Func<object[], int, Array> BuildCompiledDelegate(ColumnExpression expression, FusedExpressionPlan plan)
     {
         var leafIndex = new Dictionary<ColumnReference, int>(ReferenceEqualityComparer.Instance);
         for (int i = 0; i < plan.Columns.Count; i++)
@@ -457,7 +457,24 @@ sealed class FusedExpressionEvaluator
         var actionType = Expression.GetActionType(paramTypes);
         var body = Expression.Block(new[] { indexVar }, loopBody);
         var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam));
-        return lambda.Compile();
+        var typedAction = lambda.Compile();
+
+        var argsParam = Expression.Parameter(typeof(object[]), "args");
+        var lengthParam = Expression.Parameter(typeof(int), "length");
+        var destVar = Expression.Variable(plan.ResultType.MakeArrayType(), "dest");
+
+        var callArgs = new Expression[leafParams.Length + 1];
+        for (int i = 0; i < leafParams.Length; i++)
+            callArgs[i] = Expression.Convert(Expression.ArrayIndex(argsParam, Expression.Constant(i)), leafParams[i].Type);
+        callArgs[leafParams.Length] = destVar;
+
+        var wrapperBody = Expression.Block(
+            new[] { destVar },
+            Expression.Assign(destVar, Expression.NewArrayBounds(plan.ResultType, lengthParam)),
+            Expression.Invoke(Expression.Constant(typedAction), callArgs),
+            destVar);
+
+        return Expression.Lambda<Func<object[], int, Array>>(wrapperBody, argsParam, lengthParam).Compile();
     }
 
     /// <summary>
