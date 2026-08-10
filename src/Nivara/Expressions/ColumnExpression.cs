@@ -6,7 +6,7 @@ namespace Nivara.Expressions;
 /// <summary>
 /// Binary operators for expressions
 /// </summary>
-public enum BinaryOperator
+internal enum BinaryOperator
 {
     Add,
     Subtract,
@@ -20,7 +20,7 @@ public enum BinaryOperator
 /// <summary>
 /// Comparison operators for expressions
 /// </summary>
-public enum ComparisonOperator
+internal enum ComparisonOperator
 {
     Equal,
     NotEqual,
@@ -34,7 +34,7 @@ public enum ComparisonOperator
 /// Base class for column expressions used in query operations.
 /// Provides the foundation for building composable query expressions.
 /// </summary>
-public abstract class ColumnExpression
+internal abstract class ColumnExpression
 {
     /// <summary>
     /// Gets the result type of this expression
@@ -327,7 +327,7 @@ public abstract class ColumnExpression
 /// <summary>
 /// Represents a reference to a column by name
 /// </summary>
-public sealed class ColumnReference : ColumnExpression
+internal sealed class ColumnReference : ColumnExpression
 {
     /// <summary>
     /// Initializes a new instance of ColumnReference
@@ -386,7 +386,7 @@ public sealed class ColumnReference : ColumnExpression
 /// <summary>
 /// Represents a literal value in an expression
 /// </summary>
-public sealed class LiteralExpression : ColumnExpression
+internal sealed class LiteralExpression : ColumnExpression
 {
     /// <summary>
     /// Initializes a new instance of LiteralExpression
@@ -425,7 +425,7 @@ public sealed class LiteralExpression : ColumnExpression
 /// <summary>
 /// Represents a binary operation between two expressions
 /// </summary>
-public sealed class BinaryExpression : ColumnExpression
+internal sealed class BinaryExpression : ColumnExpression
 {
     /// <summary>
     /// Initializes a new instance of BinaryExpression
@@ -517,7 +517,7 @@ public sealed class BinaryExpression : ColumnExpression
 /// <summary>
 /// Represents a comparison operation between two expressions
 /// </summary>
-public sealed class ComparisonExpression : ColumnExpression
+internal sealed class ComparisonExpression : ColumnExpression
 {
     /// <summary>
     /// Initializes a new instance of ComparisonExpression
@@ -633,7 +633,7 @@ public sealed class ComparisonExpression : ColumnExpression
 /// <summary>
 /// Represents a scalar operation (column with scalar value)
 /// </summary>
-public sealed class ScalarExpression : ColumnExpression
+internal sealed class ScalarExpression : ColumnExpression
 {
     /// <summary>
     /// Initializes a new instance of ScalarExpression
@@ -720,7 +720,7 @@ public sealed class ScalarExpression : ColumnExpression
 /// <summary>
 /// Represents a logical negation (NOT) of a boolean expression
 /// </summary>
-public sealed class NotExpression : ColumnExpression
+internal sealed class NotExpression : ColumnExpression
 {
     /// <summary>
     /// Initializes a new instance of NotExpression
@@ -761,7 +761,7 @@ public sealed class NotExpression : ColumnExpression
 /// <summary>
 /// Global function for creating column references
 /// </summary>
-public static class ColumnExpressions
+internal static class ColumnExpressions
 {
     /// <summary>
     /// Creates a column reference expression

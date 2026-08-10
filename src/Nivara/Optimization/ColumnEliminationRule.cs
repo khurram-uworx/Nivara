@@ -6,7 +6,7 @@ namespace Nivara.Optimization;
 /// <summary>
 /// Optimization rule that eliminates unused columns early in the pipeline
 /// </summary>
-public sealed class ColumnEliminationRule : OptimizationRule
+internal sealed class ColumnEliminationRule : OptimizationRule
 {
     /// <inheritdoc />
     public override string Name => "Column Elimination";

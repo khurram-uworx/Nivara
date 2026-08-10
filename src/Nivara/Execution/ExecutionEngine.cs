@@ -34,7 +34,7 @@ public enum ExecutionStrategy
 /// <summary>
 /// Defines the interface for execution strategies
 /// </summary>
-public interface IExecutionStrategy
+internal interface IExecutionStrategy
 {
     /// <summary>
     /// Executes a query plan synchronously
@@ -73,7 +73,7 @@ public interface IExecutionStrategy
 /// Executes query plans using different execution strategies.
 /// Provides strategy pattern for lazy, eager, streaming, and parallel execution modes.
 /// </summary>
-public sealed class ExecutionEngine
+internal sealed class ExecutionEngine
 {
     QueryOptimizer? optimizer;
     ExecutionDiagnostics? lastDiagnostics;

@@ -15,7 +15,7 @@ public static class Json
     /// <returns>A query source that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static IQuerySource Scan(string filePath, JsonOptions? options = null)
+    internal static IQuerySource Scan(string filePath, JsonOptions? options = null)
     {
         return ScanJson(filePath, options);
     }
@@ -42,7 +42,7 @@ public static class Json
     /// <returns>A QueryFrame that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static QueryFrame ScanAsQueryFrame(string filePath, JsonOptions? options = null)
+    internal static QueryFrame ScanAsQueryFrame(string filePath, JsonOptions? options = null)
     {
         return ScanJsonAsQueryFrame(filePath, options);
     }
@@ -69,7 +69,7 @@ public static class Json
     /// <returns>A QueryFrame that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static IQuerySource ScanJson(string filePath, JsonOptions? options = null)
+    internal static IQuerySource ScanJson(string filePath, JsonOptions? options = null)
     {
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentNullException(nameof(filePath));
@@ -109,7 +109,7 @@ public static class Json
     /// <returns>A QueryFrame that will read the JSON when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the JSON file doesn't exist</exception>
-    public static QueryFrame ScanJsonAsQueryFrame(string filePath, JsonOptions? options = null)
+    internal static QueryFrame ScanJsonAsQueryFrame(string filePath, JsonOptions? options = null)
     {
         var source = ScanJson(filePath, options);
         return new QueryFrame(source);

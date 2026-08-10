@@ -2,19 +2,19 @@ using System.Runtime.CompilerServices;
 
 namespace Nivara.Query;
 
-public interface IQueryOperation<T>
+internal interface IQueryOperation<T>
 {
     QueryPlan Plan { get; }
 }
 
-public interface IQueryOperation
+internal interface IQueryOperation
 {
     string OperationType { get; }
     Schema TransformSchema(Schema inputSchema);
     IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input);
 }
 
-public interface IQuerySource : IDisposable
+internal interface IQuerySource : IDisposable
 {
     Schema Schema { get; }
     bool IsLazy { get; }

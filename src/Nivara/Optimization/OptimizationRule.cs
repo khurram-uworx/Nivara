@@ -5,7 +5,7 @@ namespace Nivara.Optimization;
 /// <summary>
 /// Abstract base class for query optimization rules
 /// </summary>
-public abstract class OptimizationRule
+internal abstract class OptimizationRule
 {
     /// <summary>
     /// Gets the name of this optimization rule
@@ -82,7 +82,7 @@ public abstract class OptimizationRule
 /// <summary>
 /// Statistics about an applied optimization rule
 /// </summary>
-public sealed class OptimizationStatistics
+internal sealed class OptimizationStatistics
 {
     /// <summary>
     /// Gets or sets the name of the optimization rule
@@ -128,7 +128,7 @@ public sealed class OptimizationStatistics
 /// <summary>
 /// Engine for applying optimization rules to query plans
 /// </summary>
-public sealed class OptimizationEngine
+internal sealed class OptimizationEngine
 {
     private readonly List<OptimizationRule> _rules;
 
@@ -260,7 +260,7 @@ public sealed class OptimizationEngine
 /// <summary>
 /// Result of applying optimization rules to a query plan
 /// </summary>
-public sealed class OptimizationResult
+internal sealed class OptimizationResult
 {
     /// <summary>
     /// Gets or sets the original query plan

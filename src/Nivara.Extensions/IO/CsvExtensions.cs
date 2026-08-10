@@ -15,7 +15,7 @@ public static class Csv
     /// <returns>A query source that will read the CSV when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
-    public static IQuerySource Scan(string filePath, CsvOptions? options = null)
+    internal static IQuerySource Scan(string filePath, CsvOptions? options = null)
     {
         return ScanCsv(filePath, options);
     }
@@ -42,7 +42,7 @@ public static class Csv
     /// <returns>A QueryFrame that will read the CSV when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
-    public static QueryFrame ScanAsQueryFrame(string filePath, CsvOptions? options = null)
+    internal static QueryFrame ScanAsQueryFrame(string filePath, CsvOptions? options = null)
     {
         return ScanCsvAsQueryFrame(filePath, options);
     }
@@ -69,7 +69,7 @@ public static class Csv
     /// <returns>A QueryFrame that will read the CSV when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
-    public static IQuerySource ScanCsv(string filePath, CsvOptions? options = null)
+    internal static IQuerySource ScanCsv(string filePath, CsvOptions? options = null)
     {
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentNullException(nameof(filePath));
@@ -109,7 +109,7 @@ public static class Csv
     /// <returns>A QueryFrame that will read the CSV when executed</returns>
     /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
     /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
-    public static QueryFrame ScanCsvAsQueryFrame(string filePath, CsvOptions? options = null)
+    internal static QueryFrame ScanCsvAsQueryFrame(string filePath, CsvOptions? options = null)
     {
         var source = ScanCsv(filePath, options);
         return new QueryFrame(source);

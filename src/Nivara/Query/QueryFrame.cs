@@ -10,7 +10,7 @@ namespace Nivara.Query;
 /// Represents a lazy query frame that builds query plans without immediate execution.
 /// Provides a fluent API for constructing complex queries that are executed only when Collect() is called.
 /// </summary>
-public sealed class QueryFrame : IDisposable
+internal sealed class QueryFrame : IDisposable
 {
     readonly IQuerySource source;
     readonly List<IQueryOperation> operations;

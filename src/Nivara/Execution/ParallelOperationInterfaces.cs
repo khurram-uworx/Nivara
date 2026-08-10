@@ -2,18 +2,18 @@ using Nivara.Operations;
 
 namespace Nivara.Execution;
 
-public interface IParallelSortOperation
+internal interface IParallelSortOperation
 {
     IReadOnlyList<SortKey> SortKeys { get; }
     bool IsStable { get; }
 }
 
-public interface IParallelGroupByOperation
+internal interface IParallelGroupByOperation
 {
     IReadOnlyList<Nivara.Expressions.ColumnExpression> GroupByColumns { get; }
 }
 
-public interface IParallelJoinOperation
+internal interface IParallelJoinOperation
 {
     IReadOnlyDictionary<string, IColumn> RightColumns { get; }
     JoinKey[] JoinKeys { get; }
@@ -21,7 +21,7 @@ public interface IParallelJoinOperation
     IReadOnlyDictionary<string, IColumn> MaterializeResult(JoinIndices joinIndices);
 }
 
-public interface IParallelConcatenationOperation
+internal interface IParallelConcatenationOperation
 {
     IReadOnlyList<IReadOnlyDictionary<string, IColumn>> Sources { get; }
     ConcatenationDirection Direction { get; }

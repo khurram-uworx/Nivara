@@ -6,7 +6,7 @@ namespace Nivara.Linq;
 /// Helper class to build column expressions using lambda syntax.
 /// Allows accessing columns via indexer or methods.
 /// </summary>
-public sealed class RowExpressionBuilder
+internal sealed class RowExpressionBuilder
 {
     static readonly RowExpressionBuilder instance = new();
 

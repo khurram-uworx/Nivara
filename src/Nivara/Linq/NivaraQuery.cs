@@ -42,7 +42,7 @@ public sealed class NivaraQuery<T>
     /// <summary>
     /// Returns the underlying lazy query frame for advanced composition
     /// </summary>
-    public QueryFrame AsQueryFrame() => frame;
+    internal QueryFrame AsQueryFrame() => frame;
 
     /// <summary>
     /// Filters the rows using the given predicate

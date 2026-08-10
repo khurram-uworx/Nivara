@@ -3,7 +3,7 @@ namespace Nivara.Query;
 /// <summary>
 /// Visitor interface for traversing query plans
 /// </summary>
-public interface IQueryPlanVisitor
+internal interface IQueryPlanVisitor
 {
     /// <summary>
     /// Visits a query plan
@@ -22,7 +22,7 @@ public interface IQueryPlanVisitor
 /// Generic visitor interface for transforming query plans
 /// </summary>
 /// <typeparam name="T">The result type of the transformation</typeparam>
-public interface IQueryPlanVisitor<T>
+internal interface IQueryPlanVisitor<T>
 {
     /// <summary>
     /// Visits a query plan and returns a result
@@ -42,7 +42,7 @@ public interface IQueryPlanVisitor<T>
 /// <summary>
 /// Base class for query plan visitors that provides default traversal behavior
 /// </summary>
-public abstract class QueryPlanVisitorBase : IQueryPlanVisitor
+internal abstract class QueryPlanVisitorBase : IQueryPlanVisitor
 {
     /// <inheritdoc />
     public virtual void Visit(QueryPlan plan)
@@ -179,7 +179,7 @@ public abstract class QueryPlanVisitorBase : IQueryPlanVisitor
 /// Base class for query plan transformers that can modify query plans
 /// </summary>
 /// <typeparam name="T">The result type of the transformation</typeparam>
-public abstract class QueryPlanTransformerBase<T> : IQueryPlanVisitor<T>
+internal abstract class QueryPlanTransformerBase<T> : IQueryPlanVisitor<T>
 {
     /// <inheritdoc />
     public virtual T Visit(QueryPlan plan)
@@ -305,7 +305,7 @@ public abstract class QueryPlanTransformerBase<T> : IQueryPlanVisitor<T>
 /// <summary>
 /// Visitor that collects statistics about a query plan
 /// </summary>
-public sealed class QueryPlanStatisticsVisitor : QueryPlanVisitorBase
+internal sealed class QueryPlanStatisticsVisitor : QueryPlanVisitorBase
 {
     private readonly Dictionary<string, int> _operationCounts = new();
     private int _totalOperations;
@@ -385,7 +385,7 @@ public sealed class QueryPlanStatisticsVisitor : QueryPlanVisitorBase
 /// <summary>
 /// Visitor that validates a query plan for correctness
 /// </summary>
-public sealed class QueryPlanValidationVisitor : QueryPlanVisitorBase
+internal sealed class QueryPlanValidationVisitor : QueryPlanVisitorBase
 {
     private readonly List<string> _errors = new();
     private Schema _currentSchema = null!;

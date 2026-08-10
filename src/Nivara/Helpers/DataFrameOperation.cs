@@ -2,7 +2,7 @@ using Nivara.Query;
 
 namespace Nivara.Helpers;
 
-public abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
+internal abstract class DataFrameOperation : IQueryOperation<NivaraFrame>
 {
     protected DataFrameOperation(QueryPlan plan)
     {
