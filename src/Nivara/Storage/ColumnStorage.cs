@@ -184,7 +184,7 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
     /// <summary>
     /// Gets the underlying data memory for operations
     /// </summary>
-    internal ReadOnlyMemory<T> Data
+    public ReadOnlyMemory<T> Data
     {
         get
         {
@@ -204,6 +204,8 @@ sealed class ColumnStorage<T> : IColumnStorage<T>
             return nullMask is null ? null : new ReadOnlyMemory<bool>(nullMask, maskStart, dataLength);
         }
     }
+
+    ReadOnlyMemory<bool>? IColumnStorage<T>.NullMaskMemory => NullMaskMemory;
 
     /// <summary>
     /// Gets a lazy zero-copy <see cref="Tensor{T}"/> view over this storage's data.

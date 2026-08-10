@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Numerics;
 using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace Nivara.Expressions;
 
@@ -44,7 +45,7 @@ sealed class FusedExpressionEvaluator
     /// </summary>
     internal int NodeTreePathEvaluationCount => nodeTreePathEvaluationCount;
 
-    static readonly ConcurrentDictionary<string, Delegate> compiledKernelCache = new();
+    static readonly ConcurrentDictionary<string, Func<object[], int, Array>> compiledKernelCache = new();
 
     static readonly ConcurrentDictionary<Type, MethodInfo> snapshotKernelCache = new();
 
@@ -176,9 +177,22 @@ sealed class FusedExpressionEvaluator
 
         ValidateLeafLengths(plan);
         var length = plan.Columns[0].Column.Length;
+
+        // Span kernel first: null-bearing uniform generic-math plans fuse values and the OR'd null
+        // mask in a single zero-copy pass — no leaf snapshots, no separate mask pass. Everything else
+        // (null-free uniform, heterogeneous, and every bool-result plan) stays on the compiled path,
+        // preserving the JIT-vectorized fused win for the common null-free case.
+        if (plan.IsGenericMath
+            && plan.ResultType != typeof(bool)
+            && plan.HasNulls
+            && plan.Columns.All(l => l.Column.ElementType == plan.ResultType))
+        {
+            return EvaluateNodeTree(expression, plan, length);
+        }
+
         var leafArrays = SnapshotLeaves(plan);
 
-        Delegate action;
+        Func<object[], int, Array> action;
         try
         {
             action = compiledKernelCache.GetOrAdd(plan.Signature, key => BuildCompiledDelegate(expression, plan));
@@ -189,7 +203,7 @@ sealed class FusedExpressionEvaluator
             return EvaluateNodeTree(expression, plan, length);
         }
 
-        var resultArray = ExecuteCompiled(action, leafArrays, plan.ResultType, length);
+        var resultArray = ExecuteCompiled(action, leafArrays, length);
         var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
 
         if (mask != null && plan.ResultType == typeof(bool))
@@ -208,21 +222,20 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Runs the compiled delegate, writing results into a freshly allocated typed array.
+    /// Runs the compiled delegate through its typed invocation wrapper, writing results into a
+    /// freshly allocated typed array. The wrapper casts the leaf arrays and invokes the concrete
+    /// <c>Action&lt;T1[], ..., TN[], R[]&gt;</c> directly — no <see cref="Delegate.DynamicInvoke"/>.
     /// </summary>
-    static Array ExecuteCompiled(Delegate action, object[] leafArrays, Type resultType, int length)
+    static Array ExecuteCompiled(Func<object[], int, Array> action, object[] leafArrays, int length)
     {
-        var result = Array.CreateInstance(resultType, length);
-        var args = new object[leafArrays.Length + 1];
-        Array.Copy(leafArrays, args, leafArrays.Length);
-        args[leafArrays.Length] = result;
-        action.DynamicInvoke(args);
-        return result;
+        return action(leafArrays, length);
     }
 
     /// <summary>
-    /// Evaluates through the generic node-tree kernel when the compiled target could not be built.
-    /// Requires generic math and leaf columns already sharing the result element type.
+    /// Evaluates through the generic span kernel: primary path for null-bearing uniform generic-math
+    /// plans, and fallback when the expression-tree-compiled target cannot be built. Requires generic
+    /// math and leaf columns already sharing the result element type. The null mask is fused into the
+    /// kernel (OR semantics), so no separate <see cref="ComputeMask"/> pass runs.
     /// </summary>
     IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, int length)
     {
@@ -241,29 +254,33 @@ sealed class FusedExpressionEvaluator
             }
         }
 
-        var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
-        var kernel = GetNodeTreeRunner(plan.ResultType);
-        var result = kernel.Invoke(null, new object?[] { expression, plan.Columns, mask });
+        var runner = GetNodeTreeRunner(plan.ResultType);
+        var result = runner(expression, plan.Columns);
         nodeTreePathEvaluationCount++;
         fusedPathEvaluationCount++;
-        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Generic node-tree kernel");
-        return (IColumn)result!;
+        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Span fused kernel");
+        return result;
     }
 
     static class FusedNodeTreeRunner<T>
         where T : struct, INumber<T>
     {
-        internal static IColumn Run(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves, bool[]? mask)
-            => FusedKernel.Evaluate<T>(expression, leaves, mask);
+        internal static IColumn Run(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves)
+            => FusedKernel.Evaluate<T>(expression, leaves);
     }
 
-    static readonly ConcurrentDictionary<Type, MethodInfo> nodeTreeRunnerCache = new();
+    delegate IColumn FusedNodeTreeInvoker(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves);
 
-    static MethodInfo GetNodeTreeRunner(Type elementType)
+    static readonly ConcurrentDictionary<Type, FusedNodeTreeInvoker> nodeTreeRunnerCache = new();
+
+    static FusedNodeTreeInvoker GetNodeTreeRunner(Type elementType)
     {
         return nodeTreeRunnerCache.GetOrAdd(elementType, static t =>
-            typeof(FusedNodeTreeRunner<>).MakeGenericType(t)
-                .GetMethod(nameof(FusedNodeTreeRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!);
+        {
+            var method = typeof(FusedNodeTreeRunner<>).MakeGenericType(t)
+                .GetMethod(nameof(FusedNodeTreeRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!;
+            return (FusedNodeTreeInvoker)method.CreateDelegate(typeof(FusedNodeTreeInvoker));
+        });
     }
 
     /// <summary>
@@ -282,8 +299,10 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Snapshots each leaf column into a typed array (default values at null positions; the null mask
-    /// is computed separately), so the compiled delegate can index the backing arrays directly.
+    /// Snaps each leaf column to a typed array the compiled delegate can index, reading zero-copy
+    /// when the leaf's backing array is contiguous at offset 0. Null positions hold <c>default(T)</c>
+    /// in the backing data, so a zero-copy view is always value-correct; the null mask is computed
+    /// separately. Only sliced columns (offset &gt; 0) require a snapshot copy.
     /// </summary>
     static object[] SnapshotLeaves(FusedExpressionPlan plan)
     {
@@ -307,17 +326,11 @@ sealed class FusedExpressionEvaluator
 
     static T[] SnapshotLeaf<T>(NivaraColumn<T> column)
     {
-        var array = new T[column.Length];
-        if (column.TryGetSpan(out var span))
-        {
-            span.CopyTo(array);
-        }
-        else
-        {
-            for (int i = 0; i < column.Length; i++)
-                array[i] = column[i];
-        }
+        if (MemoryMarshal.TryGetArray(column.Storage.Data, out var segment) && segment.Array is not null && segment.Offset == 0)
+            return segment.Array;
 
+        var array = new T[column.Length];
+        column.AsSpan().CopyTo(array);
         return array;
     }
 
@@ -431,9 +444,12 @@ sealed class FusedExpressionEvaluator
 
     /// <summary>
     /// Builds a compiled <c>Action&lt;T1[], ..., TN[], R[]&gt;</c> delegate that runs the whole
-    /// expression over the leaf arrays in a single loop, writing into the result array.
+    /// expression over the leaf arrays in a single loop, writing into the result array, plus a
+    /// cached typed invocation wrapper (<c>Func&lt;object[], int, Array&gt;</c>) that casts the
+    /// leaf arrays and calls the concrete action directly (no per-evaluation
+    /// <see cref="Delegate.DynamicInvoke"/>).
     /// </summary>
-    static Delegate BuildCompiledDelegate(ColumnExpression expression, FusedExpressionPlan plan)
+    static Func<object[], int, Array> BuildCompiledDelegate(ColumnExpression expression, FusedExpressionPlan plan)
     {
         var leafIndex = new Dictionary<ColumnReference, int>(ReferenceEqualityComparer.Instance);
         for (int i = 0; i < plan.Columns.Count; i++)
@@ -457,7 +473,24 @@ sealed class FusedExpressionEvaluator
         var actionType = Expression.GetActionType(paramTypes);
         var body = Expression.Block(new[] { indexVar }, loopBody);
         var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam));
-        return lambda.Compile();
+        var typedAction = lambda.Compile();
+
+        var argsParam = Expression.Parameter(typeof(object[]), "args");
+        var lengthParam = Expression.Parameter(typeof(int), "length");
+        var destVar = Expression.Variable(plan.ResultType.MakeArrayType(), "dest");
+
+        var callArgs = new Expression[leafParams.Length + 1];
+        for (int i = 0; i < leafParams.Length; i++)
+            callArgs[i] = Expression.Convert(Expression.ArrayIndex(argsParam, Expression.Constant(i)), leafParams[i].Type);
+        callArgs[leafParams.Length] = destVar;
+
+        var wrapperBody = Expression.Block(
+            new[] { destVar },
+            Expression.Assign(destVar, Expression.NewArrayBounds(plan.ResultType, lengthParam)),
+            Expression.Invoke(Expression.Constant(typedAction), callArgs),
+            destVar);
+
+        return Expression.Lambda<Func<object[], int, Array>>(wrapperBody, argsParam, lengthParam).Compile();
     }
 
     /// <summary>

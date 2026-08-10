@@ -92,6 +92,12 @@ internal interface IColumnStorage<T> : IDisposable
     ReadOnlySpan<bool> NullMask { get; }
 
     /// <summary>
+    /// Gets the null mask as memory, or null when the storage has no mask.
+    /// Used by the fused span kernel to fuse the OR'd output mask in the same pass.
+    /// </summary>
+    internal ReadOnlyMemory<bool>? NullMaskMemory { get; }
+
+    /// <summary>
     /// Gets the element at the specified index
     /// </summary>
     /// <param name="index">The zero-based index of the element to get</param>
@@ -107,6 +113,15 @@ internal interface IColumnStorage<T> : IDisposable
     /// <returns>A new storage instance representing the slice</returns>
     /// <exception cref="ArgumentOutOfRangeException">Thrown when start or length are invalid</exception>
     IColumnStorage<T> Slice(int start, int length);
+
+    /// <summary>
+    /// Gets the underlying data memory for operations.
+    /// </summary>
+    /// <remarks>
+    /// A true zero-copy view over the backing array (offset 0 when not sliced). Used by the fused
+    /// evaluator to recover the backing <typeparamref name="T"/>[] for zero-copy leaf reads.
+    /// </remarks>
+    ReadOnlyMemory<T> Data { get; }
 
     /// <summary>
     /// Gets a read-only span over the underlying data.
