@@ -393,34 +393,9 @@ sealed class FusedExpressionEvaluator
             return NivaraColumn<string>.Create(array);
         }
 
-        return value switch
-        {
-            int intValue => FillConstant(intValue, length),
-            double doubleValue => FillConstant(doubleValue, length),
-            float floatValue => FillConstant(floatValue, length),
-            long longValue => FillConstant(longValue, length),
-            bool boolValue => FillConstant(boolValue, length),
-            decimal decimalValue => FillConstant(decimalValue, length),
-            byte byteValue => FillConstant(byteValue, length),
-            short shortValue => FillConstant(shortValue, length),
-            DateTime dateTimeValue => FillConstant(dateTimeValue, length),
-            _ => FillConstantObject(value, length)
-        };
-    }
-
-    static IColumn FillConstant<T>(T value, int length)
-        where T : struct
-    {
-        var array = new T[length];
-        Array.Fill(array, value);
-        return NivaraColumn<T>.Create(array);
-    }
-
-    static IColumn FillConstantObject(object value, int length)
-    {
-        var array = new object[length];
-        Array.Fill(array, value);
-        return NivaraColumn<object>.Create(array);
+        var constantValues = new object[length];
+        Array.Fill(constantValues, value);
+        return ColumnFactory.Create(value.GetType(), constantValues);
     }
 
     /// <summary>
