@@ -160,6 +160,88 @@ public class WindowFunctionsFrameTests
         Assert.That(result.GetColumn<string>("lag")[1], Is.EqualTo("a"));
     }
 
+    // ── Extended numeric domain (issue #158) ──
+
+    [Test]
+    public void RollingSum_HalfColumn_ProducesTypedColumn()
+    {
+        var frame = FrameWith(("v", NivaraColumn<Half>.Create(new Half[] { (Half)1, (Half)2, (Half)3 })));
+
+        var result = frame.RollingSum("v", "sum", 3);
+
+        var sum = result.GetColumn<Half>("sum");
+        Assert.That(sum[2], Is.EqualTo((Half)6));
+    }
+
+    [Test]
+    public void RollingMean_HalfColumn_ProducesDoubleColumn()
+    {
+        var frame = FrameWith(("v", NivaraColumn<Half>.Create(new Half[] { (Half)1, (Half)2, (Half)3 })));
+
+        var result = frame.RollingMean("v", "mean", 3);
+
+        var mean = result.GetColumn<double>("mean");
+        Assert.That(mean[2], Is.EqualTo(2.0).Within(1e-9));
+    }
+
+    [Test]
+    public void CumulativeSum_NIntColumn_ProducesTypedColumn()
+    {
+        var frame = FrameWith(("v", NivaraColumn<nint>.Create(new nint[] { 1, 2, 3 })));
+
+        var result = frame.CumulativeSum("v", "cum");
+
+        var cum = result.GetColumn<nint>("cum");
+        Assert.That(cum[2], Is.EqualTo((nint)6));
+    }
+
+    [Test]
+    public void CumulativeProduct_Int128Column_ProducesTypedColumn()
+    {
+        var frame = FrameWith(("v", NivaraColumn<Int128>.Create(new Int128[] { 1, 2, 3 })));
+
+        var result = frame.CumulativeProduct("v", "prod");
+
+        var prod = result.GetColumn<Int128>("prod");
+        Assert.That(prod[2], Is.EqualTo((Int128)6));
+    }
+
+    [Test]
+    public void CumulativeCount_HalfColumn_ProducesLongColumn()
+    {
+        var frame = FrameWith(("v", NivaraColumn<Half>.Create(new Half[] { (Half)1, (Half)2, (Half)3 })));
+
+        var result = frame.CumulativeCount("v", "n");
+
+        var n = result.GetColumn<long>("n");
+        Assert.That(n[2], Is.EqualTo(3L));
+    }
+
+    [Test]
+    public void Shift_HalfColumn_WithTypedFillValue_FillsBoundary()
+    {
+        var frame = FrameWith(("v", NivaraColumn<Half>.Create(new Half[] { (Half)1, (Half)2, (Half)3 })));
+
+        var result = frame.Shift("v", "lag", 1, fillValue: (Half)0);
+
+        var lag = result.GetColumn<Half>("lag");
+        Assert.That(lag.HasNulls, Is.False);
+        Assert.That(lag[0], Is.EqualTo((Half)0));
+        Assert.That(lag[1], Is.EqualTo((Half)1));
+    }
+
+    [Test]
+    public void Shift_Int128Column_WithStringFillValue_UsesTryParse()
+    {
+        var frame = FrameWith(("v", NivaraColumn<Int128>.Create(new Int128[] { 1, 2, 3 })));
+
+        var result = frame.Shift("v", "lag", 1, fillValue: "7");
+
+        var lag = result.GetColumn<Int128>("lag");
+        Assert.That(lag.HasNulls, Is.False);
+        Assert.That(lag[0], Is.EqualTo((Int128)7));
+    }
+
     // ── Validation ──
 
     [Test]

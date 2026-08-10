@@ -303,7 +303,7 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 
 - **Parquet round-trip**: nullable value type null preservation may degrade — investigate (high priority).
 - **Zero-copy Arrow arrays**: removed from the public API (claims-integrity triage, see CHANGELOG); real zero-copy returns with `ARROW-ROADMAP` Phase D (issue #94).
-- **Column creation dynamic dispatch**: improve coverage for less common CLR types.
+- ✓ **Column creation dynamic dispatch (#158)**: `ColumnFactory` (`src/Nivara/Helpers/ColumnFactory.cs`) centralizes dynamic column creation via cached `MakeGenericMethod` over null-safe kernels, covering the extended CLR domain (`Half`, `nint`/`nuint`, `Int128`/`UInt128`, `sbyte`/`ushort`/`uint`/`char`, `DateOnly`/`TimeOnly`, `DateTimeOffset`, `Guid`, `TimeSpan`). All four dispatch sites (aggregation/group-by result columns, join coalesce/gather, fused constant columns) route through it; window ops accept the full `INumber<T>` domain. Remaining gap: Parquet/Arrow/ML interop keeps format-specific type systems.
 - ✓ **Public zero-copy tensor view (#107)**: `NivaraColumn<T>.AsTensorView()` / `NivaraSeries<T>.AsTensorView()` are public — lazy `Tensor<T>` view over the backing array (throws on nulls / reference types, cached via `ColumnStorage<T>.AsTensor()`); callers treat it as read-only.
 - **Tensor interop**: investigate more efficient conversion patterns for large datasets (element-wise `Series`/`Frame` ↔ `Tensor<T>` interop still copies); `AsTensorView()` covers the flat, null-free column case.
 - **NivaraSeries TopKDescending**: added in Phase 3 on `NivaraSeries<T>` (not `NivaraFrame`), returns labeled results with null-propagating scores; threshold-based optimization not yet implemented.

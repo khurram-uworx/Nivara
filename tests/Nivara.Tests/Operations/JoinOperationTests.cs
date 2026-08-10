@@ -335,4 +335,94 @@ public class JoinOperationTests
             left.InnerJoin(right, "Id", ColumnDisambiguationStrategy.Error),
             "Should throw exception when column names conflict and error strategy is used");
     }
+
+    [Test]
+    public void FullOuterJoin_WithHalfKeyColumn_ProducesTypedCoalescedKey()
+    {
+        var left = NivaraFrame.Create(
+            ("Id", NivaraColumn<Half>.Create(new Half[] { (Half)1.5, (Half)2.5 })),
+            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B" }))
+        );
+
+        var right = NivaraFrame.Create(
+            ("Id", NivaraColumn<Half>.Create(new Half[] { (Half)2.5, (Half)3.5 })),
+            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "X", "Y" }))
+        );
+
+        var result = left.FullOuterJoin(right, "Id");
+
+        var ids = result.GetColumn("Id");
+        Assert.That(ids, Is.InstanceOf<NivaraColumn<Half>>(), "coalesced join key must stay typed");
+        Assert.That(ids.Length, Is.EqualTo(3));
+        var idValues = new[] { ids.GetValue(0), ids.GetValue(1), ids.GetValue(2) };
+        Assert.That(idValues, Contains.Item((Half)1.5));
+        Assert.That(idValues, Contains.Item((Half)2.5));
+        Assert.That(idValues, Contains.Item((Half)3.5));
+    }
+
+    [Test]
+    public void FullOuterJoin_WithNIntKeyColumn_ProducesTypedCoalescedKey()
+    {
+        var left = NivaraFrame.Create(
+            ("Id", NivaraColumn<nint>.Create(new nint[] { 1, 2 })),
+            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B" }))
+        );
+
+        var right = NivaraFrame.Create(
+            ("Id", NivaraColumn<nint>.Create(new nint[] { 2, 3 })),
+            ("Value", NivaraColumn<string>.CreateForReferenceType(new string[] { "X", "Y" }))
+        );
+
+        var result = left.FullOuterJoin(right, "Id");
+
+        var ids = result.GetColumn("Id");
+        Assert.That(ids, Is.InstanceOf<NivaraColumn<nint>>(), "coalesced join key must stay typed");
+        Assert.That(ids.Length, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void LeftJoin_WithUIntRightValueColumn_ProducesTypedGatheredColumn()
+    {
+        var left = NivaraFrame.Create(
+            ("Id", NivaraColumn<int>.Create(new int[] { 1, 2, 3 })),
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B", "C" }))
+        );
+
+        var right = NivaraFrame.Create(
+            ("Id", NivaraColumn<int>.Create(new int[] { 1, 3 })),
+            ("Score", NivaraColumn<uint>.Create(new uint[] { 10, 30 }))
+        );
+
+        var result = left.LeftJoin(right, "Id");
+
+        var scores = result.GetColumn("Score");
+        Assert.That(scores, Is.InstanceOf<NivaraColumn<uint>>(), "gathered column must stay typed");
+        Assert.That(scores.Length, Is.EqualTo(3));
+        Assert.That(scores.GetValue(0), Is.EqualTo(10u));
+        Assert.That(scores.IsNull(1), Is.True, "unmatched right value must be null");
+        Assert.That(scores.GetValue(2), Is.EqualTo(30u));
+    }
+
+    [Test]
+    public void LeftJoin_WithHalfRightValueColumn_ProducesTypedGatheredColumn()
+    {
+        var left = NivaraFrame.Create(
+            ("Id", NivaraColumn<int>.Create(new int[] { 1, 2, 3 })),
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new string[] { "A", "B", "C" }))
+        );
+
+        var right = NivaraFrame.Create(
+            ("Id", NivaraColumn<int>.Create(new int[] { 1, 3 })),
+            ("Score", NivaraColumn<Half>.Create(new Half[] { (Half)1.5, (Half)3.5 }))
+        );
+
+        var result = left.LeftJoin(right, "Id");
+
+        var scores = result.GetColumn("Score");
+        Assert.That(scores, Is.InstanceOf<NivaraColumn<Half>>(), "gathered column must stay typed");
+        Assert.That(scores.Length, Is.EqualTo(3));
+        Assert.That(scores.GetValue(0), Is.EqualTo((Half)1.5));
+        Assert.That(scores.IsNull(1), Is.True, "unmatched right value must be null");
+        Assert.That(scores.GetValue(2), Is.EqualTo((Half)3.5));
+    }
 }

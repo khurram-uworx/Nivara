@@ -463,4 +463,55 @@ public class FusedExpressionEvaluatorTests
                 Assert.That(actual.GetValue(i), Is.EqualTo(expected[i]!.Value), $"value at {i}");
         }
     }
+
+    [Test]
+    public void Evaluate_LitHalfConstant_ProducesTypedColumn()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Lit((Half)1.5f), input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<Half>>(), "literal column must stay typed");
+        AssertColumn(result, new Half?[] { (Half)1.5f, (Half)1.5f, (Half)1.5f });
+    }
+
+    [Test]
+    public void Evaluate_LitNIntConstant_ProducesTypedColumn()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Lit((nint)7), input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<nint>>(), "literal column must stay typed");
+        AssertColumn(result, new nint?[] { 7, 7 });
+    }
+
+    [Test]
+    public void Evaluate_LitUIntConstant_ProducesTypedColumn()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Lit(7u), input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<uint>>(), "literal column must stay typed");
+        AssertColumn(result, new uint?[] { 7u, 7u, 7u });
+    }
+
+    [Test]
+    public void Evaluate_LitDateOnlyConstant_ProducesTypedColumn()
+    {
+        var date = new DateOnly(2024, 5, 1);
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Lit(date), input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<DateOnly>>(), "literal column must stay typed");
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result.GetValue(0), Is.EqualTo(date));
+        Assert.That(result.GetValue(1), Is.EqualTo(date));
+    }
 }
