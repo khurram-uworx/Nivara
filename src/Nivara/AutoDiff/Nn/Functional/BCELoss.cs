@@ -3,16 +3,20 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
-public sealed class BCELoss<T> where T : struct, IFloatingPointIeee754<T>
+public sealed class BCELoss<T> : Loss<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly T eps;
 
-    public BCELoss(double eps = 1e-7)
+    public BCELoss(Reduction reduction = Reduction.Mean, double eps = 1e-7)
+        : base(reduction)
     {
         this.eps = T.CreateChecked(eps);
     }
 
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> predictions, ReverseGradTensor<T> targets)
+    public override ReverseGradTensor<T> Forward(
+        ReverseGradTensor<T> predictions,
+        ReverseGradTensor<T> targets,
+        Reduction reduction)
     {
         if (predictions == null) throw new ArgumentNullException(nameof(predictions));
         if (targets == null) throw new ArgumentNullException(nameof(targets));
@@ -25,6 +29,6 @@ public sealed class BCELoss<T> where T : struct, IFloatingPointIeee754<T>
         var loss = ReverseGradOperations.Negate(ReverseGradOperations.Add(
             ReverseGradOperations.Multiply(targets, logPred),
             ReverseGradOperations.Multiply(ReverseGradOperations.Subtract(one, targets), log1mPred)));
-        return ReverseGradOperations.Sum(loss);
+        return Reduce(loss, reduction);
     }
 }
