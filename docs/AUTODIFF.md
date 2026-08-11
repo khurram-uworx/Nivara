@@ -64,7 +64,7 @@ OpNode<T>                             ← One operation node in the graph
 ├── SavedValues                       ← Dictionary of saved forward values
 └── Apply(gradOutput)                 ← Invokes the backward function
 
-ComputationGraph                      ← Graph traversal engine
+ComputationGraph                      ← Graph traversal engine (internal)
 ├── AddNode(output, opNode)           ← Attaches GradFn to output tensor
 ├── Backward(tensor, gradient)        ← Topological sort + reverse traversal
 ├── TopologicalSort(root)             ← DFS with cycle detection
@@ -262,7 +262,9 @@ The `BackwardFunction` closure captures references to input tensors and any save
 
 ### ComputationGraph
 
-Static graph traversal engine:
+Internal graph traversal engine (not public API). Public graph inspection is
+exposed through `GradientUtils`: `ZeroGrad`, `GetGraphInfo`, `PrintGraphSummary`,
+`DescribeTensor`.
 
 | Method | Description |
 |--------|-------------|
@@ -799,15 +801,17 @@ Vocabulary builder with special tokens (`<PAD>`, `<UNK>`, `<BOS>`, `<EOS>`).
 
 | Class | Formula | Use |
 |-------|---------|-----|
-| `KaimingUniform` | `U(-√(6/fanIn), √(6/fanIn))` | ReLU layers |
-| `KaimingNormal` | `N(0, √(2/fanIn))` | ReLU layers |
-| `XavierUniform` | `U(-√(6/(fanIn+fanOut)), √(6/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
-| `XavierNormal` | `N(0, √(2/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
-| `Uniform(bound)` | `U(-bound, bound)` | Generic |
-| `Normal(mean, std)` | `N(mean, std)` | Generic |
-| `PyTorchDefault` | `U(-1/√(fanIn), 1/√(fanIn))` | PyTorch-compatible default init |
+| `KaimingUniformInitializer<T>` | `U(-√(6/fanIn), √(6/fanIn))` | ReLU layers |
+| `KaimingNormalInitializer<T>` | `N(0, √(2/fanIn))` | ReLU layers |
+| `XavierUniformInitializer<T>` | `U(-√(6/(fanIn+fanOut)), √(6/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
+| `XavierNormalInitializer<T>` | `N(0, √(2/(fanIn+fanOut)))` | Tanh/Sigmoid layers |
+| `UniformInitializer<T>` | `U(-bound, bound)` | Generic |
+| `NormalInitializer<T>` | `N(mean, std)` | Generic |
+| `PyTorchDefaultInitializer<T>` | `U(-1/√(fanIn), 1/√(fanIn))` | PyTorch-compatible default init |
 
-Call `KaimingUniform.Init(model.Parameters())` or individual parameter init after construction.
+Each implements `IInitializer<T>` with `Initialize(Parameter<T>)`. Pass an instance to a
+module constructor (`weightInitializer:`, `biasInitializer:`), or call
+`initializer.Initialize(parameter)` directly after construction.
 
 ### Example
 
@@ -1239,11 +1243,7 @@ NivaraAutoGradExtensions.GetSupportedAutoGradTypes();  // [typeof(float), typeof
 | Exception | Context | Key Properties |
 |-----------|---------|----------------|
 | `AutoGradException` | Base class for all autograd errors | `OperationContext`, `InvolvedShapes`, `GetDetailedContext()` |
-| `TypeValidationException` | Unsupported numeric type | `ExpectedType`, `ActualType` |
 | `ShapeIncompatibilityException` | Shape mismatch in operations | `ExpectedShape`, `ActualShape` |
-| `CircularDependencyException` | Cycle detected in computation graph | `CycleOperationNames` |
-| `InvalidBackwardCallException` | Backward called on invalid tensor | `TensorShape`, `RequiresGrad` |
-| `GradientComputationException` | Backward pass failure | `FailedOperation`, `FailingNodeInputCount` |
 
 ---
 
@@ -1442,7 +1442,7 @@ result.PrintSummary();
 
 ```csharp
 var loss = ...; // from a computation graph
-var info = ComputationGraph.GetGraphInfo(loss);
+var info = GradientUtils.GetGraphInfo(loss);
 // { TotalNodes: 4, IsLeaf: false, RequiresGrad: true,
 //   OperationCounts: { Multiply: 1, Add: 1, Relu: 1, Mean: 1 } }
 
@@ -1546,7 +1546,7 @@ var prediction = loaded.Forward(testInput);
 | `ReverseGradTensor<T>` | `src/Nivara/AutoDiff/ReverseGradTensor.cs` |
 | `ForwardGradTensor<T>` | `src/Nivara/AutoDiff/ForwardGradTensor.cs` |
 | `OpNode<T>` | `src/Nivara/AutoDiff/OpNode.cs` |
-| `ComputationGraph` | `src/Nivara/AutoDiff/ComputationGraph.cs` |
+| `ComputationGraph` | `src/Nivara/AutoDiff/ComputationGraph.cs` (internal) |
 | `ReverseGradOperations` (all ops) | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` |
 | `ForwardGradOperations` (JVP ops) | `src/Nivara/AutoDiff/Operations/ForwardGradOperations.cs` |
 | `AutoDiffDiagnostics` | `src/Nivara/AutoDiff/AutoDiffDiagnostics.cs` |
@@ -1582,7 +1582,7 @@ var prediction = loaded.Forward(testInput);
 | `MultiheadAttention<T>` | `src/Nivara/AutoDiff/Nn/MultiheadAttention.cs` |
 | `Sampler<T>` | `src/Nivara/AutoDiff/Nn/Sampler.cs` |
 | `TextTokenizer` | `src/Nivara/AutoDiff/Nn/TextTokenizer.cs` |
-| Initializers (7) | `src/Nivara/AutoDiff/Nn/Initializers/*.cs` |
+| Initializers (8) | `src/Nivara/AutoDiff/Nn/Initializers/*.cs` |
 | Loss functions (7) | `src/Nivara/AutoDiff/Nn/Functional/*.cs` |
 | `Optimizer<T>` base | `src/Nivara/AutoDiff/Optimizer/Optimizer.cs` |
 | `SGD<T>` | `src/Nivara/AutoDiff/Optimizer/SGD.cs` |
