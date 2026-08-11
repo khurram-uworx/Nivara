@@ -128,8 +128,8 @@ public class ConvInferenceTests
     public void Conv2d_Forward_OutsideGrad_WithBias_AppliesBiasValues()
     {
         using var conv = new Conv2d<float>(1, 1, kernelSize: 1, padding: 0, bias: true);
-        conv.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(new float[] { 5f }, requiresGrad: true);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(new float[] { 1f }, 1, 1, requiresGrad: true);
+        conv.Bias!.Tensor = ReverseGradTensor<float>.FromArray(new float[] { 5f }, requiresGrad: true);
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(new float[] { 1f }, 1, 1, requiresGrad: true);
 
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 3f }),

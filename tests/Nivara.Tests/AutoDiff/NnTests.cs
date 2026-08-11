@@ -81,12 +81,12 @@ public class NnTests
     {
         using var linear = new Linear<float>(5, 2, bias: true);
 
-        Assert.That(linear.Weight.Shape, Is.EqualTo(new[] { 2, 5 }));
+        Assert.That(linear.Weight!.Tensor.Shape, Is.EqualTo(new[] { 2, 5 }));
         Assert.That(linear.InFeatures, Is.EqualTo(5));
         Assert.That(linear.OutFeatures, Is.EqualTo(2));
 
         Assert.That(linear.Bias, Is.Not.Null);
-        Assert.That(linear.Bias!.Shape, Is.EqualTo(new[] { 1, 2 }));
+        Assert.That(linear.Bias!.Tensor.Shape, Is.EqualTo(new[] { 1, 2 }));
     }
 
     [Test]
@@ -274,7 +274,7 @@ public class NnTests
     public void Linear_WeightProperty_HasRequiresGradTrue()
     {
         using var linear = new Linear<float>(3, 2);
-        Assert.That(linear.Weight.RequiresGrad, Is.True);
+        Assert.That(linear.Weight!.Tensor.RequiresGrad, Is.True);
     }
 
     [Test]
@@ -337,7 +337,7 @@ public class NnTests
     public void Linear_DefaultInit_MatchesCurrentBehavior()
     {
         using var linear = new Linear<float>(4, 3);
-        var w = linear.Weight;
+        var w = linear.Weight!.Tensor;
 
         Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
         Assert.That(w.RequiresGrad, Is.True);
@@ -351,7 +351,7 @@ public class NnTests
         using var linear = new Linear<float>(4, 3, bias: false,
             weightInitializer: XavierUniformInitializer<float>.Instance);
 
-        var w = linear.Weight;
+        var w = linear.Weight!.Tensor;
         Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
         for (int i = 0; i < w.Length; i++)
             Assert.That(float.IsNaN(w[i]) || float.IsInfinity(w[i]), Is.False);
@@ -365,10 +365,10 @@ public class NnTests
             biasInitializer: new UniformInitializer<float>(-0.1f, 0.1f));
 
         Assert.That(linear.Bias, Is.Not.Null);
-        for (int i = 0; i < linear.Bias!.Length; i++)
+        for (int i = 0; i < linear.Bias!.Tensor.Length; i++)
         {
-            Assert.That(float.IsNaN(linear.Bias[i]) || float.IsInfinity(linear.Bias[i]), Is.False);
-            Assert.That(linear.Bias[i], Is.InRange(-0.1f, 0.1f));
+            Assert.That(float.IsNaN(linear.Bias!.Tensor[i]) || float.IsInfinity(linear.Bias!.Tensor[i]), Is.False);
+            Assert.That(linear.Bias!.Tensor[i], Is.InRange(-0.1f, 0.1f));
         }
     }
 
@@ -379,8 +379,8 @@ public class NnTests
             weightInitializer: null,
             biasInitializer: null);
 
-        for (int i = 0; i < linear.Bias!.Length; i++)
-            Assert.That(linear.Bias[i], Is.EqualTo(0f));
+        for (int i = 0; i < linear.Bias!.Tensor.Length; i++)
+            Assert.That(linear.Bias!.Tensor[i], Is.EqualTo(0f));
     }
 
     [Test]
@@ -388,7 +388,7 @@ public class NnTests
     {
         using var linear = new Linear<float>(4, 3,
             weightInitializer: KaimingUniformInitializer<float>.Instance);
-        var w = linear.Weight;
+        var w = linear.Weight!.Tensor;
 
         Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
         for (int i = 0; i < w.Length; i++)
@@ -400,7 +400,7 @@ public class NnTests
     {
         using var linear = new Linear<float>(4, 3,
             weightInitializer: XavierUniformInitializer<float>.Instance);
-        var w = linear.Weight;
+        var w = linear.Weight!.Tensor;
 
         Assert.That(w.Shape, Is.EqualTo(new[] { 3, 4 }));
         for (int i = 0; i < w.Length; i++)
@@ -488,13 +488,13 @@ public class NnTests
     public void Linear_Dispose_DisposesOwnedParameters()
     {
         var linear = new Linear<float>(2, 3, bias: true);
-        var weight = linear.Weight;
-        var bias = linear.Bias;
+        var weight = linear.Weight!.Tensor;
+        var bias = linear.Bias!.Tensor;
 
         linear.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => _ = weight.Length);
-        Assert.Throws<ObjectDisposedException>(() => _ = bias!.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = bias.Length);
         Assert.DoesNotThrow(() => linear.Dispose());
     }
 
@@ -503,14 +503,14 @@ public class NnTests
     {
         var first = new Linear<float>(3, 4);
         var second = new Linear<float>(4, 2);
-        var firstWeight = first.Weight;
-        var secondBias = second.Bias;
+        var firstWeight = first.Weight!.Tensor;
+        var secondBias = second.Bias!.Tensor;
         var seq = new Sequential<float>(first, second);
 
         seq.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => _ = firstWeight.Length);
-        Assert.Throws<ObjectDisposedException>(() => _ = secondBias!.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = secondBias.Length);
         Assert.DoesNotThrow(() => seq.Dispose());
     }
 
@@ -1510,7 +1510,7 @@ public class NnTests
 
         result.Backward(gradTensor);
 
-        var weightGrad = emb.Weight.Grad;
+        var weightGrad = emb.Weight!.Tensor.Grad;
         Assert.That(weightGrad, Is.Not.Null, "Weight should have gradients");
 
         for (int d = 0; d < 4; d++)
@@ -1597,7 +1597,7 @@ public class NnTests
     public void SparseEmbedding_Forward_SumsRowsPerBatch()
     {
         using var emb = new SparseEmbedding<float>(5, 3);
-        emb.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(
+        emb.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(
             [
                 1f, 2f, 3f,
                 4f, 5f, 6f,
@@ -1635,7 +1635,7 @@ public class NnTests
         grad.Reshape(2, 2);
         result.Backward(grad);
 
-        var weightGrad = emb.Weight.Grad;
+        var weightGrad = emb.Weight!.Tensor.Grad;
         Assert.That(weightGrad, Is.Not.Null);
         Assert.That(weightGrad![0], Is.EqualTo(0f).Within(1e-6f));
         Assert.That(weightGrad[1], Is.EqualTo(0f).Within(1e-6f));
@@ -1749,8 +1749,8 @@ public class NnTests
     public void Conv2d_Forward_WithBias_AddsBias()
     {
         using var conv = new Conv2d<float>(1, 1, kernelSize: 1, bias: true);
-        conv.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(new float[] { 5f }, requiresGrad: true);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(new float[] { 1f }, 1, 1, requiresGrad: true);
+        conv.Bias!.Tensor = ReverseGradTensor<float>.FromArray(new float[] { 5f }, requiresGrad: true);
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(new float[] { 1f }, 1, 1, requiresGrad: true);
 
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 3f }),
@@ -1784,13 +1784,13 @@ public class NnTests
         Assert.That(input.Grad, Is.Not.Null);
         Assert.That(input.Grad!.Length, Is.EqualTo(32));
 
-        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(conv.WeightParam.Tensor.Grad!.Length, Is.EqualTo(3 * 2 * 3 * 3));
+        Assert.That(conv.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Weight!.Tensor.Grad!.Length, Is.EqualTo(3 * 2 * 3 * 3));
 
-        if (conv.BiasParam != null)
+        if (conv.Bias != null)
         {
-            Assert.That(conv.BiasParam.Tensor.Grad, Is.Not.Null);
-            Assert.That(conv.BiasParam.Tensor.Grad!.Length, Is.EqualTo(3));
+            Assert.That(conv.Bias!.Tensor.Grad, Is.Not.Null);
+            Assert.That(conv.Bias!.Tensor.Grad!.Length, Is.EqualTo(3));
         }
     }
 
@@ -1813,14 +1813,14 @@ public class NnTests
         output.Backward(gradOutput);
 
         Assert.That(input.Grad, Is.Not.Null);
-        Assert.That(conv.BiasParam, Is.Null);
+        Assert.That(conv.Bias, Is.Null);
     }
 
     [Test]
     public void Conv2d_KernelSize1_MatchesLinearPerSample()
     {
         using var conv = new Conv2d<float>(2, 3, kernelSize: 1);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(
             [1f, 2f, 3f, 4f, 5f, 6f],
             3, 2, requiresGrad: true);
 
@@ -1841,8 +1841,8 @@ public class NnTests
     public void Conv2d_Dispose_DisposesParameters()
     {
         var conv = new Conv2d<float>(2, 3, kernelSize: 3);
-        var weight = conv.WeightParam;
-        var bias = conv.BiasParam;
+        var weight = conv.Weight;
+        var bias = conv.Bias;
 
         conv.Dispose();
 
@@ -1915,13 +1915,13 @@ public class NnTests
         Assert.That(input.Grad, Is.Not.Null);
         Assert.That(input.Grad!.Length, Is.EqualTo(48));
 
-        Assert.That(convT.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(convT.WeightParam.Tensor.Grad!.Length, Is.EqualTo(3 * 2 * 3 * 3));
+        Assert.That(convT.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(convT.Weight!.Tensor.Grad!.Length, Is.EqualTo(3 * 2 * 3 * 3));
 
-        if (convT.BiasParam != null)
+        if (convT.Bias != null)
         {
-            Assert.That(convT.BiasParam.Tensor.Grad, Is.Not.Null);
-            Assert.That(convT.BiasParam.Tensor.Grad!.Length, Is.EqualTo(2));
+            Assert.That(convT.Bias!.Tensor.Grad, Is.Not.Null);
+            Assert.That(convT.Bias!.Tensor.Grad!.Length, Is.EqualTo(2));
         }
     }
 
@@ -1929,8 +1929,8 @@ public class NnTests
     public void ConvTranspose2d_Forward_WithBias_AddsBias()
     {
         using var convT = new ConvTranspose2d<float>(1, 1, kernelSize: 1, bias: true);
-        convT.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(new float[] { 10f }, requiresGrad: true);
-        convT.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(new float[] { 2f }, 1, 1, requiresGrad: true);
+        convT.Bias!.Tensor = ReverseGradTensor<float>.FromArray(new float[] { 10f }, requiresGrad: true);
+        convT.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(new float[] { 2f }, 1, 1, requiresGrad: true);
 
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 3f }),
@@ -1946,8 +1946,8 @@ public class NnTests
     public void ConvTranspose2d_Dispose_DisposesParameters()
     {
         var convT = new ConvTranspose2d<float>(2, 3, kernelSize: 3);
-        var weight = convT.WeightParam;
-        var bias = convT.BiasParam;
+        var weight = convT.Weight;
+        var bias = convT.Bias;
 
         convT.Dispose();
 
@@ -2164,8 +2164,8 @@ public class NnTests
 
         Assert.That(input.Grad, Is.Not.Null);
         Assert.That(input.Grad!.Length, Is.EqualTo(128));
-        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(conv.WeightParam.Tensor.Grad!.Length, Is.EqualTo(4 * 2 * 3 * 3));
+        Assert.That(conv.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Weight!.Tensor.Grad!.Length, Is.EqualTo(4 * 2 * 3 * 3));
     }
 
     [Test]
@@ -2191,8 +2191,8 @@ public class NnTests
 
         Assert.That(input.Grad, Is.Not.Null);
         Assert.That(input.Grad!.Length, Is.EqualTo(4 * 3 * 16 * 16));
-        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(conv.WeightParam.Tensor.Grad!.Length, Is.EqualTo(8 * 3 * 3 * 3));
+        Assert.That(conv.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Weight!.Tensor.Grad!.Length, Is.EqualTo(8 * 3 * 3 * 3));
     }
 
     [Test]
@@ -2218,8 +2218,8 @@ public class NnTests
 
         Assert.That(input.Grad, Is.Not.Null);
         Assert.That(input.Grad!.Length, Is.EqualTo(64));
-        Assert.That(convT.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(convT.WeightParam.Tensor.Grad!.Length, Is.EqualTo(4 * 2 * 3 * 3));
+        Assert.That(convT.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(convT.Weight!.Tensor.Grad!.Length, Is.EqualTo(4 * 2 * 3 * 3));
     }
 
     [Test]
@@ -2521,7 +2521,7 @@ public class NnTests
     {
         using var conv = new Conv2d<float>(1, 1, kernelSize: 3, stride: 2,
             paddingTop: 1, paddingBottom: 0, paddingLeft: 1, paddingRight: 0, bias: false);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(
             new float[9].Select(_ => 1f).ToArray(), 1, 9, requiresGrad: false);
 
         var input = new ReverseGradTensor<float>(
@@ -2560,10 +2560,10 @@ public class NnTests
 
         Assert.That(input.Grad, Is.Not.Null);
         Assert.That(input.Grad!.Length, Is.EqualTo(1 * 2 * 7 * 7));
-        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(conv.WeightParam.Tensor.Grad!.Length, Is.EqualTo(3 * 2 * 3 * 3));
-        Assert.That(conv.BiasParam!.Tensor.Grad, Is.Not.Null);
-        Assert.That(conv.BiasParam.Tensor.Grad!.Length, Is.EqualTo(3));
+        Assert.That(conv.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Weight!.Tensor.Grad!.Length, Is.EqualTo(3 * 2 * 3 * 3));
+        Assert.That(conv.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Bias!.Tensor.Grad!.Length, Is.EqualTo(3));
         for (int i = 0; i < input.Grad.Length; i++)
             Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
     }
@@ -2590,7 +2590,7 @@ public class NnTests
 
         Assert.That(input.Grad, Is.Not.Null);
         Assert.That(input.Grad!.Length, Is.EqualTo(1 * 4 * 8 * 8));
-        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Weight!.Tensor.Grad, Is.Not.Null);
         for (int i = 0; i < input.Grad.Length; i++)
             Assert.That(float.IsNaN(input.Grad[i]) || float.IsInfinity(input.Grad[i]), Is.False);
     }
@@ -3367,8 +3367,8 @@ public class NnTests
         output.Backward(gradOutput);
 
         Assert.That(input.Grad, Is.Not.Null);
-        Assert.That(conv.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(conv.BiasParam!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(conv.Bias!.Tensor.Grad, Is.Not.Null);
     }
 
     [Test]
@@ -3386,7 +3386,7 @@ public class NnTests
 
         output.Backward(gradOutput);
 
-        Assert.That(conv.BiasParam, Is.Null);
+        Assert.That(conv.Bias, Is.Null);
         Assert.That(input.Grad, Is.Not.Null);
     }
 
@@ -3409,7 +3409,7 @@ public class NnTests
         output.Data.CopyTo(outVals, default(float)!);
 
         float[] weightData = new float[outC * inC];
-        conv.WeightParam.Tensor.Data.CopyTo(weightData, default(float)!);
+        conv.Weight!.Tensor.Data.CopyTo(weightData, default(float)!);
 
         for (int pos = 0; pos < len; pos++)
         {
@@ -3429,7 +3429,7 @@ public class NnTests
         var conv = new Conv1d<float>(inChannels: 3, outChannels: 8, kernelSize: 3);
         conv.Dispose();
 
-        Assert.Throws<ObjectDisposedException>(() => _ = conv.WeightParam.Tensor.Length);
+        Assert.Throws<ObjectDisposedException>(() => _ = conv.Weight!.Tensor.Length);
     }
 
     [Test]

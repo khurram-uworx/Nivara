@@ -23,7 +23,7 @@ public class EmbeddingTests
         var expected = TestHelpers.LoadBin("emb_single_output.bin");
 
         using var emb = new Embedding<float>(100, 16);
-        emb.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 100, 16, requiresGrad: false);
+        emb.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 100, 16, requiresGrad: false);
 
         var inputTensor = ReverseGradTensor<float>.FromArray(new float[] { 42 }, requiresGrad: false);
 
@@ -40,7 +40,7 @@ public class EmbeddingTests
         var expected = TestHelpers.LoadBin("emb_batch_output.bin");
 
         using var emb = new Embedding<float>(100, 16);
-        emb.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 100, 16, requiresGrad: false);
+        emb.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 100, 16, requiresGrad: false);
 
         var inputTensor = ReverseGradTensor<float>.FromArray(new float[] { 0, 13, 42, 99 }, requiresGrad: false);
 
@@ -66,8 +66,8 @@ public class EmbeddingTests
 
         output.Backward(gradOutput);
 
-        Assert.That(emb.Weight.Grad, Is.Not.Null, "Embedding weight should have gradients after backward");
-        var weightGrad = emb.Weight.Grad!;
+        Assert.That(emb.Weight!.Tensor.Grad, Is.Not.Null, "Embedding weight should have gradients after backward");
+        var weightGrad = emb.Weight!.Tensor.Grad!;
         Assert.That(weightGrad.Length, Is.EqualTo(50 * 8));
 
         Assert.That(weightGrad[5 * 8], Is.EqualTo(1f),
@@ -107,8 +107,8 @@ public class EmbeddingTests
 
         output.Backward(gradOutput);
 
-        Assert.That(emb.Weight.Grad, Is.Not.Null);
-        var weightGrad = emb.Weight.Grad!;
+        Assert.That(emb.Weight!.Tensor.Grad, Is.Not.Null);
+        var weightGrad = emb.Weight!.Tensor.Grad!;
 
         for (int i = 0; i < 20; i++)
         {

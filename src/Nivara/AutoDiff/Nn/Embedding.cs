@@ -12,8 +12,7 @@ public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIee
 
     public int NumEmbeddings => numEmbeddings;
     public int EmbeddingDim => embeddingDim;
-    public ReverseGradTensor<T> Weight => weight.Tensor;
-    public Parameter<T> WeightParam => weight;
+    public Parameter<T>? Weight => weight;
 
     public Embedding(int numEmbeddings, int embeddingDim)
     {

@@ -97,7 +97,7 @@ public class MicroGptModel<T> : IDisposable where T : struct, IFloatingPointIeee
         var lin = new Linear<T>(inF, outF, bias: false,
             weightInitializer: new Nivara.AutoDiff.Nn.Initializers.NormalInitializer<T>(
                 T.Zero, T.CreateChecked(std)));
-        allParams.Add(lin.WeightParam);
+        allParams.Add(lin.Weight!);
         return lin;
     }
 
@@ -199,7 +199,7 @@ public class MicroGptModel<T> : IDisposable where T : struct, IFloatingPointIeee
         else
         {
             // Weight tying: reuse token embedding weight transposed
-            var wteWeight = wte.Weight;
+            var wteWeight = wte.Weight!.Tensor;
             var wteT = ReverseGradOperations.Transpose(wteWeight);     // [nEmbd, vocabSize]
             return ReverseGradOperations.MatMul(x, wteT);              // [1, vocabSize]
         }

@@ -449,6 +449,13 @@ To use nullable DataFrame columns with AutoDiff, resolve nulls at the boundary f
 
 ## Module System (Nn)
 
+All leaf modules that own learnable weights expose them through a **single uniform
+contract**: `Weight` / `Bias` of type `Parameter<T>?`, where `null` means the
+parameter was omitted (`bias: false` / `affine: false`). There are no
+`WeightParam` / `BiasParam` accessors and no tensor-typed `Weight` members;
+consumers reach the underlying tensor via `Weight!.Tensor` / `Bias!.Tensor`.
+This matches PyTorch's `module.weight` / `module.bias` mental model.
+
 ### Parameter\<T\>
 
 ```csharp
@@ -518,7 +525,7 @@ public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIee
 Lookup embedding: token IDs → dense vectors. Weight matrix shape `[numEmbeddings, embeddingDim]`, initialized with `Normal(0, 0.02)`.
 
 - `Forward(tokenIds)` — single token or batched input; uses a zero-copy `Gather` (replaces the old one-hot + MatMul path)
-- `Weight` / `WeightParam` — exposed for direct access
+- `Weight` — `Parameter<T>?` accessor; tensor via `Weight!.Tensor`
 
 ### SparseEmbedding\<T\>
 

@@ -25,8 +25,8 @@ public class Conv2dTests
         var expected = TestHelpers.LoadBin("conv2d_3x3_s1_p1_output.bin");
 
         using var conv = new Conv2d<float>(3, 16, kernelSize: 3, stride: 1, padding: 1, bias: true, groups: 1);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 16, 27, requiresGrad: false);
-        conv.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 16, 27, requiresGrad: false);
+        conv.Bias!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
 
         var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: false);
         inputTensor.Reshape(1, 3, 7, 7);
@@ -46,8 +46,8 @@ public class Conv2dTests
         var expected = TestHelpers.LoadBin("conv2d_1x1_s1_p0_output.bin");
 
         using var conv = new Conv2d<float>(3, 32, kernelSize: 1, stride: 1, padding: 0, bias: true, groups: 1);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 32, 3, requiresGrad: false);
-        conv.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 32, 3, requiresGrad: false);
+        conv.Bias!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
 
         var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: false);
         inputTensor.Reshape(1, 3, 7, 7);
@@ -67,8 +67,8 @@ public class Conv2dTests
         var expected = TestHelpers.LoadBin("conv2d_depthwise_output.bin");
 
         using var conv = new Conv2d<float>(16, 16, kernelSize: 3, stride: 1, padding: 1, bias: true, groups: 16);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 16, 9, requiresGrad: false);
-        conv.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 16, 9, requiresGrad: false);
+        conv.Bias!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
 
         var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: false);
         inputTensor.Reshape(1, 16, 5, 5);
@@ -88,8 +88,8 @@ public class Conv2dTests
         var expected = TestHelpers.LoadBin("conv2d_stride2_output.bin");
 
         using var conv = new Conv2d<float>(3, 32, kernelSize: 3, stride: 2, padding: 1, bias: true, groups: 1);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 32, 27, requiresGrad: false);
-        conv.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 32, 27, requiresGrad: false);
+        conv.Bias!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
 
         var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: false);
         inputTensor.Reshape(1, 3, 14, 14);
@@ -109,8 +109,8 @@ public class Conv2dTests
         var expected = TestHelpers.LoadBin("conv2d_with_bias_output.bin");
 
         using var conv = new Conv2d<float>(3, 8, kernelSize: 3, stride: 1, padding: 1, bias: true, groups: 1);
-        conv.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 8, 27, requiresGrad: false);
-        conv.BiasParam!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
+        conv.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(weight, 8, 27, requiresGrad: false);
+        conv.Bias!.Tensor = ReverseGradTensor<float>.FromArray(bias, requiresGrad: false);
 
         var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: false);
         inputTensor.Reshape(1, 3, 4, 4);

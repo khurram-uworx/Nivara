@@ -85,7 +85,7 @@ public sealed class BatchedTransformer<T> : Module<T> where T : struct, IFloatin
         x = finalNorm.Forward(x);                           // [B, L, D]
         x.Reshape(batch * length, nEmbd);                   // [B*L, D]
 
-        var wteT = ReverseGradOperations.Transpose(tokenEmb.Weight); // [D, V]
+        var wteT = ReverseGradOperations.Transpose(tokenEmb.Weight!.Tensor); // [D, V]
         return ReverseGradOperations.MatMul(x, wteT);               // [B*L, V]
     }
 
