@@ -89,7 +89,7 @@ public sealed class NivaraGptModel<T> : Module<T> where T : struct, IFloatingPoi
 
         if (weightTying)
         {
-            var wteWeight = tokenEmb.Weight;
+            var wteWeight = tokenEmb.Weight!.Tensor;
             var wteT = ReverseGradOperations.Transpose(wteWeight);
             return ReverseGradOperations.MatMul(x, wteT);
         }
