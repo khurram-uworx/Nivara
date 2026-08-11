@@ -101,21 +101,21 @@ NivaraChess). These sites get an explicit `Reduction.Sum` to preserve current nu
 
 ## Execution steps (one commit per logical unit)
 
-1. `docs: plan #180 loss API unification in TODO.md` — this file.
-2. `feat(autodiff): add Reduction enum and Loss<T> base` — `Reduction.cs`, `Loss.cs`.
-3. `feat(autodiff): rewrite losses onto Loss<T> base with Reduction support` — 5 loss files.
-4. `feat(autodiff): add Activation.Softmax/LogSoftmax wrappers; remove Functional Softmax classes`.
-5. `test(autodiff): update loss tests to Reduction enum` — LossTests/NnTests/TrainingTests/
+1. [x] `docs: plan #180 loss API unification in TODO.md` — this file.
+2. [x] `feat(autodiff): add Reduction enum and Loss<T> base` — `Reduction.cs`, `Loss.cs`.
+3. [x] `feat(autodiff): rewrite losses onto Loss<T> base with Reduction support` — 5 loss files.
+4. [x] `feat(autodiff): add Activation.Softmax/LogSoftmax wrappers; remove Functional Softmax classes`.
+5. [x] `test(autodiff): update loss tests to Reduction enum` — LossTests/NnTests/TrainingTests/
    DataParallelTests/SerializationTests/DistilBert tests; add `Reduction.None` + polymorphic
    `Loss<T>` tests.
-6. `test(autodiff): NivaraTorch loss parity with Reduction.None` — gen_reference.py fixtures
+6. [x] `test(autodiff): NivaraTorch loss parity with Reduction.None` — gen_reference.py fixtures
    (reduction='none' for MSE/L1/BCEWithLogits/CrossEntropy) + NivaraTorch/LossTests.cs.
-7. `refactor: update samples to Reduction-based loss API` — all sample call sites + EXAMPLES.md.
-8. `docs: update loss documentation for Reduction API` — AUTODIFF.md, REVIEW.md, CHANGELOG,
+7. [x] `refactor: update samples to Reduction-based loss API` — all sample call sites + EXAMPLES.md.
+8. [x] `docs: update loss documentation for Reduction API` — AUTODIFF.md, REVIEW.md, CHANGELOG,
    AGENTS.md, sample READMEs, GETTING-STARTED stale `CrossEntropyLoss<float>.Compute`.
-9. Verify: `dotnet build Nivara.slnx` (no test run without asking). Then, with human
+9. [ ] Verify: `dotnet build Nivara.slnx` (no test run without asking). Then, with human
    confirmation, run AutoDiff + NivaraTorch test suites.
-10. Review `docs/TODO.md`, remove it, offer push + PR.
+10. [ ] Review `docs/TODO.md`, remove it, offer push + PR.
 
 ## Verification
 
