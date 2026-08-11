@@ -23,8 +23,8 @@ public class LinearInferenceTests
             new float[] { 0.5f, -1.0f, 2.0f, 3.0f, 1.5f, 2.5f, -0.5f, 0.25f }, rows: 2, cols: 4, requiresGrad: false);
 
         // Reference: old path MatMul(input, Transpose(w)) + bias
-        var w = linear.Weight;
-        var b = linear.Bias!;
+        var w = linear.Weight!.Tensor;
+        var b = linear.Bias!.Tensor;
         var matMul = ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(w));
         var expected = ReverseGradOperations.AddBias(matMul, b);
 
@@ -46,7 +46,7 @@ public class LinearInferenceTests
         var input = ReverseGradTensor<float>.FromMatrix(
             new float[] { 0.5f, -1.0f, 2.0f, 3.0f, 1.5f, 2.5f, -0.5f, 0.25f }, rows: 2, cols: 4, requiresGrad: false);
 
-        var w = linear.Weight;
+        var w = linear.Weight!.Tensor;
         var expected = ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(w));
 
         // Act
@@ -69,9 +69,9 @@ public class LinearInferenceTests
         ReverseGradTensor<float> expected;
         using (GradientUtils.Grad())
         {
-            var w = linear.Weight;
+            var w = linear.Weight!.Tensor;
             var matMul = ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(w));
-            expected = ReverseGradOperations.AddBias(matMul, linear.Bias!);
+            expected = ReverseGradOperations.AddBias(matMul, linear.Bias!.Tensor);
         }
 
         ReverseGradTensor<float> actual;
@@ -105,9 +105,9 @@ public class LinearInferenceTests
         }
 
         // Assert - gradient reaches the weight and bias parameters
-        Assert.That(linear.WeightParam.Tensor.Grad, Is.Not.Null);
-        Assert.That(linear.Bias!.Grad, Is.Not.Null);
-        Assert.That(linear.Bias.Grad!.Length, Is.EqualTo(3));
+        Assert.That(linear.Weight!.Tensor.Grad, Is.Not.Null);
+        Assert.That(linear.Bias!.Tensor.Grad, Is.Not.Null);
+        Assert.That(linear.Bias!.Tensor.Grad!.Length, Is.EqualTo(3));
     }
 
     [Test]
@@ -122,12 +122,12 @@ public class LinearInferenceTests
 
         var newWeight = ReverseGradTensor<float>.FromMatrix(
             new float[12], rows: 3, cols: 4, requiresGrad: true);
-        linear.WeightParam.Tensor = newWeight;
+        linear.Weight!.Tensor = newWeight;
 
         var after = linear.Forward(input);
 
         // Assert - zero weights => output collapses to the bias broadcast
-        var bias = linear.Bias!;
+        var bias = linear.Bias!.Tensor;
         Assert.That(before[0], Is.Not.EqualTo(0f));
         for (int j = 0; j < 3; j++)
             Assert.That(after[j], Is.EqualTo(bias[j]).Within(1e-6f));

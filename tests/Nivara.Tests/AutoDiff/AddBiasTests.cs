@@ -172,8 +172,8 @@ public class AddBiasTests
         var input = ReverseGradTensor<float>.FromMatrix(
             new float[] { 1, 2, 3, 4 }, rows: 1, cols: 4, requiresGrad: false);
 
-        var w = linear.Weight;
-        var b = linear.Bias!;
+        var w = linear.Weight!.Tensor;
+        var b = linear.Bias!.Tensor;
         var matMul = ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(w));
         var expected = ReverseGradOperations.AddBias(matMul, b);
 

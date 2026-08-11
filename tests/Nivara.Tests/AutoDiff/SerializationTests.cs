@@ -34,14 +34,14 @@ public class SerializationTests
         var loaded = new Linear<float>(4, 3);
         ModelSerializer.Load(loaded, path);
 
-        Assert.That(model.Weight.Length, Is.EqualTo(loaded.Weight.Length));
-        for (int i = 0; i < model.Weight.Length; i++)
-            Assert.That(loaded.Weight[i], Is.EqualTo(model.Weight[i]).Within(1e-6f));
+        Assert.That(model.Weight!.Tensor.Length, Is.EqualTo(loaded.Weight!.Tensor.Length));
+        for (int i = 0; i < model.Weight!.Tensor.Length; i++)
+            Assert.That(loaded.Weight!.Tensor[i], Is.EqualTo(model.Weight!.Tensor[i]).Within(1e-6f));
 
         Assert.That(model.Bias, Is.Not.Null);
         Assert.That(loaded.Bias, Is.Not.Null);
-        for (int i = 0; i < model.Bias!.Length; i++)
-            Assert.That(loaded.Bias[i], Is.EqualTo(model.Bias[i]).Within(1e-6f));
+        for (int i = 0; i < model.Bias!.Tensor.Length; i++)
+            Assert.That(loaded.Bias!.Tensor[i], Is.EqualTo(model.Bias!.Tensor[i]).Within(1e-6f));
 
         File.Delete(path);
     }
@@ -57,8 +57,8 @@ public class SerializationTests
         var loaded = new Linear<double>(3, 2);
         ModelSerializer.Load(loaded, path);
 
-        for (int i = 0; i < model.Weight.Length; i++)
-            Assert.That(loaded.Weight[i], Is.EqualTo(model.Weight[i]).Within(1e-12));
+        for (int i = 0; i < model.Weight!.Tensor.Length; i++)
+            Assert.That(loaded.Weight!.Tensor[i], Is.EqualTo(model.Weight!.Tensor[i]).Within(1e-12));
 
         File.Delete(path);
     }
@@ -87,8 +87,8 @@ public class SerializationTests
         var loaded = new Linear<float>(2, 1);
         ModelSerializer.Load(loaded, path);
 
-        for (int i = 0; i < model.Weight.Length; i++)
-            Assert.That(loaded.Weight[i], Is.EqualTo(model.Weight[i]).Within(1e-6f));
+        for (int i = 0; i < model.Weight!.Tensor.Length; i++)
+            Assert.That(loaded.Weight!.Tensor[i], Is.EqualTo(model.Weight!.Tensor[i]).Within(1e-6f));
 
         File.Delete(path);
     }
@@ -125,8 +125,8 @@ public class SerializationTests
         var checkpoint = ModelSerializer.LoadCheckpoint<float>(path);
 
         var weightData = checkpoint.Parameters["Weight"];
-        Assert.That(weightData.Shape, Is.EqualTo(model.Weight.Shape));
-        Assert.That(weightData.Values.Length, Is.EqualTo(model.Weight.Length));
+        Assert.That(weightData.Shape, Is.EqualTo(model.Weight!.Tensor.Shape));
+        Assert.That(weightData.Values.Length, Is.EqualTo(model.Weight!.Tensor.Length));
 
         File.Delete(path);
     }
@@ -182,13 +182,13 @@ public class SerializationTests
 
         target.LoadStateDict(source.StateDict(), strict: true);
 
-        Assert.That(target.Weight.Shape, Is.EqualTo(source.Weight.Shape));
-        for (int i = 0; i < source.Weight.Length; i++)
-            Assert.That(target.Weight[i], Is.EqualTo(source.Weight[i]).Within(1e-6f));
+        Assert.That(target.Weight!.Tensor.Shape, Is.EqualTo(source.Weight!.Tensor.Shape));
+        for (int i = 0; i < source.Weight!.Tensor.Length; i++)
+            Assert.That(target.Weight!.Tensor[i], Is.EqualTo(source.Weight!.Tensor[i]).Within(1e-6f));
 
         Assert.That(target.Bias, Is.Not.Null);
-        for (int i = 0; i < source.Bias!.Length; i++)
-            Assert.That(target.Bias![i], Is.EqualTo(source.Bias[i]).Within(1e-6f));
+        for (int i = 0; i < source.Bias!.Tensor.Length; i++)
+            Assert.That(target.Bias!.Tensor[i], Is.EqualTo(source.Bias!.Tensor[i]).Within(1e-6f));
     }
 
     [Test]
@@ -209,12 +209,12 @@ public class SerializationTests
 
         target.LoadStateDict(state);
 
-        for (int i = 0; i < source.Weight.Length; i++)
-            Assert.That(target.Weight[i], Is.EqualTo(source.Weight[i]).Within(1e-6f));
+        for (int i = 0; i < source.Weight!.Tensor.Length; i++)
+            Assert.That(target.Weight!.Tensor[i], Is.EqualTo(source.Weight!.Tensor[i]).Within(1e-6f));
 
         Assert.That(target.Bias, Is.Not.Null);
-        Assert.That(target.Bias![0], Is.EqualTo(10f).Within(1e-6f));
-        Assert.That(target.Bias[1], Is.EqualTo(20f).Within(1e-6f));
+        Assert.That(target.Bias!.Tensor[0], Is.EqualTo(10f).Within(1e-6f));
+        Assert.That(target.Bias!.Tensor[1], Is.EqualTo(20f).Within(1e-6f));
     }
 
     [Test]
@@ -252,9 +252,9 @@ public class SerializationTests
 
         Assert.That(restored.Keys, Does.Contain("Weight"));
         Assert.That(restored["Weight"].RequiresGrad, Is.True);
-        Assert.That(restored["Weight"].Shape, Is.EqualTo(model.Weight.Shape));
-        for (int i = 0; i < model.Weight.Length; i++)
-            Assert.That(restored["Weight"][i], Is.EqualTo(model.Weight[i]).Within(1e-6f));
+        Assert.That(restored["Weight"].Shape, Is.EqualTo(model.Weight!.Tensor.Shape));
+        for (int i = 0; i < model.Weight!.Tensor.Length; i++)
+            Assert.That(restored["Weight"][i], Is.EqualTo(model.Weight!.Tensor[i]).Within(1e-6f));
     }
 
     [Test]
@@ -398,8 +398,8 @@ public class SerializationTests
         var loaded = new Linear<float>(3, 2, bias: false);
         ModelSerializer.Load(loaded, path);
 
-        for (int i = 0; i < model.Weight.Length; i++)
-            Assert.That(loaded.Weight[i], Is.EqualTo(model.Weight[i]).Within(1e-6f));
+        for (int i = 0; i < model.Weight!.Tensor.Length; i++)
+            Assert.That(loaded.Weight!.Tensor[i], Is.EqualTo(model.Weight!.Tensor[i]).Within(1e-6f));
 
         Assert.That(model.Bias, Is.Null);
         Assert.That(loaded.Bias, Is.Null);

@@ -52,7 +52,7 @@ public class LinearTransposedBTrainingTests
             output.Backward(seed);
         }
 
-        return ExtractColumn(linear.WeightParam.Tensor.Grad!);
+        return ExtractColumn(linear.Weight!.Tensor.Grad!);
     }
 
     static float[] RunExplicitForwardBackward(Linear<float> linear, ReverseGradTensor<float> input, ReverseGradTensor<float> seed)
@@ -60,12 +60,12 @@ public class LinearTransposedBTrainingTests
         using (GradientUtils.Grad())
         {
             var output = ReverseGradOperations.AddBias(
-                ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(linear.Weight)),
-                linear.Bias!);
+                ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(linear.Weight!.Tensor)),
+                linear.Bias!.Tensor);
             output.Backward(seed);
         }
 
-        return ExtractColumn(linear.WeightParam.Tensor.Grad!);
+        return ExtractColumn(linear.Weight!.Tensor.Grad!);
     }
 
     [Test]
@@ -80,8 +80,8 @@ public class LinearTransposedBTrainingTests
             // Act
             var actual = linear.Forward(input);
             var expected = ReverseGradOperations.AddBias(
-                ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(linear.Weight)),
-                linear.Bias!);
+                ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(linear.Weight!.Tensor)),
+                linear.Bias!.Tensor);
 
             // Assert
             Assert.That(actual.Length, Is.EqualTo(expected.Length));
@@ -120,12 +120,12 @@ public class LinearTransposedBTrainingTests
             var before = Extract(linear.Forward(input));
 
             // Act - replace the weight tensor (as the allocate-and-replace SGD/Adam path did)
-            linear.WeightParam.Tensor = ReverseGradTensor<float>.FromMatrix(
+            linear.Weight!.Tensor = ReverseGradTensor<float>.FromMatrix(
                 new float[12], rows: 3, cols: 4, requiresGrad: true);
             var after = Extract(linear.Forward(input));
 
             // Assert - zero weights => output collapses to the bias broadcast
-            var bias = linear.Bias!;
+            var bias = linear.Bias!.Tensor;
             Assert.That(before, Is.Not.All.EqualTo(0f));
             for (int j = 0; j < after.Length; j++)
                 Assert.That(after[j], Is.EqualTo(bias[j % 3]).Within(1e-6f));
@@ -143,8 +143,8 @@ public class LinearTransposedBTrainingTests
 
         // Act - transposed-B path, then explicit path on the same unchanged weights
         var wGradNew = RunForwardBackward(linear, input, seed);
-        linear.WeightParam.Tensor.ZeroGrad();
-        linear.Bias!.ZeroGrad();
+        linear.Weight!.Tensor.ZeroGrad();
+        linear.Bias!.Tensor.ZeroGrad();
         var wGradExplicit = RunExplicitForwardBackward(linear, input, seed);
 
         // Assert - identical gradients into the weight parameter (dB = g^T @ a)
@@ -176,8 +176,8 @@ public class LinearTransposedBTrainingTests
         using (GradientUtils.Grad())
         {
             var output = ReverseGradOperations.AddBias(
-                ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(linear.Weight)),
-                linear.Bias!);
+                ReverseGradOperations.MatMul(input, ReverseGradOperations.Transpose(linear.Weight!.Tensor)),
+                linear.Bias!.Tensor);
             output.Backward(seed);
             dInputExplicit = ExtractColumn(input.Grad!);
         }

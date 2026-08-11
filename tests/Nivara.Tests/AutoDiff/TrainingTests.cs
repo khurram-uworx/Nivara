@@ -372,8 +372,8 @@ public class TrainingTests
         en.MoveNext();
         var batch1 = en.Current;
 
-        var wBefore = model.Weight[0];
-        var bBefore = model.Bias![0];
+        var wBefore = model.Weight!.Tensor[0];
+        var bBefore = model.Bias!.Tensor[0];
 
         var output1 = model.Forward(batch1.Features);
         var loss1 = lossFn(output1, batch1.Labels);
@@ -382,8 +382,8 @@ public class TrainingTests
         optimizer.Step();
         optimizer.ZeroGrad();
 
-        Assert.That(model.Weight[0], Is.Not.EqualTo(wBefore), "Weight should change after step");
-        Assert.That(model.Bias![0], Is.Not.EqualTo(bBefore), "Bias should change after step");
+        Assert.That(model.Weight!.Tensor[0], Is.Not.EqualTo(wBefore), "Weight should change after step");
+        Assert.That(model.Bias!.Tensor[0], Is.Not.EqualTo(bBefore), "Bias should change after step");
     }
 
     [Test]
