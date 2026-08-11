@@ -753,13 +753,109 @@ internal sealed class QueryFrame : IDisposable
     public QueryFrame PercentRank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
         => AddWindowOperation(new RankOperation(resultColumn, RankKind.PercentRank, orderBy, partitionBy));
 
+    // ── Window functions over computed expressions ──
+
+    /// <summary>
+    /// Adds a rolling-sum operation over a computed source expression that appends a result column.
+    /// </summary>
+    /// <param name="source">The computed source expression</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="windowSize">The rolling window size</param>
+    /// <param name="minPeriods">The minimum number of valid observations required (defaults to the full window)</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <returns>A new QueryFrame with the rolling-sum operation added</returns>
+    /// <exception cref="ArgumentNullException">Thrown when source or resultColumn is null</exception>
+    /// <exception cref="ArgumentException">Thrown when resultColumn is whitespace</exception>
+    public QueryFrame RollingSum(ColumnExpression source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Sum));
+
+    /// <summary>
+    /// Adds a rolling-mean operation over a computed source expression that appends a double result column.
+    /// </summary>
+    public QueryFrame RollingMean(ColumnExpression source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Mean));
+
+    /// <summary>
+    /// Adds a rolling-minimum operation over a computed source expression that appends a result column.
+    /// </summary>
+    public QueryFrame RollingMin(ColumnExpression source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Min));
+
+    /// <summary>
+    /// Adds a rolling-maximum operation over a computed source expression that appends a result column.
+    /// </summary>
+    public QueryFrame RollingMax(ColumnExpression source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Max));
+
+    /// <summary>
+    /// Adds a cumulative-sum operation over a computed source expression that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeSum(ColumnExpression source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Sum));
+
+    /// <summary>
+    /// Adds a cumulative-maximum operation over a computed source expression that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeMax(ColumnExpression source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Max));
+
+    /// <summary>
+    /// Adds a cumulative-minimum operation over a computed source expression that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeMin(ColumnExpression source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Min));
+
+    /// <summary>
+    /// Adds a cumulative-product operation over a computed source expression that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeProduct(ColumnExpression source, string resultColumn, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, nullHandler, NivaraFrameExtensions.CumulativeKind.Product));
+
+    /// <summary>
+    /// Adds a running count-of-non-null operation over a computed source expression that appends a long result column.
+    /// </summary>
+    public QueryFrame CumulativeCount(ColumnExpression source, string resultColumn)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, null, NivaraFrameExtensions.CumulativeKind.Sum, isCount: true));
+
+    /// <summary>
+    /// Adds a shift (lag) operation over a computed source expression that appends a result column.
+    /// Boundary positions are null, or <paramref name="fillValue"/> when provided.
+    /// </summary>
+    public QueryFrame Shift(ColumnExpression source, string resultColumn, int periods, object? fillValue = null)
+        => AddWindowOperation(new ShiftOperation(source, resultColumn, periods, fillValue));
+
+    /// <summary>
+    /// Adds a lead operation over a computed source expression that appends a result column.
+    /// Boundary positions are null, or <paramref name="fillValue"/> when provided.
+    /// </summary>
+    public QueryFrame Lead(ColumnExpression source, string resultColumn, int periods, object? fillValue = null)
+        => AddWindowOperation(new ShiftOperation(source, resultColumn, -periods, fillValue));
+
+    /// <summary>
+    /// Adds a standard-rank operation (gaps on ties) over computed partition/order expressions.
+    /// </summary>
+    public QueryFrame Rank(string resultColumn, IReadOnlyList<SortExpressionKey> orderBy, params ColumnExpression[] partitionBy)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.Rank, orderBy, partitionBy));
+
+    /// <summary>
+    /// Adds a dense-rank operation (no gaps on ties) over computed partition/order expressions.
+    /// </summary>
+    public QueryFrame DenseRank(string resultColumn, IReadOnlyList<SortExpressionKey> orderBy, params ColumnExpression[] partitionBy)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.DenseRank, orderBy, partitionBy));
+
+    /// <summary>
+    /// Adds a percent-rank operation over computed partition/order expressions that appends a double result column.
+    /// </summary>
+    public QueryFrame PercentRank(string resultColumn, IReadOnlyList<SortExpressionKey> orderBy, params ColumnExpression[] partitionBy)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.PercentRank, orderBy, partitionBy));
+
     QueryFrame AddWindowOperation(IQueryOperation operation)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
         if (operation is WindowOperationBase windowOp)
         {
-            if (string.IsNullOrWhiteSpace(windowOp.Source))
+            if (windowOp.SourceExpression is null && string.IsNullOrWhiteSpace(windowOp.Source))
                 throw new ArgumentException("Source column name cannot be null or whitespace", nameof(windowOp.Source));
             if (string.IsNullOrWhiteSpace(windowOp.ResultColumn))
                 throw new ArgumentException("Result column name cannot be null or whitespace", nameof(windowOp.ResultColumn));

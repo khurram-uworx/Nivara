@@ -103,6 +103,20 @@ internal static class WindowFunctionHelpers
             _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a rank-family kind")
         };
     }
+    /// <summary>
+    /// Maps a rank kernel kind to the window-function kind.
+    /// </summary>
+    public static WindowFunctionKind ToWindowFunctionKind(RankKind kind)
+    {
+        return kind switch
+        {
+            RankKind.RowNumber => WindowFunctionKind.RowNumber,
+            RankKind.Rank => WindowFunctionKind.Rank,
+            RankKind.DenseRank => WindowFunctionKind.DenseRank,
+            RankKind.PercentRank => WindowFunctionKind.PercentRank,
+            _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Not a rank-family kind")
+        };
+    }
 }
 
 /// <summary>
