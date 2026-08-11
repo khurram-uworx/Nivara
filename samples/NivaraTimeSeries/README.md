@@ -111,7 +111,7 @@ Manual VAE training loop with `GradientUtils.Grad()` scope:
 ELBO = MSE(reconstruction, original) / elementCount + beta * KL(mu, logVar)
 ```
 
-- `MSELoss<T>` with `reduceToMean: true` for continuous-valued metrics
+- `MSELoss<T>` with the default `Reduction.Mean` for continuous-valued metrics
 - `KlDivergence(mu, logVar)` for latent regularization
 - `Adam<T>` optimizer with gradient clipping (`ClipGradNorm`)
 - Trained on normal (non-anomalous) windows only
@@ -150,7 +150,7 @@ Reconstruction error threshold approach:
 | `Linear<T>` | Decoder reconstruction, mu/logVar heads |
 | `Dropout<T>` | Regularization in decoder |
 | `Activation.LeakyRelu<T>` | Non-linearity throughout |
-| `MSELoss<T>` | Reconstruction loss with `reduceToMean` |
+| `MSELoss<T>` | Reconstruction loss with default `Reduction.Mean` |
 | `ReverseGradOperations.KlDivergence<T>` | KL divergence for VAE regularization |
 | `ReverseGradOperations.SampleNormal<T>` | Reparameterization trick |
 | `Adam<T>` | Optimizer with adaptive learning rates |
@@ -179,7 +179,7 @@ samples/NivaraTimeSeries/
 | **BatchNorm1d rejects 3D input** | `BatchNorm1d.Forward` throws when `input.Rank != 2`, breaking the Conv1d -> BatchNorm1d pipeline that produces 3D `[B, C, L]` output. | Accept both 2D `[N, C]` and 3D `[B, C, L]` input, extracting `planeSize` from the third dimension. The kernel already supported it via the `planeSize` parameter. File: `src/Nivara/AutoDiff/Nn/BatchNorm.cs`. |
 | **BatchNormKernel xHat allocation** | `xHat` was only allocated when `affine=true`, but the SIMD path (`planeSize >= 4`) always writes to `xHat`. Latent crash exposed by 3D input enabling the SIMD path. | Always allocate `xHat` regardless of `affine`. File: `src/Nivara/AutoDiff/Nn/BatchNormKernel.cs`. |
 | **BatchNormKernel scalar path xHat not written** | The scalar fallback path (`planeSize < 4` or `T != float`) guarded the xHat write with `if (affine)`, so xHat stayed all-zeros when `affine=false`. `BackwardInput` reads xHat unconditionally, producing silently wrong gradients. | Remove the guard so xHat is always populated with normalized values. File: `src/Nivara/AutoDiff/Nn/BatchNormKernel.cs`. |
-| **MSELoss returns sum, not mean** | `MSELoss<T>.Forward` always returns the sum of squared errors, which scales with input shape. No way to get mean MSE like PyTorch's default. | Added `Forward(predictions, targets, bool reduceToMean)` overload matching the `BCEWithLogitsLoss` pattern. File: `src/Nivara/AutoDiff/Nn/Functional/MSELoss.cs`. |
+| **MSELoss returns sum, not mean** | `MSELoss<T>.Forward` always returned the sum of squared errors, which scales with input shape. No way to get mean MSE like PyTorch's default. | All losses inherit `Loss<T>` and default to `Reduction.Mean` (PyTorch parity); `Forward(predictions, targets, Reduction)` overrides per call. File: `src/Nivara/AutoDiff/Nn/Functional/Loss.cs`. |
 
 ## Requirements
 

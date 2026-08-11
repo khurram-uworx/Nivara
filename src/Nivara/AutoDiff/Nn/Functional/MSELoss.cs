@@ -1,27 +1,24 @@
 using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
-public sealed class MSELoss<T> where T : struct, IFloatingPointIeee754<T>
+public sealed class MSELoss<T> : Loss<T> where T : struct, IFloatingPointIeee754<T>
 {
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> predictions, ReverseGradTensor<T> targets)
-        => Forward(predictions, targets, reduceToMean: false);
+    public MSELoss(Reduction reduction = Reduction.Mean) : base(reduction)
+    {
+    }
 
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> predictions, ReverseGradTensor<T> targets, bool reduceToMean)
+    public override ReverseGradTensor<T> Forward(
+        ReverseGradTensor<T> predictions,
+        ReverseGradTensor<T> targets,
+        Reduction reduction)
     {
         if (predictions == null) throw new ArgumentNullException(nameof(predictions));
         if (targets == null) throw new ArgumentNullException(nameof(targets));
 
         var diff = ReverseGradOperations.Subtract(predictions, targets);
         var squared = ReverseGradOperations.Multiply(diff, diff);
-        var sumLoss = ReverseGradOperations.Sum(squared);
-
-        if (!reduceToMean)
-            return sumLoss;
-
-        var lengthTensor = GradientUtils.Full(1, T.CreateChecked(predictions.Length));
-        return ReverseGradOperations.Divide(sumLoss, lengthTensor);
+        return Reduce(squared, reduction);
     }
 }

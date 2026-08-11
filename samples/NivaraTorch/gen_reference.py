@@ -688,11 +688,13 @@ def run():
 
     bce_sum = F.binary_cross_entropy_with_logits(bce_inp, bce_target, reduction='sum')
     bce_mean = F.binary_cross_entropy_with_logits(bce_inp, bce_target, reduction='mean')
+    bce_none = F.binary_cross_entropy_with_logits(bce_inp, bce_target, reduction='none')
 
     bce_inp.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "bce_with_logits_input.bin"))
     bce_target.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "bce_with_logits_target.bin"))
     torch.tensor([bce_sum.item()]).numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "bce_with_logits_sum_output.bin"))
     torch.tensor([bce_mean.item()]).numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "bce_with_logits_mean_output.bin"))
+    bce_none.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "bce_with_logits_none_output.bin"))
 
     manifest["bce_with_logits"] = {
         "layer": "BCEWithLogitsLoss",
@@ -700,6 +702,7 @@ def run():
         "target_shape": list(bce_target.shape),
         "sum_output_shape": [1],
         "mean_output_shape": [1],
+        "none_output_shape": list(bce_none.shape),
     }
     print(f"  bce_with_logits: input={bce_inp.shape} sum={bce_sum.item():.6f} mean={bce_mean.item():.6f}")
 
@@ -710,16 +713,19 @@ def run():
     ce_target = torch.tensor([0, 3, 7, 2])
 
     ce_out = F.cross_entropy(ce_inp, ce_target)
+    ce_none = F.cross_entropy(ce_inp, ce_target, reduction='none')
 
     ce_inp.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "cross_entropy_input.bin"))
     ce_target.numpy().astype(np.int64).tofile(os.path.join(TEST_DIR, "cross_entropy_target.bin"))
     torch.tensor([ce_out.item()]).numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "cross_entropy_output.bin"))
+    ce_none.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "cross_entropy_none_output.bin"))
 
     manifest["cross_entropy"] = {
         "layer": "CrossEntropyLoss",
         "input_shape": list(ce_inp.shape),
         "target_shape": list(ce_target.shape),
         "output_shape": [1],
+        "none_output_shape": list(ce_none.shape),
     }
     print(f"  cross_entropy: input={ce_inp.shape} target={ce_target.shape} loss={ce_out.item():.6f}")
 
@@ -731,11 +737,13 @@ def run():
 
     mse_sum = F.mse_loss(mse_pred, mse_target, reduction='sum')
     mse_mean = F.mse_loss(mse_pred, mse_target, reduction='mean')
+    mse_none = F.mse_loss(mse_pred, mse_target, reduction='none')
 
     mse_pred.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "mse_loss_pred.bin"))
     mse_target.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "mse_loss_target.bin"))
     torch.tensor([mse_sum.item()]).numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "mse_loss_sum_output.bin"))
     torch.tensor([mse_mean.item()]).numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "mse_loss_mean_output.bin"))
+    mse_none.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "mse_loss_none_output.bin"))
 
     manifest["mse_loss"] = {
         "layer": "MSELoss",
@@ -743,6 +751,7 @@ def run():
         "target_shape": list(mse_target.shape),
         "sum_output_shape": [1],
         "mean_output_shape": [1],
+        "none_output_shape": list(mse_none.shape),
     }
     print(f"  mse_loss: pred={mse_pred.shape} sum={mse_sum.item():.6f} mean={mse_mean.item():.6f}")
 
@@ -753,16 +762,19 @@ def run():
     l1_target = torch.randn(4, 10, generator=rng)
 
     l1_out = F.l1_loss(l1_pred, l1_target, reduction='sum')
+    l1_none = F.l1_loss(l1_pred, l1_target, reduction='none')
 
     l1_pred.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "l1_loss_pred.bin"))
     l1_target.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "l1_loss_target.bin"))
     torch.tensor([l1_out.item()]).numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "l1_loss_output.bin"))
+    l1_none.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "l1_loss_none_output.bin"))
 
     manifest["l1_loss"] = {
         "layer": "L1Loss",
         "pred_shape": list(l1_pred.shape),
         "target_shape": list(l1_target.shape),
         "output_shape": [1],
+        "none_output_shape": list(l1_none.shape),
     }
     print(f"  l1_loss: pred={l1_pred.shape} sum={l1_out.item():.6f}")
 

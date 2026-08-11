@@ -241,6 +241,13 @@ its deliberate `InvalidOperationException`/`ArgumentException` contract.
 `Reduction` enum, inconsistent ctor styles. `BCELoss(eps)` is stateful, the
 others stateless.
 
+**Resolved 2026-08-12 (issue #180):** every loss now inherits the abstract
+`Loss<T>` base storing a ctor-defaulted `Reduction` (`Sum`, `Mean`, `None`).
+`Forward(p, t)` applies the stored reduction; `Forward(p, t, Reduction)`
+overrides per call. `Mean` is the default everywhere (PyTorch parity), routed
+through the shared `Loss<T>.Reduce`. `BCELoss.eps` stays a ctor arg; the
+misgrouped `Softmax`/`LogSoftmax` classes moved into `Activation` wrappers.
+
 ### 10. Optimizer mental-model split
 
 `Optimizer<T>.LearningRate` is get-only, but nested `ParameterGroup.LearningRate`
@@ -330,7 +337,7 @@ All types below are `where T : struct, IFloatingPointIeee754<T>` unless noted.
 | `GradientUtils`, `TypeValidator`, `TypeConverter` | `public static class` | `AutoDiff\Utilities\` |
 | `AutoGradException` + `ShapeIncompatibilityException` | public exceptions | `AutoDiff\Exceptions\AutoGradExceptions.cs` |
 | `Module<T>` (abstract), `Parameter<T>`, `Sequential<T>`, `Linear<T>`, `Conv1d/2d/Transpose2d<T>`, `BatchNorm1d/2d<T>`, `LayerNorm<T>`, `Dropout<T>`, `Embedding<T>`, `SparseEmbedding<T>`, `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `MultiheadAttention<T>`, `TransformerBlock<T>`, `VAE<T>`, `ConvVAE<T>`, `DepthwiseSeparableConv2d<T>`, `Sampler<T>`, `TextTokenizer` | NN modules | `AutoDiff\Nn\` |
-| `BCELoss<T>`, `BCEWithLogitsLoss<T>`, `CrossEntropyLoss<T>`, `MSELoss<T>`, `L1Loss<T>`, `Softmax<T>`, `LogSoftmax<T>` | functional losses (no common base) | `AutoDiff\Nn\Functional\` |
+| `Loss<T>` (abstract), `Reduction`, `BCELoss<T>`, `BCEWithLogitsLoss<T>`, `CrossEntropyLoss<T>`, `MSELoss<T>`, `L1Loss<T>` | functional losses (common `Loss<T>` base) | `AutoDiff\Nn\Functional\` |
 | `IInitializer<T>` + 6 `*Initializer<T>` + `PyTorchDefaultInitializer<T>` | initializers | `AutoDiff\Nn\Initializers\` |
 | `ReverseGradOperations` (39 ops), `ForwardGradOperations` (24 ops), `GradKernels` (**internal**) | operations | `AutoDiff\Operations\` |
 | `Optimizer<T>`, `SGD<T>`, `Adam<T>`, `AdamW<T>` | optimizers | `AutoDiff\Optimizer\` |
@@ -385,7 +392,10 @@ whether the change is safe (no breaking change) or requires a major bump.
    contract.~~ — Done 2026-08-10 (issue #177): unified on `Weight`/`Bias` as
    `Parameter<T>?` (`null` = omitted); `WeightParam`/`BiasParam`/tensor-typed
    `Weight` removed.
-10. Introduce a `Reduction` enum and a common loss base; align reduction overloads.
+10. ~~Introduce a `Reduction` enum and a common loss base; align reduction
+    overloads.~~ — Done 2026-08-12 (issue #180): `Reduction` enum + abstract
+    `Loss<T>` base; `MSELoss`/`L1Loss`/`BCELoss`/`BCEWithLogitsLoss`/
+    `CrossEntropyLoss` rewritten on top, `Mean` default with per-call override.
 11. Make `JsonOptions.Default`/`CsvOptions.Default` immutable or remove them.
 12. Replace `CsvOptions.TrimOptions` bool and `ParquetWriteOptions.Compression`
     string with proper enums.

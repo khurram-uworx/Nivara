@@ -131,7 +131,7 @@ public static class CrossFrameworkFraudNet
 
         var loop = new TrainingLoop<float>(
             model, loader,
-            (pred, target) => new BCEWithLogitsLoss<float>().Forward(pred, target),
+            (pred, target) => new BCEWithLogitsLoss<float>(Reduction.Sum).Forward(pred, target),
             optimizer,
             epochs: 50);
 

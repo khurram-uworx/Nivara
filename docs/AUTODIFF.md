@@ -124,14 +124,16 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 
 Pre-built application-level classifiers (`TextClassifierModel<T>`, `TokenClassifierModel<T>`) moved out of core in 1.2.0 to `samples/Nivara.Samples/` (namespace `Nivara.AutoDiff.Nn`). Core provides composable primitives only.
 
-Loss Functions (Nn.Functional)
-───────────────────────────────
-MSELoss<T>                            ← Σ(pred - target)²; reduceToMean overload available
+Loss Functions (Nn.Functional; common Loss<T> base + Reduction enum)
+─────────────────────────────────────────────────────────────────────
+Loss<T>                               ← Abstract base: ctor-defaulted Reduction, Forward(p, t, Reduction) override
+Reduction                             ← Sum, Mean (default, PyTorch parity), None
+MSELoss<T>                            ← Σ(pred - target)²
 L1Loss<T>                             ← Σ|pred - target|
-BCELoss<T>                            ← -(y·log(p) + (1-y)·log(1-p))
-BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable); fused backward via single OpNode; reduceToMean overload
-CrossEntropyLoss<T>                   ← Fused log-softmax + NLL
-Softmax<T> / LogSoftmax<T>            ← Dim-aware softmax wrappers
+BCELoss<T>                            ← -(y·log(p) + (1-y)·log(1-p)); eps via ctor
+BCEWithLogitsLoss<T>                  ← Fused sigmoid + BCE (numerically stable); fused backward via single OpNode
+CrossEntropyLoss<T>                   ← Fused log-softmax + NLL; soft or int[] targets; None → per-sample NLL
+Activation.Softmax<T> / LogSoftmax<T> ← Dim-aware wrappers (Functional classes merged into Activation)
 
 Optimizers
 ──────────
@@ -841,17 +843,17 @@ class MLP : Module<float>
 
 ## Loss Functions
 
-All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Each has a `Forward(predictions, targets)` method returning a scalar loss tensor.
+All loss functions live in `Nivara.AutoDiff.Nn.Functional`. Every loss inherits the abstract `Loss<T>` base, which stores a `Reduction` (default `Reduction.Mean` for PyTorch parity) set via the constructor. `Forward(predictions, targets)` applies the stored reduction; the three-argument `Forward(predictions, targets, Reduction)` overrides it per call. `Reduce(elementwiseLoss, reduction, divisor)` centralizes reduction: `None` returns the elementwise loss, `Sum` reduces with `ReverseGradOperations.Sum`, and `Mean` divides the sum by the divisor (element count unless the loss supplies a batch divisor).
 
 | Loss | Forward Formula | Notes |
 |------|----------------|-------|
-| `MSELoss<T>` | `Σ(pred - target)²` | Mean Squared Error. `Forward(predictions, targets, reduceToMean: true)` divides by element count. |
-| `L1Loss<T>` | `Σ\|pred - target\|` | Mean Absolute Error (sum reduction) |
-| `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability |
-| `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed. `Forward(logits, targets, reduceToMean)` divides by element count when true. Backward uses fused `sigmoid(x) - z` via custom OpNode (fixes subgradient error at x=0). |
-| `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + one-hot targets |
-| `Softmax<T>` | dim-aware softmax | Wrapper around `ReverseGradOperations.Softmax`. Ctor `Softmax(dim = -1)`; `-1` is the last dim. |
-| `LogSoftmax<T>` | dim-aware log-softmax | Wrapper around `ReverseGradOperations.LogSoftmax`. Ctor `LogSoftmax(dim = -1)`; `-1` is the last dim. |
+| `MSELoss<T>` | `Σ(pred - target)²` | Mean Squared Error. Default `Reduction.Mean` divides by element count; `Sum`/`None` available. |
+| `L1Loss<T>` | `Σ\|pred - target\|` | Mean Absolute Error. Default `Reduction.Mean`. |
+| `BCELoss<T>` | `-Σ(y·log(p) + (1-y)·log(1-p))` | Inputs clamped to `[eps, 1-eps]` for numerical stability; `eps` is a ctor argument. |
+| `BCEWithLogitsLoss<T>` | Fused sigmoid + BCE | Numerically stable — no clamp needed. Backward uses fused `sigmoid(x) - z` via custom OpNode (fixes subgradient error at x=0). |
+| `CrossEntropyLoss<T>` | LogSoftmax + NLL ÷ batchSize | Expects logits + soft targets, or logits + `int[]` labels (one-hot built internally). `Reduction.None` returns per-sample NLL (`[N]`, summing class-weighted NLL within each row) matching PyTorch `reduction='none'`. |
+| `Activation.Softmax<T>` | dim-aware softmax | `Activation.Softmax(input, dim = -1)` wrapping `ReverseGradOperations.Softmax`. |
+| `Activation.LogSoftmax<T>` | dim-aware log-softmax | `Activation.LogSoftmax(input, dim = -1)` wrapping `ReverseGradOperations.LogSoftmax`. |
 
 ---
 
@@ -973,7 +975,7 @@ optimizer.AddParameterGroup(model.GetParameters().Values);
 
 var loop = new TrainingLoop<float>(
     model, loader,
-    (pred, target) => new MSELoss<float>().Forward(pred, target, reduceToMean: true),
+    (pred, target) => new MSELoss<float>().Forward(pred, target),
     optimizer,
     epochs: 20);
 

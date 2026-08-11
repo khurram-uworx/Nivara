@@ -929,6 +929,10 @@
     ],
     "mean_output_shape": [
       1
+    ],
+    "none_output_shape": [
+      4,
+      10
     ]
   },
   "cross_entropy": {
@@ -942,6 +946,9 @@
     ],
     "output_shape": [
       1
+    ],
+    "none_output_shape": [
+      4
     ]
   },
   "mse_loss": {
@@ -959,6 +966,10 @@
     ],
     "mean_output_shape": [
       1
+    ],
+    "none_output_shape": [
+      4,
+      10
     ]
   },
   "l1_loss": {
@@ -973,6 +984,10 @@
     ],
     "output_shape": [
       1
+    ],
+    "none_output_shape": [
+      4,
+      10
     ]
   },
   "add_bias": {

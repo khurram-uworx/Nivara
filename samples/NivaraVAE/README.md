@@ -256,7 +256,7 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 | Gap | Problem | Resolution |
 |-----|---------|------------|
 | **`Activation.LeakyRelu` slope default** | `LeakyRelu<T>(input, negativeSlope: default)` where `T` is `float` produces slope=0 (equivalent to ReLU), not 0.01 as intended. `default(float)` is 0. | Changed default parameter handling: when slope is `T.Zero`, use `T.CreateChecked(0.01f)` instead. File: `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`. |
-| **`BCEWithLogitsLoss` returns SUM** | Loss scales with batch size, requiring LR tuning per batch size. Not suitable for batched training without manual normalization. | Added `Forward(logits, targets, bool reduceToMean)` overload that divides by element count when `reduceToMean: true`. File: `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs`. |
+| **`BCEWithLogitsLoss` returns SUM** | Loss scales with batch size, requiring LR tuning per batch size. Not suitable for batched training without manual normalization. | All losses inherit `Loss<T>` and default to `Reduction.Mean` (PyTorch parity); `Forward(logits, targets, Reduction)` overrides per call. File: `src/Nivara/AutoDiff/Nn/Functional/Loss.cs`. |
 | **ADR-001: null handling in VAE hot paths** | `KlDivergence`, `SampleNormal`, `AccumulateGradient`, and `AdamW` contained ~200 lines of dead null-handling branches (AutoDiff is non-nullable per ADR-001). | Removed null branches from: `ApplyKlElementWise`, `ApplyKlMeanGradient`, `ApplyKlLogVarGradient`, `ApplySampleNormalForward`, `ApplySampleNormalLogVarGradient`, `AccumulateGradient`, `AdamW.applyAdamW`. Single SIMD path via `TensorPrimitives`. Files: `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs`, `src/Nivara/AutoDiff/Optimizer/AdamW.cs`. |
 | **`TensorPrimitives` SIMD in KL/sample ops** | After null cleanup, the freed code paths were replaced with direct `TensorPrimitives.Exp`, `.Multiply`, `.Add`, `.Subtract` calls for SIMD acceleration. | Replaced scalar loops with `TensorPrimitives` spans in `ApplyKlElementWise`, `ApplySampleNormalForward`, and gradient helpers. |
 | **`BCEWithLogitsLoss` backward gradient at x=0** | Forward decomposed into `Relu(x) - x*z + log(1+exp(-|x|))`. At x=0, Relu and Abs subgradients are both 0, producing gradient -1.0 instead of the correct `sigmoid(0) - z = -0.5`. | Replaced primitive-ops decomposition with fused backward that computes `sigmoid(x) - z` directly via a single `OpNode<T>` custom backward. Forward values unchanged. File: `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs`. |
@@ -265,7 +265,7 @@ NivaraVAE drove several core library fixes and improvements. The original spec i
 
 | New API | Location | Purpose |
 |---------|----------|---------|
-| `BCEWithLogitsLoss<T>.Forward(logits, targets, reduceToMean)` | `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs` | Mean-reduced BCE loss for batched training |
+| `Loss<T>` base with `Reduction` | `src/Nivara/AutoDiff/Nn/Functional/Loss.cs` | Mean-reduced BCE loss for batched training (`BCEWithLogitsLoss<T>` defaults to `Reduction.Mean`) |
 | `BCEWithLogitsLoss<T>` fused backward | `src/Nivara/AutoDiff/Nn/Functional/BCEWithLogitsLoss.cs` | Correct gradient `sigmoid(x) - z` via custom `OpNode<T>`, fixing subgradient bug at x=0 |
 | `Activation.LeakyRelu` default slope fix | `src/Nivara/AutoDiff/Operations/ReverseGradOperations.cs` | Correct 0.01 default instead of 0 |
 
