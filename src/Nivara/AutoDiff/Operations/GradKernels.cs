@@ -13,7 +13,7 @@ namespace Nivara.AutoDiff.Operations;
 /// overloads; scalar loops are used only where no platform primitive maps
 /// (erf-based GELU, row-reduction gradients).
 /// </summary>
-public static class GradKernels
+internal static class GradKernels
 {
     // ═══════════════════════════════════════════════════════════════
     //  Activations

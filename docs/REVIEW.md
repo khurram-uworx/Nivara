@@ -197,6 +197,15 @@ Enforced by `WeightAccessConsistencyTests`.
   `IInitializer<T>` instance classes — both public.
 - **`DefaultInitializers.Bias<T>()` exists to return null.**
 
+**Resolved 2026-08-12 (issue #178):** `GradKernels` and `ComputationGraph` are now
+internal (public graph introspection stays on `GradientUtils`); the four never-thrown
+sealed exception types (`GradientComputationException`, `CircularDependencyException`,
+`InvalidBackwardCallException`, `TypeValidationException`) were deleted, keeping only
+`AutoGradException` + `ShapeIncompatibilityException`; the legacy static
+`Init<T>(Dictionary<...>)` initializers and `DefaultInitializers` were deleted, leaving
+the `IInitializer<T>` instance API as the only initializer surface. `Backward()` keeps
+its deliberate `InvalidOperationException`/`ArgumentException` contract.
+
 ### 8. Silent API lies in AutoDiff
 
 - **`Softmax<T>.dim` / `LogSoftmax<T>.dim` ctor param is stored, never read.**
@@ -316,14 +325,14 @@ All types below are `where T : struct, IFloatingPointIeee754<T>` unless noted.
 | `GradTensor<T>` | `public class : IDisposable` (non-sealed) | `AutoDiff\GradTensor.cs` |
 | `ReverseGradTensor<T>` | `public sealed class : GradTensor<T>` | `AutoDiff\ReverseGradTensor.cs` |
 | `ForwardGradTensor<T>` | `public sealed class : GradTensor<T>` | `AutoDiff\ForwardGradTensor.cs` |
-| `ComputationGraph` | `public sealed class` (no public members) | `AutoDiff\ComputationGraph.cs` |
+| `ComputationGraph` | **internal** | `AutoDiff\ComputationGraph.cs` |
 | `OpNode<T>` | **internal** | `AutoDiff\OpNode.cs` |
 | `GradientUtils`, `TypeValidator`, `TypeConverter` | `public static class` | `AutoDiff\Utilities\` |
-| `AutoGradException` + 5 sealed derived | public exceptions | `AutoDiff\Exceptions\AutoGradExceptions.cs` |
+| `AutoGradException` + `ShapeIncompatibilityException` | public exceptions | `AutoDiff\Exceptions\AutoGradExceptions.cs` |
 | `Module<T>` (abstract), `Parameter<T>`, `Sequential<T>`, `Linear<T>`, `Conv1d/2d/Transpose2d<T>`, `BatchNorm1d/2d<T>`, `LayerNorm<T>`, `Dropout<T>`, `Embedding<T>`, `SparseEmbedding<T>`, `MaxPool2d<T>`, `AdaptiveAvgPool2d<T>`, `MultiheadAttention<T>`, `TransformerBlock<T>`, `VAE<T>`, `ConvVAE<T>`, `DepthwiseSeparableConv2d<T>`, `Sampler<T>`, `TextTokenizer` | NN modules | `AutoDiff\Nn\` |
 | `BCELoss<T>`, `BCEWithLogitsLoss<T>`, `CrossEntropyLoss<T>`, `MSELoss<T>`, `L1Loss<T>`, `Softmax<T>`, `LogSoftmax<T>` | functional losses (no common base) | `AutoDiff\Nn\Functional\` |
-| `IInitializer<T>` + 6 `*Initializer<T>` + 6 legacy static `*` + `DefaultInitializers` | initializers (two generations) | `AutoDiff\Nn\Initializers\` |
-| `ReverseGradOperations` (39 ops), `ForwardGradOperations` (24 ops), `GradKernels` (**public**) | operations | `AutoDiff\Operations\` |
+| `IInitializer<T>` + 6 `*Initializer<T>` + `PyTorchDefaultInitializer<T>` | initializers | `AutoDiff\Nn\Initializers\` |
+| `ReverseGradOperations` (39 ops), `ForwardGradOperations` (24 ops), `GradKernels` (**internal**) | operations | `AutoDiff\Operations\` |
 | `Optimizer<T>`, `SGD<T>`, `Adam<T>`, `AdamW<T>` | optimizers | `AutoDiff\Optimizer\` |
 | `TrainingLoop<T>` (unsealed), `TrainingResult<T>`, `EpochResult<T>`, `DataLoader<T>`, `TensorDataset<T>`, `Batch<T>`, `DataParallelTrainer<T>` (unsealed), `DataParallelTrainingResult<T>`, `DataParallelEpochResult<T>` | training | `AutoDiff\Training\` |
 | `ModelSerializer`, `Checkpoint<T>`, `ParameterData<T>` | serialization | `AutoDiff\Serialization\` |
@@ -351,14 +360,17 @@ whether the change is safe (no breaking change) or requires a major bump.
 2. ~~Replace the reflection-based `NivaraFrame.sliceColumn` with a direct
    `IColumn.Slice(int, int)` call.~~ — Done 2026-08-09 (issue #173): direct call in
    both `NivaraFrame.sliceColumn` and `SliceOperation.SliceColumn`.
-3. Internalize `GradKernels`, `ComputationGraph`, `AutoDiffDiagnostics`, and the
+3. ~~Internalize `GradKernels`, `ComputationGraph`, `AutoDiffDiagnostics`, and the
    orphaned `TensorsHelper.RowNorms`; tighten `public` members on already-internal
-   classes (`ColumnStorageFactory`, `RankKernel`, etc.).
+   classes (`ColumnStorageFactory`, `RankKernel`, etc.).~~ — GradKernels and
+   ComputationGraph internalized 2026-08-12 (issue #178); `AutoDiffDiagnostics` and
+   `TensorsHelper.RowNorms` remain pending.
 4. ~~Mark `QueryFrame.ToList()` `[Obsolete]` in favor of `ToNivaraFrame()`.~~ —
    Done 2026-08-10 (issue #176): `ToList(this QueryFrame)` removed; `ToRowList()`
    added as the row-list replacement.
-5. Delete the legacy static initializer API (`KaimingNormal.Init`, etc.) and
-   `DefaultInitializers.Bias<T>()`.
+5. ~~Delete the legacy static initializer API (`KaimingNormal.Init`, etc.) and
+   `DefaultInitializers.Bias<T>()`.~~ — Done 2026-08-12 (issue #178): all six legacy
+   static classes and the entire `DefaultInitializers` class deleted.
 6. ~~Fix `NivaraAutoGradExtensions.BatchBackward` to honor `tensors` (or remove it).~~ —
    Done 2026-08-09 (issue #179): now verifies every listed requires-grad tensor
    received a gradient, listing offending keys.

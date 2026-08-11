@@ -184,57 +184,6 @@ public class NnTests
     }
 
     [Test]
-    public void KaimingUniform_InitializesWithCorrectShapes()
-    {
-        using var linear = new Linear<float>(4, 3);
-        var parameters = linear.Parameters();
-        KaimingUniform.Init(parameters);
-
-        Assert.That(parameters["Weight"].Shape, Is.EqualTo(new[] { 3, 4 }));
-        Assert.That(parameters["Bias"].Shape, Is.EqualTo(new[] { 1, 3 }));
-
-        for (int i = 0; i < parameters["Weight"].Length; i++)
-            Assert.That(float.IsNaN(parameters["Weight"][i]) || float.IsInfinity(parameters["Weight"][i]), Is.False);
-
-        for (int i = 0; i < parameters["Bias"].Length; i++)
-            Assert.That(float.IsNaN(parameters["Bias"][i]) || float.IsInfinity(parameters["Bias"][i]), Is.False);
-    }
-
-    [Test]
-    public void XavierUniform_InitializesWithCorrectShapes()
-    {
-        using var linear = new Linear<float>(4, 3);
-        var parameters = linear.Parameters();
-        XavierUniform.Init(parameters);
-
-        Assert.That(parameters["Weight"].Shape, Is.EqualTo(new[] { 3, 4 }));
-        for (int i = 0; i < parameters["Weight"].Length; i++)
-            Assert.That(float.IsNaN(parameters["Weight"][i]), Is.False);
-    }
-
-    [Test]
-    public void Normal_Initializer_ProducesNonNanValues()
-    {
-        using var linear = new Linear<float>(4, 3);
-        var parameters = linear.Parameters();
-        Normal.Init(parameters);
-
-        for (int i = 0; i < parameters["Weight"].Length; i++)
-            Assert.That(float.IsNaN(parameters["Weight"][i]), Is.False);
-    }
-
-    [Test]
-    public void Uniform_Initializer_ProducesNonNanValues()
-    {
-        using var linear = new Linear<float>(4, 3);
-        var parameters = linear.Parameters();
-        Uniform.Init(parameters);
-
-        for (int i = 0; i < parameters["Weight"].Length; i++)
-            Assert.That(float.IsNaN(parameters["Weight"][i]), Is.False);
-    }
-
-    [Test]
     public void Module_TrainEval_TogglesIsTraining()
     {
         var module = new ModuleWithParams();
