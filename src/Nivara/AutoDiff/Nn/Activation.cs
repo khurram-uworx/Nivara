@@ -29,4 +29,12 @@ public static class Activation
 
     public static ReverseGradTensor<T> Log<T>(ReverseGradTensor<T> input) where T : struct, IFloatingPointIeee754<T>
         => ReverseGradOperations.Log(input);
+
+    public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> input, int dim = -1)
+        where T : struct, IFloatingPointIeee754<T>
+        => ReverseGradOperations.Softmax(input, dim);
+
+    public static ReverseGradTensor<T> LogSoftmax<T>(ReverseGradTensor<T> input, int dim = -1)
+        where T : struct, IFloatingPointIeee754<T>
+        => ReverseGradOperations.LogSoftmax(input, dim);
 }
