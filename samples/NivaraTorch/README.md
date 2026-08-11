@@ -382,10 +382,10 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 | MatMul | 1 | 4×8 @ 8×16 |
 | MatMulTransposedB | 1 | Inference `a @ b^T`, raw `[N, K]` weight layout |
 | AddBias | 1 | Row-broadcast bias addition (`a[i,j] + bias[j]`) |
-| BCEWithLogitsLoss | 2 | Sum and mean reduction |
-| CrossEntropyLoss | 1 | With integer targets |
-| MSELoss | 2 | Sum and mean reduction |
-| L1Loss | 1 | Sum reduction |
+| BCEWithLogitsLoss | 3 | Sum, mean, and none reduction |
+| CrossEntropyLoss | 2 | Mean and none reduction, integer targets |
+| MSELoss | 3 | Sum, mean, and none reduction |
+| L1Loss | 2 | Sum and none reduction |
 
 ### Layout notes
 

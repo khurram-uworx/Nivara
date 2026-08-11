@@ -115,7 +115,7 @@ static void Train(TimeSeriesModel<float> model, Adam<float> optimizer, MetricsGe
                 var z = model.Reparameterize(mu, logVar);
                 var recon = model.Decode(z);
 
-                var reconLoss = mseLoss.Forward(recon, features, reduceToMean: true);
+                var reconLoss = mseLoss.Forward(recon, features);
                 var kl = ReverseGradOperations.KlDivergence(mu, logVar);
                 var klMean = ReverseGradOperations.Divide(kl,
                     ReverseGradTensor<float>.FromArray(new float[] { (float)batchSize }, requiresGrad: false));

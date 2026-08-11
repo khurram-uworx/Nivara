@@ -151,7 +151,7 @@ static void TrainLinear(VaeModel<float> model, Adam<float> optimizer, PatternDat
                 var z = model.Reparameterize(mu, logVar);
                 var reconLogits = model.Decode(z);
 
-                var bce = bceLoss.Forward(reconLogits, targets, reduceToMean: true);
+                var bce = bceLoss.Forward(reconLogits, targets);
                 var kl = ReverseGradOperations.KlDivergence(mu, logVar);
                 var klMean = ReverseGradOperations.Divide(kl, new ReverseGradTensor<float>(
                     NivaraColumn<float>.Create(new float[] { (float)size }),
@@ -284,7 +284,7 @@ static void EvaluateLinear(VaeModel<float> model, PatternDataset dataset, Option
         var z = model.Reparameterize(mu, logVar, seed: i);
         var reconLogits = model.Decode(z);
 
-        var bce = bceLoss.Forward(reconLogits, input, reduceToMean: true);
+        var bce = bceLoss.Forward(reconLogits, input);
         totalLoss += bce[0];
     }
 
@@ -414,7 +414,7 @@ static void TrainConv(ConvVAE<float> model, Adam<float> optimizer, PatternDatase
                 var klMean = ReverseGradOperations.Divide(kl, new ReverseGradTensor<float>(
                     NivaraColumn<float>.Create(new float[] { (float)size }), requiresGrad: false));
                 var bceLoss = new BCEWithLogitsLoss<float>();
-                var reconLoss = bceLoss.Forward(reconFlat, inputFlat, reduceToMean: true);
+                var reconLoss = bceLoss.Forward(reconFlat, inputFlat);
                 var loss = ReverseGradOperations.Add(reconLoss, ReverseGradOperations.Multiply(klMean,
                     new ReverseGradTensor<float>(
                         NivaraColumn<float>.Create(new float[] { opts.Beta }), requiresGrad: false)));
@@ -556,7 +556,7 @@ static void EvaluateConv(ConvVAE<float> model, PatternDataset dataset, Options o
         reconFlat.Reshape(1, numPixels);
         var inputFlat = ReverseGradTensor<float>.FromArray(pattern, requiresGrad: false);
         inputFlat.Reshape(1, numPixels);
-        var bce = bceLoss.Forward(reconFlat, inputFlat, reduceToMean: true);
+        var bce = bceLoss.Forward(reconFlat, inputFlat);
         totalLoss += bce[0];
     }
 
