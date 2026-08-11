@@ -26,11 +26,44 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var mse = new MSELoss<float>();
+        var mse = new MSELoss<float>(Reduction.Sum);
         var loss = mse.Forward(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
         Assert.That(loss[0], Is.EqualTo(3f));
+    }
+
+    [Test]
+    public void MSELoss_Mean_ComputesCorrectValue()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
+
+        var mse = new MSELoss<float>();
+        var loss = mse.Forward(predictions, targets);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        Assert.That(loss[0], Is.EqualTo(1f));
+    }
+
+    [Test]
+    public void MSELoss_Mean_Backward_DividesGradientByN()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
+
+        var mse = new MSELoss<float>();
+        var loss = mse.Forward(predictions, targets);
+        loss.Backward();
+
+        Assert.That(predictions.Grad, Is.Not.Null);
+        Assert.That(predictions.Grad![0], Is.EqualTo(2f / 3f).Within(1e-6f));
+        Assert.That(predictions.Grad[1], Is.EqualTo(2f / 3f).Within(1e-6f));
+        Assert.That(predictions.Grad[2], Is.EqualTo(2f / 3f).Within(1e-6f));
     }
 
     [Test]
@@ -41,7 +74,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var mse = new MSELoss<float>();
+        var mse = new MSELoss<float>(Reduction.Sum);
         var loss = mse.Forward(predictions, targets);
         loss.Backward();
 
@@ -60,10 +93,24 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var l1 = new L1Loss<float>();
+        var l1 = new L1Loss<float>(Reduction.Sum);
         var loss = l1.Forward(predictions, targets);
 
         Assert.That(loss[0], Is.EqualTo(3f));
+    }
+
+    [Test]
+    public void L1Loss_Mean_ComputesCorrectValue()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
+
+        var l1 = new L1Loss<float>();
+        var loss = l1.Forward(predictions, targets);
+
+        Assert.That(loss[0], Is.EqualTo(1f));
     }
 
     [Test]
@@ -74,7 +121,7 @@ public class LossTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: false);
 
-        var bce = new BCELoss<float>(eps: 1e-7);
+        var bce = new BCELoss<float>(Reduction.Sum, eps: 1e-7);
         var loss = bce.Forward(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
@@ -181,7 +228,7 @@ public class LossTests
             NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }), requiresGrad: false);
 
         var bceLogits = new BCEWithLogitsLoss<float>();
-        var sumLoss = bceLogits.Forward(logitsSum, targetsSum, reduceToMean: false);
+        var sumLoss = bceLogits.Forward(logitsSum, targetsSum, Reduction.Sum);
         sumLoss.Backward();
         float gradSum = logitsSum.Grad![0];
 
@@ -190,7 +237,7 @@ public class LossTests
         var targetsMean = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }), requiresGrad: false);
 
-        var meanLoss = bceLogits.Forward(logitsMean, targetsMean, reduceToMean: true);
+        var meanLoss = bceLogits.Forward(logitsMean, targetsMean, Reduction.Mean);
         meanLoss.Backward();
         float gradMean = logitsMean.Grad![0];
 
@@ -206,8 +253,8 @@ public class LossTests
             NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f, 1f }), requiresGrad: false);
 
         var bceLogits = new BCEWithLogitsLoss<float>();
-        var sumLoss = bceLogits.Forward(logits, targets, reduceToMean: false);
-        var meanLoss = bceLogits.Forward(logits, targets, reduceToMean: true);
+        var sumLoss = bceLogits.Forward(logits, targets, Reduction.Sum);
+        var meanLoss = bceLogits.Forward(logits, targets, Reduction.Mean);
 
         // sum = 4 * log(2) = 2.7726, mean = log(2) = 0.6931
         Assert.That(sumLoss[0], Is.EqualTo(4f * 0.693147f).Within(1e-4f));
@@ -285,8 +332,7 @@ public class LossTests
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var softmax = new Softmax<float>();
-        var output = softmax.Forward(input);
+        var output = Activation.Softmax(input);
 
         Assert.That(output.Length, Is.EqualTo(3));
         var sum = 0f;
@@ -304,8 +350,7 @@ public class LossTests
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
 
-        var logSoftmax = new LogSoftmax<float>();
-        var output = logSoftmax.Forward(input);
+        var output = Activation.LogSoftmax(input);
 
         Assert.That(output.Length, Is.EqualTo(3));
         for (int i = 0; i < output.Length; i++)
@@ -323,8 +368,7 @@ public class LossTests
             requiresGrad: false);
         input.Reshape(3, 4);
 
-        var softmax = new Softmax<float>(dim: 0);
-        var output = softmax.Forward(input);
+        var output = Activation.Softmax(input, dim: 0);
 
         for (int col = 0; col < 4; col++)
         {
@@ -341,8 +385,7 @@ public class LossTests
             requiresGrad: false);
         input.Reshape(3, 4);
 
-        var logSoftmax = new LogSoftmax<float>(dim: 0);
-        var output = logSoftmax.Forward(input);
+        var output = Activation.LogSoftmax(input, dim: 0);
 
         for (int col = 0; col < 4; col++)
         {
@@ -362,8 +405,7 @@ public class LossTests
             requiresGrad: true);
         input.Reshape(3, 4);
 
-        var softmax = new Softmax<float>(dim: 0);
-        var output = softmax.Forward(input);
+        var output = Activation.Softmax(input, dim: 0);
 
         var seed = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[] { 0.1f, -0.2f, 0.3f, 0.4f, -0.5f, 0.6f, 0.7f, -0.8f, 0.9f, 1.1f, 1.2f, 1.3f }),
@@ -384,9 +426,9 @@ public class LossTests
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f }), requiresGrad: false);
         input.Reshape(2, 2);
 
-        Assert.Throws<ArgumentOutOfRangeException>(() => new Softmax<float>(dim: 2).Forward(input));
-        Assert.Throws<ArgumentOutOfRangeException>(() => new Softmax<float>(dim: -3).Forward(input));
-        Assert.Throws<ArgumentOutOfRangeException>(() => new LogSoftmax<float>(dim: 2).Forward(input));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Activation.Softmax(input, dim: 2));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Activation.Softmax(input, dim: -3));
+        Assert.Throws<ArgumentOutOfRangeException>(() => Activation.LogSoftmax(input, dim: 2));
     }
 
     [Test]
@@ -399,7 +441,7 @@ public class LossTests
             NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f }), requiresGrad: false);
         targets.Reshape(2, 2);
 
-        var mse = new MSELoss<float>();
+        var mse = new MSELoss<float>(Reduction.Sum);
         var loss = mse.Forward(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
@@ -422,5 +464,102 @@ public class LossTests
         Assert.That(logits.Grad!.Length, Is.EqualTo(3));
         for (int i = 0; i < 3; i++)
             Assert.That(float.IsNaN(logits.Grad[i]), Is.False);
+    }
+
+    [Test]
+    public void MSELoss_None_ReturnsElementwiseLoss()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
+
+        var mse = new MSELoss<float>(Reduction.None);
+        var loss = mse.Forward(predictions, targets);
+
+        Assert.That(loss.Length, Is.EqualTo(3));
+        for (int i = 0; i < 3; i++)
+            Assert.That(loss[i], Is.EqualTo(1f).Within(1e-6f));
+
+        var seed = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }), requiresGrad: false);
+        loss.Backward(seed);
+
+        Assert.That(predictions.Grad, Is.Not.Null);
+        Assert.That(predictions.Grad![0], Is.EqualTo(2f).Within(1e-6f));
+        Assert.That(predictions.Grad[1], Is.EqualTo(2f).Within(1e-6f));
+        Assert.That(predictions.Grad[2], Is.EqualTo(2f).Within(1e-6f));
+    }
+
+    [Test]
+    public void MSELoss_PerCallReduction_OverridesConstructorDefault()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
+
+        var mse = new MSELoss<float>(Reduction.Mean);
+        var sumLoss = mse.Forward(predictions, targets, Reduction.Sum);
+        var meanLoss = mse.Forward(predictions, targets);
+
+        Assert.That(sumLoss[0], Is.EqualTo(3f).Within(1e-6f));
+        Assert.That(meanLoss[0], Is.EqualTo(1f).Within(1e-6f));
+    }
+
+    [Test]
+    public void CrossEntropyLoss_None_ReturnsPerSampleNll()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 1f, 0.1f, 2f, 1f, 0.1f }), requiresGrad: true);
+        logits.Reshape(2, 3);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 0f, 0f, 0f, 1f, 0f }), requiresGrad: false);
+        targets.Reshape(2, 3);
+
+        var ce = new CrossEntropyLoss<float>(Reduction.None);
+        var loss = ce.Forward(logits, targets);
+
+        Assert.That(loss.Length, Is.EqualTo(2));
+        Assert.That(loss[0], Is.GreaterThan(0f));
+        Assert.That(loss[1], Is.GreaterThan(0f));
+    }
+
+    [Test]
+    public void LossBase_AllLosses_ForwardThroughCommonAbstraction()
+    {
+        var losses = new Loss<float>[]
+        {
+            new MSELoss<float>(Reduction.Sum),
+            new L1Loss<float>(Reduction.Sum),
+            new BCELoss<float>(Reduction.Sum),
+            new BCEWithLogitsLoss<float>(Reduction.Sum),
+            new CrossEntropyLoss<float>(Reduction.Sum),
+        };
+
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.6f, 0.7f, 0.8f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 0f, 1f }), requiresGrad: false);
+
+        foreach (var loss in losses)
+        {
+            var result = loss.Forward(predictions, targets);
+            Assert.That(result.Length, Is.EqualTo(1));
+            Assert.That(float.IsNaN(result[0]), Is.False);
+        }
+    }
+
+    [Test]
+    public void Loss_InvalidReduction_Throws()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: false);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => new MSELoss<float>((Reduction)99));
+        Assert.Throws<ArgumentOutOfRangeException>(
+            () => new MSELoss<float>().Forward(predictions, targets, (Reduction)99));
     }
 }

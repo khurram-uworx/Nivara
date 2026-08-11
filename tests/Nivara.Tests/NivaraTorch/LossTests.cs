@@ -29,7 +29,7 @@ public class LossTests
         targetTensor.Reshape(4, 10);
 
         var loss = new BCEWithLogitsLoss<float>();
-        var output = loss.Forward(inputTensor, targetTensor, reduceToMean: false);
+        var output = loss.Forward(inputTensor, targetTensor, Reduction.Sum);
 
         TestHelpers.AssertScalarEqual(expected, TestHelpers.ScalarOutput(output), label: "BCEWithLogits_sum");
     }
@@ -47,7 +47,7 @@ public class LossTests
         targetTensor.Reshape(4, 10);
 
         var loss = new BCEWithLogitsLoss<float>();
-        var output = loss.Forward(inputTensor, targetTensor, reduceToMean: true);
+        var output = loss.Forward(inputTensor, targetTensor, Reduction.Mean);
 
         TestHelpers.AssertScalarEqual(expected, TestHelpers.ScalarOutput(output), label: "BCEWithLogits_mean");
     }
@@ -81,7 +81,7 @@ public class LossTests
         targetTensor.Reshape(4, 10);
 
         var loss = new MSELoss<float>();
-        var output = loss.Forward(predTensor, targetTensor, reduceToMean: false);
+        var output = loss.Forward(predTensor, targetTensor, Reduction.Sum);
 
         TestHelpers.AssertScalarEqual(expected, TestHelpers.ScalarOutput(output), label: "MSE_sum");
     }
@@ -99,7 +99,7 @@ public class LossTests
         targetTensor.Reshape(4, 10);
 
         var loss = new MSELoss<float>();
-        var output = loss.Forward(predTensor, targetTensor, reduceToMean: true);
+        var output = loss.Forward(predTensor, targetTensor, Reduction.Mean);
 
         TestHelpers.AssertScalarEqual(expected, TestHelpers.ScalarOutput(output), label: "MSE_mean");
     }
