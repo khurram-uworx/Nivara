@@ -56,22 +56,22 @@ embedded in `Select` / `Filter` / `SortBy` and in window ops over *computed* sou
 
 ## Change units (each ends with a green build)
 
-- [ ] **U1 — WindowExpression AST + factories.** New `WindowFunctionKind`,
+- [x] **U1 — WindowExpression AST + factories.** New `WindowFunctionKind`,
   `WindowExpression`, `WindowFunctionHelpers`, `ColumnExpressions` window factories
   (`RollingSum`/`RollingMean`/`RollingMin`/`RollingMax`, `CumulativeSum`/`Max`/`Min`/
   `Product`/`Count`, `Shift`/`Lead`, `RowNumber`/`Rank`/`DenseRank`/`PercentRank`).
   Schema/result-type unit tests. No behavior change to existing paths.
-- [ ] **U2 — Fused evaluator hydration.** Window-in-`Select` composition; nested windows;
+- [x] **U2 — Fused evaluator hydration.** Window-in-`Select` composition; nested windows;
   standalone window short-circuit; fused-path guardrail test; vacuous-empty reference
   collection covers windows.
-- [ ] **U3 — Window ops over computed sources.** `SourceExpression` on Rolling/Cumulative/
+- [x] **U3 — Window ops over computed sources.** `SourceExpression` on Rolling/Cumulative/
   Shift + expression ctor for `RankOperation`; `QueryFrame` expression overloads
   (`RollingSum(ColumnExpression, ...)`, `CumulativeSum(expr, ...)`, `Shift(expr, ...)`,
   `Lead(expr, ...)`, `Rank(resultColumn, orderBy: SortExpressionKey[], partitionBy:
   ColumnExpression[])`). Pipeline tests comparing expression vs. name-based results.
-- [ ] **U4 — Plan layer.** Visitor/transformer window dispatch + `GetOperationDetails`.
-  Tests exercising `QueryPlanVisitor`/`Describe()` with window ops.
-- [ ] **U5 — Docs.** `CHANGELOG.md` Unreleased entry; `docs/LINQ.md` window-expression
+- [x] **U4 — Plan layer.** Visitor/transformer window dispatch + `GetOperationDetails`.
+  Tests exercising `QueryPlanVisitor`/`GenerateDiagnosticInfo` with window ops.
+- [x] **U5 — Docs.** `CHANGELOG.md` Unreleased entry; `docs/LINQ.md` window-expression
   section.
 - [ ] Full `dotnet build Nivara.slnx` + targeted test run; confirm all existing tests green.
 

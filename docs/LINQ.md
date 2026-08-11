@@ -160,6 +160,45 @@ Property access, constant literals, `+ - * / %` arithmetic, comparisons, and `&&
 logic. Method calls, captured variables/closures, nested property access, array/index access,
 ternary, and string `+` fail fast at build time with `UnsupportedQueryExpressionException`.
 
+### Window functions in the expression DSL
+
+Rolling / cumulative / shift / lead / rank windows are first-class `ColumnExpression`s and can be
+embedded in `Select` / `Filter` / `SortBy`, or composed with elementwise math:
+
+```csharp
+// Window result fused with elementwise math.
+var result = frame.AsQueryFrame()
+    .Select(ColumnExpressions.RollingSum(ColumnExpressions.Col("Salary"), 2) * 2)
+    .Collect();
+
+// Rank over expression partition/order keys.
+var ranked = frame.AsQueryFrame()
+    .Rank("rn", orderBy: new[] { new SortExpressionKey(ColumnExpressions.Col("Score") * 1) },
+                partitionBy: new[] { ColumnExpressions.Col("Dept") })
+    .Collect();
+```
+
+Factory surface on `ColumnExpressions`: `RollingSum` / `RollingMean` / `RollingMin` /
+`RollingMax`, `CumulativeSum` / `CumulativeMax` / `CumulativeMin` / `CumulativeProduct` /
+`CumulativeCount`, `Shift` / `Lead`, and the rank family `RowNumber` / `Rank` / `DenseRank` /
+`PercentRank`. Nested windows compose (a window inside a window is evaluated bottom-up and
+injected as a synthetic column). Result types: rolling mean → `double`, cumulative count and
+rank-family → `long` (`PercentRank` → `double`), everything else matches the source column type.
+
+Window pipeline ops also accept computed sources and keys directly:
+
+```csharp
+var r = frame.AsQueryFrame()
+    .RollingSum(ColumnExpressions.Col("A") * 2, "r", 2)   // window over a computed source
+    .CumulativeCount(ColumnExpressions.Col("A"), "cnt")
+    .Shift(ColumnExpressions.Col("A"), "lag1", 1, fillValue: -1)
+    .Lead(ColumnExpressions.Col("A"), "lead1", 1)
+    .Collect();
+```
+
+`docs/WINDOWS.md` covers the full eager `NivaraFrame` window surface; the expression DSL reuses
+the same kernels so results agree between eager and lazy paths.
+
 ---
 
 ## Materialization
