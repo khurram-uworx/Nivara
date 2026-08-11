@@ -174,7 +174,7 @@ public class LossTests
         var targetTensor = ReverseGradTensor<float>.FromArray(target, requiresGrad: false);
         targetTensor.Reshape(4, 10);
 
-        var loss = new L1Loss<float>();
+        var loss = new L1Loss<float>(Reduction.Sum);
         var output = loss.Forward(predTensor, targetTensor);
 
         TestHelpers.AssertScalarEqual(expected, TestHelpers.ScalarOutput(output), label: "L1");

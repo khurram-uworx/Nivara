@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
@@ -22,8 +23,8 @@ public sealed class BCELoss<T> : Loss<T> where T : struct, IFloatingPointIeee754
         if (targets == null) throw new ArgumentNullException(nameof(targets));
 
         var clamped = ReverseGradOperations.Clip(predictions, eps, T.One - eps);
-        var one = new ReverseGradTensor<T>(NivaraColumn<T>.Create([T.One]),
-            requiresGrad: false, predictions.shape);
+        var one = GradientUtils.Full(predictions.Length, T.One);
+        one.Reshape(predictions.shape);
         var logPred = ReverseGradOperations.Log(clamped);
         var log1mPred = ReverseGradOperations.Log(ReverseGradOperations.Subtract(one, clamped));
         var loss = ReverseGradOperations.Negate(ReverseGradOperations.Add(

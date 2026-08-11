@@ -130,6 +130,25 @@ public class LossTests
     }
 
     [Test]
+    public void BCELoss_MultiElement_ComputesCorrectMean()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 0.8f, 0.2f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 0f }), requiresGrad: false);
+
+        var bce = new BCELoss<float>();
+        var loss = bce.Forward(predictions, targets);
+
+        Assert.That(loss.Length, Is.EqualTo(1));
+        Assert.That(loss[0], Is.EqualTo(-(float)Math.Log(0.8)).Within(1e-5f));
+
+        loss.Backward();
+        Assert.That(predictions.Grad, Is.Not.Null);
+        Assert.That(predictions.Grad!.Length, Is.EqualTo(2));
+    }
+
+    [Test]
     public void BCEWithLogitsLoss_Forward_WiderInputRange()
     {
         var logits = new ReverseGradTensor<float>(
