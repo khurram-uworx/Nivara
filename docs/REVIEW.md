@@ -174,6 +174,12 @@ also exists!) and `ToList` removed or made `[Obsolete]`.
 Same member, three names, three nullability contracts. This will confuse every
 consumer and every serialization path.
 
+**Resolved 2026-08-10 (issue #177):** every leaf module now exposes `Weight` /
+`Bias` as `Parameter<T>?` (`null` = omitted via `bias: false` / `affine: false`);
+`WeightParam` / `BiasParam` and tensor-typed `Weight` were removed. Tensors are
+reached via `Weight!.Tensor` / `Bias!.Tensor`. State-dict keys unchanged.
+Enforced by `WeightAccessConsistencyTests`.
+
 ### 7. Dead public surface in AutoDiff
 
 - **4 of 5 sealed exception types are never thrown.** `CircularDependencyException`,
@@ -363,8 +369,10 @@ whether the change is safe (no breaking change) or requires a major bump.
 
 ### Breaking-change items (2.0 candidate)
 
-9. Unify AutoDiff weight access (`Weight`/`WeightParam`/`Parameter<T>?`) into one
-   contract.
+9. ~~Unify AutoDiff weight access (`Weight`/`WeightParam`/`Parameter<T>?`) into one
+   contract.~~ — Done 2026-08-10 (issue #177): unified on `Weight`/`Bias` as
+   `Parameter<T>?` (`null` = omitted); `WeightParam`/`BiasParam`/tensor-typed
+   `Weight` removed.
 10. Introduce a `Reduction` enum and a common loss base; align reduction overloads.
 11. Make `JsonOptions.Default`/`CsvOptions.Default` immutable or remove them.
 12. Replace `CsvOptions.TrimOptions` bool and `ParquetWriteOptions.Compression`
