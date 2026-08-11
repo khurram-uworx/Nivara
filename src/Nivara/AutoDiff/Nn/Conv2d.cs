@@ -34,8 +34,8 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     public int PaddingLeft => _paddingLeft;
     public int PaddingRight => _paddingRight;
     public int Groups => _groups;
-    public Parameter<T> WeightParam => _weight;
-    public Parameter<T>? BiasParam => _bias;
+    public Parameter<T>? Weight => _weight;
+    public Parameter<T>? Bias => _bias;
 
     public Conv2d(
         int inChannels,
@@ -657,8 +657,8 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
     public int KernelSize => _kernelSize;
     public int Stride => _stride;
     public int Padding => _padding;
-    public Parameter<T> WeightParam => _weight;
-    public Parameter<T>? BiasParam => _bias;
+    public Parameter<T>? Weight => _weight;
+    public Parameter<T>? Bias => _bias;
 
     public ConvTranspose2d(
         int inChannels,

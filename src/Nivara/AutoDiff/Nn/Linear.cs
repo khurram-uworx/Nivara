@@ -14,9 +14,8 @@ public sealed class Linear<T> : Module<T> where T : struct, IFloatingPointIeee75
 
     public int InFeatures => inFeatures;
     public int OutFeatures => outFeatures;
-    public ReverseGradTensor<T> Weight => weight.Tensor;
-    public Parameter<T> WeightParam => weight;
-    public ReverseGradTensor<T>? Bias => bias?.Tensor;
+    public Parameter<T>? Weight => weight;
+    public Parameter<T>? Bias => bias;
 
     public Linear(int inFeatures, int outFeatures, bool bias = true,
         IInitializer<T>? weightInitializer = null,

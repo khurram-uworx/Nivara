@@ -26,8 +26,8 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
     public int KernelSize => _kernelSize;
     public int Stride => _stride;
     public int Padding => _padding;
-    public Parameter<T> WeightParam => _weight;
-    public Parameter<T>? BiasParam => _bias;
+    public Parameter<T>? Weight => _weight;
+    public Parameter<T>? Bias => _bias;
 
     public Conv1d(
         int inChannels,

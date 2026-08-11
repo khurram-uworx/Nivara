@@ -19,8 +19,7 @@ public sealed class SparseEmbedding<T> : Module<T> where T : struct, IFloatingPo
     public int NumEmbeddings => numEmbeddings;
     public int EmbeddingDim => embeddingDim;
     public int PaddingIndex => paddingIndex;
-    public ReverseGradTensor<T> Weight => weight.Tensor;
-    public Parameter<T> WeightParam => weight;
+    public Parameter<T>? Weight => weight;
 
     public SparseEmbedding(int numEmbeddings, int embeddingDim, int paddingIndex = -1)
     {
