@@ -4,7 +4,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff;
 
-public sealed class ComputationGraph
+internal sealed class ComputationGraph
 {
     internal static void AddNode<T>(ReverseGradTensor<T> output, OpNode<T> node) where T : struct, IFloatingPointIeee754<T>
     {
@@ -139,7 +139,7 @@ public sealed class ComputationGraph
         BuildBackwardPlan(root);
     }
 
-    public static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
+    internal static void ZeroGrad<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -168,7 +168,7 @@ public sealed class ComputationGraph
         ClearGradients(tensor);
     }
 
-    public static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
+    internal static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
     {
         if (root == null)
             throw new ArgumentNullException(nameof(root));
