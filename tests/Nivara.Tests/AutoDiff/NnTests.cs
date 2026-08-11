@@ -3698,7 +3698,7 @@ public class NnTests
             NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }),
             requiresGrad: false);
 
-        var loss = new MSELoss<float>().Forward(predictions, targets);
+        var loss = new MSELoss<float>(Reduction.Sum).Forward(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
         float expected = 0f + 1f + 4f;
@@ -3716,7 +3716,7 @@ public class NnTests
             NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }),
             requiresGrad: false);
 
-        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+        var loss = new MSELoss<float>().Forward(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
         float expected = (0f + 1f + 4f) / 3f;
@@ -3734,7 +3734,7 @@ public class NnTests
             NivaraColumn<float>.Create(new float[] { 1f, 1f }),
             requiresGrad: false);
 
-        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+        var loss = new MSELoss<float>().Forward(predictions, targets);
         loss.Backward();
 
         Assert.That(predictions.Grad, Is.Not.Null);
@@ -3754,8 +3754,8 @@ public class NnTests
         var targets = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create((float[])data.Clone()), requiresGrad: false);
 
-        var sumLoss = new MSELoss<float>().Forward(predictions, targets);
-        var meanLoss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+        var sumLoss = new MSELoss<float>(Reduction.Sum).Forward(predictions, targets);
+        var meanLoss = new MSELoss<float>(Reduction.Mean).Forward(predictions, targets);
 
         Assert.That(sumLoss[0], Is.EqualTo(0f).Within(1e-6f));
         Assert.That(meanLoss[0], Is.EqualTo(0f).Within(1e-6f));
@@ -3924,7 +3924,7 @@ public class NnTests
             NivaraColumn<float>.Create(new float[] { 1, 1, 1, 1 }),
             requiresGrad: false);
 
-        var loss = new MSELoss<float>().Forward(predictions, targets, reduceToMean: true);
+        var loss = new MSELoss<float>().Forward(predictions, targets);
 
         Assert.That(loss.Length, Is.EqualTo(1));
         float expected = (0f + 1f + 4f + 9f) / 4f;

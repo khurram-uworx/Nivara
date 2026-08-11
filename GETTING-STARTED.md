@@ -1278,7 +1278,7 @@ var classifier = new TextClassifierModel<float>(
 using (GradientUtils.Grad())
 {
     var logits = classifier.Forward(inputTokens);
-    var loss = CrossEntropyLoss<float>.Compute(logits, labels);
+    var loss = new CrossEntropyLoss<float>().Forward(logits, labels);
     loss.Backward();
     optimizer.Step();
     classifier.ZeroGrad();

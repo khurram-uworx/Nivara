@@ -4,12 +4,16 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
-public sealed class BCEWithLogitsLoss<T> where T : struct, IFloatingPointIeee754<T>
+public sealed class BCEWithLogitsLoss<T> : Loss<T> where T : struct, IFloatingPointIeee754<T>
 {
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> logits, ReverseGradTensor<T> targets)
-        => Forward(logits, targets, reduceToMean: false);
+    public BCEWithLogitsLoss(Reduction reduction = Reduction.Mean) : base(reduction)
+    {
+    }
 
-    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> logits, ReverseGradTensor<T> targets, bool reduceToMean)
+    public override ReverseGradTensor<T> Forward(
+        ReverseGradTensor<T> logits,
+        ReverseGradTensor<T> targets,
+        Reduction reduction)
     {
         if (logits == null) throw new ArgumentNullException(nameof(logits));
         if (targets == null) throw new ArgumentNullException(nameof(targets));
@@ -62,13 +66,7 @@ public sealed class BCEWithLogitsLoss<T> where T : struct, IFloatingPointIeee754
             ComputationGraph.AddNode(lossTensor, gradFn);
         }
 
-        var sumLoss = ReverseGradOperations.Sum(lossTensor);
-
-        if (!reduceToMean)
-            return sumLoss;
-
-        var lengthTensor = GradientUtils.Full(1, T.CreateChecked(n));
-        return ReverseGradOperations.Divide(sumLoss, lengthTensor);
+        return Reduce(lossTensor, reduction);
     }
 
     static T SoftPlus(T x)

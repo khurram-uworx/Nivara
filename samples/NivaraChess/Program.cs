@@ -97,7 +97,7 @@ static void Train(ChessEvalModelBase model, Options options)
         var dataset = new TensorDataset<float>(frame, featureNames, "score");
         var loader = new DataLoader<float>(dataset, options.BatchSize, shuffle: true, seed: options.Seed);
 
-        var mse = new MSELoss<float>();
+        var mse = new MSELoss<float>(Reduction.Sum);
         var optimizer = new AdamW<float>((float)options.LearningRate);
         optimizer.AddParameterGroup(model.GetParameters().Values, (float)options.LearningRate);
 
