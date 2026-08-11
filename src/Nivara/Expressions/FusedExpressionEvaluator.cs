@@ -1,7 +1,9 @@
 using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Helpers;
+using Nivara.Operations;
 using Nivara.Storage;
+using Nivara.Tensors;
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Numerics;
@@ -142,11 +144,39 @@ sealed class FusedExpressionEvaluator
             case NotExpression not:
                 CollectColumnReferences(not.Operand, references);
                 break;
+            case WindowExpression window:
+                if (window.Source is not null)
+                    CollectColumnReferences(window.Source, references);
+                foreach (var key in window.OrderBy)
+                    CollectColumnReferences(key.Key, references);
+                foreach (var partition in window.PartitionBy)
+                    CollectColumnReferences(partition, references);
+                break;
         }
     }
 
     IColumn EvaluateCore(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
     {
+        // Hydrate window expressions before any kernel planning: each window node is materialized
+        // through its own evaluation (rolling/cumulative/shift/rank kernels over the computed source
+        // or key expressions) and replaced with a reference to a synthetic column injected into the
+        // input dictionary. The surrounding elementwise expression then fuses over the materialized
+        // window column in a single pass. Nested windows compose because the inner evaluations recurse
+        // through this same method.
+        if (ContainsWindowExpression(expression))
+        {
+            var synthetic = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            expression = HydrateWindows(expression, input, synthetic);
+
+            if (synthetic.Count > 0)
+            {
+                var combined = new Dictionary<string, IColumn>(input, StringComparer.OrdinalIgnoreCase);
+                foreach (var kvp in synthetic)
+                    combined[kvp.Key] = kvp.Value;
+                input = combined;
+            }
+        }
+
         switch (expression)
         {
             // Trivial passthroughs: a bare column reference or literal needs no kernel.
@@ -230,6 +260,119 @@ sealed class FusedExpressionEvaluator
     {
         return action(leafArrays, length);
     }
+
+    static bool ContainsWindowExpression(ColumnExpression node)
+    {
+        switch (node)
+        {
+            case WindowExpression:
+                return true;
+            case ScalarExpression scalar:
+                return ContainsWindowExpression(scalar.Column);
+            case BinaryExpression binary:
+                return ContainsWindowExpression(binary.Left) || ContainsWindowExpression(binary.Right);
+            case ComparisonExpression comparison:
+                return ContainsWindowExpression(comparison.Left) || ContainsWindowExpression(comparison.Right);
+            case NotExpression not:
+                return ContainsWindowExpression(not.Operand);
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Rewrites a tree, replacing each window node with a reference to a synthetic column that
+    /// holds the materialized window result. The rewritten tree contains only plain elementwise
+    /// nodes, so it flows through the standard fused kernel planning unchanged.
+    /// </summary>
+    ColumnExpression HydrateWindows(ColumnExpression node, IReadOnlyDictionary<string, IColumn> input, Dictionary<string, IColumn> synthetic)
+    {
+        switch (node)
+        {
+            case WindowExpression window:
+                {
+                    var result = MaterializeWindow(window, input);
+                    var name = SyntheticWindowPrefix + synthetic.Count;
+                    synthetic[name] = result;
+                    return new ColumnReference(name, result.ElementType);
+                }
+
+            case ScalarExpression scalar:
+                return new ScalarExpression(scalar.Operator, HydrateWindows(scalar.Column, input, synthetic), scalar.Scalar);
+
+            case BinaryExpression binary:
+                return new BinaryExpression(binary.Operator, HydrateWindows(binary.Left, input, synthetic), HydrateWindows(binary.Right, input, synthetic));
+
+            case ComparisonExpression comparison:
+                return new ComparisonExpression(comparison.Operator, HydrateWindows(comparison.Left, input, synthetic), HydrateWindows(comparison.Right, input, synthetic));
+
+            case NotExpression not:
+                return new NotExpression(HydrateWindows(not.Operand, input, synthetic));
+
+            default:
+                return node;
+        }
+    }
+
+    /// <summary>
+    /// Materializes a window expression into its result column using the same kernels as the eager
+    /// frame path and the pipeline operations. Rank-family kinds materialize each order/partition
+    /// key expression into a synthetic column and feed them to <see cref="RankKernel"/>.
+    /// </summary>
+    IColumn MaterializeWindow(WindowExpression window, IReadOnlyDictionary<string, IColumn> input)
+    {
+        if (WindowFunctionHelpers.IsRankFamily(window.Kind))
+        {
+            var keyColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            var orderKeys = new List<SortKey>();
+            var partitionNames = new List<string>();
+            var index = 0;
+
+            foreach (var orderKey in window.OrderBy)
+            {
+                var name = SyntheticWindowPrefix + index++;
+                keyColumns[name] = Evaluate(orderKey.Key, input);
+                orderKeys.Add(new SortKey(name, orderKey.Direction, orderKey.NullOrdering));
+            }
+
+            foreach (var partition in window.PartitionBy)
+            {
+                var name = SyntheticWindowPrefix + index++;
+                keyColumns[name] = Evaluate(partition, input);
+                partitionNames.Add(name);
+            }
+
+            return RankKernel.Compute(keyColumns, partitionNames.ToArray(), orderKeys, WindowFunctionHelpers.ToRankKind(window.Kind));
+        }
+
+        var source = Evaluate(window.Source!, input);
+        switch (window.Kind)
+        {
+            case WindowFunctionKind.RollingSum:
+            case WindowFunctionKind.RollingMean:
+            case WindowFunctionKind.RollingMin:
+            case WindowFunctionKind.RollingMax:
+                return NivaraFrameExtensions.CalculateRolling(source, window.WindowSize!.Value, window.MinPeriods, window.NullHandler, WindowFunctionHelpers.ToRollingKind(window.Kind));
+
+            case WindowFunctionKind.CumulativeCount:
+                return NivaraFrameExtensions.CalculateCumulativeCount(source);
+
+            case WindowFunctionKind.CumulativeSum:
+            case WindowFunctionKind.CumulativeMax:
+            case WindowFunctionKind.CumulativeMin:
+            case WindowFunctionKind.CumulativeProduct:
+                return NivaraFrameExtensions.CalculateCumulative(source, window.NullHandler, WindowFunctionHelpers.ToCumulativeKind(window.Kind));
+
+            case WindowFunctionKind.Shift:
+            case WindowFunctionKind.Lead:
+                return NivaraFrameExtensions.CalculateShift(source, window.Kind == WindowFunctionKind.Lead ? -window.Periods!.Value : window.Periods!.Value, window.FillValue);
+
+            default:
+                throw new NotSupportedException($"Window kind {window.Kind} is not supported by the fused evaluator");
+        }
+    }
+
+    static string SyntheticWindowPrefix => "__window_";
 
     /// <summary>
     /// Evaluates through the generic span kernel: primary path for null-bearing uniform generic-math
