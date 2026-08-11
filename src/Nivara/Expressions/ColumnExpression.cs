@@ -1,5 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Helpers;
+using Nivara.Operations;
 
 namespace Nivara.Expressions;
 
@@ -803,4 +804,95 @@ internal static class ColumnExpressions
     {
         return new NotExpression(operand);
     }
+
+    /// <summary>
+    /// Creates a rolling-sum window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression RollingSum(ColumnExpression source, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.RollingSum, source, windowSize, minPeriods, nullHandler);
+
+    /// <summary>
+    /// Creates a rolling-mean window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression RollingMean(ColumnExpression source, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.RollingMean, source, windowSize, minPeriods, nullHandler);
+
+    /// <summary>
+    /// Creates a rolling-minimum window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression RollingMin(ColumnExpression source, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.RollingMin, source, windowSize, minPeriods, nullHandler);
+
+    /// <summary>
+    /// Creates a rolling-maximum window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression RollingMax(ColumnExpression source, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.RollingMax, source, windowSize, minPeriods, nullHandler);
+
+    /// <summary>
+    /// Creates a cumulative-sum window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression CumulativeSum(ColumnExpression source, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.CumulativeSum, source, nullHandler);
+
+    /// <summary>
+    /// Creates a cumulative-maximum window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression CumulativeMax(ColumnExpression source, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.CumulativeMax, source, nullHandler);
+
+    /// <summary>
+    /// Creates a cumulative-minimum window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression CumulativeMin(ColumnExpression source, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.CumulativeMin, source, nullHandler);
+
+    /// <summary>
+    /// Creates a cumulative-product window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression CumulativeProduct(ColumnExpression source, Func<object?>? nullHandler = null)
+        => new WindowExpression(WindowFunctionKind.CumulativeProduct, source, nullHandler);
+
+    /// <summary>
+    /// Creates a running count-of-non-null window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression CumulativeCount(ColumnExpression source)
+        => new WindowExpression(WindowFunctionKind.CumulativeCount, source);
+
+    /// <summary>
+    /// Creates a shift (lag) window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression Shift(ColumnExpression source, int periods, object? fillValue = null)
+        => new WindowExpression(WindowFunctionKind.Shift, source, periods, fillValue);
+
+    /// <summary>
+    /// Creates a lead window expression over a source expression.
+    /// </summary>
+    public static ColumnExpression Lead(ColumnExpression source, int periods, object? fillValue = null)
+        => new WindowExpression(WindowFunctionKind.Lead, source, periods, fillValue);
+
+    /// <summary>
+    /// Creates a row-number window expression. With no partition or order keys the numbering
+    /// is sequential over all rows.
+    /// </summary>
+    public static ColumnExpression RowNumber(IReadOnlyList<ColumnExpression>? partitionBy = null, IReadOnlyList<SortExpressionKey>? orderBy = null)
+        => new WindowExpression(WindowFunctionKind.RowNumber, partitionBy, orderBy ?? Array.Empty<SortExpressionKey>());
+
+    /// <summary>
+    /// Creates a standard-rank window expression (gaps on ties).
+    /// </summary>
+    public static ColumnExpression Rank(IReadOnlyList<SortExpressionKey> orderBy, IReadOnlyList<ColumnExpression>? partitionBy = null)
+        => new WindowExpression(WindowFunctionKind.Rank, partitionBy, orderBy);
+
+    /// <summary>
+    /// Creates a dense-rank window expression (no gaps on ties).
+    /// </summary>
+    public static ColumnExpression DenseRank(IReadOnlyList<SortExpressionKey> orderBy, IReadOnlyList<ColumnExpression>? partitionBy = null)
+        => new WindowExpression(WindowFunctionKind.DenseRank, partitionBy, orderBy);
+
+    /// <summary>
+    /// Creates a percent-rank window expression.
+    /// </summary>
+    public static ColumnExpression PercentRank(IReadOnlyList<SortExpressionKey> orderBy, IReadOnlyList<ColumnExpression>? partitionBy = null)
+        => new WindowExpression(WindowFunctionKind.PercentRank, partitionBy, orderBy);
 }

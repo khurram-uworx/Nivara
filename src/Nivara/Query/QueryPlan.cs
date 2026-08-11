@@ -347,6 +347,10 @@ internal static class QueryPlanAnalyzer
             FilterOperation filter => $"Condition: {filter.Condition}",
             SelectOperation select => $"Columns: {string.Join(", ", select.Columns.Select(c => c.Name))}",
             GroupByOperation groupBy => $"Group By: {string.Join(", ", groupBy.GroupByColumns.Select(c => c.Name))}",
+            RollingOperation rolling => $"Rolling: {rolling.Source} ({rolling.WindowSize})",
+            CumulativeOperation cumulative => $"Cumulative: {cumulative.Source}",
+            ShiftOperation shift => $"Shift: {shift.Source} ({shift.Periods})",
+            RankOperation rank => $"Rank: {rank.ResultColumn}",
             _ => string.Empty
         };
     }

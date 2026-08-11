@@ -84,6 +84,12 @@ internal abstract class QueryPlanVisitorBase : IQueryPlanVisitor
             case OperationType.Projection:
                 VisitProjection(operation);
                 break;
+            case OperationType.Rolling:
+            case OperationType.Cumulative:
+            case OperationType.Shift:
+            case OperationType.Rank:
+                VisitWindow(operation);
+                break;
             case var type when type.StartsWith(OperationType.ConcatenationPrefix, StringComparison.Ordinal):
                 VisitConcatenation(operation);
                 break;
@@ -157,6 +163,15 @@ internal abstract class QueryPlanVisitorBase : IQueryPlanVisitor
     }
 
     /// <summary>
+    /// Visits a window operation (rolling, cumulative, shift, or rank)
+    /// </summary>
+    /// <param name="operation">The window operation to visit</param>
+    protected virtual void VisitWindow(IQueryOperation operation)
+    {
+        // Default implementation does nothing
+    }
+
+    /// <summary>
     /// Visits a concatenation operation
     /// </summary>
     /// <param name="operation">The concatenation operation to visit</param>
@@ -216,6 +231,10 @@ internal abstract class QueryPlanTransformerBase<T> : IQueryPlanVisitor<T>
             OperationType.Sort => VisitSort(operation),
             OperationType.Join => VisitJoin(operation),
             OperationType.Projection => VisitProjection(operation),
+            OperationType.Rolling => VisitWindow(operation),
+            OperationType.Cumulative => VisitWindow(operation),
+            OperationType.Shift => VisitWindow(operation),
+            OperationType.Rank => VisitWindow(operation),
             _ when operation.OperationType.StartsWith(OperationType.ConcatenationPrefix, StringComparison.Ordinal) => VisitConcatenation(operation),
             _ => VisitUnknownOperation(operation)
         };
@@ -277,6 +296,16 @@ internal abstract class QueryPlanTransformerBase<T> : IQueryPlanVisitor<T>
     /// <param name="operation">The projection operation to visit</param>
     /// <returns>The transformed result</returns>
     protected virtual T VisitProjection(IQueryOperation operation)
+    {
+        return (T)(object)operation; // Default: return unchanged
+    }
+
+    /// <summary>
+    /// Visits a window operation (rolling, cumulative, shift, or rank)
+    /// </summary>
+    /// <param name="operation">The window operation to visit</param>
+    /// <returns>The transformed result</returns>
+    protected virtual T VisitWindow(IQueryOperation operation)
     {
         return (T)(object)operation; // Default: return unchanged
     }

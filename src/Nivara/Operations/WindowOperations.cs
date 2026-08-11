@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Expressions;
 using Nivara.Query;
 
 namespace Nivara.Operations;
@@ -11,20 +12,44 @@ namespace Nivara.Operations;
 abstract class WindowOperationBase : IQueryOperation
 {
     /// <summary>
-    /// Initializes a new instance of WindowOperationBase
+    /// Initializes a new instance of WindowOperationBase over a named source column
     /// </summary>
     /// <param name="source">The source column name</param>
     /// <param name="resultColumn">The name of the appended result column</param>
     protected WindowOperationBase(string source, string resultColumn)
+        : this(source: source ?? throw new ArgumentNullException(nameof(source)), sourceExpression: null, resultColumn)
     {
-        Source = source ?? throw new ArgumentNullException(nameof(source));
+    }
+
+    /// <summary>
+    /// Initializes a new instance of WindowOperationBase over a computed source expression
+    /// </summary>
+    /// <param name="sourceExpression">The computed source column expression</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    protected WindowOperationBase(ColumnExpression sourceExpression, string resultColumn)
+        : this(source: null, sourceExpression: sourceExpression ?? throw new ArgumentNullException(nameof(sourceExpression)), resultColumn)
+    {
+    }
+
+    WindowOperationBase(string? source, ColumnExpression? sourceExpression, string resultColumn)
+    {
+        if (source is not null && string.IsNullOrWhiteSpace(source))
+            throw new ArgumentException("Source column name cannot be null or whitespace", nameof(source));
+
+        Source = source;
+        SourceExpression = sourceExpression;
         ResultColumn = resultColumn ?? throw new ArgumentNullException(nameof(resultColumn));
     }
 
     /// <summary>
-    /// Gets the source column name
+    /// Gets the source column name (null when a computed source expression is used)
     /// </summary>
-    public string Source { get; }
+    public string? Source { get; }
+
+    /// <summary>
+    /// Gets the computed source column expression (null when a named source column is used)
+    /// </summary>
+    public ColumnExpression? SourceExpression { get; }
 
     /// <summary>
     /// Gets the result column name
@@ -39,14 +64,32 @@ abstract class WindowOperationBase : IQueryOperation
         if (inputSchema == null)
             throw new ArgumentNullException(nameof(inputSchema));
 
-        if (!inputSchema.HasColumn(Source))
-            throw new SchemaValidationException(
-                $"Window source column '{Source}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
+        Type sourceType;
+        if (SourceExpression is not null)
+        {
+            try
+            {
+                SourceExpression.Validate(inputSchema);
+            }
+            catch (SchemaValidationException ex)
+            {
+                throw new SchemaValidationException($"Window source expression validation failed: {ex.Message}");
+            }
+
+            sourceType = SourceExpression.ResultType;
+        }
+        else
+        {
+            if (!inputSchema.HasColumn(Source!))
+                throw new SchemaValidationException(
+                    $"Window source column '{Source}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
+
+            sourceType = inputSchema.GetColumnType(Source!);
+        }
 
         if (inputSchema.HasColumn(ResultColumn))
             throw new ArgumentException($"Result column '{ResultColumn}' already exists in the schema", nameof(ResultColumn));
 
-        var sourceType = inputSchema.GetColumnType(Source);
         var resultType = GetResultType(sourceType);
         return inputSchema.WithColumn(ResultColumn, resultType);
     }
@@ -59,8 +102,15 @@ abstract class WindowOperationBase : IQueryOperation
 
         try
         {
-            if (!input.TryGetValue(Source, out var sourceColumn))
-                throw new ColumnNotFoundException(Source, input.Keys);
+            IColumn sourceColumn;
+            if (SourceExpression is not null)
+            {
+                sourceColumn = new FusedExpressionEvaluator().Evaluate(SourceExpression, input);
+            }
+            else if (!input.TryGetValue(Source!, out sourceColumn!))
+            {
+                throw new ColumnNotFoundException(Source!, input.Keys);
+            }
 
             var resultColumn = Compute(sourceColumn);
 
@@ -92,7 +142,7 @@ abstract class WindowOperationBase : IQueryOperation
 
     /// <inheritdoc />
     public override string ToString()
-        => $"{OperationType}({Source} -> {ResultColumn})";
+        => $"{OperationType}({(SourceExpression is not null ? SourceExpression.Name : Source)} -> {ResultColumn})";
 }
 
 /// <summary>
@@ -112,6 +162,28 @@ sealed class RollingOperation : WindowOperationBase
     /// <exception cref="ArgumentOutOfRangeException">Thrown when windowSize is not positive</exception>
     public RollingOperation(string source, string resultColumn, int windowSize, int? minPeriods, Func<object?>? nullHandler, NivaraFrameExtensions.RollingKind kind)
         : base(source, resultColumn)
+    {
+        if (windowSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(windowSize), "Window size must be positive");
+
+        WindowSize = windowSize;
+        MinPeriods = minPeriods;
+        NullHandler = nullHandler;
+        Kind = kind;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of RollingOperation over a computed source expression
+    /// </summary>
+    /// <param name="sourceExpression">The computed source column expression</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="windowSize">The rolling window size</param>
+    /// <param name="minPeriods">The minimum number of valid observations required</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <param name="kind">The rolling aggregate kind</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when windowSize is not positive</exception>
+    public RollingOperation(ColumnExpression sourceExpression, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null, NivaraFrameExtensions.RollingKind kind = NivaraFrameExtensions.RollingKind.Sum)
+        : base(sourceExpression, resultColumn)
     {
         if (windowSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(windowSize), "Window size must be positive");
@@ -154,7 +226,7 @@ sealed class RollingOperation : WindowOperationBase
 
     /// <inheritdoc />
     public override string ToString()
-        => $"Rolling{Kind}({Source} -> {ResultColumn}, WindowSize: {WindowSize})";
+        => $"Rolling{Kind}({(SourceExpression is not null ? SourceExpression.Name : Source)} -> {ResultColumn}, WindowSize: {WindowSize})";
 }
 
 /// <summary>
@@ -172,6 +244,22 @@ sealed class CumulativeOperation : WindowOperationBase
     /// <param name="isCount">Whether this is a running count-of-non-null operation</param>
     public CumulativeOperation(string source, string resultColumn, Func<object?>? nullHandler, NivaraFrameExtensions.CumulativeKind kind, bool isCount = false)
         : base(source, resultColumn)
+    {
+        NullHandler = nullHandler;
+        Kind = kind;
+        IsCount = isCount;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of CumulativeOperation over a computed source expression
+    /// </summary>
+    /// <param name="sourceExpression">The computed source column expression</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <param name="kind">The cumulative aggregate kind</param>
+    /// <param name="isCount">Whether this is a running count-of-non-null operation</param>
+    public CumulativeOperation(ColumnExpression sourceExpression, string resultColumn, Func<object?>? nullHandler = null, NivaraFrameExtensions.CumulativeKind kind = NivaraFrameExtensions.CumulativeKind.Sum, bool isCount = false)
+        : base(sourceExpression, resultColumn)
     {
         NullHandler = nullHandler;
         Kind = kind;
@@ -207,7 +295,7 @@ sealed class CumulativeOperation : WindowOperationBase
 
     /// <inheritdoc />
     public override string ToString()
-        => $"Cumulative{Kind}({Source} -> {ResultColumn})";
+        => $"Cumulative{Kind}({(SourceExpression is not null ? SourceExpression.Name : Source)} -> {ResultColumn})";
 }
 
 /// <summary>
@@ -225,6 +313,20 @@ sealed class ShiftOperation : WindowOperationBase
     /// <param name="fillValue">Optional fill value for boundary positions</param>
     public ShiftOperation(string source, string resultColumn, int periods, object? fillValue = null)
         : base(source, resultColumn)
+    {
+        Periods = periods;
+        FillValue = fillValue;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of ShiftOperation over a computed source expression
+    /// </summary>
+    /// <param name="sourceExpression">The computed source column expression</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="periods">The number of positions to shift by (negative = lead)</param>
+    /// <param name="fillValue">Optional fill value for boundary positions</param>
+    public ShiftOperation(ColumnExpression sourceExpression, string resultColumn, int periods, object? fillValue = null)
+        : base(sourceExpression, resultColumn)
     {
         Periods = periods;
         FillValue = fillValue;
@@ -251,5 +353,5 @@ sealed class ShiftOperation : WindowOperationBase
 
     /// <inheritdoc />
     public override string ToString()
-        => $"Shift({Source} -> {ResultColumn}, Periods: {Periods})";
+        => $"Shift({(SourceExpression is not null ? SourceExpression.Name : Source)} -> {ResultColumn}, Periods: {Periods})";
 }
