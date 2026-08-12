@@ -340,6 +340,115 @@ public class OptimizerTests
     }
 
     [Test]
+    public void LearningRate_Set_UpdatesDefaultGroups()
+    {
+        var defaultParam = new Parameter<float>("default", new float[] { 1f }, requiresGrad: true);
+        var overrideParam = new Parameter<float>("override", new float[] { 2f }, requiresGrad: true);
+
+        var sgd = new SGD<float>(0.01f);
+        sgd.AddParameterGroup(defaultParam);         // uses optimizer.LearningRate
+        sgd.AddParameterGroup(overrideParam, 0.5f);  // explicit override
+
+        sgd.LearningRate = 0.1f;
+
+        ReverseGradOperations.Add(
+            ReverseGradOperations.Sum(defaultParam.Tensor),
+            ReverseGradOperations.Sum(overrideParam.Tensor)).Backward();
+        sgd.Step();
+
+        // default group: 1.0 - 0.1 * 1.0 = 0.9
+        Assert.That(defaultParam.Tensor[0], Is.EqualTo(0.9f).Within(1e-6f));
+        // override group: 2.0 - 0.5 * 1.0 = 1.5
+        Assert.That(overrideParam.Tensor[0], Is.EqualTo(1.5f).Within(1e-6f));
+    }
+
+    [Test]
+    public void LearningRate_Set_RejectsNonPositive()
+    {
+        var sgd = new SGD<float>(0.1f);
+        sgd.AddParameterGroup(new Parameter<float>("w", new float[] { 1f }, requiresGrad: true));
+
+        Assert.Throws<ArgumentException>(() => sgd.LearningRate = 0f);
+        Assert.Throws<ArgumentException>(() => sgd.LearningRate = -0.1f);
+        Assert.That(sgd.LearningRate, Is.EqualTo(0.1f));
+    }
+
+    [Test]
+    public void LearningRate_Set_MatchesSetGroupLearningRate()
+    {
+        var baseParam = new Parameter<float>("a", new float[] { 1f }, requiresGrad: true);
+        var sgdViaBase = new SGD<float>(0.01f);
+        sgdViaBase.AddParameterGroup(baseParam);
+
+        var groupParam = new Parameter<float>("b", new float[] { 1f }, requiresGrad: true);
+        var sgdViaGroup = new SGD<float>(0.01f);
+        sgdViaGroup.AddParameterGroup(groupParam);
+
+        sgdViaBase.LearningRate = 0.05f;
+        sgdViaGroup.SetGroupLearningRate(0, 0.05f);
+
+        ReverseGradOperations.Sum(baseParam.Tensor).Backward();
+        ReverseGradOperations.Sum(groupParam.Tensor).Backward();
+
+        sgdViaBase.Step();
+        sgdViaGroup.Step();
+
+        Assert.That(baseParam.Tensor[0], Is.EqualTo(groupParam.Tensor[0]).Within(1e-6f));
+        Assert.That(baseParam.Tensor[0], Is.EqualTo(0.95f).Within(1e-6f));
+    }
+
+    [Test]
+    public void LearningRate_Set_DoesNotOverrideExplicitlyManagedGroup()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.01f);
+        sgd.AddParameterGroup(param);
+
+        sgd.SetGroupLearningRate(0, 0.05f);
+        sgd.LearningRate = 0.2f;
+
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        sgd.Step();
+
+        // Explicitly managed group keeps 0.05, not the new base 0.2
+        Assert.That(param.Tensor[0], Is.EqualTo(0.95f).Within(1e-6f));
+    }
+
+    [Test]
+    public void SetGroupWeightDecay_UpdatesGroup()
+    {
+        var param = new Parameter<float>("w", new float[] { 1f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.1f);
+        sgd.AddParameterGroup(param, 0.1f, weightDecay: 0f);
+
+        sgd.SetGroupWeightDecay(0, 1f);
+
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        sgd.Step();
+
+        // wd=1: param - lr * (wd * param + grad) = 1 - 0.1 * (1 * 1 + 1) = 0.8
+        Assert.That(param.Tensor[0], Is.EqualTo(0.8f).Within(1e-6f));
+    }
+
+    [Test]
+    public void ParameterGroup_MutableMembers_NotPublicSettable()
+    {
+        var groupType = typeof(Optimizer<float>.ParameterGroup);
+
+        foreach (var name in new[]
+        {
+            nameof(Optimizer<float>.ParameterGroup.LearningRate),
+            nameof(Optimizer<float>.ParameterGroup.WeightDecay),
+        })
+        {
+            var setter = groupType.GetProperty(name)!.SetMethod;
+            Assert.That(setter, Is.Not.Null);
+            Assert.That(setter.IsPublic, Is.False, $"{name} must not be publicly settable");
+            Assert.That(setter.IsAssembly, Is.True, $"{name} should be internal-settable");
+        }
+    }
+
+    [Test]
     public void SgdUpdate_SimpleCase_UpdatesCorrectly()
     {
         var data = NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f, 3.0f });
@@ -431,6 +540,160 @@ public class OptimizerTests
 
         Assert.That(() => SGD<float>.SgdUpdate(param, -0.1f),
             Throws.ArgumentException.With.Message.Contains("positive"));
+    }
+
+    [Test]
+    public void AdamUpdate_SimpleCase_MatchesHandComputedReference()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f });
+        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
+        ReverseGradOperations.Sum(param).Backward();
+
+        var updated = Adam<float>.AdamUpdate(param, 0.01f, new float[3], new float[3], 1);
+
+        // step=1: same math as Adam_Step_ValuesMatchHandComputedReference -> [0.99, 1.99, 2.99]
+        Assert.That(updated[0], Is.EqualTo(0.99f).Within(1e-5f));
+        Assert.That(updated[1], Is.EqualTo(1.99f).Within(1e-5f));
+        Assert.That(updated[2], Is.EqualTo(2.99f).Within(1e-5f));
+        Assert.That(updated.RequiresGrad, Is.False);
+    }
+
+    [Test]
+    public void AdamUpdate_MultipleSteps_MatchesInstanceStep()
+    {
+        var paramInst = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
+        var adamInst = new Adam<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamInst.AddParameterGroup(paramInst);
+        for (int i = 0; i < 2; i++)
+        {
+            ReverseGradOperations.Sum(paramInst.Tensor).Backward();
+            adamInst.Step();
+            adamInst.ZeroGrad();
+        }
+
+        var current = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: true);
+        var expAvg = new float[3];
+        var expAvgSq = new float[3];
+        for (int step = 1; step <= 2; step++)
+        {
+            ReverseGradOperations.Sum(current).Backward();
+            using var updated = Adam<float>.AdamUpdate(current, 0.01f, expAvg, expAvgSq, step);
+            current.Dispose();
+            current = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create(updated.ToColumn().ToArray()), requiresGrad: true);
+        }
+
+        for (int i = 0; i < 3; i++)
+            Assert.That(current[i], Is.EqualTo(paramInst.Tensor[i]).Within(1e-5f));
+    }
+
+    [Test]
+    public void AdamUpdate_NoGradient_Throws()
+    {
+        var param = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: true);
+
+        Assert.That(() => Adam<float>.AdamUpdate(param, 0.1f, new float[2], new float[2], 1),
+            Throws.InvalidOperationException.With.Message.Contains("no gradient"));
+    }
+
+    [Test]
+    public void AdamUpdate_NegativeLearningRate_Throws()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f });
+        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
+        ReverseGradOperations.Sum(param).Backward();
+
+        Assert.That(() => Adam<float>.AdamUpdate(param, -0.1f, new float[2], new float[2], 1),
+            Throws.ArgumentException.With.Message.Contains("positive"));
+    }
+
+    [Test]
+    public void AdamWUpdate_SimpleCase_MatchesHandComputedReference()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f });
+        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
+        ReverseGradOperations.Sum(param).Backward();
+
+        var updated = AdamW<float>.AdamWUpdate(param, 0.01f, new float[2], new float[2], 1, weightDecay: 0.01f);
+
+        // step=1: matches AdamW_StepWithWeightDecay_ValuesMatchHandComputedReference
+        Assert.That(updated[0], Is.EqualTo(0.9899f).Within(1e-5f));
+        Assert.That(updated[1], Is.EqualTo(1.9898f).Within(1e-5f));
+        Assert.That(updated.RequiresGrad, Is.False);
+    }
+
+    [Test]
+    public void AdamWUpdate_MultipleSteps_MatchesInstanceStep()
+    {
+        var paramInst = new Parameter<float>("w", new float[] { 1f, 2f }, requiresGrad: true);
+        var adamwInst = new AdamW<float>(0.01f, beta1: 0.9, beta2: 0.999, eps: 1e-8);
+        adamwInst.AddParameterGroup(paramInst, 0.01f, weightDecay: 0.01f);
+        for (int i = 0; i < 2; i++)
+        {
+            ReverseGradOperations.Sum(paramInst.Tensor).Backward();
+            adamwInst.Step();
+            adamwInst.ZeroGrad();
+        }
+
+        var current = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: true);
+        var expAvg = new float[2];
+        var expAvgSq = new float[2];
+        for (int step = 1; step <= 2; step++)
+        {
+            ReverseGradOperations.Sum(current).Backward();
+            using var updated = AdamW<float>.AdamWUpdate(current, 0.01f, expAvg, expAvgSq, step, weightDecay: 0.01f);
+            current.Dispose();
+            current = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create(updated.ToColumn().ToArray()), requiresGrad: true);
+        }
+
+        for (int i = 0; i < 2; i++)
+            Assert.That(current[i], Is.EqualTo(paramInst.Tensor[i]).Within(1e-5f));
+    }
+
+    [Test]
+    public void AdamWUpdate_NoGradient_Throws()
+    {
+        var param = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f }), requiresGrad: true);
+
+        Assert.That(() => AdamW<float>.AdamWUpdate(param, 0.1f, new float[2], new float[2], 1),
+            Throws.InvalidOperationException.With.Message.Contains("no gradient"));
+    }
+
+    [Test]
+    public void AdamWUpdate_NegativeLearningRate_Throws()
+    {
+        var data = NivaraColumn<float>.Create(new float[] { 1f, 2f });
+        var param = new ReverseGradTensor<float>(data, requiresGrad: true);
+        ReverseGradOperations.Sum(param).Backward();
+
+        Assert.That(() => AdamW<float>.AdamWUpdate(param, -0.1f, new float[2], new float[2], 1),
+            Throws.ArgumentException.With.Message.Contains("positive"));
+    }
+
+    [Test]
+    public void Step_WithoutZeroGrad_AccumulatesGradients()
+    {
+        var param = new Parameter<float>("w", new float[] { 10f, 20f }, requiresGrad: true);
+        var sgd = new SGD<float>(0.01f);
+        sgd.AddParameterGroup(param);
+
+        // Step 1: grad = [1, 1]; param -> [9.99, 19.99]
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        sgd.Step();
+
+        // Step 2 WITHOUT ZeroGrad: backward accumulates onto the existing Grad slot.
+        // Grad was [1, 1]; the new gradient [1, 1] accumulates to [2, 2].
+        ReverseGradOperations.Sum(param.Tensor).Backward();
+        sgd.Step();
+
+        // param = 10 - 0.01*1 (step 1) - 0.01*(1+1) (step 2) = 9.97
+        Assert.That(param.Tensor[0], Is.EqualTo(9.97f).Within(1e-6f));
+        Assert.That(param.Tensor[1], Is.EqualTo(19.97f).Within(1e-6f));
     }
 
     [Test]
