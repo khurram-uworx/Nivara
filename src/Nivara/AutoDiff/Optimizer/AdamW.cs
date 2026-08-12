@@ -34,14 +34,20 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
         var data = tensor.Data;
         var grad = tensor.Grad!;
         int n = data.Length;
-        var beta1T = T.CreateChecked(beta1);
-        var beta2T = T.CreateChecked(beta2);
-        var epsT = T.CreateChecked(eps);
-
         data.TryGetSpan(out var dataSpan);
         grad.TryGetSpan(out var gradSpan);
-        var writable = data.AsWritableSpan();
 
+        ApplyAdamWToSpan(
+            data.AsWritableSpan(), dataSpan, gradSpan, expAvg, expAvgSq, n,
+            lr, wd, biasCorr1, biasCorr2,
+            T.CreateChecked(beta1), T.CreateChecked(beta2), T.CreateChecked(eps));
+    }
+
+    static void ApplyAdamWToSpan(
+        Span<T> writable, ReadOnlySpan<T> dataSpan, ReadOnlySpan<T> gradSpan,
+        T[] expAvg, T[] expAvgSq, int n,
+        T lr, T wd, T biasCorr1, T biasCorr2, T beta1T, T beta2T, T epsT)
+    {
         if (typeof(T) == typeof(float))
         {
             ApplyAdamW_Kernel_Float(
@@ -99,6 +105,67 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
                 ? dataSpan[i] - lr * mHat / denom - lr * wd * dataSpan[i]
                 : dataSpan[i] - lr * mHat / denom;
         }
+    }
+
+    /// <summary>
+    /// Functional AdamW update for a single tensor outside the module system.
+    /// Computes the bias-corrected update with decoupled weight decay into a new
+    /// <see cref="ReverseGradTensor{T}"/> (with <see cref="ReverseGradTensor{T}.RequiresGrad"/>
+    /// = false) while mutating the caller-owned <paramref name="expAvg"/>/<paramref name="expAvgSq"/>
+    /// state buffers in place, so consecutive calls accumulate momentum across steps.
+    /// </summary>
+    /// <param name="step">Current training step, 1-based; drives bias correction.</param>
+    public static ReverseGradTensor<T> AdamWUpdate(
+        ReverseGradTensor<T> tensor, T learningRate, T[] expAvg, T[] expAvgSq, int step,
+        double beta1 = 0.9, double beta2 = 0.999, double eps = 1e-8, T weightDecay = default)
+    {
+        if (tensor == null)
+            throw new ArgumentNullException(nameof(tensor));
+        if (expAvg == null)
+            throw new ArgumentNullException(nameof(expAvg));
+        if (expAvgSq == null)
+            throw new ArgumentNullException(nameof(expAvgSq));
+
+        if (tensor.Grad == null)
+            throw new InvalidOperationException("Parameter has no gradient computed. Call Backward() first.");
+
+        if (learningRate <= T.Zero)
+            throw new ArgumentException("Learning rate must be positive", nameof(learningRate));
+        if (step < 1)
+            throw new ArgumentOutOfRangeException(nameof(step), "Step must be >= 1");
+
+        int n = tensor.Length;
+        if (expAvg.Length < n || expAvgSq.Length < n)
+            throw new ArgumentException($"State buffers must be at least {n} elements", nameof(expAvg));
+
+        var biasCorr1 = T.CreateChecked(1.0 - Math.Pow(beta1, step));
+        var biasCorr2 = T.CreateChecked(1.0 - Math.Pow(beta2, step));
+
+        return AutoDiffDiagnostics.Measure<T, ReverseGradTensor<T>>(
+            "AutoDiffAdamWUpdate",
+            n,
+
+            () => ApplyAdamWUpdateResult(
+                tensor, expAvg, expAvgSq, n,
+                learningRate, weightDecay, biasCorr1, biasCorr2,
+                T.CreateChecked(beta1), T.CreateChecked(beta2), T.CreateChecked(eps)),
+            $"AutoDiff=AdamWUpdate;Shape=[{string.Join(", ", tensor.Shape)}];WeightDecay={weightDecay != T.Zero};Step={step}");
+    }
+
+    static ReverseGradTensor<T> ApplyAdamWUpdateResult(
+        ReverseGradTensor<T> tensor, T[] expAvg, T[] expAvgSq, int n,
+        T lr, T wd, T biasCorr1, T biasCorr2, T beta1T, T beta2T, T epsT)
+    {
+        var data = tensor.Data;
+        var grad = tensor.Grad!;
+        data.TryGetSpan(out var dataSpan);
+        grad.TryGetSpan(out var gradSpan);
+
+        var result = new T[n];
+        ApplyAdamWToSpan(
+            result, dataSpan, gradSpan, expAvg, expAvgSq, n,
+            lr, wd, biasCorr1, biasCorr2, beta1T, beta2T, epsT);
+        return new ReverseGradTensor<T>(NivaraColumn<T>.CreateFromOwnedArray(result), requiresGrad: false, tensor.shape);
     }
 
     static void ApplyAdamW_Kernel_Float(
