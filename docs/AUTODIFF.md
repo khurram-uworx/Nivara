@@ -876,18 +876,26 @@ optimizer.AddParameterGroup(model.GetParameters().Values, learningRate, weightDe
 
 | Member | Description |
 |--------|-------------|
-| `LearningRate` | Default learning rate used by parameter groups when no group override is supplied |
+| `LearningRate` | Default learning rate used by parameter groups when no group override is supplied. Settable: assigning forwards to every group created without an explicit override; groups created with an explicit override (or later managed via `SetGroupLearningRate`) are left untouched |
+| `SetGroupLearningRate(index, lr)` | Mutates a single group's learning rate and marks it explicitly managed |
+| `SetGroupWeightDecay(index, wd)` | Mutates a single group's weight decay |
 | `Step()` | Abstract — applies updates to all parameters |
 | `ZeroGrad()` | Zeros gradients on all managed parameters |
 | `AddParameterGroup(...)` | Registers owning `Parameter<T>` objects; use `model.GetParameters().Values` for modules |
 | `Dispose()` | Releases rented state buffers |
 
+`ParameterGroup` exposes its `LearningRate`/`WeightDecay` read-only to consumers
+(public get, internal set) — mutate groups only through
+`SetGroupLearningRate`/`SetGroupWeightDecay` so the optimizer owns its state.
+
 **In-place steps** — `Step()` writes the update into each parameter's existing
 backing array and bumps its version (`Touch()`); the parameter tensor is never
-replaced. Consequently a `Step()` without a subsequent `ZeroGrad()` accumulates
-stale gradients across steps (PyTorch semantics). The built-in
-`TrainingLoop<T>` and `DataParallelTrainer<T>` call `ZeroGrad()` once per
-iteration; manual training code must do the same.
+replaced. `Step()` leaves each parameter's `Grad` slot intact — accumulation
+happens during `Backward()`, which adds into the existing slot. Consequently a
+`Step()` without a subsequent `ZeroGrad()` accumulates stale gradients across
+steps (PyTorch semantics). The built-in `TrainingLoop<T>` and
+`DataParallelTrainer<T>` call `ZeroGrad()` once per iteration; manual training
+code must do the same.
 
 ### SGD\<T\>
 
@@ -915,6 +923,7 @@ public sealed class Adam<T> : Optimizer<T>
 - State buffers rented from `ArrayPool<T>.Shared`
 - Null-skip: null positions zero momentum buffers (no update)
 - Decoupled weight decay via per-group `weightDecay`
+- Static `AdamUpdate(tensor, lr, expAvg, expAvgSq, step, ...)` functional helper for single-tensor updates
 
 ### AdamW\<T\>
 
@@ -928,10 +937,22 @@ public sealed class AdamW<T> : Optimizer<T>
 - Default learning rate is `0.001` unless overridden by constructor or parameter group
 - Identical to Adam except weight decay is applied directly to weights (not through gradients) — Loshchilov & Hutter 2019 formulation
 - Same null-skip semantics and `ArrayPool` buffer management
+- Static `AdamWUpdate(tensor, lr, expAvg, expAvgSq, step, ...)` functional helper for single-tensor updates
 
-### SGD\<T\>.SgdUpdate (static helper)
+### Functional single-tensor updates
 
-`SGD<T>.SgdUpdate` is available for single-tensor updates outside the module system.
+```csharp
+SGD<T>.SgdUpdate(tensor, lr, wd)                                    // stateless
+Adam<T>.AdamUpdate(tensor, lr, expAvg, expAvgSq, step, ...)         // stateful
+AdamW<T>.AdamWUpdate(tensor, lr, expAvg, expAvgSq, step, ...)       // stateful
+```
+
+Each is available for single-tensor updates outside the module system. The
+stateless `SgdUpdate` needs no state; the stateful `AdamUpdate`/`AdamWUpdate`
+take caller-owned `expAvg`/`expAvgSq` buffers plus a 1-based `step`, mutate the
+buffers in place so consecutive calls accumulate momentum, and return a new
+`requiresGrad=false` tensor. All three throw when `Grad` is null or the learning
+rate is non-positive.
 
 ---
 
