@@ -1,8 +1,8 @@
-using System.Collections.Concurrent;
-using System.Reflection;
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Query;
+using System.Collections.Concurrent;
+using System.Reflection;
 
 namespace Nivara.Operations;
 

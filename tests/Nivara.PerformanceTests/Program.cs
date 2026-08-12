@@ -4,7 +4,6 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Diagnostics;
 using Nivara.Expressions;
-using Nivara.Helpers;
 using Nivara.Storage;
 using Nivara.Tensors;
 using System.Diagnostics;

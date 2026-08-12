@@ -1,7 +1,6 @@
-using System.Reflection;
-using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using NUnit.Framework;
+using System.Reflection;
 
 namespace Nivara.Tests.AutoDiff;
 

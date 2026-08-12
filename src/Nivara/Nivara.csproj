@@ -27,11 +27,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Numerics.Tensors" Version="10.0.10" />
+    <PackageReference Include="System.Numerics.Tensors" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.301" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.400" />
   </ItemGroup>
 
   <ItemGroup>

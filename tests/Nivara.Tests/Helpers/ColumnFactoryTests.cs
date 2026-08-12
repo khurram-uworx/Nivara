@@ -1,6 +1,5 @@
 using Nivara.Helpers;
 using NUnit.Framework;
-using System.Numerics;
 
 namespace Nivara.Tests.Helpers;
 

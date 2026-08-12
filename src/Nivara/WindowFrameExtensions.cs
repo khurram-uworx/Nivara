@@ -1,8 +1,8 @@
+using Nivara.Tensors;
 using System.Collections.Concurrent;
 using System.Globalization;
 using System.Numerics;
 using System.Reflection;
-using Nivara.Tensors;
 using SortKey = Nivara.Operations.SortKey;
 
 namespace Nivara;

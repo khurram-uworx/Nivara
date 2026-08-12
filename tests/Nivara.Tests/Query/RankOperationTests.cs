@@ -1,6 +1,5 @@
 using Nivara.Exceptions;
 using Nivara.Operations;
-using Nivara.Query;
 using Nivara.Tensors;
 using NUnit.Framework;
 
