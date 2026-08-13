@@ -446,26 +446,7 @@ public static partial class NivaraFrameExtensions
         {
             if (hasResultNulls)
             {
-                var nullableType = typeof(Nullable<>).MakeGenericType(typeof(TResult));
-                var nullableArray = System.Array.CreateInstance(nullableType, result.Length);
-
-                for (int i = 0; i < result.Length; i++)
-                {
-                    if (resultNullMask[i])
-                    {
-                        nullableArray.SetValue(null, i);
-                    }
-                    else
-                    {
-                        var nullableInstance = Activator.CreateInstance(nullableType, result[i]);
-                        nullableArray.SetValue(nullableInstance, i);
-                    }
-                }
-
-                resultColumn = (IColumn)typeof(NivaraColumn<>)
-                    .MakeGenericType(typeof(TResult))
-                    .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                    .Invoke(null, new object[] { nullableArray })!;
+                resultColumn = NivaraColumn<TResult>.CreateFromSpans(result, resultNullMask);
             }
             else
             {
