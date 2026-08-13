@@ -147,9 +147,12 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
         .GetMethod(nameof(CreateCoalescedJoinKeyColumnTyped), BindingFlags.Static | BindingFlags.NonPublic)!;
     static readonly MethodInfo gatherKernel = typeof(JoinOperation)
         .GetMethod(nameof(GatherColumnTyped), BindingFlags.Static | BindingFlags.NonPublic)!;
+    static readonly MethodInfo createFromNullableFactory = typeof(NivaraColumn)
+        .GetMethod(nameof(NivaraColumn.CreateFromNullable), BindingFlags.Public | BindingFlags.Static)!;
 
     static readonly ConcurrentDictionary<Type, MethodInfo> coalesceKernelCache = new();
     static readonly ConcurrentDictionary<Type, MethodInfo> gatherKernelCache = new();
+    static readonly ConcurrentDictionary<Type, MethodInfo> createFromNullableFactoryCache = new();
 
     readonly IReadOnlyDictionary<string, IColumn> leftColumns;
     readonly IReadOnlyDictionary<string, IColumn> rightColumns;
@@ -733,10 +736,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
                 // null values remain null in the array
             }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { coalescedArray })!;
+            var factory = createFromNullableFactoryCache.GetOrAdd(typeof(T), static t => createFromNullableFactory.MakeGenericMethod(t));
+            return (IColumn)factory.Invoke(null, new object[] { coalescedArray })!;
         }
         else
         {
@@ -826,10 +827,8 @@ sealed class JoinOperation : IQueryOperation, IParallelJoinOperation
                 // null values remain null in the array
             }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { gatheredArray })!;
+            var factory = createFromNullableFactoryCache.GetOrAdd(typeof(T), static t => createFromNullableFactory.MakeGenericMethod(t));
+            return (IColumn)factory.Invoke(null, new object[] { gatheredArray })!;
         }
         else
         {

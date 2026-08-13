@@ -5,6 +5,7 @@ using Nivara.Storage;
 using System.Buffers;
 using System.Collections;
 using System.Numerics.Tensors;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Nivara;
@@ -313,6 +314,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         return new NivaraColumn<T>(storage);
     }
 
+    static readonly MethodInfo createFromNullableFactory = typeof(NivaraColumn)
+        .GetMethod(nameof(NivaraColumn.CreateFromNullable), BindingFlags.Public | BindingFlags.Static)!;
+
     /// <summary>
     /// Creates a new column from the specified array of nullable value type values.
     /// Automatically detects and tracks null values using null masks.
@@ -337,38 +341,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (actualElementType != expectedNullableType)
             throw new ArgumentException($"Array element type must be {expectedNullableType.Name}, but was {actualElementType?.Name}");
 
-        // Handle empty array
-        if (values.Length == 0)
-        {
-            return new NivaraColumn<T>(new ColumnStorage<T>(ReadOnlySpan<T>.Empty));
-        }
-
-        // Process nullable values manually
-        var dataArray = new T[values.Length];
-        var nullMaskArray = new bool[values.Length];
-        bool hasNulls = false;
-
-        for (int i = 0; i < values.Length; i++)
-        {
-            var value = values.GetValue(i);
-            if (value == null)
-            {
-                dataArray[i] = default(T)!;
-                nullMaskArray[i] = true;
-                hasNulls = true;
-            }
-            else
-            {
-                dataArray[i] = (T)value;
-                nullMaskArray[i] = false;
-            }
-        }
-
-        var data = new ReadOnlyMemory<T>(dataArray);
-        var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : null;
-
-        var storage = new ColumnStorage<T>(data, nullMask);
-        return new NivaraColumn<T>(storage);
+        // Delegate to the boxing-free generic factory (the array type is validated as T?[])
+        return (NivaraColumn<T>)createFromNullableFactory
+            .MakeGenericMethod(typeof(T))
+            .Invoke(null, new object[] { values })!;
     }
 
     /// <summary>

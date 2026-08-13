@@ -679,7 +679,7 @@ public static class ArrowInterop
             }
         }
 
-        return NivaraColumn<int>.CreateFromNullable(values.ToArray());
+        return NivaraColumn.CreateFromNullable(values.ToArray());
     }
 
     /// <summary>
@@ -787,11 +787,11 @@ public static class ArrowInterop
         {
             nullableArray[i] = values[i] == null ? null : (T)values[i]!;
         }
-        return NivaraColumn<T>.CreateFromNullable(nullableArray);
+        return NivaraColumn.CreateFromNullable(nullableArray);
     }
 
     /// <summary>
-    /// Extracts a typed value from an Arrow array at the specified index
+    /// Creates a null value for the specified type
     /// </summary>
     private static T ExtractValueFromArrowArray<T>(IArrowArray array, int index, ArrowConversionOptions options)
     {
