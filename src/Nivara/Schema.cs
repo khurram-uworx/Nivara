@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Helpers;
 
 namespace Nivara;
 
@@ -8,28 +9,6 @@ namespace Nivara;
 /// </summary>
 public sealed class Schema
 {
-    /// <summary>
-    /// Checks if two types are compatible for operations
-    /// </summary>
-    /// <param name="type1">The first type</param>
-    /// <param name="type2">The second type</param>
-    /// <returns>True if the types are compatible, false otherwise</returns>
-    static bool areTypesCompatible(Type type1, Type type2)
-    {
-        if (type1 == type2)
-            return true;
-
-        // Numeric type compatibility
-        var numericTypes = new[]
-        {
-            typeof(byte), typeof(sbyte), typeof(short), typeof(ushort),
-            typeof(int), typeof(uint), typeof(long), typeof(ulong),
-            typeof(float), typeof(double), typeof(decimal)
-        };
-
-        return numericTypes.Contains(type1) && numericTypes.Contains(type2);
-    }
-
     readonly IReadOnlyDictionary<string, Type> columnTypes;
     readonly IReadOnlyDictionary<string, ColumnMetadata> metadata;
 
@@ -255,7 +234,7 @@ public sealed class Schema
             else
             {
                 // Allow compatible types (e.g., int and long)
-                if (!areTypesCompatible(thisType, otherType))
+                if (!TypeCompatibilityValidator.AreTypesCompatible(thisType, otherType))
                     return false;
             }
         }
