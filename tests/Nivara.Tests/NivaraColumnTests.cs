@@ -2056,6 +2056,67 @@ public class NivaraColumnTests
         Assert.Throws<InvalidOperationException>(() => emptyColumn.FillNullBackward());
     }
 
+    /// <summary>
+    /// The non-generic static factory <see cref="NivaraColumn.CreateFromNullable{T}"/> must
+    /// produce results identical to the Array overload for the same nullable input.
+    /// </summary>
+    [Test]
+    public void StaticFactory_CreateFromNullable_MatchesArrayOverload()
+    {
+        int?[] intValues = [1, null, 3, null, 5];
+        var factoryColumn = NivaraColumn.CreateFromNullable(intValues);
+        var arrayOverloadColumn = NivaraColumn<int>.CreateFromNullable(intValues);
+
+        Assert.That(factoryColumn.ToArray(), Is.EqualTo(arrayOverloadColumn.ToArray()));
+        Assert.That(factoryColumn.HasNulls, Is.EqualTo(arrayOverloadColumn.HasNulls));
+        Assert.That(factoryColumn.NullCount, Is.EqualTo(arrayOverloadColumn.NullCount));
+        for (int i = 0; i < intValues.Length; i++)
+            Assert.That(factoryColumn.IsNull(i), Is.EqualTo(arrayOverloadColumn.IsNull(i)));
+
+        double?[] doubleValues = [1.5, null, 3.14];
+        var doubleColumn = NivaraColumn.CreateFromNullable(doubleValues);
+        Assert.That(doubleColumn.Length, Is.EqualTo(3));
+        Assert.That(doubleColumn.HasNulls, Is.True);
+        Assert.That(doubleColumn[0], Is.EqualTo(1.5));
+        Assert.That(doubleColumn.IsNull(1), Is.True);
+        Assert.That(doubleColumn[2], Is.EqualTo(3.14));
+    }
+
+    /// <summary>
+    /// The static factory must handle empty arrays (no null mask, zero length) and reject null
+    /// array arguments.
+    /// </summary>
+    [Test]
+    public void StaticFactory_CreateFromNullable_HandlesEmptyAndNullArrays()
+    {
+        var emptyColumn = NivaraColumn.CreateFromNullable(Array.Empty<int?>());
+        Assert.That(emptyColumn.Length, Is.EqualTo(0));
+        Assert.That(emptyColumn.HasNulls, Is.False);
+
+        Assert.Throws<ArgumentNullException>(() => NivaraColumn.CreateFromNullable<int>(null!));
+    }
+
+    /// <summary>
+    /// The static factory must support the extended numeric domain (decimal, Half) without
+    /// boxing each element.
+    /// </summary>
+    [Test]
+    public void StaticFactory_CreateFromNullable_SupportsExtendedDomain()
+    {
+        decimal?[] decimalValues = [1.5m, null, 3.5m];
+        var decimalColumn = NivaraColumn.CreateFromNullable(decimalValues);
+        Assert.That(decimalColumn.HasNulls, Is.True);
+        Assert.That(decimalColumn[0], Is.EqualTo(1.5m));
+        Assert.That(decimalColumn.IsNull(1), Is.True);
+        Assert.That(decimalColumn[2], Is.EqualTo(3.5m));
+
+        Half?[] halfValues = [(Half)1.5f, null, (Half)3.5f];
+        var halfColumn = NivaraColumn.CreateFromNullable(halfValues);
+        Assert.That(halfColumn.HasNulls, Is.True);
+        Assert.That(halfColumn[0], Is.EqualTo((Half)1.5f));
+        Assert.That(halfColumn.IsNull(1), Is.True);
+    }
+
     #endregion
 
     #region Span and Copy Operations (new APIs)
