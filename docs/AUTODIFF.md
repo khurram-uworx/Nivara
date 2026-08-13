@@ -85,7 +85,7 @@ ReverseGradOperations                 ← Reverse-mode forward+backward ops (sta
 └── ...vectorized via TensorPrimitives where available
 
 ForwardGradOperations                 ← Forward-mode JVP ops (static methods, mirrors ReverseGradOperations)
-├── Element-wise: Add, Subtract, Multiply, Divide, Clip, LeakyRelu
+├── Element-wise: Add, Subtract, Multiply, Divide, DivideScalar, Clip, LeakyRelu
 ├── Matrix: MatMul, Transpose
 ├── Reductions: Sum, Mean
 ├── Activations: Relu, Sigmoid, Tanh
@@ -416,6 +416,7 @@ Mirrors `ReverseGradOperations` in structure. Each method computes the primal va
 | `Subtract(a, b)` | `t_out = t_a - t_b` |
 | `Multiply(a, b)` | `t_out = t_a * b + a * t_b` |
 | `Divide(a, b)` | `t_out = (t_a * b - a * t_b) / b²` |
+| `DivideScalar(a, scalar)` | `t_out = t_a / scalar` |
 | `MatMul(a, b)` | `t_out = t_a @ b + a @ t_b` |
 | `Transpose(a)` | `t_out = t_aᵀ` |
 | `Relu(a)` | `t_out = t_a * (a > 0 ? 1 : 0)` |
@@ -429,7 +430,7 @@ Mirrors `ReverseGradOperations` in structure. Each method computes the primal va
 | `Mean(a)` | `t_out = Σt_a / n` |
 | `Dropout(...)` | Tangent passes through kept positions, zeroed at dropped positions |
 
-All 20 operations in `ForwardGradOperations` also include `KlDivergence` and `SampleNormal` for VAE forward-mode workflows.
+All 21 operations in `ForwardGradOperations` also include `KlDivergence` and `SampleNormal` for VAE forward-mode workflows.
 
 ### When to use which
 
