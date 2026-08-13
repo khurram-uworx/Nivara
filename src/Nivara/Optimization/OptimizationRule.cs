@@ -130,14 +130,14 @@ internal sealed class OptimizationStatistics
 /// </summary>
 internal sealed class OptimizationEngine
 {
-    private readonly List<OptimizationRule> _rules;
+    private readonly List<OptimizationRule> rules;
 
     /// <summary>
     /// Initializes a new instance of OptimizationEngine
     /// </summary>
     public OptimizationEngine()
     {
-        _rules = new List<OptimizationRule>();
+        rules = new List<OptimizationRule>();
     }
 
     /// <summary>
@@ -146,13 +146,13 @@ internal sealed class OptimizationEngine
     /// <param name="rules">The optimization rules to use</param>
     public OptimizationEngine(IEnumerable<OptimizationRule> rules)
     {
-        _rules = rules?.ToList() ?? throw new ArgumentNullException(nameof(rules));
+        this.rules = rules?.ToList() ?? throw new ArgumentNullException(nameof(rules));
     }
 
     /// <summary>
     /// Gets the optimization rules registered with this engine
     /// </summary>
-    public IReadOnlyList<OptimizationRule> Rules => _rules;
+    public IReadOnlyList<OptimizationRule> Rules => rules;
 
     /// <summary>
     /// Adds an optimization rule to the engine
@@ -163,8 +163,8 @@ internal sealed class OptimizationEngine
         if (rule == null)
             throw new ArgumentNullException(nameof(rule));
 
-        _rules.Add(rule);
-        _rules.Sort((a, b) => b.Priority.CompareTo(a.Priority)); // Sort by priority descending
+        rules.Add(rule);
+        rules.Sort((a, b) => b.Priority.CompareTo(a.Priority)); // Sort by priority descending
     }
 
     /// <summary>
@@ -174,7 +174,7 @@ internal sealed class OptimizationEngine
     /// <returns>True if the rule was removed, false if it wasn't found</returns>
     public bool RemoveRule(OptimizationRule rule)
     {
-        return _rules.Remove(rule);
+        return rules.Remove(rule);
     }
 
     /// <summary>
@@ -197,7 +197,7 @@ internal sealed class OptimizationEngine
         var currentPlan = plan;
         var totalOptimizationTime = TimeSpan.Zero;
 
-        foreach (var rule in _rules)
+        foreach (var rule in rules)
         {
             if (rule.CanApply(currentPlan))
             {
