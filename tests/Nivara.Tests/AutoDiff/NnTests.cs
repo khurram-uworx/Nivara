@@ -2783,6 +2783,25 @@ public class NnTests
     }
 
     [Test]
+    public void MultiheadAttention_PaddingMask_DispatchesThroughModuleReference()
+    {
+        using Module<float> mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[6 * 32]),
+            requiresGrad: false);
+        input.Reshape(6, 32);
+
+        var paddingMask = ReverseGradTensor<float>.FromArray(
+            new float[] { 1f, 1f, 1f, 1f, 0f, 0f }, requiresGrad: false);
+
+        var output = mha.Forward(input, paddingMask);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 6, 32 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
     public void MultiheadAttention_PaddingMask_BackwardFlows()
     {
         using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);

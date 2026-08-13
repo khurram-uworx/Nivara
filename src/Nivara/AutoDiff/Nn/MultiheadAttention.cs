@@ -74,7 +74,7 @@ public sealed class MultiheadAttention<T> : Module<T> where T : struct, IFloatin
         return _attnDropout != null ? _attnDropout.Forward(xProj) : xProj;
     }
 
-    public new ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T> paddingMask)
+    public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T> paddingMask)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (input.Rank != 2) throw new ArgumentException($"MultiheadAttention expects 2D input [L, D], got {input.Rank}D");
