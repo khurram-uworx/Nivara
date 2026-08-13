@@ -3,7 +3,7 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public sealed class VAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
+public sealed class VAE<T> : Module<T>, IMultipleInputModule<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Linear<T> encoderLayer1;
     readonly Linear<T> encoderLayer2;
@@ -68,12 +68,15 @@ public sealed class VAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T
         return Decode(z);
     }
 
-    public new ReverseGradTensor<T> Forward(ReverseGradTensor<T> x, ReverseGradTensor<T>? condition)
+    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> x, ReverseGradTensor<T>? condition)
     {
         var (mu, logVar) = Encode(x, condition);
         var z = Reparameterize(mu, logVar);
         return Decode(z, condition);
     }
+
+    ReverseGradTensor<T> IMultipleInputModule<T>.Forward(ReverseGradTensor<T> input1, ReverseGradTensor<T> input2)
+        => Forward(input1, input2);
 
     public (ReverseGradTensor<T> Mu, ReverseGradTensor<T> LogVar) Encode(ReverseGradTensor<T> x)
     {
