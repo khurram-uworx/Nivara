@@ -30,10 +30,22 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         => NumericKernelDispatcher.Multiply(x, y, destination);
 
     /// <summary>
+    /// Performs vectorized element-wise addition with a scalar
+    /// </summary>
+    static void addTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
+        => NumericKernelDispatcher.Add(x, y, destination);
+
+    /// <summary>
     /// Performs vectorized element-wise addition between two spans
     /// </summary>
     static void addTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
         => NumericKernelDispatcher.Add(x, y, destination);
+
+    /// <summary>
+    /// Performs vectorized element-wise subtraction with a scalar
+    /// </summary>
+    static void subtractTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
+        => NumericKernelDispatcher.Subtract(x, y, destination);
 
     /// <summary>
     /// Performs vectorized element-wise subtraction between two spans
@@ -42,10 +54,22 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         => NumericKernelDispatcher.Subtract(x, y, destination);
 
     /// <summary>
+    /// Performs vectorized scalar-minus-column subtraction
+    /// </summary>
+    static void subtractFromTensorPrimitive(T scalar, ReadOnlySpan<T> x, Span<T> destination)
+        => NumericKernelDispatcher.SubtractFrom(scalar, x, destination);
+
+    /// <summary>
     /// Performs vectorized element-wise division with a scalar
     /// </summary>
     static void divideTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
         => NumericKernelDispatcher.Divide(x, y, destination);
+
+    /// <summary>
+    /// Performs vectorized scalar-divided-by-column division
+    /// </summary>
+    static void divideByTensorPrimitive(T scalar, ReadOnlySpan<T> x, Span<T> destination)
+        => NumericKernelDispatcher.DivideBy(scalar, x, destination);
 
     /// <summary>
     /// Performs vectorized element-wise division between two spans
@@ -399,16 +423,19 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Performs vectorized scalar multiplication using TensorPrimitives
+    /// Shared scalar-arithmetic helper: owns storage access, kernel invocation, and
+    /// null-mask propagation for every column-vs-scalar operation. The <paramref name="fill"/>
+    /// delegate writes the element-wise result (capturing the scalar and operation) into the
+    /// destination span.
     /// </summary>
-    NivaraColumn<T> multiplyVectorized(T scalar)
+    NivaraColumn<T> applyScalarOp(string operationName, Action<ReadOnlySpan<T>, Span<T>> fill)
     {
         // Determine which kernel will actually be used
         var kernelType = determineKernelType();
 
         // Record diagnostic information
         var diagnostic = new OperationDiagnostics(
-            "ScalarMultiplication",
+            operationName,
             kernelType,
             Length,
             typeof(T),
@@ -424,8 +451,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var data = memoryStorage.Data.Span;
         var result = new T[data.Length];
 
-        // Use our helper method for multiplication
-        multiplyTensorPrimitive(data, scalar, result.AsSpan());
+        fill(data, result);
 
         // Handle null propagation
         ReadOnlyMemory<bool>? resultNullMask = null;
@@ -442,47 +468,40 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Performs vectorized scalar addition using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> addVectorized(T scalar)
+        => applyScalarOp("ScalarAddition", (data, destination) => addTensorPrimitive(data, scalar, destination));
+
+    /// <summary>
+    /// Performs vectorized scalar multiplication using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> multiplyVectorized(T scalar)
+        => applyScalarOp("ScalarMultiplication", (data, destination) => multiplyTensorPrimitive(data, scalar, destination));
+
+    /// <summary>
     /// Performs vectorized scalar division using TensorPrimitives
     /// </summary>
     NivaraColumn<T> divideVectorized(T divisor)
-    {
-        // Determine which kernel will actually be used
-        var kernelType = determineKernelType();
+        => applyScalarOp("ScalarDivision", (data, destination) => divideTensorPrimitive(data, divisor, destination));
 
-        // Record diagnostic information
-        var diagnostic = new OperationDiagnostics(
-            "ScalarDivision",
-            kernelType,
-            Length,
-            typeof(T),
-            HasNulls);
-        DiagnosticsTracker.RecordOperation(diagnostic);
+    /// <summary>
+    /// Performs vectorized column-minus-scalar subtraction using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> subtractVectorized(T scalar)
+        => applyScalarOp("ScalarSubtraction", (data, destination) => subtractTensorPrimitive(data, scalar, destination));
 
-        // ColumnStorage is the sole storage implementation; use its zero-copy span view.
-        if (storage is not ColumnStorage<T> memoryStorage)
-        {
-            throw new InvalidOperationException("Unsupported storage type for vectorized operations");
-        }
+    /// <summary>
+    /// Performs vectorized scalar-minus-column subtraction using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> subtractFromVectorized(T scalar)
+        => applyScalarOp("ScalarSubtractionFrom", (data, destination) => subtractFromTensorPrimitive(scalar, data, destination));
 
-        var data = memoryStorage.Data.Span;
-        var result = new T[data.Length];
-
-        // Use our helper method for division
-        divideTensorPrimitive(data, divisor, result.AsSpan());
-
-        // Handle null propagation
-        ReadOnlyMemory<bool>? resultNullMask = null;
-        var nullMask = memoryStorage.NullMaskMemory;
-        if (nullMask.HasValue && nullMask.Value.Length > 0)
-        {
-            var nullMaskArray = new bool[data.Length];
-            nullMask.Value.Span.CopyTo(nullMaskArray);
-            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-        }
-
-        var resultStorage = new ColumnStorage<T>(result, resultNullMask);
-        return new NivaraColumn<T>(resultStorage);
-    }
+    /// <summary>
+    /// Performs vectorized scalar-divided-by-column division using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> divideByVectorized(T divisor)
+        => applyScalarOp("ScalarDivisionBy", (data, destination) => divideByTensorPrimitive(divisor, data, destination));
 
     /// <summary>
     /// Shared element-wise binary kernel for column-vs-column arithmetic (result type T).
@@ -1682,6 +1701,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Adds a scalar value to all elements in the column.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="scalar">The scalar value to add to each element</param>
+    /// <returns>A new column with element-wise addition results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Add(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
+
+        return addVectorized(scalar);
+    }
+
+    /// <summary>
     /// Multiplies corresponding elements of two columns together.
     /// Only supported for numeric types that implement INumber&lt;T&gt;.
     /// </summary>
@@ -1734,6 +1770,40 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Subtracts a scalar value from all elements in the column.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="scalar">The scalar value to subtract from each element</param>
+    /// <returns>A new column with element-wise subtraction results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Subtract(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
+
+        return subtractVectorized(scalar);
+    }
+
+    /// <summary>
+    /// Subtracts all elements in the column from a scalar value.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="scalar">The scalar value each element is subtracted from</param>
+    /// <returns>A new column with element-wise subtraction results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> SubtractFrom(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
+
+        return subtractFromVectorized(scalar);
+    }
+
+    /// <summary>
     /// Divides corresponding elements of another column into this column.
     /// Only supported for numeric types that implement INumber&lt;T&gt;.
     /// </summary>
@@ -1760,36 +1830,93 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Operator overload for scalar multiplication
+    /// Divides all elements in the column by a scalar value.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
     /// </summary>
-    public static NivaraColumn<T> operator *(NivaraColumn<T> column, T scalar)
+    /// <param name="divisor">The scalar value to divide each element by</param>
+    /// <returns>A new column with element-wise division results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> DivideBy(T divisor)
     {
-        return column.Multiply(scalar);
-    }
+        ObjectDisposedException.ThrowIf(disposed, this);
 
-    /// <summary>
-    /// Operator overload for scalar multiplication (commutative)
-    /// </summary>
-    public static NivaraColumn<T> operator *(T scalar, NivaraColumn<T> column)
-    {
-        return column.Multiply(scalar);
-    }
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
 
-    /// <summary>
-    /// Operator overload for element-wise multiplication
-    /// </summary>
-    public static NivaraColumn<T> operator *(NivaraColumn<T> left, NivaraColumn<T> right)
-    {
-        return left.Multiply(right);
+        return divideByVectorized(divisor);
     }
 
     /// <summary>
     /// Operator overload for element-wise addition
     /// </summary>
     public static NivaraColumn<T> operator +(NivaraColumn<T> left, NivaraColumn<T> right)
-    {
-        return left.Add(right);
-    }
+        => left.Add(right);
+
+    /// <summary>
+    /// Operator overload for scalar addition
+    /// </summary>
+    public static NivaraColumn<T> operator +(NivaraColumn<T> column, T scalar)
+        => column.Add(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar addition (commutative)
+    /// </summary>
+    public static NivaraColumn<T> operator +(T scalar, NivaraColumn<T> column)
+        => column.Add(scalar);
+
+    /// <summary>
+    /// Operator overload for element-wise subtraction
+    /// </summary>
+    public static NivaraColumn<T> operator -(NivaraColumn<T> left, NivaraColumn<T> right)
+        => left.Subtract(right);
+
+    /// <summary>
+    /// Operator overload for scalar subtraction
+    /// </summary>
+    public static NivaraColumn<T> operator -(NivaraColumn<T> column, T scalar)
+        => column.Subtract(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar subtraction (scalar minus column)
+    /// </summary>
+    public static NivaraColumn<T> operator -(T scalar, NivaraColumn<T> column)
+        => column.SubtractFrom(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar multiplication
+    /// </summary>
+    public static NivaraColumn<T> operator *(NivaraColumn<T> column, T scalar)
+        => column.Multiply(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar multiplication (commutative)
+    /// </summary>
+    public static NivaraColumn<T> operator *(T scalar, NivaraColumn<T> column)
+        => column.Multiply(scalar);
+
+    /// <summary>
+    /// Operator overload for element-wise multiplication
+    /// </summary>
+    public static NivaraColumn<T> operator *(NivaraColumn<T> left, NivaraColumn<T> right)
+        => left.Multiply(right);
+
+    /// <summary>
+    /// Operator overload for element-wise division
+    /// </summary>
+    public static NivaraColumn<T> operator /(NivaraColumn<T> left, NivaraColumn<T> right)
+        => left.Divide(right);
+
+    /// <summary>
+    /// Operator overload for scalar division
+    /// </summary>
+    public static NivaraColumn<T> operator /(NivaraColumn<T> column, T scalar)
+        => column.Divide(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar division (scalar divided by column)
+    /// </summary>
+    public static NivaraColumn<T> operator /(T scalar, NivaraColumn<T> column)
+        => column.DivideBy(scalar);
 
     // Comparison Operations
 
