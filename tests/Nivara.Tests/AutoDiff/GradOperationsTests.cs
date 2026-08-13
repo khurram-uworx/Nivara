@@ -585,6 +585,87 @@ public class GradOperationsTests
         Assert.Throws<DivideByZeroException>(() => ReverseGradOperations.Divide(a, b));
     }
 
+    [Test]
+    public void DivideScalar_SimpleCase_ComputesCorrectResult()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 12f, 15f, 18f }), requiresGrad: true);
+
+        var result = ReverseGradOperations.DivideScalar(a, 3f);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result[0], Is.EqualTo(4f));
+        Assert.That(result[1], Is.EqualTo(5f));
+        Assert.That(result[2], Is.EqualTo(6f));
+        Assert.That(result.RequiresGrad, Is.True);
+    }
+
+    [Test]
+    public void DivideScalar_Backward_ScalesGradientByScalar()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 9f }), requiresGrad: true);
+
+        var result = ReverseGradOperations.DivideScalar(a, 3f);
+        result.Backward();
+
+        Assert.That(result[0], Is.EqualTo(3f));
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(a.Grad![0], Is.EqualTo(1f / 3f).Within(1e-6f));
+    }
+
+    [Test]
+    public void DivideScalar_ByZero_ThrowsException()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f }), requiresGrad: true);
+
+        Assert.Throws<DivideByZeroException>(() => ReverseGradOperations.DivideScalar(a, 0f));
+    }
+
+    [Test]
+    public void DivideScalar_MatchesDivideWithDivisorTensor_ForwardAndBackward()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var a2 = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var ones = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 1f, 1f }), requiresGrad: false);
+
+        var direct = ReverseGradOperations.DivideScalar(a, 2f);
+        var viaTensor = ReverseGradOperations.Divide(a2, GradientUtils.Full(3, 2f));
+
+        Assert.That(direct[0], Is.EqualTo(1f));
+        Assert.That(direct[1], Is.EqualTo(1.5f));
+        Assert.That(direct[2], Is.EqualTo(2f));
+        for (int i = 0; i < 3; i++)
+            Assert.That(direct[i], Is.EqualTo(viaTensor[i]).Within(1e-6f));
+
+        direct.Backward(ones);
+        viaTensor.Backward(ones);
+
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(a2.Grad, Is.Not.Null);
+        for (int i = 0; i < 3; i++)
+            Assert.That(a.Grad![i], Is.EqualTo(a2.Grad![i]).Within(1e-6f));
+        Assert.That(a.Grad![0], Is.EqualTo(0.5f).Within(1e-6f));
+    }
+
+    [Test]
+    public void DivideByScalar_Wrapper_MatchesDivideScalar()
+    {
+        var a = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 12f, 15f, 18f }), requiresGrad: true);
+
+        var result = a.DivideByScalar(3f);
+
+        Assert.That(result[0], Is.EqualTo(4f));
+        Assert.That(result[1], Is.EqualTo(5f));
+        Assert.That(result[2], Is.EqualTo(6f));
+        Assert.That(result.RequiresGrad, Is.True);
+    }
+
     #region Reduction Operations Tests
 
     [Test]
