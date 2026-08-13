@@ -1997,11 +1997,6 @@ public class NivaraColumnTests
         // Test null array
         Assert.Throws<ArgumentNullException>(() =>
             NivaraColumn.CreateFromNullable<int>(null!));
-
-        // Test with reference type (should fail)
-        var stringArray = new string[] { "a", "b" };
-        Assert.Throws<InvalidOperationException>(() =>
-            NivaraColumn<string>.CreateFromNullable(stringArray));
     }
 
     /// <summary>
@@ -2058,20 +2053,19 @@ public class NivaraColumnTests
 
     /// <summary>
     /// The non-generic static factory <see cref="NivaraColumn.CreateFromNullable{T}"/> must
-    /// produce results identical to the Array overload for the same nullable input.
+    /// produce the expected values and null mask for nullable value-type input.
     /// </summary>
     [Test]
-    public void StaticFactory_CreateFromNullable_MatchesArrayOverload()
+    public void StaticFactory_CreateFromNullable_ProducesExpectedValuesAndMask()
     {
         int?[] intValues = [1, null, 3, null, 5];
         var factoryColumn = NivaraColumn.CreateFromNullable(intValues);
-        var arrayOverloadColumn = NivaraColumn<int>.CreateFromNullable(intValues);
 
-        Assert.That(factoryColumn.ToArray(), Is.EqualTo(arrayOverloadColumn.ToArray()));
-        Assert.That(factoryColumn.HasNulls, Is.EqualTo(arrayOverloadColumn.HasNulls));
-        Assert.That(factoryColumn.NullCount, Is.EqualTo(arrayOverloadColumn.NullCount));
+        Assert.That(factoryColumn.ToArray(), Is.EqualTo(new[] { 1, 0, 3, 0, 5 }));
+        Assert.That(factoryColumn.HasNulls, Is.True);
+        Assert.That(factoryColumn.NullCount, Is.EqualTo(2));
         for (int i = 0; i < intValues.Length; i++)
-            Assert.That(factoryColumn.IsNull(i), Is.EqualTo(arrayOverloadColumn.IsNull(i)));
+            Assert.That(factoryColumn.IsNull(i), Is.EqualTo(intValues[i] == null));
 
         double?[] doubleValues = [1.5, null, 3.14];
         var doubleColumn = NivaraColumn.CreateFromNullable(doubleValues);

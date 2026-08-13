@@ -215,21 +215,5 @@ public class NullHandlingErrorConditionTests
             "Exception should specify the values parameter");
     }
 
-    /// <summary>
-    /// Test that CreateFromNullable with non-value type throws InvalidOperationException
-    /// **Validates: Requirements 6.5**
-    /// </summary>
-    [Test]
-    public void CreateFromNullable_WithReferenceType_ShouldThrowInvalidOperationException()
-    {
-        var stringArray = new string?[] { "a", null, "c" };
-
-        var ex = Assert.Throws<InvalidOperationException>(() => NivaraColumn<string>.CreateFromNullable(stringArray),
-            "CreateFromNullable with reference type should throw InvalidOperationException");
-
-        Assert.That(ex.Message, Does.Contain("can only be used with value types"),
-            "Error message should explain value type requirement");
-    }
-
     #endregion
 }
