@@ -70,9 +70,9 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
                 MemoryMarshal.Cast<T, float>(writable),
                 MemoryMarshal.Cast<T, float>(dataSpan),
                 MemoryMarshal.Cast<T, float>(gradSpan),
-                n, (float)(object)lr!, (float)(object)wd!,
-                (float)(object)biasCorr1!, (float)(object)biasCorr2!,
-                (float)(object)beta1T!, (float)(object)beta2T!, (float)(object)epsT!);
+                n, float.CreateChecked(lr), float.CreateChecked(wd),
+                float.CreateChecked(biasCorr1), float.CreateChecked(biasCorr2),
+                float.CreateChecked(beta1T), float.CreateChecked(beta2T), float.CreateChecked(epsT));
             return;
         }
 
@@ -84,9 +84,9 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
                 MemoryMarshal.Cast<T, double>(writable),
                 MemoryMarshal.Cast<T, double>(dataSpan),
                 MemoryMarshal.Cast<T, double>(gradSpan),
-                n, (double)(object)lr!, (double)(object)wd!,
-                (double)(object)biasCorr1!, (double)(object)biasCorr2!,
-                (double)(object)beta1T!, (double)(object)beta2T!, (double)(object)epsT!);
+                n, double.CreateChecked(lr), double.CreateChecked(wd),
+                double.CreateChecked(biasCorr1), double.CreateChecked(biasCorr2),
+                double.CreateChecked(beta1T), double.CreateChecked(beta2T), double.CreateChecked(epsT));
             return;
         }
 
@@ -98,9 +98,9 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
                 MemoryMarshal.Cast<T, Half>(writable),
                 MemoryMarshal.Cast<T, Half>(dataSpan),
                 MemoryMarshal.Cast<T, Half>(gradSpan),
-                n, (Half)(object)lr!, (Half)(object)wd!,
-                (Half)(object)biasCorr1!, (Half)(object)biasCorr2!,
-                (Half)(object)beta1T!, (Half)(object)beta2T!, (Half)(object)epsT!);
+                n, Half.CreateChecked(lr), Half.CreateChecked(wd),
+                Half.CreateChecked(biasCorr1), Half.CreateChecked(biasCorr2),
+                Half.CreateChecked(beta1T), Half.CreateChecked(beta2T), Half.CreateChecked(epsT));
             return;
         }
 
