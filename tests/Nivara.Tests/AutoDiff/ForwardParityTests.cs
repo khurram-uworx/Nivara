@@ -105,6 +105,25 @@ public class ForwardParityTests
     }
 
     [Test]
+    public void DivideScalar_ForwardTangent_EqualsBackwardGradient()
+    {
+        // Backward: y = a / 3, sum(y).Backward() → grad_a = [1/3, 1/3]
+        // Forward:  t_a = [1, 1] → JVP = t_a / 3 = [1/3, 1/3]
+        var aData = NivaraColumn<float>.Create(new float[] { 12f, 15f });
+
+        var ra = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        ReverseGradOperations.Sum(ReverseGradOperations.DivideScalar(ra, 3f)).Backward();
+        var expected = ra.Grad!;
+
+        var fa = new ForwardGradTensor<float>(aData, NivaraColumn<float>.Create(new float[] { 1f, 1f }));
+        var result = ForwardGradOperations.DivideScalar(fa, 3f);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        for (int i = 0; i < expected.Length; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(expected[i]).Within(1e-6f));
+    }
+
+    [Test]
     public void Relu_ForwardTangent_EqualsBackwardGradient()
     {
         var xData = NivaraColumn<float>.Create(new float[] { -1f, 0f, 1f, 2f });

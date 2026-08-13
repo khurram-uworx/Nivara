@@ -184,6 +184,37 @@ public static class ForwardGradOperations
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a, b));
     }
 
+    /// <summary>
+    /// Divides a tensor by a scalar: result[i] = a[i] / scalar.
+    /// The scalar is not wrapped in a tensor. Mirrors
+    /// <see cref="ReverseGradOperations.DivideScalar{T}(ReverseGradTensor{T}, T)"/>.
+    /// JVP: t_out = t_a / scalar
+    /// </summary>
+    public static ForwardGradTensor<T> DivideScalar<T>(ForwardGradTensor<T> a, T scalar)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        if (scalar == T.Zero)
+            throw new DivideByZeroException($"Division by zero with scalar divisor");
+
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        TensorPrimitives.Divide(aSpan, scalar, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent)
+        {
+            a.Tangent!.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            TensorPrimitives.Divide(aTanSpan, scalar, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
     #endregion
 
     #region Matrix Operations

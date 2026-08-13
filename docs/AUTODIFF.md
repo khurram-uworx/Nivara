@@ -72,7 +72,7 @@ ComputationGraph                      ← Graph traversal engine (internal)
 └── GetGraphInfo(root)                ← Returns diagnostic summary
 
 ReverseGradOperations                 ← Reverse-mode forward+backward ops (static methods)
-├── Element-wise: Add, Subtract, Multiply, Divide, Clip, Pow
+├── Element-wise: Add, Subtract, Multiply, Divide, DivideScalar, Clip, Pow
 ├── Matrix: MatMul, Transpose, TransposeAxes, Slice, Concat, Gather, MultiHeadAttention (fused kernel)
 ├── Reductions: Sum, Mean, MeanPool
 ├── Normalization: RMSNorm, PerRowRMSNorm, PerRowLayerNorm (RMSNormKernel, LayerNormKernel)
@@ -85,7 +85,7 @@ ReverseGradOperations                 ← Reverse-mode forward+backward ops (sta
 └── ...vectorized via TensorPrimitives where available
 
 ForwardGradOperations                 ← Forward-mode JVP ops (static methods, mirrors ReverseGradOperations)
-├── Element-wise: Add, Subtract, Multiply, Divide, Clip, LeakyRelu
+├── Element-wise: Add, Subtract, Multiply, Divide, DivideScalar, Clip, LeakyRelu
 ├── Matrix: MatMul, Transpose
 ├── Reductions: Sum, Mean
 ├── Activations: Relu, Sigmoid, Tanh
@@ -298,6 +298,7 @@ exposed through `GradientUtils`: `ZeroGrad`, `GetGraphInfo`, `PrintGraphSummary`
 | `Subtract(a, b)` | `a - b` | `∂/∂a = grad`, `∂/∂b = -grad` | n/a — non-nullable (ADR-001) |
 | `Multiply(a, b)` | `a * b` | `∂/∂a = grad * b`, `∂/∂b = grad * a` | n/a — non-nullable (ADR-001) |
 | `Divide(a, b)` | `a / b` | `∂/∂a = grad / b`, `∂/∂b = -(a/b²) * grad` | throws on zero division |
+| `DivideScalar(a, scalar)` | `a / scalar` | `∂/∂a = grad / scalar` | Scalar divisor; no divisor tensor or node is created (issue #207) |
 | `Clip(a, min, max)` | `clamp(a, min, max)` | 1 if in-range, 0 outside | n/a — non-nullable (ADR-001) |
 | `Pow(a, exponent)` | `a^exponent` | `exponent * a^(exponent-1) * grad` | Scalar exponent |
 
@@ -415,6 +416,7 @@ Mirrors `ReverseGradOperations` in structure. Each method computes the primal va
 | `Subtract(a, b)` | `t_out = t_a - t_b` |
 | `Multiply(a, b)` | `t_out = t_a * b + a * t_b` |
 | `Divide(a, b)` | `t_out = (t_a * b - a * t_b) / b²` |
+| `DivideScalar(a, scalar)` | `t_out = t_a / scalar` |
 | `MatMul(a, b)` | `t_out = t_a @ b + a @ t_b` |
 | `Transpose(a)` | `t_out = t_aᵀ` |
 | `Relu(a)` | `t_out = t_a * (a > 0 ? 1 : 0)` |
@@ -428,7 +430,7 @@ Mirrors `ReverseGradOperations` in structure. Each method computes the primal va
 | `Mean(a)` | `t_out = Σt_a / n` |
 | `Dropout(...)` | Tangent passes through kept positions, zeroed at dropped positions |
 
-All 20 operations in `ForwardGradOperations` also include `KlDivergence` and `SampleNormal` for VAE forward-mode workflows.
+All 21 operations in `ForwardGradOperations` also include `KlDivergence` and `SampleNormal` for VAE forward-mode workflows.
 
 ### When to use which
 

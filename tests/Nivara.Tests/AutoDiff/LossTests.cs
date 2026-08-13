@@ -67,6 +67,25 @@ public class LossTests
     }
 
     [Test]
+    public void MSELoss_Mean_GraphUsesDivideScalar_NotDivisorTensor()
+    {
+        var predictions = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f }), requiresGrad: true);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f }), requiresGrad: false);
+
+        var mse = new MSELoss<float>();
+        var loss = mse.Forward(predictions, targets);
+
+        var info = GradientUtils.GetGraphInfo(loss);
+        var opCounts = (Dictionary<string, int>)info["OperationCounts"];
+
+        Assert.That(opCounts, Does.ContainKey("DivideScalar"));
+        Assert.That(opCounts["DivideScalar"], Is.EqualTo(1));
+        Assert.That(opCounts, Does.Not.ContainKey("Divide"));
+    }
+
+    [Test]
     public void MSELoss_Backward_ProducesGradients()
     {
         var predictions = new ReverseGradTensor<float>(
