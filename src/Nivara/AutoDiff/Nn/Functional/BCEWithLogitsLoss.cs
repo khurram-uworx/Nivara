@@ -39,7 +39,7 @@ public sealed class BCEWithLogitsLoss<T> : Loss<T> where T : struct, IFloatingPo
         if (shouldTrack)
         {
             bool trackTargets = targets.RequiresGrad;
-            var gradFn = new OpNode<T>("BCEWithLogits", new object[] { logits, targets }, (gradOutput) =>
+            var gradFn = new OpNode<T>("BCEWithLogits", [logits, targets], (gradOutput) =>
             {
                 var grad = new T[n];
                 gradOutput.CopyTo(grad.AsSpan(), default(T)!);

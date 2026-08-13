@@ -2369,33 +2369,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
 
         if (typeof(TResult).IsValueType)
         {
-            // For value types, use CreateFromNullable if there are nulls
+            // For value types, use CreateFromSpans when there are nulls
             if (hasResultNulls)
             {
-                var nullableType = typeof(Nullable<>).MakeGenericType(typeof(TResult));
-                var nullableArray = System.Array.CreateInstance(nullableType, Length);
-
-                for (int i = 0; i < Length; i++)
-                {
-                    if (resultNullMask[i])
-                    {
-                        nullableArray.SetValue(null, i);
-                    }
-                    else
-                    {
-                        var nullableInstance = Activator.CreateInstance(nullableType, result[i]);
-                        nullableArray.SetValue(nullableInstance, i);
-                    }
-                }
-
-                return (NivaraColumn<TResult>)typeof(NivaraColumn<>)
-                    .MakeGenericType(typeof(TResult))
-                    .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                    .Invoke(null, new object[] { nullableArray })!;
+                return NivaraColumn<TResult>.CreateFromSpans(result, resultNullMask);
             }
             else
             {
-                // No nulls, use regular Create
                 return NivaraColumn<TResult>.Create(result);
             }
         }
@@ -2467,33 +2447,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         // Create result column with appropriate null mask
         if (typeof(TResult).IsValueType)
         {
-            // For value types, use CreateFromNullable if there are nulls
+            // For value types, use CreateFromSpans when there are nulls
             if (hasResultNulls)
             {
-                var nullableType = typeof(Nullable<>).MakeGenericType(typeof(TResult));
-                var nullableArray = System.Array.CreateInstance(nullableType, Length);
-
-                for (int i = 0; i < Length; i++)
-                {
-                    if (resultNullMask[i])
-                    {
-                        nullableArray.SetValue(null, i);
-                    }
-                    else
-                    {
-                        var nullableInstance = Activator.CreateInstance(nullableType, result[i]);
-                        nullableArray.SetValue(nullableInstance, i);
-                    }
-                }
-
-                return (NivaraColumn<TResult>)typeof(NivaraColumn<>)
-                    .MakeGenericType(typeof(TResult))
-                    .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                    .Invoke(null, new object[] { nullableArray })!;
+                return NivaraColumn<TResult>.CreateFromSpans(result, resultNullMask);
             }
             else
             {
-                // No nulls, use regular Create
                 return NivaraColumn<TResult>.Create(result);
             }
         }

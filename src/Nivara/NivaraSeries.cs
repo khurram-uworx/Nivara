@@ -104,105 +104,88 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
 
         if (type == typeof(float))
         {
-            var floatSum = (float)(object)sum!;
-            var result = floatSum / count;
-            return (T)(object)result;
+            var floatSum = Unsafe.As<T, float>(ref sum);
+            return reinterpretBack(floatSum / count);
         }
         else if (type == typeof(double))
         {
-            var doubleSum = (double)(object)sum!;
-            var result = doubleSum / count;
-            return (T)(object)result;
+            var doubleSum = Unsafe.As<T, double>(ref sum);
+            return reinterpretBack(doubleSum / count);
         }
         else if (type == typeof(int))
         {
-            var intSum = (int)(object)sum!;
-            var result = intSum / count;
-            return (T)(object)result;
+            var intSum = Unsafe.As<T, int>(ref sum);
+            return reinterpretBack(intSum / count);
         }
         else if (type == typeof(long))
         {
-            var longSum = (long)(object)sum!;
-            var result = longSum / count;
-            return (T)(object)result;
+            var longSum = Unsafe.As<T, long>(ref sum);
+            return reinterpretBack(longSum / count);
         }
         else if (type == typeof(short))
         {
-            var shortSum = (short)(object)sum!;
-            var result = (short)(shortSum / count);
-            return (T)(object)result;
+            var shortSum = Unsafe.As<T, short>(ref sum);
+            return reinterpretBack((short)(shortSum / count));
         }
         else if (type == typeof(byte))
         {
-            var byteSum = (byte)(object)sum!;
-            var result = (byte)(byteSum / count);
-            return (T)(object)result;
+            var byteSum = Unsafe.As<T, byte>(ref sum);
+            return reinterpretBack((byte)(byteSum / count));
         }
         else if (type == typeof(sbyte))
         {
-            var sbyteSum = (sbyte)(object)sum!;
-            var result = (sbyte)(sbyteSum / count);
-            return (T)(object)result;
+            var sbyteSum = Unsafe.As<T, sbyte>(ref sum);
+            return reinterpretBack((sbyte)(sbyteSum / count));
         }
         else if (type == typeof(ushort))
         {
-            var ushortSum = (ushort)(object)sum!;
-            var result = (ushort)(ushortSum / count);
-            return (T)(object)result;
+            var ushortSum = Unsafe.As<T, ushort>(ref sum);
+            return reinterpretBack((ushort)(ushortSum / count));
         }
         else if (type == typeof(char))
         {
-            var charSum = (char)(object)sum!;
-            var result = (char)(charSum / count);
-            return (T)(object)result;
+            var charSum = Unsafe.As<T, char>(ref sum);
+            return reinterpretBack((char)(charSum / count));
         }
         else if (type == typeof(uint))
         {
-            var uintSum = (uint)(object)sum!;
-            var result = (uint)(uintSum / count);
-            return (T)(object)result;
+            var uintSum = Unsafe.As<T, uint>(ref sum);
+            return reinterpretBack(uintSum / count);
         }
         else if (type == typeof(ulong))
         {
-            var ulongSum = (ulong)(object)sum!;
-            var result = ulongSum / (ulong)count;
-            return (T)(object)result;
+            var ulongSum = Unsafe.As<T, ulong>(ref sum);
+            return reinterpretBack(ulongSum / (ulong)count);
         }
         else if (type == typeof(decimal))
         {
-            var decimalSum = (decimal)(object)sum!;
-            var result = decimalSum / count;
-            return (T)(object)result;
+            var decimalSum = Unsafe.As<T, decimal>(ref sum);
+            return reinterpretBack(decimalSum / count);
         }
         else if (type == typeof(Half))
         {
-            var halfSum = (Half)(object)sum!;
-            var result = halfSum / (Half)count;
-            return (T)(object)result;
+            var halfSum = Unsafe.As<T, Half>(ref sum);
+            return reinterpretBack(halfSum / (Half)count);
         }
         else if (type == typeof(nint))
         {
-            var nintSum = (nint)(object)sum!;
-            var result = nintSum / count;
-            return (T)(object)result;
+            var nintSum = Unsafe.As<T, nint>(ref sum);
+            return reinterpretBack(nintSum / count);
         }
         else if (type == typeof(nuint))
         {
-            var nuintSum = (nuint)(object)sum!;
-            var result = nuintSum / (nuint)count;
-            return (T)(object)result;
+            var nuintSum = Unsafe.As<T, nuint>(ref sum);
+            return reinterpretBack(nuintSum / (nuint)count);
         }
         else if (type == typeof(Int128))
         {
-            var int128Sum = (Int128)(object)sum!;
-            var result = int128Sum / count;
-            return (T)(object)result;
+            var int128Sum = Unsafe.As<T, Int128>(ref sum);
+            return reinterpretBack(int128Sum / count);
         }
         else if (type == typeof(UInt128))
         {
-            var uint128Sum = (UInt128)(object)sum!;
-            var result = uint128Sum / (UInt128)count;
-            return (T)(object)result;
+            var uint128Sum = Unsafe.As<T, UInt128>(ref sum);
+            return reinterpretBack(uint128Sum / (UInt128)count);
         }
         else
         {

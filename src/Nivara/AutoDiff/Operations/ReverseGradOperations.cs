@@ -27,7 +27,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Add", new object[] { a, b }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Add", [a, b], (typedGradOutput) =>
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                     AccumulateGradient(a, typedGradOutput);
@@ -78,7 +78,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a, bias))
                 {
-                    var gradFn = new OpNode<T>("AddBias", new object[] { a, bias }, (typedGradOutput) =>
+                    var gradFn = new OpNode<T>("AddBias", [a, bias], (typedGradOutput) =>
                     {
                         typedGradOutput.TryGetSpan(out var gSpan);
                         if (GradientUtils.ShouldTrackGrad(a))
@@ -117,7 +117,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Subtract", new object[] { a, b }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Subtract", [a, b], (typedGradOutput) =>
             {
                 if (GradientUtils.ShouldTrackGrad(a))
                     AccumulateGradient(a, typedGradOutput);
@@ -151,7 +151,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Multiply", new object[] { a, b }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Multiply", [a, b], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 if (GradientUtils.ShouldTrackGrad(a))
@@ -196,7 +196,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a, b))
         {
-            var gradFn = new OpNode<T>("Divide", new object[] { a, b }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Divide", [a, b], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 if (GradientUtils.ShouldTrackGrad(a))
@@ -269,7 +269,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a, b))
                 {
-                    var gradFn = new OpNode<T>("MatMul", new object[] { a, b }, (typedGradOutput) =>
+                    var gradFn = new OpNode<T>("MatMul", [a, b], (typedGradOutput) =>
                     {
                         var bTArr = ArrayPool<T>.Shared.Rent(Math.Max(bRows * bCols, 1));
                         var aTArr = ArrayPool<T>.Shared.Rent(Math.Max(aRows * aCols, 1));
@@ -355,7 +355,7 @@ public static class ReverseGradOperations
 
                 if (shouldTrack)
                 {
-                    var gradFn = new OpNode<T>("MatMulTransposedB", new object[] { a, b }, (typedGradOutput) =>
+                    var gradFn = new OpNode<T>("MatMulTransposedB", [a, b], (typedGradOutput) =>
                     {
                         if (GradientUtils.ShouldTrackGrad(a))
                         {
@@ -502,8 +502,8 @@ public static class ReverseGradOperations
                     {
                         var weights = savedWeights!;
                         var inputs = mask != null
-                            ? new object[] { query, key, value, mask }
-                            : new object[] { query, key, value };
+                            ? new ReverseGradTensor<T>[] { query, key, value, mask! }
+                            : new ReverseGradTensor<T>[] { query, key, value };
 
                         var gradFn = new OpNode<T>("MultiHeadAttention", inputs, (typedGradOutput) =>
                         {
@@ -747,8 +747,8 @@ public static class ReverseGradOperations
                     {
                         var weights = savedWeights!;
                         var inputs = mask != null
-                            ? new object[] { query, key, value, mask }
-                            : new object[] { query, key, value };
+                            ? new ReverseGradTensor<T>[] { query, key, value, mask! }
+                            : new ReverseGradTensor<T>[] { query, key, value };
 
                         var gradFn = new OpNode<T>("BatchedMultiHeadAttention", inputs, (typedGradOutput) =>
                         {
@@ -896,7 +896,7 @@ public static class ReverseGradOperations
 
                 if (GradientUtils.ShouldTrackGrad(a))
                 {
-                    var gradFn = new OpNode<T>("Transpose", new object[] { a }, (typedGradOutput) =>
+                    var gradFn = new OpNode<T>("Transpose", [a], (typedGradOutput) =>
                     {
                         var gArr = new T[cols * rows];
                         typedGradOutput.TryGetSpan(out var gradSpan);
@@ -972,7 +972,7 @@ public static class ReverseGradOperations
                 {
                     int capturedAxis1 = axis1, capturedAxis2 = axis2;
                     int[] capturedDstDims = dstDims;
-                    var gradFn = new OpNode<T>("TransposeAxes", new object[] { a }, (typedGradOutput) =>
+                    var gradFn = new OpNode<T>("TransposeAxes", [a], (typedGradOutput) =>
                     {
                         int gradLen = typedGradOutput.Length;
                         var gSrc = new T[gradLen];
@@ -1037,7 +1037,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Sum", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Sum", [a], (typedGradOutput) =>
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
                 AccumulateGradient(a, aGrad);
@@ -1065,7 +1065,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Mean", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Mean", [a], (typedGradOutput) =>
             {
                 var aGrad = BroadcastGradient(typedGradOutput, a.Length);
                 var scaledGrad = aGrad.Divide(T.CreateChecked(a.Length));
@@ -1121,7 +1121,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("MeanPool", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("MeanPool", [a], (typedGradOutput) =>
             {
                 var gradOut = new T[a.Length];
                 var gradSrc = new T[typedGradOutput.Length];
@@ -1163,7 +1163,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Relu", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Relu", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1190,7 +1190,7 @@ public static class ReverseGradOperations
 
         if (trackGrad)
         {
-            var gradFn = new OpNode<T>("Gelu", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Gelu", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1220,7 +1220,7 @@ public static class ReverseGradOperations
             var aArr = new T[a.Length];
             a.AsSpan().CopyTo(aArr.AsSpan());
 
-            var gradFn = new OpNode<T>("GeluExact", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("GeluExact", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gradSpan);
                 var gradArr = new T[a.Length];
@@ -1245,7 +1245,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Sigmoid", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Sigmoid", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1270,7 +1270,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Tanh", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Tanh", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1295,7 +1295,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Negate", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Negate", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1320,7 +1320,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Abs", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Abs", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1346,7 +1346,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Clip", new object[] { a, min, max }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Clip", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1375,7 +1375,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("LeakyRelu", new object[] { a, negativeSlope }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("LeakyRelu", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1400,7 +1400,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Exp", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Exp", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1425,7 +1425,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Log", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Log", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
@@ -1453,7 +1453,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Pow", new object[] { a, exponent }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Pow", [a], (typedGradOutput) =>
             {
                 var gradArr = new T[a.Length];
                 for (int i = 0; i < a.Length; i++)
@@ -1824,7 +1824,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("Softmax", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Softmax", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var aGradArr = new T[a.Length];
@@ -1865,7 +1865,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
-            var gradFn = new OpNode<T>("LogSoftmax", new object[] { a }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("LogSoftmax", [a], (typedGradOutput) =>
             {
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var aGradArr = new T[a.Length];
@@ -1933,7 +1933,7 @@ public static class ReverseGradOperations
                 {
                     var savedInput = a.Data;
                     var savedEps = eps;
-                    var gradFn = new OpNode<T>("RMSNorm", new object[] { a, eps }, (typedGradOutput) =>
+                    var gradFn = new OpNode<T>("RMSNorm", [a], (typedGradOutput) =>
                     {
                         var aGrad = ApplyRMSNormGradient(savedInput, typedGradOutput, savedEps);
                         AccumulateGradient(a, aGrad);
@@ -2026,7 +2026,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(input))
         {
-            var gradFn = new OpNode<T>("Dropout", new object[] { input }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("Dropout", [input], (typedGradOutput) =>
             {
                 var inputGrad = ApplyDropoutGradient(input.Data, typedGradOutput, savedMask, scale);
                 AccumulateGradient(input, inputGrad);
@@ -2108,7 +2108,7 @@ public static class ReverseGradOperations
         if (GradientUtils.ShouldTrackGrad(weight))
         {
             var savedIndices = parsedIndices;
-            var gradFn = new OpNode<T>("SparseEmbeddingBag", new object[] { weight }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("SparseEmbeddingBag", [weight], (typedGradOutput) =>
             {
                 var weightGrad = new T[weight.Length];
                 var gradSpan = typedGradOutput.AsSpan();
@@ -2208,7 +2208,7 @@ public static class ReverseGradOperations
                 if (GradientUtils.ShouldTrackGrad(source))
                 {
                     var savedIndices = indices;
-                    var gradFn = new OpNode<T>("Gather", new object[] { source }, (typedGradOutput) =>
+                    var gradFn = new OpNode<T>("Gather", [source], (typedGradOutput) =>
                     {
                         var gradBuf = ArrayPool<T>.Shared.Rent(source.Length);
                         Array.Clear(gradBuf, 0, source.Length);
@@ -2265,7 +2265,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(mean, logVar))
         {
-            var gradFn = new OpNode<T>("KlDivergence", new object[] { mean, logVar }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("KlDivergence", [mean, logVar], (typedGradOutput) =>
             {
                 if (mean.RequiresGrad)
                 {
@@ -2309,7 +2309,7 @@ public static class ReverseGradOperations
         if (GradientUtils.ShouldTrackGrad(mean, logVar))
         {
             var savedEpsilon = epsilonCol;
-            var gradFn = new OpNode<T>("SampleNormal", new object[] { mean, logVar }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("SampleNormal", [mean, logVar], (typedGradOutput) =>
             {
                 if (mean.RequiresGrad)
                 {
@@ -2567,7 +2567,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(input, scale))
         {
-            var gradFn = new OpNode<T>("BroadcastMultiply", new object[] { input, scale }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("BroadcastMultiply", [input, scale], (typedGradOutput) =>
             {
                 var gradData = new T[input.Length];
                 typedGradOutput.CopyTo(gradData, T.Zero);
@@ -2631,7 +2631,7 @@ public static class ReverseGradOperations
 
         if (GradientUtils.ShouldTrackGrad(input, bias))
         {
-            var gradFn = new OpNode<T>("BroadcastAdd", new object[] { input, bias }, (typedGradOutput) =>
+            var gradFn = new OpNode<T>("BroadcastAdd", [input, bias], (typedGradOutput) =>
             {
                 var gradData = new T[input.Length];
                 typedGradOutput.CopyTo(gradData, T.Zero);

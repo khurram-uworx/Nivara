@@ -205,7 +205,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
             var capturedWeightData = weightSpan.ToArray();
             var capturedBiasData = biasSpan.Length > 0 ? biasSpan.ToArray() : null;
 
-            var gradFn = new OpNode<T>("Conv2d", new object[] { input, _weight.Tensor }, (gradOutput) =>
+            var gradFn = new OpNode<T>("Conv2d", [input, _weight.Tensor], (gradOutput) =>
             {
                 var gradOutData = new T[n * _outChannels * oH * oW];
                 gradOutput.CopyTo(gradOutData, T.Zero);
@@ -768,7 +768,7 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
             var capturedInputData = inputSpan.ToArray();
             var capturedWeightData = weightSpan.ToArray();
 
-            var gradFn = new OpNode<T>("ConvTranspose2d", new object[] { input, _weight.Tensor }, (gradOutput) =>
+            var gradFn = new OpNode<T>("ConvTranspose2d", [input, _weight.Tensor], (gradOutput) =>
             {
                 var gradOutData = new T[n * _outChannels * oH * oW];
                 gradOutput.CopyTo(gradOutData, T.Zero);

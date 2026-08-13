@@ -89,10 +89,7 @@ internal sealed class ComputationGraph
             nodeToOutput[t.GradFn] = t;
 
             foreach (var input in t.GradFn.Inputs)
-            {
-                if (input is ReverseGradTensor<T> inputTensor)
-                    VisitTensors(inputTensor);
-            }
+                VisitTensors(input);
         }
 
         void VisitNodes(OpNode<T>? node)
@@ -108,8 +105,8 @@ internal sealed class ComputationGraph
 
             foreach (var input in node.Inputs)
             {
-                if (input is ReverseGradTensor<T> gradTensor && gradTensor.GradFn != null)
-                    VisitNodes(gradTensor.GradFn);
+                if (input.GradFn != null)
+                    VisitNodes(input.GradFn);
             }
 
             visiting.Remove(node);
@@ -156,12 +153,7 @@ internal sealed class ComputationGraph
             if (t.GradFn != null)
             {
                 foreach (var input in t.GradFn.Inputs)
-                {
-                    if (input is ReverseGradTensor<T> inputTensor)
-                    {
-                        ClearGradients(inputTensor);
-                    }
-                }
+                    ClearGradients(input);
             }
         }
 
