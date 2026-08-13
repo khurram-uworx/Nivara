@@ -275,7 +275,7 @@ exposed through `GradientUtils`: `ZeroGrad`, `GetGraphInfo`, `PrintGraphSummary`
 | `TopologicalSort(root)` | DFS with cycle detection via visiting/visited sets |
 | `ValidateGraph(root)` | Validates no circular dependencies |
 | `ZeroGrad(tensor)` | Recursively clears gradients from reachable tensors |
-| `GetGraphInfo(root)` | Returns `{ TotalNodes, IsLeaf, RequiresGrad, OperationCounts }` |
+| `GetGraphInfo(root)` | Returns a typed `GraphInfo` record `{ TotalNodes, IsLeaf, RequiresGrad, OperationCounts }` |
 
 **Backward algorithm:**
 
@@ -1181,7 +1181,7 @@ null participation, and operation-specific notes such as shape metadata.
 
 | Method | Description |
 |--------|-------------|
-| `GetGraphInfo(tensor)` | Delegates to `ComputationGraph.GetGraphInfo` |
+| `GetGraphInfo(tensor)` | Returns a typed `GraphInfo` record (`TotalNodes`, `IsLeaf`, `RequiresGrad`, `OperationCounts`) |
 | `PrintGraphSummary(tensor)` | Human-readable graph summary string |
 | `DescribeTensor(tensor)` | Detailed tensor debug info (length, grad norm, operation, etc.) |
 | `HasGradient(tensor)` | Whether `Grad != null` |
@@ -1468,8 +1468,9 @@ result.PrintSummary();
 ```csharp
 var loss = ...; // from a computation graph
 var info = GradientUtils.GetGraphInfo(loss);
-// { TotalNodes: 4, IsLeaf: false, RequiresGrad: true,
+// GraphInfo { TotalNodes: 4, IsLeaf: false, RequiresGrad: true,
 //   OperationCounts: { Multiply: 1, Add: 1, Relu: 1, Mean: 1 } }
+// typed access: info.TotalNodes, info.IsLeaf, info.RequiresGrad, info.OperationCounts
 
 var summary = GradientUtils.PrintGraphSummary(loss);
 // Computation Graph Summary:
