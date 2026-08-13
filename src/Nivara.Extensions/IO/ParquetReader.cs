@@ -262,7 +262,7 @@ public static class ParquetReader
         // Handle nullable types
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
-        return TypeMapper.GetSupportedTypes().Contains(actualType);
+        return TypeMapper.IsParquetSupported(actualType);
     }
 
     /// <summary>
@@ -273,7 +273,7 @@ public static class ParquetReader
         var length = checked((int)rowGroupReader.RowCount);
         var elementType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
 
-        if (elementType == typeof(string))
+        if (TypeMapper.IsStringType(elementType))
         {
             var values = new string[length];
             await rowGroupReader.ReadAsync(field, values, null, cancellationToken);
@@ -325,7 +325,7 @@ public static class ParquetReader
             Type t when t == typeof(float) => CreateNivaraColumn<float>(columnData),
             Type t when t == typeof(double) => CreateNivaraColumn<double>(columnData),
             Type t when t == typeof(DateTime) => CreateNivaraColumn<DateTime>(columnData),
-            Type t when t == typeof(string) => CreateStringColumn(columnData),
+            Type t when TypeMapper.IsStringType(t) => CreateStringColumn(columnData),
             _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
     }

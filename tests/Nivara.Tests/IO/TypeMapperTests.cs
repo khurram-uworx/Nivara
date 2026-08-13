@@ -139,7 +139,15 @@ public class TypeMapperTests
             var field = TypeMapper.CreateParquetField(fieldName, clrType);
 
             Assert.That(field.Name, Is.EqualTo(fieldName));
-            Assert.That(field.ClrType, Is.EqualTo(clrType));
+            if (TypeMapper.IsStringType(clrType))
+            {
+                // Parquet.Net 6.1.0 reports string fields as ReadOnlyMemory<char>
+                Assert.That(field.ClrType, Is.AnyOf(typeof(string), typeof(ReadOnlyMemory<char>)));
+            }
+            else
+            {
+                Assert.That(field.ClrType, Is.EqualTo(clrType));
+            }
         }
     }
 
@@ -475,8 +483,17 @@ public class TypeMapperTests
 
             // Verify the CLR type is preserved correctly
             var expectedClrType = Nullable.GetUnderlyingType(type) ?? type;
-            Assert.That(field.ClrType, Is.EqualTo(expectedClrType),
-                $"Parquet field should preserve underlying CLR type for {type.Name}");
+            if (TypeMapper.IsStringType(expectedClrType))
+            {
+                // Parquet.Net 6.1.0 reports string fields as ReadOnlyMemory<char>
+                Assert.That(field.ClrType, Is.AnyOf(typeof(string), typeof(ReadOnlyMemory<char>)),
+                    $"Parquet field should preserve underlying CLR type for {type.Name}");
+            }
+            else
+            {
+                Assert.That(field.ClrType, Is.EqualTo(expectedClrType),
+                    $"Parquet field should preserve underlying CLR type for {type.Name}");
+            }
         }
     }
 

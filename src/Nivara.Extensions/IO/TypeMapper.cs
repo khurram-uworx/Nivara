@@ -156,7 +156,8 @@ static class TypeMapper
     {
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
 
-        return actualType == typeof(bool) ||
+        return IsStringType(actualType) ||
+               actualType == typeof(bool) ||
                actualType == typeof(int) ||
                actualType == typeof(long) ||
                actualType == typeof(float) ||
@@ -170,6 +171,17 @@ static class TypeMapper
                actualType == typeof(ushort) ||
                actualType == typeof(sbyte) ||
                actualType == typeof(decimal);
+    }
+
+    /// <summary>
+    /// Checks whether a CLR type represents a string in Parquet.
+    /// Parquet.Net 6.1.0 reports string fields with <see cref="ReadOnlyMemory{T}"/> of char.
+    /// </summary>
+    /// <param name="clrType">The CLR type to check</param>
+    /// <returns>True if the type is a string or its Parquet.Net string representation</returns>
+    internal static bool IsStringType(Type clrType)
+    {
+        return clrType == typeof(string) || clrType == typeof(ReadOnlyMemory<char>);
     }
 
     /// <summary>
