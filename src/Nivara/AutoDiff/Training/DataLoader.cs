@@ -5,29 +5,29 @@ namespace Nivara.AutoDiff.Training;
 
 public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFloatingPointIeee754<T>
 {
-    readonly TensorDataset<T> _dataset;
-    readonly int _batchSize;
-    readonly bool _shuffle;
-    readonly int? _seed;
+    readonly TensorDataset<T> dataset;
+    readonly int batchSize;
+    readonly bool shuffle;
+    readonly int? seed;
 
-    public TensorDataset<T> Dataset => _dataset;
-    public int BatchSize => _batchSize;
-    public bool Shuffle => _shuffle;
-    public int? Seed => _seed;
+    public TensorDataset<T> Dataset => dataset;
+    public int BatchSize => batchSize;
+    public bool Shuffle => shuffle;
+    public int? Seed => seed;
 
     public DataLoader(TensorDataset<T> dataset, int batchSize, bool shuffle = true, int? seed = null)
     {
-        _dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
+        this.dataset = dataset ?? throw new ArgumentNullException(nameof(dataset));
 
         if (batchSize <= 0)
             throw new ArgumentException("Batch size must be positive.", nameof(batchSize));
 
-        _batchSize = batchSize;
-        _shuffle = shuffle;
-        _seed = seed;
+        this.batchSize = batchSize;
+        this.shuffle = shuffle;
+        this.seed = seed;
     }
 
-    public int Count => _dataset.Count;
+    public int Count => dataset.Count;
 
     int enumerationCount;
 
@@ -38,15 +38,15 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFlo
 
     public IEnumerable<Batch<T>> GetBatches(int epoch = 0, int skipBatches = 0)
     {
-        int count = _dataset.Count;
+        int count = dataset.Count;
         int[] indices = new int[count];
         for (int i = 0; i < count; i++)
             indices[i] = i;
 
-        if (_shuffle)
+        if (shuffle)
         {
-            var rng = _seed.HasValue
-                ? new Random(_seed.Value + epoch)
+            var rng = seed.HasValue
+                ? new Random(seed.Value + epoch)
                 : new Random(epoch);
             for (int i = count - 1; i > 0; i--)
             {
@@ -56,7 +56,7 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFlo
         }
 
         int batchIndex = 0;
-        for (int i = 0; i < count; i += _batchSize)
+        for (int i = 0; i < count; i += batchSize)
         {
             if (batchIndex < skipBatches)
             {
@@ -65,8 +65,8 @@ public sealed class DataLoader<T> : IEnumerable<Batch<T>> where T : struct, IFlo
             }
 
             int remaining = count - i;
-            int batchLen = remaining < _batchSize ? remaining : _batchSize;
-            yield return _dataset.GetBatch(indices.AsSpan(i, batchLen));
+            int batchLen = remaining < batchSize ? remaining : batchSize;
+            yield return dataset.GetBatch(indices.AsSpan(i, batchLen));
             batchIndex++;
         }
     }

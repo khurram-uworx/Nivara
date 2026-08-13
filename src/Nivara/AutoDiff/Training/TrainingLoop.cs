@@ -49,16 +49,16 @@ public sealed class EpochResult<T> where T : struct, IFloatingPointIeee754<T>
 
 public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
-    readonly Module<T> _model;
-    readonly DataLoader<T> _loader;
-    readonly Func<ReverseGradTensor<T>, ReverseGradTensor<T>, ReverseGradTensor<T>> _lossFn;
-    readonly Optimizer.Optimizer<T> _optimizer;
-    int _maxEpoch;
+    readonly Module<T> model;
+    readonly DataLoader<T> loader;
+    readonly Func<ReverseGradTensor<T>, ReverseGradTensor<T>, ReverseGradTensor<T>> lossFn;
+    readonly Optimizer.Optimizer<T> optimizer;
+    int maxEpoch;
     bool disposed;
 
-    public Module<T> Model => _model;
-    public DataLoader<T> Loader => _loader;
-    public int MaxEpoch => _maxEpoch;
+    public Module<T> Model => model;
+    public DataLoader<T> Loader => loader;
+    public int MaxEpoch => maxEpoch;
 
     public TrainingLoop(
         Module<T> model,
@@ -67,23 +67,23 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         Optimizer.Optimizer<T> optimizer,
         int epochs)
     {
-        _model = model ?? throw new ArgumentNullException(nameof(model));
-        _loader = loader ?? throw new ArgumentNullException(nameof(loader));
-        _lossFn = lossFn ?? throw new ArgumentNullException(nameof(lossFn));
-        _optimizer = optimizer ?? throw new ArgumentNullException(nameof(optimizer));
+        this.model = model ?? throw new ArgumentNullException(nameof(model));
+        this.loader = loader ?? throw new ArgumentNullException(nameof(loader));
+        this.lossFn = lossFn ?? throw new ArgumentNullException(nameof(lossFn));
+        this.optimizer = optimizer ?? throw new ArgumentNullException(nameof(optimizer));
 
         if (epochs <= 0)
             throw new ArgumentException("Epochs must be positive.", nameof(epochs));
 
-        _maxEpoch = epochs;
+        maxEpoch = epochs;
     }
 
     public TrainingResult<T> Run(int startEpoch = 1)
     {
-        var epochResults = new List<EpochResult<T>>(_maxEpoch - startEpoch + 1);
+        var epochResults = new List<EpochResult<T>>(maxEpoch - startEpoch + 1);
         var totalSw = Stopwatch.StartNew();
 
-        for (int epoch = startEpoch; epoch <= _maxEpoch; epoch++)
+        for (int epoch = startEpoch; epoch <= maxEpoch; epoch++)
         {
             OnEpochStart(epoch);
 
@@ -91,16 +91,16 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
             var totalLoss = T.Zero;
             int batchCount = 0;
 
-            foreach (var batch in _loader.GetBatches(epoch))
+            foreach (var batch in loader.GetBatches(epoch))
             {
                 using var gradScope = GradientUtils.Grad();
 
-                var output = _model.Forward(batch.Features);
-                var loss = _lossFn(output, batch.Labels);
+                var output = model.Forward(batch.Features);
+                var loss = lossFn(output, batch.Labels);
                 loss.Backward();
 
-                _optimizer.Step();
-                _optimizer.ZeroGrad();
+                optimizer.Step();
+                optimizer.ZeroGrad();
 
                 totalLoss += loss[0];
                 batchCount++;
@@ -127,29 +127,29 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         if (additionalEpochs <= 0)
             throw new ArgumentException("Additional epochs must be positive.", nameof(additionalEpochs));
 
-        int startEpoch = _maxEpoch + 1;
-        _maxEpoch += additionalEpochs;
+        int startEpoch = maxEpoch + 1;
+        maxEpoch += additionalEpochs;
         return Run(startEpoch);
     }
 
     public void SaveCheckpoint(string path, int epoch, T loss)
     {
         var epochResult = new EpochResult<T>(epoch, loss, TimeSpan.Zero, 0);
-        var optimizerState = _optimizer.StateDict();
-        Serialization.ModelSerializer.SaveCheckpoint(_model, epochResult, path, optimizerState);
+        var optimizerState = optimizer.StateDict();
+        Serialization.ModelSerializer.SaveCheckpoint(model, epochResult, path, optimizerState);
     }
 
     public void LoadCheckpoint(string path)
     {
         var checkpoint = Serialization.ModelSerializer.LoadCheckpoint<T>(path);
-        _model.LoadStateDict(checkpoint.Parameters.ToDictionary(
+        model.LoadStateDict(checkpoint.Parameters.ToDictionary(
             kv => kv.Key,
             kv => new ReverseGradTensor<T>(
                 NivaraColumn<T>.CreateFromOwnedArray(kv.Value.Values),
                 requiresGrad: true,
                 kv.Value.Shape)));
-        _optimizer.LoadStateDict(new Dictionary<string, T[]>(checkpoint.OptimizerState));
-        _maxEpoch = checkpoint.Epoch;
+        optimizer.LoadStateDict(new Dictionary<string, T[]>(checkpoint.OptimizerState));
+        maxEpoch = checkpoint.Epoch;
     }
 
     protected virtual void OnEpochStart(int epoch)
@@ -175,8 +175,8 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         if (disposed) return;
         if (disposing)
         {
-            _model.Dispose();
-            _optimizer.Dispose();
+            model.Dispose();
+            optimizer.Dispose();
         }
         disposed = true;
     }

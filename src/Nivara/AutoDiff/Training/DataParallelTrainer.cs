@@ -9,12 +9,12 @@ namespace Nivara.AutoDiff.Training;
 
 public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
-    readonly Module<T> _model;
-    readonly DataLoader<T> _loader;
-    readonly Func<ReverseGradTensor<T>, ReverseGradTensor<T>, ReverseGradTensor<T>> _lossFn;
-    readonly Optimizer.Optimizer<T> _optimizer;
-    readonly int _epochs;
-    readonly int? _maxDegreeOfParallelism;
+    readonly Module<T> model;
+    readonly DataLoader<T> loader;
+    readonly Func<ReverseGradTensor<T>, ReverseGradTensor<T>, ReverseGradTensor<T>> lossFn;
+    readonly Optimizer.Optimizer<T> optimizer;
+    readonly int epochs;
+    readonly int? maxDegreeOfParallelism;
     bool disposed;
 
     public DataParallelTrainer(
@@ -25,29 +25,29 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
         int epochs,
         int? maxDegreeOfParallelism = null)
     {
-        _model = model ?? throw new ArgumentNullException(nameof(model));
-        _loader = loader ?? throw new ArgumentNullException(nameof(loader));
-        _lossFn = lossFn ?? throw new ArgumentNullException(nameof(lossFn));
-        _optimizer = optimizer ?? throw new ArgumentNullException(nameof(optimizer));
+        this.model = model ?? throw new ArgumentNullException(nameof(model));
+        this.loader = loader ?? throw new ArgumentNullException(nameof(loader));
+        this.lossFn = lossFn ?? throw new ArgumentNullException(nameof(lossFn));
+        this.optimizer = optimizer ?? throw new ArgumentNullException(nameof(optimizer));
 
         if (epochs <= 0)
             throw new ArgumentException("Epochs must be positive.", nameof(epochs));
 
-        _epochs = epochs;
-        _maxDegreeOfParallelism = maxDegreeOfParallelism;
+        this.epochs = epochs;
+        this.maxDegreeOfParallelism = maxDegreeOfParallelism;
     }
 
     public DataParallelTrainingResult<T> Run()
     {
-        var epochResults = new List<DataParallelEpochResult<T>>(_epochs);
+        var epochResults = new List<DataParallelEpochResult<T>>(epochs);
         var totalSw = Stopwatch.StartNew();
-        var dataset = _loader.Dataset;
+        var dataset = loader.Dataset;
         int totalRows = dataset.Count;
         var maxDop = ParallelExecutionHelper.GetRecommendedParallelism(
-            _maxDegreeOfParallelism ?? Environment.ProcessorCount);
-        int chunkSize = _loader.BatchSize;
+            maxDegreeOfParallelism ?? Environment.ProcessorCount);
+        int chunkSize = loader.BatchSize;
 
-        for (int epoch = 1; epoch <= _epochs; epoch++)
+        for (int epoch = 1; epoch <= epochs; epoch++)
         {
             OnEpochStart(epoch);
             var epochSw = Stopwatch.StartNew();
@@ -70,8 +70,8 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
                     var batch = dataset.GetBatch(chunkIndices);
 
                     using var gradScope = GradientUtils.Grad();
-                    var output = _model.Forward(batch.Features);
-                    var loss = _lossFn(output, batch.Labels);
+                    var output = model.Forward(batch.Features);
+                    var loss = lossFn(output, batch.Labels);
 
                     forwardResults[i] = (output, loss);
                 }
@@ -85,8 +85,8 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
                     var batch = dataset.GetBatch(chunkIndices);
 
                     using var gradScope = GradientUtils.Grad();
-                    var output = _model.Forward(batch.Features);
-                    var loss = _lossFn(output, batch.Labels);
+                    var output = model.Forward(batch.Features);
+                    var loss = lossFn(output, batch.Labels);
 
                     forwardResults[i] = (output, loss);
                 });
@@ -120,8 +120,8 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
             {
                 SumAndApplyGradients(allGradients);
                 double gradNorm = ComputeGradientNorm();
-                _optimizer.Step();
-                _optimizer.ZeroGrad();
+                optimizer.Step();
+                optimizer.ZeroGrad();
 
                 epochSw.Stop();
 
@@ -169,9 +169,9 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
         for (int i = 0; i < totalRows; i++)
             indices[i] = i;
 
-        if (_loader.Shuffle)
+        if (loader.Shuffle)
         {
-            var seed = _loader.Seed ?? (epoch * 397);
+            var seed = loader.Seed ?? (epoch * 397);
             var rng = new Random(seed);
             for (int i = totalRows - 1; i > 0; i--)
             {
@@ -186,7 +186,7 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
     Dictionary<string, T[]> CloneGradients()
     {
         var snapshot = new Dictionary<string, T[]>();
-        var parameters = _model.Parameters();
+        var parameters = model.Parameters();
 
         foreach (var (name, tensor) in parameters)
         {
@@ -206,7 +206,7 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
     {
         if (allGradients.Count == 0) return;
 
-        var parameters = _model.Parameters();
+        var parameters = model.Parameters();
         int chunkCount = allGradients.Count;
 
         foreach (var (name, tensor) in parameters)
@@ -230,7 +230,7 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
     double ComputeGradientNorm()
     {
         double sumSq = 0;
-        var parameters = _model.Parameters();
+        var parameters = model.Parameters();
 
         foreach (var (_, tensor) in parameters)
         {
@@ -258,8 +258,8 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
         if (disposed) return;
         if (disposing)
         {
-            _model.Dispose();
-            _optimizer.Dispose();
+            model.Dispose();
+            optimizer.Dispose();
         }
         disposed = true;
     }
