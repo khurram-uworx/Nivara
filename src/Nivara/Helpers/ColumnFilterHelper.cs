@@ -87,23 +87,23 @@ static class ColumnFilterHelper
     {
         if (typeof(T).IsValueType)
         {
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var filteredArray = System.Array.CreateInstance(nullableType, indices.Count);
+            var filteredValues = new T[indices.Count];
+            var nullMask = new bool[indices.Count];
 
             for (int i = 0; i < indices.Count; i++)
             {
                 var value = column.GetValue(indices[i]);
                 if (value != null)
                 {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    filteredArray.SetValue(nullableInstance, i);
+                    filteredValues[i] = (T)value;
+                }
+                else
+                {
+                    nullMask[i] = true;
                 }
             }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { filteredArray })!;
+            return NivaraColumn<T>.CreateFromSpans(filteredValues, nullMask);
         }
         else
         {
@@ -114,10 +114,7 @@ static class ColumnFilterHelper
                 filteredArray[i] = (T)value!;
             }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { filteredArray })!;
+            return NivaraColumn<T>.CreateForReferenceType(filteredArray);
         }
     }
 
@@ -125,23 +122,23 @@ static class ColumnFilterHelper
     {
         if (typeof(T).IsValueType)
         {
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var reorderedArray = System.Array.CreateInstance(nullableType, indices.Length);
+            var reorderedValues = new T[indices.Length];
+            var nullMask = new bool[indices.Length];
 
             for (int i = 0; i < indices.Length; i++)
             {
                 var value = column.GetValue(indices[i]);
                 if (value != null)
                 {
-                    var nullableInstance = Activator.CreateInstance(nullableType, value);
-                    reorderedArray.SetValue(nullableInstance, i);
+                    reorderedValues[i] = (T)value;
+                }
+                else
+                {
+                    nullMask[i] = true;
                 }
             }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { reorderedArray })!;
+            return NivaraColumn<T>.CreateFromSpans(reorderedValues, nullMask);
         }
         else
         {
@@ -152,10 +149,7 @@ static class ColumnFilterHelper
                 reorderedArray[i] = (T)value!;
             }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { reorderedArray })!;
+            return NivaraColumn<T>.CreateForReferenceType(reorderedArray);
         }
     }
 
@@ -173,26 +167,28 @@ static class ColumnFilterHelper
 
         if (typeof(T).IsValueType)
         {
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var concatenatedArray = System.Array.CreateInstance(nullableType, totalLength);
+            var concatenatedValues = new T[totalLength];
+            var nullMask = new bool[totalLength];
 
             int currentIndex = 0;
             foreach (var column in columns)
+            {
                 for (int i = 0; i < column.Length; i++)
                 {
                     var value = column.GetValue(i);
                     if (value != null)
                     {
-                        var nullableInstance = Activator.CreateInstance(nullableType, value);
-                        concatenatedArray.SetValue(nullableInstance, currentIndex);
+                        concatenatedValues[currentIndex] = (T)value;
+                    }
+                    else
+                    {
+                        nullMask[currentIndex] = true;
                     }
                     currentIndex++;
                 }
+            }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { concatenatedArray })!;
+            return NivaraColumn<T>.CreateFromSpans(concatenatedValues, nullMask);
         }
         else
         {
@@ -200,16 +196,15 @@ static class ColumnFilterHelper
 
             int currentIndex = 0;
             foreach (var column in columns)
+            {
                 for (int i = 0; i < column.Length; i++)
                 {
                     concatenatedArray[currentIndex] = (T)column.GetValue(i)!;
                     currentIndex++;
                 }
+            }
 
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { concatenatedArray })!;
+            return NivaraColumn<T>.CreateForReferenceType(concatenatedArray);
         }
     }
 
@@ -217,22 +212,14 @@ static class ColumnFilterHelper
     {
         if (typeof(T).IsValueType)
         {
-            var nullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-            var nullArray = System.Array.CreateInstance(nullableType, length);
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<int>.CreateFromNullable), new[] { nullableType.MakeArrayType() })!
-                .Invoke(null, new object[] { nullArray })!;
+            var nullMask = new bool[length];
+            Array.Fill(nullMask, true);
+            return NivaraColumn<T>.CreateFromSpans(new T[length], nullMask);
         }
         else
         {
             var nullArray = new T[length];
-
-            return (IColumn)typeof(NivaraColumn<>)
-                .MakeGenericType(typeof(T))
-                .GetMethod(nameof(NivaraColumn<string>.CreateForReferenceType), new[] { typeof(T[]) })!
-                .Invoke(null, new object[] { nullArray })!;
+            return NivaraColumn<T>.CreateForReferenceType(nullArray);
         }
     }
 }
