@@ -49,6 +49,19 @@ static class NumericTensorKernels<T>
     public static void Divide(ReadOnlySpan<T> x, T y, Span<T> destination)
         => TensorPrimitives.Divide(x, y, destination);
 
+    /// <summary>
+    /// Computes <c>scalar / y[i]</c> element-wise. <see cref="TensorPrimitives"/> has no
+    /// scalar-first divide overload on the in-repo BCL version, so this uses a direct
+    /// <see cref="INumber{T}"/> loop (functionally identical for the numeric domain).
+    /// </summary>
+    public static void DivideBy(T scalar, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        for (int i = 0; i < y.Length; i++)
+        {
+            destination[i] = scalar / y[i];
+        }
+    }
+
     public static void Multiply(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
         => TensorPrimitives.Multiply(x, y, destination);
 
