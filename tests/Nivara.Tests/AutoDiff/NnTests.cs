@@ -283,6 +283,18 @@ public class NnTests
     }
 
     [Test]
+    public void Sequential_Constructor_NullModule_ThrowsArgumentNullException()
+    {
+        using var linear = new Linear<float>(3, 2);
+        using var dropout = new Dropout<float>(0.5);
+
+        Assert.Throws<ArgumentNullException>(
+            () => new Sequential<float>(linear, null!, dropout));
+        Assert.Throws<ArgumentNullException>(
+            () => new Sequential<float>((Module<float>[])null!));
+    }
+
+    [Test]
     public void Linear_DefaultInit_MatchesCurrentBehavior()
     {
         using var linear = new Linear<float>(4, 3);
