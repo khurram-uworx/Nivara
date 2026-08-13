@@ -18,6 +18,9 @@ public abstract class Loss<T> where T : struct, IFloatingPointIeee754<T>
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> predictions, ReverseGradTensor<T> targets)
         => Forward(predictions, targets, Reduction);
 
+    // Subclasses override only this 3-arg overload; the 2-arg Forward above is
+    // non-virtual and delegates with the stored Reduction so both paths share
+    // one Reduce call chain. Do not override the 2-arg overload.
     public abstract ReverseGradTensor<T> Forward(
         ReverseGradTensor<T> predictions,
         ReverseGradTensor<T> targets,

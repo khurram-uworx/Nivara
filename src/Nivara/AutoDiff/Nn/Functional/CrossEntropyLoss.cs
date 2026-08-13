@@ -24,6 +24,8 @@ public sealed class CrossEntropyLoss<T> : Loss<T> where T : struct, IFloatingPoi
         if (reduction == Reduction.None)
             return PerRowNll(nll, logits);
 
+        // Batch-average (divide by batchSize) matches PyTorch cross_entropy and
+        // deliberately differs from the element-count fallback in Loss<T>.Reduce.
         int batchSize = logits.shape[0];
         return Reduce(nll, reduction, batchSize);
     }
