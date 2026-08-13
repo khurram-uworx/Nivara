@@ -231,6 +231,32 @@ public class ForwardGradOperationsTests
     }
 
     [Test]
+    public void DivideScalar_Simple_ComputesCorrectValuesAndTangents()
+    {
+        // JVP: t_out = t_a / scalar
+        // a=[12,15], scalar=3, t_a=[1,1]
+        // result=[4,5], tangent=[1/3,1/3]
+        var a = ForwardGradTensor<float>.FromArray(
+            new float[] { 12.0f, 15.0f }, new float[] { 1.0f, 1.0f });
+
+        var result = ForwardGradOperations.DivideScalar(a, 3f);
+
+        Assert.That(result[0], Is.EqualTo(4.0f));
+        Assert.That(result[1], Is.EqualTo(5.0f));
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(1.0f / 3.0f).Within(1e-6f));
+        Assert.That(result.Tangent[1], Is.EqualTo(1.0f / 3.0f).Within(1e-6f));
+    }
+
+    [Test]
+    public void DivideScalar_ByZero_ThrowsException()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1.0f, 2.0f });
+
+        Assert.Throws<DivideByZeroException>(() => ForwardGradOperations.DivideScalar(a, 0f));
+    }
+
+    [Test]
     public void ElementWiseOperation_LengthMismatch_Throws()
     {
         var a = ForwardGradTensor<float>.FromArray(new float[] { 1.0f, 2.0f });
