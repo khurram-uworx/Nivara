@@ -1,5 +1,4 @@
 using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
@@ -43,8 +42,8 @@ public abstract class Loss<T> where T : struct, IFloatingPointIeee754<T>
 
             case Reduction.Mean:
                 int count = divisor ?? elementwiseLoss.Length;
-                var scale = GradientUtils.Full(1, T.CreateChecked(count));
-                return ReverseGradOperations.Divide(ReverseGradOperations.Sum(elementwiseLoss), scale);
+                return ReverseGradOperations.DivideScalar(
+                    ReverseGradOperations.Sum(elementwiseLoss), T.CreateChecked(count));
 
             default:
                 throw new ArgumentOutOfRangeException(nameof(reduction), $"Unknown Reduction value: {reduction}.");
