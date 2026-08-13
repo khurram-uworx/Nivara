@@ -799,6 +799,27 @@ public class NnTests
     }
 
     [Test]
+    public void VAE_Conditional_DispatchesThroughMultipleInputInterface()
+    {
+        using IMultipleInputModule<float> vae = new VAE<float>(4, 2, 8, conditionDim: 3);
+        var x = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f]),
+            requiresGrad: false);
+        x.Reshape(2, 4);
+
+        var condition = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create([0.1f, 0.2f, 0.3f, 0.4f, 0.5f, 0.6f]),
+            requiresGrad: false);
+        condition.Reshape(2, 3);
+
+        var recon = vae.Forward(x, condition);
+
+        Assert.That(recon.Shape, Is.EqualTo(new[] { 2, 4 }));
+        for (int i = 0; i < recon.Length; i++)
+            Assert.That(float.IsNaN(recon[i]) || float.IsInfinity(recon[i]), Is.False);
+    }
+
+    [Test]
     public void VAE_Conditional_ElboLoss_Works()
     {
         using var vae = new VAE<float>(4, 2, 8, conditionDim: 3);
@@ -2795,9 +2816,9 @@ public class NnTests
     }
 
     [Test]
-    public void MultiheadAttention_PaddingMask_DispatchesThroughModuleReference()
+    public void MultiheadAttention_PaddingMask_DispatchesThroughMultipleInputInterface()
     {
-        using Module<float> mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        using IMultipleInputModule<float> mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[6 * 32]),
             requiresGrad: false);

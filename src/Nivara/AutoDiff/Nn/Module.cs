@@ -12,11 +12,6 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
 
     public abstract ReverseGradTensor<T> Forward(ReverseGradTensor<T> input);
 
-    public virtual ReverseGradTensor<T> Forward(ReverseGradTensor<T> input1, ReverseGradTensor<T> input2)
-    {
-        throw new NotSupportedException($"{GetType().Name} does not support multi-input Forward.");
-    }
-
     public void Train()
     {
         IsTraining = true;

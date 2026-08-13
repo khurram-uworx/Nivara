@@ -478,7 +478,7 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
 |--------|-------------|
 | `IsTraining` | Current train/eval state |
 | `Forward(input)` | Abstract — define model logic |
-| `Forward(input, input2)` | Virtual — multi-input forward (throws by default) |
+| Multi-input forward | Opt-in via `IMultipleInputModule<T>` — implemented only by `MultiheadAttention<T>` (`Forward(input, paddingMask)`) and `VAE<T>` (`Forward(x, condition)`) |
 | `Train()` | Sets training mode (recursive) |
 | `Eval()` | Sets evaluation mode (recursive) |
 | `RegisterModules(...)` | Register child modules for parameter discovery |
