@@ -52,7 +52,7 @@ public class TensorInteropTests
     public void ToTensor_WithNullValues_Throws()
     {
         // Arrange
-        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+        var column = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
         using var series = new NivaraSeries<float>(column);
 
         // Act & Assert
@@ -64,7 +64,7 @@ public class TensorInteropTests
     public void ToTensor_WithNullReplacement_ReplacesOnlyNullPositions()
     {
         // Arrange
-        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+        var column = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
         using var series = new NivaraSeries<float>(column);
 
         // Act
@@ -95,7 +95,7 @@ public class TensorInteropTests
     [Test]
     public void SeriesToNullableTensor_WithNulls_PreservesMask()
     {
-        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
+        var column = NivaraColumn.CreateFromNullable(new float?[] { 1.0f, null, 3.0f });
         using var series = new NivaraSeries<float>(column);
 
         var nullableTensor = series.ToNullableTensor();
@@ -424,7 +424,7 @@ public class TensorInteropTests
         using var frame = new NivaraFrame(new[]
         {
             ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1.0f, 3.0f })),
-            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 4.0f })),
+            ("B", (IColumn)NivaraColumn.CreateFromNullable(new float?[] { null, 4.0f })),
         });
 
         var nullableTensor = frame.ToNullableTensor<float>();
@@ -736,7 +736,7 @@ public class TensorInteropTests
     public void ArgSortDescending_ReturnsStableIndicesWithNullsLast()
     {
         // Arrange
-        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 0.5f, null, 0.9f, 0.9f, 0.1f });
+        var column = NivaraColumn.CreateFromNullable(new float?[] { 0.5f, null, 0.9f, 0.9f, 0.1f });
         using var series = new NivaraSeries<float>(column);
 
         // Act
@@ -811,7 +811,7 @@ public class TensorInteropTests
     [Test]
     public void TopKDescending_WithCountLargerThanNonNullCount_ExcludesNulls()
     {
-        var column = NivaraColumn<float>.CreateFromNullable(new float?[] { 0.5f, null, 0.9f, null, 0.7f });
+        var column = NivaraColumn.CreateFromNullable(new float?[] { 0.5f, null, 0.9f, null, 0.7f });
         using var series = new NivaraSeries<float>(column);
 
         var result = series.TopKDescending(10);
@@ -823,7 +823,7 @@ public class TensorInteropTests
     [Test]
     public void TopKDescending_HeapPath_ExcludesNullsAndPreservesStableTieOrder()
     {
-        var column = NivaraColumn<float>.CreateFromNullable(new float?[]
+        var column = NivaraColumn.CreateFromNullable(new float?[]
         {
             0.1f, 0.2f, 0.3f, 0.4f, 0.95f,
             null, 0.5f, 0.6f, 0.7f, 0.8f,

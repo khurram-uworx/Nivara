@@ -90,7 +90,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+        var column = NivaraColumn.CreateFromNullable(nullableData);
 
         // Act
         var result = column.Sum();
@@ -127,7 +127,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { null, null, null };
-        var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+        var column = NivaraColumn.CreateFromNullable(nullableData);
 
         // Act
         var result = column.Sum();
@@ -193,7 +193,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { 2, null, 4, null, 6 };
-        var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+        var column = NivaraColumn.CreateFromNullable(nullableData);
         var series = new NivaraSeries<int>(column);
 
         // Act
@@ -303,7 +303,7 @@ public class NivaraSeriesAggregateTests
     public void Average_Int128WithNulls_ReturnsValidAverage()
     {
         // Arrange
-        var column = NivaraColumn<Int128>.CreateFromNullable(new Int128?[] { 2, null, 4, null, 6 });
+        var column = NivaraColumn.CreateFromNullable(new Int128?[] { 2, null, 4, null, 6 });
         var series = new NivaraSeries<Int128>(column);
 
         // Act
@@ -416,7 +416,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { 2, null, 8, null, 5 };
-        var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+        var column = NivaraColumn.CreateFromNullable(nullableData);
 
         // Act
         var result = column.Max();
@@ -495,7 +495,7 @@ public class NivaraSeriesAggregateTests
     {
         // Arrange
         var nullableData = new int?[] { null, null, null };
-        var column = NivaraColumn<int>.CreateFromNullable(nullableData);
+        var column = NivaraColumn.CreateFromNullable(nullableData);
 
         // Act & Assert
         var minEx = Assert.Throws<InvalidOperationException>(() => column.Min());

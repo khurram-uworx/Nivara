@@ -71,7 +71,7 @@ public class SortingIntegrationTests
         Assert.That(multiSortedNames.ToArray(), Is.EqualTo(new[] { "Charlie Brown", "Alice Johnson", "Diana Prince", "Eve Adams", "Bob Smith" }));
 
         // Act 3: Test with null values
-        var scoresWithNulls = NivaraColumn<int>.CreateFromNullable(new int?[] { 85, null, 92, 78, null });
+        var scoresWithNulls = NivaraColumn.CreateFromNullable(new int?[] { 85, null, 92, 78, null });
         var frameWithNulls = frame.WithColumn("Score", scoresWithNulls);
 
         var sortedWithNullsFirst = frameWithNulls.AsQueryFrame()

@@ -28,7 +28,7 @@ public class JoinOperationTests
     private NivaraFrame CreateLeftFrameWithNulls()
     {
         return NivaraFrame.Create(
-            ("Id", NivaraColumn<int>.CreateFromNullable(new int?[] { 1, 2, null, 4 })),
+            ("Id", NivaraColumn.CreateFromNullable(new int?[] { 1, 2, null, 4 })),
             ("Name", NivaraColumn<string>.CreateForReferenceType(new string?[] { "Alice", "Bob", null, "David" }!))
         );
     }
@@ -36,7 +36,7 @@ public class JoinOperationTests
     private NivaraFrame CreateRightFrameWithNulls()
     {
         return NivaraFrame.Create(
-            ("Id", NivaraColumn<int>.CreateFromNullable(new int?[] { 2, null, 4, 5 })),
+            ("Id", NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, 5 })),
             ("Department", NivaraColumn<string>.CreateForReferenceType(new string?[] { "HR", null, "Finance", "Marketing" }!))
         );
     }

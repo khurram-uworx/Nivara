@@ -33,7 +33,7 @@ public class NullHandlingPropertyTests
         {
             if (values.Length == 0) continue; // Skip empty arrays
 
-            var column = NivaraColumn<int>.CreateFromNullable(values);
+            var column = NivaraColumn.CreateFromNullable(values);
             var scalar = 5;
 
             // Test scalar multiplication
@@ -71,8 +71,8 @@ public class NullHandlingPropertyTests
 
         foreach (var (leftValues, rightValues) in testCases)
         {
-            var leftColumn = NivaraColumn<int>.CreateFromNullable(leftValues);
-            var rightColumn = NivaraColumn<int>.CreateFromNullable(rightValues);
+            var leftColumn = NivaraColumn.CreateFromNullable(leftValues);
+            var rightColumn = NivaraColumn.CreateFromNullable(rightValues);
 
             // Test element-wise addition
             var result = leftColumn.Add(rightColumn);
@@ -112,7 +112,7 @@ public class NullHandlingPropertyTests
         {
             if (values.Length == 0) continue; // Skip empty arrays
 
-            var column = NivaraColumn<int>.CreateFromNullable(values);
+            var column = NivaraColumn.CreateFromNullable(values);
             var compareValue = 2;
 
             // Test scalar comparison
@@ -161,7 +161,7 @@ public class NullHandlingPropertyTests
 
         foreach (var (values, expectedNullCount) in testCases)
         {
-            var column = NivaraColumn<int>.CreateFromNullable(values);
+            var column = NivaraColumn.CreateFromNullable(values);
 
             // Test HasNulls property
             bool expectedHasNulls = expectedNullCount > 0;
@@ -233,7 +233,7 @@ public class NullHandlingPropertyTests
 
         foreach (var (values, fillValue) in testCases)
         {
-            var column = NivaraColumn<int>.CreateFromNullable(values);
+            var column = NivaraColumn.CreateFromNullable(values);
 
             // Test FillNull method
             var filled = column.FillNull(fillValue);

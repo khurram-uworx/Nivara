@@ -137,7 +137,7 @@ public class NivaraFrameSortingTests
     public void ReorderByIndices_WithNullableColumns_ShouldPreserveNulls()
     {
         // Arrange
-        var nullableNumbers = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 30 });
+        var nullableNumbers = NivaraColumn.CreateFromNullable(new int?[] { 10, null, 30 });
         var letters = NivaraColumn<string>.Create(new[] { "a", "b", "c" });
         var frame = NivaraFrame.Create(("Numbers", nullableNumbers), ("Letters", letters));
 
@@ -303,7 +303,7 @@ public class NivaraFrameSortingTests
     {
         // Arrange
         var names = NivaraColumn<string>.Create(new[] { "a", "a", "b", "b" });
-        var values = NivaraColumn<int>.CreateFromNullable(new int?[] { 2, null, 1, null });
+        var values = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 1, null });
         var frame = NivaraFrame.Create(("Name", names), ("Val", values));
 
         // Act

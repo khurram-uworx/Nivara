@@ -134,7 +134,7 @@ public class LinqQueryTests
     {
         // Arrange
         var numbers = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
-        var scores = NivaraColumn<int>.CreateFromNullable(new int?[] { 10, null, 30 });
+        var scores = NivaraColumn.CreateFromNullable(new int?[] { 10, null, 30 });
         var frame = NivaraFrame.Create(("Numbers", numbers), ("Scores", scores));
 
         // Act
@@ -236,7 +236,7 @@ public class LinqQueryTests
     public void OrderBy_WithComputedKey_NullsPlacement_MatchSortSemantics()
     {
         // Arrange
-        var ages = NivaraColumn<int>.CreateFromNullable(new int?[] { 30, null, 20, 40, null });
+        var ages = NivaraColumn.CreateFromNullable(new int?[] { 30, null, 20, 40, null });
         var names = NivaraColumn<string>.Create(new[] { "a", "b", "c", "d", "e" });
         var frame = NivaraFrame.Create(("Age", ages), ("Name", names));
 

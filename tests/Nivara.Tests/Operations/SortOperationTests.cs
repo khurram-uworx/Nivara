@@ -214,7 +214,7 @@ public class SortOperationTests
     public void Execute_WithNullValues_ShouldHandleNullsCorrectly()
     {
         // Arrange
-        var nullableNumbers = NivaraColumn<int>.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
+        var nullableNumbers = NivaraColumn.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
         var names = NivaraColumn<string>.Create(new[] { "c", "null1", "a", "null2", "b" });
         var input = new Dictionary<string, IColumn>
         {
@@ -245,7 +245,7 @@ public class SortOperationTests
     public void Execute_WithNullsLast_ShouldPlaceNullsAtEnd()
     {
         // Arrange
-        var nullableNumbers = NivaraColumn<int>.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
+        var nullableNumbers = NivaraColumn.CreateFromNullable(new int?[] { 3, null, 1, null, 2 });
         var names = NivaraColumn<string>.Create(new[] { "c", "null1", "a", "null2", "b" });
         var input = new Dictionary<string, IColumn>
         {

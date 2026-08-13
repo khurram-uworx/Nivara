@@ -203,7 +203,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     [Test]
     public void ColumnStorageColumn_Comparison_EngagesTypedKernel_FiltersCorrectly()
     {
-        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        var ids = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         using var frame = NivaraFrame.Create(("ID", ids));
 
         using var filtered = frame.AsQueryFrame()
@@ -216,7 +216,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     [Test]
     public void MixedStorage_SelectComparison_WithNulls_CarriesNullMask()
     {
-        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        var ids = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         using var frame = NivaraFrame.Create(("ID", ids));
 
         using var selected = frame.AsQueryFrame()
@@ -235,7 +235,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     [Test]
     public void MixedStorage_TensorLeftMemoryRight_Comparison_CarriesNullMask()
     {
-        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        var ids = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         var bonus = NivaraColumn<int>.Create(new[] { 10, 20, 30, 40, 50 });
         using var frame = NivaraFrame.Create(("ID", ids), ("Bonus", bonus));
 
@@ -254,7 +254,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     [Test]
     public void MixedStorage_NullableColumnAddition_MatchesBoxedSemantics()
     {
-        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        var ids = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         var bonus = NivaraColumn<int>.Create(new[] { 10, 20, 30, 40, 50 });
         using var frame = NivaraFrame.Create(("ID", ids), ("Bonus", bonus));
 
@@ -274,7 +274,7 @@ public class ExpressionEvaluatorTypedFastPathTests
     [Test]
     public void MixedStorage_NullableColumnComparison_RecordsFusedKernelDiagnostics()
     {
-        var ids = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
+        var ids = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, 4, 5 });
         using var frame = NivaraFrame.Create(("ID", ids));
         var queryFrame = frame.AsQueryFrame().Filter(ColumnExpressions.Col("ID") > 2);
         var plan = queryFrame.ToQueryPlan();

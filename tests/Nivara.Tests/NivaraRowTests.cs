@@ -49,7 +49,7 @@ public class NivaraRowTests
     [Test]
     public void Where_IsNull_SelectsOnlyNullRows()
     {
-        var ages = NivaraColumn<int>.CreateFromNullable(new int?[] { 30, null, 35 });
+        var ages = NivaraColumn.CreateFromNullable(new int?[] { 30, null, 35 });
         using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })), ("Age", ages));
 
         var result = frame.Where(row => row.IsNull("Age"));
@@ -61,7 +61,7 @@ public class NivaraRowTests
     [Test]
     public void Where_IsNullAndTypedValue_ComposeCorrectly()
     {
-        var ages = NivaraColumn<int>.CreateFromNullable(new int?[] { 30, null, 35 });
+        var ages = NivaraColumn.CreateFromNullable(new int?[] { 30, null, 35 });
         using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })), ("Age", ages));
 
         var result = frame.Where(row => !row.IsNull("Age") && row.GetValue<int>("Age") > 30);
@@ -73,7 +73,7 @@ public class NivaraRowTests
     [Test]
     public void Indexer_NullCell_ReturnsNull()
     {
-        var ages = NivaraColumn<int>.CreateFromNullable(new int?[] { 30, null, 35 });
+        var ages = NivaraColumn.CreateFromNullable(new int?[] { 30, null, 35 });
         using var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })), ("Age", ages));
 
         var result = frame.Where(row => row["Age"] == null);
