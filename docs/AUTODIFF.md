@@ -72,7 +72,7 @@ ComputationGraph                      ← Graph traversal engine (internal)
 └── GetGraphInfo(root)                ← Returns diagnostic summary
 
 ReverseGradOperations                 ← Reverse-mode forward+backward ops (static methods)
-├── Element-wise: Add, Subtract, Multiply, Divide, Clip, Pow
+├── Element-wise: Add, Subtract, Multiply, Divide, DivideScalar, Clip, Pow
 ├── Matrix: MatMul, Transpose, TransposeAxes, Slice, Concat, Gather, MultiHeadAttention (fused kernel)
 ├── Reductions: Sum, Mean, MeanPool
 ├── Normalization: RMSNorm, PerRowRMSNorm, PerRowLayerNorm (RMSNormKernel, LayerNormKernel)
@@ -298,6 +298,7 @@ exposed through `GradientUtils`: `ZeroGrad`, `GetGraphInfo`, `PrintGraphSummary`
 | `Subtract(a, b)` | `a - b` | `∂/∂a = grad`, `∂/∂b = -grad` | n/a — non-nullable (ADR-001) |
 | `Multiply(a, b)` | `a * b` | `∂/∂a = grad * b`, `∂/∂b = grad * a` | n/a — non-nullable (ADR-001) |
 | `Divide(a, b)` | `a / b` | `∂/∂a = grad / b`, `∂/∂b = -(a/b²) * grad` | throws on zero division |
+| `DivideScalar(a, scalar)` | `a / scalar` | `∂/∂a = grad / scalar` | Scalar divisor; no divisor tensor or node is created (issue #207) |
 | `Clip(a, min, max)` | `clamp(a, min, max)` | 1 if in-range, 0 outside | n/a — non-nullable (ADR-001) |
 | `Pow(a, exponent)` | `a^exponent` | `exponent * a^(exponent-1) * grad` | Scalar exponent |
 
