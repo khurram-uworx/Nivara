@@ -570,6 +570,78 @@ public class LossTests
     }
 
     [Test]
+    public void LossBase_AllLosses_TwoArgForward_DelegatesToThreeArg()
+    {
+        var reductions = new[] { Reduction.Sum, Reduction.Mean, Reduction.None };
+        foreach (var reduction in reductions)
+        {
+            var losses = new Loss<float>[]
+            {
+                new MSELoss<float>(reduction),
+                new L1Loss<float>(reduction),
+                new BCELoss<float>(reduction),
+                new BCEWithLogitsLoss<float>(reduction),
+                new CrossEntropyLoss<float>(reduction),
+            };
+
+            var predictions = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create(new float[] { 0.6f, 0.7f, 0.8f, 0.2f, 0.4f, 0.9f }),
+                requiresGrad: false);
+            predictions.Reshape(2, 3);
+            var targets = new ReverseGradTensor<float>(
+                NivaraColumn<float>.Create(new float[] { 1f, 0f, 0f, 0f, 1f, 0f }), requiresGrad: false);
+            targets.Reshape(2, 3);
+
+            foreach (var loss in losses)
+            {
+                var viaTwoArg = loss.Forward(predictions, targets);
+                var viaThreeArg = loss.Forward(predictions, targets, reduction);
+
+                Assert.That(viaTwoArg.Length, Is.EqualTo(viaThreeArg.Length));
+                for (int i = 0; i < viaThreeArg.Length; i++)
+                    Assert.That(viaTwoArg[i], Is.EqualTo(viaThreeArg[i]).Within(1e-5f),
+                        $"{loss.GetType().Name} reduction={reduction} index={i}");
+            }
+        }
+    }
+
+    [Test]
+    public void CrossEntropyLoss_Mean_UsesBatchSizeDivisor()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 1f, 0.1f, 1f, 2f, 0.5f }), requiresGrad: false);
+        logits.Reshape(2, 3);
+        var targets = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 1f, 0f, 0f, 0f, 1f, 0f }), requiresGrad: false);
+        targets.Reshape(2, 3);
+
+        var ce = new CrossEntropyLoss<float>();
+        var sumLoss = ce.Forward(logits, targets, Reduction.Sum);
+        var meanLoss = ce.Forward(logits, targets, Reduction.Mean);
+
+        Assert.That(meanLoss[0], Is.EqualTo(sumLoss[0] / 2f).Within(1e-5f));
+    }
+
+    [Test]
+    public void CrossEntropyLoss_IntArrayTargets_MatchesOneHotTensorPath()
+    {
+        var logits = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[] { 2f, 1f, 0.1f, 1f, 2f, 0.5f }), requiresGrad: false);
+        logits.Reshape(2, 3);
+        int[] labels = { 0, 1 };
+
+        var viaIntArray = new CrossEntropyLoss<float>().Forward(logits, labels);
+
+        var oneHotData = new float[] { 1f, 0f, 0f, 0f, 1f, 0f };
+        var oneHot = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(oneHotData), requiresGrad: false);
+        oneHot.Reshape(2, 3);
+        var viaTensor = new CrossEntropyLoss<float>().Forward(logits, oneHot);
+
+        Assert.That(viaIntArray[0], Is.EqualTo(viaTensor[0]).Within(1e-5f));
+    }
+
+    [Test]
     public void Loss_InvalidReduction_Throws()
     {
         var predictions = new ReverseGradTensor<float>(
