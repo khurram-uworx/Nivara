@@ -97,7 +97,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         this.momentum = momentum;
     }
 
-    void ensureVelocityBuffer(int idx, int size)
+    void ensureBuffer(int idx, int size)
     {
         while (idx >= velocityBuffers.Count)
         {
@@ -124,7 +124,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
 
                 if (momentum > 0.0)
                 {
-                    ensureVelocityBuffer(velIdx, tensor.Length);
+                    ensureBuffer(velIdx, tensor.Length);
                     stepWithMomentumInPlace(tensor.Data, tensor.Grad!, tensor.Data.AsWritableSpan(), velocityBuffers[velIdx], lr, wd);
                     velIdx++;
                 }
@@ -154,7 +154,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         int i = 0;
         while (state.TryGetValue($"velocity_{i}", out var buf))
         {
-            ensureVelocityBuffer(i, buf.Length);
+            ensureBuffer(i, buf.Length);
             buf.AsSpan(0, Math.Min(buf.Length, velocityBuffers[i].Length)).CopyTo(velocityBuffers[i]);
             i++;
         }

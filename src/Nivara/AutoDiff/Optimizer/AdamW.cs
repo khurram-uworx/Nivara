@@ -303,6 +303,20 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
         }
     }
 
+    void ensureBuffer(int idx, int size)
+    {
+        while (idx >= expAvgBuffers.Count)
+        {
+            var expAvg = ArrayPool<T>.Shared.Rent(size);
+            expAvg.AsSpan(0, size).Clear();
+            expAvgBuffers.Add(expAvg);
+
+            var expAvgSq = ArrayPool<T>.Shared.Rent(size);
+            expAvgSq.AsSpan(0, size).Clear();
+            expAvgSqBuffers.Add(expAvgSq);
+        }
+    }
+
     public override void Step()
     {
         step++;
@@ -322,25 +336,11 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
                 if (tensor.Grad == null || !tensor.RequiresGrad)
                     continue;
 
-                EnsureBuffer(bufIdx, tensor.Length);
+                ensureBuffer(bufIdx, tensor.Length);
                 applyAdamW(tensor, expAvgBuffers[bufIdx], expAvgSqBuffers[bufIdx], lr, wd, biasCorr1, biasCorr2);
                 param.Touch();
                 bufIdx++;
             }
-        }
-    }
-
-    private void EnsureBuffer(int idx, int size)
-    {
-        while (idx >= expAvgBuffers.Count)
-        {
-            var expAvg = ArrayPool<T>.Shared.Rent(size);
-            expAvg.AsSpan(0, size).Clear();
-            expAvgBuffers.Add(expAvg);
-
-            var expAvgSq = ArrayPool<T>.Shared.Rent(size);
-            expAvgSq.AsSpan(0, size).Clear();
-            expAvgSqBuffers.Add(expAvgSq);
         }
     }
 
@@ -370,7 +370,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
         int i = 0;
         while (state.TryGetValue($"expAvg_{i}", out var buf))
         {
-            EnsureBuffer(i, buf.Length);
+            ensureBuffer(i, buf.Length);
             buf.AsSpan(0, Math.Min(buf.Length, expAvgBuffers[i].Length)).CopyTo(expAvgBuffers[i]);
 
             if (state.TryGetValue($"expAvgSq_{i}", out var sqBuf))
