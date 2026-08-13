@@ -142,6 +142,31 @@ static class TypeMapper
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
         var isNullable = Nullable.GetUnderlyingType(clrType) != null || !actualType.IsValueType;
 
+        return CreateParquetField(name, actualType, isNullable);
+    }
+
+    /// <summary>
+    /// Creates a Parquet field for the specified CLR type with explicit nullability.
+    /// Extended-domain types either map to a native Parquet.Net <see cref="DataField{T}"/>
+    /// (<see cref="DateOnly"/>, <see cref="TimeOnly"/>, <see cref="Guid"/>) or to a lossless
+    /// widened representation (<see cref="Half"/> as <see cref="float"/>, <see cref="nint"/>
+    /// as <see cref="long"/>, <see cref="nuint"/> as <see cref="ulong"/>, <see cref="char"/>
+    /// as <see cref="ushort"/>, <see cref="DateTimeOffset"/> as <see cref="DateTime"/>,
+    /// <see cref="TimeSpan"/> as <see cref="long"/>).
+    /// </summary>
+    /// <param name="name">The field name</param>
+    /// <param name="actualType">The non-nullable CLR type</param>
+    /// <param name="isNullable">Whether the field permits nulls</param>
+    /// <returns>A Parquet DataField</returns>
+    /// <exception cref="UnsupportedTypeException">Thrown when the CLR type is not supported for Parquet</exception>
+    internal static DataField CreateParquetField(string name, Type actualType, bool isNullable)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(actualType);
+
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Field name cannot be empty or whitespace", nameof(name));
+
         return actualType switch
         {
             Type t when t == typeof(bool) => new DataField<bool>(name, isNullable),
