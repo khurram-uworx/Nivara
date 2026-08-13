@@ -123,6 +123,8 @@ static T divideByCount(T sum, int count) => sum / T.CreateChecked(count);
 
 ## GitHub issues log
 
+- [x] #218 — Reflection in ColumnFilterHelper generic helpers on every call
+  (created while working on #199; same #200 theme, deferred)
 - [ ] — ColumnFilterHelper (`src/Nivara/Helpers/ColumnFilterHelper.cs`) still uses
   the `MakeGenericType`+`GetMethod`+`Invoke` reflection pattern (lines ~90-233);
   candidate follow-up issue to create during execution if confirmed on a hot path.

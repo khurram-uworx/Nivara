@@ -5,12 +5,12 @@ namespace Nivara.AutoDiff;
 sealed class OpNode<T> where T : struct, IFloatingPointIeee754<T>
 {
     public string OperationName { get; }
-    public IReadOnlyList<object> Inputs { get; }
+    public IReadOnlyList<ReverseGradTensor<T>> Inputs { get; }
     public Action<NivaraColumn<T>> BackwardFunction { get; }
 
     public OpNode(
         string operationName,
-        IReadOnlyList<object> inputs,
+        IReadOnlyList<ReverseGradTensor<T>> inputs,
         Action<NivaraColumn<T>> backwardFunction)
     {
         if (string.IsNullOrEmpty(operationName))
