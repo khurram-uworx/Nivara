@@ -371,6 +371,117 @@ public class NivaraColumnTests
 
     #endregion
 
+    #region Property 7b: Scalar and reverse arithmetic methods and operators
+
+    /// <summary>
+    /// Scalar addition method and operators: Add(T) must match column+scalar and scalar+column.
+    /// </summary>
+    [Test]
+    public void ScalarArithmetic_AddMethodAndOperators_MatchColumnAndReverseForms()
+    {
+        var values = new[] { 1, 2, 3, 4, 5 };
+        var column = NivaraColumn<int>.Create(values);
+        const int scalar = 10;
+
+        var methodResult = column.Add(scalar);
+        var rightOperator = column + scalar;
+        var leftOperator = scalar + column;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(methodResult[i], Is.EqualTo(values[i] + scalar));
+            Assert.That(rightOperator[i], Is.EqualTo(values[i] + scalar));
+            Assert.That(leftOperator[i], Is.EqualTo(values[i] + scalar));
+        }
+    }
+
+    /// <summary>
+    /// Scalar subtraction methods and operators: Subtract(T), SubtractFrom(T) and the three
+    /// operator forms must all compute the expected column-vs-scalar results.
+    /// </summary>
+    [Test]
+    public void ScalarArithmetic_SubtractAndSubtractFrom_MatchColumnAndReverseForms()
+    {
+        var values = new[] { 10, 20, 30, 40, 50 };
+        var column = NivaraColumn<int>.Create(values);
+        const int scalar = 15;
+        var rightColumn = NivaraColumn<int>.Create(new[] { 5, 5, 5, 5, 5 });
+
+        var subtractMethod = column.Subtract(scalar);
+        var subtractFromMethod = column.SubtractFrom(scalar);
+        var columnOperator = column - scalar;
+        var reverseOperator = scalar - column;
+        var elementWiseOperator = column - rightColumn;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(subtractMethod[i], Is.EqualTo(values[i] - scalar));
+            Assert.That(subtractFromMethod[i], Is.EqualTo(scalar - values[i]));
+            Assert.That(columnOperator[i], Is.EqualTo(values[i] - scalar));
+            Assert.That(reverseOperator[i], Is.EqualTo(scalar - values[i]));
+            Assert.That(elementWiseOperator[i], Is.EqualTo(values[i] - 5));
+        }
+    }
+
+    /// <summary>
+    /// Scalar division methods and operators: Divide(T), DivideBy(T) and the three operator
+    /// forms must all compute the expected column-vs-scalar results.
+    /// </summary>
+    [Test]
+    public void ScalarArithmetic_DivideAndDivideBy_MatchColumnAndReverseForms()
+    {
+        var values = new[] { 10.0, 20.0, 30.0, 40.0, 50.0 };
+        var column = NivaraColumn<double>.Create(values);
+        const double scalar = 2.0;
+        var rightColumn = NivaraColumn<double>.Create(new[] { 2.0, 4.0, 5.0, 10.0, 25.0 });
+
+        var divideMethod = column.Divide(scalar);
+        var divideByMethod = column.DivideBy(scalar);
+        var columnOperator = column / scalar;
+        var reverseOperator = scalar / column;
+        var elementWiseOperator = column / rightColumn;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            Assert.That(divideMethod[i], Is.EqualTo(values[i] / scalar));
+            Assert.That(divideByMethod[i], Is.EqualTo(scalar / values[i]));
+            Assert.That(columnOperator[i], Is.EqualTo(values[i] / scalar));
+            Assert.That(reverseOperator[i], Is.EqualTo(scalar / values[i]));
+            Assert.That(elementWiseOperator[i], Is.EqualTo(values[i] / rightColumn[i]));
+        }
+    }
+
+    /// <summary>
+    /// Null-mask propagation for scalar/reverse arithmetic: every form propagates the source
+    /// column's mask, matching SQL-like null semantics. Uses a floating type because reverse
+    /// division at a null position divides by the stored default (0) which is masked anyway.
+    /// </summary>
+    [Test]
+    public void NullMaskMaintenance_ScalarAndReverseArithmetic_PreservesNullPositions()
+    {
+        var values = new double?[] { 1.0, null, 3.0 };
+        var column = NivaraColumn<double>.CreateFromNullable(values);
+
+        var addResult = column.Add(5.0);
+        var subtractResult = column.Subtract(5.0);
+        var subtractFromResult = column.SubtractFrom(5.0);
+        var divideByResult = column.DivideBy(5.0);
+        var divideResult = column.Divide(5.0);
+        var multiplyResult = column.Multiply(5.0);
+
+        foreach (var result in new[] { addResult, subtractResult, subtractFromResult, divideByResult, divideResult, multiplyResult })
+        {
+            for (int i = 0; i < values.Length; i++)
+                Assert.That(result.IsNull(i), Is.EqualTo(values[i] == null));
+        }
+
+        Assert.That(addResult[0], Is.EqualTo(6.0));
+        Assert.That(subtractFromResult[0], Is.EqualTo(4.0));
+        Assert.That(divideByResult[0], Is.EqualTo(5.0));
+    }
+
+    #endregion
+
     #region Property 8: Null propagation in operations
 
     /// <summary>
@@ -559,12 +670,30 @@ public class NivaraColumnTests
         Assert.Throws<InvalidOperationException>(() => { var result = stringColumn + stringColumn; },
             "String addition operator should throw InvalidOperationException");
 
+        // Test subtraction operators
+        Assert.Throws<InvalidOperationException>(() => { var result = stringColumn - "2"; },
+            "String subtraction operator should throw InvalidOperationException");
+        Assert.Throws<InvalidOperationException>(() => { var result = "2" - stringColumn; },
+            "Reverse string subtraction operator should throw InvalidOperationException");
+
+        // Test division operators
+        Assert.Throws<InvalidOperationException>(() => { var result = stringColumn / stringColumn; },
+            "String division operator should throw InvalidOperationException");
+        Assert.Throws<InvalidOperationException>(() => { var result = stringColumn / "2"; },
+            "String division operator should throw InvalidOperationException");
+        Assert.Throws<InvalidOperationException>(() => { var result = "2" / stringColumn; },
+            "Reverse string division operator should throw InvalidOperationException");
+
         // Test with mismatched lengths
         var shortColumn = NivaraColumn<int>.Create(new[] { 1, 2 });
         var longColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
 
         Assert.Throws<ArgumentException>(() => { var result = shortColumn + longColumn; },
             "Addition operator with mismatched lengths should throw ArgumentException");
+        Assert.Throws<ArgumentException>(() => { var result = shortColumn - longColumn; },
+            "Subtraction operator with mismatched lengths should throw ArgumentException");
+        Assert.Throws<ArgumentException>(() => { var result = shortColumn / longColumn; },
+            "Division operator with mismatched lengths should throw ArgumentException");
     }
 
     #endregion
@@ -1925,6 +2054,67 @@ public class NivaraColumnTests
         var emptyColumn = NivaraColumn<int>.Create(Array.Empty<int>());
         Assert.Throws<InvalidOperationException>(() => emptyColumn.FillNullForward());
         Assert.Throws<InvalidOperationException>(() => emptyColumn.FillNullBackward());
+    }
+
+    /// <summary>
+    /// The non-generic static factory <see cref="NivaraColumn.CreateFromNullable{T}"/> must
+    /// produce results identical to the Array overload for the same nullable input.
+    /// </summary>
+    [Test]
+    public void StaticFactory_CreateFromNullable_MatchesArrayOverload()
+    {
+        int?[] intValues = [1, null, 3, null, 5];
+        var factoryColumn = NivaraColumn.CreateFromNullable(intValues);
+        var arrayOverloadColumn = NivaraColumn<int>.CreateFromNullable(intValues);
+
+        Assert.That(factoryColumn.ToArray(), Is.EqualTo(arrayOverloadColumn.ToArray()));
+        Assert.That(factoryColumn.HasNulls, Is.EqualTo(arrayOverloadColumn.HasNulls));
+        Assert.That(factoryColumn.NullCount, Is.EqualTo(arrayOverloadColumn.NullCount));
+        for (int i = 0; i < intValues.Length; i++)
+            Assert.That(factoryColumn.IsNull(i), Is.EqualTo(arrayOverloadColumn.IsNull(i)));
+
+        double?[] doubleValues = [1.5, null, 3.14];
+        var doubleColumn = NivaraColumn.CreateFromNullable(doubleValues);
+        Assert.That(doubleColumn.Length, Is.EqualTo(3));
+        Assert.That(doubleColumn.HasNulls, Is.True);
+        Assert.That(doubleColumn[0], Is.EqualTo(1.5));
+        Assert.That(doubleColumn.IsNull(1), Is.True);
+        Assert.That(doubleColumn[2], Is.EqualTo(3.14));
+    }
+
+    /// <summary>
+    /// The static factory must handle empty arrays (no null mask, zero length) and reject null
+    /// array arguments.
+    /// </summary>
+    [Test]
+    public void StaticFactory_CreateFromNullable_HandlesEmptyAndNullArrays()
+    {
+        var emptyColumn = NivaraColumn.CreateFromNullable(Array.Empty<int?>());
+        Assert.That(emptyColumn.Length, Is.EqualTo(0));
+        Assert.That(emptyColumn.HasNulls, Is.False);
+
+        Assert.Throws<ArgumentNullException>(() => NivaraColumn.CreateFromNullable<int>(null!));
+    }
+
+    /// <summary>
+    /// The static factory must support the extended numeric domain (decimal, Half) without
+    /// boxing each element.
+    /// </summary>
+    [Test]
+    public void StaticFactory_CreateFromNullable_SupportsExtendedDomain()
+    {
+        decimal?[] decimalValues = [1.5m, null, 3.5m];
+        var decimalColumn = NivaraColumn.CreateFromNullable(decimalValues);
+        Assert.That(decimalColumn.HasNulls, Is.True);
+        Assert.That(decimalColumn[0], Is.EqualTo(1.5m));
+        Assert.That(decimalColumn.IsNull(1), Is.True);
+        Assert.That(decimalColumn[2], Is.EqualTo(3.5m));
+
+        Half?[] halfValues = [(Half)1.5f, null, (Half)3.5f];
+        var halfColumn = NivaraColumn.CreateFromNullable(halfValues);
+        Assert.That(halfColumn.HasNulls, Is.True);
+        Assert.That(halfColumn[0], Is.EqualTo((Half)1.5f));
+        Assert.That(halfColumn.IsNull(1), Is.True);
     }
 
     #endregion

@@ -27,11 +27,40 @@ static class NumericTensorKernels<T>
     public static void Subtract(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
         => TensorPrimitives.Subtract(x, y, destination);
 
+    public static void Subtract(ReadOnlySpan<T> x, T y, Span<T> destination)
+        => TensorPrimitives.Subtract(x, y, destination);
+
+    /// <summary>
+    /// Computes <c>scalar - y[i]</c> element-wise. <see cref="TensorPrimitives"/> has no
+    /// scalar-first subtract overload on the in-repo BCL version, so this uses a direct
+    /// <see cref="INumber{T}"/> loop (functionally identical for the numeric domain).
+    /// </summary>
+    public static void SubtractFrom(T scalar, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        for (int i = 0; i < y.Length; i++)
+        {
+            destination[i] = scalar - y[i];
+        }
+    }
+
     public static void Divide(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
         => TensorPrimitives.Divide(x, y, destination);
 
     public static void Divide(ReadOnlySpan<T> x, T y, Span<T> destination)
         => TensorPrimitives.Divide(x, y, destination);
+
+    /// <summary>
+    /// Computes <c>scalar / y[i]</c> element-wise. <see cref="TensorPrimitives"/> has no
+    /// scalar-first divide overload on the in-repo BCL version, so this uses a direct
+    /// <see cref="INumber{T}"/> loop (functionally identical for the numeric domain).
+    /// </summary>
+    public static void DivideBy(T scalar, ReadOnlySpan<T> y, Span<T> destination)
+    {
+        for (int i = 0; i < y.Length; i++)
+        {
+            destination[i] = scalar / y[i];
+        }
+    }
 
     public static void Multiply(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
         => TensorPrimitives.Multiply(x, y, destination);
@@ -89,6 +118,15 @@ static class NumericTensorKernels<T>
 
     public static T Sum(ReadOnlySpan<T> values)
         => TensorPrimitives.Sum(values);
+
+    /// <summary>
+    /// Computes <c>sum / count</c>. <c>CreateChecked</c> matches the previous per-type
+    /// <c>Unsafe.As</c> casts: truncating integer division for the integer types and true
+    /// division for float/double/Half/decimal (including <c>char</c>, whose generic
+    /// division truncates the promoted quotient identically).
+    /// </summary>
+    public static T DivideByCount(T sum, int count)
+        => sum / T.CreateChecked(count);
 
     public static T Min(ReadOnlySpan<T> values)
         => TensorPrimitives.Min(values);

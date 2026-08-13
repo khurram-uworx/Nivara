@@ -55,7 +55,7 @@ static class ColumnFactory
                 nullable[i] = (T)value;
         }
 
-        return NivaraColumn<T>.CreateFromNullable(nullable);
+        return NivaraColumn.CreateFromNullable(nullable);
     }
 
     static IColumn createReferenceColumn<T>(object?[] values)

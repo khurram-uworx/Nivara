@@ -675,7 +675,7 @@ public static class ParquetWriter
             }
         }
 
-        return NivaraColumn<T>.CreateFromNullable(nullableArray);
+        return NivaraColumn.CreateFromNullable(nullableArray);
     }
 
     /// <summary>

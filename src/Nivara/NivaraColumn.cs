@@ -5,6 +5,7 @@ using Nivara.Storage;
 using System.Buffers;
 using System.Collections;
 using System.Numerics.Tensors;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Nivara;
@@ -18,244 +19,77 @@ namespace Nivara;
 public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
 {
     /// <summary>
-    /// Reinterprets a span of the column element type as a span of <typeparamref name="U"/>
-    /// without copying. Only valid when the runtime element type equals <typeparamref name="U"/>.
-    /// </summary>
-    static ReadOnlySpan<U> reinterpretReadOnly<U>(ReadOnlySpan<T> source)
-        where U : unmanaged
-        => SpanReinterpret.ReadOnly<T, U>(source);
-
-    static Span<U> reinterpretWritable<U>(Span<T> destination)
-        where U : unmanaged
-        => SpanReinterpret.Writable<T, U>(destination);
-
-    static U reinterpretScalar<U>(T value)
-        where U : unmanaged
-        => SpanReinterpret.Scalar<T, U>(value);
-
-    /// <summary>
-    /// Helper method to perform vectorized multiplication using TensorPrimitives with runtime type dispatch
+    /// Performs vectorized element-wise multiplication with a scalar
     /// </summary>
     static void multiplyTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
-        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
-        // through the same typed kernels instead of a dynamic fallback.
-        if (type == typeof(float)) { NumericTensorKernels<float>.Multiply(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), reinterpretWritable<float>(destination)); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Multiply(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), reinterpretWritable<double>(destination)); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Multiply(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), reinterpretWritable<int>(destination)); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Multiply(reinterpretReadOnly<long>(x), reinterpretScalar<long>(y), reinterpretWritable<long>(destination)); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Multiply(reinterpretReadOnly<short>(x), reinterpretScalar<short>(y), reinterpretWritable<short>(destination)); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Multiply(reinterpretReadOnly<ushort>(x), reinterpretScalar<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Multiply(reinterpretReadOnly<uint>(x), reinterpretScalar<uint>(y), reinterpretWritable<uint>(destination)); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Multiply(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Multiply(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), reinterpretWritable<char>(destination)); return; }
-        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Multiply(reinterpretReadOnly<decimal>(x), reinterpretScalar<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
-        if (type == typeof(Half)) { NumericTensorKernels<Half>.Multiply(reinterpretReadOnly<Half>(x), reinterpretScalar<Half>(y), reinterpretWritable<Half>(destination)); return; }
-        if (type == typeof(nint)) { NumericTensorKernels<nint>.Multiply(reinterpretReadOnly<nint>(x), reinterpretScalar<nint>(y), reinterpretWritable<nint>(destination)); return; }
-        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Multiply(reinterpretReadOnly<nuint>(x), reinterpretScalar<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
-        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Multiply(reinterpretReadOnly<Int128>(x), reinterpretScalar<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
-        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Multiply(reinterpretReadOnly<UInt128>(x), reinterpretScalar<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
-
-        throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-    }
+        => NumericKernelDispatcher.Multiply(x, y, destination);
 
     /// <summary>
-    /// Helper method to perform vectorized element-wise multiplication using TensorPrimitives with runtime type dispatch
+    /// Performs vectorized element-wise multiplication between two spans
     /// </summary>
     static void multiplyTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
-        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
-        // through the same typed kernels instead of a dynamic fallback.
-        if (type == typeof(float)) { NumericTensorKernels<float>.Multiply(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Multiply(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Multiply(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Multiply(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), reinterpretWritable<long>(destination)); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Multiply(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), reinterpretWritable<short>(destination)); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Multiply(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Multiply(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), reinterpretWritable<uint>(destination)); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Multiply(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Multiply(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Multiply(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Multiply(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
-        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Multiply(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
-        if (type == typeof(Half)) { NumericTensorKernels<Half>.Multiply(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
-        if (type == typeof(nint)) { NumericTensorKernels<nint>.Multiply(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
-        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Multiply(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
-        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Multiply(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
-        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Multiply(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
-
-        throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-    }
+        => NumericKernelDispatcher.Multiply(x, y, destination);
 
     /// <summary>
-    /// Helper method to perform vectorized addition using TensorPrimitives with runtime type dispatch
+    /// Performs vectorized element-wise addition with a scalar
+    /// </summary>
+    static void addTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
+        => NumericKernelDispatcher.Add(x, y, destination);
+
+    /// <summary>
+    /// Performs vectorized element-wise addition between two spans
     /// </summary>
     static void addTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
-        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
-        // through the same typed kernels instead of a dynamic fallback.
-        if (type == typeof(float)) { NumericTensorKernels<float>.Add(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Add(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Add(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Add(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), reinterpretWritable<long>(destination)); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Add(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), reinterpretWritable<short>(destination)); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Add(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Add(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), reinterpretWritable<uint>(destination)); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Add(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Add(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Add(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Add(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
-        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Add(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
-        if (type == typeof(Half)) { NumericTensorKernels<Half>.Add(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
-        if (type == typeof(nint)) { NumericTensorKernels<nint>.Add(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
-        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Add(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
-        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Add(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
-        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Add(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
-
-        throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-    }
+        => NumericKernelDispatcher.Add(x, y, destination);
 
     /// <summary>
-    /// Helper method to perform vectorized subtraction using TensorPrimitives with runtime type dispatch
+    /// Performs vectorized element-wise subtraction with a scalar
+    /// </summary>
+    static void subtractTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
+        => NumericKernelDispatcher.Subtract(x, y, destination);
+
+    /// <summary>
+    /// Performs vectorized element-wise subtraction between two spans
     /// </summary>
     static void subtractTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
-        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
-        // through the same typed kernels instead of a dynamic fallback.
-        if (type == typeof(float)) { NumericTensorKernels<float>.Subtract(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Subtract(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Subtract(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Subtract(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), reinterpretWritable<long>(destination)); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Subtract(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), reinterpretWritable<short>(destination)); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Subtract(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Subtract(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), reinterpretWritable<uint>(destination)); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Subtract(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Subtract(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Subtract(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Subtract(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
-        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Subtract(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
-        if (type == typeof(Half)) { NumericTensorKernels<Half>.Subtract(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
-        if (type == typeof(nint)) { NumericTensorKernels<nint>.Subtract(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
-        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Subtract(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
-        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Subtract(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
-        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Subtract(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
-
-        throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-    }
+        => NumericKernelDispatcher.Subtract(x, y, destination);
 
     /// <summary>
-    /// Helper method to perform vectorized division using TensorPrimitives with runtime type dispatch
+    /// Performs vectorized scalar-minus-column subtraction
     /// </summary>
-    static void divideTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
-        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
-        // through the same typed kernels instead of a dynamic fallback.
-        if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), reinterpretWritable<float>(destination)); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), reinterpretWritable<double>(destination)); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), reinterpretWritable<int>(destination)); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Divide(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), reinterpretWritable<long>(destination)); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Divide(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), reinterpretWritable<short>(destination)); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Divide(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Divide(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), reinterpretWritable<uint>(destination)); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Divide(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), reinterpretWritable<byte>(destination)); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Divide(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), reinterpretWritable<char>(destination)); return; }
-        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Divide(reinterpretReadOnly<decimal>(x), reinterpretReadOnly<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
-        if (type == typeof(Half)) { NumericTensorKernels<Half>.Divide(reinterpretReadOnly<Half>(x), reinterpretReadOnly<Half>(y), reinterpretWritable<Half>(destination)); return; }
-        if (type == typeof(nint)) { NumericTensorKernels<nint>.Divide(reinterpretReadOnly<nint>(x), reinterpretReadOnly<nint>(y), reinterpretWritable<nint>(destination)); return; }
-        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Divide(reinterpretReadOnly<nuint>(x), reinterpretReadOnly<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
-        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Divide(reinterpretReadOnly<Int128>(x), reinterpretReadOnly<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
-        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Divide(reinterpretReadOnly<UInt128>(x), reinterpretReadOnly<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
-
-        throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-    }
+    static void subtractFromTensorPrimitive(T scalar, ReadOnlySpan<T> x, Span<T> destination)
+        => NumericKernelDispatcher.SubtractFrom(scalar, x, destination);
 
     /// <summary>
-    /// Helper method to perform vectorized scalar division using TensorPrimitives with runtime type dispatch
+    /// Performs vectorized element-wise division with a scalar
     /// </summary>
     static void divideTensorPrimitive(ReadOnlySpan<T> x, T y, Span<T> destination)
-    {
-        var type = typeof(T);
+        => NumericKernelDispatcher.Divide(x, y, destination);
 
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
-        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
-        // through the same typed kernels instead of a dynamic fallback.
-        if (type == typeof(float)) { NumericTensorKernels<float>.Divide(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), reinterpretWritable<float>(destination)); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Divide(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), reinterpretWritable<double>(destination)); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Divide(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), reinterpretWritable<int>(destination)); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Divide(reinterpretReadOnly<long>(x), reinterpretScalar<long>(y), reinterpretWritable<long>(destination)); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Divide(reinterpretReadOnly<short>(x), reinterpretScalar<short>(y), reinterpretWritable<short>(destination)); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Divide(reinterpretReadOnly<ushort>(x), reinterpretScalar<ushort>(y), reinterpretWritable<ushort>(destination)); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Divide(reinterpretReadOnly<uint>(x), reinterpretScalar<uint>(y), reinterpretWritable<uint>(destination)); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Divide(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), reinterpretWritable<ulong>(destination)); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Divide(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), reinterpretWritable<byte>(destination)); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Divide(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), reinterpretWritable<sbyte>(destination)); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Divide(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), reinterpretWritable<char>(destination)); return; }
-        if (type == typeof(decimal)) { NumericTensorKernels<decimal>.Divide(reinterpretReadOnly<decimal>(x), reinterpretScalar<decimal>(y), reinterpretWritable<decimal>(destination)); return; }
-        if (type == typeof(Half)) { NumericTensorKernels<Half>.Divide(reinterpretReadOnly<Half>(x), reinterpretScalar<Half>(y), reinterpretWritable<Half>(destination)); return; }
-        if (type == typeof(nint)) { NumericTensorKernels<nint>.Divide(reinterpretReadOnly<nint>(x), reinterpretScalar<nint>(y), reinterpretWritable<nint>(destination)); return; }
-        if (type == typeof(nuint)) { NumericTensorKernels<nuint>.Divide(reinterpretReadOnly<nuint>(x), reinterpretScalar<nuint>(y), reinterpretWritable<nuint>(destination)); return; }
-        if (type == typeof(Int128)) { NumericTensorKernels<Int128>.Divide(reinterpretReadOnly<Int128>(x), reinterpretScalar<Int128>(y), reinterpretWritable<Int128>(destination)); return; }
-        if (type == typeof(UInt128)) { NumericTensorKernels<UInt128>.Divide(reinterpretReadOnly<UInt128>(x), reinterpretScalar<UInt128>(y), reinterpretWritable<UInt128>(destination)); return; }
+    /// <summary>
+    /// Performs vectorized scalar-divided-by-column division
+    /// </summary>
+    static void divideByTensorPrimitive(T scalar, ReadOnlySpan<T> x, Span<T> destination)
+        => NumericKernelDispatcher.DivideBy(scalar, x, destination);
 
-        throw new NotSupportedException(
-            $"Arithmetic on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-    }
+    /// <summary>
+    /// Performs vectorized element-wise division between two spans
+    /// </summary>
+    static void divideTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
+        => NumericKernelDispatcher.Divide(x, y, destination);
 
     /// <summary>
     /// Helper method to perform vectorized equality comparison using optimized loops with runtime type dispatch
     /// </summary>
     static void equalsTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
     {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get direct operator comparisons; fall back to a default comparer for others
-        if (type == typeof(float)) { NumericTensorKernels<float>.Equals(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), destination); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Equals(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), destination); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Equals(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), destination); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Equals(reinterpretReadOnly<long>(x), reinterpretScalar<long>(y), destination); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Equals(reinterpretReadOnly<short>(x), reinterpretScalar<short>(y), destination); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Equals(reinterpretReadOnly<ushort>(x), reinterpretScalar<ushort>(y), destination); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Equals(reinterpretReadOnly<uint>(x), reinterpretScalar<uint>(y), destination); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Equals(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), destination); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Equals(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), destination); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Equals(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), destination); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Equals(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), destination); return; }
-
-        var comparer = EqualityComparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        if (!NumericKernelDispatcher.TryEquals(x, y, destination))
         {
-            destination[i] = comparer.Equals(x[i], y);
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Equals(x[i], y);
+            }
         }
     }
 
@@ -264,26 +98,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     static void equalsTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
     {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get direct operator comparisons; fall back to a default comparer for others
-        if (type == typeof(float)) { NumericTensorKernels<float>.Equals(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), destination); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.Equals(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), destination); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.Equals(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), destination); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.Equals(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), destination); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.Equals(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), destination); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.Equals(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), destination); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.Equals(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), destination); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.Equals(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), destination); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.Equals(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), destination); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.Equals(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), destination); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.Equals(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), destination); return; }
-
-        var comparer = EqualityComparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        if (!NumericKernelDispatcher.TryEquals(x, y, destination))
         {
-            destination[i] = comparer.Equals(x[i], y[i]);
+            var comparer = EqualityComparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Equals(x[i], y[i]);
+            }
         }
     }
 
@@ -292,26 +113,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     static void greaterThanTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
     {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get direct operator comparisons; fall back to a default comparer for others
-        if (type == typeof(float)) { NumericTensorKernels<float>.GreaterThan(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), destination); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.GreaterThan(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), destination); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.GreaterThan(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), destination); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.GreaterThan(reinterpretReadOnly<long>(x), reinterpretScalar<long>(y), destination); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.GreaterThan(reinterpretReadOnly<short>(x), reinterpretScalar<short>(y), destination); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.GreaterThan(reinterpretReadOnly<ushort>(x), reinterpretScalar<ushort>(y), destination); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.GreaterThan(reinterpretReadOnly<uint>(x), reinterpretScalar<uint>(y), destination); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.GreaterThan(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), destination); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.GreaterThan(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), destination); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.GreaterThan(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), destination); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.GreaterThan(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), destination); return; }
-
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        if (!NumericKernelDispatcher.TryGreaterThan(x, y, destination))
         {
-            destination[i] = comparer.Compare(x[i], y) > 0;
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y) > 0;
+            }
         }
     }
 
@@ -320,54 +128,28 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     static void greaterThanTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
     {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get direct operator comparisons; fall back to a default comparer for others
-        if (type == typeof(float)) { NumericTensorKernels<float>.GreaterThan(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), destination); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.GreaterThan(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), destination); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.GreaterThan(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), destination); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.GreaterThan(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), destination); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.GreaterThan(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), destination); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.GreaterThan(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), destination); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.GreaterThan(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), destination); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.GreaterThan(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), destination); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.GreaterThan(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), destination); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.GreaterThan(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), destination); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.GreaterThan(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), destination); return; }
-
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        if (!NumericKernelDispatcher.TryGreaterThan(x, y, destination))
         {
-            destination[i] = comparer.Compare(x[i], y[i]) > 0;
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y[i]) > 0;
+            }
         }
     }
 
     /// <summary>
-    /// Helper method to perform vectorized less than comparison using TensorPrimitives with runtime type dispatch
+    /// Helper method to perform vectorized element-wise less than comparison using TensorPrimitives with runtime type dispatch
     /// </summary>
     static void lessThanTensorPrimitive(ReadOnlySpan<T> x, T y, Span<bool> destination)
     {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get direct operator comparisons; fall back to a default comparer for others
-        if (type == typeof(float)) { NumericTensorKernels<float>.LessThan(reinterpretReadOnly<float>(x), reinterpretScalar<float>(y), destination); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.LessThan(reinterpretReadOnly<double>(x), reinterpretScalar<double>(y), destination); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.LessThan(reinterpretReadOnly<int>(x), reinterpretScalar<int>(y), destination); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.LessThan(reinterpretReadOnly<long>(x), reinterpretScalar<long>(y), destination); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.LessThan(reinterpretReadOnly<short>(x), reinterpretScalar<short>(y), destination); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.LessThan(reinterpretReadOnly<ushort>(x), reinterpretScalar<ushort>(y), destination); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.LessThan(reinterpretReadOnly<uint>(x), reinterpretScalar<uint>(y), destination); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.LessThan(reinterpretReadOnly<ulong>(x), reinterpretScalar<ulong>(y), destination); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.LessThan(reinterpretReadOnly<byte>(x), reinterpretScalar<byte>(y), destination); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.LessThan(reinterpretReadOnly<sbyte>(x), reinterpretScalar<sbyte>(y), destination); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.LessThan(reinterpretReadOnly<char>(x), reinterpretScalar<char>(y), destination); return; }
-
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        if (!NumericKernelDispatcher.TryLessThan(x, y, destination))
         {
-            destination[i] = comparer.Compare(x[i], y) < 0;
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y) < 0;
+            }
         }
     }
 
@@ -376,26 +158,13 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     /// </summary>
     static void lessThanTensorPrimitive(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<bool> destination)
     {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get direct operator comparisons; fall back to a default comparer for others
-        if (type == typeof(float)) { NumericTensorKernels<float>.LessThan(reinterpretReadOnly<float>(x), reinterpretReadOnly<float>(y), destination); return; }
-        if (type == typeof(double)) { NumericTensorKernels<double>.LessThan(reinterpretReadOnly<double>(x), reinterpretReadOnly<double>(y), destination); return; }
-        if (type == typeof(int)) { NumericTensorKernels<int>.LessThan(reinterpretReadOnly<int>(x), reinterpretReadOnly<int>(y), destination); return; }
-        if (type == typeof(long)) { NumericTensorKernels<long>.LessThan(reinterpretReadOnly<long>(x), reinterpretReadOnly<long>(y), destination); return; }
-        if (type == typeof(short)) { NumericTensorKernels<short>.LessThan(reinterpretReadOnly<short>(x), reinterpretReadOnly<short>(y), destination); return; }
-        if (type == typeof(ushort)) { NumericTensorKernels<ushort>.LessThan(reinterpretReadOnly<ushort>(x), reinterpretReadOnly<ushort>(y), destination); return; }
-        if (type == typeof(uint)) { NumericTensorKernels<uint>.LessThan(reinterpretReadOnly<uint>(x), reinterpretReadOnly<uint>(y), destination); return; }
-        if (type == typeof(ulong)) { NumericTensorKernels<ulong>.LessThan(reinterpretReadOnly<ulong>(x), reinterpretReadOnly<ulong>(y), destination); return; }
-        if (type == typeof(byte)) { NumericTensorKernels<byte>.LessThan(reinterpretReadOnly<byte>(x), reinterpretReadOnly<byte>(y), destination); return; }
-        if (type == typeof(sbyte)) { NumericTensorKernels<sbyte>.LessThan(reinterpretReadOnly<sbyte>(x), reinterpretReadOnly<sbyte>(y), destination); return; }
-        if (type == typeof(char)) { NumericTensorKernels<char>.LessThan(reinterpretReadOnly<char>(x), reinterpretReadOnly<char>(y), destination); return; }
-
-        var comparer = Comparer<T>.Default;
-        for (int i = 0; i < x.Length; i++)
+        if (!NumericKernelDispatcher.TryLessThan(x, y, destination))
         {
-            destination[i] = comparer.Compare(x[i], y[i]) < 0;
+            var comparer = Comparer<T>.Default;
+            for (int i = 0; i < x.Length; i++)
+            {
+                destination[i] = comparer.Compare(x[i], y[i]) < 0;
+            }
         }
     }
 
@@ -545,6 +314,9 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         return new NivaraColumn<T>(storage);
     }
 
+    static readonly MethodInfo createFromNullableFactory = typeof(NivaraColumn)
+        .GetMethod(nameof(NivaraColumn.CreateFromNullable), BindingFlags.Public | BindingFlags.Static)!;
+
     /// <summary>
     /// Creates a new column from the specified array of nullable value type values.
     /// Automatically detects and tracks null values using null masks.
@@ -569,38 +341,10 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         if (actualElementType != expectedNullableType)
             throw new ArgumentException($"Array element type must be {expectedNullableType.Name}, but was {actualElementType?.Name}");
 
-        // Handle empty array
-        if (values.Length == 0)
-        {
-            return new NivaraColumn<T>(new ColumnStorage<T>(ReadOnlySpan<T>.Empty));
-        }
-
-        // Process nullable values manually
-        var dataArray = new T[values.Length];
-        var nullMaskArray = new bool[values.Length];
-        bool hasNulls = false;
-
-        for (int i = 0; i < values.Length; i++)
-        {
-            var value = values.GetValue(i);
-            if (value == null)
-            {
-                dataArray[i] = default(T)!;
-                nullMaskArray[i] = true;
-                hasNulls = true;
-            }
-            else
-            {
-                dataArray[i] = (T)value;
-                nullMaskArray[i] = false;
-            }
-        }
-
-        var data = new ReadOnlyMemory<T>(dataArray);
-        var nullMask = hasNulls ? new ReadOnlyMemory<bool>(nullMaskArray) : null;
-
-        var storage = new ColumnStorage<T>(data, nullMask);
-        return new NivaraColumn<T>(storage);
+        // Delegate to the boxing-free generic factory (the array type is validated as T?[])
+        return (NivaraColumn<T>)createFromNullableFactory
+            .MakeGenericMethod(typeof(T))
+            .Invoke(null, new object[] { values })!;
     }
 
     /// <summary>
@@ -655,16 +399,19 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Performs vectorized scalar multiplication using TensorPrimitives
+    /// Shared scalar-arithmetic helper: owns storage access, kernel invocation, and
+    /// null-mask propagation for every column-vs-scalar operation. The <paramref name="fill"/>
+    /// delegate writes the element-wise result (capturing the scalar and operation) into the
+    /// destination span.
     /// </summary>
-    NivaraColumn<T> multiplyVectorized(T scalar)
+    NivaraColumn<T> applyScalarOp(string operationName, Action<ReadOnlySpan<T>, Span<T>> fill)
     {
         // Determine which kernel will actually be used
         var kernelType = determineKernelType();
 
         // Record diagnostic information
         var diagnostic = new OperationDiagnostics(
-            "ScalarMultiplication",
+            operationName,
             kernelType,
             Length,
             typeof(T),
@@ -680,8 +427,7 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         var data = memoryStorage.Data.Span;
         var result = new T[data.Length];
 
-        // Use our helper method for multiplication
-        multiplyTensorPrimitive(data, scalar, result.AsSpan());
+        fill(data, result);
 
         // Handle null propagation
         ReadOnlyMemory<bool>? resultNullMask = null;
@@ -698,47 +444,40 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Performs vectorized scalar addition using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> addVectorized(T scalar)
+        => applyScalarOp("ScalarAddition", (data, destination) => addTensorPrimitive(data, scalar, destination));
+
+    /// <summary>
+    /// Performs vectorized scalar multiplication using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> multiplyVectorized(T scalar)
+        => applyScalarOp("ScalarMultiplication", (data, destination) => multiplyTensorPrimitive(data, scalar, destination));
+
+    /// <summary>
     /// Performs vectorized scalar division using TensorPrimitives
     /// </summary>
     NivaraColumn<T> divideVectorized(T divisor)
-    {
-        // Determine which kernel will actually be used
-        var kernelType = determineKernelType();
+        => applyScalarOp("ScalarDivision", (data, destination) => divideTensorPrimitive(data, divisor, destination));
 
-        // Record diagnostic information
-        var diagnostic = new OperationDiagnostics(
-            "ScalarDivision",
-            kernelType,
-            Length,
-            typeof(T),
-            HasNulls);
-        DiagnosticsTracker.RecordOperation(diagnostic);
+    /// <summary>
+    /// Performs vectorized column-minus-scalar subtraction using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> subtractVectorized(T scalar)
+        => applyScalarOp("ScalarSubtraction", (data, destination) => subtractTensorPrimitive(data, scalar, destination));
 
-        // ColumnStorage is the sole storage implementation; use its zero-copy span view.
-        if (storage is not ColumnStorage<T> memoryStorage)
-        {
-            throw new InvalidOperationException("Unsupported storage type for vectorized operations");
-        }
+    /// <summary>
+    /// Performs vectorized scalar-minus-column subtraction using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> subtractFromVectorized(T scalar)
+        => applyScalarOp("ScalarSubtractionFrom", (data, destination) => subtractFromTensorPrimitive(scalar, data, destination));
 
-        var data = memoryStorage.Data.Span;
-        var result = new T[data.Length];
-
-        // Use our helper method for division
-        divideTensorPrimitive(data, divisor, result.AsSpan());
-
-        // Handle null propagation
-        ReadOnlyMemory<bool>? resultNullMask = null;
-        var nullMask = memoryStorage.NullMaskMemory;
-        if (nullMask.HasValue && nullMask.Value.Length > 0)
-        {
-            var nullMaskArray = new bool[data.Length];
-            nullMask.Value.Span.CopyTo(nullMaskArray);
-            resultNullMask = new ReadOnlyMemory<bool>(nullMaskArray);
-        }
-
-        var resultStorage = new ColumnStorage<T>(result, resultNullMask);
-        return new NivaraColumn<T>(resultStorage);
-    }
+    /// <summary>
+    /// Performs vectorized scalar-divided-by-column division using TensorPrimitives
+    /// </summary>
+    NivaraColumn<T> divideByVectorized(T divisor)
+        => applyScalarOp("ScalarDivisionBy", (data, destination) => divideByTensorPrimitive(divisor, data, destination));
 
     /// <summary>
     /// Shared element-wise binary kernel for column-vs-column arithmetic (result type T).
@@ -1938,6 +1677,23 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Adds a scalar value to all elements in the column.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="scalar">The scalar value to add to each element</param>
+    /// <returns>A new column with element-wise addition results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Add(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
+
+        return addVectorized(scalar);
+    }
+
+    /// <summary>
     /// Multiplies corresponding elements of two columns together.
     /// Only supported for numeric types that implement INumber&lt;T&gt;.
     /// </summary>
@@ -1990,6 +1746,40 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Subtracts a scalar value from all elements in the column.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="scalar">The scalar value to subtract from each element</param>
+    /// <returns>A new column with element-wise subtraction results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> Subtract(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
+
+        return subtractVectorized(scalar);
+    }
+
+    /// <summary>
+    /// Subtracts all elements in the column from a scalar value.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
+    /// </summary>
+    /// <param name="scalar">The scalar value each element is subtracted from</param>
+    /// <returns>A new column with element-wise subtraction results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> SubtractFrom(T scalar)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
+
+        return subtractFromVectorized(scalar);
+    }
+
+    /// <summary>
     /// Divides corresponding elements of another column into this column.
     /// Only supported for numeric types that implement INumber&lt;T&gt;.
     /// </summary>
@@ -2016,36 +1806,93 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Operator overload for scalar multiplication
+    /// Divides all elements in the column by a scalar value.
+    /// Only supported for numeric types that implement INumber&lt;T&gt;.
     /// </summary>
-    public static NivaraColumn<T> operator *(NivaraColumn<T> column, T scalar)
+    /// <param name="divisor">The scalar value to divide each element by</param>
+    /// <returns>A new column with element-wise division results</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    public NivaraColumn<T> DivideBy(T divisor)
     {
-        return column.Multiply(scalar);
-    }
+        ObjectDisposedException.ThrowIf(disposed, this);
 
-    /// <summary>
-    /// Operator overload for scalar multiplication (commutative)
-    /// </summary>
-    public static NivaraColumn<T> operator *(T scalar, NivaraColumn<T> column)
-    {
-        return column.Multiply(scalar);
-    }
+        // Use centralized validation
+        validateTypeSupportsOperation("arithmetic");
 
-    /// <summary>
-    /// Operator overload for element-wise multiplication
-    /// </summary>
-    public static NivaraColumn<T> operator *(NivaraColumn<T> left, NivaraColumn<T> right)
-    {
-        return left.Multiply(right);
+        return divideByVectorized(divisor);
     }
 
     /// <summary>
     /// Operator overload for element-wise addition
     /// </summary>
     public static NivaraColumn<T> operator +(NivaraColumn<T> left, NivaraColumn<T> right)
-    {
-        return left.Add(right);
-    }
+        => left.Add(right);
+
+    /// <summary>
+    /// Operator overload for scalar addition
+    /// </summary>
+    public static NivaraColumn<T> operator +(NivaraColumn<T> column, T scalar)
+        => column.Add(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar addition (commutative)
+    /// </summary>
+    public static NivaraColumn<T> operator +(T scalar, NivaraColumn<T> column)
+        => column.Add(scalar);
+
+    /// <summary>
+    /// Operator overload for element-wise subtraction
+    /// </summary>
+    public static NivaraColumn<T> operator -(NivaraColumn<T> left, NivaraColumn<T> right)
+        => left.Subtract(right);
+
+    /// <summary>
+    /// Operator overload for scalar subtraction
+    /// </summary>
+    public static NivaraColumn<T> operator -(NivaraColumn<T> column, T scalar)
+        => column.Subtract(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar subtraction (scalar minus column)
+    /// </summary>
+    public static NivaraColumn<T> operator -(T scalar, NivaraColumn<T> column)
+        => column.SubtractFrom(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar multiplication
+    /// </summary>
+    public static NivaraColumn<T> operator *(NivaraColumn<T> column, T scalar)
+        => column.Multiply(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar multiplication (commutative)
+    /// </summary>
+    public static NivaraColumn<T> operator *(T scalar, NivaraColumn<T> column)
+        => column.Multiply(scalar);
+
+    /// <summary>
+    /// Operator overload for element-wise multiplication
+    /// </summary>
+    public static NivaraColumn<T> operator *(NivaraColumn<T> left, NivaraColumn<T> right)
+        => left.Multiply(right);
+
+    /// <summary>
+    /// Operator overload for element-wise division
+    /// </summary>
+    public static NivaraColumn<T> operator /(NivaraColumn<T> left, NivaraColumn<T> right)
+        => left.Divide(right);
+
+    /// <summary>
+    /// Operator overload for scalar division
+    /// </summary>
+    public static NivaraColumn<T> operator /(NivaraColumn<T> column, T scalar)
+        => column.Divide(scalar);
+
+    /// <summary>
+    /// Operator overload for scalar division (scalar divided by column)
+    /// </summary>
+    public static NivaraColumn<T> operator /(T scalar, NivaraColumn<T> column)
+        => column.DivideBy(scalar);
 
     // Comparison Operations
 
