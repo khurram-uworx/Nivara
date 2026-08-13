@@ -53,7 +53,7 @@ public class NivaraQueryFeatureTests
     static NivaraFrame CreateNullableFrame()
     {
         var names = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c", "d" });
-        var ages = NivaraColumn<int>.CreateFromNullable(new int?[] { 30, null, 20, null });
+        var ages = NivaraColumn.CreateFromNullable(new int?[] { 30, null, 20, null });
         return NivaraFrame.Create(("Name", names), ("Age", ages));
     }
 

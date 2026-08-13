@@ -116,7 +116,7 @@ public class ArrowInteropTests
     {
         // Arrange
         var data = new int?[] { 1, null, 3, null, 5 };
-        var column = NivaraColumn<int>.CreateFromNullable(data);
+        var column = NivaraColumn.CreateFromNullable(data);
         var frame = NivaraFrame.Create(("NullableNumbers", column));
 
         // Act
@@ -1119,7 +1119,7 @@ public class ArrowInteropTests
     /// </summary>
     private static NivaraFrame CreateTestFrame<T>(string columnName, T?[] data) where T : struct
     {
-        var column = NivaraColumn<T>.CreateFromNullable(data);
+        var column = NivaraColumn.CreateFromNullable(data);
         return NivaraFrame.Create((columnName, column));
     }
 
@@ -1146,14 +1146,14 @@ public class ArrowInteropTests
 
             IColumn column = data switch
             {
-                int?[] intData => NivaraColumn<int>.CreateFromNullable(intData),
-                long?[] longData => NivaraColumn<long>.CreateFromNullable(longData),
-                float?[] floatData => NivaraColumn<float>.CreateFromNullable(floatData),
-                double?[] doubleData => NivaraColumn<double>.CreateFromNullable(doubleData),
-                bool?[] boolData => NivaraColumn<bool>.CreateFromNullable(boolData),
-                DateTime?[] dateTimeData => NivaraColumn<DateTime>.CreateFromNullable(dateTimeData),
-                byte?[] byteData => NivaraColumn<byte>.CreateFromNullable(byteData),
-                short?[] shortData => NivaraColumn<short>.CreateFromNullable(shortData),
+                int?[] intData => NivaraColumn.CreateFromNullable(intData),
+                long?[] longData => NivaraColumn.CreateFromNullable(longData),
+                float?[] floatData => NivaraColumn.CreateFromNullable(floatData),
+                double?[] doubleData => NivaraColumn.CreateFromNullable(doubleData),
+                bool?[] boolData => NivaraColumn.CreateFromNullable(boolData),
+                DateTime?[] dateTimeData => NivaraColumn.CreateFromNullable(dateTimeData),
+                byte?[] byteData => NivaraColumn.CreateFromNullable(byteData),
+                short?[] shortData => NivaraColumn.CreateFromNullable(shortData),
                 string?[] stringData => NivaraColumn<string>.Create(stringData!), // Use null-forgiving operator
                 _ => throw new ArgumentException($"Unsupported data type: {data.GetType()}")
             };

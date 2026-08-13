@@ -98,7 +98,7 @@ public class ArrowParquetIntegrationTests
     {
         // Arrange - Create frame with null values
         var nullableIntArray = new int?[] { 1, null, 3, null, 5 };
-        var intColumn = NivaraColumn<int>.CreateFromNullable(nullableIntArray);
+        var intColumn = NivaraColumn.CreateFromNullable(nullableIntArray);
 
         var stringArray = new string[] { "a", null!, "c", null!, "e" };
         var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringArray);

@@ -5,7 +5,6 @@ using Nivara.Storage;
 using System.Buffers;
 using System.Collections;
 using System.Numerics.Tensors;
-using System.Reflection;
 using System.Runtime.CompilerServices;
 
 namespace Nivara;
@@ -312,39 +311,6 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         // For reference types, always detect nulls using ColumnStorage directly
         var storage = new ColumnStorage<T>(values, detectNulls: true);
         return new NivaraColumn<T>(storage);
-    }
-
-    static readonly MethodInfo createFromNullableFactory = typeof(NivaraColumn)
-        .GetMethod(nameof(NivaraColumn.CreateFromNullable), BindingFlags.Public | BindingFlags.Static)!;
-
-    /// <summary>
-    /// Creates a new column from the specified array of nullable value type values.
-    /// Automatically detects and tracks null values using null masks.
-    /// </summary>
-    /// <param name="values">The nullable value type values to store in the column</param>
-    /// <returns>A new NivaraColumn instance</returns>
-    /// <exception cref="ArgumentNullException">Thrown when values array is null</exception>
-    /// <exception cref="InvalidOperationException">Thrown when T is not a value type</exception>
-    public static NivaraColumn<T> CreateFromNullable(Array values)
-    {
-        if (values == null)
-            throw new ArgumentNullException(nameof(values));
-
-        // Ensure this method is only used with value types
-        if (!typeof(T).IsValueType)
-            throw new InvalidOperationException($"CreateFromNullable can only be used with value types. Use CreateForReferenceType for reference types.");
-
-        // Validate the array type - it should be T?[] where T is a value type
-        var actualElementType = values.GetType().GetElementType();
-        var expectedNullableType = typeof(Nullable<>).MakeGenericType(typeof(T));
-
-        if (actualElementType != expectedNullableType)
-            throw new ArgumentException($"Array element type must be {expectedNullableType.Name}, but was {actualElementType?.Name}");
-
-        // Delegate to the boxing-free generic factory (the array type is validated as T?[])
-        return (NivaraColumn<T>)createFromNullableFactory
-            .MakeGenericMethod(typeof(T))
-            .Invoke(null, new object[] { values })!;
     }
 
     /// <summary>

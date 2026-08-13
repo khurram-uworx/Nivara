@@ -35,7 +35,7 @@ public class TypedLinqTests
 
     static NivaraFrame CreateNullableFrame()
     {
-        var values = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var values = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         var labels = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" });
         return NivaraFrame.Create(("Value", values), ("Label", labels));
     }

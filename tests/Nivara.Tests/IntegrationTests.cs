@@ -19,7 +19,7 @@ public class IntegrationTests
         // Arrange - Create columns with different types and null values
         var intColumn = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4, 5 });
         var stringColumn = NivaraColumn<string>.Create(new[] { "Alice", "Bob", "Charlie", "David", "Eve" });
-        var doubleColumn = NivaraColumn<double>.CreateFromNullable(new double?[] { 1.1, null, 3.3, 4.4, 5.5 });
+        var doubleColumn = NivaraColumn.CreateFromNullable(new double?[] { 1.1, null, 3.3, 4.4, 5.5 });
 
         // Act - Create series with custom indices
         var intSeries = new NivaraSeries<int>(intColumn);
@@ -197,7 +197,7 @@ public class IntegrationTests
         var intValues = new int?[] { 1, null, 3, null, 5 };
         var stringValues = new string?[] { "A", null, "C", "D", null };
 
-        var intColumn = NivaraColumn<int>.CreateFromNullable(intValues);
+        var intColumn = NivaraColumn.CreateFromNullable(intValues);
         var stringColumn = NivaraColumn<string>.CreateForReferenceType(stringValues!);
 
         // Act - Create series and frame with null data

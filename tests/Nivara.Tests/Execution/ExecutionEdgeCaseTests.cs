@@ -340,7 +340,7 @@ public class ExecutionEdgeCaseTests
         var source = new StubQuerySource();
         source.ExecuteFn = () => new Dictionary<string, IColumn>
         {
-            ["A"] = NivaraColumn<int>.CreateFromNullable(new int?[] { null, null, null })
+            ["A"] = NivaraColumn.CreateFromNullable(new int?[] { null, null, null })
         };
         var plan = new QueryPlan(source, Array.Empty<IQueryOperation>());
 

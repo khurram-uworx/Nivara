@@ -19,7 +19,7 @@ public class QueryFrameTests
 
     static NivaraFrame CreateTestFrameWithNulls()
     {
-        var intColumn = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        var intColumn = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
         var strColumn = NivaraColumn<string>.CreateForReferenceType(new string[] { "a", null!, "c", null!, "e" });
         return NivaraFrame.Create(
             ("X", intColumn),
@@ -259,7 +259,7 @@ public class QueryFrameTests
     [Test]
     public void Distinct_WithNullValues_DeduplicatesNullRows()
     {
-        var col = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 2, null, 3 });
+        var col = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 2, null, 3 });
         using var frame = NivaraFrame.Create("x", col);
         using var result = frame.AsQueryFrame().Distinct().Collect();
 

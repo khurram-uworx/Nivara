@@ -26,6 +26,10 @@ All notable changes to Nivara are documented here. Released versions are publish
 - **`GradientUtils.CanBackward(tensor, gradient)` overload (#179)** — checks `RequiresGrad`, matching length, and matching shape for `Backward(gradient)` calls (the seed-less scalar helper is unchanged). `DescribeTensor` now reports `Can Backward (no seed)`.
 - **`NivaraColumn<T>` arithmetic generic-math collapse (#157)** — the six `NivaraColumn<T>` arithmetic kernel helpers (scalar `Multiply`/`Divide`, column `Multiply`/`Add`/`Subtract`/`Divide`) now dispatch `decimal`, `Half`, `nint`, `nuint`, `Int128`, and `UInt128` through the `INumber<T>`-constrained `NumericTensorKernels<T>` typed switch, matching `NivaraSeries`. These types previously threw (`InvalidOperationException` for `Half`/`nint`/`nuint`/`Int128`/`UInt128` via `validateTypeSupportsOperation`, `NotSupportedException` for `decimal` at kernel dispatch). On .NET 10 `TensorPrimitives` runs the six types via SIMD (`Half` widening, `nint`/`nuint`) or the operator-based software fallback (`decimal`/`Int128`/`UInt128`). `IsNumericType()` recognizes the five previously-rejected types so validation no longer blocks them; non-numeric types (`string`/`Guid`/`DateTime`) still throw the clear validation error. `KernelSelector` still reports `KernelType.Scalar` for the six, so diagnostics stay accurate.
 
+### Changed
+
+- **Removed `NivaraColumn<T>.CreateFromNullable(Array)` (breaking, #222)** — the generic-class Array overload is deleted; `NivaraColumn.CreateFromNullable<T>(T?[])` is the single entry point for nullable value-type columns (all internal dispatch and every call site now use it). Migration: `NivaraColumn<T>.CreateFromNullable(values)` becomes `NivaraColumn.CreateFromNullable(values)` — the factory resolves `T` by inference; use an explicit type argument for `null` arrays (`NivaraColumn.CreateFromNullable<int>(null!)`). Reference-type arguments are now rejected at compile time by the `where T : struct` constraint instead of a runtime `InvalidOperationException`.
+
 ### Fixed
 
 - **Dynamic column creation covers the extended CLR domain (#158)** - the five

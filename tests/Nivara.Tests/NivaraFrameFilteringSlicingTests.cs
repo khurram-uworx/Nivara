@@ -203,7 +203,7 @@ public class NivaraFrameFilteringSlicingTests
     {
         // Arrange
         var nullableInts = new int?[] { 1, null, 3, null, 5 };
-        var intColumn = NivaraColumn<int>.CreateFromNullable(nullableInts);
+        var intColumn = NivaraColumn.CreateFromNullable(nullableInts);
         var frame = NivaraFrame.Create(("Numbers", intColumn));
 
         // Act - Filter to keep only non-null values

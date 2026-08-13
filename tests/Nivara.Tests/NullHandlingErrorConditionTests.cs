@@ -36,7 +36,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void FillNull_OnDisposedColumn_ShouldThrowObjectDisposedException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => column.FillNull(42),
@@ -54,7 +54,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void FillNullForward_WithFirstElementNull_ShouldThrowInvalidOperationException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { null, 2, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, 2, 3 });
 
         var ex = Assert.Throws<InvalidOperationException>(() => column.FillNullForward(),
             "FillNullForward with first element null should throw InvalidOperationException");
@@ -72,7 +72,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void FillNullForward_OnDisposedColumn_ShouldThrowObjectDisposedException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => column.FillNullForward(),
@@ -90,7 +90,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void FillNullBackward_WithLastElementNull_ShouldThrowInvalidOperationException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, 2, null });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, 2, null });
 
         var ex = Assert.Throws<InvalidOperationException>(() => column.FillNullBackward(),
             "FillNullBackward with last element null should throw InvalidOperationException");
@@ -108,7 +108,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void FillNullBackward_OnDisposedColumn_ShouldThrowObjectDisposedException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => column.FillNullBackward(),
@@ -126,7 +126,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void IsNull_WithOutOfBoundsIndex_ShouldThrowIndexOutOfRangeException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
 
         // Test negative index
         Assert.Throws<IndexOutOfRangeException>(() => column.IsNull(-1),
@@ -148,7 +148,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void IsNull_OnDisposedColumn_ShouldThrowObjectDisposedException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => column.IsNull(0),
@@ -162,7 +162,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void HasNulls_OnDisposedColumn_ShouldThrowObjectDisposedException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => { var _ = column.HasNulls; },
@@ -176,7 +176,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void NullCount_OnDisposedColumn_ShouldThrowObjectDisposedException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => { var _ = column.NullCount; },
@@ -190,7 +190,7 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void GetNullIndices_OnDisposedColumn_ShouldThrowObjectDisposedException()
     {
-        var column = NivaraColumn<int>.CreateFromNullable(new int?[] { 1, null, 3 });
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3 });
         column.Dispose();
 
         Assert.Throws<ObjectDisposedException>(() => column.GetNullIndices(),
@@ -208,27 +208,11 @@ public class NullHandlingErrorConditionTests
     [Test]
     public void CreateFromNullable_WithNullArray_ShouldThrowArgumentNullException()
     {
-        var ex = Assert.Throws<ArgumentNullException>(() => NivaraColumn<int>.CreateFromNullable(null!),
+        var ex = Assert.Throws<ArgumentNullException>(() => NivaraColumn.CreateFromNullable<int>(null!),
             "CreateFromNullable with null array should throw ArgumentNullException");
 
         Assert.That(ex.ParamName, Is.EqualTo("values"),
             "Exception should specify the values parameter");
-    }
-
-    /// <summary>
-    /// Test that CreateFromNullable with non-value type throws InvalidOperationException
-    /// **Validates: Requirements 6.5**
-    /// </summary>
-    [Test]
-    public void CreateFromNullable_WithReferenceType_ShouldThrowInvalidOperationException()
-    {
-        var stringArray = new string?[] { "a", null, "c" };
-
-        var ex = Assert.Throws<InvalidOperationException>(() => NivaraColumn<string>.CreateFromNullable(stringArray),
-            "CreateFromNullable with reference type should throw InvalidOperationException");
-
-        Assert.That(ex.Message, Does.Contain("can only be used with value types"),
-            "Error message should explain value type requirement");
     }
 
     #endregion

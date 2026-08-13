@@ -547,7 +547,7 @@ public class NivaraFrameTests
         var frame = new NivaraFrame(new[]
         {
             ("A", (IColumn)NivaraColumn<int>.Create(new[] { 1, 4 })),
-            ("B", (IColumn)NivaraColumn<int>.CreateFromNullable(new int?[] { 2, null })),
+            ("B", (IColumn)NivaraColumn.CreateFromNullable(new int?[] { 2, null })),
         });
 
         var result = frame.TryGetRowMajorSpan<int>(out var span);
@@ -633,7 +633,7 @@ public class NivaraFrameTests
         var frame = new NivaraFrame(new[]
         {
             ("A", (IColumn)NivaraColumn<int>.Create(new[] { 10, 40 })),
-            ("B", (IColumn)NivaraColumn<int>.CreateFromNullable(new int?[] { null, 50 })),
+            ("B", (IColumn)NivaraColumn.CreateFromNullable(new int?[] { null, 50 })),
         });
         var dest = new int[4];
 
@@ -648,7 +648,7 @@ public class NivaraFrameTests
         var frame = new NivaraFrame(new[]
         {
             ("A", (IColumn)NivaraColumn<int>.Create(new[] { 10, 40 })),
-            ("B", (IColumn)NivaraColumn<int>.CreateFromNullable(new int?[] { null, 50 })),
+            ("B", (IColumn)NivaraColumn.CreateFromNullable(new int?[] { null, 50 })),
         });
         var dest = new int[4];
 
@@ -728,7 +728,7 @@ public class NivaraFrameTests
         var frame = new NivaraFrame(new[]
         {
             ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
-            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 5f })),
+            ("B", (IColumn)NivaraColumn.CreateFromNullable(new float?[] { null, 5f })),
             ("C", (IColumn)NivaraColumn<float>.Create(new[] { 3f, 6f })),
         });
         var query = NivaraSeries<float>.Create([10f, 20f, 30f]);
@@ -750,7 +750,7 @@ public class NivaraFrameTests
             ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 4f })),
             ("B", (IColumn)NivaraColumn<float>.Create(new[] { 2f, 5f })),
         });
-        var query = new NivaraSeries<float>(NivaraColumn<float>.CreateFromNullable(new float?[] { 10f, null }));
+        var query = new NivaraSeries<float>(NivaraColumn.CreateFromNullable(new float?[] { 10f, null }));
 
         var result = frame.RowDot(query);
 
@@ -784,7 +784,7 @@ public class NivaraFrameTests
         var frame = new NivaraFrame(new[]
         {
             ("A", (IColumn)NivaraColumn<float>.Create(new[] { 1f, 0f })),
-            ("B", (IColumn)NivaraColumn<float>.CreateFromNullable(new float?[] { null, 1f })),
+            ("B", (IColumn)NivaraColumn.CreateFromNullable(new float?[] { null, 1f })),
         });
         var query = NivaraSeries<float>.Create([1f, 0f]);
 

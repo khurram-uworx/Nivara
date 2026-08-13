@@ -14,7 +14,7 @@ public class ColumnFilterHelperTests
     public void CreateFilteredColumn_GuidColumn_PreservesElementTypeAndNulls()
     {
         var target = Guid.NewGuid();
-        var ids = NivaraColumn<Guid>.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid() });
+        var ids = NivaraColumn.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid() });
         var indices = new List<int> { 0, 2 };
 
         var filtered = ColumnFilterHelper.CreateFilteredColumn(ids, indices);
@@ -29,7 +29,7 @@ public class ColumnFilterHelperTests
     public void CreateFilteredColumn_GuidColumnWithNullIndex_PreservesNullMask()
     {
         var target = Guid.NewGuid();
-        var ids = NivaraColumn<Guid>.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid() });
+        var ids = NivaraColumn.CreateFromNullable(new Guid?[] { target, null, Guid.NewGuid() });
         var indices = new List<int> { 0, 1 };
 
         var filtered = ColumnFilterHelper.CreateFilteredColumn(ids, indices);

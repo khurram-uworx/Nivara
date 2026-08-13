@@ -5,8 +5,7 @@ namespace Nivara;
 /// <summary>
 /// Non-generic factory entry points for <see cref="NivaraColumn{T}"/>. The generic
 /// <see cref="CreateFromNullable{T}(T?[])"/> overload builds columns from nullable value-type
-/// arrays without boxing each element; <see cref="NivaraColumn{T}.CreateFromNullable(Array)"/>
-/// delegates to it after validating the runtime array type.
+/// arrays without boxing each element.
 /// </summary>
 public static class NivaraColumn
 {

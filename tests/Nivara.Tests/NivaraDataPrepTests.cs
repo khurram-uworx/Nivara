@@ -53,7 +53,7 @@ public class NivaraDataPrepTests
     public void Standardize_SkipsNulls_PreservesNullMask()
     {
         var data = new float?[] { 1f, 2f, null, 4f, 5f };
-        var frame = NivaraFrame.Create(("Values", NivaraColumn<float>.CreateFromNullable(data)));
+        var frame = NivaraFrame.Create(("Values", NivaraColumn.CreateFromNullable(data)));
 
         var result = frame.Standardize("Values");
         var resultCol = result.GetColumn<float>("Values");
@@ -109,7 +109,7 @@ public class NivaraDataPrepTests
     public void Standardize_ZeroVarianceWithNulls_PreservesNulls()
     {
         var data = new float?[] { 3f, null, 3f, 3f };
-        var frame = NivaraFrame.Create(("Values", NivaraColumn<float>.CreateFromNullable(data)));
+        var frame = NivaraFrame.Create(("Values", NivaraColumn.CreateFromNullable(data)));
 
         var resultCol = frame.Standardize("Values").GetColumn<float>("Values");
 
@@ -190,7 +190,7 @@ public class NivaraDataPrepTests
     public void Standardize_IntColumnWithNulls_SkipsNulls_PreservesNullMask()
     {
         var data = new int?[] { 1, 2, null, 4, 5 };
-        var frame = NivaraFrame.Create(("Values", NivaraColumn<int>.CreateFromNullable(data)));
+        var frame = NivaraFrame.Create(("Values", NivaraColumn.CreateFromNullable(data)));
 
         var resultCol = frame.Standardize("Values").GetColumn<double>("Values");
 
