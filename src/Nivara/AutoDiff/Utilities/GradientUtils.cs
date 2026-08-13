@@ -288,7 +288,7 @@ public static class GradientUtils
     /// <summary>
     /// Gets diagnostic information about the computation graph rooted at the specified tensor.
     /// </summary>
-    public static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
+    public static GraphInfo GetGraphInfo<T>(ReverseGradTensor<T> tensor) where T : struct, IFloatingPointIeee754<T>
     {
         if (tensor == null)
             throw new ArgumentNullException(nameof(tensor));
@@ -308,14 +308,14 @@ public static class GradientUtils
         var sb = new StringBuilder();
 
         sb.AppendLine("Computation Graph Summary:");
-        sb.AppendLine($"  Total Nodes: {info["TotalNodes"]}");
-        sb.AppendLine($"  Is Leaf: {info["IsLeaf"]}");
-        sb.AppendLine($"  Requires Grad: {info["RequiresGrad"]}");
+        sb.AppendLine($"  Total Nodes: {info.TotalNodes}");
+        sb.AppendLine($"  Is Leaf: {info.IsLeaf}");
+        sb.AppendLine($"  Requires Grad: {info.RequiresGrad}");
 
-        if (info["OperationCounts"] is Dictionary<string, int> opCounts && opCounts.Count > 0)
+        if (info.OperationCounts.Count > 0)
         {
             sb.AppendLine("  Operation Counts:");
-            foreach (var kvp in opCounts.OrderByDescending(x => x.Value))
+            foreach (var kvp in info.OperationCounts.OrderByDescending(x => x.Value))
             {
                 sb.AppendLine($"    {kvp.Key}: {kvp.Value}");
             }

@@ -29,7 +29,7 @@ public class GradientUtilsTests
 
         Assert.That(GradientUtils.IsGradEnabled, Is.False);
         Assert.That(result.RequiresGrad, Is.False);
-        Assert.That(info["TotalNodes"], Is.EqualTo(0));
+        Assert.That(info.TotalNodes, Is.EqualTo(0));
     }
 
     [Test]
@@ -49,7 +49,7 @@ public class GradientUtilsTests
 
             Assert.That(GradientUtils.IsGradEnabled, Is.True);
             Assert.That(result.RequiresGrad, Is.True);
-            Assert.That(info["TotalNodes"], Is.EqualTo(2));
+            Assert.That(info.TotalNodes, Is.EqualTo(2));
 
             result.Backward();
         }
@@ -339,9 +339,9 @@ public class GradientUtilsTests
         var info = GradientUtils.GetGraphInfo(a);
 
         // Assert
-        Assert.That(info["TotalNodes"], Is.EqualTo(0));
-        Assert.That(info["IsLeaf"], Is.True);
-        Assert.That(info["RequiresGrad"], Is.True);
+        Assert.That(info.TotalNodes, Is.EqualTo(0));
+        Assert.That(info.IsLeaf, Is.True);
+        Assert.That(info.RequiresGrad, Is.True);
     }
 
     [Test]
@@ -351,7 +351,7 @@ public class GradientUtilsTests
         var a = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 1.0f, 2.0f }), requiresGrad: true);
         var b = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[] { 3.0f, 4.0f }), requiresGrad: true);
 
-        Dictionary<string, object> info;
+        GraphInfo info;
         using (GradientUtils.Grad())
         {
             var add = ReverseGradOperations.Add(a, b);
@@ -363,11 +363,11 @@ public class GradientUtilsTests
         }
 
         // Assert
-        Assert.That(info["TotalNodes"], Is.EqualTo(3)); // Add, Multiply, Sum
-        Assert.That(info["IsLeaf"], Is.False);
-        Assert.That(info["RequiresGrad"], Is.True);
+        Assert.That(info.TotalNodes, Is.EqualTo(3)); // Add, Multiply, Sum
+        Assert.That(info.IsLeaf, Is.False);
+        Assert.That(info.RequiresGrad, Is.True);
 
-        var opCounts = (Dictionary<string, int>)info["OperationCounts"];
+        var opCounts = info.OperationCounts;
         Assert.That(opCounts["Add"], Is.EqualTo(1));
         Assert.That(opCounts["Multiply"], Is.EqualTo(1));
         Assert.That(opCounts["Sum"], Is.EqualTo(1));

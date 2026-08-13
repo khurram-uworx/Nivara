@@ -160,7 +160,7 @@ internal sealed class ComputationGraph
         ClearGradients(tensor);
     }
 
-    internal static Dictionary<string, object> GetGraphInfo<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
+    internal static GraphInfo GetGraphInfo<T>(ReverseGradTensor<T> root) where T : struct, IFloatingPointIeee754<T>
     {
         if (root == null)
             throw new ArgumentNullException(nameof(root));
@@ -173,12 +173,6 @@ internal sealed class ComputationGraph
             operationCounts[node.OperationName] = operationCounts.GetValueOrDefault(node.OperationName, 0) + 1;
         }
 
-        return new Dictionary<string, object>
-        {
-            ["TotalNodes"] = nodes.Count,
-            ["IsLeaf"] = root.IsLeaf,
-            ["RequiresGrad"] = root.RequiresGrad,
-            ["OperationCounts"] = operationCounts
-        };
+        return new GraphInfo(nodes.Count, root.IsLeaf, root.RequiresGrad, operationCounts);
     }
 }
