@@ -56,6 +56,13 @@ tests/sample, so no import changes needed.
 
 ## GitHub issues log
 
-- None yet. As work executes, any deferred work / concern discovered must be
-  created immediately via `gh issue create --repo khurram-uworx/Nivara` and the
-  number recorded here — don't rely on memory.
+- [x] #205 — `ensureBuffer` casing inconsistency (M9 in REVIEW-2026-08-12.md).
+  Renamed to `ensureBuffer` in commit `71764ff`; explicit `private` added in this
+  plan's `refactor: add explicit private to optimizer buffer helpers` commit.
+- [x] #214 — `SGD.ensureVelocityBuffer` implicit-private (M18 in
+  REVIEW-2026-08-12.md). Resolved together with #205 by the explicit-`private`
+  commit; both already CLOSED on GitHub.
+
+As work executes, any deferred work / concern discovered must be created
+immediately via `gh issue create --repo khurram-uworx/Nivara` and the number
+recorded here — don't rely on memory.

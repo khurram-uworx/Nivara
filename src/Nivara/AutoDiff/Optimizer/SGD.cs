@@ -97,7 +97,7 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         this.momentum = momentum;
     }
 
-    void ensureBuffer(int idx, int size)
+    private void ensureBuffer(int idx, int size)
     {
         while (idx >= velocityBuffers.Count)
         {
