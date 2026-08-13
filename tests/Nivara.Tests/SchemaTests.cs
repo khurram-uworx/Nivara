@@ -335,6 +335,31 @@ public class SchemaTests
     }
 
     [Test]
+    public void IsCompatibleWith_WithExtendedNumericTypes_NonExactMatch_ReturnsTrue()
+    {
+        var pairs = new[]
+        {
+            (typeof(Half), typeof(float)),
+            (typeof(Int128), typeof(int)),
+            (typeof(nint), typeof(long)),
+            (typeof(nuint), typeof(ulong)),
+            (typeof(UInt128), typeof(ulong)),
+            (typeof(char), typeof(ushort))
+        };
+
+        foreach (var (type1, type2) in pairs)
+        {
+            var schema1 = new Schema(new[] { ("Value", type1) });
+            var schema2 = new Schema(new[] { ("Value", type2) });
+
+            Assert.That(
+                schema1.IsCompatibleWith(schema2, requireExactMatch: false),
+                Is.True,
+                $"{type1.Name} and {type2.Name} should be compatible");
+        }
+    }
+
+    [Test]
     public void IsCompatibleWith_WithNullSchema_ReturnsFalse()
     {
         // Arrange

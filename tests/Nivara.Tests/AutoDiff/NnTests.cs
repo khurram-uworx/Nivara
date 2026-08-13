@@ -283,6 +283,18 @@ public class NnTests
     }
 
     [Test]
+    public void Sequential_Constructor_NullModule_ThrowsArgumentNullException()
+    {
+        using var linear = new Linear<float>(3, 2);
+        using var dropout = new Dropout<float>(0.5);
+
+        Assert.Throws<ArgumentNullException>(
+            () => new Sequential<float>(linear, null!, dropout));
+        Assert.Throws<ArgumentNullException>(
+            () => new Sequential<float>((Module<float>[])null!));
+    }
+
+    [Test]
     public void Linear_DefaultInit_MatchesCurrentBehavior()
     {
         using var linear = new Linear<float>(4, 3);
@@ -2767,6 +2779,25 @@ public class NnTests
     public void MultiheadAttention_PaddingMask_ShapeCorrect()
     {
         using var mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
+        var input = new ReverseGradTensor<float>(
+            NivaraColumn<float>.Create(new float[6 * 32]),
+            requiresGrad: false);
+        input.Reshape(6, 32);
+
+        var paddingMask = ReverseGradTensor<float>.FromArray(
+            new float[] { 1f, 1f, 1f, 1f, 0f, 0f }, requiresGrad: false);
+
+        var output = mha.Forward(input, paddingMask);
+
+        Assert.That(output.Shape, Is.EqualTo(new[] { 6, 32 }));
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsNaN(output[i]) || float.IsInfinity(output[i]), Is.False);
+    }
+
+    [Test]
+    public void MultiheadAttention_PaddingMask_DispatchesThroughModuleReference()
+    {
+        using Module<float> mha = new MultiheadAttention<float>(embedDim: 32, numHeads: 4);
         var input = new ReverseGradTensor<float>(
             NivaraColumn<float>.Create(new float[6 * 32]),
             requiresGrad: false);

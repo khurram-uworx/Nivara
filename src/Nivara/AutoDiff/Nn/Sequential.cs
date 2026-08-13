@@ -10,16 +10,12 @@ public sealed class Sequential<T> : Module<T> where T : struct, IFloatingPointIe
 
     public Sequential(params Module<T>[] modules)
     {
-        if (modules != null)
+        ArgumentNullException.ThrowIfNull(modules);
+        foreach (var m in modules)
         {
-            foreach (var m in modules)
-            {
-                if (m != null)
-                {
-                    this.modules.Add(m);
-                    RegisterModules(m);
-                }
-            }
+            ArgumentNullException.ThrowIfNull(m);
+            this.modules.Add(m);
+            RegisterModules(m);
         }
     }
 
