@@ -288,6 +288,14 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
     public static ReverseGradTensor<T> operator /(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         => ReverseGradOperations.Divide(a, b);
 
+    /// <summary>
+    /// Divides this tensor by a scalar: result[i] = this[i] / scalar.
+    /// The scalar is not wrapped in a tensor, so no divisor graph node is created.
+    /// Gradient flows back scaled by 1/scalar.
+    /// </summary>
+    public ReverseGradTensor<T> DivideByScalar(T scalar)
+        => ReverseGradOperations.DivideScalar(this, scalar);
+
     public static ReverseGradTensor<T> operator -(ReverseGradTensor<T> a)
         => ReverseGradOperations.Negate(a);
 
