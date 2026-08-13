@@ -227,6 +227,40 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Divides a tensor by a scalar: result[i] = a[i] / scalar.
+    /// Unlike <see cref="Divide{T}(ReverseGradTensor{T}, ReverseGradTensor{T})"/>, no divisor
+    /// tensor is constructed (the divisor is a plain scalar with no gradient).
+    /// Backward scales the gradient by 1/scalar.
+    /// </summary>
+    public static ReverseGradTensor<T> DivideScalar<T>(ReverseGradTensor<T> a, T scalar) where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        if (scalar == T.Zero)
+            throw new DivideByZeroException($"Division by zero with scalar divisor");
+
+        var resultArr = new T[a.Length];
+        TensorPrimitives.Divide(a.AsSpan(), scalar, resultArr);
+
+        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
+
+        if (GradientUtils.ShouldTrackGrad(a))
+        {
+            var gradFn = new OpNode<T>("DivideScalar", [a], (typedGradOutput) =>
+            {
+                typedGradOutput.TryGetSpan(out var gSpan);
+                var gradArr = new T[a.Length];
+                TensorPrimitives.Divide(gSpan, scalar, gradArr);
+                AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
     #endregion
 
     #region Matrix Operations
