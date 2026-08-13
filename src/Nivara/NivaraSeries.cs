@@ -55,144 +55,16 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Reinterprets a scalar of the runtime numeric element type back to <typeparamref name="T"/>.
-    /// Only valid when the runtime element type equals <typeparamref name="U"/>.
-    /// </summary>
-    static T reinterpretBack<U>(U value)
-        where U : unmanaged
-        => Unsafe.As<U, T>(ref value);
-
-    /// <summary>
     /// Helper method to perform vectorized sum using TensorPrimitives with runtime type dispatch
     /// </summary>
     static T sumTensorPrimitive(ReadOnlySpan<T> values)
-    {
-        var type = typeof(T);
-
-        // Route every numeric primitive to a constrained generic kernel so integer types
-        // also get SIMD via generic TensorPrimitives. The extended numeric domain (decimal,
-        // Half, native/wide integers) is unmanaged and satisfies INumber, so it is dispatched
-        // through the same typed kernels instead of a dynamic fallback.
-        if (type == typeof(float)) return reinterpretBack(NumericTensorKernels<float>.Sum(SpanReinterpret.ReadOnly<T, float>(values)));
-        if (type == typeof(double)) return reinterpretBack(NumericTensorKernels<double>.Sum(SpanReinterpret.ReadOnly<T, double>(values)));
-        if (type == typeof(int)) return reinterpretBack(NumericTensorKernels<int>.Sum(SpanReinterpret.ReadOnly<T, int>(values)));
-        if (type == typeof(long)) return reinterpretBack(NumericTensorKernels<long>.Sum(SpanReinterpret.ReadOnly<T, long>(values)));
-        if (type == typeof(short)) return reinterpretBack(NumericTensorKernels<short>.Sum(SpanReinterpret.ReadOnly<T, short>(values)));
-        if (type == typeof(ushort)) return reinterpretBack(NumericTensorKernels<ushort>.Sum(SpanReinterpret.ReadOnly<T, ushort>(values)));
-        if (type == typeof(uint)) return reinterpretBack(NumericTensorKernels<uint>.Sum(SpanReinterpret.ReadOnly<T, uint>(values)));
-        if (type == typeof(ulong)) return reinterpretBack(NumericTensorKernels<ulong>.Sum(SpanReinterpret.ReadOnly<T, ulong>(values)));
-        if (type == typeof(byte)) return reinterpretBack(NumericTensorKernels<byte>.Sum(SpanReinterpret.ReadOnly<T, byte>(values)));
-        if (type == typeof(sbyte)) return reinterpretBack(NumericTensorKernels<sbyte>.Sum(SpanReinterpret.ReadOnly<T, sbyte>(values)));
-        if (type == typeof(char)) return reinterpretBack(NumericTensorKernels<char>.Sum(SpanReinterpret.ReadOnly<T, char>(values)));
-        if (type == typeof(decimal)) return reinterpretBack(NumericTensorKernels<decimal>.Sum(SpanReinterpret.ReadOnly<T, decimal>(values)));
-        if (type == typeof(Half)) return reinterpretBack(NumericTensorKernels<Half>.Sum(SpanReinterpret.ReadOnly<T, Half>(values)));
-        if (type == typeof(nint)) return reinterpretBack(NumericTensorKernels<nint>.Sum(SpanReinterpret.ReadOnly<T, nint>(values)));
-        if (type == typeof(nuint)) return reinterpretBack(NumericTensorKernels<nuint>.Sum(SpanReinterpret.ReadOnly<T, nuint>(values)));
-        if (type == typeof(Int128)) return reinterpretBack(NumericTensorKernels<Int128>.Sum(SpanReinterpret.ReadOnly<T, Int128>(values)));
-        if (type == typeof(UInt128)) return reinterpretBack(NumericTensorKernels<UInt128>.Sum(SpanReinterpret.ReadOnly<T, UInt128>(values)));
-
-        throw new NotSupportedException(
-            $"Sum on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-    }
+        => NumericKernelDispatcher.Sum(values);
 
     /// <summary>
     /// Helper method to divide a sum by count for average calculation
     /// </summary>
     static T divideByCount(T sum, int count)
-    {
-        var type = typeof(T);
-
-        if (type == typeof(float))
-        {
-            var floatSum = Unsafe.As<T, float>(ref sum);
-            return reinterpretBack(floatSum / count);
-        }
-        else if (type == typeof(double))
-        {
-            var doubleSum = Unsafe.As<T, double>(ref sum);
-            return reinterpretBack(doubleSum / count);
-        }
-        else if (type == typeof(int))
-        {
-            var intSum = Unsafe.As<T, int>(ref sum);
-            return reinterpretBack(intSum / count);
-        }
-        else if (type == typeof(long))
-        {
-            var longSum = Unsafe.As<T, long>(ref sum);
-            return reinterpretBack(longSum / count);
-        }
-        else if (type == typeof(short))
-        {
-            var shortSum = Unsafe.As<T, short>(ref sum);
-            return reinterpretBack((short)(shortSum / count));
-        }
-        else if (type == typeof(byte))
-        {
-            var byteSum = Unsafe.As<T, byte>(ref sum);
-            return reinterpretBack((byte)(byteSum / count));
-        }
-        else if (type == typeof(sbyte))
-        {
-            var sbyteSum = Unsafe.As<T, sbyte>(ref sum);
-            return reinterpretBack((sbyte)(sbyteSum / count));
-        }
-        else if (type == typeof(ushort))
-        {
-            var ushortSum = Unsafe.As<T, ushort>(ref sum);
-            return reinterpretBack((ushort)(ushortSum / count));
-        }
-        else if (type == typeof(char))
-        {
-            var charSum = Unsafe.As<T, char>(ref sum);
-            return reinterpretBack((char)(charSum / count));
-        }
-        else if (type == typeof(uint))
-        {
-            var uintSum = Unsafe.As<T, uint>(ref sum);
-            return reinterpretBack(uintSum / count);
-        }
-        else if (type == typeof(ulong))
-        {
-            var ulongSum = Unsafe.As<T, ulong>(ref sum);
-            return reinterpretBack(ulongSum / (ulong)count);
-        }
-        else if (type == typeof(decimal))
-        {
-            var decimalSum = Unsafe.As<T, decimal>(ref sum);
-            return reinterpretBack(decimalSum / count);
-        }
-        else if (type == typeof(Half))
-        {
-            var halfSum = Unsafe.As<T, Half>(ref sum);
-            return reinterpretBack(halfSum / (Half)count);
-        }
-        else if (type == typeof(nint))
-        {
-            var nintSum = Unsafe.As<T, nint>(ref sum);
-            return reinterpretBack(nintSum / count);
-        }
-        else if (type == typeof(nuint))
-        {
-            var nuintSum = Unsafe.As<T, nuint>(ref sum);
-            return reinterpretBack(nuintSum / (nuint)count);
-        }
-        else if (type == typeof(Int128))
-        {
-            var int128Sum = Unsafe.As<T, Int128>(ref sum);
-            return reinterpretBack(int128Sum / count);
-        }
-        else if (type == typeof(UInt128))
-        {
-            var uint128Sum = Unsafe.As<T, UInt128>(ref sum);
-            return reinterpretBack(uint128Sum / (UInt128)count);
-        }
-        else
-        {
-            throw new NotSupportedException(
-                $"Average on type {typeof(T).Name} is not supported by the typed kernel dispatch");
-        }
-    }
+        => NumericKernelDispatcher.DivideByCount(sum, count);
 
     /// <summary>
     /// Creates an empty series with no values
