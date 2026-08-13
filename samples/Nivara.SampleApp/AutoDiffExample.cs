@@ -213,8 +213,8 @@ public static class AutoDiffExample
         result = ReverseGradOperations.Sum(result);
 
         var graphInfo = GradientUtils.GetGraphInfo(result);
-        Console.WriteLine($"  Total nodes: {graphInfo["TotalNodes"]}");
-        Console.WriteLine($"  Is leaf: {graphInfo["IsLeaf"]}");
+        Console.WriteLine($"  Total nodes: {graphInfo.TotalNodes}");
+        Console.WriteLine($"  Is leaf: {graphInfo.IsLeaf}");
         Console.WriteLine($"  Can backward: {GradientUtils.CanBackward(result)}");
         Console.WriteLine();
 

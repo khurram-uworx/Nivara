@@ -336,25 +336,25 @@ internal abstract class QueryPlanTransformerBase<T> : IQueryPlanVisitor<T>
 /// </summary>
 internal sealed class QueryPlanStatisticsVisitor : QueryPlanVisitorBase
 {
-    private readonly Dictionary<string, int> _operationCounts = new();
-    private int _totalOperations;
-    private int _maxDepth;
-    private int _currentDepth;
+    private readonly Dictionary<string, int> operationCounts = new();
+    private int totalOperations;
+    private int maxDepth;
+    private int currentDepth;
 
     /// <summary>
     /// Gets the operation counts by type
     /// </summary>
-    public IReadOnlyDictionary<string, int> OperationCounts => _operationCounts;
+    public IReadOnlyDictionary<string, int> OperationCounts => operationCounts;
 
     /// <summary>
     /// Gets the total number of operations
     /// </summary>
-    public int TotalOperations => _totalOperations;
+    public int TotalOperations => totalOperations;
 
     /// <summary>
     /// Gets the maximum depth of the query plan
     /// </summary>
-    public int MaxDepth => _maxDepth;
+    public int MaxDepth => maxDepth;
 
     /// <inheritdoc />
     public override void Visit(IQueryOperation operation)
@@ -362,16 +362,16 @@ internal sealed class QueryPlanStatisticsVisitor : QueryPlanVisitorBase
         if (operation == null)
             return;
 
-        _totalOperations++;
-        _currentDepth++;
-        _maxDepth = Math.Max(_maxDepth, _currentDepth);
+        totalOperations++;
+        currentDepth++;
+        maxDepth = Math.Max(maxDepth, currentDepth);
 
         var operationType = operation.OperationType;
-        _operationCounts[operationType] = _operationCounts.GetValueOrDefault(operationType, 0) + 1;
+        operationCounts[operationType] = operationCounts.GetValueOrDefault(operationType, 0) + 1;
 
         base.Visit(operation);
 
-        _currentDepth--;
+        currentDepth--;
     }
 
     /// <summary>
@@ -379,10 +379,10 @@ internal sealed class QueryPlanStatisticsVisitor : QueryPlanVisitorBase
     /// </summary>
     public void Reset()
     {
-        _operationCounts.Clear();
-        _totalOperations = 0;
-        _maxDepth = 0;
-        _currentDepth = 0;
+        operationCounts.Clear();
+        totalOperations = 0;
+        maxDepth = 0;
+        currentDepth = 0;
     }
 
     /// <summary>
@@ -416,37 +416,37 @@ internal sealed class QueryPlanStatisticsVisitor : QueryPlanVisitorBase
 /// </summary>
 internal sealed class QueryPlanValidationVisitor : QueryPlanVisitorBase
 {
-    private readonly List<string> _errors = new();
-    private Schema _currentSchema = null!;
+    private readonly List<string> errors = new();
+    private Schema currentSchema = null!;
 
     /// <summary>
     /// Gets the validation errors found
     /// </summary>
-    public IReadOnlyList<string> Errors => _errors;
+    public IReadOnlyList<string> Errors => errors;
 
     /// <summary>
     /// Gets a value indicating whether the query plan is valid
     /// </summary>
-    public bool IsValid => _errors.Count == 0;
+    public bool IsValid => errors.Count == 0;
 
     /// <inheritdoc />
     public override void Visit(QueryPlan plan)
     {
-        _errors.Clear();
+        errors.Clear();
 
         if (plan == null)
         {
-            _errors.Add("Query plan is null");
+            errors.Add("Query plan is null");
             return;
         }
 
         if (plan.Source == null)
         {
-            _errors.Add("Query plan source is null");
+            errors.Add("Query plan source is null");
             return;
         }
 
-        _currentSchema = plan.Source.Schema;
+        currentSchema = plan.Source.Schema;
 
         base.Visit(plan);
     }
@@ -465,11 +465,11 @@ internal sealed class QueryPlanValidationVisitor : QueryPlanVisitorBase
         // Update current schema based on selection
         try
         {
-            _currentSchema = operation.TransformSchema(_currentSchema);
+            currentSchema = operation.TransformSchema(currentSchema);
         }
         catch (Exception ex)
         {
-            _errors.Add($"Select operation schema transformation failed: {ex.Message}");
+            errors.Add($"Select operation schema transformation failed: {ex.Message}");
         }
     }
 
@@ -479,11 +479,11 @@ internal sealed class QueryPlanValidationVisitor : QueryPlanVisitorBase
         // Update current schema based on grouping
         try
         {
-            _currentSchema = operation.TransformSchema(_currentSchema);
+            currentSchema = operation.TransformSchema(currentSchema);
         }
         catch (Exception ex)
         {
-            _errors.Add($"GroupBy operation schema transformation failed: {ex.Message}");
+            errors.Add($"GroupBy operation schema transformation failed: {ex.Message}");
         }
     }
 

@@ -78,7 +78,7 @@ public class LossTests
         var loss = mse.Forward(predictions, targets);
 
         var info = GradientUtils.GetGraphInfo(loss);
-        var opCounts = (Dictionary<string, int>)info["OperationCounts"];
+        var opCounts = info.OperationCounts;
 
         Assert.That(opCounts, Does.ContainKey("DivideScalar"));
         Assert.That(opCounts["DivideScalar"], Is.EqualTo(1));

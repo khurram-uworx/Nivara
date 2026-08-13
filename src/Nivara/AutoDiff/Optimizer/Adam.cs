@@ -28,7 +28,7 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
         this.eps = eps;
     }
 
-    void ensureBuffer(int idx, int size)
+    private void ensureBuffer(int idx, int size)
     {
         while (idx >= expAvgBuffers.Count)
         {

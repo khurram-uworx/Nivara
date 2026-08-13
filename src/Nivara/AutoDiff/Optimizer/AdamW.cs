@@ -303,7 +303,7 @@ public sealed class AdamW<T> : Optimizer<T> where T : struct, IFloatingPointIeee
         }
     }
 
-    void ensureBuffer(int idx, int size)
+    private void ensureBuffer(int idx, int size)
     {
         while (idx >= expAvgBuffers.Count)
         {
