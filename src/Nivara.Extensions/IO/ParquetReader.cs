@@ -148,6 +148,7 @@ public static class ParquetReader
     {
         var schema = parquetReader.Schema;
         var dataFields = schema.GetDataFields();
+        var clrTypeMetadata = parquetReader.CustomMetadata;
 
         if (dataFields.Length == 0)
         {
@@ -195,7 +196,7 @@ public static class ParquetReader
                         cancellationToken.ThrowIfCancellationRequested();
 
                         var columnData = await ReadParquetColumnAsync(rowGroupReader, field, cancellationToken);
-                        var column = CreateNivaraColumnFromParquetData(columnData, field);
+                        var column = CreateNivaraColumnFromParquetData(columnData, field, clrTypeMetadata);
                         columns.Add((columnName, column));
                     }
                     catch (Exception ex)
@@ -288,6 +289,8 @@ public static class ParquetReader
             Type t when t == typeof(float) => await ReadParquetColumnAsync<float>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(double) => await ReadParquetColumnAsync<double>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(DateTime) => await ReadParquetColumnAsync<DateTime>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(DateOnly) => await ReadParquetColumnAsync<DateOnly>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(Guid) => await ReadParquetColumnAsync<Guid>(rowGroupReader, field, length, cancellationToken),
             _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
     }
@@ -307,15 +310,20 @@ public static class ParquetReader
         return values;
     }
 
-    private static IColumn CreateNivaraColumnFromParquetData(Array columnData, DataField field)
+    private static IColumn CreateNivaraColumnFromParquetData(Array columnData, DataField field, IReadOnlyDictionary<string, string>? clrTypeMetadata)
     {
-        var elementType = field.ClrType;
+        var elementType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
 
-        // Handle nullable types
-        if (elementType.IsGenericType && elementType.GetGenericTypeDefinition() == typeof(Nullable<>))
-        {
-            elementType = Nullable.GetUnderlyingType(elementType)!;
-        }
+        // Restore the original CLR type when the file was written by Nivara (widened types)
+        var originalType = TypeMapper.ResolveMetadataClrType(clrTypeMetadata, field.Name);
+
+        if (originalType == typeof(Half)) return CreateConvertedColumn<Half>(columnData, static v => v is float f ? (Half)f : null);
+        if (originalType == typeof(nint)) return CreateConvertedColumn<nint>(columnData, static v => v is long l ? (nint)l : null);
+        if (originalType == typeof(nuint)) return CreateConvertedColumn<nuint>(columnData, static v => v is ulong ul ? (nuint)ul : null);
+        if (originalType == typeof(char)) return CreateConvertedColumn<char>(columnData, static v => v is ushort us ? (char)us : null);
+        if (originalType == typeof(DateTimeOffset)) return CreateConvertedColumn<DateTimeOffset>(columnData, static v => v is DateTime dt ? new DateTimeOffset(dt) : null);
+        if (originalType == typeof(TimeSpan)) return CreateConvertedColumn<TimeSpan>(columnData, static v => v is long l ? TimeSpan.FromTicks(l) : null);
+        if (originalType == typeof(TimeOnly)) return CreateConvertedColumn<TimeOnly>(columnData, static v => v is long l ? TimeOnly.FromTimeSpan(TimeSpan.FromTicks(l / 100)) : null);
 
         return elementType switch
         {
@@ -325,9 +333,27 @@ public static class ParquetReader
             Type t when t == typeof(float) => CreateNivaraColumn<float>(columnData),
             Type t when t == typeof(double) => CreateNivaraColumn<double>(columnData),
             Type t when t == typeof(DateTime) => CreateNivaraColumn<DateTime>(columnData),
+            Type t when t == typeof(DateOnly) => CreateNivaraColumn<DateOnly>(columnData),
+            Type t when t == typeof(Guid) => CreateNivaraColumn<Guid>(columnData),
             Type t when TypeMapper.IsStringType(t) => CreateStringColumn(columnData),
             _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
+    }
+
+    /// <summary>
+    /// Creates a typed column from Parquet data using an explicit value converter,
+    /// used to restore extended-domain types from their widened on-disk representation.
+    /// </summary>
+    private static NivaraColumn<T> CreateConvertedColumn<T>(Array columnData, Func<object?, T?> convert)
+        where T : struct
+    {
+        var length = columnData.Length;
+        var nullableArray = new T?[length];
+
+        for (int i = 0; i < length; i++)
+            nullableArray[i] = convert(columnData.GetValue(i));
+
+        return NivaraColumn.CreateFromNullable(nullableArray);
     }
 
     /// <summary>
