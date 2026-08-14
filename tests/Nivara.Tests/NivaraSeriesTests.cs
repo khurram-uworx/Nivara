@@ -152,6 +152,23 @@ public class NivaraSeriesTests
         Assert.That(series.GetByLabel(DateTime.Today), Is.EqualTo("value3"), "Should access by DateTime label using GetByLabel");
     }
 
+    [Test]
+    public void SeriesIndexer_IntIsPosition_StringIsLabel()
+    {
+        // Default-index series: this[int] is a position, this[string] is a label lookup
+        using var series = NivaraSeries<int>.Create(new[] { 10, 20, 30 });
+
+        Assert.That(series[1], Is.EqualTo(20), "Integer indexer should address positions");
+        Assert.That(series.GetLabel(1), Is.EqualTo(1), "Default index label at position 1 is the position itself");
+        Assert.Throws<KeyNotFoundException>(() => { var _ = series["1"]; },
+            "String label '1' does not exist on a positional series");
+
+        // Custom string-index series: this[string] resolves labels, this[int] stays positional
+        using var labeled = NivaraSeries<int>.Create(new[] { 10, 20, 30 }, new[] { "one", "two", "three" });
+        Assert.That(labeled[1], Is.EqualTo(20), "Integer indexer stays positional on labeled series");
+        Assert.That(labeled["two"], Is.EqualTo(20), "String indexer resolves labels");
+    }
+
     #endregion
 
     #region Property 12: Default integer indexing
