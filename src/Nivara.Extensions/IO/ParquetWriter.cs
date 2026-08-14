@@ -689,7 +689,7 @@ public static class ParquetWriter
     /// <summary>
     /// Concatenates multiple NivaraFrames into a single frame
     /// </summary>
-    private static NivaraFrame ConcatenateFrames(List<NivaraFrame> frames)
+    internal static NivaraFrame ConcatenateFrames(List<NivaraFrame> frames)
     {
         if (frames.Count == 0)
             throw new ArgumentException("Cannot concatenate empty frame list");

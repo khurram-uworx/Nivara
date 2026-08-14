@@ -173,58 +173,58 @@ public static class ParquetReader
 
         var columns = new List<(string Name, IColumn Column)>();
 
-        // Read all row groups
+        // Read all row groups so multi-row-group files (RowGroupSize) round-trip completely
+        var frames = new List<NivaraFrame>(parquetReader.RowGroupCount);
         for (int rowGroupIndex = 0; rowGroupIndex < parquetReader.RowGroupCount; rowGroupIndex++)
         {
             using var rowGroupReader = parquetReader.OpenRowGroupReader(rowGroupIndex);
 
-            if (rowGroupIndex == 0)
+            for (int columnIndex = 0; columnIndex < dataFields.Length; columnIndex++)
             {
-                // Initialize columns on first row group
-                for (int columnIndex = 0; columnIndex < dataFields.Length; columnIndex++)
+                var field = dataFields[columnIndex];
+                var columnName = field.Name;
+
+                // Skip the dummy column used for empty files
+                if (columnName == "_empty")
+                    continue;
+
+                try
                 {
-                    var field = dataFields[columnIndex];
-                    var columnName = field.Name;
+                    // Check for cancellation before processing each column
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                    // Skip the dummy column used for empty files
-                    if (columnName == "_empty")
-                        continue;
-
-                    try
+                    var columnData = await ReadParquetColumnAsync(rowGroupReader, field, cancellationToken);
+                    var column = CreateNivaraColumnFromParquetData(columnData, field, clrTypeMetadata);
+                    columns.Add((columnName, column));
+                }
+                catch (Exception ex)
+                {
+                    throw new DataCorruptionException($"Failed to read column '{columnName}': {ex.Message}", ex)
                     {
-                        // Check for cancellation before processing each column
-                        cancellationToken.ThrowIfCancellationRequested();
-
-                        var columnData = await ReadParquetColumnAsync(rowGroupReader, field, cancellationToken);
-                        var column = CreateNivaraColumnFromParquetData(columnData, field, clrTypeMetadata);
-                        columns.Add((columnName, column));
-                    }
-                    catch (Exception ex)
-                    {
-                        throw new DataCorruptionException($"Failed to read column '{columnName}': {ex.Message}", ex)
-                        {
-                            AffectedColumns = new[] { columnName },
-                            AffectedRowRange = new Range(0, 1000) // Use a default range since we can't access ThriftMetadata
-                        };
-                    }
+                        AffectedColumns = new[] { columnName },
+                        AffectedRowRange = new Range(0, 1000) // Use a default range since we can't access ThriftMetadata
+                    };
                 }
             }
-            else
+
+            if (columns.Count > 0)
             {
-                // Append data from subsequent row groups (simplified - would need proper concatenation)
-                // For now, just use the first row group
-                break;
+                frames.Add(NivaraFrame.Create(columns.ToArray()));
+                columns.Clear();
             }
         }
 
-        if (columns.Count == 0)
+        if (frames.Count == 0)
         {
             // Create an empty frame with a dummy column
             var emptyColumn = NivaraColumn<int>.Create(Array.Empty<int>());
             return NivaraFrame.Create(("_empty", emptyColumn));
         }
 
-        return NivaraFrame.Create(columns.ToArray());
+        if (frames.Count == 1)
+            return frames[0];
+
+        return ParquetWriter.ConcatenateFrames(frames);
     }
 
     /// <summary>
