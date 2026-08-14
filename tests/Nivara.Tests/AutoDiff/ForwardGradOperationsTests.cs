@@ -830,4 +830,913 @@ public class ForwardGradOperationsTests
     }
 
     #endregion
+
+    #region MatMulTransposedB
+
+    [Test]
+    public void MatMulTransposedB_Simple_ComputesCorrectValuesAndShape()
+    {
+        // a = [[1,2,3],[4,5,6]], b = [[7,8,9],[10,11,12]]
+        // result = a @ b^T = [[50,68],[122,167]]
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3);
+        var b = ForwardGradTensor<float>.FromMatrix(new float[] { 7f, 8f, 9f, 10f, 11f, 12f }, 2, 3);
+
+        var result = ForwardGradOperations.MatMulTransposedB(a, b);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2 }));
+        Assert.That(result[0], Is.EqualTo(50.0f));
+        Assert.That(result[1], Is.EqualTo(68.0f));
+        Assert.That(result[2], Is.EqualTo(122.0f));
+        Assert.That(result[3], Is.EqualTo(167.0f));
+    }
+
+    [Test]
+    public void MatMulTransposedB_OnlyATangent_ComputesCorrectTangent()
+    {
+        // JVP: t_out = t_a @ b^T. t_a = ones → each column sums to sum(b column).
+        var a = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+        var b = ForwardGradTensor<float>.FromMatrix(new float[] { 7f, 8f, 9f, 10f, 11f, 12f }, 2, 3);
+
+        var result = ForwardGradOperations.MatMulTransposedB(a, b);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent, Is.Not.Null);
+        Assert.That(result.Tangent![0], Is.EqualTo(24.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(33.0f));
+        Assert.That(result.Tangent[2], Is.EqualTo(24.0f));
+        Assert.That(result.Tangent[3], Is.EqualTo(33.0f));
+    }
+
+    [Test]
+    public void MatMulTransposedB_OnlyBTangent_ComputesCorrectTangent()
+    {
+        // JVP: t_out = a @ t_b^T. t_b = ones → rows sum a's row sums.
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3);
+        var b = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 7f, 8f, 9f, 10f, 11f, 12f }, 2, 3, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+
+        var result = ForwardGradOperations.MatMulTransposedB(a, b);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent, Is.Not.Null);
+        Assert.That(result.Tangent![0], Is.EqualTo(6.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(6.0f));
+        Assert.That(result.Tangent[2], Is.EqualTo(15.0f));
+        Assert.That(result.Tangent[3], Is.EqualTo(15.0f));
+    }
+
+    [Test]
+    public void MatMulTransposedB_BothTangents_SumsContributions()
+    {
+        // t_out = t_a @ b^T + a @ t_b^T = [[30,39],[39,48]]
+        var a = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+        var b = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 7f, 8f, 9f, 10f, 11f, 12f }, 2, 3, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+
+        var result = ForwardGradOperations.MatMulTransposedB(a, b);
+
+        Assert.That(result.Tangent![0], Is.EqualTo(30.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(39.0f));
+        Assert.That(result.Tangent[2], Is.EqualTo(39.0f));
+        Assert.That(result.Tangent[3], Is.EqualTo(48.0f));
+    }
+
+    [Test]
+    public void MatMulTransposedB_NoTangents_DoesNotTrackTangent()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3);
+        var b = ForwardGradTensor<float>.FromMatrix(new float[] { 7f, 8f, 9f, 10f, 11f, 12f }, 2, 3);
+
+        var result = ForwardGradOperations.MatMulTransposedB(a, b);
+
+        Assert.That(result.RequiresTangent, Is.False);
+        Assert.That(result.Tangent, Is.Null);
+    }
+
+    [Test]
+    public void MatMulTransposedB_DimensionMismatch_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3);
+        var b = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f }, 2, 2);
+
+        var ex = Assert.Throws<ArgumentException>(() => ForwardGradOperations.MatMulTransposedB(a, b));
+        Assert.That(ex.Message, Does.Contain("must equal"));
+    }
+
+    [Test]
+    public void MatMulTransposedB_WrongRank_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f });
+        var b = ForwardGradTensor<float>.FromArray(new float[] { 4f, 5f, 6f });
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.MatMulTransposedB(a, b));
+    }
+
+    #endregion
+
+    #region TransposeAxes
+
+    [Test]
+    public void TransposeAxes_2D_SwapsRowsAndColumns()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3,
+            new float[] { 1f, 0f, 0f, 0f, 0f, 0f });
+
+        var result = ForwardGradOperations.TransposeAxes(a, 0, 1);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 3, 2 }));
+        Assert.That(result[0], Is.EqualTo(1.0f));
+        Assert.That(result[1], Is.EqualTo(4.0f));
+        Assert.That(result[2], Is.EqualTo(2.0f));
+        Assert.That(result[3], Is.EqualTo(5.0f));
+        Assert.That(result[4], Is.EqualTo(3.0f));
+        Assert.That(result[5], Is.EqualTo(6.0f));
+        Assert.That(result.Tangent![0], Is.EqualTo(1.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(0.0f));
+        Assert.That(result.Tangent[5], Is.EqualTo(0.0f));
+    }
+
+    [Test]
+    public void TransposeAxes_3D_SwapsFirstAndLastAxes()
+    {
+        // a flat [1..8] with shape [2,2,2], swap axes 0 and 2
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f });
+        a.Reshape(2, 2, 2);
+
+        var result = ForwardGradOperations.TransposeAxes(a, 0, 2);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2, 2 }));
+        Assert.That(result[0], Is.EqualTo(1.0f));
+        Assert.That(result[1], Is.EqualTo(5.0f));
+        Assert.That(result[2], Is.EqualTo(3.0f));
+        Assert.That(result[3], Is.EqualTo(7.0f));
+        Assert.That(result[4], Is.EqualTo(2.0f));
+        Assert.That(result[5], Is.EqualTo(6.0f));
+        Assert.That(result[6], Is.EqualTo(4.0f));
+        Assert.That(result[7], Is.EqualTo(8.0f));
+    }
+
+    [Test]
+    public void TransposeAxes_3DWithTangent_TransposesTangent()
+    {
+        var a = ForwardGradTensor<float>.FromArray(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f },
+            new float[] { 1f, 0f, 0f, 0f, 0f, 0f, 0f, 0f });
+        a.Reshape(2, 2, 2);
+
+        var result = ForwardGradOperations.TransposeAxes(a, 0, 2);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(1.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(0.0f));
+        Assert.That(result.Tangent[4], Is.EqualTo(0.0f));
+    }
+
+    [Test]
+    public void TransposeAxes_InvalidAxis_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[4], 2, 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ForwardGradOperations.TransposeAxes(a, 0, 2));
+    }
+
+    [Test]
+    public void TransposeAxes_SameAxis_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[4], 2, 2);
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.TransposeAxes(a, 1, 1));
+    }
+
+    [Test]
+    public void TransposeAxes_WrongRank_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f });
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.TransposeAxes(a, 0, 1));
+    }
+
+    #endregion
+
+    #region Slice
+
+    [Test]
+    public void Slice_RowVector_ExtractsSubrange()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 1, 6,
+            new float[] { 6f, 5f, 4f, 3f, 2f, 1f });
+
+        var result = ForwardGradOperations.Slice(a, 1, 3);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 3 }));
+        Assert.That(result[0], Is.EqualTo(2.0f));
+        Assert.That(result[1], Is.EqualTo(3.0f));
+        Assert.That(result[2], Is.EqualTo(4.0f));
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(5.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(4.0f));
+        Assert.That(result.Tangent[2], Is.EqualTo(3.0f));
+    }
+
+    [Test]
+    public void Slice_Matrix_SlicesEveryRow()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3);
+
+        var result = ForwardGradOperations.Slice(a, 1, 2);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2 }));
+        Assert.That(result[0], Is.EqualTo(2.0f));
+        Assert.That(result[1], Is.EqualTo(3.0f));
+        Assert.That(result[2], Is.EqualTo(5.0f));
+        Assert.That(result[3], Is.EqualTo(6.0f));
+    }
+
+    [Test]
+    public void Slice_OutOfRange_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f }, 1, 4);
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.Slice(a, 3, 2));
+    }
+
+    [Test]
+    public void Slice_NegativeStart_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f }, 1, 4);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ForwardGradOperations.Slice(a, -1, 2));
+    }
+
+    #endregion
+
+    #region Concat
+
+    [Test]
+    public void Concat_1D_JoinsValuesAndZeroFillsMissingTangents()
+    {
+        var a = ForwardGradTensor<float>.FromArray(
+            new float[] { 1f, 2f, 3f }, new float[] { 1f, 1f, 1f });
+        var b = ForwardGradTensor<float>.FromArray(new float[] { 4f, 5f });
+
+        var result = ForwardGradOperations.Concat(new[] { a, b });
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 5 }));
+        Assert.That(result[0], Is.EqualTo(1.0f));
+        Assert.That(result[1], Is.EqualTo(2.0f));
+        Assert.That(result[2], Is.EqualTo(3.0f));
+        Assert.That(result[3], Is.EqualTo(4.0f));
+        Assert.That(result[4], Is.EqualTo(5.0f));
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(1.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(1.0f));
+        Assert.That(result.Tangent[2], Is.EqualTo(1.0f));
+        Assert.That(result.Tangent[3], Is.EqualTo(0.0f));
+        Assert.That(result.Tangent[4], Is.EqualTo(0.0f));
+    }
+
+    [Test]
+    public void Concat_2D_Axis1_JoinsColumns()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f }, 2, 2);
+        var b = ForwardGradTensor<float>.FromMatrix(new float[] { 5f, 6f }, 2, 1);
+
+        var result = ForwardGradOperations.Concat(new[] { a, b }, axis: 1);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 3 }));
+        Assert.That(result[0], Is.EqualTo(1.0f));
+        Assert.That(result[1], Is.EqualTo(2.0f));
+        Assert.That(result[2], Is.EqualTo(5.0f));
+        Assert.That(result[3], Is.EqualTo(3.0f));
+        Assert.That(result[4], Is.EqualTo(4.0f));
+        Assert.That(result[5], Is.EqualTo(6.0f));
+    }
+
+    [Test]
+    public void Concat_2D_Axis0_StacksRows()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f }, 2, 2);
+        var b = ForwardGradTensor<float>.FromMatrix(new float[] { 7f, 8f }, 1, 2);
+
+        var result = ForwardGradOperations.Concat(new[] { a, b }, axis: 0);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 3, 2 }));
+        Assert.That(result[0], Is.EqualTo(1.0f));
+        Assert.That(result[1], Is.EqualTo(2.0f));
+        Assert.That(result[4], Is.EqualTo(7.0f));
+        Assert.That(result[5], Is.EqualTo(8.0f));
+    }
+
+    [Test]
+    public void Concat_Axis1_RowMismatch_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[4], 2, 2);
+        var b = ForwardGradTensor<float>.FromMatrix(new float[3], 1, 3);
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.Concat(new[] { a, b }, axis: 1));
+    }
+
+    [Test]
+    public void Concat_SingleTensor_ReturnsTensorUnchanged()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f });
+
+        var result = ForwardGradOperations.Concat(new[] { a });
+
+        Assert.That(ReferenceEquals(result, a), Is.True);
+    }
+
+    [Test]
+    public void Concat_Empty_Throws()
+    {
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.Concat<float>(Array.Empty<ForwardGradTensor<float>>()));
+    }
+
+    #endregion
+
+    #region Gather
+
+    [Test]
+    public void Gather_Rows_SelectsByIndex()
+    {
+        var source = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 3, 2,
+            new float[] { 1f, 0f, 0f, 1f, 1f, 0f });
+
+        var result = ForwardGradOperations.Gather(source, new[] { 2, 0 });
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2 }));
+        Assert.That(result[0], Is.EqualTo(5.0f));
+        Assert.That(result[1], Is.EqualTo(6.0f));
+        Assert.That(result[2], Is.EqualTo(1.0f));
+        Assert.That(result[3], Is.EqualTo(2.0f));
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(1.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(0.0f));
+        Assert.That(result.Tangent[2], Is.EqualTo(1.0f));
+        Assert.That(result.Tangent[3], Is.EqualTo(0.0f));
+    }
+
+    [Test]
+    public void Gather_OutOfRange_Throws()
+    {
+        var source = ForwardGradTensor<float>.FromMatrix(new float[6], 3, 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ForwardGradOperations.Gather(source, new[] { 3 }));
+    }
+
+    [Test]
+    public void Gather_UnsupportedAxis_Throws()
+    {
+        var source = ForwardGradTensor<float>.FromMatrix(new float[6], 3, 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ForwardGradOperations.Gather(source, new[] { 0 }, axis: 1));
+    }
+
+    #endregion
+
+    #region SparseEmbeddingBag
+
+    [Test]
+    public void SparseEmbeddingBag_SumsSelectedRows()
+    {
+        var weight = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f }, 4, 3);
+        var indices = ForwardGradTensor<float>.FromMatrix(new float[] { 0f, 2f, 3f, 1f }, 2, 2);
+
+        var result = ForwardGradOperations.SparseEmbeddingBag(weight, indices);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 3 }));
+        Assert.That(result[0], Is.EqualTo(8.0f));
+        Assert.That(result[1], Is.EqualTo(10.0f));
+        Assert.That(result[2], Is.EqualTo(12.0f));
+        Assert.That(result[3], Is.EqualTo(14.0f));
+        Assert.That(result[4], Is.EqualTo(16.0f));
+        Assert.That(result[5], Is.EqualTo(18.0f));
+    }
+
+    [Test]
+    public void SparseEmbeddingBag_PaddingIndex_SkipsRows()
+    {
+        var weight = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f }, 4, 3);
+        var indices = ForwardGradTensor<float>.FromMatrix(new float[] { 0f, -1f, 3f, 1f }, 2, 2);
+
+        var result = ForwardGradOperations.SparseEmbeddingBag(weight, indices, paddingIndex: -1);
+
+        Assert.That(result[0], Is.EqualTo(1.0f));
+        Assert.That(result[1], Is.EqualTo(2.0f));
+        Assert.That(result[2], Is.EqualTo(3.0f));
+        Assert.That(result[3], Is.EqualTo(14.0f));
+        Assert.That(result[4], Is.EqualTo(16.0f));
+        Assert.That(result[5], Is.EqualTo(18.0f));
+    }
+
+    [Test]
+    public void SparseEmbeddingBag_WeightTangent_SumsSelectedTangents()
+    {
+        var weight = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f }, 4, 3,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var indices = ForwardGradTensor<float>.FromMatrix(new float[] { 0f, 2f, 3f, 1f }, 2, 2);
+
+        var result = ForwardGradOperations.SparseEmbeddingBag(weight, indices);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent, Is.Not.Null);
+        for (int i = 0; i < 6; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(2.0f));
+    }
+
+    [Test]
+    public void SparseEmbeddingBag_OutOfRange_Throws()
+    {
+        var weight = ForwardGradTensor<float>.FromMatrix(new float[12], 4, 3);
+        var indices = ForwardGradTensor<float>.FromMatrix(new float[] { 0f, 4f }, 1, 2);
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => ForwardGradOperations.SparseEmbeddingBag(weight, indices));
+    }
+
+    #endregion
+
+    #region MeanPool
+
+    [Test]
+    public void MeanPool_AveragesNonOverlappingWindows()
+    {
+        // batch=2, poolSize=2, embedDim=3
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f });
+
+        var result = ForwardGradOperations.MeanPool(a, poolSize: 2, embedDim: 3);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 3 }));
+        Assert.That(result[0], Is.EqualTo(2.5f));
+        Assert.That(result[1], Is.EqualTo(3.5f));
+        Assert.That(result[2], Is.EqualTo(4.5f));
+        Assert.That(result[3], Is.EqualTo(8.5f));
+        Assert.That(result[4], Is.EqualTo(9.5f));
+        Assert.That(result[5], Is.EqualTo(10.5f));
+    }
+
+    [Test]
+    public void MeanPool_WithTangent_AveragesTangent()
+    {
+        var a = ForwardGradTensor<float>.FromArray(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f },
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+
+        var result = ForwardGradOperations.MeanPool(a, poolSize: 2, embedDim: 3);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        for (int i = 0; i < 6; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(1.0f));
+    }
+
+    [Test]
+    public void MeanPool_NonDivisibleLength_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f, 4f, 5f });
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.MeanPool(a, poolSize: 2, embedDim: 3));
+    }
+
+    #endregion
+
+    #region GeluExact
+
+    [Test]
+    public void GeluExact_AtZero_ComputesValueAndTangent()
+    {
+        // gelu(0) = 0, gelu'(0) = 0.5, JVP = 0.5 * 2 = 1
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 0.0f }, new float[] { 2.0f });
+
+        var result = ForwardGradOperations.GeluExact(a);
+
+        Assert.That(result[0], Is.EqualTo(0.0f).Within(1e-4f));
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(1.0f).Within(1e-4f));
+    }
+
+    [Test]
+    public void GeluExact_NoTangent_DoesNotTrack()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1.0f, 2.0f, 3.0f });
+
+        var result = ForwardGradOperations.GeluExact(a);
+
+        Assert.That(result.RequiresTangent, Is.False);
+        Assert.That(result.Tangent, Is.Null);
+        Assert.That(result.Length, Is.EqualTo(3));
+    }
+
+    #endregion
+
+    #region Pow
+
+    [Test]
+    public void Pow_ComputesValuesAndTangent()
+    {
+        // a=[2,3], exp=2 → [4,9]; JVP = 2 * a^(1) * t_a = [4,6]
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 2f, 3f }, new float[] { 1f, 1f });
+
+        var result = ForwardGradOperations.Pow(a, 2.0);
+
+        Assert.That(result[0], Is.EqualTo(4.0f));
+        Assert.That(result[1], Is.EqualTo(9.0f));
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(4.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(6.0f));
+    }
+
+    [Test]
+    public void Pow_FractionalExponent_ComputesTangent()
+    {
+        // a=[4], exp=0.5 → 2; JVP = 0.5 * 4^(-0.5) * t_a = 0.5 * 0.5 * 8 = 2
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 4f }, new float[] { 8f });
+
+        var result = ForwardGradOperations.Pow(a, 0.5);
+
+        Assert.That(result[0], Is.EqualTo(2.0f).Within(1e-4f));
+        Assert.That(result.Tangent![0], Is.EqualTo(2.0f).Within(1e-4f));
+    }
+
+    #endregion
+
+    #region RMSNorm
+
+    [Test]
+    public void RMSNorm_NormalizesByRowNorm()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f });
+
+        var result = ForwardGradOperations.RMSNorm(a);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result[0], Is.EqualTo(0.46291f).Within(1e-4f));
+        Assert.That(result[1], Is.EqualTo(0.92582f).Within(1e-4f));
+        Assert.That(result[2], Is.EqualTo(1.38873f).Within(1e-4f));
+    }
+
+    [Test]
+    public void RMSNorm_WithTangent_ComputesSymmetricJvp()
+    {
+        var a = ForwardGradTensor<float>.FromArray(
+            new float[] { 1f, 2f, 3f }, new float[] { 1f, 1f, 1f });
+
+        var result = ForwardGradOperations.RMSNorm(a);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(0.26460f).Within(1e-4f));
+        Assert.That(result.Tangent[1], Is.EqualTo(0.06619f).Within(1e-4f));
+        Assert.That(result.Tangent[2], Is.EqualTo(-0.13217f).Within(1e-4f));
+    }
+
+    #endregion
+
+    #region PerRowRMSNorm
+
+    [Test]
+    public void PerRowRMSNorm_NormalizesEachRow()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f }, 2, 2);
+
+        var result = ForwardGradOperations.PerRowRMSNorm(a, rows: 2, cols: 2);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2 }));
+        Assert.That(result[0], Is.EqualTo(0.632455f).Within(1e-4f));
+        Assert.That(result[1], Is.EqualTo(1.264911f).Within(1e-4f));
+        Assert.That(result[2], Is.EqualTo(0.848528f).Within(1e-4f));
+        Assert.That(result[3], Is.EqualTo(1.131371f).Within(1e-4f));
+    }
+
+    [Test]
+    public void PerRowRMSNorm_WithTangent_ComputesPerRowJvp()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f }, 2, 2,
+            new float[] { 1f, 1f, 1f, 1f });
+
+        var result = ForwardGradOperations.PerRowRMSNorm(a, rows: 2, cols: 2);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(0.252982f).Within(1e-4f));
+        Assert.That(result.Tangent[1], Is.EqualTo(-0.126491f).Within(1e-4f));
+        Assert.That(result.Tangent[2], Is.EqualTo(0.045251f).Within(1e-4f));
+        Assert.That(result.Tangent[3], Is.EqualTo(-0.033946f).Within(1e-4f));
+    }
+
+    #endregion
+
+    #region AddBias
+
+    [Test]
+    public void AddBias_AddsBiasToEachRow()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3);
+        var bias = ForwardGradTensor<float>.FromArray(new float[] { 10f, 20f, 30f });
+
+        var result = ForwardGradOperations.AddBias(a, bias);
+
+        Assert.That(result[0], Is.EqualTo(11.0f));
+        Assert.That(result[1], Is.EqualTo(22.0f));
+        Assert.That(result[2], Is.EqualTo(33.0f));
+        Assert.That(result[3], Is.EqualTo(14.0f));
+        Assert.That(result[4], Is.EqualTo(25.0f));
+        Assert.That(result[5], Is.EqualTo(36.0f));
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 3 }));
+    }
+
+    [Test]
+    public void AddBias_OnlyBiasTangent_BroadcastsToAllRows()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3);
+        var bias = ForwardGradTensor<float>.FromArray(new float[] { 10f, 20f, 30f }, new float[] { 1f, 1f, 1f });
+
+        var result = ForwardGradOperations.AddBias(a, bias);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        for (int i = 0; i < 6; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(1.0f));
+    }
+
+    [Test]
+    public void AddBias_BothTangents_SumsContributions()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, 2, 3,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+        var bias = ForwardGradTensor<float>.FromArray(new float[] { 10f, 20f, 30f }, new float[] { 1f, 1f, 1f });
+
+        var result = ForwardGradOperations.AddBias(a, bias);
+
+        for (int i = 0; i < 6; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(2.0f));
+    }
+
+    [Test]
+    public void AddBias_LengthMismatch_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromMatrix(new float[6], 2, 3);
+        var bias = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f });
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.AddBias(a, bias));
+    }
+
+    [Test]
+    public void AddBias_WrongRank_Throws()
+    {
+        var a = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f });
+        var bias = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f });
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.AddBias(a, bias));
+    }
+
+    #endregion
+
+    #region Broadcasting
+
+    static ForwardGradTensor<float> From3D(float[] data, int b, int l, int d, float[]? tangent = null)
+    {
+        var dataCol = NivaraColumn<float>.CreateFromOwnedArray(data);
+        NivaraColumn<float>? tanCol = tangent != null ? NivaraColumn<float>.CreateFromOwnedArray(tangent) : null;
+        return new ForwardGradTensor<float>(dataCol, tanCol, new[] { b, l, d });
+    }
+
+    [Test]
+    public void BroadcastMultiply_ScalesByChannel()
+    {
+        // input [2,2,2], scale [2,3]; channel = dim 1
+        var input = From3D(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2);
+        var scale = ForwardGradTensor<float>.FromArray(new float[] { 2f, 3f });
+
+        var result = ForwardGradOperations.BroadcastMultiply(input, scale);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2, 2 }));
+        Assert.That(result[0], Is.EqualTo(2.0f));
+        Assert.That(result[1], Is.EqualTo(4.0f));
+        Assert.That(result[2], Is.EqualTo(9.0f));
+        Assert.That(result[3], Is.EqualTo(12.0f));
+        Assert.That(result[4], Is.EqualTo(10.0f));
+        Assert.That(result[5], Is.EqualTo(12.0f));
+        Assert.That(result[6], Is.EqualTo(21.0f));
+        Assert.That(result[7], Is.EqualTo(24.0f));
+    }
+
+    [Test]
+    public void BroadcastMultiply_InputTangent_ScalesTangent()
+    {
+        var input = From3D(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var scale = ForwardGradTensor<float>.FromArray(new float[] { 2f, 3f });
+
+        var result = ForwardGradOperations.BroadcastMultiply(input, scale);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent![0], Is.EqualTo(2.0f));
+        Assert.That(result.Tangent[1], Is.EqualTo(2.0f));
+        Assert.That(result.Tangent[2], Is.EqualTo(3.0f));
+        Assert.That(result.Tangent[3], Is.EqualTo(3.0f));
+        Assert.That(result.Tangent[4], Is.EqualTo(2.0f));
+        Assert.That(result.Tangent[7], Is.EqualTo(3.0f));
+    }
+
+    [Test]
+    public void BroadcastMultiply_BothTangents_SumsContributions()
+    {
+        var input = From3D(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var scale = ForwardGradTensor<float>.FromArray(new float[] { 2f, 3f }, new float[] { 1f, 1f });
+
+        var result = ForwardGradOperations.BroadcastMultiply(input, scale);
+
+        Assert.That(result.Tangent![0], Is.EqualTo(3.0f));
+        Assert.That(result.Tangent![1], Is.EqualTo(4.0f));
+        Assert.That(result.Tangent![2], Is.EqualTo(6.0f));
+        Assert.That(result.Tangent![3], Is.EqualTo(7.0f));
+    }
+
+    [Test]
+    public void BroadcastAdd_AddsChannelBias()
+    {
+        var input = From3D(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2);
+        var bias = ForwardGradTensor<float>.FromArray(new float[] { 2f, 3f });
+
+        var result = ForwardGradOperations.BroadcastAdd(input, bias);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2, 2 }));
+        Assert.That(result[0], Is.EqualTo(3.0f));
+        Assert.That(result[1], Is.EqualTo(4.0f));
+        Assert.That(result[2], Is.EqualTo(6.0f));
+        Assert.That(result[3], Is.EqualTo(7.0f));
+        Assert.That(result[4], Is.EqualTo(7.0f));
+        Assert.That(result[5], Is.EqualTo(8.0f));
+        Assert.That(result[6], Is.EqualTo(10.0f));
+        Assert.That(result[7], Is.EqualTo(11.0f));
+    }
+
+    [Test]
+    public void BroadcastAdd_BiasTangent_Broadcasts()
+    {
+        var input = From3D(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var bias = ForwardGradTensor<float>.FromArray(new float[] { 2f, 3f }, new float[] { 1f, 1f });
+
+        var result = ForwardGradOperations.BroadcastAdd(input, bias);
+
+        for (int i = 0; i < 8; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(2.0f));
+    }
+
+    [Test]
+    public void BroadcastMultiply_ChannelMismatch_Throws()
+    {
+        var input = From3D(new float[8], 2, 2, 2);
+        var scale = ForwardGradTensor<float>.FromArray(new float[] { 1f, 2f, 3f });
+
+        Assert.Throws<ArgumentException>(() => ForwardGradOperations.BroadcastMultiply(input, scale));
+    }
+
+    #endregion
+
+    #region MultiHeadAttention
+
+    [Test]
+    public void MultiHeadAttention_ComputesOutputShape()
+    {
+        var query = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4);
+        var key = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 0f, 1f, 0f, 0f, 1f, 0f, 1f }, 2, 4);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 1f, 1f, 1f, 2f, 2f, 2f, 2f }, 2, 4);
+
+        var result = ForwardGradOperations.MultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 4 }));
+        Assert.That(result.RequiresTangent, Is.False);
+        Assert.That(result[0], Is.EqualTo(1.73106f).Within(1e-4f));
+        Assert.That(result[1], Is.EqualTo(1.73106f).Within(1e-4f));
+        Assert.That(result[4], Is.EqualTo(1.73106f).Within(1e-4f));
+        Assert.That(result[7], Is.EqualTo(1.73106f).Within(1e-4f));
+    }
+
+    [Test]
+    public void MultiHeadAttention_WithMask_ProducesFiniteOutput()
+    {
+        var query = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4);
+        var key = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 0f, 1f, 0f, 0f, 1f, 0f, 1f }, 2, 4);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 1f, 1f, 1f, 2f, 2f, 2f, 2f }, 2, 4);
+        var mask = ForwardGradTensor<float>.FromMatrix(
+            new float[] { float.NegativeInfinity, 0f, 0f, 0f }, 2, 2);
+
+        var result = ForwardGradOperations.MultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f, mask);
+
+        Assert.That(result.Length, Is.EqualTo(8));
+        foreach (var v in result.AsSpan())
+        {
+            Assert.That(float.IsNaN(v), Is.False);
+            Assert.That(float.IsInfinity(v), Is.False);
+        }
+    }
+
+    [Test]
+    public void MultiHeadAttention_QueryTangentSummedSoftmax_ZeroJvp()
+    {
+        // With t_Q = ones and t_K = t_V = 0, t_scores = ones; each softmax row sums to 1,
+        // so the softmax JVP is zero and t_out = 0.
+        var query = ForwardGradTensor<float>.FromMatrix(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 4,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var key = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 0f, 1f, 0f, 0f, 1f, 0f, 1f }, 2, 4);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[] { 1f, 1f, 1f, 1f, 2f, 2f, 2f, 2f }, 2, 4);
+
+        var result = ForwardGradOperations.MultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        Assert.That(result.Tangent, Is.Not.Null);
+        for (int i = 0; i < 8; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(0.0f).Within(1e-4f));
+    }
+
+    [Test]
+    public void MultiHeadAttention_InvalidMaskShape_Throws()
+    {
+        var query = ForwardGradTensor<float>.FromMatrix(new float[8], 2, 4);
+        var key = ForwardGradTensor<float>.FromMatrix(new float[8], 2, 4);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[8], 2, 4);
+        var mask = ForwardGradTensor<float>.FromMatrix(new float[2], 1, 2);
+
+        Assert.Throws<ArgumentException>(() =>
+            ForwardGradOperations.MultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f, mask));
+    }
+
+    [Test]
+    public void MultiHeadAttention_WidthNotDivisible_Throws()
+    {
+        var query = ForwardGradTensor<float>.FromMatrix(new float[6], 2, 3);
+        var key = ForwardGradTensor<float>.FromMatrix(new float[6], 2, 3);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[6], 2, 3);
+
+        Assert.Throws<ArgumentException>(() =>
+            ForwardGradOperations.MultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f));
+    }
+
+    #endregion
+
+    #region BatchedMultiHeadAttention
+
+    [Test]
+    public void BatchedMultiHeadAttention_ComputesOutputShape()
+    {
+        // D=2, numHeads=2 → headDim=1; softmax of scores gives the expected values below.
+        var query = From3D(new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2);
+        var key = From3D(new float[] { 1f, 0f, 0f, 1f, 1f, 0f, 0f, 1f }, 2, 2, 2);
+        var value = From3D(new float[] { 1f, 1f, 2f, 2f, 1f, 1f, 2f, 2f }, 2, 2, 2);
+
+        var result = ForwardGradOperations.BatchedMultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f);
+
+        Assert.That(result.Shape, Is.EqualTo(new[] { 2, 2, 2 }));
+        Assert.That(result.RequiresTangent, Is.False);
+        Assert.That(result[0], Is.EqualTo(1.26894f).Within(1e-4f));
+        Assert.That(result[1], Is.EqualTo(1.88080f).Within(1e-4f));
+        Assert.That(result[2], Is.EqualTo(1.04743f).Within(1e-4f));
+        Assert.That(result[3], Is.EqualTo(1.98201f).Within(1e-4f));
+        Assert.That(result[7], Is.EqualTo(1.99966f).Within(1e-4f));
+    }
+
+    [Test]
+    public void BatchedMultiHeadAttention_QueryTangent_ZeroJvp()
+    {
+        // With K = ones, t_scores = scale * t_Q @ K^T = ones; ds is constant per key
+        // position, so the softmax JVP is zero and t_out = 0.
+        var query = From3D(
+            new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f }, 2, 2, 2,
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var key = From3D(
+            new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f }, 2, 2, 2);
+        var value = From3D(new float[] { 1f, 1f, 2f, 2f, 1f, 1f, 2f, 2f }, 2, 2, 2);
+
+        var result = ForwardGradOperations.BatchedMultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f);
+
+        Assert.That(result.RequiresTangent, Is.True);
+        for (int i = 0; i < 8; i++)
+            Assert.That(result.Tangent![i], Is.EqualTo(0.0f).Within(1e-4f));
+    }
+
+    [Test]
+    public void BatchedMultiHeadAttention_WrongRank_Throws()
+    {
+        var query = ForwardGradTensor<float>.FromMatrix(new float[4], 2, 2);
+        var key = ForwardGradTensor<float>.FromMatrix(new float[4], 2, 2);
+        var value = ForwardGradTensor<float>.FromMatrix(new float[4], 2, 2);
+
+        Assert.Throws<ArgumentException>(() =>
+            ForwardGradOperations.BatchedMultiHeadAttention(query, key, value, numHeads: 2, scale: 1.0f));
+    }
+
+    #endregion
 }

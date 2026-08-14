@@ -429,8 +429,24 @@ Mirrors `ReverseGradOperations` in structure. Each method computes the primal va
 | `Sum(a)` | `t_out = Σt_a` |
 | `Mean(a)` | `t_out = Σt_a / n` |
 | `Dropout(...)` | Tangent passes through kept positions, zeroed at dropped positions |
+| `MatMulTransposedB(a, b)` | `t_out = t_a @ bᵀ + a @ t_bᵀ` |
+| `TransposeAxes(a, axis1, axis2)` | `t_out = t_a transposed along the same axes` |
+| `Slice(a, start, length)` | `t_out = t_a[start .. start+length]` |
+| `Concat(tensors, axis)` | `t_out = concat of tangents along axis (zero-filled where a tangent is absent)` |
+| `Gather(source, indices, axis)` | `t_out = t_source[indices]` (indices are non-differentiable) |
+| `SparseEmbeddingBag(weight, indices, paddingIndex)` | `t_out = bag-mean/agg of t_weight at the selected rows` (indices non-differentiable) |
+| `GeluExact(a)` | `t_out = t_a * gelu_exact'(a)` |
+| `Pow(a, exponent)` | `t_out = t_a * exponent * a^(exponent-1)` |
+| `MeanPool(a, poolSize, embedDim)` | `t_out = pooled t_a / poolSize` (linear) |
+| `RMSNorm(a)` | `t_out = J·t_a` reusing the reverse backward kernel (symmetric Jacobian) |
+| `PerRowRMSNorm(a, rows, cols)` | `t_out = per-row J·t_a` reusing the reverse backward kernel |
+| `AddBias(a, bias)` | `t_out = t_a + broadcast(t_bias)` |
+| `BroadcastMultiply(input, scale)` | `t_out = t_input * scale + input * broadcast(t_scale)` |
+| `BroadcastAdd(input, bias)` | `t_out = t_input + broadcast(t_bias)` |
+| `MultiHeadAttention(q, k, v, numHeads, scale, mask)` | per-head `t_scores = scale·(t_Q @ Kᵀ + Q @ t_Kᵀ)`, `t_out = t_P @ V + P @ t_V` with an in-place softmax JVP (`SoftmaxBackwardRows`); `mask` is a non-differentiable constant |
+| `BatchedMultiHeadAttention(...)` | same rule as `MultiHeadAttention`, applied per batch element |
 
-All 21 operations in `ForwardGradOperations` also include `KlDivergence` and `SampleNormal` for VAE forward-mode workflows.
+All 40 operations in `ForwardGradOperations` also include `KlDivergence` and `SampleNormal` for VAE forward-mode workflows.
 
 ### When to use which
 

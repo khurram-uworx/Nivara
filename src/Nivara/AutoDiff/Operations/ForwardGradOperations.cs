@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn;
 using Nivara.Helpers;
 using System.Buffers;
 using System.Numerics;
@@ -320,6 +321,374 @@ public static class ForwardGradOperations
         return new ForwardGradTensor<T>(primal, tangent, resultShape);
     }
 
+    /// <summary>
+    /// Multiplies a matrix by the transpose of another: result = a @ b^T,
+    /// where b is [bCols, aCols] and the result is [aRows, bCols].
+    /// JVP: t_out = t_a @ B^T + A @ t_b^T
+    /// </summary>
+    public static ForwardGradTensor<T> MatMulTransposedB<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (b == null) throw new ArgumentNullException(nameof(b));
+        if (a.Rank != 2 || b.Rank != 2)
+            throw new ArgumentException("MatMulTransposedB requires rank-2 operands.");
+
+        var aRows = a.shape[0];
+        var aCols = a.shape[1];
+        var bCols = b.shape[0];
+        if (b.shape[1] != aCols)
+            throw new ArgumentException(
+                $"MatMulTransposedB dimension mismatch: a is {aRows}x{aCols}, b is {bCols}x{b.shape[1]}. " +
+                $"b's column count ({b.shape[1]}) must equal a's column count ({aCols}).");
+
+        a.Data.TryGetSpan(out var aSpan);
+        b.Data.TryGetSpan(out var bSpan);
+        var primalArr = new T[aRows * bCols];
+        GradKernels.MatMulTransposedB(aSpan, bSpan, primalArr, aRows, aCols, bCols);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
+        var resultShape = new[] { aRows, bCols };
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent || b.RequiresTangent)
+        {
+            var aTan = a.Tangent;
+            var bTan = b.Tangent;
+
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tAB = new T[aRows * bCols];
+                GradKernels.MatMulTransposedB(aTanSpan, bSpan, tAB, aRows, aCols, bCols);
+                var aTB = new T[aRows * bCols];
+                GradKernels.MatMulTransposedB(aSpan, bTanSpan, aTB, aRows, aCols, bCols);
+                var tanArr = new T[aRows * bCols];
+                TensorPrimitives.Add(tAB, aTB, tanArr);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                var tanArr = new T[aRows * bCols];
+                GradKernels.MatMulTransposedB(aTanSpan, bSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[aRows * bCols];
+                GradKernels.MatMulTransposedB(aSpan, bTanSpan, tanArr, aRows, aCols, bCols);
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, resultShape);
+    }
+
+    /// <summary>
+    /// Transposes a rank-2 or rank-3 tensor by swapping two axes.
+    /// JVP: t_out = TransposeAxes(t_a)
+    /// </summary>
+    public static ForwardGradTensor<T> TransposeAxes<T>(ForwardGradTensor<T> a, int axis1, int axis2)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (a.Rank < 2 || a.Rank > 3)
+            throw new ArgumentException($"TransposeAxes supports rank 2–3, got rank {a.Rank}", nameof(a));
+        if (axis1 < 0 || axis1 >= a.Rank) throw new ArgumentOutOfRangeException(nameof(axis1));
+        if (axis2 < 0 || axis2 >= a.Rank) throw new ArgumentOutOfRangeException(nameof(axis2));
+        if (axis1 == axis2) throw new ArgumentException("axis1 and axis2 must differ");
+
+        var srcDims = a.shape;
+        var dstDims = (int[])srcDims.Clone();
+        (dstDims[axis1], dstDims[axis2]) = (dstDims[axis2], dstDims[axis1]);
+
+        var srcData = new T[a.Length];
+        a.Data.TryGetSpan(out var srcSpan);
+        srcSpan.CopyTo(srcData);
+        var dstData = TransposeAxesData(srcData, srcDims, dstDims, axis1, axis2);
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(dstData);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var tanSpan);
+            var tanData = new T[a.Length];
+            tanSpan.CopyTo(tanData);
+            var tanDst = TransposeAxesData(tanData, srcDims, dstDims, axis1, axis2);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanDst);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, dstDims);
+    }
+
+    #endregion
+
+    #region Selection Operations
+
+    /// <summary>
+    /// Extracts a contiguous slice from a 1D or row-vector tensor.
+    /// Input shape: [1, n] or [n]; output shape: [1, length] or [length].
+    /// JVP: t_out = Slice(t_a, start, length)
+    /// </summary>
+    public static ForwardGradTensor<T> Slice<T>(ForwardGradTensor<T> a, int start, int length)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (start < 0) throw new ArgumentOutOfRangeException(nameof(start));
+        if (length <= 0) throw new ArgumentOutOfRangeException(nameof(length));
+
+        int fullDim = a.shape.Length == 2 ? a.shape[1] : a.Length;
+        int batchDim = a.shape.Length == 2 ? a.shape[0] : 1;
+
+        if (start + length > a.Length)
+            throw new ArgumentException($"Slice ({start}..{start + length}) exceeds tensor length {a.Length}");
+        if (start + length > fullDim)
+            throw new ArgumentException($"Slice ({start}..{start + length}) exceeds dimension size {fullDim}");
+
+        int resultLen = batchDim * length;
+        var resultValues = new T[resultLen];
+        var srcData = new T[a.Length];
+        a.Data.CopyTo(srcData, default(T)!);
+        for (int r = 0; r < batchDim; r++)
+            Array.Copy(srcData, r * fullDim + start, resultValues, r * length, length);
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
+        var resultShape = batchDim == 1
+            ? new[] { length }
+            : new[] { batchDim, length };
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var tanSpan);
+            var tanValues = new T[resultLen];
+            for (int r = 0; r < batchDim; r++)
+                tanSpan.Slice(r * fullDim + start, length).CopyTo(tanValues.AsSpan(r * length));
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanValues);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, resultShape);
+    }
+
+    /// <summary>
+    /// Concatenates 1D or 2D tensors along an axis. For 2D input, axis 0 joins rows and
+    /// axis 1 joins columns.
+    /// JVP: t_out = Concat(t_a_i), where inputs without a tangent contribute zeros.
+    /// </summary>
+    public static ForwardGradTensor<T> Concat<T>(ForwardGradTensor<T>[] tensors, int axis = 0)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (tensors == null || tensors.Length == 0)
+            throw new ArgumentException("At least one tensor is required for Concat.", nameof(tensors));
+        if (tensors.Length == 1)
+            return tensors[0];
+
+        int rank = tensors[0].Rank;
+        if (rank < 1 || rank > 2)
+            throw new ArgumentException($"Concat supports 1D or 2D tensors, got rank {rank}.");
+
+        for (int i = 1; i < tensors.Length; i++)
+        {
+            if (tensors[i].Rank != rank)
+                throw new ArgumentException(
+                    $"All tensors must have the same rank. Tensor 0 has rank {rank}, tensor {i} has rank {tensors[i].Rank}.");
+
+            if (rank == 2 && axis == 1 && tensors[i].shape[0] != tensors[0].shape[0])
+                throw new ArgumentException(
+                    $"For axis=1 concatenation, all tensors must have the same number of rows. " +
+                    $"Tensor 0 has {tensors[0].shape[0]} rows, tensor {i} has {tensors[i].shape[0]} rows.");
+
+            if (rank == 2 && axis == 0 && tensors[i].shape[1] != tensors[0].shape[1])
+                throw new ArgumentException(
+                    $"For axis=0 concatenation, all tensors must have the same number of columns. " +
+                    $"Tensor 0 has {tensors[0].shape[1]} columns, tensor {i} has {tensors[i].shape[1]} columns.");
+        }
+
+        var shapes = new int[tensors.Length][];
+        for (int i = 0; i < tensors.Length; i++)
+            shapes[i] = tensors[i].shape;
+
+        var dataCols = new NivaraColumn<T>[tensors.Length];
+        for (int i = 0; i < tensors.Length; i++)
+            dataCols[i] = tensors[i].Data;
+
+        var resultData = ConcatColumns(dataCols, shapes, axis, rank);
+        var resultShape = rank == 1
+            ? new[] { resultData.Length }
+            : axis == 0
+                ? new[] { tensors.Sum(t => t.shape[0]), tensors[0].shape[1] }
+                : new[] { tensors[0].shape[0], tensors.Sum(t => t.shape[1]) };
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultData);
+
+        NivaraColumn<T>? tangent = null;
+        if (tensors.Any(t => t.RequiresTangent))
+        {
+            var tanCols = new NivaraColumn<T>[tensors.Length];
+            for (int i = 0; i < tensors.Length; i++)
+            {
+                var tan = tensors[i].Tangent;
+                if (tan != null)
+                    tanCols[i] = tan;
+                else
+                    tanCols[i] = NivaraColumn<T>.Create(new T[tensors[i].Length]);
+            }
+            var tanData = ConcatColumns(tanCols, shapes, axis, rank);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanData);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, resultShape);
+    }
+
+    /// <summary>
+    /// Selects rows from a source tensor by integer index along axis 0.
+    /// source shape: [N, ...], indices length: L → result shape: [L, ...].
+    /// JVP: t_out = Gather(t_source, indices, axis)
+    /// </summary>
+    public static ForwardGradTensor<T> Gather<T>(ForwardGradTensor<T> source, int[] indices, int axis = 0)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (source == null) throw new ArgumentNullException(nameof(source));
+        if (indices == null) throw new ArgumentNullException(nameof(indices));
+        if (axis != 0) throw new ArgumentOutOfRangeException(nameof(axis), "Only axis 0 is currently supported.");
+        if (indices.Length == 0)
+            return new ForwardGradTensor<T>(
+                NivaraColumn<T>.Create(Array.Empty<T>()),
+                tangent: null,
+                new[] { 0 });
+
+        int sourceRowCount = source.shape[0];
+        int stride = source.Length / sourceRowCount;
+
+        for (int i = 0; i < indices.Length; i++)
+        {
+            if (indices[i] < 0 || indices[i] >= sourceRowCount)
+                throw new ArgumentOutOfRangeException(
+                    nameof(indices),
+                    $"Index at position {i} is {indices[i]}, must be in range [0, {sourceRowCount}).");
+        }
+
+        int resultLen = indices.Length * stride;
+        var resultValues = new T[resultLen];
+
+        source.Data.TryGetSpan(out var span);
+        for (int i = 0; i < indices.Length; i++)
+        {
+            int srcOffset = indices[i] * stride;
+            int dstOffset = i * stride;
+            span.Slice(srcOffset, stride).CopyTo(resultValues.AsSpan(dstOffset, stride));
+        }
+
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
+
+        var resultShape = new int[source.shape.Length];
+        resultShape[0] = indices.Length;
+        for (int d = 1; d < source.shape.Length; d++)
+            resultShape[d] = source.shape[d];
+
+        NivaraColumn<T>? tangent = null;
+        if (source.RequiresTangent && source.Tangent != null)
+        {
+            source.Tangent.TryGetSpan(out var tanSpan);
+            var tanValues = new T[resultLen];
+            for (int i = 0; i < indices.Length; i++)
+            {
+                int srcOffset = indices[i] * stride;
+                int dstOffset = i * stride;
+                tanSpan.Slice(srcOffset, stride).CopyTo(tanValues.AsSpan(dstOffset, stride));
+            }
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanValues);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, resultShape);
+    }
+
+    /// <summary>
+    /// Embedding-bag: sums the rows of a [numEmbeddings, embeddingDim] weight tensor
+    /// selected by 2D integer indices, producing [batchSize, embeddingDim]. Positions
+    /// equal to <paramref name="paddingIndex"/> are skipped. Indices are not differentiable;
+    /// JVP: t_out = SparseEmbeddingBag(t_weight, indices, paddingIndex).
+    /// </summary>
+    public static ForwardGradTensor<T> SparseEmbeddingBag<T>(
+        ForwardGradTensor<T> weight,
+        ForwardGradTensor<T> indices,
+        int paddingIndex = -1)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (weight == null) throw new ArgumentNullException(nameof(weight));
+        if (indices == null) throw new ArgumentNullException(nameof(indices));
+        if (weight.Rank != 2)
+            throw new ArgumentException("SparseEmbeddingBag weight must be a 2D tensor.", nameof(weight));
+        if (indices.Rank != 2)
+            throw new ArgumentException("SparseEmbeddingBag indices must be a 2D tensor.", nameof(indices));
+
+        int numEmbeddings = weight.shape[0];
+        int embeddingDim = weight.shape[1];
+        int batchSize = indices.shape[0];
+        int maxActiveFeatures = indices.shape[1];
+
+        var parsedIndices = new int[indices.Length];
+        for (int i = 0; i < indices.Length; i++)
+        {
+            int index = int.CreateChecked(indices.Data[i]);
+            if (index != paddingIndex && ((uint)index >= (uint)numEmbeddings))
+                throw new ArgumentOutOfRangeException(
+                    nameof(indices),
+                    $"Index at position {i} is {index}, must be {paddingIndex} or in range [0, {numEmbeddings}).");
+
+            parsedIndices[i] = index;
+        }
+
+        var resultValues = new T[batchSize * embeddingDim];
+        var weightSpan = weight.Data.AsSpan();
+        for (int batch = 0; batch < batchSize; batch++)
+        {
+            int indexBase = batch * maxActiveFeatures;
+            int outputBase = batch * embeddingDim;
+
+            for (int slot = 0; slot < maxActiveFeatures; slot++)
+            {
+                int index = parsedIndices[indexBase + slot];
+                if (index == paddingIndex)
+                    continue;
+
+                int weightBase = index * embeddingDim;
+                var src = weightSpan.Slice(weightBase, embeddingDim);
+                var dst = resultValues.AsSpan().Slice(outputBase, embeddingDim);
+                TensorPrimitives.Add(src, dst, dst);
+            }
+        }
+
+        var resultColumn = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
+
+        NivaraColumn<T>? tangent = null;
+        if (weight.RequiresTangent && weight.Tangent != null)
+        {
+            weight.Tangent.TryGetSpan(out var tanSpan);
+            var tanValues = new T[batchSize * embeddingDim];
+            for (int batch = 0; batch < batchSize; batch++)
+            {
+                int indexBase = batch * maxActiveFeatures;
+                int outputBase = batch * embeddingDim;
+
+                for (int slot = 0; slot < maxActiveFeatures; slot++)
+                {
+                    int index = parsedIndices[indexBase + slot];
+                    if (index == paddingIndex)
+                        continue;
+
+                    int weightBase = index * embeddingDim;
+                    var src = tanSpan.Slice(weightBase, embeddingDim);
+                    var dst = tanValues.AsSpan().Slice(outputBase, embeddingDim);
+                    TensorPrimitives.Add(src, dst, dst);
+                }
+            }
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanValues);
+        }
+
+        return new ForwardGradTensor<T>(resultColumn, tangent, new[] { batchSize, embeddingDim });
+    }
+
     #endregion
 
     #region Reduction Operations
@@ -381,6 +750,65 @@ public static class ForwardGradOperations
         return new ForwardGradTensor<T>(resultData, tangent, ScalarShape());
     }
 
+    /// <summary>
+    /// Reduces a tensor by averaging non-overlapping pools: input is [batch*poolSize, embedDim]
+    /// flattened, output is [batchSize, embedDim].
+    /// JVP: t_out = MeanPool(t_a, poolSize, embedDim) — the pooling transform is linear.
+    /// </summary>
+    public static ForwardGradTensor<T> MeanPool<T>(ForwardGradTensor<T> a, int poolSize, int embedDim)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (poolSize <= 0) throw new ArgumentOutOfRangeException(nameof(poolSize));
+        if (embedDim <= 0) throw new ArgumentOutOfRangeException(nameof(embedDim));
+        if (a.Length == 0) throw new InvalidOperationException("Cannot mean-pool an empty tensor.");
+        if (a.Length % (poolSize * embedDim) != 0)
+            throw new ArgumentException(
+                $"Tensor length {a.Length} is not divisible by poolSize*embedDim = {poolSize * embedDim}.");
+
+        int batchSize = a.Length / (poolSize * embedDim);
+        T tPoolSize = T.CreateChecked(poolSize);
+
+        var src = new T[a.Length];
+        a.Data.CopyTo(src, default(T)!);
+
+        var resultValues = new T[batchSize * embedDim];
+        for (int b = 0; b < batchSize; b++)
+        {
+            int rowOffset = b * poolSize * embedDim;
+            for (int d = 0; d < embedDim; d++)
+            {
+                T sum = T.Zero;
+                for (int l = 0; l < poolSize; l++)
+                    sum += src[rowOffset + l * embedDim + d];
+                resultValues[b * embedDim + d] = sum / tPoolSize;
+            }
+        }
+
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var tanSpan);
+            var tanValues = new T[batchSize * embedDim];
+            for (int b = 0; b < batchSize; b++)
+            {
+                int rowOffset = b * poolSize * embedDim;
+                for (int d = 0; d < embedDim; d++)
+                {
+                    T sum = T.Zero;
+                    for (int l = 0; l < poolSize; l++)
+                        sum += tanSpan[rowOffset + l * embedDim + d];
+                    tanValues[b * embedDim + d] = sum / tPoolSize;
+                }
+            }
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanValues);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, new[] { batchSize, embedDim });
+    }
+
     #endregion
 
     #region Activation Functions
@@ -429,6 +857,31 @@ public static class ForwardGradOperations
             a.Tangent.TryGetSpan(out var aTanSpan);
             var tanArr = new T[a.Length];
             GradKernels.GeluGradient(aSpan, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
+    /// <summary>
+    /// Applies the exact Gaussian error linear unit (erf-based).
+    /// JVP: t_out = GeluExactGradient(a) * t_a
+    /// </summary>
+    public static ForwardGradTensor<T> GeluExact<T>(ForwardGradTensor<T> a)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var resultArr = new T[a.Length];
+        GradKernels.GeluExact(a.AsSpan(), resultArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(resultArr);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.GeluExactGradient(a.AsSpan(), aTanSpan, tanArr);
             tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
@@ -639,6 +1092,24 @@ public static class ForwardGradOperations
     }
 
     /// <summary>
+    /// Raises each element to a scalar power: result[i] = a[i]^exponent.
+    /// JVP: t_out = exponent * a^(exponent-1) * t_a
+    /// </summary>
+    public static ForwardGradTensor<T> Pow<T>(ForwardGradTensor<T> a, double exponent)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var primal = GradOperationKernels.ApplyPow(a.Data, exponent);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+            tangent = GradOperationKernels.ApplyPowGradient(a.Data, a.Tangent, exponent);
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
+    /// <summary>
     /// Applies the Softmax function along the last dimension.
     /// JVP: s ⊙ (t_a - Σ(s * t_a)) where s = softmax(a)
     /// The Jacobian is symmetric, so SoftmaxGradient(result, t_a, dim) computes the JVP.
@@ -728,14 +1199,701 @@ public static class ForwardGradOperations
                 nameof(keepMask));
 
         var savedMask = keepMask.ToArray();
-        var primal = ApplyDropout(input.Data, savedMask, scale);
+        var primal = GradOperationKernels.ApplyDropout(input.Data, savedMask, scale);
         NivaraColumn<T>? tangent = null;
         if (input.RequiresTangent && input.Tangent != null)
         {
-            tangent = ApplyDropoutTangent(input.Data, input.Tangent, savedMask, scale);
+            tangent = GradOperationKernels.ApplyDropoutGradient(input.Data, input.Tangent, savedMask, scale);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(input));
+    }
+
+    #endregion
+
+    #region Normalization Operations
+
+    /// <summary>
+    /// Applies RMS normalization: result[i] = input[i] / sqrt(mean(input^2) + eps).
+    /// The RMSNorm Jacobian is symmetric, so the JVP uses the reverse-mode gradient kernel.
+    /// JVP: t_out = ApplyRMSNormGradient(a, t_a, eps)
+    /// </summary>
+    public static ForwardGradTensor<T> RMSNorm<T>(ForwardGradTensor<T> a, double eps = 1e-5)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var primal = GradOperationKernels.ApplyRMSNorm(a.Data, eps);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+            tangent = GradOperationKernels.ApplyRMSNormGradient(a.Data, a.Tangent, eps);
+
+        return new ForwardGradTensor<T>(primal, tangent, a.shape);
+    }
+
+    /// <summary>
+    /// Applies RMS normalization independently to each row of a [rows, cols] tensor.
+    /// The per-row Jacobian is symmetric, so the JVP reuses the backward kernel.
+    /// JVP: t_out = PerRowRMSNormBackwardKernel(a, t_a, rows, cols, eps)
+    /// </summary>
+    public static ForwardGradTensor<T> PerRowRMSNorm<T>(ForwardGradTensor<T> a, int rows, int cols, double eps = 1e-5)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var srcData = new T[a.Length];
+        a.Data.CopyTo(srcData, default(T)!);
+        var resultData = new T[rows * cols];
+        RMSNormKernel<T>.PerRowRMSNormForwardKernel(srcData, resultData, rows, cols, eps);
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultData);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            var tanSrc = new T[a.Length];
+            a.Tangent.CopyTo(tanSrc, default(T)!);
+            var tanResult = new T[rows * cols];
+            RMSNormKernel<T>.PerRowRMSNormBackwardKernel(srcData, tanSrc, tanResult, rows, cols, eps);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanResult);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, a.Shape);
+    }
+
+    #endregion
+
+    #region Broadcasting Operations
+
+    /// <summary>
+    /// Adds a per-column bias to each row of a matrix: result[i, j] = a[i, j] + bias[j].
+    /// JVP: t_out = t_a + broadcast(t_bias)
+    /// </summary>
+    public static ForwardGradTensor<T> AddBias<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> bias)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (bias == null) throw new ArgumentNullException(nameof(bias));
+
+        if (a.Rank != 2)
+            throw new ArgumentException($"AddBias expects a matrix (rank 2) input, got rank {a.Rank}", nameof(a));
+
+        var rows = a.shape[0];
+        var cols = a.shape[1];
+        if (bias.Length != cols)
+            throw new ArgumentException($"AddBias bias length ({bias.Length}) must equal the input column count ({cols}).");
+
+        var aSpan = a.AsSpan();
+        var biasSpan = bias.AsSpan();
+        var resultArr = new T[a.Length];
+        for (int r = 0; r < rows; r++)
+        {
+            var resultRow = resultArr.AsSpan(r * cols, cols);
+            TensorPrimitives.Add(aSpan.Slice(r * cols, cols), biasSpan, resultRow);
+        }
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(resultArr);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent || bias.RequiresTangent)
+        {
+            var aTan = a.Tangent;
+            var bTan = bias.Tangent;
+
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[a.Length];
+                for (int r = 0; r < rows; r++)
+                {
+                    var row = tanArr.AsSpan(r * cols, cols);
+                    TensorPrimitives.Add(aTanSpan.Slice(r * cols, cols), bTanSpan, row);
+                }
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                tangent = aTan;
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[a.Length];
+                for (int r = 0; r < rows; r++)
+                    bTanSpan.CopyTo(tanArr.AsSpan(r * cols, cols));
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, a.shape);
+    }
+
+    /// <summary>
+    /// Broadcasts a per-channel scale across a 2D+ input:
+    /// result[i, c, ...] = input[i, c, ...] * scale[c].
+    /// JVP: t_out = t_input * scale + input * broadcast(t_scale)
+    /// </summary>
+    public static ForwardGradTensor<T> BroadcastMultiply<T>(ForwardGradTensor<T> input, ForwardGradTensor<T> scale)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (scale == null) throw new ArgumentNullException(nameof(scale));
+        if (input.Rank < 2) throw new ArgumentException($"Input must be at least 2D [batch, channels, ...], got {input.Rank}D");
+        if (scale.Rank != 1) throw new ArgumentException($"Scale must be 1D [channels], got {scale.Rank}D");
+
+        int c = input.shape[1];
+        if (scale.Length != c)
+            throw new ArgumentException($"Scale length ({scale.Length}) must match input channel dimension ({c})");
+
+        var inputData = new T[input.Length];
+        input.Data.CopyTo(inputData, T.Zero);
+        var scaleData = new T[c];
+        scale.Data.CopyTo(scaleData, T.Zero);
+
+        int channelStride = 1;
+        for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
+
+        var outputData = new T[input.Length];
+        for (int idx = 0; idx < input.Length; idx++)
+        {
+            int ch = (idx / channelStride) % c;
+            outputData[idx] = inputData[idx] * scaleData[ch];
+        }
+
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(outputData);
+
+        NivaraColumn<T>? tangent = null;
+        if (input.RequiresTangent || scale.RequiresTangent)
+        {
+            var tanData = new T[input.Length];
+            if (input.Tangent != null)
+            {
+                input.Tangent.TryGetSpan(out var inputTanSpan);
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanData[idx] = inputTanSpan[idx] * scaleData[ch];
+                }
+            }
+
+            if (scale.Tangent != null)
+            {
+                scale.Tangent.TryGetSpan(out var scaleTanSpan);
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanData[idx] += inputData[idx] * scaleTanSpan[ch];
+                }
+            }
+
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanData);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, input.shape);
+    }
+
+    /// <summary>
+    /// Broadcasts a per-channel bias across a 2D+ input: result[i, c, ...] = input[i, c, ...] + bias[c].
+    /// JVP: t_out = t_input + broadcast(t_bias)
+    /// </summary>
+    public static ForwardGradTensor<T> BroadcastAdd<T>(ForwardGradTensor<T> input, ForwardGradTensor<T> bias)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (bias == null) throw new ArgumentNullException(nameof(bias));
+        if (input.Rank < 2) throw new ArgumentException($"Input must be at least 2D [batch, channels, ...], got {input.Rank}D");
+        if (bias.Rank != 1) throw new ArgumentException($"Bias must be 1D [channels], got {bias.Rank}D");
+
+        int c = input.shape[1];
+        if (bias.Length != c)
+            throw new ArgumentException($"Bias length ({bias.Length}) must match input channel dimension ({c})");
+
+        var inputData = new T[input.Length];
+        input.Data.CopyTo(inputData, T.Zero);
+        var biasData = new T[c];
+        bias.Data.CopyTo(biasData, T.Zero);
+
+        int channelStride = 1;
+        for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
+
+        var outputData = new T[input.Length];
+        for (int idx = 0; idx < input.Length; idx++)
+        {
+            int ch = (idx / channelStride) % c;
+            outputData[idx] = inputData[idx] + biasData[ch];
+        }
+
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(outputData);
+
+        NivaraColumn<T>? tangent = null;
+        if (input.RequiresTangent || bias.RequiresTangent)
+        {
+            var aTan = input.Tangent;
+            var bTan = bias.Tangent;
+
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[input.Length];
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanArr[idx] = aTanSpan[idx] + bTanSpan[ch];
+                }
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                tangent = aTan;
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[input.Length];
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanArr[idx] = bTanSpan[ch];
+                }
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, input.shape);
+    }
+
+    #endregion
+
+    #region Attention Operations
+
+    /// <summary>
+    /// Multi-head scaled dot-product attention over single sequences. Query is
+    /// [qLen, D], key/value are [kvLen, D], output is [qLen, D] with D = numHeads * headDim.
+    /// Mask is an optional [qLen, kvLen] additive matrix (use <c>T.NegativeInfinity</c> to
+    /// suppress positions) and is a non-differentiable constant.
+    /// JVP: t_scores = scale * (t_Q @ K^T + Q @ t_K^T), t_P = SoftmaxBackwardRows(P, t_scores),
+    /// t_out = t_P @ V + P @ t_V.
+    /// </summary>
+    public static ForwardGradTensor<T> MultiHeadAttention<T>(
+        ForwardGradTensor<T> query,
+        ForwardGradTensor<T> key,
+        ForwardGradTensor<T> value,
+        int numHeads,
+        T scale,
+        ForwardGradTensor<T>? mask = null)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (query == null) throw new ArgumentNullException(nameof(query));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+        if (value == null) throw new ArgumentNullException(nameof(value));
+        if (numHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
+        if (query.Rank != 2)
+            throw new ArgumentException($"Query must be a matrix (rank 2), got rank {query.Rank}", nameof(query));
+        if (key.Rank != 2)
+            throw new ArgumentException($"Key must be a matrix (rank 2), got rank {key.Rank}", nameof(key));
+        if (value.Rank != 2)
+            throw new ArgumentException($"Value must be a matrix (rank 2), got rank {value.Rank}", nameof(value));
+
+        int qLen = query.shape[0];
+        int kvLen = key.shape[0];
+        int D = query.shape[1];
+        if (D % numHeads != 0)
+            throw new ArgumentException($"Query width ({D}) must be divisible by numHeads ({numHeads}).", nameof(query));
+        int headDim = D / numHeads;
+        if (key.shape[1] != D || value.shape[1] != D)
+            throw new ArgumentException($"Key/Value width must equal query width ({D}).");
+        if (key.shape[0] != value.shape[0])
+            throw new ArgumentException($"Key and Value row counts must match (got {key.shape[0]} vs {value.shape[0]}).");
+        if (mask != null && (mask.Rank != 2 || mask.shape[0] != qLen || mask.shape[1] != kvLen))
+            throw new ArgumentException($"Mask must be a {qLen}x{kvLen} additive matrix.");
+
+        bool trackTangent = query.RequiresTangent || key.RequiresTangent || value.RequiresTangent;
+        int scoreLen = qLen * kvLen;
+        int qHeadsLen = numHeads * qLen * headDim;
+        int kvHeadsLen = numHeads * kvLen * headDim;
+
+        var qSpan = query.AsSpan();
+        var kSpan = key.AsSpan();
+        var vSpan = value.AsSpan();
+        var maskSpan = mask != null ? mask.AsSpan() : ReadOnlySpan<T>.Empty;
+
+        var qHeads = ArrayPool<T>.Shared.Rent(Math.Max(qHeadsLen, 1));
+        var kHeads = ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1));
+        var vHeads = ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1));
+        var scores = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+        var outHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+        var tScores = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+        var tTemp = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+        var tOutHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+        var tOutPart = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+        try
+        {
+            AttentionKernels<T>.PackHeads(qSpan, qHeads.AsSpan(0, qHeadsLen), qLen, numHeads, headDim);
+            AttentionKernels<T>.PackHeads(kSpan, kHeads.AsSpan(0, kvHeadsLen), kvLen, numHeads, headDim);
+            AttentionKernels<T>.PackHeads(vSpan, vHeads.AsSpan(0, kvHeadsLen), kvLen, numHeads, headDim);
+
+            var output = new T[qLen * D];
+            T[]? savedWeights = trackTangent ? new T[numHeads * scoreLen] : null;
+
+            for (int h = 0; h < numHeads; h++)
+            {
+                var qh = qHeads.AsSpan(h * qLen * headDim, qLen * headDim);
+                var kh = kHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+                var vh = vHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+
+                GradKernels.MatMulTransposedB(qh, kh, scores, qLen, headDim, kvLen);
+                var scoresSpan = scores.AsSpan(0, scoreLen);
+                TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
+                if (!maskSpan.IsEmpty)
+                    TensorPrimitives.Add(scoresSpan, maskSpan, scoresSpan);
+
+                AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
+
+                if (savedWeights != null)
+                    scoresSpan.CopyTo(savedWeights.AsSpan(h * scoreLen, scoreLen));
+
+                GradKernels.MatMul(scores, vh, outHead, qLen, kvLen, headDim);
+                AttentionKernels<T>.ScatterHead(
+                    outHead.AsSpan(0, qLen * headDim), output.AsSpan(), qLen, D, h, headDim);
+            }
+
+            var primal = NivaraColumn<T>.CreateFromOwnedArray(output);
+
+            NivaraColumn<T>? tangent = null;
+            if (trackTangent)
+            {
+                var qTan = query.Tangent;
+                var kTan = key.Tangent;
+                var vTan = value.Tangent;
+
+                var qTanHeads = qTan != null ? ArrayPool<T>.Shared.Rent(Math.Max(qHeadsLen, 1)) : null;
+                var kTanHeads = kTan != null ? ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1)) : null;
+                var vTanHeads = vTan != null ? ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1)) : null;
+                try
+                {
+                    if (qTan != null)
+                        AttentionKernels<T>.PackHeads(qTan.AsSpan(), qTanHeads.AsSpan(0, qHeadsLen), qLen, numHeads, headDim);
+                    if (kTan != null)
+                        AttentionKernels<T>.PackHeads(kTan.AsSpan(), kTanHeads.AsSpan(0, kvHeadsLen), kvLen, numHeads, headDim);
+                    if (vTan != null)
+                        AttentionKernels<T>.PackHeads(vTan.AsSpan(), vTanHeads.AsSpan(0, kvHeadsLen), kvLen, numHeads, headDim);
+
+                    var tanOutput = new T[qLen * D];
+
+                    for (int h = 0; h < numHeads; h++)
+                    {
+                        var qh = qHeads.AsSpan(h * qLen * headDim, qLen * headDim);
+                        var kh = kHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+                        var vh = vHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+                        var pHead = savedWeights.AsSpan(h * scoreLen, scoreLen);
+
+                        var tScoresSpan = tScores.AsSpan(0, scoreLen);
+                        if (qTan != null)
+                        {
+                            var qTh = qTanHeads.AsSpan(h * qLen * headDim, qLen * headDim);
+                            GradKernels.MatMulTransposedB(qTh, kh, tScores, qLen, headDim, kvLen);
+                            if (kTan != null)
+                            {
+                                var kTh = kTanHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+                                GradKernels.MatMulTransposedB(qh, kTh, tTemp, qLen, headDim, kvLen);
+                                TensorPrimitives.Add(tScoresSpan, tTemp.AsSpan(0, scoreLen), tScoresSpan);
+                            }
+                        }
+                        else if (kTan != null)
+                        {
+                            var kTh = kTanHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+                            GradKernels.MatMulTransposedB(qh, kTh, tScores, qLen, headDim, kvLen);
+                        }
+                        else
+                        {
+                            tScoresSpan.Clear();
+                        }
+
+                        TensorPrimitives.Multiply(tScoresSpan, scale, tScoresSpan);
+                        AttentionKernels<T>.SoftmaxBackwardRows(pHead, tScoresSpan, qLen, kvLen);
+
+                        var tOutSpan = tOutHead.AsSpan(0, qLen * headDim);
+                        GradKernels.MatMul(tScores, vh, tOutHead, qLen, kvLen, headDim);
+                        if (vTan != null)
+                        {
+                            var vTh = vTanHeads.AsSpan(h * kvLen * headDim, kvLen * headDim);
+                            GradKernels.MatMul(tScores, vTh, tOutPart, qLen, kvLen, headDim);
+                            TensorPrimitives.Add(tOutSpan, tOutPart.AsSpan(0, qLen * headDim), tOutSpan);
+                        }
+
+                        AttentionKernels<T>.ScatterHead(tOutSpan, tanOutput.AsSpan(), qLen, D, h, headDim);
+                    }
+
+                    tangent = NivaraColumn<T>.CreateFromOwnedArray(tanOutput);
+                }
+                finally
+                {
+                    if (qTanHeads != null) ArrayPool<T>.Shared.Return(qTanHeads, clearArray: true);
+                    if (kTanHeads != null) ArrayPool<T>.Shared.Return(kTanHeads, clearArray: true);
+                    if (vTanHeads != null) ArrayPool<T>.Shared.Return(vTanHeads, clearArray: true);
+                }
+            }
+
+            return new ForwardGradTensor<T>(primal, tangent, new[] { qLen, D });
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(qHeads, clearArray: true);
+            ArrayPool<T>.Shared.Return(kHeads, clearArray: true);
+            ArrayPool<T>.Shared.Return(vHeads, clearArray: true);
+            ArrayPool<T>.Shared.Return(scores, clearArray: true);
+            ArrayPool<T>.Shared.Return(outHead, clearArray: true);
+            ArrayPool<T>.Shared.Return(tScores, clearArray: true);
+            ArrayPool<T>.Shared.Return(tTemp, clearArray: true);
+            ArrayPool<T>.Shared.Return(tOutHead, clearArray: true);
+            ArrayPool<T>.Shared.Return(tOutPart, clearArray: true);
+        }
+    }
+
+    /// <summary>
+    /// Batched multi-head scaled dot-product attention: query is [B, qLen, D],
+    /// key/value are [B, kvLen, D], output is [B, qLen, D] with D = numHeads * headDim.
+    /// Each batch element runs the identical per-head fused kernel as
+    /// <see cref="MultiHeadAttention{T}"/>. Mask is an optional [B, qLen, kvLen]
+    /// additive tensor (non-differentiable constant).
+    /// </summary>
+    public static ForwardGradTensor<T> BatchedMultiHeadAttention<T>(
+        ForwardGradTensor<T> query,
+        ForwardGradTensor<T> key,
+        ForwardGradTensor<T> value,
+        int numHeads,
+        T scale,
+        ForwardGradTensor<T>? mask = null)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (query == null) throw new ArgumentNullException(nameof(query));
+        if (key == null) throw new ArgumentNullException(nameof(key));
+        if (value == null) throw new ArgumentNullException(nameof(value));
+        if (numHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
+        if (query.Rank != 3)
+            throw new ArgumentException($"Query must be [B, L, D] (rank 3), got rank {query.Rank}", nameof(query));
+        if (key.Rank != 3)
+            throw new ArgumentException($"Key must be [B, L, D] (rank 3), got rank {key.Rank}", nameof(key));
+        if (value.Rank != 3)
+            throw new ArgumentException($"Value must be [B, L, D] (rank 3), got rank {value.Rank}", nameof(value));
+
+        int batch = query.shape[0];
+        int qLen = query.shape[1];
+        int kvLen = key.shape[1];
+        int D = query.shape[2];
+        if (D % numHeads != 0)
+            throw new ArgumentException($"Query width ({D}) must be divisible by numHeads ({numHeads}).", nameof(query));
+        int headDim = D / numHeads;
+        if (key.shape[2] != D || value.shape[2] != D)
+            throw new ArgumentException($"Key/Value width must equal query width ({D}).");
+        if (key.shape[0] != batch || value.shape[0] != batch)
+            throw new ArgumentException($"Key/Value batch size must equal query batch size ({batch}).");
+        if (key.shape[1] != value.shape[1])
+            throw new ArgumentException($"Key and Value sequence lengths must match (got {key.shape[1]} vs {value.shape[1]}).");
+        if (mask != null && (mask.Rank != 3 || mask.shape[0] != batch || mask.shape[1] != qLen || mask.shape[2] != kvLen))
+            throw new ArgumentException($"Mask must be a {batch}x{qLen}x{kvLen} additive tensor.");
+
+        bool trackTangent = query.RequiresTangent || key.RequiresTangent || value.RequiresTangent;
+        int scoreLen = qLen * kvLen;
+        int qHeadsLen = numHeads * qLen * headDim;
+        int kvHeadsLen = numHeads * kvLen * headDim;
+        int qRowLen = qLen * D;
+        int kvRowLen = kvLen * D;
+
+        var qSpan = query.AsSpan();
+        var kSpan = key.AsSpan();
+        var vSpan = value.AsSpan();
+
+        var qHeads = ArrayPool<T>.Shared.Rent(Math.Max(batch * qHeadsLen, 1));
+        var kHeads = ArrayPool<T>.Shared.Rent(Math.Max(batch * kvHeadsLen, 1));
+        var vHeads = ArrayPool<T>.Shared.Rent(Math.Max(batch * kvHeadsLen, 1));
+        try
+        {
+            for (int b = 0; b < batch; b++)
+            {
+                AttentionKernels<T>.PackHeads(
+                    qSpan.Slice(b * qRowLen, qRowLen),
+                    qHeads.AsSpan(b * qHeadsLen, qHeadsLen), qLen, numHeads, headDim);
+                AttentionKernels<T>.PackHeads(
+                    kSpan.Slice(b * kvRowLen, kvRowLen),
+                    kHeads.AsSpan(b * kvHeadsLen, kvHeadsLen), kvLen, numHeads, headDim);
+                AttentionKernels<T>.PackHeads(
+                    vSpan.Slice(b * kvRowLen, kvRowLen),
+                    vHeads.AsSpan(b * kvHeadsLen, kvHeadsLen), kvLen, numHeads, headDim);
+            }
+
+            var output = new T[batch * qLen * D];
+            T[]? savedWeights = trackTangent ? new T[batch * numHeads * scoreLen] : null;
+
+            for (int b = 0; b < batch; b++)
+            {
+                var maskSpan = mask != null ? mask.AsSpan() : ReadOnlySpan<T>.Empty;
+                var scores = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                var outHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                try
+                {
+                    var qhBatch = qHeads.AsSpan(b * qHeadsLen, qHeadsLen);
+                    var kvhBatch = kHeads.AsSpan(b * kvHeadsLen, kvHeadsLen);
+                    var vBatch = vHeads.AsSpan(b * kvHeadsLen, kvHeadsLen);
+                    int outOff = b * qLen * D;
+                    int wOff = b * numHeads * scoreLen;
+
+                    for (int h = 0; h < numHeads; h++)
+                    {
+                        var qh = qhBatch.Slice(h * qLen * headDim, qLen * headDim);
+                        var kh = kvhBatch.Slice(h * kvLen * headDim, kvLen * headDim);
+                        var vh = vBatch.Slice(h * kvLen * headDim, kvLen * headDim);
+
+                        GradKernels.MatMulTransposedB(qh, kh, scores, qLen, headDim, kvLen);
+                        var scoresSpan = scores.AsSpan(0, scoreLen);
+                        TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
+                        if (!maskSpan.IsEmpty)
+                            TensorPrimitives.Add(scoresSpan, maskSpan.Slice(b * scoreLen, scoreLen), scoresSpan);
+
+                        AttentionKernels<T>.SoftmaxRows(scoresSpan, qLen, kvLen);
+
+                        if (savedWeights != null)
+                            scoresSpan.CopyTo(savedWeights.AsSpan(wOff + h * scoreLen, scoreLen));
+
+                        GradKernels.MatMul(scores, vh, outHead, qLen, kvLen, headDim);
+                        AttentionKernels<T>.ScatterHead(
+                            outHead.AsSpan(0, qLen * headDim), output.AsSpan(outOff, qLen * D), qLen, D, h, headDim);
+                    }
+                }
+                finally
+                {
+                    ArrayPool<T>.Shared.Return(scores, clearArray: true);
+                    ArrayPool<T>.Shared.Return(outHead, clearArray: true);
+                }
+            }
+
+            var primal = NivaraColumn<T>.CreateFromOwnedArray(output);
+
+            NivaraColumn<T>? tangent = null;
+            if (trackTangent)
+            {
+                var qTan = query.Tangent;
+                var kTan = key.Tangent;
+                var vTan = value.Tangent;
+
+                var qTanHeads = qTan != null ? ArrayPool<T>.Shared.Rent(Math.Max(batch * qHeadsLen, 1)) : null;
+                var kTanHeads = kTan != null ? ArrayPool<T>.Shared.Rent(Math.Max(batch * kvHeadsLen, 1)) : null;
+                var vTanHeads = vTan != null ? ArrayPool<T>.Shared.Rent(Math.Max(batch * kvHeadsLen, 1)) : null;
+                try
+                {
+                    if (qTan != null)
+                    {
+                        qTan.TryGetSpan(out var qTanSpan);
+                        for (int b = 0; b < batch; b++)
+                            AttentionKernels<T>.PackHeads(
+                                qTanSpan.Slice(b * qRowLen, qRowLen),
+                                qTanHeads.AsSpan(b * qHeadsLen, qHeadsLen), qLen, numHeads, headDim);
+                    }
+                    if (kTan != null)
+                    {
+                        kTan.TryGetSpan(out var kTanSpan);
+                        for (int b = 0; b < batch; b++)
+                            AttentionKernels<T>.PackHeads(
+                                kTanSpan.Slice(b * kvRowLen, kvRowLen),
+                                kTanHeads.AsSpan(b * kvHeadsLen, kvHeadsLen), kvLen, numHeads, headDim);
+                    }
+                    if (vTan != null)
+                    {
+                        vTan.TryGetSpan(out var vTanSpan);
+                        for (int b = 0; b < batch; b++)
+                            AttentionKernels<T>.PackHeads(
+                                vTanSpan.Slice(b * kvRowLen, kvRowLen),
+                                vTanHeads.AsSpan(b * kvHeadsLen, kvHeadsLen), kvLen, numHeads, headDim);
+                    }
+
+                    var tanOutput = new T[batch * qLen * D];
+
+                    for (int b = 0; b < batch; b++)
+                    {
+                        var tScores = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                        var tTemp = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+                        var tOutHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                        var tOutPart = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
+                        try
+                        {
+                            var qhBatch = qHeads.AsSpan(b * qHeadsLen, qHeadsLen);
+                            var kvhBatch = kHeads.AsSpan(b * kvHeadsLen, kvHeadsLen);
+                            var vBatch = vHeads.AsSpan(b * kvHeadsLen, kvHeadsLen);
+                            int outOff = b * qLen * D;
+                            int wOff = b * numHeads * scoreLen;
+
+                            for (int h = 0; h < numHeads; h++)
+                            {
+                                var qh = qhBatch.Slice(h * qLen * headDim, qLen * headDim);
+                                var kh = kvhBatch.Slice(h * kvLen * headDim, kvLen * headDim);
+                                var vh = vBatch.Slice(h * kvLen * headDim, kvLen * headDim);
+                                var pHead = savedWeights.AsSpan(wOff + h * scoreLen, scoreLen);
+
+                                var tScoresSpan = tScores.AsSpan(0, scoreLen);
+                                if (qTan != null)
+                                {
+                                    var qTh = qTanHeads.AsSpan(b * qHeadsLen + h * qLen * headDim, qLen * headDim);
+                                    GradKernels.MatMulTransposedB(qTh, kh, tScores, qLen, headDim, kvLen);
+                                    if (kTan != null)
+                                    {
+                                        var kTh = kTanHeads.AsSpan(b * kvHeadsLen + h * kvLen * headDim, kvLen * headDim);
+                                        GradKernels.MatMulTransposedB(qh, kTh, tTemp, qLen, headDim, kvLen);
+                                        TensorPrimitives.Add(tScoresSpan, tTemp.AsSpan(0, scoreLen), tScoresSpan);
+                                    }
+                                }
+                                else if (kTan != null)
+                                {
+                                    var kTh = kTanHeads.AsSpan(b * kvHeadsLen + h * kvLen * headDim, kvLen * headDim);
+                                    GradKernels.MatMulTransposedB(qh, kTh, tScores, qLen, headDim, kvLen);
+                                }
+                                else
+                                {
+                                    tScoresSpan.Clear();
+                                }
+
+                                TensorPrimitives.Multiply(tScoresSpan, scale, tScoresSpan);
+                                AttentionKernels<T>.SoftmaxBackwardRows(pHead, tScoresSpan, qLen, kvLen);
+
+                                var tOutSpan = tOutHead.AsSpan(0, qLen * headDim);
+                                GradKernels.MatMul(tScores, vh, tOutHead, qLen, kvLen, headDim);
+                                if (vTan != null)
+                                {
+                                    var vTh = vTanHeads.AsSpan(b * kvHeadsLen + h * kvLen * headDim, kvLen * headDim);
+                                    GradKernels.MatMul(tScores, vTh, tOutPart, qLen, kvLen, headDim);
+                                    TensorPrimitives.Add(tOutSpan, tOutPart.AsSpan(0, qLen * headDim), tOutSpan);
+                                }
+
+                                AttentionKernels<T>.ScatterHead(tOutSpan, tanOutput.AsSpan(outOff, qLen * D), qLen, D, h, headDim);
+                            }
+                        }
+                        finally
+                        {
+                            ArrayPool<T>.Shared.Return(tScores, clearArray: true);
+                            ArrayPool<T>.Shared.Return(tTemp, clearArray: true);
+                            ArrayPool<T>.Shared.Return(tOutHead, clearArray: true);
+                            ArrayPool<T>.Shared.Return(tOutPart, clearArray: true);
+                        }
+                    }
+
+                    tangent = NivaraColumn<T>.CreateFromOwnedArray(tanOutput);
+                }
+                finally
+                {
+                    if (qTanHeads != null) ArrayPool<T>.Shared.Return(qTanHeads, clearArray: true);
+                    if (kTanHeads != null) ArrayPool<T>.Shared.Return(kTanHeads, clearArray: true);
+                    if (vTanHeads != null) ArrayPool<T>.Shared.Return(vTanHeads, clearArray: true);
+                }
+            }
+
+            return new ForwardGradTensor<T>(primal, tangent, new[] { batch, qLen, D });
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(qHeads, clearArray: true);
+            ArrayPool<T>.Shared.Return(kHeads, clearArray: true);
+            ArrayPool<T>.Shared.Return(vHeads, clearArray: true);
+        }
     }
 
     #endregion
@@ -760,7 +1918,7 @@ public static class ForwardGradOperations
                 $"mean length ({mean.Length}) must equal logVar length ({logVar.Length})",
                 nameof(logVar));
 
-        var klElements = ApplyKlElementWise(mean.Data, logVar.Data);
+        var klElements = GradOperationKernels.ApplyKlElementWise(mean.Data, logVar.Data);
         klElements.TryGetSpan(out var klSpan);
         var klSum = TensorPrimitives.Sum(klSpan);
         var resultData = NivaraColumn<T>.CreateFromOwnedArray(new T[] { klSum });
@@ -816,14 +1974,14 @@ public static class ForwardGradOperations
         int n = mean.Length;
         var epsilon = RandomGeneration.GenerateStandardNormal<T>(n, seed);
         var epsilonCol = NivaraColumn<T>.CreateFromOwnedArray(epsilon);
-        var primal = ApplySampleNormalForward(mean.Data, logVar.Data, epsilonCol);
+        var primal = GradOperationKernels.ApplySampleNormalForward(mean.Data, logVar.Data, epsilonCol);
 
         NivaraColumn<T>? tangent = null;
         if (mean.RequiresTangent || logVar.RequiresTangent)
         {
             if (mean.Tangent != null && logVar.Tangent != null)
             {
-                var dLogVar = ApplySampleNormalLogVarTangent(logVar.Data, logVar.Tangent, epsilonCol);
+                var dLogVar = GradOperationKernels.ApplySampleNormalLogVarGradient(logVar.Data, logVar.Tangent, epsilonCol);
                 tangent = mean.Tangent + dLogVar;
             }
             else if (mean.Tangent != null)
@@ -832,7 +1990,7 @@ public static class ForwardGradOperations
             }
             else if (logVar.Tangent != null)
             {
-                tangent = ApplySampleNormalLogVarTangent(logVar.Data, logVar.Tangent, epsilonCol);
+                tangent = GradOperationKernels.ApplySampleNormalLogVarGradient(logVar.Data, logVar.Tangent, epsilonCol);
             }
         }
 
@@ -858,103 +2016,88 @@ public static class ForwardGradOperations
         return new[] { 1 };
     }
 
-    private static NivaraColumn<T> ApplyDropout<T>(NivaraColumn<T> input, ReadOnlySpan<bool> keepMask, T scale)
+    static T[] TransposeAxesData<T>(T[] srcData, int[] srcDims, int[] dstDims, int axis1, int axis2)
         where T : struct, IFloatingPointIeee754<T>
     {
-        int n = input.Length;
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
+        var dstData = new T[srcData.Length];
 
-        try
+        if (srcDims.Length == 2)
         {
-            input.TryGetSpan(out var span);
-            for (int i = 0; i < n; i++)
-                resultBuf[i] = keepMask[i] ? span[i] * scale : T.Zero;
+            int rows = srcDims[0], cols = srcDims[1];
+            for (int r = 0; r < rows; r++)
+                for (int c = 0; c < cols; c++)
+                {
+                    int srcIdx = r * cols + c;
+                    int dstIdx = c * rows + r;
+                    dstData[dstIdx] = srcData[srcIdx];
+                }
+        }
+        else
+        {
+            int d0 = srcDims[0], d1 = srcDims[1], d2 = srcDims[2];
+            int nd1 = dstDims[1], nd2 = dstDims[2];
+            for (int i0 = 0; i0 < d0; i0++)
+                for (int i1 = 0; i1 < d1; i1++)
+                    for (int i2 = 0; i2 < d2; i2++)
+                    {
+                        int srcIdx = i0 * d1 * d2 + i1 * d2 + i2;
+                        var indices = new[] { i0, i1, i2 };
+                        (indices[axis1], indices[axis2]) = (indices[axis2], indices[axis1]);
+                        int dstIdx = indices[0] * nd1 * nd2 + indices[1] * nd2 + indices[2];
+                        dstData[dstIdx] = srcData[srcIdx];
+                    }
+        }
 
-            return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-        }
+        return dstData;
     }
 
-    private static NivaraColumn<T> ApplyDropoutTangent<T>(
-        NivaraColumn<T> input,
-        NivaraColumn<T> tangent,
-        ReadOnlySpan<bool> keepMask,
-        T scale)
+    static T[] ConcatColumns<T>(NivaraColumn<T>[] cols, int[][] shapes, int axis, int rank)
         where T : struct, IFloatingPointIeee754<T>
     {
-        int n = input.Length;
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-
-        try
+        if (rank == 1)
         {
-            tangent.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            for (int i = 0; i < n; i++)
-                resultBuf[i] = keepMask[i] ? gradBuf[i] * scale : T.Zero;
-
-            return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
+            int totalLen = cols.Sum(c => c.Length);
+            var result = new T[totalLen];
+            int offset = 0;
+            for (int i = 0; i < cols.Length; i++)
+            {
+                cols[i].CopyTo(result.AsSpan(offset, cols[i].Length), default(T)!);
+                offset += cols[i].Length;
+            }
+            return result;
         }
-        finally
+
+        if (axis == 1)
         {
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
+            int rows = shapes[0][0];
+            int totalCols = shapes.Sum(s => s[1]);
+            var result = new T[rows * totalCols];
+            int colOffset = 0;
+            for (int i = 0; i < cols.Length; i++)
+            {
+                int tCols = shapes[i][1];
+                var src = new T[cols[i].Length];
+                cols[i].CopyTo(src, default(T)!);
+                for (int r = 0; r < rows; r++)
+                    Array.Copy(src, r * tCols, result, r * totalCols + colOffset, tCols);
+                colOffset += tCols;
+            }
+            return result;
         }
-    }
 
-    private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = mean.Length;
-        mean.TryGetSpan(out var mSpan);
-        logVar.TryGetSpan(out var lvSpan);
-        var result = new T[n];
-        var m2 = new T[n];
-        var expLv = new T[n];
-        var tmp = new T[n];
-        TensorPrimitives.Multiply(mSpan, mSpan, m2);
-        TensorPrimitives.Exp(lvSpan, expLv);
-        TensorPrimitives.Add(lvSpan, T.One, tmp);
-        TensorPrimitives.Subtract(tmp, m2, tmp);
-        TensorPrimitives.Subtract(tmp, expLv, tmp);
-        TensorPrimitives.Multiply(tmp, T.CreateChecked(-0.5), result);
-        return NivaraColumn<T>.CreateFromOwnedArray(result);
-    }
-
-    private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = mean.Length;
-        mean.TryGetSpan(out var mSpan);
-        logVar.TryGetSpan(out var lvSpan);
-        epsilon.TryGetSpan(out var eSpan);
-        var result = new T[n];
-        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
-        TensorPrimitives.Exp(result, result);
-        TensorPrimitives.Multiply(result, eSpan, result);
-        TensorPrimitives.Add(result, mSpan, result);
-        return NivaraColumn<T>.CreateFromOwnedArray(result);
-    }
-
-    private static NivaraColumn<T> ApplySampleNormalLogVarTangent<T>(
-        NivaraColumn<T> logVar,
-        NivaraColumn<T> tangent,
-        NivaraColumn<T> epsilon)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = logVar.Length;
-        logVar.TryGetSpan(out var lvSpan);
-        tangent.TryGetSpan(out var gSpan);
-        epsilon.TryGetSpan(out var eSpan);
-        var result = new T[n];
-        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
-        TensorPrimitives.Exp(result, result);
-        TensorPrimitives.Multiply(result, eSpan, result);
-        TensorPrimitives.Multiply(result, gSpan, result);
-        TensorPrimitives.Multiply(result, T.CreateChecked(0.5), result);
-        return NivaraColumn<T>.CreateFromOwnedArray(result);
+        int totalRows = shapes.Sum(s => s[0]);
+        int outCols = shapes[0][1];
+        var resultRows = new T[totalRows * outCols];
+        int rowOffset = 0;
+        for (int i = 0; i < cols.Length; i++)
+        {
+            int tRows = shapes[i][0];
+            var src = new T[cols[i].Length];
+            cols[i].CopyTo(src, default(T)!);
+            Array.Copy(src, 0, resultRows, rowOffset * outCols, tRows * outCols);
+            rowOffset += tRows;
+        }
+        return resultRows;
     }
 
     #endregion
