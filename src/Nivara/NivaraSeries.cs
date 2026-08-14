@@ -231,20 +231,33 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Returns the valid (non-null) values as a list when the series contains nulls, or null
+    /// when the series has no nulls (in which case the full column span should be used directly).
+    /// </summary>
+    List<T>? getValidValues()
+    {
+        if (!HasNulls)
+            return null;
+
+        var validValues = new List<T>(Length);
+        for (int i = 0; i < Length; i++)
+        {
+            if (IsValid(i))
+                validValues.Add(values[i]);
+        }
+
+        return validValues;
+    }
+
+    /// <summary>
     /// Performs vectorized average computation using TensorPrimitives when possible
     /// </summary>
     T averageVectorized()
     {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
+        var validValues = getValidValues();
 
+        if (validValues != null)
+        {
             if (validValues.Count == 0)
                 throw new InvalidOperationException("Cannot compute average: all values are null. Series must contain at least one valid value.");
 
@@ -676,6 +689,90 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             throw new InvalidOperationException($"Average operation is not supported for type {typeof(T).Name}. Only numeric types support average operations.");
 
         return averageVectorized();
+    }
+
+    /// <summary>
+    /// Computes the sum of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The sum of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty</exception>
+    public T Sum()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Sum of empty series. Series must contain at least one element.");
+
+        validateNumericAggregate("Sum");
+
+        var validValues = getValidValues();
+        if (validValues != null)
+            return validValues.Count == 0
+                ? default(T)!   // all-null sum is zero, matching NivaraColumn<T>.Sum()
+                : sumTensorPrimitive(validValues.ToArray().AsSpan());
+
+        return sumTensorPrimitive(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Computes the minimum of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The minimum of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public T Min()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Min of empty series. Series must contain at least one element.");
+
+        validateNumericAggregate("Min");
+
+        return minMaxValue(NumericKernelDispatcher.Min);
+    }
+
+    /// <summary>
+    /// Computes the maximum of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The maximum of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public T Max()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Max of empty series. Series must contain at least one element.");
+
+        validateNumericAggregate("Max");
+
+        return minMaxValue(NumericKernelDispatcher.Max);
+    }
+
+    T minMaxValue(Func<ReadOnlySpan<T>, T> kernel)
+    {
+        var validValues = getValidValues();
+        if (validValues != null)
+        {
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute aggregate: all values are null. Series must contain at least one valid value.");
+
+            return kernel(validValues.ToArray().AsSpan());
+        }
+
+        return kernel(values.AsSpan());
+    }
+
+    void validateNumericAggregate(string operation)
+    {
+        var supported = TypeCompatibilityValidator.GetNumericTypes().Append(typeof(bool));
+        if (!supported.Contains(typeof(T)))
+            throw new InvalidOperationException($"{operation} operation is not supported for type {typeof(T).Name}. Only numeric types support {operation.ToLowerInvariant()} operations.");
     }
 
     /// <summary>
