@@ -567,35 +567,6 @@ static class TensorsHelper
         }
     }
 
-    /// <summary>
-    /// Computes <c>output[r] = norm(rowMajor[r, :])</c> for each row of a row-major
-    /// buffer. Nulls in a row mask only that row's norm.
-    /// </summary>
-    public static void RowNorms<T>(
-        ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
-        Span<T> output, Span<bool> outputMask, int rows, int cols)
-        where T : struct, IRootFunctions<T>
-    {
-        ValidateRowKernelArgs(rowMajor, rowMajorNullMask, default, default, output, outputMask, rows, cols,
-            requireQuery: false, requireNonZeroCols: true);
-
-        if (rowMajorNullMask.Length == 0)
-        {
-            outputMask.Clear();
-            for (int r = 0; r < rows; r++)
-                output[r] = TensorPrimitives.Norm(rowMajor.Slice(r * cols, cols));
-            return;
-        }
-
-        for (int r = 0; r < rows; r++)
-        {
-            int off = r * cols;
-            bool nullRow = AnyTrue(rowMajorNullMask.Slice(off, cols));
-            outputMask[r] = nullRow;
-            output[r] = nullRow ? default : TensorPrimitives.Norm(rowMajor.Slice(off, cols));
-        }
-    }
-
     // ═══════════════════════════════════════════════════════════════
     //  Normalize / Standardize (population z-score)
     //  .NET future: TensorPrimitives.Mean&lt;T&gt; / StdDev&lt;T&gt; (net-11 names)
