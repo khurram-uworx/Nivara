@@ -28,4 +28,8 @@
     <PackageReference Include="OllamaSharp" Version="5.4.30" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.400" />
+  </ItemGroup>
+
 </Project>
