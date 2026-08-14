@@ -197,6 +197,10 @@ var r = frame.AsQueryFrame()
 `docs/WINDOWS.md` covers the full eager `NivaraFrame` window surface; the expression DSL reuses
 the same kernels so results agree between eager and lazy paths.
 
+The `WindowSpec` builder (`Over().PartitionBy(...).OrderBy(...)`) is also available on both
+`NivaraFrame` and `QueryFrame` window overloads for SQL-style partitioned windows; see
+`docs/WINDOWS.md` for the full builder and semantics.
+
 ---
 
 ## Materialization

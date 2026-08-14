@@ -6,6 +6,18 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **`Over()` / `WindowSpec` builder for window functions (#162)** — SQL-style partitioned
+  windows on both `NivaraFrame` (eager) and `QueryFrame` (lazy). `Over()` returns an immutable
+  `WindowSpec` with `PartitionBy(params string[])` and three `OrderBy` overloads
+  (`SortKey[]`, `string[]`, or `string + SortDirection + NullOrdering`; ascending/NULLS LAST by
+  default). Every window function gains a `WindowSpec` overload: rolling (`Sum`/`Mean`/`Min`/
+  `Max`), cumulative (`Sum`/`Max`/`Min`/`Product`/`Count`), `Shift`/`Lead`, and the rank family
+  (`RowNumber`/`Rank`/`DenseRank`/`PercentRank`, which keep existing null-order-key semantics).
+  Execution runs partition → sort → compute → scatter via the shared
+  `PartitionedWindowEngine` (`src/Nivara/Tensors/PartitionedWindowEngine.cs`); partition and
+  order keys are validated up front (missing/non-comparable columns throw). A spec with no keys
+  (`new WindowSpec()`) matches the plain overloads. See `docs/WINDOWS.md`.
+
 - **Fused expression kernel IR + span/chunked execution (#167)** — the fused expression engine now lowers every expression tree to a single post-order `KernelPlan` (`KernelLowerer`/`KernelIR`) and routes it to one of three backends: a flat IR span interpreter in `FusedKernel` for null-bearing uniform numeric plans (per-element `ReadOnlyMemory<T>` leaf access, hoisted literals, inline OR null-mask), a `TensorPrimitives` SIMD backend for null-free single-op plans (Add/Subtract/Multiply/Divide, one BCL SIMD call), and the compiled offset delegate (`start`/`count`/`destStart`) for everything else (null-free chains, bool, heterogeneous plans). Execution is chunk-capable: `FusedExpressionEvaluator.EvaluateChunked(expression, input, chunkSize)` slices the existing contiguous leaf storage zero-copy and writes into one shared output array, bit-identical to whole-column evaluation — the memory-budgeted primitive the Phase 4 async streaming bridge (#171) needs. Chunked/whole bit-identity, null-mask propagation, and backend-routing guardrails are pinned by unit tests (`EvaluateChunked_*`, `Evaluate_NullFreeSingleOp_*`); `NodeTreePathEvaluationCount` was renamed `SpanKernelPathEvaluationCount` to reflect the IR span fallback. Design rationale recorded in `docs/adr/004-fused-expression-engine-kernel-ir-span-backends.md`.
 
 ### Changed
