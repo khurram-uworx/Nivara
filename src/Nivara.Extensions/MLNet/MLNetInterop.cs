@@ -382,28 +382,29 @@ public static class MLNetInterop
 }
 
 /// <summary>
-/// Data classes for ML.NET compatibility.
+/// Data classes for ML.NET compatibility. Internal — implementation detail of
+/// <see cref="ToDataView"/>, not public API.
 /// </summary>
-public class TwoColumnData
+internal class TwoColumnData
 {
     public float Col1 { get; set; }
     public float Col2 { get; set; }
 }
 
-public class TwoColumnFeatureData
+internal class TwoColumnFeatureData
 {
     public float Feature1 { get; set; }
     public float Feature2 { get; set; }
 }
 
-public class ThreeColumnData
+internal class ThreeColumnData
 {
     public float Feature1 { get; set; }
     public float Feature2 { get; set; }
     public float Label { get; set; }
 }
 
-public class GenericData
+internal class GenericData
 {
     public float[]? Features { get; set; }
 }
