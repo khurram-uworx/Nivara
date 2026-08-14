@@ -295,24 +295,30 @@ public static class ParquetWriter
         // For reference types, they are inherently nullable
         var isNullable = hasNulls || !actualType.IsValueType;
 
-        return actualType switch
+        return TypeMapper.CreateParquetField(name, actualType, isNullable);
+    }
+
+    /// <summary>
+    /// Builds the file-level metadata that preserves the original CLR type of extended-domain
+    /// columns. Without it, a widened representation (e.g. <see cref="Half"/> as
+    /// <see cref="float"/>) would read back as the widened type.
+    /// </summary>
+    private static Dictionary<string, string> BuildClrTypeMetadata(NivaraFrame frame)
+    {
+        var metadata = new Dictionary<string, string>();
+
+        for (int i = 0; i < frame.ColumnCount; i++)
         {
-            Type t when t == typeof(bool) => new DataField<bool>(name, isNullable),
-            Type t when t == typeof(int) => new DataField<int>(name, isNullable),
-            Type t when t == typeof(long) => new DataField<long>(name, isNullable),
-            Type t when t == typeof(float) => new DataField<float>(name, isNullable),
-            Type t when t == typeof(double) => new DataField<double>(name, isNullable),
-            Type t when t == typeof(DateTime) => new DataField<DateTime>(name, isNullable),
-            Type t when t == typeof(string) => new DataField<string>(name, isNullable),
-            Type t when t == typeof(byte) => new DataField<byte>(name, isNullable),
-            Type t when t == typeof(short) => new DataField<short>(name, isNullable),
-            Type t when t == typeof(uint) => new DataField<uint>(name, isNullable),
-            Type t when t == typeof(ulong) => new DataField<ulong>(name, isNullable),
-            Type t when t == typeof(ushort) => new DataField<ushort>(name, isNullable),
-            Type t when t == typeof(sbyte) => new DataField<sbyte>(name, isNullable),
-            Type t when t == typeof(decimal) => new DataField<decimal>(name, isNullable),
-            _ => throw new UnsupportedTypeException(actualType, TypeMapper.GetTypeSuggestions(actualType))
-        };
+            var columnName = frame.ColumnNames[i];
+            var columnType = frame.Schema.GetColumnType(columnName);
+            if (TypeMapper.IsExtendedDomainType(columnType))
+            {
+                var storedType = Nullable.GetUnderlyingType(columnType) ?? columnType;
+                metadata[TypeMapper.GetClrTypeMetadataKey(columnName)] = storedType.FullName!;
+            }
+        }
+
+        return metadata;
     }
 
     /// <summary>
@@ -374,6 +380,13 @@ public static class ParquetWriter
 
         // Create Parquet writer
         await using var parquetWriter = await Parquet.ParquetWriter.CreateAsync(schema, stream);
+
+        // Preserve the original CLR type of extended-domain columns so a round-trip can
+        // restore the typed column (e.g. Half is stored as float on disk).
+        var clrTypeMetadata = BuildClrTypeMetadata(frame);
+        if (clrTypeMetadata.Count > 0)
+            parquetWriter.CustomMetadata = clrTypeMetadata;
+
         using var rowGroupWriter = parquetWriter.CreateRowGroup();
 
         // Write column data
@@ -404,37 +417,43 @@ public static class ParquetWriter
 
     private static Task WriteParquetColumnAsync(Parquet.ParquetRowGroupWriter rowGroupWriter, DataField field, Array columnData, CancellationToken cancellationToken)
     {
-        return columnData switch
+        var elementType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
+
+        if (TypeMapper.IsStringType(elementType))
+            return rowGroupWriter.WriteAsync(field, (string[])columnData, null);
+
+        // Dispatch on the DataField element type rather than the array runtime type:
+        // .NET 10 treats same-width signed/unsigned primitive arrays (long[]/ulong[],
+        // int[]/uint[], short[]/ushort[], byte[]/sbyte[]) as type-equivalent in pattern
+        // matching, so a runtime-type switch would pick the wrong WriteAsync<T> arm.
+        return elementType switch
         {
-            bool[] values => rowGroupWriter.WriteAsync<bool>(field, values, null, null, cancellationToken),
-            bool?[] values => rowGroupWriter.WriteAsync<bool>(field, values, null, null, cancellationToken),
-            int[] values => rowGroupWriter.WriteAsync<int>(field, values, null, null, cancellationToken),
-            int?[] values => rowGroupWriter.WriteAsync<int>(field, values, null, null, cancellationToken),
-            long[] values => rowGroupWriter.WriteAsync<long>(field, values, null, null, cancellationToken),
-            long?[] values => rowGroupWriter.WriteAsync<long>(field, values, null, null, cancellationToken),
-            float[] values => rowGroupWriter.WriteAsync<float>(field, values, null, null, cancellationToken),
-            float?[] values => rowGroupWriter.WriteAsync<float>(field, values, null, null, cancellationToken),
-            double[] values => rowGroupWriter.WriteAsync<double>(field, values, null, null, cancellationToken),
-            double?[] values => rowGroupWriter.WriteAsync<double>(field, values, null, null, cancellationToken),
-            DateTime[] values => rowGroupWriter.WriteAsync<DateTime>(field, values, null, null, cancellationToken),
-            DateTime?[] values => rowGroupWriter.WriteAsync<DateTime>(field, values, null, null, cancellationToken),
-            byte[] values => rowGroupWriter.WriteAsync<byte>(field, values, null, null, cancellationToken),
-            byte?[] values => rowGroupWriter.WriteAsync<byte>(field, values, null, null, cancellationToken),
-            short[] values => rowGroupWriter.WriteAsync<short>(field, values, null, null, cancellationToken),
-            short?[] values => rowGroupWriter.WriteAsync<short>(field, values, null, null, cancellationToken),
-            uint[] values => rowGroupWriter.WriteAsync<uint>(field, values, null, null, cancellationToken),
-            uint?[] values => rowGroupWriter.WriteAsync<uint>(field, values, null, null, cancellationToken),
-            ulong[] values => rowGroupWriter.WriteAsync<ulong>(field, values, null, null, cancellationToken),
-            ulong?[] values => rowGroupWriter.WriteAsync<ulong>(field, values, null, null, cancellationToken),
-            ushort[] values => rowGroupWriter.WriteAsync<ushort>(field, values, null, null, cancellationToken),
-            ushort?[] values => rowGroupWriter.WriteAsync<ushort>(field, values, null, null, cancellationToken),
-            sbyte[] values => rowGroupWriter.WriteAsync<sbyte>(field, values, null, null, cancellationToken),
-            sbyte?[] values => rowGroupWriter.WriteAsync<sbyte>(field, values, null, null, cancellationToken),
-            decimal[] values => rowGroupWriter.WriteAsync<decimal>(field, values, null, null, cancellationToken),
-            decimal?[] values => rowGroupWriter.WriteAsync<decimal>(field, values, null, null, cancellationToken),
-            string[] values => rowGroupWriter.WriteAsync(field, values, null),
-            _ => throw new UnsupportedTypeException(columnData.GetType().GetElementType() ?? columnData.GetType(), TypeMapper.GetTypeSuggestions(columnData.GetType().GetElementType() ?? columnData.GetType()))
+            Type t when t == typeof(bool) => WriteParquetColumnTypedAsync<bool>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(byte) => WriteParquetColumnTypedAsync<byte>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(sbyte) => WriteParquetColumnTypedAsync<sbyte>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(short) => WriteParquetColumnTypedAsync<short>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(ushort) => WriteParquetColumnTypedAsync<ushort>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(int) => WriteParquetColumnTypedAsync<int>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(uint) => WriteParquetColumnTypedAsync<uint>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(long) => WriteParquetColumnTypedAsync<long>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(ulong) => WriteParquetColumnTypedAsync<ulong>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(float) => WriteParquetColumnTypedAsync<float>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(double) => WriteParquetColumnTypedAsync<double>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(decimal) => WriteParquetColumnTypedAsync<decimal>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(DateTime) => WriteParquetColumnTypedAsync<DateTime>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(DateOnly) => WriteParquetColumnTypedAsync<DateOnly>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(Guid) => WriteParquetColumnTypedAsync<Guid>(rowGroupWriter, field, columnData, cancellationToken),
+            _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
+    }
+
+    private static Task WriteParquetColumnTypedAsync<T>(Parquet.ParquetRowGroupWriter rowGroupWriter, DataField field, Array columnData, CancellationToken cancellationToken)
+        where T : struct
+    {
+        if (field.IsNullable)
+            return rowGroupWriter.WriteAsync<T>(field, (T?[])columnData, null, null, cancellationToken);
+
+        return rowGroupWriter.WriteAsync<T>(field, (T[])columnData, null, null, cancellationToken);
     }
 
     /// <summary>
@@ -461,9 +480,48 @@ public static class ParquetWriter
             Type t when t == typeof(ushort) => ExtractColumnDataArrayTyped<ushort>(frame, columnName, column.HasNulls),
             Type t when t == typeof(sbyte) => ExtractColumnDataArrayTyped<sbyte>(frame, columnName, column.HasNulls),
             Type t when t == typeof(decimal) => ExtractColumnDataArrayTyped<decimal>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(DateOnly) => ExtractColumnDataArrayTyped<DateOnly>(frame, columnName, column.HasNulls),
+            Type t when t == typeof(Guid) => ExtractColumnDataArrayTyped<Guid>(frame, columnName, column.HasNulls),
+            // Extended-domain types use a lossless widened on-disk representation
+            Type t when t == typeof(TimeOnly) => ExtractConvertedColumnDataArray<TimeOnly, long>(frame, columnName, static v => v.Ticks * 100L),
+            Type t when t == typeof(Half) => ExtractConvertedColumnDataArray<Half, float>(frame, columnName, static v => (float)v),
+            Type t when t == typeof(nint) => ExtractConvertedColumnDataArray<nint, long>(frame, columnName, static v => v),
+            Type t when t == typeof(nuint) => ExtractConvertedColumnDataArray<nuint, ulong>(frame, columnName, static v => v),
+            Type t when t == typeof(char) => ExtractConvertedColumnDataArray<char, ushort>(frame, columnName, static v => v),
+            Type t when t == typeof(DateTimeOffset) => ExtractConvertedColumnDataArray<DateTimeOffset, DateTime>(frame, columnName, static v => v.UtcDateTime),
+            Type t when t == typeof(TimeSpan) => ExtractConvertedColumnDataArray<TimeSpan, long>(frame, columnName, static v => v.Ticks),
             Type t when t == typeof(string) => ExtractStringColumnDataArray(frame, columnName),
             _ => throw new UnsupportedTypeException(actualType, TypeMapper.GetTypeSuggestions(actualType))
         };
+    }
+
+    /// <summary>
+    /// Extracts a column into its on-disk (widened) representation for Parquet writing,
+    /// preserving null positions. Used by the extended CLR domain types.
+    /// </summary>
+    private static Array ExtractConvertedColumnDataArray<TSource, TTarget>(
+        NivaraFrame frame, string columnName, Func<TSource, TTarget> convert)
+        where TSource : struct
+        where TTarget : struct
+    {
+        var column = frame.GetColumn<TSource>(columnName);
+
+        if (column.HasNulls)
+        {
+            var nullableValues = new TTarget?[column.Length];
+            for (int i = 0; i < column.Length; i++)
+                nullableValues[i] = column.IsNull(i) ? null : convert(column[i]);
+
+            return nullableValues;
+        }
+        else
+        {
+            var values = new TTarget[column.Length];
+            for (int i = 0; i < column.Length; i++)
+                values[i] = convert(column[i]);
+
+            return values;
+        }
     }
 
     /// <summary>
@@ -624,6 +682,15 @@ public static class ParquetWriter
             Type t when t == typeof(ushort) => ConcatenateColumnTyped<ushort>(frames, columnName),
             Type t when t == typeof(sbyte) => ConcatenateColumnTyped<sbyte>(frames, columnName),
             Type t when t == typeof(decimal) => ConcatenateColumnTyped<decimal>(frames, columnName),
+            Type t when t == typeof(DateOnly) => ConcatenateColumnTyped<DateOnly>(frames, columnName),
+            Type t when t == typeof(TimeOnly) => ConcatenateColumnTyped<TimeOnly>(frames, columnName),
+            Type t when t == typeof(Guid) => ConcatenateColumnTyped<Guid>(frames, columnName),
+            Type t when t == typeof(Half) => ConcatenateColumnTyped<Half>(frames, columnName),
+            Type t when t == typeof(nint) => ConcatenateColumnTyped<nint>(frames, columnName),
+            Type t when t == typeof(nuint) => ConcatenateColumnTyped<nuint>(frames, columnName),
+            Type t when t == typeof(char) => ConcatenateColumnTyped<char>(frames, columnName),
+            Type t when t == typeof(DateTimeOffset) => ConcatenateColumnTyped<DateTimeOffset>(frames, columnName),
+            Type t when t == typeof(TimeSpan) => ConcatenateColumnTyped<TimeSpan>(frames, columnName),
             Type t when t == typeof(string) => ConcatenateStringColumn(frames, columnName),
             _ => throw new UnsupportedTypeException(actualType, TypeMapper.GetTypeSuggestions(actualType))
         };

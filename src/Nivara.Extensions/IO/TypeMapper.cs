@@ -8,6 +8,14 @@ namespace Nivara.IO;
 /// </summary>
 static class TypeMapper
 {
+    /// <summary>
+    /// Prefix for schema metadata keys that preserve the original CLR column type across a
+    /// Parquet or Arrow round-trip when the on-disk representation uses a widened type
+    /// (e.g. <see cref="Half"/> stored as <see cref="float"/>, <see cref="nint"/> stored as
+    /// <see cref="long"/>). The key suffix is the column name.
+    /// </summary>
+    internal const string ClrTypeMetadataKeyPrefix = "nivara.clrType.";
+
     // CLR to Arrow type mapping
     private static readonly Dictionary<Type, IArrowType> ClrToArrowMap = new()
     {
@@ -17,16 +25,27 @@ static class TypeMapper
         { typeof(float), FloatType.Default },
         { typeof(double), DoubleType.Default },
         { typeof(DateTime), new TimestampType(TimeUnit.Microsecond, TimeZoneInfo.Utc) },
+        { typeof(DateTimeOffset), new TimestampType(TimeUnit.Microsecond, TimeZoneInfo.Utc) },
         { typeof(string), StringType.Default },
         { typeof(byte), UInt8Type.Default },
         { typeof(short), Int16Type.Default },
         { typeof(uint), UInt32Type.Default },
         { typeof(ulong), UInt64Type.Default },
         { typeof(ushort), UInt16Type.Default },
-        { typeof(sbyte), Int8Type.Default }
+        { typeof(sbyte), Int8Type.Default },
+        { typeof(Half), new HalfFloatType() },
+        { typeof(nint), Int64Type.Default },
+        { typeof(nuint), UInt64Type.Default },
+        { typeof(char), StringType.Default },
+        { typeof(DateOnly), new Date32Type() },
+        { typeof(TimeOnly), new Time64Type(TimeUnit.Nanosecond) },
+        { typeof(Guid), new FixedSizeBinaryType(16) },
+        { typeof(TimeSpan), DurationType.Nanosecond }
     };
 
-    // Arrow to CLR type mapping
+    // Arrow to CLR type mapping. Types with a shared Arrow representation (nint/nuint/char
+    // via Int64/UInt64/String, DateTimeOffset via Timestamp) intentionally map to the base
+    // CLR type at schema level; the original type is restored from metadata when present.
     private static readonly Dictionary<Type, Type> ArrowToClrMap = new()
     {
         { typeof(BooleanType), typeof(bool) },
@@ -41,7 +60,14 @@ static class TypeMapper
         { typeof(UInt32Type), typeof(uint) },
         { typeof(UInt64Type), typeof(ulong) },
         { typeof(UInt16Type), typeof(ushort) },
-        { typeof(Int8Type), typeof(sbyte) }
+        { typeof(Int8Type), typeof(sbyte) },
+        { typeof(HalfFloatType), typeof(Half) },
+        { typeof(Date32Type), typeof(DateOnly) },
+        { typeof(Date64Type), typeof(DateOnly) },
+        { typeof(Time32Type), typeof(TimeOnly) },
+        { typeof(Time64Type), typeof(TimeOnly) },
+        { typeof(DurationType), typeof(TimeSpan) },
+        { typeof(FixedSizeBinaryType), typeof(Guid) }
     };
 
     /// <summary>
@@ -116,6 +142,31 @@ static class TypeMapper
         var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
         var isNullable = Nullable.GetUnderlyingType(clrType) != null || !actualType.IsValueType;
 
+        return CreateParquetField(name, actualType, isNullable);
+    }
+
+    /// <summary>
+    /// Creates a Parquet field for the specified CLR type with explicit nullability.
+    /// Extended-domain types either map to a native Parquet.Net <see cref="DataField{T}"/>
+    /// (<see cref="DateOnly"/>, <see cref="TimeOnly"/>, <see cref="Guid"/>) or to a lossless
+    /// widened representation (<see cref="Half"/> as <see cref="float"/>, <see cref="nint"/>
+    /// as <see cref="long"/>, <see cref="nuint"/> as <see cref="ulong"/>, <see cref="char"/>
+    /// as <see cref="ushort"/>, <see cref="DateTimeOffset"/> as <see cref="DateTime"/>,
+    /// <see cref="TimeSpan"/> as <see cref="long"/>).
+    /// </summary>
+    /// <param name="name">The field name</param>
+    /// <param name="actualType">The non-nullable CLR type</param>
+    /// <param name="isNullable">Whether the field permits nulls</param>
+    /// <returns>A Parquet DataField</returns>
+    /// <exception cref="UnsupportedTypeException">Thrown when the CLR type is not supported for Parquet</exception>
+    internal static DataField CreateParquetField(string name, Type actualType, bool isNullable)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        ArgumentNullException.ThrowIfNull(actualType);
+
+        if (string.IsNullOrWhiteSpace(name))
+            throw new ArgumentException("Field name cannot be empty or whitespace", nameof(name));
+
         return actualType switch
         {
             Type t when t == typeof(bool) => new DataField<bool>(name, isNullable),
@@ -132,6 +183,15 @@ static class TypeMapper
             Type t when t == typeof(ushort) => new DataField<ushort>(name, isNullable),
             Type t when t == typeof(sbyte) => new DataField<sbyte>(name, isNullable),
             Type t when t == typeof(decimal) => new DataField<decimal>(name, isNullable),
+            Type t when t == typeof(DateOnly) => new DataField<DateOnly>(name, isNullable),
+            Type t when t == typeof(TimeOnly) => new DataField<TimeOnly>(name, isNullable),
+            Type t when t == typeof(Guid) => new DataField<Guid>(name, isNullable),
+            Type t when t == typeof(Half) => new DataField<float>(name, isNullable),
+            Type t when t == typeof(nint) => new DataField<long>(name, isNullable),
+            Type t when t == typeof(nuint) => new DataField<ulong>(name, isNullable),
+            Type t when t == typeof(char) => new DataField<ushort>(name, isNullable),
+            Type t when t == typeof(DateTimeOffset) => new DataField<DateTime>(name, isNullable),
+            Type t when t == typeof(TimeSpan) => new DataField<long>(name, isNullable),
             _ => throw new UnsupportedTypeException(actualType, GetTypeSuggestions(actualType))
         };
     }
@@ -148,7 +208,10 @@ static class TypeMapper
     }
 
     /// <summary>
-    /// Checks if a CLR type is supported for Parquet conversion
+    /// Checks if a CLR type is supported for Parquet conversion. Extended-domain types are
+    /// supported either natively (<see cref="DateOnly"/>, <see cref="TimeOnly"/>,
+    /// <see cref="Guid"/>) or via a lossless widened representation (<see cref="Half"/> as
+    /// <see cref="float"/>, <see cref="nint"/> as <see cref="long"/>, etc.).
     /// </summary>
     /// <param name="clrType">The CLR type to check</param>
     /// <returns>True if the type is supported, false otherwise</returns>
@@ -170,7 +233,95 @@ static class TypeMapper
                actualType == typeof(ulong) ||
                actualType == typeof(ushort) ||
                actualType == typeof(sbyte) ||
-               actualType == typeof(decimal);
+               actualType == typeof(decimal) ||
+               actualType == typeof(Half) ||
+               actualType == typeof(nint) ||
+               actualType == typeof(nuint) ||
+               actualType == typeof(char) ||
+               actualType == typeof(DateOnly) ||
+               actualType == typeof(TimeOnly) ||
+               actualType == typeof(DateTimeOffset) ||
+               actualType == typeof(Guid) ||
+               actualType == typeof(TimeSpan);
+    }
+
+    /// <summary>
+    /// Checks if a CLR type can be represented as an ML.NET <see cref="Microsoft.ML.Data.PrimitiveDataViewType"/>
+    /// column. Covers boolean, every numeric DataView width, text, and the date/time types
+    /// ML.NET understands (<see cref="DateTime"/>, <see cref="DateTimeOffset"/>, <see cref="TimeSpan"/>).
+    /// </summary>
+    /// <param name="clrType">The CLR type to check</param>
+    /// <returns>True if the type is supported, false otherwise</returns>
+    public static bool IsMLNetSupported(Type clrType)
+    {
+        var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
+
+        return actualType == typeof(bool) ||
+               actualType == typeof(byte) ||
+               actualType == typeof(sbyte) ||
+               actualType == typeof(short) ||
+               actualType == typeof(ushort) ||
+               actualType == typeof(int) ||
+               actualType == typeof(uint) ||
+               actualType == typeof(long) ||
+               actualType == typeof(ulong) ||
+               actualType == typeof(float) ||
+               actualType == typeof(double) ||
+               actualType == typeof(string) ||
+               actualType == typeof(DateTime) ||
+               actualType == typeof(DateTimeOffset) ||
+               actualType == typeof(TimeSpan);
+    }
+
+    /// <summary>
+    /// Checks whether a CLR type is part of the extended domain from issue #158
+    /// (<see cref="Half"/>, <see cref="nint"/>/<see cref="nuint"/>, <see cref="char"/>,
+    /// <see cref="DateOnly"/>/<see cref="TimeOnly"/>, <see cref="DateTimeOffset"/>,
+    /// <see cref="Guid"/>, <see cref="TimeSpan"/>). These types use <c>nivara.clrType</c>
+    /// schema metadata so a round-trip restores the original column type.
+    /// </summary>
+    /// <param name="clrType">The CLR type to check</param>
+    /// <returns>True when the type belongs to the extended domain</returns>
+    public static bool IsExtendedDomainType(Type clrType)
+    {
+        var actualType = Nullable.GetUnderlyingType(clrType) ?? clrType;
+
+        return actualType == typeof(Half) ||
+               actualType == typeof(nint) ||
+               actualType == typeof(nuint) ||
+               actualType == typeof(char) ||
+               actualType == typeof(DateOnly) ||
+               actualType == typeof(TimeOnly) ||
+               actualType == typeof(DateTimeOffset) ||
+               actualType == typeof(Guid) ||
+               actualType == typeof(TimeSpan);
+    }
+
+    /// <summary>
+    /// Gets the schema-metadata key under which the original CLR type of a column is stored.
+    /// </summary>
+    /// <param name="columnName">The column name</param>
+    /// <returns>The metadata key</returns>
+    internal static string GetClrTypeMetadataKey(string columnName) => ClrTypeMetadataKeyPrefix + columnName;
+
+    /// <summary>
+    /// Checks whether a schema-metadata key carries a preserved CLR type.
+    /// </summary>
+    internal static bool IsClrTypeMetadataKey(string key)
+        => key.StartsWith(ClrTypeMetadataKeyPrefix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// Resolves the preserved CLR type for a column from schema metadata.
+    /// </summary>
+    /// <param name="metadata">The schema metadata dictionary, or null</param>
+    /// <param name="columnName">The column name</param>
+    /// <returns>The preserved CLR type, or null when no metadata is present for the column</returns>
+    internal static Type? ResolveMetadataClrType(IReadOnlyDictionary<string, string>? metadata, string columnName)
+    {
+        if (metadata is not null && metadata.TryGetValue(GetClrTypeMetadataKey(columnName), out var fullName))
+            return Type.GetType(fullName, throwOnError: false);
+
+        return null;
     }
 
     /// <summary>
@@ -202,11 +353,10 @@ static class TypeMapper
     {
         return unsupportedType switch
         {
-            Type t when t == typeof(Guid) => new List<string> { "string", "byte[]" },
-            Type t when t == typeof(TimeSpan) => new List<string> { "long (ticks)", "double (seconds)" },
-            Type t when t == typeof(DateOnly) => new List<string> { "DateTime", "string" },
-            Type t when t == typeof(TimeOnly) => new List<string> { "TimeSpan", "string" },
-            Type t when t == typeof(char) => new List<string> { "string", "ushort" },
+            Type t when t == typeof(Int128) || t == typeof(UInt128) => new List<string>
+            {
+                "Parquet/Arrow/ML.NET have no lossless 128-bit integer representation; store as string or decimal with documented precision loss"
+            },
             Type t when t.IsEnum => new List<string> { "int", "string" },
             Type t when t.IsArray => new List<string> { "Use individual columns for array elements" },
             Type t when t.IsGenericType => new List<string> { "Break down into primitive components" },

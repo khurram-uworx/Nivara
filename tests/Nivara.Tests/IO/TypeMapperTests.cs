@@ -24,7 +24,16 @@ public class TypeMapperTests
             (typeof(uint), typeof(UInt32Type)),
             (typeof(ulong), typeof(UInt64Type)),
             (typeof(ushort), typeof(UInt16Type)),
-            (typeof(sbyte), typeof(Int8Type))
+            (typeof(sbyte), typeof(Int8Type)),
+            (typeof(Half), typeof(HalfFloatType)),
+            (typeof(nint), typeof(Int64Type)),
+            (typeof(nuint), typeof(UInt64Type)),
+            (typeof(char), typeof(StringType)),
+            (typeof(DateOnly), typeof(Date32Type)),
+            (typeof(TimeOnly), typeof(Time64Type)),
+            (typeof(DateTimeOffset), typeof(TimestampType)),
+            (typeof(Guid), typeof(FixedSizeBinaryType)),
+            (typeof(TimeSpan), typeof(DurationType))
         };
 
         foreach (var (clrType, expectedArrowType) in testCases)
@@ -72,10 +81,8 @@ public class TypeMapperTests
     {
         var unsupportedTypes = new[]
         {
-            typeof(Guid),
-            typeof(TimeSpan),
-            typeof(DateOnly),
-            typeof(char),
+            typeof(Int128),
+            typeof(UInt128),
             typeof(object)
         };
 
@@ -100,7 +107,14 @@ public class TypeMapperTests
             (DoubleType.Default, typeof(double)),
             (StringType.Default, typeof(string)),
             (UInt8Type.Default, typeof(byte)),
-            (Int16Type.Default, typeof(short))
+            (Int16Type.Default, typeof(short)),
+            (new HalfFloatType(), typeof(Half)),
+            (new Date32Type(), typeof(DateOnly)),
+            (new Date64Type(), typeof(DateOnly)),
+            (new Time32Type(TimeUnit.Second), typeof(TimeOnly)),
+            (new Time64Type(TimeUnit.Nanosecond), typeof(TimeOnly)),
+            (DurationType.Nanosecond, typeof(TimeSpan)),
+            (new FixedSizeBinaryType(16), typeof(Guid))
         };
 
         foreach (var (arrowType, expectedClrType) in testCases)
@@ -125,28 +139,38 @@ public class TypeMapperTests
     {
         var testCases = new[]
         {
-            (typeof(bool), "BoolField"),
-            (typeof(int), "IntField"),
-            (typeof(long), "LongField"),
-            (typeof(float), "FloatField"),
-            (typeof(double), "DoubleField"),
-            (typeof(string), "StringField"),
-            (typeof(DateTime), "DateTimeField")
+            (typeof(bool), "BoolField", typeof(bool)),
+            (typeof(int), "IntField", typeof(int)),
+            (typeof(long), "LongField", typeof(long)),
+            (typeof(float), "FloatField", typeof(float)),
+            (typeof(double), "DoubleField", typeof(double)),
+            (typeof(string), "StringField", typeof(string)),
+            (typeof(DateTime), "DateTimeField", typeof(DateTime)),
+            (typeof(DateOnly), "DateOnlyField", typeof(DateOnly)),
+            (typeof(Guid), "GuidField", typeof(Guid)),
+            // Extended-domain types use a lossless widened on-disk representation
+            (typeof(TimeOnly), "TimeOnlyField", typeof(long)),
+            (typeof(Half), "HalfField", typeof(float)),
+            (typeof(nint), "NIntField", typeof(long)),
+            (typeof(nuint), "NUIntField", typeof(ulong)),
+            (typeof(char), "CharField", typeof(ushort)),
+            (typeof(DateTimeOffset), "DateTimeOffsetField", typeof(DateTime)),
+            (typeof(TimeSpan), "TimeSpanField", typeof(long))
         };
 
-        foreach (var (clrType, fieldName) in testCases)
+        foreach (var (clrType, fieldName, expectedClrType) in testCases)
         {
             var field = TypeMapper.CreateParquetField(fieldName, clrType);
 
             Assert.That(field.Name, Is.EqualTo(fieldName));
-            if (TypeMapper.IsStringType(clrType))
+            if (TypeMapper.IsStringType(expectedClrType))
             {
                 // Parquet.Net 6.1.0 reports string fields as ReadOnlyMemory<char>
                 Assert.That(field.ClrType, Is.AnyOf(typeof(string), typeof(ReadOnlyMemory<char>)));
             }
             else
             {
-                Assert.That(field.ClrType, Is.EqualTo(clrType));
+                Assert.That(field.ClrType, Is.EqualTo(expectedClrType));
             }
         }
     }
@@ -171,11 +195,10 @@ public class TypeMapperTests
     public void CreateParquetField_UnsupportedType_ThrowsUnsupportedTypeException()
     {
         var ex = Assert.Throws<UnsupportedTypeException>(() =>
-            TypeMapper.CreateParquetField("UnsupportedField", typeof(Guid)));
+            TypeMapper.CreateParquetField("UnsupportedField", typeof(Int128)));
 
-        Assert.That(ex!.UnsupportedType, Is.EqualTo(typeof(Guid)));
-        Assert.That(ex.SuggestedAlternatives, Contains.Item("string"));
-        Assert.That(ex.SuggestedAlternatives, Contains.Item("byte[]"));
+        Assert.That(ex!.UnsupportedType, Is.EqualTo(typeof(Int128)));
+        Assert.That(ex.SuggestedAlternatives, Is.Not.Empty);
     }
 
     [Test]
@@ -185,6 +208,9 @@ public class TypeMapperTests
         {
             typeof(bool), typeof(int), typeof(long), typeof(float), typeof(double),
             typeof(string), typeof(DateTime), typeof(byte), typeof(short),
+            typeof(Half), typeof(nint), typeof(nuint), typeof(char),
+            typeof(DateOnly), typeof(TimeOnly), typeof(DateTimeOffset),
+            typeof(Guid), typeof(TimeSpan),
             typeof(bool?), typeof(int?), typeof(DateTime?)
         };
 
@@ -200,7 +226,7 @@ public class TypeMapperTests
     {
         var unsupportedTypes = new[]
         {
-            typeof(Guid), typeof(TimeSpan), typeof(DateOnly), typeof(char), typeof(object)
+            typeof(Int128), typeof(UInt128), typeof(object)
         };
 
         foreach (var type in unsupportedTypes)
@@ -217,6 +243,9 @@ public class TypeMapperTests
         {
             typeof(bool), typeof(int), typeof(long), typeof(float), typeof(double),
             typeof(string), typeof(DateTime), typeof(byte), typeof(short), typeof(decimal),
+            typeof(Half), typeof(nint), typeof(nuint), typeof(char),
+            typeof(DateOnly), typeof(TimeOnly), typeof(DateTimeOffset),
+            typeof(Guid), typeof(TimeSpan),
             typeof(bool?), typeof(int?), typeof(decimal?)
         };
 
@@ -232,7 +261,7 @@ public class TypeMapperTests
     {
         var unsupportedTypes = new[]
         {
-            typeof(Guid), typeof(TimeSpan), typeof(DateOnly), typeof(char), typeof(object)
+            typeof(Int128), typeof(UInt128), typeof(object)
         };
 
         foreach (var type in unsupportedTypes)
@@ -245,15 +274,12 @@ public class TypeMapperTests
     [Test]
     public void TypeMapping_SpecialCases_HandlesCorrectly()
     {
-        // Test Guid suggestions
-        var guidEx = Assert.Throws<UnsupportedTypeException>(() => TypeMapper.MapClrToArrow(typeof(Guid)));
-        Assert.That(guidEx!.SuggestedAlternatives, Contains.Item("string"));
-        Assert.That(guidEx.SuggestedAlternatives, Contains.Item("byte[]"));
+        // Test Int128/UInt128 suggestions (no lossless 128-bit interop representation)
+        var int128Ex = Assert.Throws<UnsupportedTypeException>(() => TypeMapper.MapClrToArrow(typeof(Int128)));
+        Assert.That(int128Ex!.SuggestedAlternatives, Is.Not.Empty);
 
-        // Test TimeSpan suggestions
-        var timeSpanEx = Assert.Throws<UnsupportedTypeException>(() => TypeMapper.MapClrToArrow(typeof(TimeSpan)));
-        Assert.That(timeSpanEx!.SuggestedAlternatives, Contains.Item("long (ticks)"));
-        Assert.That(timeSpanEx.SuggestedAlternatives, Contains.Item("double (seconds)"));
+        var uint128Ex = Assert.Throws<UnsupportedTypeException>(() => TypeMapper.MapClrToArrow(typeof(UInt128)));
+        Assert.That(uint128Ex!.SuggestedAlternatives, Is.Not.Empty);
 
         // Test enum suggestions
         var enumEx = Assert.Throws<UnsupportedTypeException>(() => TypeMapper.MapClrToArrow(typeof(DayOfWeek)));
@@ -295,14 +321,32 @@ public class TypeMapperTests
         // Test all supported types for Arrow mapping consistency
         var supportedTypes = TypeMapper.GetSupportedTypes().ToArray();
 
+        // Types with a shared Arrow representation map to a base CLR type at schema level;
+        // the original type is restored from nivara.clrType metadata on a table round-trip.
+        var nonInjectiveArrowTypes = new Dictionary<Type, Type>
+        {
+            { typeof(nint), typeof(long) },
+            { typeof(nuint), typeof(ulong) },
+            { typeof(char), typeof(string) },
+            { typeof(DateTimeOffset), typeof(DateTime) }
+        };
+
         foreach (var clrType in supportedTypes)
         {
             // Test CLR -> Arrow -> CLR round-trip consistency
             var arrowType = TypeMapper.MapClrToArrow(clrType);
             var roundTripClrType = TypeMapper.MapArrowToClr(arrowType);
 
-            Assert.That(roundTripClrType, Is.EqualTo(clrType),
-                $"CLR type {clrType.Name} should round-trip through Arrow mapping consistently");
+            if (nonInjectiveArrowTypes.TryGetValue(clrType, out var baseType))
+            {
+                Assert.That(roundTripClrType, Is.EqualTo(baseType),
+                    $"CLR type {clrType.Name} should map to shared Arrow type {baseType.Name} at schema level");
+            }
+            else
+            {
+                Assert.That(roundTripClrType, Is.EqualTo(clrType),
+                    $"CLR type {clrType.Name} should round-trip through Arrow mapping consistently");
+            }
 
             // Test that Arrow support detection is consistent
             Assert.That(TypeMapper.IsArrowSupported(clrType), Is.True,
@@ -318,7 +362,9 @@ public class TypeMapperTests
         var valueTypes = new[]
         {
             typeof(bool), typeof(int), typeof(long), typeof(float), typeof(double), typeof(DateTime),
-            typeof(byte), typeof(short), typeof(uint), typeof(ulong), typeof(ushort), typeof(sbyte)
+            typeof(byte), typeof(short), typeof(uint), typeof(ulong), typeof(ushort), typeof(sbyte),
+            typeof(Half), typeof(nint), typeof(nuint), typeof(char),
+            typeof(DateOnly), typeof(TimeOnly), typeof(DateTimeOffset), typeof(Guid), typeof(TimeSpan)
         };
 
         foreach (var valueType in valueTypes)
@@ -357,7 +403,7 @@ public class TypeMapperTests
             typeof(decimal), typeof(decimal?),
             
             // Unsupported types
-            typeof(Guid), typeof(TimeSpan), typeof(char), typeof(object)
+            typeof(Int128), typeof(UInt128), typeof(object)
         };
 
         foreach (var type in testTypes)
@@ -365,8 +411,8 @@ public class TypeMapperTests
             bool isArrowSupported = TypeMapper.IsArrowSupported(type);
             bool isParquetSupported = TypeMapper.IsParquetSupported(type);
 
-            // For types that are Arrow-supported, verify they can create Parquet fields (except for some edge cases)
-            if (isArrowSupported && type != typeof(uint) && type != typeof(ulong) && type != typeof(ushort) && type != typeof(sbyte))
+            // For types that are Arrow-supported, verify they can create Parquet fields
+            if (isArrowSupported)
             {
                 Assert.DoesNotThrow(() => TypeMapper.CreateParquetField("TestField", type),
                     $"Arrow-supported type {type.Name} should be able to create Parquet fields");
@@ -395,8 +441,8 @@ public class TypeMapperTests
 
         var unsupportedTypes = new[]
         {
-            typeof(Guid), typeof(TimeSpan), typeof(DateOnly), typeof(TimeOnly),
-            typeof(char), typeof(object), typeof(DayOfWeek), typeof(int[])
+            typeof(Int128), typeof(UInt128),
+            typeof(object), typeof(DayOfWeek), typeof(int[])
         };
 
         foreach (var unsupportedType in unsupportedTypes)
@@ -462,17 +508,25 @@ public class TypeMapperTests
 
         var testCases = new[]
         {
-            // (Type, ExpectedNullability)
-            (typeof(int), false),      // Value type - non-nullable
-            (typeof(int?), true),      // Nullable value type - nullable
-            (typeof(string), true),    // Reference type - nullable
-            (typeof(bool), false),     // Value type - non-nullable
-            (typeof(bool?), true),     // Nullable value type - nullable
-            (typeof(DateTime), false), // Value type - non-nullable
-            (typeof(DateTime?), true)  // Nullable value type - nullable
+            // (Type, ExpectedNullability, ExpectedClrType)
+            (typeof(int), false, typeof(int)),          // Value type - non-nullable
+            (typeof(int?), true, typeof(int)),          // Nullable value type - nullable
+            (typeof(string), true, typeof(string)),     // Reference type - nullable (reports ReadOnlyMemory<char>)
+            (typeof(bool), false, typeof(bool)),        // Value type - non-nullable
+            (typeof(bool?), true, typeof(bool)),        // Nullable value type - nullable
+            (typeof(DateTime), false, typeof(DateTime)),// Value type - non-nullable
+            (typeof(DateTime?), true, typeof(DateTime)),// Nullable value type - nullable
+            (typeof(TimeOnly), false, typeof(long)),    // Parquet.Net 6.1.0 reports TIME as Int64
+            (typeof(TimeOnly?), true, typeof(long)),
+            (typeof(Half), false, typeof(float)),       // Widened on-disk representation
+            (typeof(nint), false, typeof(long)),
+            (typeof(nuint), false, typeof(ulong)),
+            (typeof(char), false, typeof(ushort)),
+            (typeof(DateTimeOffset), false, typeof(DateTime)),
+            (typeof(TimeSpan), false, typeof(long))
         };
 
-        foreach (var (type, expectedNullable) in testCases)
+        foreach (var (type, expectedNullable, expectedClrType) in testCases)
         {
             if (!TypeMapper.IsParquetSupported(type)) continue;
 
@@ -482,7 +536,6 @@ public class TypeMapperTests
                 $"Type {type.Name} should have nullability {expectedNullable} in Parquet field");
 
             // Verify the CLR type is preserved correctly
-            var expectedClrType = Nullable.GetUnderlyingType(type) ?? type;
             if (TypeMapper.IsStringType(expectedClrType))
             {
                 // Parquet.Net 6.1.0 reports string fields as ReadOnlyMemory<char>
