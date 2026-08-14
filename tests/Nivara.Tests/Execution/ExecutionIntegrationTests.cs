@@ -173,12 +173,13 @@ public class ExecutionIntegrationTests
         try
         {
             File.WriteAllText(tempFile, json);
-            var source = Json.Scan(tempFile);
-            var plan = new QueryPlan(source, new IQueryOperation[]
-            {
-                new StubQueryOperation("Filter"),
-                new StubQueryOperation("Select"),
-            });
+            var plan = Json.ScanFrame(tempFile)
+                .ToQueryPlan()
+                .WithOperations(new IQueryOperation[]
+                {
+                    new StubQueryOperation("Filter"),
+                    new StubQueryOperation("Select"),
+                });
             using var result = CreateEngine().Execute(plan, CreateContext(ExecutionStrategy.Eager));
             Assert.That(result.RowCount, Is.EqualTo(3));
             Assert.That(result.ColumnCount, Is.EqualTo(2));
@@ -203,8 +204,9 @@ public class ExecutionIntegrationTests
         try
         {
             File.WriteAllText(tempFile, csv);
-            var source = Csv.Scan(tempFile);
-            var plan = new QueryPlan(source, new IQueryOperation[] { new StubQueryOperation("Filter") });
+            var plan = Csv.ScanFrame(tempFile)
+                .ToQueryPlan()
+                .WithOperations(new IQueryOperation[] { new StubQueryOperation("Filter") });
             using var result = CreateEngine().Execute(plan, CreateContext(strategy));
             Assert.That(result.RowCount, Is.EqualTo(3), strategy.ToString());
             Assert.That(result.HasColumn("Name"), Is.True, strategy.ToString());

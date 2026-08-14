@@ -249,7 +249,7 @@ public class NivaraQueryFeatureTests
     {
         var missingPath = Path.Combine(Path.GetTempPath(), "nivara_missing_" + Guid.NewGuid() + ".csv");
 
-        Assert.Throws<FileNotFoundException>(() => Csv.ScanAsQuery<CsvPerson>(missingPath));
+        Assert.Throws<FileNotFoundException>(() => Csv.ScanQuery<CsvPerson>(missingPath));
     }
 
     sealed class CsvPerson
@@ -292,8 +292,8 @@ public class NivaraQueryFeatureTests
                 ]
                 """);
 
-            CsvQuery = Csv.ScanAsQuery<CsvPerson>(csvPath);
-            JsonQuery = Json.ScanAsQuery<JsonPerson>(jsonPath);
+            CsvQuery = Csv.ScanQuery<CsvPerson>(csvPath);
+            JsonQuery = Json.ScanQuery<JsonPerson>(jsonPath);
         }
 
         public NivaraQuery<CsvPerson> CsvQuery { get; }
