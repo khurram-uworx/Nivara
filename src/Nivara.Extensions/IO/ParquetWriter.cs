@@ -357,6 +357,37 @@ public static class ParquetWriter
     }
 
     /// <summary>
+    /// Maps a <see cref="ParquetCompression"/> value to the Parquet.Net compression method
+    /// </summary>
+    private static Parquet.CompressionMethod MapCompression(ParquetCompression compression)
+    {
+        return compression switch
+        {
+            ParquetCompression.None => Parquet.CompressionMethod.None,
+            ParquetCompression.Snappy => Parquet.CompressionMethod.Snappy,
+            ParquetCompression.Gzip => Parquet.CompressionMethod.Gzip,
+            ParquetCompression.Lzo => Parquet.CompressionMethod.Lzo,
+            ParquetCompression.Brotli => Parquet.CompressionMethod.Brotli,
+            ParquetCompression.LZ4 => Parquet.CompressionMethod.LZ4,
+            ParquetCompression.Zstd => Parquet.CompressionMethod.Zstd,
+            ParquetCompression.Lz4Raw => Parquet.CompressionMethod.Lz4Raw,
+            _ => throw new ArgumentOutOfRangeException(nameof(compression), compression, "Unsupported Parquet compression method")
+        };
+    }
+
+    /// <summary>
+    /// Creates a sliced copy of an array for a single row group
+    /// </summary>
+    private static Array SliceArray(Array source, int start, int count)
+    {
+        var elementType = source.GetType().GetElementType()!;
+        var slice = Array.CreateInstance(elementType, count);
+        if (count > 0)
+            Array.Copy(source, start, slice, 0, count);
+        return slice;
+    }
+
+    /// <summary>
     /// Converts a NivaraFrame to Parquet format using the Parquet.Net API
     /// </summary>
     private static async Task ConvertNivaraFrameToParquet(NivaraFrame frame, Stream stream, ParquetWriteOptions options, CancellationToken cancellationToken)
@@ -378,39 +409,62 @@ public static class ParquetWriter
 
         var schema = new ParquetSchema(fields.ToArray());
 
-        // Create Parquet writer
-        await using var parquetWriter = await Parquet.ParquetWriter.CreateAsync(schema, stream);
+        // Create Parquet writer with the configured compression
+        var parquetOptions = new Parquet.ParquetOptions
+        {
+            CompressionMethod = MapCompression(options.Compression)
+        };
+
+        await using var parquetWriter = await Parquet.ParquetWriter.CreateAsync(schema, stream, parquetOptions);
 
         // Preserve the original CLR type of extended-domain columns so a round-trip can
-        // restore the typed column (e.g. Half is stored as float on disk).
-        var clrTypeMetadata = BuildClrTypeMetadata(frame);
-        if (clrTypeMetadata.Count > 0)
-            parquetWriter.CustomMetadata = clrTypeMetadata;
+        // restore the typed column (e.g. Half is stored as float on disk). Gated by
+        // WriteMetadata so callers can opt out of the metadata attachment.
+        if (options.WriteMetadata)
+        {
+            var clrTypeMetadata = BuildClrTypeMetadata(frame);
+            if (clrTypeMetadata.Count > 0)
+                parquetWriter.CustomMetadata = clrTypeMetadata;
+        }
 
-        using var rowGroupWriter = parquetWriter.CreateRowGroup();
-
-        // Write column data
+        // Extract each column's data once, then slice per row group
+        var columnData = new Array[frame.ColumnCount];
         for (int i = 0; i < frame.ColumnCount; i++)
         {
-            // Check for cancellation before processing each column
-            cancellationToken.ThrowIfCancellationRequested();
-
             var columnName = frame.ColumnNames[i];
             var columnType = frame.Schema.GetColumnType(columnName);
-            var field = fields[i];
+            columnData[i] = ExtractColumnDataArray(frame, columnName, columnType);
+        }
 
-            try
+        var rowGroupSize = Math.Max(1, options.RowGroupSize);
+        var rowGroupCount = Math.Max(1, (frame.RowCount + rowGroupSize - 1) / rowGroupSize);
+
+        for (int rg = 0; rg < rowGroupCount; rg++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            using var rowGroupWriter = parquetWriter.CreateRowGroup();
+
+            var start = rg * rowGroupSize;
+            var count = Math.Min(rowGroupSize, Math.Max(0, frame.RowCount - start));
+
+            for (int i = 0; i < frame.ColumnCount; i++)
             {
-                var columnData = ExtractColumnDataArray(frame, columnName, columnType);
-                await WriteParquetColumnAsync(rowGroupWriter, field, columnData, cancellationToken);
-            }
-            catch (Exception ex)
-            {
-                throw new DataCorruptionException($"Failed to write column '{columnName}': {ex.Message}", ex)
+                var columnName = frame.ColumnNames[i];
+                var field = fields[i];
+
+                try
                 {
-                    AffectedColumns = new[] { columnName },
-                    AffectedRowRange = new Range(0, frame.RowCount)
-                };
+                    var slice = SliceArray(columnData[i], start, count);
+                    await WriteParquetColumnAsync(rowGroupWriter, field, slice, cancellationToken);
+                }
+                catch (Exception ex)
+                {
+                    throw new DataCorruptionException($"Failed to write column '{columnName}': {ex.Message}", ex)
+                    {
+                        AffectedColumns = new[] { columnName },
+                        AffectedRowRange = new Range(start, start + count)
+                    };
+                }
             }
         }
     }
