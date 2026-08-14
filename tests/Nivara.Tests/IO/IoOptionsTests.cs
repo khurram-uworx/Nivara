@@ -53,7 +53,7 @@ public class IoOptionsTests
         Assert.That(options.HasHeaderRecord, Is.True);
         Assert.That(options.Delimiter, Is.EqualTo(","));
         Assert.That(options.Culture, Is.EqualTo(CultureInfo.InvariantCulture));
-        Assert.That(options.SchemaInferenceRows, Is.EqualTo(100));
+        Assert.That(options.SchemaInferenceRecords, Is.EqualTo(100));
         Assert.That(options.IgnoreBlankLines, Is.True);
         Assert.That(options.TrimOptions, Is.EqualTo(CsvTrimOptions.Trim));
     }
@@ -66,7 +66,7 @@ public class IoOptionsTests
         Assert.That(options, Is.Not.SameAs(CsvOptions.Default));
         Assert.That(options.Delimiter, Is.EqualTo(";"));
         Assert.That(options.HasHeaderRecord, Is.False);
-        Assert.That(options.SchemaInferenceRows, Is.EqualTo(100));
+        Assert.That(options.SchemaInferenceRecords, Is.EqualTo(100));
         Assert.That(CsvOptions.Default.Delimiter, Is.EqualTo(","));
     }
 

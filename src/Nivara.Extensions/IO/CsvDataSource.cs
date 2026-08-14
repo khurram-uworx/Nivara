@@ -51,7 +51,7 @@ public sealed class CsvOptions
     /// <summary>
     /// Gets the number of rows to use for schema inference
     /// </summary>
-    public int SchemaInferenceRows { get; }
+    public int SchemaInferenceRecords { get; }
 
     /// <summary>
     /// Gets whether to ignore blank lines
@@ -71,17 +71,17 @@ public sealed class CsvOptions
         HasHeaderRecord = true;
         Delimiter = ",";
         Culture = CultureInfo.InvariantCulture;
-        SchemaInferenceRows = 100;
+        SchemaInferenceRecords = 100;
         IgnoreBlankLines = true;
         TrimOptions = CsvTrimOptions.Trim;
     }
 
-    private CsvOptions(bool hasHeaderRecord, string delimiter, CultureInfo culture, int schemaInferenceRows, bool ignoreBlankLines, CsvTrimOptions trimOptions)
+    private CsvOptions(bool hasHeaderRecord, string delimiter, CultureInfo culture, int schemaInferenceRecords, bool ignoreBlankLines, CsvTrimOptions trimOptions)
     {
         HasHeaderRecord = hasHeaderRecord;
         Delimiter = delimiter;
         Culture = culture;
-        SchemaInferenceRows = schemaInferenceRows;
+        SchemaInferenceRecords = schemaInferenceRecords;
         IgnoreBlankLines = ignoreBlankLines;
         TrimOptions = trimOptions;
     }
@@ -92,17 +92,17 @@ public sealed class CsvOptions
     /// <param name="hasHeaderRecord">New header mode, or null to keep the current value</param>
     /// <param name="delimiter">New delimiter, or null to keep the current value</param>
     /// <param name="culture">New culture, or null to keep the current value</param>
-    /// <param name="schemaInferenceRows">New schema inference row count, or null to keep the current value</param>
+    /// <param name="schemaInferenceRecords">New schema inference record count, or null to keep the current value</param>
     /// <param name="ignoreBlankLines">New blank-line mode, or null to keep the current value</param>
     /// <param name="trimOptions">New trim mode, or null to keep the current value</param>
     /// <returns>A new CsvOptions instance</returns>
-    public CsvOptions With(bool? hasHeaderRecord = null, string? delimiter = null, CultureInfo? culture = null, int? schemaInferenceRows = null, bool? ignoreBlankLines = null, CsvTrimOptions? trimOptions = null)
+    public CsvOptions With(bool? hasHeaderRecord = null, string? delimiter = null, CultureInfo? culture = null, int? schemaInferenceRecords = null, bool? ignoreBlankLines = null, CsvTrimOptions? trimOptions = null)
     {
         return new CsvOptions(
             hasHeaderRecord ?? HasHeaderRecord,
             delimiter ?? Delimiter,
             culture ?? Culture,
-            schemaInferenceRows ?? SchemaInferenceRows,
+            schemaInferenceRecords ?? SchemaInferenceRecords,
             ignoreBlankLines ?? IgnoreBlankLines,
             trimOptions ?? TrimOptions);
     }
@@ -385,7 +385,7 @@ sealed class CsvLazySource : IQuerySource
 
             try
             {
-                while (csv.Read() && rowsRead < options.SchemaInferenceRows)
+                while (csv.Read() && rowsRead < options.SchemaInferenceRecords)
                 {
                     sampleRecords.Add(csv.GetRecord<dynamic>());
                     rowsRead++;
