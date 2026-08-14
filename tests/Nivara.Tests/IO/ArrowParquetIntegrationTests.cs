@@ -325,7 +325,7 @@ public class ArrowParquetIntegrationTests
         // Configure options
         var parquetOptions = ParquetWriteOptions.Default.With(
             validateSchema: true,
-            compression: "snappy",
+            compression: ParquetCompression.Snappy,
             rowGroupSize: 1000);
 
         var arrowOptions = new ArrowConversionOptions

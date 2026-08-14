@@ -1,6 +1,52 @@
 namespace Nivara.IO;
 
 /// <summary>
+/// Compression algorithms supported when writing Parquet files
+/// </summary>
+public enum ParquetCompression
+{
+    /// <summary>
+    /// No compression
+    /// </summary>
+    None = 0,
+
+    /// <summary>
+    /// Snappy compression. Default, balances compression ratio and speed.
+    /// </summary>
+    Snappy = 1,
+
+    /// <summary>
+    /// Gzip compression
+    /// </summary>
+    Gzip = 2,
+
+    /// <summary>
+    /// LZO compression
+    /// </summary>
+    Lzo = 3,
+
+    /// <summary>
+    /// Brotli compression
+    /// </summary>
+    Brotli = 4,
+
+    /// <summary>
+    /// LZ4 compression
+    /// </summary>
+    LZ4 = 5,
+
+    /// <summary>
+    /// Zstandard compression
+    /// </summary>
+    Zstd = 6,
+
+    /// <summary>
+    /// Raw LZ4 compression (no frame header)
+    /// </summary>
+    Lz4Raw = 7
+}
+
+/// <summary>
 /// Configuration options for Parquet writing operations
 /// </summary>
 public sealed class ParquetWriteOptions
@@ -24,10 +70,10 @@ public sealed class ParquetWriteOptions
     /// Gets the compression algorithm to use
     /// </summary>
     /// <remarks>
-    /// Supported compression algorithms: "none", "snappy", "gzip", "lz4", "brotli", "zstd".
-    /// Default is "snappy" for good balance of compression ratio and speed.
+    /// Default is <see cref="ParquetCompression.Snappy"/> for good balance of
+    /// compression ratio and speed.
     /// </remarks>
-    public string Compression { get; }
+    public ParquetCompression Compression { get; }
 
     /// <summary>
     /// Gets whether to validate the schema before writing
@@ -54,12 +100,12 @@ public sealed class ParquetWriteOptions
     public ParquetWriteOptions()
     {
         RowGroupSize = 10000;
-        Compression = "snappy";
+        Compression = ParquetCompression.Snappy;
         ValidateSchema = true;
         WriteMetadata = true;
     }
 
-    private ParquetWriteOptions(int rowGroupSize, string compression, bool validateSchema, bool writeMetadata)
+    private ParquetWriteOptions(int rowGroupSize, ParquetCompression compression, bool validateSchema, bool writeMetadata)
     {
         RowGroupSize = rowGroupSize;
         Compression = compression;
@@ -75,7 +121,7 @@ public sealed class ParquetWriteOptions
     /// <param name="validateSchema">New schema validation mode, or null to keep the current value</param>
     /// <param name="writeMetadata">New metadata writing mode, or null to keep the current value</param>
     /// <returns>A new ParquetWriteOptions instance</returns>
-    public ParquetWriteOptions With(int? rowGroupSize = null, string? compression = null, bool? validateSchema = null, bool? writeMetadata = null)
+    public ParquetWriteOptions With(int? rowGroupSize = null, ParquetCompression? compression = null, bool? validateSchema = null, bool? writeMetadata = null)
     {
         return new ParquetWriteOptions(
             rowGroupSize ?? RowGroupSize,

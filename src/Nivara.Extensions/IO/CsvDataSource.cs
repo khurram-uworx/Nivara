@@ -8,6 +8,22 @@ using System.Globalization;
 namespace Nivara.IO;
 
 /// <summary>
+/// Configures whitespace trimming applied to CSV fields while reading
+/// </summary>
+public enum CsvTrimOptions
+{
+    /// <summary>
+    /// Fields are read verbatim, preserving surrounding whitespace
+    /// </summary>
+    None,
+
+    /// <summary>
+    /// Leading and trailing whitespace is removed from every field
+    /// </summary>
+    Trim
+}
+
+/// <summary>
 /// Configuration options for CSV reading operations
 /// </summary>
 public sealed class CsvOptions
@@ -43,9 +59,9 @@ public sealed class CsvOptions
     public bool IgnoreBlankLines { get; }
 
     /// <summary>
-    /// Gets whether to trim whitespace from fields
+    /// Gets the whitespace trimming mode for fields
     /// </summary>
-    public bool TrimOptions { get; }
+    public CsvTrimOptions TrimOptions { get; }
 
     /// <summary>
     /// Initializes a new instance of CsvOptions with default values
@@ -57,10 +73,10 @@ public sealed class CsvOptions
         Culture = CultureInfo.InvariantCulture;
         SchemaInferenceRows = 100;
         IgnoreBlankLines = true;
-        TrimOptions = true;
+        TrimOptions = CsvTrimOptions.Trim;
     }
 
-    private CsvOptions(bool hasHeaderRecord, string delimiter, CultureInfo culture, int schemaInferenceRows, bool ignoreBlankLines, bool trimOptions)
+    private CsvOptions(bool hasHeaderRecord, string delimiter, CultureInfo culture, int schemaInferenceRows, bool ignoreBlankLines, CsvTrimOptions trimOptions)
     {
         HasHeaderRecord = hasHeaderRecord;
         Delimiter = delimiter;
@@ -80,7 +96,7 @@ public sealed class CsvOptions
     /// <param name="ignoreBlankLines">New blank-line mode, or null to keep the current value</param>
     /// <param name="trimOptions">New trim mode, or null to keep the current value</param>
     /// <returns>A new CsvOptions instance</returns>
-    public CsvOptions With(bool? hasHeaderRecord = null, string? delimiter = null, CultureInfo? culture = null, int? schemaInferenceRows = null, bool? ignoreBlankLines = null, bool? trimOptions = null)
+    public CsvOptions With(bool? hasHeaderRecord = null, string? delimiter = null, CultureInfo? culture = null, int? schemaInferenceRows = null, bool? ignoreBlankLines = null, CsvTrimOptions? trimOptions = null)
     {
         return new CsvOptions(
             hasHeaderRecord ?? HasHeaderRecord,
@@ -102,7 +118,9 @@ public sealed class CsvOptions
             HasHeaderRecord = HasHeaderRecord,
             Delimiter = Delimiter,
             IgnoreBlankLines = IgnoreBlankLines,
-            TrimOptions = TrimOptions ? CsvHelper.Configuration.TrimOptions.Trim : CsvHelper.Configuration.TrimOptions.None,
+            TrimOptions = TrimOptions == CsvTrimOptions.Trim
+                ? CsvHelper.Configuration.TrimOptions.Trim
+                : CsvHelper.Configuration.TrimOptions.None,
             MissingFieldFound = null, // Don't throw on missing fields
             HeaderValidated = null   // Don't validate headers
         };
