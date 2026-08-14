@@ -243,7 +243,7 @@ internal static class FusedKernel
         return new FusedExpressionPlan(typeof(T), true, hasNulls, expression.Name, leaves);
     }
 
-    static T CoerceLiteral<T>(object? value)
+    internal static T CoerceLiteral<T>(object? value)
         where T : struct, INumber<T>
     {
         if (value == null)

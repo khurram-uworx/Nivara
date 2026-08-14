@@ -30,6 +30,7 @@ sealed class FusedExpressionEvaluator
     int fusedPathEvaluationCount;
     int compiledPathEvaluationCount;
     int nodeTreePathEvaluationCount;
+    int tensorPrimitivesPathEvaluationCount;
 
     /// <summary>
     /// Gets how many fused evaluations were applied by the most recent operations on this instance.
@@ -46,6 +47,11 @@ sealed class FusedExpressionEvaluator
     /// Gets how many of those evaluations ran through the generic node-tree kernel fallback.
     /// </summary>
     internal int NodeTreePathEvaluationCount => nodeTreePathEvaluationCount;
+
+    /// <summary>
+    /// Gets how many of those evaluations ran through the TensorPrimitives single-op backend.
+    /// </summary>
+    internal int TensorPrimitivesPathEvaluationCount => tensorPrimitivesPathEvaluationCount;
 
     delegate void CompiledFusedInvoke(object[] leafArrays, Array dest, int start, int count, int destStart);
 
@@ -215,12 +221,18 @@ sealed class FusedExpressionEvaluator
         var kernelPlan = KernelLowerer.Lower(expression, plan);
 
         // Span kernel first: null-bearing uniform generic-math plans fuse values and the OR'd null
-        // mask in a single zero-copy pass — no leaf snapshots, no separate mask pass. Everything else
-        // (null-free uniform, heterogeneous, and every bool-result plan) stays on the compiled path,
+        // mask in a single zero-copy pass — no leaf snapshots, no separate mask pass. Null-free
+        // single-op uniform plans skip straight to the TensorPrimitives SIMD kernel. Everything else
+        // (null-free chains, heterogeneous, and every bool-result plan) stays on the compiled path,
         // preserving the JIT-vectorized fused win for the common null-free case.
         if (kernelPlan.IsUniformNumeric && kernelPlan.HasNulls)
         {
             return EvaluateNodeTree(expression, plan, kernelPlan, length);
+        }
+
+        if (kernelPlan.IsTensorPrimitivesCandidate && !kernelPlan.HasNulls)
+        {
+            return EvaluateTensorPrimitives(expression, plan, kernelPlan, length);
         }
 
         var leafArrays = SnapshotLeaves(plan);
@@ -422,6 +434,58 @@ sealed class FusedExpressionEvaluator
             var method = typeof(FusedNodeTreeRunner<>).MakeGenericType(t)
                 .GetMethod(nameof(FusedNodeTreeRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!;
             return (FusedNodeTreeInvoker)method.CreateDelegate(typeof(FusedNodeTreeInvoker));
+        });
+    }
+
+    /// <summary>
+    /// Evaluates through the TensorPrimitives single-op backend: null-free uniform plans that are a
+    /// single Add/Subtract/Multiply/Divide over leaves and literals dispatch to the SIMD-vectorized
+    /// <see cref="System.Numerics.Tensors.TensorPrimitives"/> overloads in one call.
+    /// </summary>
+    IColumn EvaluateTensorPrimitives(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length)
+    {
+        if (!TensorPrimitivesKernel.IsDispatchable(kernelPlan))
+        {
+            throw new NotSupportedException(
+                $"Expression '{expression.Name}' is not dispatchable to the TensorPrimitives single-op backend");
+        }
+
+        var runner = GetTensorPrimitivesRunner(plan.ResultType);
+        var result = runner(kernelPlan);
+        tensorPrimitivesPathEvaluationCount++;
+        fusedPathEvaluationCount++;
+        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "TensorPrimitives fused kernel");
+        return result;
+    }
+
+    static class TensorPrimitivesRunner<T>
+        where T : struct, INumber<T>
+    {
+        internal static IColumn Run(KernelPlan plan)
+        {
+            var leaves = new NivaraColumn<T>[plan.Columns.Count];
+            for (int i = 0; i < plan.Columns.Count; i++)
+                leaves[i] = (NivaraColumn<T>)plan.Columns[i].Column;
+
+            var length = leaves.Length == 0 ? 1 : leaves[0].Length;
+            var ok = TensorPrimitivesKernel.TryEvaluate<T>(plan, leaves, length, out var result);
+            if (!ok)
+                throw new NotSupportedException($"Plan is not dispatchable to the TensorPrimitives single-op backend for element type {typeof(T).Name}");
+            return result;
+        }
+    }
+
+    delegate IColumn TensorPrimitivesInvoker(KernelPlan plan);
+
+    static readonly ConcurrentDictionary<Type, TensorPrimitivesInvoker> tensorPrimitivesRunnerCache = new();
+
+    static TensorPrimitivesInvoker GetTensorPrimitivesRunner(Type elementType)
+    {
+        return tensorPrimitivesRunnerCache.GetOrAdd(elementType, static t =>
+        {
+            var method = typeof(TensorPrimitivesRunner<>).MakeGenericType(t)
+                .GetMethod(nameof(TensorPrimitivesRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!;
+            return (TensorPrimitivesInvoker)method.CreateDelegate(typeof(TensorPrimitivesInvoker));
         });
     }
 
