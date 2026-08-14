@@ -8,6 +8,42 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 - **Fused expression kernel IR + span/chunked execution (#167)** — the fused expression engine now lowers every expression tree to a single post-order `KernelPlan` (`KernelLowerer`/`KernelIR`) and routes it to one of three backends: a flat IR span interpreter in `FusedKernel` for null-bearing uniform numeric plans (per-element `ReadOnlyMemory<T>` leaf access, hoisted literals, inline OR null-mask), a `TensorPrimitives` SIMD backend for null-free single-op plans (Add/Subtract/Multiply/Divide, one BCL SIMD call), and the compiled offset delegate (`start`/`count`/`destStart`) for everything else (null-free chains, bool, heterogeneous plans). Execution is chunk-capable: `FusedExpressionEvaluator.EvaluateChunked(expression, input, chunkSize)` slices the existing contiguous leaf storage zero-copy and writes into one shared output array, bit-identical to whole-column evaluation — the memory-budgeted primitive the Phase 4 async streaming bridge (#171) needs. Chunked/whole bit-identity, null-mask propagation, and backend-routing guardrails are pinned by unit tests (`EvaluateChunked_*`, `Evaluate_NullFreeSingleOp_*`); `NodeTreePathEvaluationCount` was renamed `SpanKernelPathEvaluationCount` to reflect the IR span fallback. Design rationale recorded in `docs/adr/004-fused-expression-engine-kernel-ir-span-backends.md`.
 
+### Changed
+
+- **Strongly-typed ML.NET training metrics (#233)** — `ModelIntegration.TrainAndEvaluate`
+  now returns `(ITransformer Model, ModelEvaluationResult Metrics)` instead of
+  `(ITransformer Model, object Metrics)`. `ModelEvaluationResult` is a sealed record with
+  a `ModelTaskKind Kind` plus exactly one non-null typed metrics property (`Binary`,
+  `Multiclass`, or `Regression`), populated by the pipeline-kind heuristic. Breaking: the
+  previous untyped `object` return could not be consumed without reflection, so no
+  supported callers are affected.
+
+- **`TrainingResult.PrintSummary()` / `DataParallelTrainingResult.PrintSummary()` accept
+  an optional `TextWriter` (#235)** — both now write to `writer ?? Console.Out`, so
+  summaries can be routed to logs or captured in tests. Existing no-argument callers are
+  unchanged.
+
+- **`CsvOptions.SchemaInferenceRows` renamed to `SchemaInferenceRecords` (#235)** — matches
+  the existing `JsonOptions.SchemaInferenceRecords` naming. Breaking for any caller that
+  referenced the CSV option by its old name (including the `With(schemaInferenceRows: ...)`
+  parameter).
+
+- **Internal surface scoping (#235)** — members of already-internal classes that were
+  mistakenly declared `public` are now `internal`: `ColumnStorageFactory` (`Create`,
+  `IsVectorizable`), `TensorsHelper` (10 tensor kernels), and `RankKernel.Compute`.
+  `RankKind` remains public. No behavioral change.
+
+### Removed
+
+- **`MLNetInterop.ToNivaraFrame(IDataView, MLContext)` static (#233)** — removed the
+  argument-order trap duplicate of the `MLNetExtensions.ToNivaraFrame(this MLContext,
+  IDataView)` extension; use the extension form. The underlying
+  `MLNetInterop.ConvertFromDataView` is now `internal`.
+
+- **Array-based tensor conversions (#233)** — `TensorConversions.ReshapeToArray` and
+  `TensorConversions.FlattenFromTensor(Array)` are removed in favor of the core
+  `Nivara.Tensors` typed `ReshapeToTensor` / `FlattenFromTensor(Tensor<T>)` equivalents.
+
 ## [1.3.0] - 2026-08-14
 
 ### Added
