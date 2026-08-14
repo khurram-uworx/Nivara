@@ -212,19 +212,17 @@ sealed class FusedExpressionEvaluator
         ValidateLeafLengths(plan);
         var length = plan.Columns[0].Column.Length;
 
+        var kernelPlan = KernelLowerer.Lower(expression, plan);
+
         // Span kernel first: null-bearing uniform generic-math plans fuse values and the OR'd null
         // mask in a single zero-copy pass — no leaf snapshots, no separate mask pass. Everything else
         // (null-free uniform, heterogeneous, and every bool-result plan) stays on the compiled path,
         // preserving the JIT-vectorized fused win for the common null-free case.
-        if (plan.IsGenericMath
-            && plan.ResultType != typeof(bool)
-            && plan.HasNulls
-            && plan.Columns.All(l => l.Column.ElementType == plan.ResultType))
+        if (kernelPlan.IsUniformNumeric && kernelPlan.HasNulls)
         {
-            return EvaluateNodeTree(expression, plan, length);
+            return EvaluateNodeTree(expression, plan, kernelPlan, length);
         }
 
-        var kernelPlan = KernelLowerer.Lower(expression, plan);
         var leafArrays = SnapshotLeaves(plan);
 
         CompiledFusedInvoke invoke;
@@ -235,7 +233,7 @@ sealed class FusedExpressionEvaluator
         }
         catch (NotSupportedException)
         {
-            return EvaluateNodeTree(expression, plan, length);
+            return EvaluateNodeTree(expression, plan, kernelPlan, length);
         }
 
         var resultArray = AllocateResultArray(plan.ResultType, length);
@@ -390,25 +388,16 @@ sealed class FusedExpressionEvaluator
     /// math and leaf columns already sharing the result element type. The null mask is fused into the
     /// kernel (OR semantics), so no separate <see cref="ComputeMask"/> pass runs.
     /// </summary>
-    IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, int length)
+    IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length)
     {
-        if (!plan.IsGenericMath)
+        if (!kernelPlan.IsUniformNumeric)
         {
             throw new NotSupportedException(
                 $"Expression '{expression.Name}' is not supported by the fused evaluator for element type {plan.ResultType.Name}");
         }
 
-        foreach (var leaf in plan.Columns)
-        {
-            if (leaf.Column.ElementType != plan.ResultType)
-            {
-                throw new NotSupportedException(
-                    $"Expression '{expression.Name}' mixes element types that the generic node-tree kernel cannot fuse");
-            }
-        }
-
         var runner = GetNodeTreeRunner(plan.ResultType);
-        var result = runner(expression, plan.Columns);
+        var result = runner(kernelPlan);
         nodeTreePathEvaluationCount++;
         fusedPathEvaluationCount++;
         RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Span fused kernel");
@@ -418,11 +407,11 @@ sealed class FusedExpressionEvaluator
     static class FusedNodeTreeRunner<T>
         where T : struct, INumber<T>
     {
-        internal static IColumn Run(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves)
-            => FusedKernel.Evaluate<T>(expression, leaves);
+        internal static IColumn Run(KernelPlan plan)
+            => FusedKernel.Evaluate<T>(plan);
     }
 
-    delegate IColumn FusedNodeTreeInvoker(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves);
+    delegate IColumn FusedNodeTreeInvoker(KernelPlan plan);
 
     static readonly ConcurrentDictionary<Type, FusedNodeTreeInvoker> nodeTreeRunnerCache = new();
 
