@@ -360,7 +360,7 @@ public class ForwardParityTests
     }
 
     [Test]
-    public void DoubleType_ForwardTangent_MatchesBackwardGradient()
+    public void DoubleType_ForwardTangent_EqualsBackwardGradient()
     {
         var xData = NivaraColumn<double>.Create(new double[] { -2.0, 0.0, 3.0 });
 
@@ -374,4 +374,405 @@ public class ForwardParityTests
         for (int i = 0; i < expected.Length; i++)
             Assert.That(result.Tangent![i], Is.EqualTo(expected[i]).Within(1e-12));
     }
+
+    static ForwardGradTensor<float> Fwd(float[] data, float[]? tangent = null) =>
+        new ForwardGradTensor<float>(NivaraColumn<float>.Create(data), tangent != null ? NivaraColumn<float>.Create(tangent) : null);
+
+    static ReverseGradTensor<float> Rev(float[] data, bool requiresGrad, int[] shape) =>
+        new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad, shape);
+
+    static void AssertTangentEqualsGradient(ForwardGradTensor<float> fwd, NivaraColumn<float> backward, int count, string label)
+    {
+        Assert.That(fwd.RequiresTangent, Is.True);
+        Assert.That(fwd.Tangent, Is.Not.Null);
+        for (int i = 0; i < count; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(backward[i]).Within(1e-5f),
+                $"{label}: position {i}, forward={fwd.Tangent[i]}, backward={backward[i]}");
+    }
+
+    static void AssertTangentSumEqualsGradientSum(ForwardGradTensor<float> fwd, NivaraColumn<float> backward, string label)
+    {
+        Assert.That(fwd.RequiresTangent, Is.True);
+        Assert.That(fwd.Tangent, Is.Not.Null);
+        Assert.That(fwd.Tangent!.Sum(), Is.EqualTo(backward.Sum()).Within(1e-4f),
+            $"{label}: forward tangent sum={fwd.Tangent.Sum()}, backward grad sum={backward.Sum()}");
+    }
+
+    static float[] CentralDifferenceJvp(Func<float[], ForwardGradTensor<float>> forward, float[] x, float[] v, int outputLength, float h = 1e-2f)
+    {
+        var xPlus = (float[])x.Clone();
+        var xMinus = (float[])x.Clone();
+        for (int i = 0; i < x.Length; i++)
+        {
+            xPlus[i] += h * v[i];
+            xMinus[i] -= h * v[i];
+        }
+        var fPlus = forward(xPlus);
+        var fMinus = forward(xMinus);
+        var result = new float[outputLength];
+        for (int i = 0; i < outputLength; i++)
+            result[i] = (fPlus[i] - fMinus[i]) / (2f * h);
+        return result;
+    }
+
+    static ForwardGradTensor<float> From3D(float[] data, int b, int l, int d, float[]? tangent = null)
+    {
+        var dataCol = NivaraColumn<float>.CreateFromOwnedArray(data);
+        NivaraColumn<float>? tanCol = tangent != null ? NivaraColumn<float>.CreateFromOwnedArray(tangent) : null;
+        return new ForwardGradTensor<float>(dataCol, tanCol, new[] { b, l, d });
+    }
+
+    #region New-Op Reverse Parity
+
+    [Test]
+    public void GeluExact_ForwardTangent_EqualsBackwardGradient()
+    {
+        var xData = NivaraColumn<float>.Create(new float[] { -2f, -0.5f, 0f, 0.5f, 2f });
+
+        var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
+        ReverseGradOperations.Sum(ReverseGradOperations.GeluExact(rx)).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(new float[] { -2f, -0.5f, 0f, 0.5f, 2f }, new float[] { 1f, 1f, 1f, 1f, 1f });
+        var result = ForwardGradOperations.GeluExact(fx);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "GeluExact");
+    }
+
+    [Test]
+    public void Pow_ForwardTangent_EqualsBackwardGradient()
+    {
+        var xData = NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f });
+
+        var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
+        ReverseGradOperations.Sum(ReverseGradOperations.Pow(rx, 2.0)).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(new float[] { 2f, 3f, 4f }, new float[] { 1f, 1f, 1f });
+        var result = ForwardGradOperations.Pow(fx, 2.0);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "Pow");
+    }
+
+    [Test]
+    public void RMSNorm_ForwardTangent_EqualsBackwardGradient()
+    {
+        var xData = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f });
+
+        var rx = new ReverseGradTensor<float>(xData, requiresGrad: true);
+        ReverseGradOperations.Sum(ReverseGradOperations.RMSNorm(rx)).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(new float[] { 1f, 2f, 3f }, new float[] { 1f, 1f, 1f });
+        var result = ForwardGradOperations.RMSNorm(fx);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "RMSNorm");
+    }
+
+    [Test]
+    public void PerRowRMSNorm_ForwardTangent_EqualsBackwardGradient()
+    {
+        var data = new float[] { 1f, 2f, 3f, 4f };
+
+        var rx = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad: true);
+        rx.Reshape(2, 2);
+        ReverseGradOperations.Sum(ReverseGradOperations.PerRowRMSNorm(rx, 2, 2)).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(data, new float[] { 1f, 1f, 1f, 1f });
+        fx.Reshape(2, 2);
+        var result = ForwardGradOperations.PerRowRMSNorm(fx, 2, 2);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "PerRowRMSNorm");
+    }
+
+    [Test]
+    public void MeanPool_ForwardTangentSum_EqualsBackwardGradientSum()
+    {
+        var data = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f };
+
+        var rx = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad: true);
+        ReverseGradOperations.Sum(ReverseGradOperations.MeanPool(rx, 2, 3)).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(data, new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var result = ForwardGradOperations.MeanPool(fx, 2, 3);
+
+        AssertTangentSumEqualsGradientSum(result, expected, "MeanPool");
+    }
+
+    [Test]
+    public void MatMulTransposedB_ForwardTangent_MatchesBackwardGradient()
+    {
+        // f(A,B) = Sum(A @ B^T). With symmetric B and t_A = ones:
+        //   Forward JVP = ones @ B^T = ones @ B
+        //   Backward grad_A = ones @ B
+        var aData = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f, 6f });
+        var bData = NivaraColumn<float>.Create(new float[] { 1f, 2f, 3f, 2f, 4f, 5f, 3f, 5f, 6f });
+
+        var ra = new ReverseGradTensor<float>(aData, requiresGrad: true);
+        var rb = new ReverseGradTensor<float>(bData, requiresGrad: false);
+        ra.Reshape(2, 3);
+        rb.Reshape(3, 3);
+        ReverseGradOperations.Sum(ReverseGradOperations.MatMulTransposedB(ra, rb)).Backward();
+
+        var fa = Fwd(new float[] { 1f, 2f, 3f, 4f, 5f, 6f }, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+        var fb = Fwd(new float[] { 1f, 2f, 3f, 2f, 4f, 5f, 3f, 5f, 6f });
+        fa.Reshape(2, 3);
+        fb.Reshape(3, 3);
+        var fresult = ForwardGradOperations.MatMulTransposedB(fa, fb);
+
+        Assert.That(ra.Grad, Is.Not.Null);
+        AssertTangentEqualsGradient(fresult, ra.Grad!, 6, "MatMulTransposedB");
+    }
+
+    [Test]
+    public void AddBias_ForwardTangent_EqualsBackwardGradient()
+    {
+        var aData = new float[] { 1f, 2f, 3f, 4f, 5f, 6f };
+        var biasData = new float[] { 10f, 20f, 30f };
+
+        var ra = new ReverseGradTensor<float>(NivaraColumn<float>.Create(aData), requiresGrad: true);
+        var rb = new ReverseGradTensor<float>(NivaraColumn<float>.Create(biasData), requiresGrad: false);
+        ra.Reshape(2, 3);
+        ReverseGradOperations.Sum(ReverseGradOperations.AddBias(ra, rb)).Backward();
+        var expected = ra.Grad!;
+
+        var fa = Fwd(aData, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+        var fb = Fwd(biasData);
+        fa.Reshape(2, 3);
+        var result = ForwardGradOperations.AddBias(fa, fb);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "AddBias");
+    }
+
+    [Test]
+    public void BroadcastMultiply_InputTangent_EqualsBackwardGradient()
+    {
+        var inputData = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f };
+        var scaleData = new float[] { 2f, 3f };
+
+        var ri = new ReverseGradTensor<float>(NivaraColumn<float>.Create(inputData), true, new[] { 2, 2, 2 });
+        var rs = new ReverseGradTensor<float>(NivaraColumn<float>.Create(scaleData), false);
+        ReverseGradOperations.Sum(ReverseGradOperations.BroadcastMultiply(ri, rs)).Backward();
+        var expected = ri.Grad!;
+
+        var fi = From3D(inputData, 2, 2, 2, new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var fs = Fwd(scaleData);
+        var result = ForwardGradOperations.BroadcastMultiply(fi, fs);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "BroadcastMultiply");
+    }
+
+    [Test]
+    public void BroadcastAdd_InputTangent_EqualsBackwardGradient()
+    {
+        var inputData = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f };
+        var biasData = new float[] { 2f, 3f };
+
+        var ri = new ReverseGradTensor<float>(NivaraColumn<float>.Create(inputData), true, new[] { 2, 2, 2 });
+        var rb = new ReverseGradTensor<float>(NivaraColumn<float>.Create(biasData), false);
+        ReverseGradOperations.Sum(ReverseGradOperations.BroadcastAdd(ri, rb)).Backward();
+        var expected = ri.Grad!;
+
+        var fi = From3D(inputData, 2, 2, 2, new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        var fb = Fwd(biasData);
+        var result = ForwardGradOperations.BroadcastAdd(fi, fb);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "BroadcastAdd");
+    }
+
+    [Test]
+    public void Slice_ForwardTangentSum_EqualsBackwardGradientSum()
+    {
+        var data = new float[] { 1f, 2f, 3f, 4f, 5f, 6f };
+
+        var rx = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad: true);
+        rx.Reshape(1, 6);
+        ReverseGradOperations.Sum(ReverseGradOperations.Slice(rx, 1, 3)).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(data, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+        fx.Reshape(1, 6);
+        var result = ForwardGradOperations.Slice(fx, 1, 3);
+
+        AssertTangentSumEqualsGradientSum(result, expected, "Slice");
+    }
+
+    [Test]
+    public void Concat_ForwardTangentSum_EqualsBackwardGradientSum()
+    {
+        var aData = new float[] { 1f, 2f, 3f };
+        var bData = new float[] { 4f, 5f };
+
+        var ra = new ReverseGradTensor<float>(NivaraColumn<float>.Create(aData), requiresGrad: true);
+        var rb = new ReverseGradTensor<float>(NivaraColumn<float>.Create(bData), requiresGrad: true);
+        ReverseGradOperations.Sum(ReverseGradOperations.Concat(new[] { ra, rb })).Backward();
+        var gradA = ra.Grad!;
+        var gradB = rb.Grad!;
+        var combined = new float[gradA.Length + gradB.Length];
+        gradA.CopyTo(combined.AsSpan(), 0);
+        gradB.CopyTo(combined.AsSpan(gradA.Length), 0);
+
+        var fa = Fwd(aData, new float[] { 1f, 1f, 1f });
+        var fb = Fwd(bData, new float[] { 1f, 1f });
+        var result = ForwardGradOperations.Concat(new[] { fa, fb });
+
+        AssertTangentEqualsGradient(result, NivaraColumn<float>.CreateFromOwnedArray(combined), combined.Length, "Concat");
+    }
+
+    [Test]
+    public void Gather_ForwardTangentSum_EqualsBackwardGradientSum()
+    {
+        var data = new float[] { 1f, 2f, 3f, 4f, 5f, 6f };
+
+        var rx = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad: true);
+        rx.Reshape(3, 2);
+        ReverseGradOperations.Sum(ReverseGradOperations.Gather(rx, new[] { 2, 0 })).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(data, new float[] { 1f, 1f, 1f, 1f, 1f, 1f });
+        fx.Reshape(3, 2);
+        var result = ForwardGradOperations.Gather(fx, new[] { 2, 0 });
+
+        AssertTangentSumEqualsGradientSum(result, expected, "Gather");
+    }
+
+    [Test]
+    public void SparseEmbeddingBag_ForwardTangentSum_EqualsBackwardGradientSum()
+    {
+        var weightData = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f };
+        var indexData = new float[] { 0f, 2f, 3f, 1f };
+
+        var rw = new ReverseGradTensor<float>(NivaraColumn<float>.Create(weightData), requiresGrad: true);
+        rw.Reshape(4, 3);
+        var ri = new ReverseGradTensor<float>(NivaraColumn<float>.Create(indexData), requiresGrad: false);
+        ri.Reshape(2, 2);
+        ReverseGradOperations.Sum(ReverseGradOperations.SparseEmbeddingBag(rw, ri)).Backward();
+        var expected = rw.Grad!;
+
+        var fw = Fwd(weightData, new float[] { 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f, 1f });
+        fw.Reshape(4, 3);
+        var fi = Fwd(indexData);
+        fi.Reshape(2, 2);
+        var result = ForwardGradOperations.SparseEmbeddingBag(fw, fi);
+
+        AssertTangentSumEqualsGradientSum(result, expected, "SparseEmbeddingBag");
+    }
+
+    #endregion
+
+    #region New-Op Finite-Difference JVP
+
+    [Test]
+    public void MeanPool_FiniteDifference_JvpMatches()
+    {
+        var x = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f };
+        var v = new float[] { 1f, 0.5f, -1f, 2f, 0.25f, 0f, 1f, 1f, 1f, -0.5f, 0.5f, 0f };
+
+        var fwd = ForwardGradOperations.MeanPool(Fwd(x, v), 2, 3);
+
+        var fdJvp = CentralDifferenceJvp(a => ForwardGradOperations.MeanPool(Fwd(a), 2, 3), x, v, 6);
+        for (int i = 0; i < 6; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"MeanPool position {i}");
+    }
+
+    [Test]
+    public void Gather_FiniteDifference_DuplicateIndices_JvpMatches()
+    {
+        var x = new float[] { 1f, 2f, 3f, 4f, 5f, 6f };
+        var v = new float[] { 0.5f, 1f, -0.25f, 0.75f, 1.5f, -1f };
+        var indices = new[] { 2, 0, 2 };
+
+        var source = Fwd(x, v);
+        source.Reshape(3, 2);
+        var fwd = ForwardGradOperations.Gather(source, indices);
+
+        var fdJvp = CentralDifferenceJvp(
+            a =>
+            {
+                var s = Fwd(a);
+                s.Reshape(3, 2);
+                return ForwardGradOperations.Gather(s, indices);
+            },
+            x, v, indices.Length * 2);
+        for (int i = 0; i < fdJvp.Length; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"Gather position {i}");
+    }
+
+    [Test]
+    public void SparseEmbeddingBag_FiniteDifference_DuplicateIndices_JvpMatches()
+    {
+        var x = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f, 9f, 10f, 11f, 12f };
+        var v = new float[] { 1f, 0f, 1f, 0f, 1f, 0f, 1f, 0f, 1f, 0f, 1f, 0f };
+        var indexData = new float[] { 0f, 2f, 2f, 1f };
+
+        var weight = Fwd(x, v);
+        weight.Reshape(4, 3);
+        var fi = Fwd(indexData);
+        fi.Reshape(2, 2);
+        var fwd = ForwardGradOperations.SparseEmbeddingBag(weight, fi);
+
+        var fdJvp = CentralDifferenceJvp(
+            a =>
+            {
+                var w = Fwd(a);
+                w.Reshape(4, 3);
+                var idx = Fwd(indexData);
+                idx.Reshape(2, 2);
+                return ForwardGradOperations.SparseEmbeddingBag(w, idx);
+            },
+            x, v, 6);
+        for (int i = 0; i < 6; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"SparseEmbeddingBag position {i}");
+    }
+
+    [Test]
+    public void MultiHeadAttention_FiniteDifference_JvpMatches()
+    {
+        var q = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f };
+        var vq = new float[] { 0.5f, -0.25f, 0.1f, 0.2f, -0.1f, 0.3f, 0.15f, 0.05f };
+        var kData = new float[] { 1f, 0f, 1f, 0f, 0f, 1f, 0f, 1f };
+        var vData = new float[] { 1f, 1f, 1f, 1f, 2f, 2f, 2f, 2f };
+        var key = Fwd(kData);
+        key.Reshape(2, 4);
+        var value = Fwd(vData);
+        value.Reshape(2, 4);
+
+        var fq = Fwd(q, vq);
+        fq.Reshape(2, 4);
+        var fwd = ForwardGradOperations.MultiHeadAttention(fq, key, value, numHeads: 2, scale: 1.0f);
+
+        var fdJvp = CentralDifferenceJvp(
+            a =>
+            {
+                var qq = Fwd(a);
+                qq.Reshape(2, 4);
+                return ForwardGradOperations.MultiHeadAttention(qq, key, value, numHeads: 2, scale: 1.0f);
+            },
+            q, vq, 8);
+        for (int i = 0; i < 8; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"MultiHeadAttention position {i}");
+    }
+
+    [Test]
+    public void BatchedMultiHeadAttention_FiniteDifference_JvpMatches()
+    {
+        var q = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f };
+        var vq = new float[] { 0.1f, 0.2f, -0.1f, 0.05f, 0.3f, -0.2f, 0.15f, 0.25f };
+        var kData = new float[] { 1f, 0f, 0f, 1f, 1f, 0f, 0f, 1f };
+        var vData = new float[] { 1f, 1f, 2f, 2f, 1f, 1f, 2f, 2f };
+
+        var key = From3D(kData, 2, 2, 2);
+        var value = From3D(vData, 2, 2, 2);
+        var fwd = ForwardGradOperations.BatchedMultiHeadAttention(From3D(q, 2, 2, 2, vq), key, value, numHeads: 2, scale: 1.0f);
+
+        var fdJvp = CentralDifferenceJvp(
+            a => ForwardGradOperations.BatchedMultiHeadAttention(From3D(a, 2, 2, 2), key, value, numHeads: 2, scale: 1.0f),
+            q, vq, 8);
+        for (int i = 0; i < 8; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"BatchedMultiHeadAttention position {i}");
+    }
+
+    #endregion
 }
