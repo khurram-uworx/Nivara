@@ -4,6 +4,12 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Standalone multi-head self-/cross-attention. Projects a 2D input <c>[L, D]</c> into query,
+/// key, and value spaces, splits them into <c>numHeads</c> heads of size <c>D / numHeads</c>,
+/// scales attention logits by <c>1 / sqrt(headDim)</c>, and re-projects the concatenated result.
+/// Supports optional causal masking, padding masks, and attention dropout.
+/// </summary>
 public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int embedDim;
@@ -19,10 +25,21 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
 
     readonly Dropout<T>? attnDropout;
 
+    /// <summary>Gets the embedding dimension of the input/output.</summary>
     public int EmbedDim => embedDim;
+    /// <summary>Gets the number of attention heads.</summary>
     public int NumHeads => numHeads;
+    /// <summary>Gets the per-head dimension (<c>embedDim / numHeads</c>).</summary>
     public int HeadDim => headDim;
 
+    /// <summary>
+    /// Creates a multi-head attention module.
+    /// </summary>
+    /// <param name="embedDim">Embedding dimension of the input/output (must be divisible by numHeads)</param>
+    /// <param name="numHeads">Number of attention heads</param>
+    /// <param name="causal">Whether a causal (upper-triangular) mask is applied by default</param>
+    /// <param name="dropout">Attention/output dropout probability</param>
+    /// <param name="initStd">Standard deviation for the normal initialization of the Q/K/V projections</param>
     public MultiheadAttention(
         int embedDim,
         int numHeads,
@@ -56,6 +73,11 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
         }
     }
 
+    /// <summary>
+    /// Runs self-attention over a 2D input <c>[L, D]</c> using the default causal setting.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 2)</param>
+    /// <returns>The attention output</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -74,6 +96,13 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
         return attnDropout != null ? attnDropout.Forward(xProj) : xProj;
     }
 
+    /// <summary>
+    /// Runs self-attention over a 2D input <c>[L, D]</c>, masking positions where the padding
+    /// mask is zero.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 2)</param>
+    /// <param name="paddingMask">Per-position mask of length <c>L</c>; zero entries are masked</param>
+    /// <returns>The attention output</returns>
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T> paddingMask)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -91,6 +120,16 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
         return attnDropout != null ? attnDropout.Forward(xProj) : xProj;
     }
 
+    /// <summary>
+    /// Runs cross-attention with separate query, key, and value tensors, optionally overriding
+    /// the causal setting and providing a padding mask.
+    /// </summary>
+    /// <param name="query">The query tensor (rank 2)</param>
+    /// <param name="key">The key tensor (rank 2)</param>
+    /// <param name="value">The value tensor (rank 2)</param>
+    /// <param name="causal">Whether to apply a causal mask for this call</param>
+    /// <param name="paddingMask">Per-key mask; zero entries are masked</param>
+    /// <returns>The attention output</returns>
     public ReverseGradTensor<T> Forward(
         ReverseGradTensor<T> query,
         ReverseGradTensor<T> key,
