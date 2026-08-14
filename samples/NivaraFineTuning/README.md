@@ -187,8 +187,8 @@ Accuracy target: >75% (above random baseline), with 3 epochs typically reaching 
 ### Expected timing
 
 Fine-tuning runs entirely in managed C# on CPU. For `--max-examples 25 --batch-size 2 --epochs 1 -c Release`
-expect **~1.4 s/batch** steady-state (measured 2026-08-06, see [Performance benchmarks](#performance-benchmarks));
-a full 67K-example epoch extrapolates to ~13 hours. Keep `--max-len` at the default 128 and use
+expect **~3.4 s/batch** steady-state (measured 2026-08-14, see [Performance benchmarks](#performance-benchmarks));
+a full 67K-example epoch extrapolates to ~32 hours. Keep `--max-len` at the default 128 and use
 `--max-examples` to validate the pipeline before committing to a full run.
 
 ## Performance benchmarks
@@ -204,9 +204,14 @@ reproducible. Numbers vary with machine load — re-measure both sides in the
 same session when comparing (run-to-run variance ~±10% per
 `tests/Nivara.PerformanceTests/README.md`).
 
+Recorded **2026-08-14** on an 11th-gen Intel i5-1135G7 laptop (4P/8T, Windows
+11, `torch_threads=4`). The 2026-08-06 figures were from a different (faster)
+machine, so the absolute s/batch below are **not comparable** to that table;
+the ~3× ratio holds on both machines.
+
 | Config | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |--------|---------------|-------------------|----------|
-| Fine-tune B=2, L=128, 25 examples | 0.46 s/batch | 1.4 s/batch | **~3×** |
+| Fine-tune B=2, L=128, 25 examples | 1.16 s/batch | 3.4 s/batch | **~3×** |
 
 The gap is far smaller than a naive port suggests: at batch size 2 the per-batch
 cost is dominated by 38 small Linear matmuls and the backward pass through 67M
@@ -223,10 +228,10 @@ management keep Nivara within ~3× of PyTorch's MKL on this configuration.
 
 | Config | Framework | 1 epoch (est.) | 3 epochs (est.) |
 |--------|-----------|----------------|-----------------|
-| B=2, L=128 | PyTorch (CPU) | ~4 h | ~13 h |
-| B=2, L=128 | Nivara (.NET 10) | ~13 h | ~39 h |
-| B=4, L=128 | PyTorch (CPU) | ~4 h | ~12 h |
-| B=4, L=128 | Nivara (.NET 10) | ~12 h | ~36 h |
+| B=2, L=128 | PyTorch (CPU) | ~11 h | ~32 h |
+| B=2, L=128 | Nivara (.NET 10) | ~32 h | ~96 h |
+| B=4, L=128 | PyTorch (CPU) | ~10 h | ~31 h |
+| B=4, L=128 | Nivara (.NET 10) | ~30 h | ~90 h |
 
 B=4 figures are not benchmarked end-to-end — they're derived from the measured
 B=2 throughput. Batch cost grows sub-linearly in B (better kernel utilization),
@@ -288,16 +293,16 @@ it does not require the full dataset to answer.
 50% coin-flip baseline. Those numbers show the loop is learning and the numerics
 line up; they are not a claim about final model quality.
 
-**What we deliberately did not run.** A full SST-2 fine-tune on CPU costs ~13
-hours per epoch (67,349 examples at ~1.4 s/batch), so a complete 3-epoch run is
-~1.5 days of wall-clock. We judged that against the goal — proving technical
+**What we deliberately did not run.** A full SST-2 fine-tune on CPU costs ~32
+hours per epoch (67,349 examples at ~3.4 s/batch), so a complete 3-epoch run is
+~4 days of wall-clock. We judged that against the goal — proving technical
 correctness — and chose the 25-example slice instead. The first example of a
 training slice already exercises every layer, every gradient, and every
 optimizer step the full run would; what a slice cannot tell you is *accuracy*,
 which is why the harness still evaluates on the full dev set.
 
 **Where performance stands.** On this machine Nivara is ~3× slower than
-PyTorch's MKL kernels at this configuration (1.4 s vs 0.46 s per batch). The
+PyTorch's MKL kernels at this configuration (3.4 s vs 1.16 s per batch). The
 honest summary: *technically correct, not yet performant.* The numerics are
 right, the pipeline is complete, and the benchmark harness in the previous
 section is the tool for chasing the gap.
