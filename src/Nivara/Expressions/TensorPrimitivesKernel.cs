@@ -42,19 +42,77 @@ internal static class TensorPrimitivesKernel
 
         var leftIsColumn = leftNode.Op == KernelOp.Column;
         var rightIsColumn = rightNode.Op == KernelOp.Column;
-        var leftLeaf = leftIsColumn ? leaves[leftNode.Left] : null;
-        var rightLeaf = rightIsColumn ? leaves[rightNode.Left] : null;
         var leftScalar = leftIsColumn ? default : FusedKernel.CoerceLiteral<T>(leftNode.Value);
         var rightScalar = rightIsColumn ? default : FusedKernel.CoerceLiteral<T>(rightNode.Value);
 
-        var leftData = leftLeaf == null ? default : leftLeaf.Storage.Data.Span;
-        var rightData = rightLeaf == null ? default : rightLeaf.Storage.Data.Span;
+        var inputs = new ReadOnlyMemory<T>[leaves.Count];
+        for (int i = 0; i < leaves.Count; i++)
+            inputs[i] = leaves[i].Storage.Data;
 
         var output = new T[length];
-        Execute<T>(root.Op, leftIsColumn, rightIsColumn, leftScalar, rightScalar, leftData, rightData, output);
+        RunChunk<T>(plan, inputs, output, 0, length);
 
         result = NivaraColumn<T>.CreateFromOwnedArray(output);
         return true;
+    }
+
+    /// <summary>
+    /// Evaluates the plan in row-batches of <paramref name="chunkSize"/> into one shared output array:
+    /// each chunk slices the zero-copy leaf memory and the destination span, so chunked results are
+    /// bit-identical to whole-column evaluation (issue #167).
+    /// </summary>
+    /// <typeparam name="T">The uniform element type, constrained to generic math</typeparam>
+    /// <param name="plan">The lowered kernel plan</param>
+    /// <param name="leaves">The leaf columns in plan order</param>
+    /// <param name="length">The number of elements to evaluate</param>
+    /// <param name="chunkSize">The row-batch size</param>
+    /// <param name="result">The typed result column when dispatchable</param>
+    /// <returns>True when the plan was dispatched to TensorPrimitives</returns>
+    public static bool TryEvaluateChunked<T>(KernelPlan plan, IReadOnlyList<NivaraColumn<T>> leaves, int length, int chunkSize, out IColumn result)
+        where T : struct, INumber<T>
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+
+        if (!IsDispatchable(plan) || plan.HasNulls)
+        {
+            result = null!;
+            return false;
+        }
+
+        var inputs = new ReadOnlyMemory<T>[leaves.Count];
+        for (int i = 0; i < leaves.Count; i++)
+            inputs[i] = leaves[i].Storage.Data;
+
+        var output = new T[length];
+        for (var start = 0; start < length; start += chunkSize)
+        {
+            var count = Math.Min(chunkSize, length - start);
+            RunChunk<T>(plan, inputs, output.AsSpan(start, count), start, count);
+        }
+
+        result = NivaraColumn<T>.CreateFromOwnedArray(output);
+        return true;
+    }
+
+    /// <summary>
+    /// Resolves the plan shape once per chunk and runs the single binary op over the sliced leaf data
+    /// spans and literal scalars.
+    /// </summary>
+    static void RunChunk<T>(KernelPlan plan, ReadOnlyMemory<T>[] inputs, Span<T> destination, int start, int count)
+        where T : struct, INumber<T>
+    {
+        var root = plan.Nodes[plan.RootNode];
+        var leftNode = plan.Nodes[root.Left];
+        var rightNode = plan.Nodes[root.Right];
+
+        var leftIsColumn = leftNode.Op == KernelOp.Column;
+        var rightIsColumn = rightNode.Op == KernelOp.Column;
+        var leftScalar = leftIsColumn ? default : FusedKernel.CoerceLiteral<T>(leftNode.Value);
+        var rightScalar = rightIsColumn ? default : FusedKernel.CoerceLiteral<T>(rightNode.Value);
+        var leftData = leftIsColumn ? inputs[leftNode.Left].Slice(start, count).Span : default;
+        var rightData = rightIsColumn ? inputs[rightNode.Left].Slice(start, count).Span : default;
+
+        Execute<T>(root.Op, leftIsColumn, rightIsColumn, leftScalar, rightScalar, leftData, rightData, destination);
     }
 
     /// <summary>

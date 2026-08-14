@@ -42,6 +42,20 @@ internal static class FusedKernel
     /// <returns>A typed column with the evaluation results</returns>
     public static IColumn Evaluate<T>(KernelPlan plan)
         where T : struct, INumber<T>
+        => Evaluate<T>(plan, null);
+
+    /// <summary>
+    /// Runs a lowered uniform generic-math plan over its leaf columns, optionally batched by
+    /// <paramref name="chunkSize"/>: each chunk slices the zero-copy leaf memory (never copies it) and
+    /// executes the same single pass into one shared output array, so chunked results are bit-identical
+    /// to whole-column evaluation (issue #167).
+    /// </summary>
+    /// <typeparam name="T">The uniform element type, constrained to generic math</typeparam>
+    /// <param name="plan">The lowered kernel plan</param>
+    /// <param name="chunkSize">The row-batch size, or null for one whole-column pass</param>
+    /// <returns>A typed column with the evaluation results</returns>
+    internal static IColumn Evaluate<T>(KernelPlan plan, int? chunkSize)
+        where T : struct, INumber<T>
     {
         ArgumentNullException.ThrowIfNull(plan);
 
@@ -64,7 +78,30 @@ internal static class FusedKernel
 
         var output = new T[length];
         var outputMask = hasNulls ? new bool[length] : null;
-        Execute<T>(plan, inputs, leafMasks, output, outputMask is null ? default : outputMask.AsSpan());
+        var outputMaskSpan = outputMask is null ? default : outputMask.AsSpan();
+
+        if (chunkSize == null || chunkSize.Value >= length)
+        {
+            Execute<T>(plan, inputs, leafMasks, output, outputMaskSpan);
+        }
+        else
+        {
+            var hasMask = new bool[leafMasks.Length];
+            for (int m = 0; m < leafMasks.Length; m++)
+                hasMask[m] = !leafMasks[m].IsEmpty;
+
+            for (var start = 0; start < length; start += chunkSize.Value)
+            {
+                var count = Math.Min(chunkSize.Value, length - start);
+                var chunkInputs = new ReadOnlyMemory<T>[inputs.Length];
+                for (int m = 0; m < inputs.Length; m++)
+                    chunkInputs[m] = inputs[m].Slice(start, count);
+                var chunkMasks = new ReadOnlyMemory<bool>[leafMasks.Length];
+                for (int m = 0; m < leafMasks.Length; m++)
+                    chunkMasks[m] = hasMask[m] ? leafMasks[m].Slice(start, count) : default;
+                Execute<T>(plan, chunkInputs, chunkMasks, output.AsSpan(start, count), outputMaskSpan.IsEmpty ? default : outputMaskSpan.Slice(start, count));
+            }
+        }
 
         return outputMask == null
             ? NivaraColumn<T>.CreateFromOwnedArray(output)

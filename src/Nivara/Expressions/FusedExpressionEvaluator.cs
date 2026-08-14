@@ -79,7 +79,33 @@ sealed class FusedExpressionEvaluator
 
         try
         {
-            return EvaluateCore(expression, input);
+            return EvaluateCore(expression, input, null);
+        }
+        catch (Exception ex) when (ex is not QueryExecutionException)
+        {
+            throw new QueryExecutionException($"Failed to evaluate expression '{expression.Name}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates a column expression in row-batches of <paramref name="chunkSize"/> through the fused
+    /// kernels, producing a single result column. Leaf data is never copied: each backend slices the
+    /// existing column storage per chunk (issue #167). Bit-identical to whole-column evaluation.
+    /// </summary>
+    /// <param name="expression">The expression to evaluate</param>
+    /// <param name="input">The input columns</param>
+    /// <param name="chunkSize">The row-batch size</param>
+    /// <returns>The result column</returns>
+    /// <exception cref="QueryExecutionException">Thrown when evaluation fails</exception>
+    internal IColumn EvaluateChunked(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input, int chunkSize)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkSize);
+
+        try
+        {
+            return EvaluateCore(expression, input, chunkSize);
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
@@ -165,7 +191,7 @@ sealed class FusedExpressionEvaluator
         }
     }
 
-    IColumn EvaluateCore(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
+    IColumn EvaluateCore(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input, int? chunkSize)
     {
         // Hydrate window expressions before any kernel planning: each window node is materialized
         // through its own evaluation (rolling/cumulative/shift/rank kernels over the computed source
@@ -227,14 +253,23 @@ sealed class FusedExpressionEvaluator
         // preserving the JIT-vectorized fused win for the common null-free case.
         if (kernelPlan.IsUniformNumeric && kernelPlan.HasNulls)
         {
-            return EvaluateNodeTree(expression, plan, kernelPlan, length);
+            return EvaluateNodeTree(expression, plan, kernelPlan, length, chunkSize);
         }
 
         if (kernelPlan.IsTensorPrimitivesCandidate && !kernelPlan.HasNulls)
         {
-            return EvaluateTensorPrimitives(expression, plan, kernelPlan, length);
+            return EvaluateTensorPrimitives(expression, plan, kernelPlan, length, chunkSize);
         }
 
+        return EvaluateCompiled(expression, plan, kernelPlan, length, chunkSize);
+    }
+
+    /// <summary>
+    /// Evaluates through the compiled expression-tree target: whole-column in one call, or batched by
+    /// <paramref name="chunkSize"/> into the shared result array through the offset-based delegate.
+    /// </summary>
+    IColumn EvaluateCompiled(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length, int? chunkSize)
+    {
         var leafArrays = SnapshotLeaves(plan);
 
         CompiledFusedInvoke invoke;
@@ -245,11 +280,23 @@ sealed class FusedExpressionEvaluator
         }
         catch (NotSupportedException)
         {
-            return EvaluateNodeTree(expression, plan, kernelPlan, length);
+            return EvaluateNodeTree(expression, plan, kernelPlan, length, null);
         }
 
         var resultArray = AllocateResultArray(plan.ResultType, length);
-        invoke(leafArrays, resultArray, 0, length, 0);
+        if (chunkSize == null || chunkSize.Value >= length)
+        {
+            invoke(leafArrays, resultArray, 0, length, 0);
+        }
+        else
+        {
+            for (var start = 0; start < length; start += chunkSize.Value)
+            {
+                var count = Math.Min(chunkSize.Value, length - start);
+                invoke(leafArrays, resultArray, start, count, start);
+            }
+        }
+
         var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
 
         if (mask != null && plan.ResultType == typeof(bool))
@@ -400,7 +447,7 @@ sealed class FusedExpressionEvaluator
     /// math and leaf columns already sharing the result element type. The null mask is fused into the
     /// kernel (OR semantics), so no separate <see cref="ComputeMask"/> pass runs.
     /// </summary>
-    IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length)
+    IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length, int? chunkSize)
     {
         if (!kernelPlan.IsUniformNumeric)
         {
@@ -409,7 +456,7 @@ sealed class FusedExpressionEvaluator
         }
 
         var runner = GetNodeTreeRunner(plan.ResultType);
-        var result = runner(kernelPlan);
+        var result = runner(kernelPlan, chunkSize);
         nodeTreePathEvaluationCount++;
         fusedPathEvaluationCount++;
         RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Span fused kernel");
@@ -419,11 +466,11 @@ sealed class FusedExpressionEvaluator
     static class FusedNodeTreeRunner<T>
         where T : struct, INumber<T>
     {
-        internal static IColumn Run(KernelPlan plan)
-            => FusedKernel.Evaluate<T>(plan);
+        internal static IColumn Run(KernelPlan plan, int? chunkSize)
+            => FusedKernel.Evaluate<T>(plan, chunkSize);
     }
 
-    delegate IColumn FusedNodeTreeInvoker(KernelPlan plan);
+    delegate IColumn FusedNodeTreeInvoker(KernelPlan plan, int? chunkSize);
 
     static readonly ConcurrentDictionary<Type, FusedNodeTreeInvoker> nodeTreeRunnerCache = new();
 
@@ -442,7 +489,7 @@ sealed class FusedExpressionEvaluator
     /// single Add/Subtract/Multiply/Divide over leaves and literals dispatch to the SIMD-vectorized
     /// <see cref="System.Numerics.Tensors.TensorPrimitives"/> overloads in one call.
     /// </summary>
-    IColumn EvaluateTensorPrimitives(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length)
+    IColumn EvaluateTensorPrimitives(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length, int? chunkSize)
     {
         if (!TensorPrimitivesKernel.IsDispatchable(kernelPlan))
         {
@@ -451,7 +498,7 @@ sealed class FusedExpressionEvaluator
         }
 
         var runner = GetTensorPrimitivesRunner(plan.ResultType);
-        var result = runner(kernelPlan);
+        var result = runner(kernelPlan, chunkSize);
         tensorPrimitivesPathEvaluationCount++;
         fusedPathEvaluationCount++;
         RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "TensorPrimitives fused kernel");
@@ -461,21 +508,23 @@ sealed class FusedExpressionEvaluator
     static class TensorPrimitivesRunner<T>
         where T : struct, INumber<T>
     {
-        internal static IColumn Run(KernelPlan plan)
+        internal static IColumn Run(KernelPlan plan, int? chunkSize)
         {
             var leaves = new NivaraColumn<T>[plan.Columns.Count];
             for (int i = 0; i < plan.Columns.Count; i++)
                 leaves[i] = (NivaraColumn<T>)plan.Columns[i].Column;
 
             var length = leaves.Length == 0 ? 1 : leaves[0].Length;
-            var ok = TensorPrimitivesKernel.TryEvaluate<T>(plan, leaves, length, out var result);
+            var ok = chunkSize == null
+                ? TensorPrimitivesKernel.TryEvaluate<T>(plan, leaves, length, out var result)
+                : TensorPrimitivesKernel.TryEvaluateChunked<T>(plan, leaves, length, chunkSize.Value, out result);
             if (!ok)
                 throw new NotSupportedException($"Plan is not dispatchable to the TensorPrimitives single-op backend for element type {typeof(T).Name}");
             return result;
         }
     }
 
-    delegate IColumn TensorPrimitivesInvoker(KernelPlan plan);
+    delegate IColumn TensorPrimitivesInvoker(KernelPlan plan, int? chunkSize);
 
     static readonly ConcurrentDictionary<Type, TensorPrimitivesInvoker> tensorPrimitivesRunnerCache = new();
 
