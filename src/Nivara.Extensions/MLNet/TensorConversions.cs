@@ -148,9 +148,8 @@ public static class TensorConversions
                 }
             }
 
-            // Create series with sequential integer indices
-            var seriesIndices = Enumerable.Range(0, values.Length).Cast<object>().ToArray();
-            seriesArray[i] = NivaraSeries<T>.Create(values, seriesIndices);
+            // Series default to a virtual positional index; no boxed object array needed
+            seriesArray[i] = NivaraSeries<T>.Create(values);
         }
 
         return seriesArray;
