@@ -191,6 +191,13 @@ public static class MLNetExtensions
             decimal dec => (float)dec,
             byte b => b,
             short s => s,
+            uint u => u,
+            ulong ul => (float)ul,
+            ushort us => us,
+            sbyte sb => sb,
+            nint ni => (float)ni,
+            nuint nu => (float)nu,
+            Half h => (float)h,
             _ => throw new InvalidOperationException($"Cannot convert {value?.GetType()} to float")
         };
     }

@@ -73,89 +73,91 @@ public static class MLNetInterop
         }
     }
 
-    static NivaraFrame ConvertFromGenericData(IDataView dataView, MLContext mlContext, string[] columnNames)
+    static NivaraFrame ConvertFromDataView(IDataView dataView, MLContext mlContext)
     {
         var columns = new List<(string Name, IColumn Column)>();
 
-        // Process each column individually based on its type
-        foreach (var columnName in columnNames)
+        foreach (var columnName in dataView.Schema.Select(col => col.Name))
         {
             var column = dataView.Schema[columnName];
             var columnType = column.Type;
 
-            try
+            if (columnType is VectorDataViewType vectorType)
             {
-                if (columnType == NumberDataViewType.Single)
+                if (vectorType.ItemType is NumberDataViewType numberItem && numberItem.RawType == typeof(float))
                 {
-                    var values = ExtractFloatColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
-                }
-                else if (columnType == NumberDataViewType.Double)
-                {
-                    var values = ExtractDoubleColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<double>.Create(values)));
-                }
-                else if (columnType is VectorDataViewType vectorType && vectorType.ItemType == NumberDataViewType.Single)
-                {
-                    // Handle VBuffer<float> columns (like Features or Score columns)
+                    // Handle VBuffer<float> columns (like Features or Score columns) by taking the first element
                     var values = ExtractVBufferFloatColumn(dataView, mlContext, columnName);
                     columns.Add((columnName, NivaraColumn<float>.Create(values)));
                 }
                 else
                 {
-                    // For other types, try to convert to float as fallback
-                    var values = ExtractFloatColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
+                    throw new NotSupportedException(
+                        $"Column '{columnName}' has unsupported vector type '{columnType}'. " +
+                        "Only single-precision vector columns are supported by the NivaraFrame conversion.");
                 }
             }
-            catch
+            else
             {
-                // If extraction fails, try VBuffer approach as fallback
-                try
-                {
-                    var values = ExtractVBufferFloatColumn(dataView, mlContext, columnName);
-                    columns.Add((columnName, NivaraColumn<float>.Create(values)));
-                }
-                catch
-                {
-                    // Skip columns that can't be converted
-                    continue;
-                }
+                columns.Add((columnName, ExtractScalarColumn(dataView, mlContext, columnName, columnType)));
             }
         }
 
         return new NivaraFrame(columns);
     }
 
-    static float[] ExtractFloatColumn(IDataView dataView, MLContext mlContext, string columnName)
+    static IColumn ExtractScalarColumn(IDataView dataView, MLContext mlContext, string columnName, DataViewType columnType)
     {
-        var values = new List<float>();
-        var column = dataView.Schema[columnName];
-
-        using var cursor = dataView.GetRowCursor(new[] { column });
-        var getter = cursor.GetGetter<float>(column);
-
-        while (cursor.MoveNext())
+        if (columnType is BooleanDataViewType)
+            return NivaraColumn<bool>.Create(ExtractColumnValues<bool>(dataView, columnName));
+        if (columnType is TextDataViewType)
         {
-            float value = 0f;
-            getter(ref value);
-            values.Add(value);
+            // ML.NET text getters expose ReadOnlyMemory<char>, not string
+            var rawValues = ExtractColumnValues<ReadOnlyMemory<char>>(dataView, columnName);
+            var strings = new string[rawValues.Length];
+            for (int i = 0; i < rawValues.Length; i++)
+                strings[i] = rawValues[i].ToString();
+            return NivaraColumn<string>.Create(strings);
         }
+        if (columnType is DateTimeDataViewType)
+            return NivaraColumn<DateTime>.Create(ExtractColumnValues<DateTime>(dataView, columnName));
+        if (columnType is DateTimeOffsetDataViewType)
+            return NivaraColumn<DateTimeOffset>.Create(ExtractColumnValues<DateTimeOffset>(dataView, columnName));
+        if (columnType is NumberDataViewType or KeyDataViewType)
+            return ExtractNumericColumn(dataView, columnName, columnType.RawType);
 
-        return values.ToArray();
+        throw new NotSupportedException($"Column '{columnName}' has unsupported DataView type '{columnType}'.");
     }
 
-    static double[] ExtractDoubleColumn(IDataView dataView, MLContext mlContext, string columnName)
+    static IColumn ExtractNumericColumn(IDataView dataView, string columnName, Type rawType)
     {
-        var values = new List<double>();
+        return rawType switch
+        {
+            Type t when t == typeof(float) => NivaraColumn<float>.Create(ExtractColumnValues<float>(dataView, columnName)),
+            Type t when t == typeof(double) => NivaraColumn<double>.Create(ExtractColumnValues<double>(dataView, columnName)),
+            Type t when t == typeof(int) => NivaraColumn<int>.Create(ExtractColumnValues<int>(dataView, columnName)),
+            Type t when t == typeof(uint) => NivaraColumn<uint>.Create(ExtractColumnValues<uint>(dataView, columnName)),
+            Type t when t == typeof(long) => NivaraColumn<long>.Create(ExtractColumnValues<long>(dataView, columnName)),
+            Type t when t == typeof(ulong) => NivaraColumn<ulong>.Create(ExtractColumnValues<ulong>(dataView, columnName)),
+            Type t when t == typeof(short) => NivaraColumn<short>.Create(ExtractColumnValues<short>(dataView, columnName)),
+            Type t when t == typeof(ushort) => NivaraColumn<ushort>.Create(ExtractColumnValues<ushort>(dataView, columnName)),
+            Type t when t == typeof(sbyte) => NivaraColumn<sbyte>.Create(ExtractColumnValues<sbyte>(dataView, columnName)),
+            Type t when t == typeof(byte) => NivaraColumn<byte>.Create(ExtractColumnValues<byte>(dataView, columnName)),
+            _ => throw new NotSupportedException($"Column '{columnName}' has unsupported raw type '{rawType.FullName}'.")
+        };
+    }
+
+    static T[] ExtractColumnValues<T>(IDataView dataView, string columnName)
+    {
+        var values = new List<T>();
         var column = dataView.Schema[columnName];
 
         using var cursor = dataView.GetRowCursor(new[] { column });
-        var getter = cursor.GetGetter<double>(column);
+        var getter = cursor.GetGetter<T>(column);
 
         while (cursor.MoveNext())
         {
-            double value = 0.0;
+            T value = default!;
             getter(ref value);
             values.Add(value);
         }
@@ -203,7 +205,15 @@ public static class MLNetInterop
             decimal dec => (float)dec,
             byte b => b,
             short s => s,
-            _ => 0f // Default for unsupported types
+            uint u => u,
+            ulong ul => (float)ul,
+            ushort us => us,
+            sbyte sb => sb,
+            nint ni => (float)ni,
+            nuint nu => (float)nu,
+            Half h => (float)h,
+            _ => throw new InvalidOperationException(
+                $"Cannot convert value of type {value.GetType().FullName} to float for ML.NET interop")
         };
     }
     /// <summary>
@@ -260,11 +270,8 @@ public static class MLNetInterop
         if (mlContext == null) throw new ArgumentNullException(nameof(mlContext));
 
         var schema = dataView.Schema;
-        var columnNames = schema.Select(col => col.Name).ToArray();
 
-        // For prediction results, we need to handle all columns dynamically
-        // since ML.NET adds prediction columns to the original data
-        return ConvertFromGenericData(dataView, mlContext, columnNames);
+        return ConvertFromDataView(dataView, mlContext);
     }
 
     /// <summary>
