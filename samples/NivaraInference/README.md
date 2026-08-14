@@ -9,7 +9,7 @@ The same architecture is also implemented in PyTorch (`samples/NivaraInference/P
 ```bash
 # Download model weights via HuggingFace CLI
 hf download google/mobilenet_v2_1.0_224 --local-dir samples/data/mobilenet_v2
-hf download timm/resnet18.augreg_in1k --local-dir samples/data/resnet18
+hf download microsoft/resnet-18 model.safetensors config.json --local-dir samples/data/resnet18
 hf download sentence-transformers/all-MiniLM-L6-v2 --local-dir samples/data/minilm
 # (distilbert-base-uncased already present under samples/data/distilbert)
 hf download distilbert/distilbert-base-uncased-finetuned-sst-2-english config.json model.safetensors vocab.txt tokenizer_config.json --local-dir samples/data/distilbert_sst
@@ -217,17 +217,30 @@ The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the
 
 ## Performance benchmarks
 
-Measured on the same machine (CPU-only, no GPU). Nivara measured in Release mode. PyTorch uses MKL-optimized kernels. Both use batch size 1 with 3-pass warmup + 10 timed passes. Numbers vary with machine load; the Nivara column below was re-measured **2026-08-04** after the AutoDiff refactor (span-based `GradKernels`, inference-default `GradientUtils.Grad()`), and the PyTorch text-model figures were re-confirmed in the same session.
+Measured on the same machine (CPU-only, no GPU): 11th-gen Intel i5-1135G7
+laptop (4P/8T), Nivara in Release mode, PyTorch with MKL-optimized kernels.
+Both use batch size 1 with 3-pass warmup + 10 timed passes. Both columns were
+recorded **2026-08-14** in the same session (the two vision rows paired
+back-to-back). Numbers vary with machine load; the **2026-08-04** table below
+was recorded on a different (desktop-class) machine, so its absolute ms are
+**not comparable** to this table — only the same-row PyTorch-vs-Nivara ratio is
+meaningful here.
 
 | Model | Input | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |-------|-------|---------------|-------------------|----------|
-| **MobileNetV2** | 1×3×224×224 | 115 ms | 563 ms | **~5×** |
-| **ResNet-18** | 1×3×224×224 | 68 ms | 263 ms | **~4×** |
-| **MiniLM-L6** | 128 tokens | 11 ms | 73 ms | **~7×** |
-| **DistilBERT** | 128 tokens | 31 ms | 164 ms | **~5×** |
-| **DistilBERT SST-2** | 128 tokens | 31 ms | 187 ms | **~6×** |
+| **MobileNetV2** | 1×3×224×224 | 49 ms | 895 ms | **~18×** |
+| **ResNet-18** | 1×3×224×224 | 34 ms | 405 ms | **~12×** |
+| **MiniLM-L6** | 128 tokens | 23 ms | 142 ms | **~6×** |
+| **DistilBERT** | 128 tokens | 80 ms | 508 ms | **~6×** |
+| **DistilBERT SST-2** | 128 tokens | 80 ms | 519 ms | **~6×** |
 
-AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The AutoDiff refactor cut the gap substantially: vision inference dropped ~4× (MobileNetV2 from ~2,254 ms to ~563 ms, ResNet-18 from ~641 ms to ~263 ms) and transformers ran faster still (MiniLM ~110 → ~73 ms, DistilBERT ~186 → ~164 ms, SST-2 ~232 → ~187 ms). The vision gap is now dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops — ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, keeping DistilBERT encoder inference at ~164 ms.
+The SST-2 row reuses the DistilBERT PyTorch timing (same architecture, only the
+weights differ; `Python/distilbert_sst_compare.py` is accuracy-only, no timing).
+PyTorch vision is multi-threaded MKL; Nivara's conv kernels are single-threaded
+naive loops, which widens the vision gap on this low-power 4-core CPU — the
+transformer gap (~6×) is the more representative figure on this machine.
+
+AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The AutoDiff refactor closed most of the gap: on the 2026-08-04 machine it cut vision inference ~4× (MobileNetV2 ~2,254 ms → ~563 ms, ResNet-18 ~641 ms → ~263 ms) and transformers ~1.5× (MiniLM ~110 → ~73 ms, DistilBERT ~186 → ~164 ms, SST-2 ~232 → ~187 ms). The vision gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops — ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, keeping DistilBERT encoder inference at ~508 ms on this laptop.
 
 ## Sample data
 
@@ -235,7 +248,7 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 |------|---------|
 | `samples/data/mobilenet_v2/model.safetensors` | MobileNetV2 weights (~13.5 MB) |
 | `samples/data/resnet18/model.safetensors` | ResNet-18 weights (~44.6 MB) |
-| `samples/data/minilm/model.safetensors` | MiniLM weights (~91 MB) |
+| `samples/data/minilm/model.safetensors` | MiniLM weights (~87 MB) |
 | `samples/data/minilm/config.json` | MiniLM BERT config |
 | `samples/data/minilm/vocab.txt` | MiniLM wordpiece vocabulary |
 | `samples/data/distilbert/model.safetensors` | DistilBERT weights (~255.5 MB, 105 tensors) |
