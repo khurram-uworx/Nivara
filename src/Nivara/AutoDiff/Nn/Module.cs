@@ -2,16 +2,33 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Base class for neural-network modules. A module owns child modules and parameters
+/// registered via <see cref="RegisterModules"/> / <see cref="RegisterParameters"/> and
+/// exposes them as flat, dotted-path state dictionaries for training and serialization.
+/// </summary>
 public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     readonly List<Module<T>> modules = [];
     readonly List<Parameter<T>> parameters = [];
     bool disposed;
 
+    /// <summary>
+    /// Gets whether the module is in training mode. Stochastic layers such as
+    /// <see cref="Dropout{T}"/> behave differently in training vs evaluation mode.
+    /// True by default; switch via <see cref="Train"/> / <see cref="Eval"/>.
+    /// </summary>
     public bool IsTraining { get; private set; } = true;
 
+    /// <summary>
+    /// Runs the forward pass for this module. When gradient tracking is enabled the
+    /// computation graph is recorded so a subsequent <c>Backward()</c> can differentiate it.
+    /// </summary>
+    /// <param name="input">The input tensor</param>
+    /// <returns>The output tensor</returns>
     public abstract ReverseGradTensor<T> Forward(ReverseGradTensor<T> input);
 
+    /// <summary>Puts this module and all registered child modules into training mode.</summary>
     public void Train()
     {
         IsTraining = true;
@@ -19,6 +36,7 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
             module.Train();
     }
 
+    /// <summary>Puts this module and all registered child modules into evaluation mode.</summary>
     public void Eval()
     {
         IsTraining = false;
@@ -26,6 +44,11 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
             module.Eval();
     }
 
+    /// <summary>
+    /// Registers child modules so their parameters are included in <see cref="Parameters()"/>,
+    /// <see cref="GetParameters()"/>, <see cref="StateDict"/>, and <see cref="Train"/> / <see cref="Eval"/>.
+    /// </summary>
+    /// <param name="modules">The child modules to register</param>
     public void RegisterModules(params Module<T>[] modules)
     {
         ArgumentNullException.ThrowIfNull(modules);
@@ -33,6 +56,11 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
             this.modules.Add(module);
     }
 
+    /// <summary>
+    /// Registers parameters so they are included in <see cref="Parameters()"/>,
+    /// <see cref="GetParameters()"/>, and <see cref="StateDict"/>.
+    /// </summary>
+    /// <param name="parameters">The parameters to register</param>
     public void RegisterParameters(params Parameter<T>[] parameters)
     {
         ArgumentNullException.ThrowIfNull(parameters);
@@ -40,6 +68,11 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
             this.parameters.Add(param);
     }
 
+    /// <summary>
+    /// Returns a flat dictionary of all parameter tensors keyed by dotted path
+    /// (e.g. <c>Weight</c>, <c>Module_0.Weight</c>).
+    /// </summary>
+    /// <returns>A flat name-to-tensor dictionary</returns>
     public Dictionary<string, ReverseGradTensor<T>> Parameters()
     {
         return Parameters("");
@@ -62,6 +95,11 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
         return result;
     }
 
+    /// <summary>
+    /// Returns a flat dictionary of all <see cref="Parameter{T}"/> objects keyed by dotted path
+    /// (e.g. <c>Weight</c>, <c>Module_0.Weight</c>).
+    /// </summary>
+    /// <returns>A flat name-to-parameter dictionary</returns>
     public Dictionary<string, Parameter<T>> GetParameters()
     {
         return GetParameters("");
@@ -84,8 +122,14 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
         return result;
     }
 
+    /// <summary>Gets the read-only list of registered child modules.</summary>
     public IReadOnlyList<Module<T>> NamedModules() => modules.AsReadOnly();
 
+    /// <summary>
+    /// Returns a deep copy of all parameter tensors keyed by dotted path, suitable for
+    /// serialization or for loading into another module of the same architecture.
+    /// </summary>
+    /// <returns>A state dictionary of parameter tensors</returns>
     public virtual Dictionary<string, ReverseGradTensor<T>> StateDict()
     {
         var state = new Dictionary<string, ReverseGradTensor<T>>();
@@ -96,6 +140,13 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
         return state;
     }
 
+    /// <summary>
+    /// Restores parameter values from a state dictionary produced by <see cref="StateDict"/>.
+    /// Throws if a dictionary key does not exist in the model; when <paramref name="strict"/> is
+    /// true it also throws if the model has parameters absent from the dictionary.
+    /// </summary>
+    /// <param name="stateDict">The state dictionary to load from</param>
+    /// <param name="strict">Whether missing model parameters should throw</param>
     public virtual void LoadStateDict(
         IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict,
         bool strict = false)
@@ -163,6 +214,13 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
         }
     }
 
+    /// <summary>
+    /// Returns the index of the largest logit within one row of a <c>[row, numClasses]</c> tensor.
+    /// </summary>
+    /// <param name="logits">The logits tensor</param>
+    /// <param name="row">The row index to scan</param>
+    /// <param name="numClasses">The number of classes per row</param>
+    /// <returns>The class index with the maximum logit in the given row</returns>
     protected static int ArgMax(ReverseGradTensor<T> logits, int row, int numClasses)
     {
         int bestClass = 0;
@@ -175,12 +233,19 @@ public abstract class Module<T> : IDisposable where T : struct, IFloatingPointIe
         return bestClass;
     }
 
+    /// <summary>
+    /// Disposes this module and all registered child modules and parameters.
+    /// </summary>
     public void Dispose()
     {
         Dispose(true);
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Releases managed resources held by this module and its children.
+    /// </summary>
+    /// <param name="disposing">True when called from <see cref="Dispose()"/>; false from a finalizer</param>
     protected virtual void Dispose(bool disposing)
     {
         if (disposed) return;
