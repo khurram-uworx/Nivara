@@ -32,7 +32,7 @@ public static class MLNetExtensions
         if (mlContext == null) throw new ArgumentNullException(nameof(mlContext));
         if (predictions == null) throw new ArgumentNullException(nameof(predictions));
 
-        return MLNetInterop.ToNivaraFrame(predictions, mlContext);
+        return MLNetInterop.ConvertFromDataView(predictions, mlContext);
     }
 
     /// <summary>
@@ -50,7 +50,7 @@ public static class MLNetExtensions
 
         var dataView = MLNetInterop.ToDataView(frame, mlContext);
         var transformedView = transformer.Transform(dataView);
-        return MLNetInterop.ToNivaraFrame(transformedView, mlContext);
+        return MLNetInterop.ConvertFromDataView(transformedView, mlContext);
     }
 
     /// <summary>
@@ -87,7 +87,7 @@ public static class MLNetExtensions
 
         var dataView = MLNetInterop.ToDataView(inputFrame, mlContext);
         var predictions = model.Transform(dataView);
-        return MLNetInterop.ToNivaraFrame(predictions, mlContext);
+        return MLNetInterop.ConvertFromDataView(predictions, mlContext);
     }
 
     /// <summary>

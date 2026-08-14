@@ -116,7 +116,7 @@ public class MLNetIntegrationTests
         var dataView = originalFrame.ToDataView(mlContext);
 
         // Convert back to NivaraFrame
-        var roundTripFrame = MLNetInterop.ToNivaraFrame(dataView, mlContext);
+        var roundTripFrame = mlContext.ToNivaraFrame(dataView);
 
         // Assert structure is preserved
         Assert.That(roundTripFrame.RowCount, Is.EqualTo(originalFrame.RowCount));

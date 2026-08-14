@@ -73,7 +73,7 @@ public static class MLNetInterop
         }
     }
 
-    static NivaraFrame ConvertFromDataView(IDataView dataView, MLContext mlContext)
+    internal static NivaraFrame ConvertFromDataView(IDataView dataView, MLContext mlContext)
     {
         var columns = new List<(string Name, IColumn Column)>();
 
@@ -256,22 +256,6 @@ public static class MLNetInterop
             var data = ConvertToGenericData(frame);
             return mlContext.Data.LoadFromEnumerable(data);
         }
-    }
-
-    /// <summary>
-    /// Creates a NivaraFrame from an ML.NET IDataView.
-    /// </summary>
-    /// <param name="dataView">The ML.NET IDataView to convert</param>
-    /// <param name="mlContext">The ML.NET context</param>
-    /// <returns>A NivaraFrame representation of the IDataView</returns>
-    public static NivaraFrame ToNivaraFrame(IDataView dataView, MLContext mlContext)
-    {
-        if (dataView == null) throw new ArgumentNullException(nameof(dataView));
-        if (mlContext == null) throw new ArgumentNullException(nameof(mlContext));
-
-        var schema = dataView.Schema;
-
-        return ConvertFromDataView(dataView, mlContext);
     }
 
     /// <summary>
