@@ -210,7 +210,9 @@ public class DataParallelTests
             model, loader, lossFn, optimizer, epochs: 2, maxDegreeOfParallelism: 1);
         var result = trainer.Run();
 
-        Assert.DoesNotThrow(() => result.PrintSummary());
+        using var writer = new StringWriter();
+        Assert.DoesNotThrow(() => result.PrintSummary(writer));
+        Assert.That(writer.ToString(), Does.Contain("Data-parallel training completed"));
     }
 
     [Test]

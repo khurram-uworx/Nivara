@@ -549,7 +549,9 @@ public class TrainingTests
         using var loop = new TrainingLoop<float>(model, loader, lossFn, optimizer, epochs: 1);
         var result = loop.Run();
 
-        Assert.DoesNotThrow(() => result.PrintSummary());
+        using var writer = new StringWriter();
+        Assert.DoesNotThrow(() => result.PrintSummary(writer));
+        Assert.That(writer.ToString(), Does.Contain("Training completed"));
     }
 
     // --- Minibatch test gaps (I5) ---
