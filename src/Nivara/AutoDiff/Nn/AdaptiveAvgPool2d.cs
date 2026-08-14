@@ -4,18 +4,33 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Adaptive average pooling over 2D spatial dimensions. Accepts a 4D input
+/// <c>[N, C, H, W]</c> and produces output of shape <c>[N, C, outputSize, outputSize]</c>
+/// by averaging each non-overlapping input region onto the output grid.
+/// </summary>
 public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int outputSize;
 
+    /// <summary>Gets the height and width of the square output grid.</summary>
     public int OutputSize => outputSize;
 
+    /// <summary>
+    /// Creates an adaptive average pooling layer.
+    /// </summary>
+    /// <param name="outputSize">The height/width of the square output grid (must be positive)</param>
     public AdaptiveAvgPool2d(int outputSize)
     {
         if (outputSize <= 0) throw new ArgumentOutOfRangeException(nameof(outputSize));
         this.outputSize = outputSize;
     }
 
+    /// <summary>
+    /// Pools a 4D input <c>[N, C, H, W]</c> into <c>[N, C, outputSize, outputSize]</c>.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 4)</param>
+    /// <returns>The pooled tensor</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         ArgumentNullException.ThrowIfNull(input);

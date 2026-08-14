@@ -4,16 +4,29 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// 2D max pooling over a 4D input <c>[N, C, H, W]</c>. The output dimensions follow the
+/// standard formula <c>(H + 2·padding - kernelSize) / stride + 1</c>.
+/// </summary>
 public sealed class MaxPool2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int kernelSize;
     readonly int stride;
     readonly int padding;
 
+    /// <summary>Gets the pooling window size.</summary>
     public int KernelSize => kernelSize;
+    /// <summary>Gets the stride; when the constructor receives zero this is the kernel size.</summary>
     public int Stride => stride;
+    /// <summary>Gets the zero padding applied on each spatial edge.</summary>
     public int Padding => padding;
 
+    /// <summary>
+    /// Creates a max pooling layer.
+    /// </summary>
+    /// <param name="kernelSize">The pooling window size (must be positive)</param>
+    /// <param name="stride">The stride; zero defaults to the kernel size</param>
+    /// <param name="padding">The zero padding applied on each spatial edge</param>
     public MaxPool2d(int kernelSize, int stride = 0, int padding = 0)
     {
         if (kernelSize <= 0) throw new ArgumentOutOfRangeException(nameof(kernelSize));
@@ -24,6 +37,11 @@ public sealed class MaxPool2d<T> : Module<T> where T : struct, IFloatingPointIee
         this.padding = padding;
     }
 
+    /// <summary>
+    /// Pools a 4D input <c>[N, C, H, W]</c>, taking the maximum value within each window.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 4)</param>
+    /// <returns>The pooled tensor</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         ArgumentNullException.ThrowIfNull(input);
