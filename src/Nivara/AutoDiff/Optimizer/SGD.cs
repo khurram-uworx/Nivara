@@ -4,6 +4,11 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Optimizer;
 
+/// <summary>
+/// Stochastic gradient descent optimizer with optional momentum and per-group weight decay.
+/// Writes updates in place on the parameter tensors (no <c>requiresGrad</c> replacement),
+/// and tracks momentum in pooled velocity buffers.
+/// </summary>
 public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee754<T>
 {
     static void stepNoMomentumInPlace(NivaraColumn<T> data, NivaraColumn<T> grad, Span<T> writable, T lr, T wd)
@@ -34,6 +39,17 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
             writable[i] = dataSpan[i] - velocity[i];
     }
 
+    /// <summary>
+    /// Functional SGD update for a single tensor outside the module system. Computes the
+    /// update into a new <see cref="ReverseGradTensor{T}"/> (with
+    /// <see cref="ReverseGradTensor{T}.RequiresGrad"/> = false); no momentum is tracked.
+    /// </summary>
+    /// <param name="tensor">The tensor to update</param>
+    /// <param name="learningRate">The learning rate (must be positive)</param>
+    /// <param name="weightDecay">The L2 weight decay</param>
+    /// <returns>A new tensor holding the updated values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="tensor"/> is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the tensor has no gradient computed</exception>
     public static ReverseGradTensor<T> SgdUpdate(ReverseGradTensor<T> tensor, T learningRate, T weightDecay = default)
     {
         if (tensor == null)
@@ -88,6 +104,12 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
     readonly double momentum;
     readonly List<T[]> velocityBuffers = [];
 
+    /// <summary>
+    /// Creates an SGD optimizer with an optional momentum coefficient.
+    /// </summary>
+    /// <param name="learningRate">The default learning rate (must be positive)</param>
+    /// <param name="momentum">Momentum coefficient in <c>[0, 1)</c>; zero disables momentum</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when momentum is outside <c>[0, 1)</c></exception>
     public SGD(T learningRate, double momentum = 0.0)
         : base(learningRate)
     {
@@ -107,6 +129,10 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         }
     }
 
+    /// <summary>
+    /// Applies one SGD step to every registered parameter that has a computed gradient,
+    /// updating the parameter tensors in place and touching each parameter.
+    /// </summary>
     public override void Step()
     {
         var velIdx = 0;
@@ -137,6 +163,10 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         }
     }
 
+    /// <summary>
+    /// Saves the momentum velocity buffers keyed by index (e.g. <c>velocity_0</c>).
+    /// </summary>
+    /// <returns>A state dictionary for <see cref="LoadStateDict"/></returns>
     public override Dictionary<string, T[]> StateDict()
     {
         var state = new Dictionary<string, T[]>();
@@ -149,6 +179,10 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         return state;
     }
 
+    /// <summary>
+    /// Restores momentum velocity buffers saved by <see cref="StateDict"/>.
+    /// </summary>
+    /// <param name="state">The state dictionary to load from</param>
     public override void LoadStateDict(Dictionary<string, T[]> state)
     {
         int i = 0;
@@ -160,6 +194,9 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         }
     }
 
+    /// <summary>
+    /// Returns pooled velocity buffers to the shared array pool.
+    /// </summary>
     protected override void DisposeManaged()
     {
         foreach (var buf in velocityBuffers)

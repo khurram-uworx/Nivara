@@ -5,6 +5,11 @@ using System.Runtime.InteropServices;
 
 namespace Nivara.AutoDiff.Optimizer;
 
+/// <summary>
+/// Adam optimizer with bias-corrected first/second moment estimates and optional weight decay.
+/// Uses SIMD-accelerated <see cref="TensorPrimitives"/> chains for float/double/Half, and
+/// tracks the exponential-average state in pooled buffers.
+/// </summary>
 public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly double beta1;
@@ -15,11 +20,24 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
     readonly List<T[]> expAvgSqBuffers = [];
     int step;
 
+    /// <summary>
+    /// Creates an Adam optimizer with a default learning rate of 0.001.
+    /// </summary>
+    /// <param name="beta1">First-moment exponential decay rate</param>
+    /// <param name="beta2">Second-moment exponential decay rate</param>
+    /// <param name="eps">Small constant added to the denominator for numerical stability</param>
     public Adam(double beta1 = 0.9, double beta2 = 0.999, double eps = 1e-8)
         : this(T.CreateChecked(0.001), beta1, beta2, eps)
     {
     }
 
+    /// <summary>
+    /// Creates an Adam optimizer with an explicit learning rate.
+    /// </summary>
+    /// <param name="learningRate">The default learning rate (must be positive)</param>
+    /// <param name="beta1">First-moment exponential decay rate</param>
+    /// <param name="beta2">Second-moment exponential decay rate</param>
+    /// <param name="eps">Small constant added to the denominator for numerical stability</param>
     public Adam(T learningRate, double beta1 = 0.9, double beta2 = 0.999, double eps = 1e-8)
         : base(learningRate)
     {
@@ -317,6 +335,11 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
         }
     }
 
+    /// <summary>
+    /// Applies one Adam step to every registered parameter that has a computed gradient,
+    /// updating the parameter tensors in place, touching each parameter, and advancing the
+    /// internal step counter used for bias correction.
+    /// </summary>
     public override void Step()
     {
         step++;
@@ -344,6 +367,11 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
         }
     }
 
+    /// <summary>
+    /// Saves the step counter and the exponential-average state buffers keyed by index
+    /// (e.g. <c>step</c>, <c>expAvg_0</c>, <c>expAvgSq_0</c>).
+    /// </summary>
+    /// <returns>A state dictionary for <see cref="LoadStateDict"/></returns>
     public override Dictionary<string, T[]> StateDict()
     {
         var state = new Dictionary<string, T[]> { ["step"] = [T.CreateChecked(step)] };
@@ -362,6 +390,11 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
         return state;
     }
 
+    /// <summary>
+    /// Restores the step counter and exponential-average state buffers saved by
+    /// <see cref="StateDict"/>.
+    /// </summary>
+    /// <param name="state">The state dictionary to load from</param>
     public override void LoadStateDict(Dictionary<string, T[]> state)
     {
         if (state.TryGetValue("step", out var stepVal))
@@ -380,6 +413,9 @@ public sealed class Adam<T> : Optimizer<T> where T : struct, IFloatingPointIeee7
         }
     }
 
+    /// <summary>
+    /// Returns pooled exponential-average buffers to the shared array pool.
+    /// </summary>
     protected override void DisposeManaged()
     {
         foreach (var buf in expAvgBuffers.Concat(expAvgSqBuffers))

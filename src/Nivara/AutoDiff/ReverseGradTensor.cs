@@ -276,15 +276,19 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
         return TypeConverter.ToHalf(this, requiresGrad);
     }
 
+    /// <summary>Adds two reverse-mode tensors element-wise.</summary>
     public static ReverseGradTensor<T> operator +(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         => ReverseGradOperations.Add(a, b);
 
+    /// <summary>Subtracts one reverse-mode tensor from another element-wise.</summary>
     public static ReverseGradTensor<T> operator -(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         => ReverseGradOperations.Subtract(a, b);
 
+    /// <summary>Multiplies two reverse-mode tensors element-wise.</summary>
     public static ReverseGradTensor<T> operator *(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         => ReverseGradOperations.Multiply(a, b);
 
+    /// <summary>Divides one reverse-mode tensor by another element-wise.</summary>
     public static ReverseGradTensor<T> operator /(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         => ReverseGradOperations.Divide(a, b);
 
@@ -296,6 +300,7 @@ public sealed class ReverseGradTensor<T> : GradTensor<T> where T : struct, IFloa
     public ReverseGradTensor<T> DivideByScalar(T scalar)
         => ReverseGradOperations.DivideScalar(this, scalar);
 
+    /// <summary>Negates a reverse-mode tensor element-wise.</summary>
     public static ReverseGradTensor<T> operator -(ReverseGradTensor<T> a)
         => ReverseGradOperations.Negate(a);
 

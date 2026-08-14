@@ -7,6 +7,11 @@ using System.Runtime.CompilerServices;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// 1D convolution over a 3D input <c>[B, C, L]</c>, producing <c>[B, outChannels, oL]</c>.
+/// Uses an im2col expansion with a <see cref="TensorPrimitives.Dot"/> kernel and a 1×1
+/// fast path when <c>kernelSize == 1 &amp;&amp; stride == 1 &amp;&amp; padding == 0</c>.
+/// </summary>
 public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     const int TargetL1Bytes = 32 * 1024;
@@ -21,14 +26,30 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
     readonly Parameter<T> weight;
     readonly Parameter<T>? bias;
 
+    /// <summary>Gets the number of input channels.</summary>
     public int InChannels => inChannels;
+    /// <summary>Gets the number of output channels.</summary>
     public int OutChannels => outChannels;
+    /// <summary>Gets the spatial kernel length.</summary>
     public int KernelSize => kernelSize;
+    /// <summary>Gets the convolution stride.</summary>
     public int Stride => stride;
+    /// <summary>Gets the zero padding applied on each end of the sequence.</summary>
     public int Padding => padding;
+    /// <summary>Gets the weight parameter (shape <c>[outChannels, inChannels, kernelSize]</c>).</summary>
     public Parameter<T>? Weight => weight;
+    /// <summary>Gets the bias parameter, or null when bias is disabled.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <summary>
+    /// Creates a 1D convolution layer with Kaiming-initialized weights.
+    /// </summary>
+    /// <param name="inChannels">Number of input channels (must be positive)</param>
+    /// <param name="outChannels">Number of output channels (must be positive)</param>
+    /// <param name="kernelSize">Spatial kernel length (must be positive)</param>
+    /// <param name="stride">The convolution stride (must be positive)</param>
+    /// <param name="padding">Zero padding applied on each end of the sequence</param>
+    /// <param name="bias">Whether to include a bias parameter</param>
     public Conv1d(
         int inChannels,
         int outChannels,
@@ -71,6 +92,12 @@ public sealed class Conv1d<T> : Module<T> where T : struct, IFloatingPointIeee75
         }
     }
 
+    /// <summary>
+    /// Convolves a 3D input <c>[B, C, L]</c>, producing <c>[B, outChannels, oL]</c> where
+    /// <c>oL = (L + 2·padding - kernelSize) / stride + 1</c>.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 3)</param>
+    /// <returns>The convolution output</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));

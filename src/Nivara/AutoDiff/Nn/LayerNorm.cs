@@ -3,6 +3,11 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Layer normalization over the last dimension of the input. Each row (the trailing
+/// <c>normalizedShape</c> elements) is normalized using that row's own mean and variance,
+/// optionally followed by a per-element affine transform.
+/// </summary>
 public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int normalizedShape;
@@ -12,12 +17,23 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
     readonly Parameter<T>? weight;
     readonly Parameter<T>? bias;
 
+    /// <summary>Gets the size of the normalized (last) dimension.</summary>
     public int NormalizedShape => normalizedShape;
+    /// <summary>Gets the stability term added to the variance.</summary>
     public T Eps => eps;
+    /// <summary>Gets whether the affine gamma/beta transform is applied.</summary>
     public bool Affine => affine;
+    /// <summary>Gets the learnable gamma parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Weight => weight;
+    /// <summary>Gets the learnable beta parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <summary>
+    /// Creates a layer normalization layer. Gamma is initialized to one and beta to zero.
+    /// </summary>
+    /// <param name="normalizedShape">Size of the normalized (last) dimension (must be positive)</param>
+    /// <param name="eps">Stability term added to the variance (must be positive)</param>
+    /// <param name="affine">Whether to include learnable gamma/beta parameters</param>
     public LayerNorm(
         int normalizedShape,
         float eps = 1e-5f,
@@ -45,6 +61,11 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
         }
     }
 
+    /// <summary>
+    /// Normalizes the last dimension of a tensor of rank at least 2.
+    /// </summary>
+    /// <param name="input">The input tensor (rank at least 2)</param>
+    /// <returns>The normalized tensor</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));

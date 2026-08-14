@@ -410,6 +410,10 @@ public static class ForwardGradOperations
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
     }
 
+    /// <summary>
+    /// Applies the Gaussian error linear unit (tanh approximation).
+    /// JVP: t_out = GeluGradient(a) * t_a
+    /// </summary>
     public static ForwardGradTensor<T> Gelu<T>(ForwardGradTensor<T> a)
         where T : struct, IFloatingPointIeee754<T>
     {

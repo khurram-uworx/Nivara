@@ -4,17 +4,37 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Training;
 
+/// <summary>
+/// An in-memory dataset over a <see cref="NivaraFrame"/>, materializing feature and label
+/// tensors for arbitrary row selections. Requires the selected columns to contain no nulls
+/// (the AutoDiff domain is non-nullable).
+/// </summary>
 public sealed class TensorDataset<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly NivaraFrame frame;
     readonly string[] featureColumns;
     readonly string[] labelColumns;
 
+    /// <summary>The number of rows in the underlying frame.</summary>
     public int Count => frame.RowCount;
+
+    /// <summary>The underlying frame.</summary>
     public NivaraFrame Frame => frame;
+
+    /// <summary>The column names used as model features.</summary>
     public IReadOnlyList<string> FeatureColumns => featureColumns;
+
+    /// <summary>The column names used as labels.</summary>
     public IReadOnlyList<string> LabelColumns => labelColumns;
 
+    /// <summary>
+    /// Creates a dataset over a frame with the given feature and label columns.
+    /// </summary>
+    /// <param name="frame">The source frame (must be non-empty)</param>
+    /// <param name="featureColumns">The feature column names (at least one)</param>
+    /// <param name="labelColumns">The label column names (at least one)</param>
+    /// <exception cref="ArgumentNullException">Thrown when any argument is null</exception>
+    /// <exception cref="ArgumentException">Thrown when no feature/label columns are given, the frame is empty, or a named column is missing</exception>
     public TensorDataset(NivaraFrame frame, string[] featureColumns, string[] labelColumns)
     {
         this.frame = frame ?? throw new ArgumentNullException(nameof(frame));
@@ -35,11 +55,24 @@ public sealed class TensorDataset<T> where T : struct, IFloatingPointIeee754<T>
         }
     }
 
+    /// <summary>
+    /// Creates a dataset over a frame with the given feature columns and a single label column.
+    /// </summary>
+    /// <param name="frame">The source frame (must be non-empty)</param>
+    /// <param name="featureColumns">The feature column names (at least one)</param>
+    /// <param name="labelColumn">The single label column name</param>
     public TensorDataset(NivaraFrame frame, string[] featureColumns, string labelColumn)
         : this(frame, featureColumns, [labelColumn])
     {
     }
 
+    /// <summary>
+    /// Materializes a batch of features and labels for the given row indices. Features are
+    /// created with <see cref="ReverseGradTensor{T}.RequiresGrad"/> set to true so gradients
+    /// can flow back to them.
+    /// </summary>
+    /// <param name="indices">The row indices to include in the batch</param>
+    /// <returns>A batch with <c>[batchSize, featureCount]</c> features and labels</returns>
     public Batch<T> GetBatch(ReadOnlySpan<int> indices)
     {
         var features = BuildTensor(featureColumns, indices, requiresGrad: true);

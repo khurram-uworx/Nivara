@@ -5,17 +5,29 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Training;
 
+/// <summary>
+/// The result of a training run: per-epoch results plus total elapsed time.
+/// </summary>
 public sealed class TrainingResult<T> where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>Per-epoch results in run order.</summary>
     public IReadOnlyList<EpochResult<T>> Epochs { get; }
+
+    /// <summary>Total wall-clock time for the run.</summary>
     public TimeSpan TotalElapsed { get; }
 
+    /// <summary>
+    /// Creates a training result.
+    /// </summary>
+    /// <param name="epochs">Per-epoch results</param>
+    /// <param name="totalElapsed">Total elapsed time</param>
     public TrainingResult(IReadOnlyList<EpochResult<T>> epochs, TimeSpan totalElapsed)
     {
         Epochs = epochs;
         TotalElapsed = totalElapsed;
     }
 
+    /// <summary>Prints a summary of the run to the console.</summary>
     public void PrintSummary()
     {
         Console.WriteLine($"Training completed in {TotalElapsed.TotalSeconds:F2}s");
@@ -31,13 +43,28 @@ public sealed class TrainingResult<T> where T : struct, IFloatingPointIeee754<T>
     }
 }
 
+/// <summary>Per-epoch training metrics.</summary>
 public sealed class EpochResult<T> where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>The 1-based epoch number.</summary>
     public int Epoch { get; }
+
+    /// <summary>Average loss across batches in the epoch.</summary>
     public T Loss { get; }
+
+    /// <summary>Wall-clock time for the epoch.</summary>
     public TimeSpan Elapsed { get; }
+
+    /// <summary>Number of batches processed in the epoch.</summary>
     public int Batches { get; }
 
+    /// <summary>
+    /// Creates an epoch result.
+    /// </summary>
+    /// <param name="epoch">The epoch number</param>
+    /// <param name="loss">Average loss</param>
+    /// <param name="elapsed">Elapsed time</param>
+    /// <param name="batches">Batch count</param>
     public EpochResult(int epoch, T loss, TimeSpan elapsed, int batches)
     {
         Epoch = epoch;
@@ -47,6 +74,11 @@ public sealed class EpochResult<T> where T : struct, IFloatingPointIeee754<T>
     }
 }
 
+/// <summary>
+/// Sequential training loop: for each epoch, iterates batches, computes forward pass and loss
+/// inside a <see cref="GradientUtils.Grad"/> scope, backpropagates, steps the optimizer, and
+/// zeroes gradients. Provides checkpoint save/load and epoch lifecycle hooks for subclassing.
+/// </summary>
 public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     readonly Module<T> model;
@@ -56,10 +88,25 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
     int maxEpoch;
     bool disposed;
 
+    /// <summary>The model being trained.</summary>
     public Module<T> Model => model;
+
+    /// <summary>The data loader providing batches.</summary>
     public DataLoader<T> Loader => loader;
+
+    /// <summary>The highest epoch reached by the loop.</summary>
     public int MaxEpoch => maxEpoch;
 
+    /// <summary>
+    /// Creates a training loop.
+    /// </summary>
+    /// <param name="model">The model to train</param>
+    /// <param name="loader">The data loader supplying batches</param>
+    /// <param name="lossFn">Loss function of (output, labels)</param>
+    /// <param name="optimizer">The optimizer used to update parameters</param>
+    /// <param name="epochs">Number of epochs to run</param>
+    /// <exception cref="ArgumentNullException">Thrown when any argument is null</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="epochs"/> is not positive</exception>
     public TrainingLoop(
         Module<T> model,
         DataLoader<T> loader,
@@ -78,6 +125,11 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         maxEpoch = epochs;
     }
 
+    /// <summary>
+    /// Runs the training loop from the current epoch counter up to <see cref="MaxEpoch"/>.
+    /// </summary>
+    /// <param name="startEpoch">The first epoch to run (default 1)</param>
+    /// <returns>A summary of the training run</returns>
     public TrainingResult<T> Run(int startEpoch = 1)
     {
         var epochResults = new List<EpochResult<T>>(maxEpoch - startEpoch + 1);
@@ -122,6 +174,13 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         return new TrainingResult<T>(epochResults, totalSw.Elapsed);
     }
 
+    /// <summary>
+    /// Extends the loop by additional epochs, resuming from the next epoch after
+    /// <see cref="MaxEpoch"/>.
+    /// </summary>
+    /// <param name="additionalEpochs">The number of additional epochs to run</param>
+    /// <returns>A summary of the continued run</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="additionalEpochs"/> is not positive</exception>
     public TrainingResult<T> Continue(int additionalEpochs)
     {
         if (additionalEpochs <= 0)
@@ -132,6 +191,12 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         return Run(startEpoch);
     }
 
+    /// <summary>
+    /// Saves a checkpoint of the model and optimizer state.
+    /// </summary>
+    /// <param name="path">The destination file path</param>
+    /// <param name="epoch">The epoch to record in the checkpoint</param>
+    /// <param name="loss">The loss to record in the checkpoint</param>
     public void SaveCheckpoint(string path, int epoch, T loss)
     {
         var epochResult = new EpochResult<T>(epoch, loss, TimeSpan.Zero, 0);
@@ -139,6 +204,11 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         Serialization.ModelSerializer.SaveCheckpoint(model, epochResult, path, optimizerState);
     }
 
+    /// <summary>
+    /// Loads model weights, optimizer state, and the recorded epoch from a checkpoint,
+    /// setting <see cref="MaxEpoch"/> to the checkpoint epoch.
+    /// </summary>
+    /// <param name="path">The checkpoint file path</param>
     public void LoadCheckpoint(string path)
     {
         var checkpoint = Serialization.ModelSerializer.LoadCheckpoint<T>(path);
@@ -152,24 +222,40 @@ public class TrainingLoop<T> : IDisposable where T : struct, IFloatingPointIeee7
         maxEpoch = checkpoint.Epoch;
     }
 
+    /// <summary>Called at the start of each epoch. Override to hook epoch boundaries.</summary>
+    /// <param name="epoch">The epoch number about to start</param>
     protected virtual void OnEpochStart(int epoch)
     {
     }
 
+    /// <summary>Called after each batch is processed. Override to observe batch-level loss.</summary>
+    /// <param name="epoch">The current epoch number</param>
+    /// <param name="batch">The 1-based batch index</param>
+    /// <param name="lossValue">The loss of the batch</param>
     protected virtual void OnBatchEnd(int epoch, int batch, T lossValue)
     {
     }
 
+    /// <summary>Called at the end of each epoch. Override to hook epoch completion.</summary>
+    /// <param name="epoch">The epoch number that finished</param>
+    /// <param name="result">The epoch result</param>
     protected virtual void OnEpochEnd(int epoch, EpochResult<T> result)
     {
     }
 
+    /// <summary>
+    /// Disposes the model and optimizer.
+    /// </summary>
     public void Dispose()
     {
         Dispose(true);
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// Disposes the model and optimizer.
+    /// </summary>
+    /// <param name="disposing">Whether managed resources should be released</param>
     protected virtual void Dispose(bool disposing)
     {
         if (disposed) return;

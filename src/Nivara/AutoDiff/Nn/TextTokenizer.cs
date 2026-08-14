@@ -3,12 +3,22 @@ using System.Text.Json;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Simple word-level tokenizer built from a corpus. Maps tokens to integer IDs with reserved
+/// padding, unknown, begin-of-sequence, and end-of-sequence tokens; supports encode/decode,
+/// fixed-length padding, and JSON save/load.
+/// </summary>
 public sealed class TextTokenizer
 {
+    /// <summary>Gets the number of tokens in the vocabulary (including special tokens).</summary>
     public int VocabSize { get; }
+    /// <summary>Gets the reserved padding token ID.</summary>
     public int PadToken { get; }
+    /// <summary>Gets the reserved unknown-token ID.</summary>
     public int UnkToken { get; }
+    /// <summary>Gets the reserved begin-of-sequence token ID.</summary>
     public int BosToken { get; }
+    /// <summary>Gets the reserved end-of-sequence token ID.</summary>
     public int EosToken { get; }
 
     readonly Dictionary<string, int> stoi;
@@ -30,6 +40,14 @@ public sealed class TextTokenizer
         EosToken = stoi[EosStr];
     }
 
+    /// <summary>
+    /// Builds a tokenizer from a corpus, keeping the most frequent tokens up to
+    /// <paramref name="maxVocabSize"/>, filtered by a minimum frequency.
+    /// </summary>
+    /// <param name="documents">The documents to learn the vocabulary from</param>
+    /// <param name="maxVocabSize">Maximum vocabulary size (excluding the four special tokens)</param>
+    /// <param name="minFreq">Minimum token frequency to be kept</param>
+    /// <returns>The trained tokenizer</returns>
     public static TextTokenizer FromDocuments(
         IEnumerable<string> documents,
         int maxVocabSize = 10000,
@@ -77,6 +95,13 @@ public sealed class TextTokenizer
         return new TextTokenizer(stoi, itos);
     }
 
+    /// <summary>
+    /// Encodes text into token IDs, optionally wrapping with BOS/EOS and padding to a fixed length.
+    /// </summary>
+    /// <param name="text">The text to encode</param>
+    /// <param name="fixedLength">When set, pads (or truncates) the result to this length</param>
+    /// <param name="addBosEos">Whether to prepend BOS and append EOS</param>
+    /// <returns>The token ID sequence</returns>
     public int[] Encode(string text, int? fixedLength = null, bool addBosEos = true)
     {
         ArgumentNullException.ThrowIfNull(text);
@@ -113,6 +138,12 @@ public sealed class TextTokenizer
         return result;
     }
 
+    /// <summary>
+    /// Decodes token IDs back into text, skipping padding and BOS tokens and stopping at EOS.
+    /// Unknown IDs are rendered as <c>&lt;id&gt;</c>.
+    /// </summary>
+    /// <param name="tokens">The token ID sequence</param>
+    /// <returns>The decoded text</returns>
     public string Decode(ReadOnlySpan<int> tokens)
     {
         var sb = new StringBuilder();
@@ -134,6 +165,10 @@ public sealed class TextTokenizer
         return sb.ToString();
     }
 
+    /// <summary>
+    /// Saves the tokenizer vocabulary to a JSON file.
+    /// </summary>
+    /// <param name="path">The destination file path</param>
     public void Save(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -143,6 +178,11 @@ public sealed class TextTokenizer
         File.WriteAllText(path, json);
     }
 
+    /// <summary>
+    /// Loads a tokenizer previously saved with <see cref="Save"/>.
+    /// </summary>
+    /// <param name="path">The JSON file path</param>
+    /// <returns>The loaded tokenizer</returns>
     public static TextTokenizer Load(string path)
     {
         ArgumentNullException.ThrowIfNull(path);
@@ -164,6 +204,11 @@ public sealed class TextTokenizer
         return new TextTokenizer(stoi, itos);
     }
 
+    /// <summary>
+    /// Splits lower-cased text into word tokens on any non-letter/non-digit character.
+    /// </summary>
+    /// <param name="text">The text to tokenize</param>
+    /// <returns>The word tokens</returns>
     public static List<string> Tokenize(string text)
     {
         ArgumentNullException.ThrowIfNull(text);

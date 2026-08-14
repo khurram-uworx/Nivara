@@ -16,11 +16,21 @@ public sealed class SparseEmbedding<T> : Module<T> where T : struct, IFloatingPo
     readonly int paddingIndex;
     readonly Parameter<T> weight;
 
+    /// <summary>Gets the size of the vocabulary (number of embedding rows).</summary>
     public int NumEmbeddings => numEmbeddings;
+    /// <summary>Gets the dimension of each embedding vector.</summary>
     public int EmbeddingDim => embeddingDim;
+    /// <summary>Gets the padding index whose entries are ignored during the sum.</summary>
     public int PaddingIndex => paddingIndex;
+    /// <summary>Gets the weight parameter (shape <c>[numEmbeddings, embeddingDim]</c>).</summary>
     public Parameter<T>? Weight => weight;
 
+    /// <summary>
+    /// Creates a sparse embedding bag.
+    /// </summary>
+    /// <param name="numEmbeddings">Size of the vocabulary (must be positive)</param>
+    /// <param name="embeddingDim">Dimension of each embedding vector (must be positive)</param>
+    /// <param name="paddingIndex">Index that marks padding; its row is ignored</param>
     public SparseEmbedding(int numEmbeddings, int embeddingDim, int paddingIndex = -1)
     {
         if (numEmbeddings <= 0)
@@ -41,6 +51,12 @@ public sealed class SparseEmbedding<T> : Module<T> where T : struct, IFloatingPo
         init.Initialize(weight);
     }
 
+    /// <summary>
+    /// Sums the embeddings of the active feature indices in each row of a
+    /// <c>[batchSize, maxActiveFeatures]</c> input, producing <c>[batchSize, embeddingDim]</c>.
+    /// </summary>
+    /// <param name="input">Tensor of feature indices (rank 2)</param>
+    /// <returns>The summed embedding vectors</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null)

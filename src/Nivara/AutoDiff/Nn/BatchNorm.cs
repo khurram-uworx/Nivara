@@ -3,6 +3,11 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Batch normalization over feature channels for 2D <c>[N, C]</c> or 3D <c>[B, C, L]</c> input.
+/// Normalizes each channel using the current batch statistics while training, and the running
+/// statistics while in evaluation mode. Supports optional affine parameters (gamma/beta).
+/// </summary>
 public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int numFeatures;
@@ -18,6 +23,14 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
     ReverseGradTensor<T>? runningVar;
     ReverseGradTensor<T>? numBatchesTracked;
 
+    /// <summary>
+    /// Creates a 1D batch normalization layer. Gamma is initialized to one and beta to zero.
+    /// </summary>
+    /// <param name="numFeatures">Number of feature channels (must be positive)</param>
+    /// <param name="eps">Value added to the variance for numerical stability (must be positive)</param>
+    /// <param name="momentum">Momentum used to update running statistics (in <c>(0, 1)</c>)</param>
+    /// <param name="affine">Whether to include learnable gamma/beta parameters</param>
+    /// <param name="trackRunningStats">Whether to maintain running mean/var and a batch counter</param>
     public BatchNorm1d(
         int numFeatures,
         float eps = 1e-5f,
@@ -64,16 +77,28 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
         }
     }
 
+    /// <summary>Gets the running mean; throws when created with <c>trackRunningStats: false</c>.</summary>
     public ReverseGradTensor<T> RunningMean => runningMean
         ?? throw new InvalidOperationException("RunningMean is unavailable because this BatchNorm1d was created with trackRunningStats: false.");
+    /// <summary>Gets the running variance; throws when created with <c>trackRunningStats: false</c>.</summary>
     public ReverseGradTensor<T> RunningVar => runningVar
         ?? throw new InvalidOperationException("RunningVar is unavailable because this BatchNorm1d was created with trackRunningStats: false.");
+    /// <summary>Gets the number of batches tracked; throws when created with <c>trackRunningStats: false</c>.</summary>
     public ReverseGradTensor<T> NumBatchesTracked => numBatchesTracked
         ?? throw new InvalidOperationException("NumBatchesTracked is unavailable because this BatchNorm1d was created with trackRunningStats: false.");
+    /// <summary>Gets whether running statistics are being maintained.</summary>
     public bool TrackRunningStats => trackRunningStats;
+    /// <summary>Gets the learnable gamma parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Weight => weight;
+    /// <summary>Gets the learnable beta parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <summary>
+    /// Normalizes a 2D <c>[N, C]</c> or 3D <c>[B, C, L]</c> input, using batch statistics while
+    /// training and running statistics while in evaluation mode.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 2 or 3)</param>
+    /// <returns>The normalized tensor</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -196,6 +221,10 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
     static ReadOnlySpan<T> GetParamSpan(ReverseGradTensor<T> tensor)
         => ModuleHelpers<T>.GetSpan(tensor);
 
+    /// <summary>
+    /// Includes running mean, running variance, and the batch counter in the state dictionary.
+    /// </summary>
+    /// <returns>The state dictionary</returns>
     public override Dictionary<string, ReverseGradTensor<T>> StateDict()
     {
         var state = base.StateDict();
@@ -205,6 +234,11 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
         return state;
     }
 
+    /// <summary>
+    /// Restores parameters and running statistics from a state dictionary.
+    /// </summary>
+    /// <param name="stateDict">The state dictionary to load from</param>
+    /// <param name="strict">Whether missing model parameters should throw</param>
     public override void LoadStateDict(IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict, bool strict = false)
     {
         var paramKeys = new HashSet<string>(stateDict.Keys.Where(k => k is "Weight" or "Bias"));
@@ -218,6 +252,11 @@ public sealed class BatchNorm1d<T> : Module<T> where T : struct, IFloatingPointI
     }
 }
 
+/// <summary>
+/// Batch normalization over feature channels for 4D <c>[N, C, H, W]</c> input. Normalizes each
+/// channel using the current batch statistics while training and the running statistics while in
+/// evaluation mode. Supports optional affine parameters (gamma/beta).
+/// </summary>
 public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int numFeatures;
@@ -233,6 +272,14 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
     ReverseGradTensor<T>? runningVar;
     ReverseGradTensor<T>? numBatchesTracked;
 
+    /// <summary>
+    /// Creates a 2D batch normalization layer. Gamma is initialized to one and beta to zero.
+    /// </summary>
+    /// <param name="numFeatures">Number of feature channels (must be positive)</param>
+    /// <param name="eps">Value added to the variance for numerical stability (must be positive)</param>
+    /// <param name="momentum">Momentum used to update running statistics (in <c>(0, 1)</c>)</param>
+    /// <param name="affine">Whether to include learnable gamma/beta parameters</param>
+    /// <param name="trackRunningStats">Whether to maintain running mean/var and a batch counter</param>
     public BatchNorm2d(
         int numFeatures,
         float eps = 1e-5f,
@@ -279,16 +326,28 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
         }
     }
 
+    /// <summary>Gets the running mean; throws when created with <c>trackRunningStats: false</c>.</summary>
     public ReverseGradTensor<T> RunningMean => runningMean
         ?? throw new InvalidOperationException("RunningMean is unavailable because this BatchNorm2d was created with trackRunningStats: false.");
+    /// <summary>Gets the running variance; throws when created with <c>trackRunningStats: false</c>.</summary>
     public ReverseGradTensor<T> RunningVar => runningVar
         ?? throw new InvalidOperationException("RunningVar is unavailable because this BatchNorm2d was created with trackRunningStats: false.");
+    /// <summary>Gets the number of batches tracked; throws when created with <c>trackRunningStats: false</c>.</summary>
     public ReverseGradTensor<T> NumBatchesTracked => numBatchesTracked
         ?? throw new InvalidOperationException("NumBatchesTracked is unavailable because this BatchNorm2d was created with trackRunningStats: false.");
+    /// <summary>Gets whether running statistics are being maintained.</summary>
     public bool TrackRunningStats => trackRunningStats;
+    /// <summary>Gets the learnable gamma parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Weight => weight;
+    /// <summary>Gets the learnable beta parameter, or null when <c>affine</c> is false.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <summary>
+    /// Normalizes a 4D input <c>[N, C, H, W]</c>, using batch statistics while training and
+    /// running statistics while in evaluation mode.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 4)</param>
+    /// <returns>The normalized tensor</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -414,6 +473,10 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
     static ReadOnlySpan<T> GetParamSpan(ReverseGradTensor<T> tensor)
         => ModuleHelpers<T>.GetSpan(tensor);
 
+    /// <summary>
+    /// Includes running mean, running variance, and the batch counter in the state dictionary.
+    /// </summary>
+    /// <returns>The state dictionary</returns>
     public override Dictionary<string, ReverseGradTensor<T>> StateDict()
     {
         var state = base.StateDict();
@@ -423,6 +486,11 @@ public sealed class BatchNorm2d<T> : Module<T> where T : struct, IFloatingPointI
         return state;
     }
 
+    /// <summary>
+    /// Restores parameters and running statistics from a state dictionary.
+    /// </summary>
+    /// <param name="stateDict">The state dictionary to load from</param>
+    /// <param name="strict">Whether missing model parameters should throw</param>
     public override void LoadStateDict(IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict, bool strict = false)
     {
         var paramKeys = new HashSet<string>(stateDict.Keys.Where(k => k is "Weight" or "Bias"));

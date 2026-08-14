@@ -7,6 +7,11 @@ using System.Text.Json;
 
 namespace Nivara.AutoDiff.Serialization;
 
+/// <summary>
+/// Serializes and deserializes models and checkpoints as versioned JSON files, with parameter
+/// values encoded as base64 in binary form. Formats: <c>nivara-ss-v2</c> (state dict) and
+/// <c>nivara-ckpt-v2</c> (checkpoint).
+/// </summary>
 public static class ModelSerializer
 {
     static readonly JsonSerializerOptions s_options = new()
@@ -14,6 +19,13 @@ public static class ModelSerializer
         WriteIndented = true
     };
 
+    /// <summary>
+    /// Saves a model's state dict to a JSON file.
+    /// </summary>
+    /// <param name="model">The model to save</param>
+    /// <param name="path">The destination file path</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="model"/> is null</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is null or blank</exception>
     public static void Save<T>(Module<T> model, string path) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -25,6 +37,14 @@ public static class ModelSerializer
     const string ExpectedModelFormat = "nivara-ss-v2";
     const string ExpectedCheckpointFormat = "nivara-ckpt-v2";
 
+    /// <summary>
+    /// Loads a state dict from a JSON file into an existing model.
+    /// </summary>
+    /// <param name="model">The model to populate</param>
+    /// <param name="path">The model file path</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="model"/> is null</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is null or blank</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the file does not exist</exception>
     public static void Load<T>(Module<T> model, string path) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -36,6 +56,12 @@ public static class ModelSerializer
         model.LoadStateDict(JsonToStateDict<T>(File.ReadAllText(path)));
     }
 
+    /// <summary>
+    /// Serializes a state dict to versioned JSON text.
+    /// </summary>
+    /// <param name="stateDict">The state dict to serialize</param>
+    /// <returns>The JSON representation</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="stateDict"/> is null</exception>
     public static string StateDictToJson<T>(
         IReadOnlyDictionary<string, ReverseGradTensor<T>> stateDict) where T : struct, IFloatingPointIeee754<T>
     {
@@ -45,6 +71,14 @@ public static class ModelSerializer
         return JsonSerializer.Serialize(file, s_options);
     }
 
+    /// <summary>
+    /// Deserializes versioned JSON text into a state dict.
+    /// </summary>
+    /// <param name="json">The JSON text</param>
+    /// <param name="requiresGrad">Whether the deserialized tensors should require gradients</param>
+    /// <returns>The deserialized state dict</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="json"/> is null or blank</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the JSON is malformed or uses an unsupported format</exception>
     public static Dictionary<string, ReverseGradTensor<T>> JsonToStateDict<T>(
         string json,
         bool requiresGrad = false) where T : struct, IFloatingPointIeee754<T>
@@ -65,6 +99,15 @@ public static class ModelSerializer
         return state;
     }
 
+    /// <summary>
+    /// Saves a model, epoch metadata, and optimizer state as a JSON checkpoint file.
+    /// </summary>
+    /// <param name="model">The model to save</param>
+    /// <param name="epoch">The epoch result to record</param>
+    /// <param name="path">The destination file path</param>
+    /// <param name="optimizerState">Optional optimizer state to include</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="model"/> or <paramref name="epoch"/> is null</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is null or blank</exception>
     public static void SaveCheckpoint<T>(
         Module<T> model,
         EpochResult<T> epoch,
@@ -80,6 +123,14 @@ public static class ModelSerializer
         File.WriteAllText(path, json);
     }
 
+    /// <summary>
+    /// Loads a checkpoint from a JSON checkpoint file.
+    /// </summary>
+    /// <param name="path">The checkpoint file path</param>
+    /// <returns>The deserialized checkpoint</returns>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="path"/> is null or blank</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the file does not exist</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the JSON is malformed or uses an unsupported format</exception>
     public static Checkpoint<T> LoadCheckpoint<T>(string path) where T : struct, IFloatingPointIeee754<T>
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);

@@ -4,15 +4,35 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Fused batch-normalization kernels over NCHW-style layouts: forward (train and eval),
+/// plus backward passes for the input, gamma, and beta. Uses <see cref="TensorPrimitives"/>
+/// SIMD paths for float planes of size at least 4 and scalar fallbacks otherwise.
+/// </summary>
 internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>
+    /// Result of a forward batch-normalization pass: the normalized output, per-channel
+    /// batch mean, inverse standard deviation, and the normalized values (x-hat).
+    /// </summary>
     internal readonly struct ForwardResult
     {
+        /// <summary>The normalized output.</summary>
         public readonly T[] Output;
+        /// <summary>Per-channel batch mean.</summary>
         public readonly T[] Mean;
+        /// <summary>Per-channel inverse standard deviation (<c>1 / sqrt(var + eps)</c>).</summary>
         public readonly T[] InvStd;
+        /// <summary>Per-channel normalized values before the affine transform.</summary>
         public readonly T[] XHat;
 
+        /// <summary>
+        /// Creates a forward result.
+        /// </summary>
+        /// <param name="output">The normalized output</param>
+        /// <param name="mean">Per-channel batch mean</param>
+        /// <param name="invStd">Per-channel inverse standard deviation</param>
+        /// <param name="xHat">Per-channel normalized values</param>
         public ForwardResult(T[] output, T[] mean, T[] invStd, T[] xHat)
         {
             Output = output;
@@ -22,6 +42,19 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
         }
     }
 
+    /// <summary>
+    /// Computes batch normalization using the current batch statistics, optionally updating
+    /// the running statistics, and returns the values needed for backward.
+    /// </summary>
+    /// <param name="input">The raw input</param>
+    /// <param name="n">Batch size</param>
+    /// <param name="c">Number of channels</param>
+    /// <param name="planeSize">Spatial size per channel</param>
+    /// <param name="gamma">Learnable scale, or empty when not affine</param>
+    /// <param name="beta">Learnable shift, or empty when not affine</param>
+    /// <param name="eps">Stability term added to the variance</param>
+    /// <param name="affine">Whether the gamma/beta transform is applied</param>
+    /// <returns>The forward result</returns>
     internal static ForwardResult Forward(
         ReadOnlySpan<T> input, int n, int c, int planeSize,
         ReadOnlySpan<T> gamma, ReadOnlySpan<T> beta,
@@ -124,6 +157,20 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
     }
 
 
+    /// <summary>
+    /// Computes batch normalization using pre-computed running statistics (evaluation mode).
+    /// </summary>
+    /// <param name="input">The raw input</param>
+    /// <param name="n">Batch size</param>
+    /// <param name="c">Number of channels</param>
+    /// <param name="planeSize">Spatial size per channel</param>
+    /// <param name="gamma">Learnable scale, or empty when not affine</param>
+    /// <param name="beta">Learnable shift, or empty when not affine</param>
+    /// <param name="runningMean">Per-channel running mean</param>
+    /// <param name="runningVar">Per-channel running variance</param>
+    /// <param name="eps">Stability term added to the variance</param>
+    /// <param name="affine">Whether the gamma/beta transform is applied</param>
+    /// <returns>The forward result</returns>
     internal static ForwardResult ForwardEval(
         ReadOnlySpan<T> input, int n, int c, int planeSize,
         ReadOnlySpan<T> gamma, ReadOnlySpan<T> beta,
@@ -192,6 +239,18 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
         return new ForwardResult(output, mean, invStd, xHat);
     }
 
+    /// <summary>
+    /// Computes the gradient of the loss with respect to the batch-normalization input.
+    /// </summary>
+    /// <param name="gradOutput">Gradient of the loss w.r.t. the output</param>
+    /// <param name="xHat">Normalized values saved during forward</param>
+    /// <param name="gamma">Learnable scale, or empty when not affine</param>
+    /// <param name="invStd">Inverse standard deviation saved during forward</param>
+    /// <param name="n">Batch size</param>
+    /// <param name="c">Number of channels</param>
+    /// <param name="planeSize">Spatial size per channel</param>
+    /// <param name="affine">Whether the gamma/beta transform is applied</param>
+    /// <returns>The input gradient</returns>
     internal static T[] BackwardInput(
         ReadOnlySpan<T> gradOutput, ReadOnlySpan<T> xHat,
         ReadOnlySpan<T> gamma, ReadOnlySpan<T> invStd,
@@ -278,6 +337,15 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
         return gradInput;
     }
 
+    /// <summary>
+    /// Computes the gradient of the loss with respect to the gamma parameter.
+    /// </summary>
+    /// <param name="gradOutput">Gradient of the loss w.r.t. the output</param>
+    /// <param name="xHat">Normalized values saved during forward</param>
+    /// <param name="n">Batch size</param>
+    /// <param name="c">Number of channels</param>
+    /// <param name="planeSize">Spatial size per channel</param>
+    /// <returns>The per-channel gamma gradient</returns>
     internal static T[] BackwardWeight(
         ReadOnlySpan<T> gradOutput, ReadOnlySpan<T> xHat,
         int n, int c, int planeSize)
@@ -318,6 +386,14 @@ internal static class BatchNormKernel<T> where T : struct, IFloatingPointIeee754
         return gradGamma;
     }
 
+    /// <summary>
+    /// Computes the gradient of the loss with respect to the beta parameter.
+    /// </summary>
+    /// <param name="gradOutput">Gradient of the loss w.r.t. the output</param>
+    /// <param name="n">Batch size</param>
+    /// <param name="c">Number of channels</param>
+    /// <param name="planeSize">Spatial size per channel</param>
+    /// <returns>The per-channel beta gradient</returns>
     internal static T[] BackwardBias(
         ReadOnlySpan<T> gradOutput,
         int n, int c, int planeSize)

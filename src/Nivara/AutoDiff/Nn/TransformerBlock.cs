@@ -4,8 +4,19 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
-public enum NormType { RMSNorm, LayerNorm }
+/// <summary>Selects the normalization applied before each attention/MLP sub-block.</summary>
+public enum NormType
+{
+    /// <summary>Root-mean-square normalization.</summary>
+    RMSNorm,
+    /// <summary>Layer normalization.</summary>
+    LayerNorm
+}
 
+/// <summary>
+/// Pre-norm transformer block: multi-head self-attention with a GELU two-layer MLP,
+/// residual connections, and per-sub-block normalization. Uses a pre-computed causal mask.
+/// </summary>
 public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int nEmbd;
@@ -27,6 +38,15 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
     readonly int maxSeqLen;
     readonly NormType normType;
 
+    /// <summary>
+    /// Creates a pre-norm transformer block.
+    /// </summary>
+    /// <param name="nEmbd">Embedding dimension (must be divisible by nHead)</param>
+    /// <param name="nHead">Number of attention heads</param>
+    /// <param name="dropout">Dropout applied to attention and MLP outputs</param>
+    /// <param name="maxSeqLen">Maximum sequence length for the pre-computed causal mask</param>
+    /// <param name="initStd">Standard deviation for the normal weight initialization</param>
+    /// <param name="normType">The normalization applied before each sub-block</param>
     public TransformerBlock(int nEmbd, int nHead, double dropout = 0.0, int maxSeqLen = 256, double initStd = 0.02, NormType normType = NormType.RMSNorm)
     {
         if (nEmbd % nHead != 0)
@@ -76,6 +96,11 @@ public sealed class TransformerBlock<T> : Module<T> where T : struct, IFloatingP
         return tensor;
     }
 
+    /// <summary>
+    /// Runs attention, residual add, MLP, and a final residual add over the input.
+    /// </summary>
+    /// <param name="input">The input tensor</param>
+    /// <returns>The block output</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));

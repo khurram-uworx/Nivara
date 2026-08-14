@@ -7,6 +7,11 @@ using System.Runtime.CompilerServices;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// 2D convolution over a 4D input <c>[N, C, H, W]</c>, producing <c>[N, outChannels, oH, oW]</c>.
+/// Uses a tiled im2col expansion with a <see cref="TensorPrimitives.Dot"/> kernel, supports
+/// grouped convolution, and has a 1×1 fast path when <c>kernelSize == 1 &amp;&amp; stride == 1</c>.
+/// </summary>
 public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     const int TargetL1Bytes = 32 * 1024;
@@ -25,18 +30,39 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     readonly Parameter<T> weight;
     readonly Parameter<T>? bias;
 
+    /// <summary>Gets the number of input channels.</summary>
     public int InChannels => inChannels;
+    /// <summary>Gets the number of output channels.</summary>
     public int OutChannels => outChannels;
+    /// <summary>Gets the spatial kernel size.</summary>
     public int KernelSize => kernelSize;
+    /// <summary>Gets the convolution stride.</summary>
     public int Stride => stride;
+    /// <summary>Gets the zero padding applied to the top of the input.</summary>
     public int PaddingTop => paddingTop;
+    /// <summary>Gets the zero padding applied to the bottom of the input.</summary>
     public int PaddingBottom => paddingBottom;
+    /// <summary>Gets the zero padding applied to the left of the input.</summary>
     public int PaddingLeft => paddingLeft;
+    /// <summary>Gets the zero padding applied to the right of the input.</summary>
     public int PaddingRight => paddingRight;
+    /// <summary>Gets the number of channel groups.</summary>
     public int Groups => groups;
+    /// <summary>Gets the weight parameter (shape <c>[outChannels, inChannels/groups, kernelSize, kernelSize]</c>).</summary>
     public Parameter<T>? Weight => weight;
+    /// <summary>Gets the bias parameter, or null when bias is disabled.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <summary>
+    /// Creates a 2D convolution layer with symmetric padding.
+    /// </summary>
+    /// <param name="inChannels">Number of input channels (must be positive)</param>
+    /// <param name="outChannels">Number of output channels (must be positive)</param>
+    /// <param name="kernelSize">Spatial kernel size (must be positive)</param>
+    /// <param name="stride">The convolution stride (must be positive)</param>
+    /// <param name="padding">Zero padding applied on all sides</param>
+    /// <param name="bias">Whether to include a bias parameter</param>
+    /// <param name="groups">Number of channel groups; both channel counts must be divisible by it</param>
     public Conv2d(
         int inChannels,
         int outChannels,
@@ -49,6 +75,19 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     {
     }
 
+    /// <summary>
+    /// Creates a 2D convolution layer with per-side padding.
+    /// </summary>
+    /// <param name="inChannels">Number of input channels (must be positive)</param>
+    /// <param name="outChannels">Number of output channels (must be positive)</param>
+    /// <param name="kernelSize">Spatial kernel size (must be positive)</param>
+    /// <param name="stride">The convolution stride (must be positive)</param>
+    /// <param name="paddingTop">Zero padding applied to the top</param>
+    /// <param name="paddingBottom">Zero padding applied to the bottom</param>
+    /// <param name="paddingLeft">Zero padding applied to the left</param>
+    /// <param name="paddingRight">Zero padding applied to the right</param>
+    /// <param name="bias">Whether to include a bias parameter</param>
+    /// <param name="groups">Number of channel groups; both channel counts must be divisible by it</param>
     public Conv2d(
         int inChannels,
         int outChannels,
@@ -106,6 +145,12 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         }
     }
 
+    /// <summary>
+    /// Convolves a 4D input <c>[N, C, H, W]</c>, producing <c>[N, outChannels, oH, oW]</c> where
+    /// <c>oH = (H + paddingTop + paddingBottom - kernelSize) / stride + 1</c> (and likewise for width).
+    /// </summary>
+    /// <param name="input">The input tensor (rank 4)</param>
+    /// <returns>The convolution output</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -640,6 +685,11 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     }
 }
 
+/// <summary>
+/// 2D transposed (de)convolution over a 4D input <c>[N, C, H, W]</c>, producing
+/// <c>[N, outChannels, (H-1)·stride - 2·padding + kernelSize, (W-1)·stride - 2·padding + kernelSize]</c>.
+/// Uses a direct scatter into the output tensor; no grouped-convolution support.
+/// </summary>
 public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int inChannels;
@@ -652,14 +702,30 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
     readonly Parameter<T> weight;
     readonly Parameter<T>? bias;
 
+    /// <summary>Gets the number of input channels.</summary>
     public int InChannels => inChannels;
+    /// <summary>Gets the number of output channels.</summary>
     public int OutChannels => outChannels;
+    /// <summary>Gets the spatial kernel size.</summary>
     public int KernelSize => kernelSize;
+    /// <summary>Gets the convolution stride.</summary>
     public int Stride => stride;
+    /// <summary>Gets the zero padding applied on each side.</summary>
     public int Padding => padding;
+    /// <summary>Gets the weight parameter (shape <c>[inChannels, outChannels, kernelSize, kernelSize]</c>).</summary>
     public Parameter<T>? Weight => weight;
+    /// <summary>Gets the bias parameter, or null when bias is disabled.</summary>
     public Parameter<T>? Bias => bias;
 
+    /// <summary>
+    /// Creates a 2D transposed convolution layer with Kaiming-initialized weights.
+    /// </summary>
+    /// <param name="inChannels">Number of input channels (must be positive)</param>
+    /// <param name="outChannels">Number of output channels (must be positive)</param>
+    /// <param name="kernelSize">Spatial kernel size (must be positive)</param>
+    /// <param name="stride">The convolution stride (must be positive)</param>
+    /// <param name="padding">Zero padding applied on each side</param>
+    /// <param name="bias">Whether to include a bias parameter</param>
     public ConvTranspose2d(
         int inChannels,
         int outChannels,
@@ -701,6 +767,11 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
         }
     }
 
+    /// <summary>
+    /// Deconvolves a 4D input <c>[N, C, H, W]</c>, scattering each input element across the output.
+    /// </summary>
+    /// <param name="input">The input tensor (rank 4)</param>
+    /// <returns>The transposed-convolution output</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));

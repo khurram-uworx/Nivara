@@ -2,10 +2,18 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Initializers;
 
+/// <summary>
+/// Kaiming/He uniform initializer: values uniform in <c>[-bound, bound]</c> with
+/// <c>bound = sqrt(6 / fanIn)</c>, where fanIn is the second shape dimension.
+/// No-op for tensors with fewer than two dimensions.
+/// </summary>
 public sealed class KaimingUniformInitializer<T> : IInitializer<T> where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>A shared singleton instance.</summary>
     public static readonly KaimingUniformInitializer<T> Instance = new();
 
+    /// <summary>Initializes the parameter in place.</summary>
+    /// <param name="parameter">The parameter to initialize</param>
     public void Initialize(Parameter<T> parameter)
     {
         var tensor = parameter.Tensor;

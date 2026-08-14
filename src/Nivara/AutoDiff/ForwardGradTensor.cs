@@ -151,18 +151,23 @@ public sealed class ForwardGradTensor<T> : GradTensor<T> where T : struct, IFloa
         return tensor;
     }
 
+    /// <summary>Adds two forward-mode tensors element-wise.</summary>
     public static ForwardGradTensor<T> operator +(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
         => ForwardGradOperations.Add(a, b);
 
+    /// <summary>Subtracts one forward-mode tensor from another element-wise.</summary>
     public static ForwardGradTensor<T> operator -(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
         => ForwardGradOperations.Subtract(a, b);
 
+    /// <summary>Multiplies two forward-mode tensors element-wise.</summary>
     public static ForwardGradTensor<T> operator *(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
         => ForwardGradOperations.Multiply(a, b);
 
+    /// <summary>Divides one forward-mode tensor by another element-wise.</summary>
     public static ForwardGradTensor<T> operator /(ForwardGradTensor<T> a, ForwardGradTensor<T> b)
         => ForwardGradOperations.Divide(a, b);
 
+    /// <summary>Negates a forward-mode tensor element-wise.</summary>
     public static ForwardGradTensor<T> operator -(ForwardGradTensor<T> a)
         => ForwardGradOperations.Negate(a);
 

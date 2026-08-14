@@ -6,10 +6,24 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Operations;
 
+/// <summary>
+/// Reverse-mode automatic differentiation operations. Each method computes the forward result
+/// and, when gradients are being tracked (inside a <see cref="GradientUtils.Grad"/> scope),
+/// records an <see cref="OpNode{T}"/> whose VJP accumulates gradients back to the inputs.
+/// All kernels are span-based and use <see cref="TensorPrimitives"/> where applicable.
+/// </summary>
 public static class ReverseGradOperations
 {
     #region Element-wise Operations
 
+    /// <summary>
+    /// Adds two tensors element-wise: result[i] = a[i] + b[i]. Requires equal lengths.
+    /// </summary>
+    /// <param name="a">The left operand</param>
+    /// <param name="b">The right operand</param>
+    /// <returns>A new tensor holding the element-wise sum</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the operand lengths differ</exception>
     public static ReverseGradTensor<T> Add<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -100,6 +114,14 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.MatrixNote("AddBias", rows, cols, cols));
     }
 
+    /// <summary>
+    /// Subtracts two tensors element-wise: result[i] = a[i] - b[i]. Requires equal lengths.
+    /// </summary>
+    /// <param name="a">The left operand</param>
+    /// <param name="b">The right operand</param>
+    /// <returns>A new tensor holding the element-wise difference</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the operand lengths differ</exception>
     public static ReverseGradTensor<T> Subtract<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -136,6 +158,14 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Multiplies two tensors element-wise: result[i] = a[i] * b[i]. Requires equal lengths.
+    /// </summary>
+    /// <param name="a">The left operand</param>
+    /// <param name="b">The right operand</param>
+    /// <returns>A new tensor holding the element-wise product</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the operand lengths differ</exception>
     public static ReverseGradTensor<T> Multiply<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -174,6 +204,16 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Divides two tensors element-wise: result[i] = a[i] / b[i]. Requires equal lengths and
+    /// rejects zero divisors.
+    /// </summary>
+    /// <param name="a">The left operand (dividend)</param>
+    /// <param name="b">The right operand (divisor)</param>
+    /// <returns>A new tensor holding the element-wise quotient</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the operand lengths differ</exception>
+    /// <exception cref="DivideByZeroException">Thrown when the divisor contains a zero</exception>
     public static ReverseGradTensor<T> Divide<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -265,6 +305,15 @@ public static class ReverseGradOperations
 
     #region Matrix Operations
 
+    /// <summary>
+    /// Computes the matrix product of two rank-2 tensors: result = a @ b. Requires
+    /// a's column count to equal b's row count.
+    /// </summary>
+    /// <param name="a">The left matrix operand</param>
+    /// <param name="b">The right matrix operand</param>
+    /// <returns>A new [aRows, bCols] tensor holding the matrix product</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when an operand is not rank 2 or dimensions are incompatible</exception>
     public static ReverseGradTensor<T> MatMul<T>(ReverseGradTensor<T> a, ReverseGradTensor<T> b)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -906,6 +955,13 @@ public static class ReverseGradOperations
     static bool ShouldParallelizeBatch(int batch, long workPerBatch)
         => batch >= 4 && batch * workPerBatch >= 2L << 20;
 
+    /// <summary>
+    /// Transposes a rank-2 tensor, producing shape [cols, rows].
+    /// </summary>
+    /// <param name="a">The matrix to transpose</param>
+    /// <returns>A new tensor holding the transposed matrix</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the input is not rank 2</exception>
     public static ReverseGradTensor<T> Transpose<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -946,6 +1002,16 @@ public static class ReverseGradOperations
             $"AutoDiff=Transpose;Shape={rows}x{cols}->{cols}x{rows}");
     }
 
+    /// <summary>
+    /// Swaps two axes of a rank-2 or rank-3 tensor.
+    /// </summary>
+    /// <param name="a">The tensor to permute</param>
+    /// <param name="axis1">The first axis to swap</param>
+    /// <param name="axis2">The second axis to swap</param>
+    /// <returns>A new tensor with the two axes swapped</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the input is not rank 2-3 or the axes coincide</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when an axis is out of range</exception>
     public static ReverseGradTensor<T> TransposeAxes<T>(ReverseGradTensor<T> a, int axis1, int axis2) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1055,6 +1121,13 @@ public static class ReverseGradOperations
 
     #region Reduction Operations
 
+    /// <summary>
+    /// Reduces a tensor to a scalar sum.
+    /// </summary>
+    /// <param name="a">The tensor to reduce</param>
+    /// <returns>A scalar (length-1) tensor holding the sum</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the tensor is empty</exception>
     public static ReverseGradTensor<T> Sum<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1083,6 +1156,13 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Reduces a tensor to a scalar mean.
+    /// </summary>
+    /// <param name="a">The tensor to reduce</param>
+    /// <returns>A scalar (length-1) tensor holding the mean</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the tensor is empty</exception>
     public static ReverseGradTensor<T> Mean<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1186,6 +1266,12 @@ public static class ReverseGradOperations
 
     #region Activation Functions
 
+    /// <summary>
+    /// Applies the rectified linear unit: result[i] = max(0, a[i]).
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with ReLU applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Relu<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1211,6 +1297,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies the Gaussian error linear unit (tanh approximation).
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with GELU applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Gelu<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1238,6 +1330,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies the exact Gaussian error linear unit using the error function.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with exact GELU applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> GeluExact<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1268,6 +1366,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies the logistic sigmoid element-wise: result[i] = 1 / (1 + exp(-a[i])).
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with sigmoid applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Sigmoid<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1293,6 +1397,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies the hyperbolic tangent element-wise.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with tanh applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Tanh<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1318,6 +1428,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Negates a tensor element-wise: result[i] = -a[i].
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with all elements negated</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Negate<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1343,6 +1459,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies the absolute value element-wise.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with absolute values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Abs<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1368,6 +1490,14 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Clamps a tensor to [min, max] element-wise. Gradients are zero outside the range.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <param name="min">The lower bound</param>
+    /// <param name="max">The upper bound</param>
+    /// <returns>A new tensor with elements clamped to the range</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Clip<T>(ReverseGradTensor<T> a, T min, T max)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -1394,6 +1524,14 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies leaky ReLU element-wise: result[i] = a[i] for a[i] &gt;= 0, else negativeSlope * a[i].
+    /// A zero slope defaults to 0.01.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <param name="negativeSlope">The slope for negative inputs; zero is treated as 0.01</param>
+    /// <returns>A new tensor with leaky ReLU applied</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> LeakyRelu<T>(ReverseGradTensor<T> a, T negativeSlope = default)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -1423,6 +1561,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies the exponential function element-wise.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with exp applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Exp<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1448,6 +1592,12 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies the natural logarithm element-wise.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with log applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Log<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1473,6 +1623,13 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Raises a tensor to a scalar power element-wise: result[i] = a[i]^exponent.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <param name="exponent">The scalar exponent</param>
+    /// <returns>A new tensor with each element raised to the power</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> Pow<T>(ReverseGradTensor<T> a, double exponent) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1591,6 +1748,14 @@ public static class ReverseGradOperations
             $"AutoDiff=Slice;Start={start};Length={length};FullDim={fullDim}");
     }
 
+    /// <summary>
+    /// Concatenates 1D or 2D tensors along an axis. For 2D input, axis 0 joins rows and
+    /// axis 1 joins columns.
+    /// </summary>
+    /// <param name="tensors">The tensors to concatenate (at least one)</param>
+    /// <param name="axis">The axis to concatenate along (0 or 1 for 2D input)</param>
+    /// <returns>A new tensor holding the concatenated data</returns>
+    /// <exception cref="ArgumentException">Thrown when no tensors are given, ranks differ, or the non-concatenation dimensions mismatch</exception>
     public static ReverseGradTensor<T> Concat<T>(ReverseGradTensor<T>[] tensors, int axis = 0)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -1839,6 +2004,15 @@ public static class ReverseGradOperations
             $"AutoDiff=Concat;Axis={axis};Count={tensors.Length}");
     }
 
+    /// <summary>
+    /// Applies softmax along a dimension, producing a probability distribution per slice.
+    /// A negative <paramref name="dim"/> is resolved relative to the tensor rank.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <param name="dim">The dimension to normalize (default -1, the last dimension)</param>
+    /// <returns>A new tensor with softmax applied</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the dimension is out of range</exception>
     public static ReverseGradTensor<T> Softmax<T>(ReverseGradTensor<T> a, int dim = -1) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1880,6 +2054,15 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Applies log-softmax along a dimension, producing log probabilities per slice.
+    /// A negative <paramref name="dim"/> is resolved relative to the tensor rank.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <param name="dim">The dimension to normalize (default -1, the last dimension)</param>
+    /// <returns>A new tensor with log-softmax applied</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the dimension is out of range</exception>
     public static ReverseGradTensor<T> LogSoftmax<T>(ReverseGradTensor<T> a, int dim = -1) where T : struct, IFloatingPointIeee754<T>
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
@@ -1949,6 +2132,13 @@ public static class ReverseGradOperations
             inner *= a.shape[i];
     }
 
+    /// <summary>
+    /// Normalizes the whole tensor by its root-mean-square, scaled by 1/sqrt(eps + mean(x^2)).
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <param name="eps">Small constant added to the denominator for numerical stability</param>
+    /// <returns>A new tensor with RMS normalization applied</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> RMSNorm<T>(ReverseGradTensor<T> a, double eps = 1e-5)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -1981,6 +2171,15 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("RMSNorm", a.Shape));
     }
 
+    /// <summary>
+    /// Applies RMS normalization independently to each row of a [rows, cols] tensor.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <param name="rows">The number of rows</param>
+    /// <param name="cols">The number of columns</param>
+    /// <param name="eps">Small constant added to each row's denominator</param>
+    /// <returns>A new tensor with per-row RMS normalization applied</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
     public static ReverseGradTensor<T> PerRowRMSNorm<T>(ReverseGradTensor<T> a, int rows, int cols, double eps = 1e-5)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -2028,6 +2227,17 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("PerRowRMSNorm", a.Shape));
     }
 
+    /// <summary>
+    /// Applies dropout: in training, elements are zeroed with the given probability and the
+    /// survivors are scaled by 1/(1-p). In evaluation (or with zero probability), the input
+    /// is returned unchanged.
+    /// </summary>
+    /// <param name="input">The input tensor</param>
+    /// <param name="probability">Dropout probability in [0, 1)</param>
+    /// <param name="isTraining">Whether to apply dropout; false returns the input unchanged</param>
+    /// <returns>The dropout-masked tensor (the same instance when not applied)</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="input"/> is null</exception>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when the probability is outside [0, 1)</exception>
     public static ReverseGradTensor<T> Dropout<T>(ReverseGradTensor<T> input, double probability, bool isTraining)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -2279,6 +2489,15 @@ public static class ReverseGradOperations
 
     #region VAE Operations
 
+    /// <summary>
+    /// Computes the Kullback-Leibler divergence of the reparameterized Gaussian
+    /// N(mean, exp(logVar)) from a standard normal, summed to a scalar.
+    /// </summary>
+    /// <param name="mean">The mean tensor</param>
+    /// <param name="logVar">The log-variance tensor (same length as <paramref name="mean"/>)</param>
+    /// <returns>A scalar (length-1) tensor holding the summed KL divergence</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the operand lengths differ</exception>
     public static ReverseGradTensor<T> KlDivergence<T>(ReverseGradTensor<T> mean, ReverseGradTensor<T> logVar)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -2321,6 +2540,16 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Samples from a Gaussian using the reparameterization trick:
+    /// result = mean + exp(logVar / 2) * epsilon, where epsilon ~ N(0, 1).
+    /// </summary>
+    /// <param name="mean">The mean tensor</param>
+    /// <param name="logVar">The log-variance tensor (same length as <paramref name="mean"/>)</param>
+    /// <param name="seed">Optional RNG seed for deterministic sampling</param>
+    /// <returns>A new tensor with the sampled values</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the operand lengths differ</exception>
     public static ReverseGradTensor<T> SampleNormal<T>(ReverseGradTensor<T> mean, ReverseGradTensor<T> logVar, int? seed = null)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -2570,6 +2799,14 @@ public static class ReverseGradOperations
         return NivaraColumn<T>.CreateFromOwnedArray(result);
     }
 
+    /// <summary>
+    /// Broadcasts a per-channel scale across a 2D+ input: result[i, c, ...] = input[i, c, ...] * scale[c].
+    /// </summary>
+    /// <param name="input">The input tensor (rank 2 or higher)</param>
+    /// <param name="scale">A 1D [channels] tensor matching the input's second dimension</param>
+    /// <returns>A new tensor with each channel scaled</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the input is not 2D+, the scale is not 1D, or the channel counts differ</exception>
     public static ReverseGradTensor<T> BroadcastMultiply<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> scale) where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -2634,6 +2871,14 @@ public static class ReverseGradOperations
         return resultTensor;
     }
 
+    /// <summary>
+    /// Broadcasts a per-channel bias across a 2D+ input: result[i, c, ...] = input[i, c, ...] + bias[c].
+    /// </summary>
+    /// <param name="input">The input tensor (rank 2 or higher)</param>
+    /// <param name="bias">A 1D [channels] tensor matching the input's second dimension</param>
+    /// <returns>A new tensor with each channel offset by the bias</returns>
+    /// <exception cref="ArgumentNullException">Thrown when either operand is null</exception>
+    /// <exception cref="ArgumentException">Thrown when the input is not 2D+, the bias is not 1D, or the channel counts differ</exception>
     public static ReverseGradTensor<T> BroadcastAdd<T>(ReverseGradTensor<T> input, ReverseGradTensor<T> bias) where T : struct, IFloatingPointIeee754<T>
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
