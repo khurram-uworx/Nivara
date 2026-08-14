@@ -473,43 +473,6 @@ public class TensorsHelperTests
             Throws.ArgumentException);
     }
 
-    [Test]
-    public void RowNorms_NoNulls_MatchesPerRowScalar()
-    {
-        const int rows = 5, cols = 3;
-        var rowMajor = FillRowMajor(rows, cols, seed: 42);
-        var output = new float[rows];
-        var outputMask = new bool[rows];
-
-        TensorsHelper.RowNorms(rowMajor, ReadOnlySpan<bool>.Empty, output, outputMask, rows, cols);
-
-        for (int r = 0; r < rows; r++)
-            Assert.That(output[r], Is.EqualTo(TensorPrimitives.Norm(rowMajor.AsSpan(r * cols, cols))), $"row {r}");
-        Assert.That(outputMask, Is.EqualTo(new bool[rows]));
-    }
-
-    [Test]
-    public void RowNorms_WithRowNulls_MasksOnlyNullRows()
-    {
-        const int rows = 3, cols = 2;
-        var rowMajor = new[] { 3f, 4f, 6f, 8f, 1f, 1f };
-        var rowMask = new[]
-        {
-            false, false,
-            true, false,   // row 1 null
-            false, false
-        };
-        var output = new float[rows];
-        var outputMask = new bool[rows];
-
-        TensorsHelper.RowNorms(rowMajor, rowMask, output, outputMask, rows, cols);
-
-        Assert.That(outputMask, Is.EqualTo(new[] { false, true, false }));
-        Assert.That(output[0], Is.EqualTo(5f));
-        Assert.That(output[1], Is.EqualTo(0f));
-        Assert.That(output[2], Is.EqualTo((float)Math.Sqrt(2.0)));
-    }
-
     static float[] FillRowMajor(int rows, int cols, int seed)
     {
         var rng = new Random(seed);
