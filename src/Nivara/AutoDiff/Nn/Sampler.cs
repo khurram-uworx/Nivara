@@ -2,15 +2,30 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Samples token indices from logits using temperature-scaled softmax with optional top-k
+/// filtering. Intended for autoregressive text generation.
+/// </summary>
 public sealed class Sampler<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly Random rng;
 
+    /// <summary>
+    /// Creates a sampler with an optional seed for reproducible results.
+    /// </summary>
+    /// <param name="seed">Optional RNG seed; when null, a shared non-deterministic RNG is used</param>
     public Sampler(int? seed = null)
     {
         rng = seed.HasValue ? new Random(seed.Value) : Random.Shared;
     }
 
+    /// <summary>
+    /// Samples one token index from a vector of logits.
+    /// </summary>
+    /// <param name="logits">The logits tensor (one value per candidate)</param>
+    /// <param name="temperature">Softmax temperature; higher values flatten the distribution</param>
+    /// <param name="topK">When positive, restrict sampling to the top-k highest logits</param>
+    /// <returns>The sampled token index</returns>
     public int Sample(ReverseGradTensor<T> logits, double temperature = 1.0, int topK = 0)
     {
         if (logits == null) throw new ArgumentNullException(nameof(logits));
