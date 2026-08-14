@@ -18,7 +18,7 @@ public class ParquetWriterTests
         );
 
         var tempFile = Path.GetTempFileName();
-        var options = new ParquetWriteOptions { ValidateSchema = true };
+        var options = ParquetWriteOptions.Default.With(validateSchema: true);
 
         try
         {
@@ -142,7 +142,7 @@ public class ParquetWriterTests
         var frame = NivaraFrame.Create(("LongColumn", longColumn));
 
         using var stream = new MemoryStream();
-        var options = new ParquetWriteOptions();
+        var options = ParquetWriteOptions.Default;
 
         try
         {

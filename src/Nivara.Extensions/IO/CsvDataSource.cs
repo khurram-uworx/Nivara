@@ -18,34 +18,78 @@ public sealed class CsvOptions
     public static CsvOptions Default { get; } = new CsvOptions();
 
     /// <summary>
-    /// Gets or sets whether the CSV file has a header row
+    /// Gets whether the CSV file has a header row
     /// </summary>
-    public bool HasHeaderRecord { get; set; } = true;
+    public bool HasHeaderRecord { get; }
 
     /// <summary>
-    /// Gets or sets the delimiter character
+    /// Gets the delimiter character
     /// </summary>
-    public string Delimiter { get; set; } = ",";
+    public string Delimiter { get; }
 
     /// <summary>
-    /// Gets or sets the culture info for parsing
+    /// Gets the culture info for parsing
     /// </summary>
-    public CultureInfo Culture { get; set; } = CultureInfo.InvariantCulture;
+    public CultureInfo Culture { get; }
 
     /// <summary>
-    /// Gets or sets the number of rows to use for schema inference
+    /// Gets the number of rows to use for schema inference
     /// </summary>
-    public int SchemaInferenceRows { get; set; } = 100;
+    public int SchemaInferenceRows { get; }
 
     /// <summary>
-    /// Gets or sets whether to ignore blank lines
+    /// Gets whether to ignore blank lines
     /// </summary>
-    public bool IgnoreBlankLines { get; set; } = true;
+    public bool IgnoreBlankLines { get; }
 
     /// <summary>
-    /// Gets or sets whether to trim whitespace from fields
+    /// Gets whether to trim whitespace from fields
     /// </summary>
-    public bool TrimOptions { get; set; } = true;
+    public bool TrimOptions { get; }
+
+    /// <summary>
+    /// Initializes a new instance of CsvOptions with default values
+    /// </summary>
+    public CsvOptions()
+    {
+        HasHeaderRecord = true;
+        Delimiter = ",";
+        Culture = CultureInfo.InvariantCulture;
+        SchemaInferenceRows = 100;
+        IgnoreBlankLines = true;
+        TrimOptions = true;
+    }
+
+    private CsvOptions(bool hasHeaderRecord, string delimiter, CultureInfo culture, int schemaInferenceRows, bool ignoreBlankLines, bool trimOptions)
+    {
+        HasHeaderRecord = hasHeaderRecord;
+        Delimiter = delimiter;
+        Culture = culture;
+        SchemaInferenceRows = schemaInferenceRows;
+        IgnoreBlankLines = ignoreBlankLines;
+        TrimOptions = trimOptions;
+    }
+
+    /// <summary>
+    /// Returns a copy of these options with the specified values changed
+    /// </summary>
+    /// <param name="hasHeaderRecord">New header mode, or null to keep the current value</param>
+    /// <param name="delimiter">New delimiter, or null to keep the current value</param>
+    /// <param name="culture">New culture, or null to keep the current value</param>
+    /// <param name="schemaInferenceRows">New schema inference row count, or null to keep the current value</param>
+    /// <param name="ignoreBlankLines">New blank-line mode, or null to keep the current value</param>
+    /// <param name="trimOptions">New trim mode, or null to keep the current value</param>
+    /// <returns>A new CsvOptions instance</returns>
+    public CsvOptions With(bool? hasHeaderRecord = null, string? delimiter = null, CultureInfo? culture = null, int? schemaInferenceRows = null, bool? ignoreBlankLines = null, bool? trimOptions = null)
+    {
+        return new CsvOptions(
+            hasHeaderRecord ?? HasHeaderRecord,
+            delimiter ?? Delimiter,
+            culture ?? Culture,
+            schemaInferenceRows ?? SchemaInferenceRows,
+            ignoreBlankLines ?? IgnoreBlankLines,
+            trimOptions ?? TrimOptions);
+    }
 
     /// <summary>
     /// Creates a CsvHelper configuration from these options

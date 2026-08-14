@@ -192,7 +192,7 @@ public class NivaraFrameExtensionsTests
             Assert.DoesNotThrow(() => frame.ToArrowTable());
 
             // And with options parameter
-            var parquetOptions = new ParquetWriteOptions();
+            var parquetOptions = ParquetWriteOptions.Default;
             var arrowOptions = new ArrowConversionOptions();
 
             Assert.DoesNotThrow(() => frame.ToParquet(tempFile, parquetOptions));

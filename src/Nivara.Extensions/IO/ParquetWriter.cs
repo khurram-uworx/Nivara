@@ -26,7 +26,7 @@ public static class ParquetWriter
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(filePath);
 
-        options ??= new ParquetWriteOptions();
+        options ??= ParquetWriteOptions.Default;
 
         try
         {
@@ -58,7 +58,7 @@ public static class ParquetWriter
         ArgumentNullException.ThrowIfNull(frame);
         ArgumentNullException.ThrowIfNull(stream);
 
-        options ??= new ParquetWriteOptions();
+        options ??= ParquetWriteOptions.Default;
 
         try
         {
@@ -121,7 +121,7 @@ public static class ParquetWriter
         ArgumentNullException.ThrowIfNull(frames);
         ArgumentNullException.ThrowIfNull(filePath);
 
-        options ??= new ParquetWriteOptions();
+        options ??= ParquetWriteOptions.Default;
 
         try
         {
@@ -153,7 +153,7 @@ public static class ParquetWriter
         ArgumentNullException.ThrowIfNull(frames);
         ArgumentNullException.ThrowIfNull(stream);
 
-        options ??= new ParquetWriteOptions();
+        options ??= ParquetWriteOptions.Default;
 
         var frameList = frames.ToList();
         if (frameList.Count == 0)
