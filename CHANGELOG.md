@@ -6,6 +6,23 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **`NivaraSeries<T>.Sum()` / `Min()` / `Max()` instance aggregates (#231)** — the series
+  level reductions removed in the AutoDiff refactor are restored (issue #231 reverses that
+  decision). All three dispatch through the full 17-type numeric domain via
+  `NumericKernelDispatcher` (`Min`/`Max` arms added), null-aware and vectorized over
+  `TensorPrimitives`, with column-parity semantics: an empty series throws, all-null `Sum`
+  returns `default(T)` (zero), and all-null `Min`/`Max` throw. Non-numeric series throw a
+  clear `InvalidOperationException`. `Average()` now shares a `getValidValues` helper with
+  the new aggregates.
+
+- **Virtual positional default index for `NivaraSeries<T>` (#231)** — series created
+  without custom labels no longer allocate a `NivaraColumn<object>` of boxed integers.
+  Label lookup (`GetByLabel`, `ContainsLabel`, `TryGetByLabel`, `GetLabel`) computes
+  positional labels directly, and the public `Index` property materializes the boxed
+  column lazily on first access. `Slice`/`Align`/`AlignBoth`/`Add`/`Multiply` preserve a
+  virtual index for default series instead of building `object[]` arrays. Observable
+  behavior is unchanged.
+
 - **Parquet extended-domain round-trip (#190)** — `ParquetWriter`/`ParquetReader` now cover the extended CLR domain from #158. Native `DataField<T>` arms for `DateOnly`, `TimeOnly` (TIME nanoseconds), and `Guid`; `Half`, `nint`/`nuint`, `char`, `DateTimeOffset`, and `TimeSpan` widen to base Parquet types (`float`, `long`/`ulong`, `ushort`, `DateTime`, `long` ticks) with the original CLR type persisted in `CustomMetadata` under key `nivara.clrType.<column>`. Readers restore the typed column; foreign files without metadata read back as the widened type. `Int128`/`UInt128` throw a documented `UnsupportedTypeException`. Null masks and values round-trip (verified by `ParquetExtendedDomainRoundTripTests`).
 
 - **Arrow extended-domain round-trip (#190)** — `ArrowInterop` maps the extended domain to native Apache Arrow arrays: `Half` → `HalfFloatType`, `DateOnly` → `Date32Type`, `TimeOnly` → `Time64Type` (nanoseconds), `Guid` → `FixedSizeBinaryType(16)`, `TimeSpan` → `DurationType` (nanoseconds); widened `nint`/`nuint`/`char`/`DateTimeOffset` → `Int64`/`UInt64`/`String`/`Timestamp` (µs, UTC). Original CLR types are persisted as `nivara.clrType.<column>` schema metadata and restored on read; foreign files read back as the base Arrow types. `Int128`/`UInt128` throw a documented `UnsupportedTypeException`. `DateTimeOffset` instants are clamped to the Timestamp range (1677-09-21…2262-04-11) and normalized to UTC. Note: Apache.Arrow 23.0.0 ships a native `HalfFloatArray` builder, so `Half` uses it rather than a manual `ArrayData` path.
@@ -33,6 +50,13 @@ All notable changes to Nivara are documented here. Released versions are publish
 - **`NivaraColumn<T>` arithmetic generic-math collapse (#157)** — the six `NivaraColumn<T>` arithmetic kernel helpers (scalar `Multiply`/`Divide`, column `Multiply`/`Add`/`Subtract`/`Divide`) now dispatch `decimal`, `Half`, `nint`, `nuint`, `Int128`, and `UInt128` through the `INumber<T>`-constrained `NumericTensorKernels<T>` typed switch, matching `NivaraSeries`. These types previously threw (`InvalidOperationException` for `Half`/`nint`/`nuint`/`Int128`/`UInt128` via `validateTypeSupportsOperation`, `NotSupportedException` for `decimal` at kernel dispatch). On .NET 10 `TensorPrimitives` runs the six types via SIMD (`Half` widening, `nint`/`nuint`) or the operator-based software fallback (`decimal`/`Int128`/`UInt128`). `IsNumericType()` recognizes the five previously-rejected types so validation no longer blocks them; non-numeric types (`string`/`Guid`/`DateTime`) still throw the clear validation error. `KernelSelector` still reports `KernelType.Scalar` for the six, so diagnostics stay accurate.
 
 ### Changed
+
+- **`NivaraSeries<T>.TopKDescending` stringifies labels (#231)** — non-string labels were
+  silently nulled (`label is string s ? s : null`), so a default positional index returned
+  null labels and int/DateTime custom labels were dropped. Labels are now stringified via
+  `ToString()`, surfacing positional indices as their integer string form (e.g. `"0"`,
+  `"1"`) and preserving every label as a useful string. Return type
+  `(string? Label, T Score)[]` is unchanged.
 
 - **ML.NET float conversion is no longer silently lossy (#190)** — `MLNetInterop.ConvertToFloat` (used by `ToDataView`, `ToFeatureVectors`, `CreateFeatureMatrix`) throws `InvalidOperationException` for non-numeric values (string, bool, DateTime, Guid, …) instead of returning `0f`. Extended numeric types (`uint`, `ulong`, `ushort`, `sbyte`, `nint`, `nuint`, `Half`) are now converted. `null` still maps to `0f` per the ML feature-vector contract.
 
@@ -89,6 +113,14 @@ All notable changes to Nivara are documented here. Released versions are publish
 - **XML doc comments across the entire AutoDiff public API (#197)** - every public type and member under `src/Nivara/AutoDiff/` (NN modules, losses, optimizers, training, serialization, initializers, operations, tensors) now carries XML doc comments (`<summary>` plus `<param>`/`<returns>`/`<exception>`/`<see cref>` where applicable), so IntelliSense tooltips cover the full ML training surface. `docs/REVIEW-2026-08-12.md` finding #1 (High) is now resolved; the build gate `dotnet build src/Nivara/Nivara.csproj -p:GenerateDocumentationFile=true` reports zero CS1591 across the namespace. Pure documentation change - no API shape, behavior, or signature impact.
 
 ### Breaking changes
+
+- **`NivaraSeries<T>` object label indexer removed; `this[string]` added (#231)** — the
+  `this[object]` indexer collided with positional `this[int]` access for boxed integer
+  labels. It is replaced by `this[string]`, so the common `series["a"]` lookup keeps
+  working; integer and other non-string labels must use the explicit `GetByLabel(object)`
+  API (boxed `(object)` casts no longer resolve). Series created without custom labels use
+  a virtual positional index (`Index` lazily materialized); behavior is otherwise
+  unchanged.
 
 - **`Module<T>.Forward(input1, input2)` removed; multi-input forward is opt-in via `IMultipleInputModule<T>` (#202)** — the base class no longer advertises a two-input `Forward` that always threw `NotSupportedException` on every subclass except `MultiheadAttention`. Only `MultiheadAttention<T>` and `VAE<T>` genuinely accept a second input, so the capability moved to a new `IMultipleInputModule<T>` interface (`Forward(input1, input2)`) implemented by those two modules. Consumers holding a `Module<T>` reference dispatch with `if (module is IMultipleInputModule<T> multiInput) { multiInput.Forward(a, b); }`. The removed member only ever worked through MHA's concrete type, so the breaking surface is contained to `Module<T>`-typed two-argument calls (which previously threw or required a concrete cast).
 

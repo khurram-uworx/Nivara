@@ -5,9 +5,9 @@ using System.Numerics;
 namespace Nivara.Tests;
 
 /// <summary>
-/// Tests for NivaraSeries aggregate functions and the column-level reductions
-/// (Sum, Min, Max) that back the series. NivaraSeries keeps Average; Sum/Min/Max
-/// live on NivaraColumn&lt;T&gt; (null-aware, TensorPrimitives).
+/// Tests for NivaraSeries aggregate functions (Average, Sum, Min, Max) and the
+/// column-level reductions (Sum, Min, Max) that share the numeric kernel domain.
+/// Series aggregates are null-aware and vectorized via TensorPrimitives.
 /// </summary>
 [TestFixture]
 public class NivaraSeriesAggregateTests
@@ -459,6 +459,161 @@ public class NivaraSeriesAggregateTests
 
     #endregion
 
+    #region Series-Level Aggregates
+
+    /// <summary>
+    /// Feature: nivara-series, Property: Sum computation
+    /// For any series of numeric values, Sum should return the correct arithmetic sum.
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Sum computation")]
+    public void Sum_IntegerSeries_ReturnsCorrectSum()
+    {
+        var series = NivaraSeries<int>.Create(new[] { 1, 2, 3, 4, 5 });
+        Assert.That(series.Sum(), Is.EqualTo(15));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Sum computation with vectorization")]
+    public void Sum_FloatSeries_ReturnsCorrectSum()
+    {
+        var series = NivaraSeries<float>.Create(new[] { 1.5f, 2.5f, 3.0f });
+        Assert.That(series.Sum(), Is.EqualTo(7.0f).Within(0.0001f));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Sum with null handling")]
+    public void Sum_Series_WithNullValues_ReturnsValidSum()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 3, null, 5 });
+        using var series = new NivaraSeries<int>(column);
+
+        Assert.That(series.Sum(), Is.EqualTo(9)); // 1 + 3 + 5
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Sum error handling")]
+    public void Sum_EmptySeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(Array.Empty<int>());
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Sum());
+        Assert.That(ex.Message, Does.Contain("Cannot compute Sum of empty series"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Sum with null handling")]
+    public void Sum_AllNullSeries_ReturnsZero()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        using var series = new NivaraSeries<int>(column);
+
+        Assert.That(series.Sum(), Is.EqualTo(0));
+    }
+
+    /// <summary>
+    /// Feature: nivara-series, Property: Sum on extended numeric domain
+    /// For Half/nint/nuint/Int128/UInt128 series, Sum should dispatch through the
+    /// extended numeric kernel domain.
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Sum on extended numeric domain")]
+    public void Sum_ExtendedDomain_ReturnsCorrectSum()
+    {
+        Assert.That(NivaraSeries<Half>.Create(new[] { (Half)1.5, (Half)2.5 }).Sum(), Is.EqualTo((Half)4.0));
+        Assert.That(NivaraSeries<nint>.Create(new nint[] { 2, 4, 6 }).Sum(), Is.EqualTo((nint)12));
+        Assert.That(NivaraSeries<nuint>.Create(new nuint[] { 2, 4, 6 }).Sum(), Is.EqualTo((nuint)12));
+        Assert.That(NivaraSeries<Int128>.Create(new Int128[] { 2, 4, 6 }).Sum(), Is.EqualTo((Int128)12));
+        Assert.That(NivaraSeries<UInt128>.Create(new UInt128[] { 2, 4, 6 }).Sum(), Is.EqualTo((UInt128)12));
+    }
+
+    /// <summary>
+    /// Feature: nivara-series, Property: Min/Max computation
+    /// For any series of numeric values, Min/Max should return the smallest/largest value.
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Min computation")]
+    public void Min_IntegerSeries_ReturnsCorrectMin()
+    {
+        var series = NivaraSeries<int>.Create(new[] { 5, 2, 8, 1, 9 });
+        Assert.That(series.Min(), Is.EqualTo(1));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Max computation")]
+    public void Max_IntegerSeries_ReturnsCorrectMax()
+    {
+        var series = NivaraSeries<int>.Create(new[] { 5, 2, 8, 1, 9 });
+        Assert.That(series.Max(), Is.EqualTo(9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Min/Max with null handling")]
+    public void MinMax_Series_WithNullValues_ReturnsValidExtremes()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 8, null, 5 });
+        using var series = new NivaraSeries<int>(column);
+
+        Assert.That(series.Min(), Is.EqualTo(2));
+        Assert.That(series.Max(), Is.EqualTo(8));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Min/Max error handling")]
+    public void MinMax_EmptySeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(Array.Empty<int>());
+
+        var minEx = Assert.Throws<InvalidOperationException>(() => series.Min());
+        var maxEx = Assert.Throws<InvalidOperationException>(() => series.Max());
+        Assert.That(minEx.Message, Does.Contain("Cannot compute Min of empty series"));
+        Assert.That(maxEx.Message, Does.Contain("Cannot compute Max of empty series"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Min/Max error handling")]
+    public void MinMax_AllNullSeries_ThrowsInvalidOperationException()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        using var series = new NivaraSeries<int>(column);
+
+        var minEx = Assert.Throws<InvalidOperationException>(() => series.Min());
+        var maxEx = Assert.Throws<InvalidOperationException>(() => series.Max());
+        Assert.That(minEx.Message, Does.Contain("all values are null"));
+        Assert.That(maxEx.Message, Does.Contain("all values are null"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Sum/Min/Max on extended numeric domain")]
+    public void MinMax_ExtendedDomain_ReturnsCorrectExtremes()
+    {
+        Assert.That(NivaraSeries<Half>.Create(new[] { (Half)3.5, (Half)1.5 }).Min(), Is.EqualTo((Half)1.5));
+        Assert.That(NivaraSeries<Half>.Create(new[] { (Half)3.5, (Half)1.5 }).Max(), Is.EqualTo((Half)3.5));
+        Assert.That(NivaraSeries<Int128>.Create(new Int128[] { 3, 1, 2 }).Min(), Is.EqualTo((Int128)1));
+        Assert.That(NivaraSeries<UInt128>.Create(new UInt128[] { 3, 1, 2 }).Max(), Is.EqualTo((UInt128)3));
+    }
+
+    /// <summary>
+    /// Feature: nivara-series, Property: Aggregate type validation
+    /// For non-numeric series, Sum/Min/Max should throw a clear InvalidOperationException.
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Aggregate type validation")]
+    public void Aggregates_NonNumericSeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<string>.Create(new[] { "a", "b" });
+
+        var sumEx = Assert.Throws<InvalidOperationException>(() => series.Sum());
+        var minEx = Assert.Throws<InvalidOperationException>(() => series.Min());
+        var maxEx = Assert.Throws<InvalidOperationException>(() => series.Max());
+
+        Assert.That(sumEx.Message, Does.Contain("Sum operation is not supported"));
+        Assert.That(minEx.Message, Does.Contain("Min operation is not supported"));
+        Assert.That(maxEx.Message, Does.Contain("Max operation is not supported"));
+    }
+
+    #endregion
+
     #region Edge Cases and Error Handling
 
     /// <summary>
@@ -476,6 +631,9 @@ public class NivaraSeriesAggregateTests
 
         // Act & Assert
         Assert.Throws<ObjectDisposedException>(() => series.Average());
+        Assert.Throws<ObjectDisposedException>(() => series.Sum());
+        Assert.Throws<ObjectDisposedException>(() => series.Min());
+        Assert.Throws<ObjectDisposedException>(() => series.Max());
 
         var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
         column.Dispose();

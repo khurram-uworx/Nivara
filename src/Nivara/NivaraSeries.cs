@@ -39,11 +39,12 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Creates a default integer index for the specified length
+    /// Materializes the default positional index as a column containing boxed integer positions.
+    /// Only called when the public Index property is accessed on a series without custom labels.
     /// </summary>
     /// <param name="length">The length of the index to create</param>
     /// <returns>A column containing integer indices from 0 to length-1</returns>
-    static NivaraColumn<object> createDefaultIndex(int length)
+    static NivaraColumn<object> materializeDefaultIndex(int length)
     {
         var indexValues = new object[length];
         for (int i = 0; i < length; i++)
@@ -136,7 +137,8 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     readonly NivaraColumn<T> values;
-    readonly NivaraColumn<object> index;
+    readonly NivaraColumn<object>? index;
+    NivaraColumn<object>? materializedDefaultIndex;
     bool disposed;
 
     /// <summary>
@@ -145,14 +147,13 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     internal NivaraSeries()
     {
         this.values = NivaraColumn<T>.Create(ReadOnlySpan<T>.Empty);
-        this.index = createDefaultIndex(0);
     }
 
     /// <summary>
     /// Initializes a new instance of NivaraSeries with the specified values and optional index
     /// </summary>
     /// <param name="values">The column of values</param>
-    /// <param name="index">Optional index labels. If null, integer positions (0, 1, 2, ...) will be used</param>
+    /// <param name="index">Optional index labels. If null, integer positions (0, 1, 2, ...) are used as a virtual index</param>
     /// <exception cref="ArgumentNullException">Thrown when values is null</exception>
     /// <exception cref="ArgumentException">Thrown when index length doesn't match values length</exception>
     public NivaraSeries(NivaraColumn<T> values, NivaraColumn<object>? index = null)
@@ -166,10 +167,6 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
 
             this.index = index;
         }
-        else
-        {
-            this.index = NivaraSeries<T>.createDefaultIndex(values.Length);
-        }
     }
 
     /// <summary>
@@ -179,6 +176,9 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     /// <returns>The position of the label, or -1 if not found</returns>
     int findLabelPosition(object label)
     {
+        if (index == null)
+            return label is int position && (uint)position < (uint)Length ? position : -1;
+
         var comparer = EqualityComparer<object>.Default;
 
         for (int i = 0; i < index.Length; i++)
@@ -202,21 +202,22 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         var alignedPairs = new List<(int, int)>();
         var comparer = EqualityComparer<object>.Default;
 
-        // For each index in this series, find matching index in other series
-        for (int thisPos = 0; thisPos < index.Length; thisPos++)
+        // For each index in this series, find matching index in other series.
+        // Series without custom labels use positional labels (boxed only on comparison).
+        for (int thisPos = 0; thisPos < Length; thisPos++)
         {
-            if (index.IsNull(thisPos))
+            if (index != null && index.IsNull(thisPos))
                 continue;
 
-            var thisLabel = index[thisPos];
+            var thisLabel = index != null ? index[thisPos] : thisPos;
 
             // Find matching label in other series
-            for (int otherPos = 0; otherPos < other.index.Length; otherPos++)
+            for (int otherPos = 0; otherPos < other.Length; otherPos++)
             {
-                if (other.index.IsNull(otherPos))
+                if (other.index != null && other.index.IsNull(otherPos))
                     continue;
 
-                var otherLabel = other.index[otherPos];
+                var otherLabel = other.index != null ? other.index[otherPos] : otherPos;
 
                 if (comparer.Equals(thisLabel, otherLabel))
                 {
@@ -230,20 +231,33 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Returns the valid (non-null) values as a list when the series contains nulls, or null
+    /// when the series has no nulls (in which case the full column span should be used directly).
+    /// </summary>
+    List<T>? getValidValues()
+    {
+        if (!HasNulls)
+            return null;
+
+        var validValues = new List<T>(Length);
+        for (int i = 0; i < Length; i++)
+        {
+            if (IsValid(i))
+                validValues.Add(values[i]);
+        }
+
+        return validValues;
+    }
+
+    /// <summary>
     /// Performs vectorized average computation using TensorPrimitives when possible
     /// </summary>
     T averageVectorized()
     {
-        // Handle null values by filtering to valid values only
-        if (HasNulls)
-        {
-            var validValues = new List<T>();
-            for (int i = 0; i < Length; i++)
-            {
-                if (IsValid(i))
-                    validValues.Add(values[i]);
-            }
+        var validValues = getValidValues();
 
+        if (validValues != null)
+        {
             if (validValues.Count == 0)
                 throw new InvalidOperationException("Cannot compute average: all values are null. Series must contain at least one valid value.");
 
@@ -293,14 +307,16 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Gets the index column
+    /// Gets the index column.
+    /// When the series has no custom labels, a positional index (boxed integers 0 to length-1)
+    /// is materialized lazily on first access.
     /// </summary>
     public NivaraColumn<object> Index
     {
         get
         {
             ObjectDisposedException.ThrowIf(disposed, this);
-            return index;
+            return index ?? (materializedDefaultIndex ??= materializeDefaultIndex(Length));
         }
     }
 
@@ -320,12 +336,13 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Gets the value associated with the specified label
+    /// Gets the value associated with the specified string label.
+    /// Integer positions and non-string labels are looked up via <see cref="GetByLabel(object)"/>.
     /// </summary>
-    /// <param name="label">The label to look up</param>
+    /// <param name="label">The string label to look up</param>
     /// <returns>The value associated with the label</returns>
     /// <exception cref="KeyNotFoundException">Thrown when the label is not found</exception>
-    public T this[object label]
+    public T this[string label]
     {
         get
         {
@@ -432,7 +449,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     public object GetLabel(int position)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        return index[position];
+        return index != null ? index[position] : position;
     }
 
     /// <summary>
@@ -447,8 +464,10 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         ObjectDisposedException.ThrowIf(disposed, this);
 
         var slicedValues = values.Slice(start, length);
-        var slicedIndex = index.Slice(start, length);
+        if (index == null)
+            return new NivaraSeries<T>(slicedValues);
 
+        var slicedIndex = index.Slice(start, length);
         return new NivaraSeries<T>(slicedValues, slicedIndex);
     }
 
@@ -471,20 +490,23 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         if (alignedPairs.Count == 0)
         {
             // No matching indices, return empty series
-            return NivaraSeries<T>.Create(Array.Empty<T>(), Array.Empty<object>());
+            return NivaraSeries<T>.Create(Array.Empty<T>());
         }
 
         var alignedValues = new T[alignedPairs.Count];
-        var alignedIndex = new object[alignedPairs.Count];
+        object[]? alignedIndex = index == null ? null : new object[alignedPairs.Count];
 
         for (int i = 0; i < alignedPairs.Count; i++)
         {
             var (thisPos, _) = alignedPairs[i];
             alignedValues[i] = values[thisPos];
-            alignedIndex[i] = index[thisPos];
+            if (alignedIndex != null)
+                alignedIndex[i] = index![thisPos];
         }
 
-        return NivaraSeries<T>.Create(alignedValues, alignedIndex);
+        return alignedIndex != null
+            ? NivaraSeries<T>.Create(alignedValues, alignedIndex)
+            : NivaraSeries<T>.Create(alignedValues);
     }
 
     /// <summary>
@@ -507,22 +529,26 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         {
             // No matching indices, return empty series
             var empty = Array.Empty<T>();
-            var emptyIndex = Array.Empty<object>();
-            return (NivaraSeries<T>.Create(empty, emptyIndex),
-                    NivaraSeries<T>.Create(empty, emptyIndex));
+            return (NivaraSeries<T>.Create(empty),
+                    NivaraSeries<T>.Create(empty));
         }
 
         var leftValues = new T[alignedPairs.Count];
         var rightValues = new T[alignedPairs.Count];
-        var alignedIndex = new object[alignedPairs.Count];
+        object[]? alignedIndex = index == null ? null : new object[alignedPairs.Count];
 
         for (int i = 0; i < alignedPairs.Count; i++)
         {
             var (thisPos, otherPos) = alignedPairs[i];
             leftValues[i] = values[thisPos];
             rightValues[i] = other.values[otherPos];
-            alignedIndex[i] = index[thisPos];
+            if (alignedIndex != null)
+                alignedIndex[i] = index![thisPos];
         }
+
+        if (alignedIndex == null)
+            return (NivaraSeries<T>.Create(leftValues),
+                    NivaraSeries<T>.Create(rightValues));
 
         return (NivaraSeries<T>.Create(leftValues, alignedIndex),
                 NivaraSeries<T>.Create(rightValues, alignedIndex));
@@ -547,7 +573,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         if (alignedLeft.Length == 0)
         {
             // No matching indices, return empty series
-            return NivaraSeries<T>.Create(Array.Empty<T>(), Array.Empty<object>());
+            return NivaraSeries<T>.Create(Array.Empty<T>());
         }
 
         var resultValues = alignedLeft.values + alignedRight.values;
@@ -573,7 +599,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         if (alignedLeft.Length == 0)
         {
             // No matching indices, return empty series
-            return NivaraSeries<T>.Create(Array.Empty<T>(), Array.Empty<object>());
+            return NivaraSeries<T>.Create(Array.Empty<T>());
         }
 
         var resultValues = alignedLeft.values * alignedRight.values;
@@ -667,6 +693,90 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
+    /// Computes the sum of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The sum of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty</exception>
+    public T Sum()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Sum of empty series. Series must contain at least one element.");
+
+        validateNumericAggregate("Sum");
+
+        var validValues = getValidValues();
+        if (validValues != null)
+            return validValues.Count == 0
+                ? default(T)!   // all-null sum is zero, matching NivaraColumn<T>.Sum()
+                : sumTensorPrimitive(validValues.ToArray().AsSpan());
+
+        return sumTensorPrimitive(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Computes the minimum of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The minimum of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public T Min()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Min of empty series. Series must contain at least one element.");
+
+        validateNumericAggregate("Min");
+
+        return minMaxValue(NumericKernelDispatcher.Min);
+    }
+
+    /// <summary>
+    /// Computes the maximum of all valid elements in the series.
+    /// Uses vectorized operations when possible for optimal performance.
+    /// </summary>
+    /// <returns>The maximum of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T does not support arithmetic operations</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public T Max()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Max of empty series. Series must contain at least one element.");
+
+        validateNumericAggregate("Max");
+
+        return minMaxValue(NumericKernelDispatcher.Max);
+    }
+
+    T minMaxValue(Func<ReadOnlySpan<T>, T> kernel)
+    {
+        var validValues = getValidValues();
+        if (validValues != null)
+        {
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute aggregate: all values are null. Series must contain at least one valid value.");
+
+            return kernel(validValues.ToArray().AsSpan());
+        }
+
+        return kernel(values.AsSpan());
+    }
+
+    void validateNumericAggregate(string operation)
+    {
+        var supported = TypeCompatibilityValidator.GetNumericTypes().Append(typeof(bool));
+        if (!supported.Contains(typeof(T)))
+            throw new InvalidOperationException($"{operation} operation is not supported for type {typeof(T).Name}. Only numeric types support {operation.ToLowerInvariant()} operations.");
+    }
+
+    /// <summary>
     /// Returns positional indices sorted by the series values. Null values are always placed last.
     /// </summary>
     public int[] ArgSort(bool descending = false)
@@ -713,6 +823,8 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     /// <summary>
     /// Returns the top K values in descending order with their labels.
     /// Null values are always placed last and excluded from top results.
+    /// Labels are stringified via <c>ToString()</c>; positional default-index labels
+    /// surface as their integer string form.
     /// </summary>
     /// <param name="count">The number of top elements to return</param>
     /// <returns>An array of tuples containing the label and score of the top K elements</returns>
@@ -745,7 +857,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             var idx = indices[i];
             var label = GetLabel(idx);
             result[i] = (
-                label is string s ? s : null,
+                label?.ToString(),
                 this[idx]
             );
         }
@@ -792,7 +904,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             var idx = indices[i];
             var label = GetLabel(idx);
             result[i] = (
-                label is string s ? s : null,
+                label?.ToString(),
                 this[idx]
             );
         }
@@ -807,6 +919,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         {
             values?.Dispose();
             index?.Dispose();
+            materializedDefaultIndex?.Dispose();
             disposed = true;
         }
     }

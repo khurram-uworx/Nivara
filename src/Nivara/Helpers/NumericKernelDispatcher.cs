@@ -22,6 +22,8 @@ static class NumericKernelDispatcher
         Multiply,
         Divide,
         Sum,
+        Min,
+        Max,
         DivideByCount,
         Equals,
         GreaterThan,
@@ -58,6 +60,12 @@ static class NumericKernelDispatcher
     static string sumMessage(Type type)
         => $"Sum on type {type.Name} is not supported by the typed kernel dispatch";
 
+    static string minMessage(Type type)
+        => $"Min on type {type.Name} is not supported by the typed kernel dispatch";
+
+    static string maxMessage(Type type)
+        => $"Max on type {type.Name} is not supported by the typed kernel dispatch";
+
     static string averageMessage(Type type)
         => $"Average on type {type.Name} is not supported by the typed kernel dispatch";
 
@@ -93,6 +101,12 @@ static class NumericKernelDispatcher
 
     public static T Sum<T>(ReadOnlySpan<T> values)
         => ((Func<ReadOnlySpan<T>, T>)getArithmetic(typeof(T), Operation.Sum, Shape.Span, sumMessage))(values);
+
+    public static T Min<T>(ReadOnlySpan<T> values)
+        => ((Func<ReadOnlySpan<T>, T>)getArithmetic(typeof(T), Operation.Min, Shape.Span, minMessage))(values);
+
+    public static T Max<T>(ReadOnlySpan<T> values)
+        => ((Func<ReadOnlySpan<T>, T>)getArithmetic(typeof(T), Operation.Max, Shape.Span, maxMessage))(values);
 
     public static T DivideByCount<T>(T sum, int count)
         => ((Func<T, int, T>)getArithmetic(typeof(T), Operation.DivideByCount, Shape.Span, averageMessage))(sum, count);
@@ -199,6 +213,8 @@ static class NumericKernelDispatcher
                 _ => throw new ArgumentOutOfRangeException(nameof(shape)),
             },
             Operation.Sum => new Func<ReadOnlySpan<U>, U>(NumericTensorKernels<U>.Sum),
+            Operation.Min => new Func<ReadOnlySpan<U>, U>(NumericTensorKernels<U>.Min),
+            Operation.Max => new Func<ReadOnlySpan<U>, U>(NumericTensorKernels<U>.Max),
             Operation.DivideByCount => new Func<U, int, U>(NumericTensorKernels<U>.DivideByCount),
             _ => throw new ArgumentOutOfRangeException(nameof(op)),
         };
