@@ -64,7 +64,7 @@ public class FusedExpressionEvaluatorTests
         var result = fused.Evaluate(expression, input);
 
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1), "chained arithmetic must run through the fused evaluator");
-        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(1), "null-bearing uniform arithmetic must run through the span kernel");
+        Assert.That(fused.SpanKernelPathEvaluationCount, Is.EqualTo(1), "null-bearing uniform arithmetic must run through the span kernel");
         AssertColumn(result, new double?[] { null, 992.75, null, 964.4 });
     }
 
@@ -328,7 +328,7 @@ public class FusedExpressionEvaluatorTests
         var result = fused.Evaluate(expression, input);
 
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
-        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(1), "null-bearing uniform modulo must run through the span kernel");
+        Assert.That(fused.SpanKernelPathEvaluationCount, Is.EqualTo(1), "null-bearing uniform modulo must run through the span kernel");
         Assert.That(result.ElementType, Is.EqualTo(typeof(int)));
         AssertColumn(result, new int?[] { 1, null, 4, 3 });
     }
@@ -431,13 +431,13 @@ public class FusedExpressionEvaluatorTests
         var fused = new FusedExpressionEvaluator();
         var result = fused.Evaluate(expression, input);
 
-        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(1), "null-bearing uniform arithmetic must use the span kernel");
+        Assert.That(fused.SpanKernelPathEvaluationCount, Is.EqualTo(1), "null-bearing uniform arithmetic must use the span kernel");
         Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(0), "null-bearing uniform arithmetic must not use the compiled target");
         AssertColumn(result, new double?[] { 2.0, null, 6.0 });
     }
 
     [Test]
-    public void Evaluate_NullFreeUniformPlan_StaysOnCompiledPath()
+    public void Evaluate_NullFreeSingleOp_DispatchesToTensorPrimitives()
     {
         var column = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0 });
         var input = new Dictionary<string, IColumn> { ["A"] = column };
@@ -446,9 +446,98 @@ public class FusedExpressionEvaluatorTests
         var fused = new FusedExpressionEvaluator();
         var result = fused.Evaluate(expression, input);
 
-        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "null-free uniform arithmetic must stay on the compiled path");
-        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(0), "null-free uniform arithmetic must not route to the span kernel");
+        Assert.That(fused.TensorPrimitivesPathEvaluationCount, Is.EqualTo(1), "null-free single-op arithmetic must dispatch to TensorPrimitives");
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(0), "null-free single-op arithmetic must not build the compiled delegate");
+        Assert.That(fused.SpanKernelPathEvaluationCount, Is.EqualTo(0), "null-free single-op arithmetic must not route to the span kernel");
         AssertColumn(result, new double?[] { 2.0, 4.0, 6.0 });
+    }
+
+    [Test]
+    public void Evaluate_NullFreeSingleOpModulo_StaysOnCompiledPath()
+    {
+        var column = NivaraColumn<double>.Create(new[] { 5.5, 10.0, 3.25 });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") % 2.0;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "null-free modulo has no TensorPrimitives dispatch and must stay on the compiled path");
+        Assert.That(fused.TensorPrimitivesPathEvaluationCount, Is.EqualTo(0), "modulo is not a TensorPrimitives candidate");
+        AssertColumn(result, new double?[] { 1.5, 0.0, 1.25 });
+    }
+
+    [Test]
+    public void EvaluateChunked_NullFreeChain_MatchesWholeColumn()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<double>.Create(Enumerable.Range(0, 2000).Select(i => (double)i).ToArray()),
+            ["B"] = NivaraColumn<double>.Create(Enumerable.Range(0, 2000).Select(i => (double)(i * 3)).ToArray())
+        };
+        var expression = ColumnExpressions.Col("A") * 1.1 + 1000 - ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        AssertChunkedMatchesWhole(fused, expression, input, new[] { 1, 2, 3, 511, 512, 1024, 1999, 2000 });
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(9), "whole + 8 chunk sizes must all run through the fused evaluator");
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(9), "null-free chains must run through the compiled target");
+    }
+
+    [Test]
+    public void EvaluateChunked_SingleOp_MatchesWholeColumn()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<double>.Create(Enumerable.Range(0, 2000).Select(i => (double)i).ToArray())
+        };
+        var expression = ColumnExpressions.Col("A") * 2.0;
+
+        var fused = new FusedExpressionEvaluator();
+        AssertChunkedMatchesWhole(fused, expression, input, new[] { 1, 2, 3, 511, 512, 1024, 1999, 2000 });
+
+        Assert.That(fused.TensorPrimitivesPathEvaluationCount, Is.EqualTo(9), "single-op plans must keep dispatching to TensorPrimitives when chunked");
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void EvaluateChunked_NullBearingChain_MatchesWholeColumn()
+    {
+        var values = new double?[2000];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = i % 97 == 0 ? null : (double)i;
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn.CreateFromNullable(values),
+            ["B"] = NivaraColumn<double>.Create(Enumerable.Range(0, 2000).Select(i => (double)(i * 3)).ToArray())
+        };
+        var expression = ColumnExpressions.Col("A") * 1.1 + 1000 - ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        AssertChunkedMatchesWhole(fused, expression, input, new[] { 1, 2, 3, 511, 512, 1024, 1999, 2000 });
+
+        Assert.That(fused.SpanKernelPathEvaluationCount, Is.EqualTo(9), "null-bearing chains must keep routing to the span kernel when chunked");
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(0));
+    }
+
+    /// <summary>
+    /// Asserts chunked evaluation of the expression is bit-identical to whole-column evaluation
+    /// (values and null masks) for every requested chunk size.
+    /// </summary>
+    static void AssertChunkedMatchesWhole(FusedExpressionEvaluator fused, ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input, IReadOnlyList<int> chunkSizes)
+    {
+        var whole = fused.Evaluate(expression, input);
+        foreach (var chunkSize in chunkSizes)
+        {
+            var chunked = fused.EvaluateChunked(expression, input, chunkSize);
+            Assert.That(chunked.Length, Is.EqualTo(whole.Length), $"chunkSize {chunkSize}: length must match");
+            for (int i = 0; i < whole.Length; i++)
+            {
+                Assert.That(chunked.IsNull(i), Is.EqualTo(whole.IsNull(i)), $"chunkSize {chunkSize}: null mask at {i}");
+                if (!whole.IsNull(i))
+                    Assert.That(chunked.GetValue(i), Is.EqualTo(whole.GetValue(i)), $"chunkSize {chunkSize}: value at {i}");
+            }
+        }
     }
 
     static void AssertColumn<T>(IColumn actual, IReadOnlyList<T?> expected)

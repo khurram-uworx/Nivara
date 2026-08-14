@@ -29,7 +29,7 @@ sealed class FusedExpressionEvaluator
 {
     int fusedPathEvaluationCount;
     int compiledPathEvaluationCount;
-    int nodeTreePathEvaluationCount;
+    int spanKernelPathEvaluationCount;
     int tensorPrimitivesPathEvaluationCount;
 
     /// <summary>
@@ -44,9 +44,9 @@ sealed class FusedExpressionEvaluator
     internal int CompiledPathEvaluationCount => compiledPathEvaluationCount;
 
     /// <summary>
-    /// Gets how many of those evaluations ran through the generic node-tree kernel fallback.
+    /// Gets how many of those evaluations ran through the generic span-kernel interpreter.
     /// </summary>
-    internal int NodeTreePathEvaluationCount => nodeTreePathEvaluationCount;
+    internal int SpanKernelPathEvaluationCount => spanKernelPathEvaluationCount;
 
     /// <summary>
     /// Gets how many of those evaluations ran through the TensorPrimitives single-op backend.
@@ -457,7 +457,7 @@ sealed class FusedExpressionEvaluator
 
         var runner = GetNodeTreeRunner(plan.ResultType);
         var result = runner(kernelPlan, chunkSize);
-        nodeTreePathEvaluationCount++;
+        spanKernelPathEvaluationCount++;
         fusedPathEvaluationCount++;
         RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Span fused kernel");
         return result;
