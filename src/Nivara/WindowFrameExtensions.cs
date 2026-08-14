@@ -58,6 +58,30 @@ public static partial class NivaraFrameExtensions
     public static NivaraFrame RollingMax(this NivaraFrame frame, string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
         => addWindowColumn(frame, source, resultColumn, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Max));
 
+    /// <summary>
+    /// Adds a rolling sum column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame RollingSum(this NivaraFrame frame, string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Sum));
+
+    /// <summary>
+    /// Adds a rolling mean column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame RollingMean(this NivaraFrame frame, string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Mean));
+
+    /// <summary>
+    /// Adds a rolling minimum column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame RollingMin(this NivaraFrame frame, string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Min));
+
+    /// <summary>
+    /// Adds a rolling maximum column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame RollingMax(this NivaraFrame frame, string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateRolling(c, windowSize, minPeriods, nullHandler, RollingKind.Max));
+
     // ── Cumulative ──
 
     /// <summary>
@@ -90,6 +114,36 @@ public static partial class NivaraFrameExtensions
     public static NivaraFrame CumulativeCount(this NivaraFrame frame, string source, string resultColumn)
         => addWindowColumn(frame, source, resultColumn, CalculateCumulativeCount);
 
+    /// <summary>
+    /// Adds a cumulative sum column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame CumulativeSum(this NivaraFrame frame, string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateCumulative(c, nullHandler, CumulativeKind.Sum));
+
+    /// <summary>
+    /// Adds a cumulative maximum column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame CumulativeMax(this NivaraFrame frame, string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateCumulative(c, nullHandler, CumulativeKind.Max));
+
+    /// <summary>
+    /// Adds a cumulative minimum column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame CumulativeMin(this NivaraFrame frame, string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateCumulative(c, nullHandler, CumulativeKind.Min));
+
+    /// <summary>
+    /// Adds a cumulative product column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame CumulativeProduct(this NivaraFrame frame, string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateCumulative(c, nullHandler, CumulativeKind.Product));
+
+    /// <summary>
+    /// Adds a running count-of-non-null column over a partitioned/ordered window (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame CumulativeCount(this NivaraFrame frame, string source, string resultColumn, WindowSpec spec)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, CalculateCumulativeCount);
+
     // ── Shift / Lead ──
 
     /// <summary>
@@ -103,6 +157,18 @@ public static partial class NivaraFrameExtensions
     /// </summary>
     public static NivaraFrame Lead(this NivaraFrame frame, string source, string resultColumn, int periods, object? fillValue = null)
         => addWindowColumn(frame, source, resultColumn, c => CalculateShift(c, -periods, fillValue));
+
+    /// <summary>
+    /// Adds a shifted (lag) column over a partitioned/ordered window (see <see cref="WindowSpec"/>). Boundary positions are null, or <paramref name="fillValue"/> when provided.
+    /// </summary>
+    public static NivaraFrame Shift(this NivaraFrame frame, string source, string resultColumn, int periods, WindowSpec spec, object? fillValue = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateShift(c, periods, fillValue));
+
+    /// <summary>
+    /// Adds a lead column (negative shift) over a partitioned/ordered window (see <see cref="WindowSpec"/>). Boundary positions are null, or <paramref name="fillValue"/> when provided.
+    /// </summary>
+    public static NivaraFrame Lead(this NivaraFrame frame, string source, string resultColumn, int periods, WindowSpec spec, object? fillValue = null)
+        => addPartitionedWindowColumn(frame, source, resultColumn, spec, c => CalculateShift(c, -periods, fillValue));
 
     // ── Rank family ──
 
@@ -131,6 +197,36 @@ public static partial class NivaraFrameExtensions
     public static NivaraFrame PercentRank(this NivaraFrame frame, string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
         => addRankColumn(frame, resultColumn, RankKind.PercentRank, partitionBy, orderBy);
 
+    /// <summary>
+    /// Adds a row-number column from a window specification (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame RowNumber(this NivaraFrame frame, string resultColumn, WindowSpec spec)
+        => addRankColumn(frame, resultColumn, RankKind.RowNumber, spec);
+
+    /// <summary>
+    /// Adds a standard rank column (gaps on ties) from a window specification (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame Rank(this NivaraFrame frame, string resultColumn, WindowSpec spec)
+        => addRankColumn(frame, resultColumn, RankKind.Rank, spec);
+
+    /// <summary>
+    /// Adds a dense-rank column (no gaps on ties) from a window specification (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame DenseRank(this NivaraFrame frame, string resultColumn, WindowSpec spec)
+        => addRankColumn(frame, resultColumn, RankKind.DenseRank, spec);
+
+    /// <summary>
+    /// Adds a percent-rank column from a window specification (see <see cref="WindowSpec"/>).
+    /// </summary>
+    public static NivaraFrame PercentRank(this NivaraFrame frame, string resultColumn, WindowSpec spec)
+        => addRankColumn(frame, resultColumn, RankKind.PercentRank, spec);
+
+    static NivaraFrame addRankColumn(NivaraFrame frame, string resultColumn, RankKind kind, WindowSpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+        return addRankColumn(frame, resultColumn, kind, spec.PartitionColumns.ToArray(), spec.OrderKeys);
+    }
+
     static NivaraFrame addRankColumn(NivaraFrame frame, string resultColumn, RankKind kind, string[] partitionBy, IReadOnlyList<SortKey> orderBy)
     {
         ArgumentNullException.ThrowIfNull(frame);
@@ -158,6 +254,26 @@ public static partial class NivaraFrameExtensions
         ArgumentNullException.ThrowIfNull(frame);
         var sourceColumn = frame.GetColumn(source);
         var result = computation(sourceColumn);
+        return frame.WithColumn(resultColumn, result);
+    }
+
+    static NivaraFrame addPartitionedWindowColumn(NivaraFrame frame, string source, string resultColumn, WindowSpec spec, Func<IColumn, IColumn> computation)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        ArgumentNullException.ThrowIfNull(spec);
+
+        var sourceColumn = frame.GetColumn(source);
+        IColumn result;
+        if (spec.IsEmpty)
+        {
+            result = computation(sourceColumn);
+        }
+        else
+        {
+            var columns = frame.ColumnNames.ToDictionary(n => n, n => frame.GetColumn(n), StringComparer.OrdinalIgnoreCase);
+            result = PartitionedWindowEngine.Compute(columns, sourceColumn, spec, computation);
+        }
+
         return frame.WithColumn(resultColumn, result);
     }
 
