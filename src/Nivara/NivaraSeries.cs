@@ -823,6 +823,8 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     /// <summary>
     /// Returns the top K values in descending order with their labels.
     /// Null values are always placed last and excluded from top results.
+    /// Labels are stringified via <c>ToString()</c>; positional default-index labels
+    /// surface as their integer string form.
     /// </summary>
     /// <param name="count">The number of top elements to return</param>
     /// <returns>An array of tuples containing the label and score of the top K elements</returns>
@@ -855,7 +857,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             var idx = indices[i];
             var label = GetLabel(idx);
             result[i] = (
-                label is string s ? s : null,
+                label?.ToString(),
                 this[idx]
             );
         }
@@ -902,7 +904,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             var idx = indices[i];
             var label = GetLabel(idx);
             result[i] = (
-                label is string s ? s : null,
+                label?.ToString(),
                 this[idx]
             );
         }

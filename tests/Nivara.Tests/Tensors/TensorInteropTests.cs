@@ -767,7 +767,7 @@ public class TensorInteropTests
     }
 
     [Test]
-    public void TopKDescending_WithPositionalIndex_ReturnsNullLabels()
+    public void TopKDescending_WithPositionalIndex_ReturnsStringifiedPositionLabels()
     {
         var data = new float[] { 0.5f, 0.9f, 0.1f, 0.7f };
         using var series = NivaraSeries<float>.Create(data);
@@ -775,8 +775,10 @@ public class TensorInteropTests
         var result = series.TopKDescending(2);
 
         Assert.That(result.Length, Is.EqualTo(2));
-        Assert.That(result[0].Label, Is.Null);
-        Assert.That(result[1].Label, Is.Null);
+        Assert.That(result[0].Label, Is.EqualTo("1"));
+        Assert.That(result[0].Score, Is.EqualTo(0.9f));
+        Assert.That(result[1].Label, Is.EqualTo("3"));
+        Assert.That(result[1].Score, Is.EqualTo(0.7f));
     }
 
     [Test]
