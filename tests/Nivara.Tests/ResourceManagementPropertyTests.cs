@@ -170,7 +170,7 @@ public class ResourceManagementPropertyTests
             WeakReference? queryRef = null;
 
             // Act - Create lazy query frame
-            queryFrame = Json.ScanJsonAsQueryFrame(tempFile);
+            queryFrame = Json.ScanFrame(tempFile);
             queryRef = new WeakReference(queryFrame);
 
             // Verify query frame is tracked
@@ -369,7 +369,7 @@ public class ResourceManagementPropertyTests
     {
         for (int i = 0; i < tempFiles.Count; i++)
         {
-            var queryFrame = Json.ScanJsonAsQueryFrame(tempFiles[i]);
+            var queryFrame = Json.ScanFrame(tempFiles[i]);
             weakRefs.Add(new WeakReference(queryFrame));
             // queryFrame goes out of scope here, making it eligible for GC
         }

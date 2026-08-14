@@ -52,13 +52,13 @@ public class QueryOptimizationPropertyTests
                 var queries = new List<QueryFrame>();
 
                 // Simple query
-                queries.Add(Csv.ScanCsvAsQueryFrame(tempFile));
+                queries.Add(Csv.ScanFrame(tempFile));
 
                 // Only add more complex queries if we have the expected columns
                 if (testCase.Data.Contains("Name") && testCase.Data.Contains("Age"))
                 {
                     // Query with redundant operations that can be optimized
-                    queries.Add(Csv.ScanCsvAsQueryFrame(tempFile)
+                    queries.Add(Csv.ScanFrame(tempFile)
                         .Filter(ColumnExpressions.Col("Age") >= 0));  // Filter that should match all
                 }
 
@@ -166,11 +166,11 @@ public class QueryOptimizationPropertyTests
             foreach (var condition in filterConditions)
             {
                 // Query without explicit optimization opportunity (baseline)
-                var baselineQuery = Csv.ScanCsvAsQueryFrame(tempFile)
+                var baselineQuery = Csv.ScanFrame(tempFile)
                     .Filter(condition);
 
                 // Query with predicate pushdown opportunity (filter after select)
-                var optimizableQuery = Csv.ScanCsvAsQueryFrame(tempFile)
+                var optimizableQuery = Csv.ScanFrame(tempFile)
                     .Select("Name", "Age", "Salary", "Department")  // Select first
                     .Filter(condition);  // Filter after select (should be pushed down)
 
@@ -227,13 +227,13 @@ public class QueryOptimizationPropertyTests
             File.WriteAllText(tempFile, testData);
 
             // Test multiple filter fusion
-            var separateFiltersQuery = Csv.ScanCsvAsQueryFrame(tempFile)
+            var separateFiltersQuery = Csv.ScanFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Filter(ColumnExpressions.Col("Salary") > 45000);
 
             // Equivalent query with manual combined logic (what fusion should produce)
             // Since we can't easily create AND expressions, we'll test that separate filters work the same
-            var manualCombinedQuery = Csv.ScanCsvAsQueryFrame(tempFile)
+            var manualCombinedQuery = Csv.ScanFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Filter(ColumnExpressions.Col("Salary") > 45000);
 
@@ -290,7 +290,7 @@ public class QueryOptimizationPropertyTests
             File.WriteAllText(tempFile, testData);
 
             // Query that only uses some columns (column elimination opportunity)
-            var query = Csv.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)  // Uses Age
                 .Select("Name", "Department");  // Only needs Name and Department
 
@@ -349,12 +349,12 @@ public class QueryOptimizationPropertyTests
             File.WriteAllText(tempFile, testData);
 
             // Query with suboptimal operation order
-            var suboptimalQuery = Csv.ScanCsvAsQueryFrame(tempFile)
+            var suboptimalQuery = Csv.ScanFrame(tempFile)
                 .Select("Name", "Age", "Salary")  // Select first (less efficient)
                 .Filter(ColumnExpressions.Col("Age") > 25);  // Filter after select
 
             // Query with optimal operation order
-            var optimalQuery = Csv.ScanCsvAsQueryFrame(tempFile)
+            var optimalQuery = Csv.ScanFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)  // Filter first (more efficient)
                 .Select("Name", "Age", "Salary");  // Select after filter
 
@@ -422,13 +422,13 @@ public class QueryOptimizationPropertyTests
             var queries = new[]
             {
                 // Baseline: optimal order
-                Csv.ScanCsvAsQueryFrame(tempFile)
+                Csv.ScanFrame(tempFile)
                     .Filter(ColumnExpressions.Col("Age") > 25)
                     .Filter(ColumnExpressions.Col("Department") == "Engineering")
                     .Select("Name"),
                 
                 // Suboptimal: select first, then filter
-                Csv.ScanCsvAsQueryFrame(tempFile)
+                Csv.ScanFrame(tempFile)
                     .Select("Name", "Age", "Department")
                     .Filter(ColumnExpressions.Col("Age") > 25)
                     .Filter(ColumnExpressions.Col("Department") == "Engineering")

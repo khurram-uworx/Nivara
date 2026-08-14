@@ -68,7 +68,7 @@ public class LazyDataSourceTests
     public void CsvLazySource_ScanCsv_CreatesLazyQuerySource()
     {
         // Act
-        var source = Csv.ScanCsv(csvFilePath);
+        var source = Csv.ScanFrame(csvFilePath);
 
         // Assert
         Assert.That(source, Is.Not.Null);
@@ -84,7 +84,7 @@ public class LazyDataSourceTests
     public void CsvLazySource_ScanCsvAsQueryFrame_CreatesLazyQueryFrame()
     {
         // Act
-        var queryFrame = Csv.ScanCsvAsQueryFrame(csvFilePath);
+        var queryFrame = Csv.ScanFrame(csvFilePath);
 
         // Assert
         Assert.That(queryFrame, Is.Not.Null);
@@ -97,7 +97,7 @@ public class LazyDataSourceTests
     public void CsvLazySource_SchemaInference_InfersCorrectTypes()
     {
         // Act
-        var source = Csv.ScanCsv(csvFilePath);
+        var source = Csv.ScanFrame(csvFilePath);
 
         // Assert
         Assert.That(source.Schema.GetColumnType("Name"), Is.EqualTo(typeof(string)));
@@ -108,19 +108,16 @@ public class LazyDataSourceTests
     [Test]
     public void CsvLazySource_Execute_ReturnsCorrectData()
     {
-        // Arrange
-        var source = Csv.ScanCsv(csvFilePath);
-
         // Act
-        var columns = source.Execute();
+        var frame = Csv.ScanFrame(csvFilePath).Collect();
 
         // Assert
-        Assert.That(columns, Is.Not.Null);
-        Assert.That(columns, Has.Count.EqualTo(3));
+        Assert.That(frame, Is.Not.Null);
+        Assert.That(frame.ColumnCount, Is.EqualTo(3));
 
-        var nameColumn = columns["Name"];
-        var ageColumn = columns["Age"];
-        var salaryColumn = columns["Salary"];
+        var nameColumn = frame.GetColumn<string>("Name");
+        var ageColumn = frame.GetColumn<int>("Age");
+        var salaryColumn = frame.GetColumn<int>("Salary");
 
         Assert.That(nameColumn.Length, Is.EqualTo(3));
         Assert.That(ageColumn.Length, Is.EqualTo(3));
@@ -134,7 +131,7 @@ public class LazyDataSourceTests
         var lastAccessTime = File.GetLastAccessTime(csvFilePath);
 
         // Act - creating query should not read file
-        var queryFrame = Csv.ScanCsvAsQueryFrame(csvFilePath);
+        var queryFrame = Csv.ScanFrame(csvFilePath);
         var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
 
         // Assert - file should not have been accessed for data (schema inference may access it briefly)
@@ -147,7 +144,7 @@ public class LazyDataSourceTests
     public void CsvLazySource_Collect_ExecutesLazyQuery()
     {
         // Arrange
-        var queryFrame = Csv.ScanCsvAsQueryFrame(csvFilePath);
+        var queryFrame = Csv.ScanFrame(csvFilePath);
         var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
 
         // Act
@@ -163,15 +160,14 @@ public class LazyDataSourceTests
     public void CsvLazySource_EmptyFile_HandlesGracefully()
     {
         // Act
-        var source = Csv.ScanCsv(emptyCsvFilePath);
-        var columns = source.Execute();
+        var frame = Csv.ScanFrame(emptyCsvFilePath).Collect();
 
         // Assert
-        Assert.That(columns, Is.Not.Null);
-        Assert.That(columns, Has.Count.EqualTo(3)); // Headers still present
-        Assert.That(columns["Name"].Length, Is.EqualTo(0));
-        Assert.That(columns["Age"].Length, Is.EqualTo(0));
-        Assert.That(columns["Salary"].Length, Is.EqualTo(0));
+        Assert.That(frame, Is.Not.Null);
+        Assert.That(frame.ColumnCount, Is.EqualTo(3)); // Headers still present
+        Assert.That(frame.GetColumn("Name").Length, Is.EqualTo(0));
+        Assert.That(frame.GetColumn("Age").Length, Is.EqualTo(0));
+        Assert.That(frame.GetColumn("Salary").Length, Is.EqualTo(0));
     }
 
     [Test]
@@ -181,14 +177,14 @@ public class LazyDataSourceTests
         var nonExistentPath = Path.Combine(testDataDirectory, "nonexistent.csv");
 
         // Act & Assert
-        Assert.Throws<FileNotFoundException>(() => Csv.ScanCsv(nonExistentPath));
+        Assert.Throws<FileNotFoundException>(() => Csv.ScanFrame(nonExistentPath));
     }
 
     [Test]
     public void CsvLazySource_NullFilePath_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => Csv.ScanCsv(null!));
+        Assert.Throws<ArgumentNullException>(() => Csv.ScanFrame(null!));
     }
 
     #endregion
@@ -199,7 +195,7 @@ public class LazyDataSourceTests
     public void JsonLazySource_ScanJson_CreatesLazyQuerySource()
     {
         // Act
-        var source = Json.ScanJson(jsonFilePath);
+        var source = Json.ScanFrame(jsonFilePath);
 
         // Assert
         Assert.That(source, Is.Not.Null);
@@ -215,7 +211,7 @@ public class LazyDataSourceTests
     public void JsonLazySource_ScanJsonAsQueryFrame_CreatesLazyQueryFrame()
     {
         // Act
-        var queryFrame = Json.ScanJsonAsQueryFrame(jsonFilePath);
+        var queryFrame = Json.ScanFrame(jsonFilePath);
 
         // Assert
         Assert.That(queryFrame, Is.Not.Null);
@@ -228,7 +224,7 @@ public class LazyDataSourceTests
     public void JsonLazySource_SchemaInference_InfersCorrectTypes()
     {
         // Act
-        var source = Json.ScanJson(jsonFilePath);
+        var source = Json.ScanFrame(jsonFilePath);
 
         // Assert
         Assert.That(source.Schema.GetColumnType("Name"), Is.EqualTo(typeof(string)));
@@ -239,19 +235,16 @@ public class LazyDataSourceTests
     [Test]
     public void JsonLazySource_Execute_ReturnsCorrectData()
     {
-        // Arrange
-        var source = Json.ScanJson(jsonFilePath);
-
         // Act
-        var columns = source.Execute();
+        var frame = Json.ScanFrame(jsonFilePath).Collect();
 
         // Assert
-        Assert.That(columns, Is.Not.Null);
-        Assert.That(columns, Has.Count.EqualTo(3));
+        Assert.That(frame, Is.Not.Null);
+        Assert.That(frame.ColumnCount, Is.EqualTo(3));
 
-        var nameColumn = columns["Name"];
-        var ageColumn = columns["Age"];
-        var salaryColumn = columns["Salary"];
+        var nameColumn = frame.GetColumn<string>("Name");
+        var ageColumn = frame.GetColumn<double>("Age");
+        var salaryColumn = frame.GetColumn<double>("Salary");
 
         Assert.That(nameColumn.Length, Is.EqualTo(3));
         Assert.That(ageColumn.Length, Is.EqualTo(3));
@@ -262,7 +255,7 @@ public class LazyDataSourceTests
     public void JsonLazySource_LazyEvaluation_NoImmediateExecution()
     {
         // Act - creating query should not fully process file
-        var queryFrame = Json.ScanJsonAsQueryFrame(jsonFilePath);
+        var queryFrame = Json.ScanFrame(jsonFilePath);
         var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30);
 
         // Assert - query should be lazy
@@ -274,7 +267,7 @@ public class LazyDataSourceTests
     public void JsonLazySource_Collect_ExecutesLazyQuery()
     {
         // Arrange
-        var queryFrame = Json.ScanJsonAsQueryFrame(jsonFilePath);
+        var queryFrame = Json.ScanFrame(jsonFilePath);
         var filteredQuery = queryFrame.Filter(ColumnExpressions.Col("Age") > 30.0); // Use double for JSON
 
         // Act
@@ -292,7 +285,7 @@ public class LazyDataSourceTests
         // Act & Assert - should throw because empty JSON array has no schema to infer
         Assert.Throws<DataSourceException>(() =>
         {
-            var source = Json.ScanJson(emptyJsonFilePath);
+            var source = Json.ScanFrame(emptyJsonFilePath);
             var schema = source.Schema; // This should throw
         });
     }
@@ -304,14 +297,14 @@ public class LazyDataSourceTests
         var nonExistentPath = Path.Combine(testDataDirectory, "nonexistent.json");
 
         // Act & Assert
-        Assert.Throws<FileNotFoundException>(() => Json.ScanJson(nonExistentPath));
+        Assert.Throws<FileNotFoundException>(() => Json.ScanFrame(nonExistentPath));
     }
 
     [Test]
     public void JsonLazySource_NullFilePath_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => Json.ScanJson(null!));
+        Assert.Throws<ArgumentNullException>(() => Json.ScanFrame(null!));
     }
 
     #endregion
@@ -322,7 +315,7 @@ public class LazyDataSourceTests
     public void CsvEagerSource_ReadCsvAsFrame_ReturnsImmediateFrame()
     {
         // Act
-        var frame = Csv.ReadCsvAsFrame(csvFilePath);
+        var frame = Csv.ReadFrame(csvFilePath);
 
         // Assert
         Assert.That(frame, Is.Not.Null);
@@ -337,7 +330,7 @@ public class LazyDataSourceTests
     public void JsonEagerSource_ReadJsonAsFrame_ReturnsImmediateFrame()
     {
         // Act
-        var frame = Json.ReadJsonAsFrame(jsonFilePath);
+        var frame = Json.ReadFrame(jsonFilePath);
 
         // Assert
         Assert.That(frame, Is.Not.Null);
@@ -352,11 +345,11 @@ public class LazyDataSourceTests
     public void EagerVsLazy_SameData_ProduceSameResults()
     {
         // Arrange & Act
-        var eagerCsvFrame = Csv.ReadCsvAsFrame(csvFilePath);
-        var lazyCsvFrame = Csv.ScanCsvAsQueryFrame(csvFilePath).Collect();
+        var eagerCsvFrame = Csv.ReadFrame(csvFilePath);
+        var lazyCsvFrame = Csv.ScanFrame(csvFilePath).Collect();
 
-        var eagerJsonFrame = Json.ReadJsonAsFrame(jsonFilePath);
-        var lazyJsonFrame = Json.ScanJsonAsQueryFrame(jsonFilePath).Collect();
+        var eagerJsonFrame = Json.ReadFrame(jsonFilePath);
+        var lazyJsonFrame = Json.ScanFrame(jsonFilePath).Collect();
 
         // Assert CSV
         Assert.That(lazyCsvFrame.RowCount, Is.EqualTo(eagerCsvFrame.RowCount));
@@ -377,7 +370,7 @@ public class LazyDataSourceTests
     public void CsvStaticClass_ScanAsQueryFrame_WorksCorrectly()
     {
         // Act
-        var queryFrame = Csv.ScanAsQueryFrame(csvFilePath);
+        var queryFrame = Csv.ScanFrame(csvFilePath);
 
         // Assert
         Assert.That(queryFrame, Is.Not.Null);
@@ -389,7 +382,7 @@ public class LazyDataSourceTests
     public void CsvStaticClass_ReadAsFrame_WorksCorrectly()
     {
         // Act
-        var frame = Csv.ReadAsFrame(csvFilePath);
+        var frame = Csv.ReadFrame(csvFilePath);
 
         // Assert
         Assert.That(frame, Is.Not.Null);
@@ -401,7 +394,7 @@ public class LazyDataSourceTests
     public void JsonStaticClass_ScanAsQueryFrame_WorksCorrectly()
     {
         // Act
-        var queryFrame = Json.ScanAsQueryFrame(jsonFilePath);
+        var queryFrame = Json.ScanFrame(jsonFilePath);
 
         // Assert
         Assert.That(queryFrame, Is.Not.Null);
@@ -413,7 +406,7 @@ public class LazyDataSourceTests
     public void JsonStaticClass_ReadAsFrame_WorksCorrectly()
     {
         // Act
-        var frame = Json.ReadAsFrame(jsonFilePath);
+        var frame = Json.ReadFrame(jsonFilePath);
 
         // Assert
         Assert.That(frame, Is.Not.Null);
@@ -449,7 +442,7 @@ public class LazyDataSourceTests
             QueryFrame query;
             if (filePath.EndsWith(".csv"))
             {
-                query = Csv.ScanCsvAsQueryFrame(filePath);
+                query = Csv.ScanFrame(filePath);
                 var complexQuery = query
                     .Filter(ColumnExpressions.Col("Age") > 25)
                     .Select("Name", "Salary")
@@ -465,7 +458,7 @@ public class LazyDataSourceTests
             }
             else
             {
-                query = Json.ScanJsonAsQueryFrame(filePath);
+                query = Json.ScanFrame(filePath);
                 var complexQuery = query
                     .Filter(ColumnExpressions.Col("Age") > 25.0) // Use double for JSON
                     .Select("Name", "Salary")
@@ -500,11 +493,11 @@ public class LazyDataSourceTests
         foreach (var (filePath, expectedTypes) in testCases)
         {
             // Act
-            IQuerySource source;
+            QueryFrame source;
             if (filePath.EndsWith(".csv"))
-                source = Csv.ScanCsv(filePath);
+                source = Csv.ScanFrame(filePath);
             else
-                source = Json.ScanJson(filePath);
+                source = Json.ScanFrame(filePath);
 
             // Assert
             var schema = source.Schema;
@@ -548,11 +541,11 @@ public class LazyDataSourceTests
             NivaraFrame frame;
             if (readMethod == "CSV")
             {
-                frame = Csv.ReadCsvAsFrame(filePath);
+                frame = Csv.ReadFrame(filePath);
             }
             else
             {
-                frame = Json.ReadJsonAsFrame(filePath);
+                frame = Json.ReadFrame(filePath);
             }
 
             // Assert - data should be immediately available
@@ -605,7 +598,7 @@ public class LazyDataSourceTests
             """);
 
         // Test CSV data consistency - should handle inconsistent types gracefully
-        var csvFrame = Csv.ReadCsvAsFrame(inconsistentCsvPath);
+        var csvFrame = Csv.ReadFrame(inconsistentCsvPath);
         Assert.That(csvFrame, Is.Not.Null, "CSV frame should be created even with inconsistent data");
         Assert.That(csvFrame.RowCount, Is.EqualTo(3), "Should process all rows despite inconsistencies");
 
@@ -615,7 +608,7 @@ public class LazyDataSourceTests
         Assert.That(csvSchema.GetColumnType("Age"), Is.EqualTo(typeof(string)), "Mixed type column should fall back to string");
 
         // Test JSON data consistency - should handle mixed types gracefully
-        var jsonFrame = Json.ReadJsonAsFrame(malformedJsonPath);
+        var jsonFrame = Json.ReadFrame(malformedJsonPath);
         Assert.That(jsonFrame, Is.Not.Null, "JSON frame should be created even with mixed types");
         Assert.That(jsonFrame.RowCount, Is.EqualTo(3), "Should process all rows despite type inconsistencies");
 
@@ -646,11 +639,11 @@ public class LazyDataSourceTests
         File.WriteAllText(invalidJsonPath, "{ this is not valid JSON }");
 
         // Test CSV error reporting - empty file should cause schema inference to fail
-        var csvException = Assert.Throws<DataSourceException>(() => Csv.ReadCsvAsFrame(corruptCsvPath));
+        var csvException = Assert.Throws<DataSourceException>(() => Csv.ReadFrame(corruptCsvPath));
         Assert.That(csvException!.Message, Does.Contain("CSV").Or.Contain("csv"), "Error message should mention CSV");
 
         // Test JSON error reporting  
-        var jsonException = Assert.Throws<DataSourceException>(() => Json.ReadJsonAsFrame(invalidJsonPath));
+        var jsonException = Assert.Throws<DataSourceException>(() => Json.ReadFrame(invalidJsonPath));
         Assert.That(jsonException!.Message, Does.Contain("JSON").Or.Contain("json"), "Error message should mention JSON");
 
         // Clean up test files
@@ -667,13 +660,13 @@ public class LazyDataSourceTests
     public void EagerLoading_EmptyFiles_ReturnsEmptyFrames()
     {
         // Test empty CSV file handling
-        var emptyFrame = Csv.ReadCsvAsFrame(emptyCsvFilePath);
+        var emptyFrame = Csv.ReadFrame(emptyCsvFilePath);
         Assert.That(emptyFrame, Is.Not.Null, "Should return frame for empty CSV");
         Assert.That(emptyFrame.RowCount, Is.EqualTo(0), "Empty CSV should have 0 rows");
         Assert.That(emptyFrame.ColumnCount, Is.EqualTo(3), "Empty CSV should still have columns from headers");
 
         // Test empty JSON file handling - should throw because schema cannot be inferred
-        Assert.Throws<DataSourceException>(() => Json.ReadJsonAsFrame(emptyJsonFilePath),
+        Assert.Throws<DataSourceException>(() => Json.ReadFrame(emptyJsonFilePath),
             "Empty JSON array should throw DataSourceException due to inability to infer schema");
     }
 

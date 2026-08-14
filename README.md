@@ -79,7 +79,7 @@ var adults = frame.Query<Person>()
 
 ### Query Engine
 - Typed object LINQ — `frame.Query<T>()` maps a POCO to the frame schema and compiles typed lambdas into query plans (predicates, projections, `OrderBy`/`ThenBy` with per-key `SortDirection`/`NullOrdering`, `Distinct`/`DistinctBy`, `SelectRows`, `Skip`/`Take`, `GroupBy` with `g.Key` + `Average`/`Sum`/`Count`/`Min`/`Max` aggregates), materializing to a `NivaraFrame` or `IReadOnlyList<TResult>`
-- Lazy typed file-source queries — `Json.ScanAsQuery<T>()`/`ScanJsonAsQuery<T>()` (core) and `Csv.ScanAsQuery<T>()`/`ScanCsvAsQuery<T>()` (Extensions) defer I/O until execution
+- Lazy typed file-source queries — `Json.ScanQuery<T>()` (core) and `Csv.ScanQuery<T>()` (Extensions) defer I/O until execution; `ReadFrame`/`ScanFrame` cover eager/lazy frame loading
 - Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
 - Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with integrated performance diagnostics
 

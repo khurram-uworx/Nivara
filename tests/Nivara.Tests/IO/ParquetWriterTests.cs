@@ -18,7 +18,7 @@ public class ParquetWriterTests
         );
 
         var tempFile = Path.GetTempFileName();
-        var options = new ParquetWriteOptions { ValidateSchema = true };
+        var options = ParquetWriteOptions.Default.With(validateSchema: true);
 
         try
         {
@@ -142,7 +142,7 @@ public class ParquetWriterTests
         var frame = NivaraFrame.Create(("LongColumn", longColumn));
 
         using var stream = new MemoryStream();
-        var options = new ParquetWriteOptions();
+        var options = ParquetWriteOptions.Default;
 
         try
         {
@@ -289,6 +289,108 @@ public class ParquetWriterTests
             frame.Dispose();
             if (File.Exists(tempFile))
                 File.Delete(tempFile);
+        }
+    }
+
+    [Test]
+    public async Task WriteParquet_WithSmallRowGroupSize_WritesMultipleRowGroupsAndRoundTrips()
+    {
+        // Arrange
+        var values = Enumerable.Range(0, 2500).Select(i => i * 2).ToArray();
+        var frame = NivaraFrame.Create(("Index", NivaraColumn<int>.Create(values)));
+        var tempFile = Path.GetTempFileName();
+
+        try
+        {
+            // Act
+            ParquetWriter.WriteParquet(frame, tempFile, ParquetWriteOptions.Default.With(rowGroupSize: 1000));
+
+            // Assert - file contains one row group per 1000 rows
+            using var fileStream = new FileStream(tempFile, FileMode.Open, FileAccess.Read);
+            await using var parquetReader = await Parquet.ParquetReader.CreateAsync(fileStream);
+            Assert.That(parquetReader.RowGroupCount, Is.EqualTo(3));
+
+            // All row groups round-trip through the Nivara reader
+            var roundTrip = ParquetReader.ReadParquet(tempFile);
+            Assert.That(roundTrip.RowCount, Is.EqualTo(2500));
+            Assert.That(roundTrip.GetColumn<int>("Index")[2499], Is.EqualTo(4998));
+            Assert.That(roundTrip.GetColumn<int>("Index")[1000], Is.EqualTo(2000));
+        }
+        finally
+        {
+            // Cleanup
+            frame.Dispose();
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
+    }
+
+    [Test]
+    public void WriteParquet_WithGzipCompression_RoundTripsAndCompresses()
+    {
+        // Arrange
+        var strings = Enumerable.Range(0, 5000).Select(i => $"row-{i % 50}").ToArray();
+        var frame = NivaraFrame.Create(("Name", NivaraColumn<string>.CreateForReferenceType(strings)));
+        var gzipFile = Path.GetTempFileName();
+        var noneFile = Path.GetTempFileName();
+
+        try
+        {
+            // Act
+            ParquetWriter.WriteParquet(frame, gzipFile, ParquetWriteOptions.Default.With(compression: ParquetCompression.Gzip));
+            ParquetWriter.WriteParquet(frame, noneFile, ParquetWriteOptions.Default.With(compression: ParquetCompression.None));
+
+            // Assert - data round-trips under the configured compression
+            var roundTrip = ParquetReader.ReadParquet(gzipFile);
+            Assert.That(roundTrip.RowCount, Is.EqualTo(5000));
+            Assert.That(roundTrip.GetColumn<string>("Name")[123], Is.EqualTo(strings[123]));
+
+            // Gzip should compress the repetitive data better than no compression
+            Assert.That(new FileInfo(gzipFile).Length, Is.LessThan(new FileInfo(noneFile).Length));
+        }
+        finally
+        {
+            // Cleanup
+            frame.Dispose();
+            if (File.Exists(gzipFile))
+                File.Delete(gzipFile);
+            if (File.Exists(noneFile))
+                File.Delete(noneFile);
+        }
+    }
+
+    [Test]
+    public void WriteParquet_WithWriteMetadataDisabled_DoesNotRestoreExtendedTypes()
+    {
+        // Arrange
+        var halfValues = new Half[] { (Half)1.5f, (Half)2.5f, (Half)3.5f };
+        var frame = NivaraFrame.Create(("Measurement", NivaraColumn<Half>.Create(halfValues)));
+        var noMetadataFile = Path.GetTempFileName();
+        var withMetadataFile = Path.GetTempFileName();
+
+        try
+        {
+            // Act
+            ParquetWriter.WriteParquet(frame, noMetadataFile, ParquetWriteOptions.Default.With(writeMetadata: false));
+            ParquetWriter.WriteParquet(frame, withMetadataFile);
+
+            // Assert - without metadata the widened on-disk representation is read back
+            var noMetadata = ParquetReader.ReadParquet(noMetadataFile);
+            Assert.That(noMetadata.Schema.GetColumnType("Measurement"), Is.EqualTo(typeof(float)));
+
+            // With default metadata the original CLR type is restored
+            var withMetadata = ParquetReader.ReadParquet(withMetadataFile);
+            Assert.That(withMetadata.Schema.GetColumnType("Measurement"), Is.EqualTo(typeof(Half)));
+            Assert.That(withMetadata.GetColumn<Half>("Measurement")[0], Is.EqualTo((Half)1.5f));
+        }
+        finally
+        {
+            // Cleanup
+            frame.Dispose();
+            if (File.Exists(noMetadataFile))
+                File.Delete(noMetadataFile);
+            if (File.Exists(withMetadataFile))
+                File.Delete(withMetadataFile);
         }
     }
 }

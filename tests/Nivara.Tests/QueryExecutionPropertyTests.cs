@@ -37,7 +37,7 @@ public class QueryExecutionPropertyTests
                 File.WriteAllText(tempFile, testCase.Data);
 
                 // Test simple query
-                var query = Csv.ScanCsvAsQueryFrame(tempFile);
+                var query = Csv.ScanFrame(tempFile);
 
                 // Property: Multiple Collect() calls should produce identical results
                 var result1 = query.Collect();
@@ -136,7 +136,7 @@ public class QueryExecutionPropertyTests
 
             foreach (var condition in filterConditions)
             {
-                var query = Csv.ScanCsvAsQueryFrame(tempFile)
+                var query = Csv.ScanFrame(tempFile)
                     .Filter(condition);
 
                 // Property: Multiple executions of the same filtered query should be identical
@@ -184,7 +184,7 @@ public class QueryExecutionPropertyTests
         {
             File.WriteAllText(tempFile, testData);
 
-            var query = Csv.ScanCsvAsQueryFrame(tempFile);
+            var query = Csv.ScanFrame(tempFile);
 
             // Property: Each Collect() call should return a new, independent frame
             var result1 = query.Collect();
@@ -230,7 +230,7 @@ public class QueryExecutionPropertyTests
         {
             File.WriteAllText(tempFile, testData);
 
-            var query = Csv.ScanCsvAsQueryFrame(tempFile);
+            var query = Csv.ScanFrame(tempFile);
 
             // Property: Query should work before disposal
             var result = query.Collect();
@@ -276,7 +276,7 @@ public class QueryExecutionPropertyTests
             File.WriteAllText(tempFile, testData);
 
             // Create a complex query with multiple operations
-            var query = Csv.ScanCsvAsQueryFrame(tempFile)
+            var query = Csv.ScanFrame(tempFile)
                 .Filter(ColumnExpressions.Col("Age") > 25)
                 .Filter(ColumnExpressions.Col("Salary") > 45000)
                 .Select("Name", "Department");

@@ -323,12 +323,10 @@ public class ArrowParquetIntegrationTests
         var parquetFile = Path.Combine(_tempDirectory, "config_test.parquet");
 
         // Configure options
-        var parquetOptions = new ParquetWriteOptions
-        {
-            ValidateSchema = true,
-            Compression = "snappy",
-            RowGroupSize = 1000
-        };
+        var parquetOptions = ParquetWriteOptions.Default.With(
+            validateSchema: true,
+            compression: ParquetCompression.Snappy,
+            rowGroupSize: 1000);
 
         var arrowOptions = new ArrowConversionOptions
         {

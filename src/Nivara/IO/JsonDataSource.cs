@@ -16,24 +16,56 @@ public sealed class JsonOptions
     public static JsonOptions Default { get; } = new JsonOptions();
 
     /// <summary>
-    /// Gets or sets the JSON serializer options
+    /// Gets the JSON serializer options
     /// </summary>
-    public JsonSerializerOptions SerializerOptions { get; set; } = new JsonSerializerOptions
+    public JsonSerializerOptions SerializerOptions { get; }
+
+    /// <summary>
+    /// Gets the number of records to use for schema inference
+    /// </summary>
+    public int SchemaInferenceRecords { get; }
+
+    /// <summary>
+    /// Gets whether to treat the JSON as an array of objects
+    /// </summary>
+    public bool IsArray { get; }
+
+    /// <summary>
+    /// Initializes a new instance of JsonOptions with default values
+    /// </summary>
+    public JsonOptions()
     {
-        PropertyNameCaseInsensitive = true,
-        ReadCommentHandling = JsonCommentHandling.Skip,
-        AllowTrailingCommas = true
-    };
+        SerializerOptions = new JsonSerializerOptions
+        {
+            PropertyNameCaseInsensitive = true,
+            ReadCommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true
+        };
+        SchemaInferenceRecords = 100;
+        IsArray = true;
+    }
+
+    private JsonOptions(JsonSerializerOptions serializerOptions, int schemaInferenceRecords, bool isArray)
+    {
+        SerializerOptions = serializerOptions;
+        SchemaInferenceRecords = schemaInferenceRecords;
+        IsArray = isArray;
+    }
 
     /// <summary>
-    /// Gets or sets the number of records to use for schema inference
+    /// Returns a copy of these options with the specified values changed
     /// </summary>
-    public int SchemaInferenceRecords { get; set; } = 100;
-
-    /// <summary>
-    /// Gets or sets whether to treat the JSON as an array of objects
-    /// </summary>
-    public bool IsArray { get; set; } = true;
+    /// <param name="serializerOptions">New serializer options, or null to keep the current value</param>
+    /// <param name="schemaInferenceRecords">New schema inference record count, or null to keep the current value</param>
+    /// <param name="isArray">New array mode, or null to keep the current value</param>
+    /// <returns>A new JsonOptions instance</returns>
+    public JsonOptions With(JsonSerializerOptions? serializerOptions = null, int? schemaInferenceRecords = null, bool? isArray = null)
+    {
+        return new JsonOptions(
+            serializerOptions is null ? SerializerOptions : new JsonSerializerOptions(serializerOptions),
+            schemaInferenceRecords ?? SchemaInferenceRecords,
+            isArray ?? IsArray);
+    }
 }
 
 /// <summary>
