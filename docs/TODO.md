@@ -38,13 +38,17 @@ Scope by area (one commit per area):
 | 9 | Optimizers | `Optimizer.cs` (gap-fill), `SGD.cs`, `Adam.cs`, `AdamW.cs` (gap-fill) |
 | 10 | Training | `TrainingLoop.cs`, `DataParallelTrainer.cs`, `DataLoader.cs`, `TensorDataset.cs`, `Batch.cs`, `DataParallelResult.cs` |
 | 11 | Serialization | `ModelSerializer.cs`, `Checkpoint.cs` |
+| 12 | Operations & tensors | `ReverseGradOperations.cs`, `ForwardGradOperations.cs`, `ReverseGradTensor.cs`, `ForwardGradTensor.cs` |
 
-Already documented (no change): `Parameter.cs`, `Im2Col.cs`, `LayerNormKernel.cs`,
-`ForwardGradOperations.cs`, `ReverseGradOperations.cs`, `GradKernels.cs`,
-`AttentionKernels.cs`, `GradientUtils.cs`, `TypeValidator.cs`, `TypeConverter.cs`,
-`GradTensor.cs`, `ForwardGradTensor.cs`, `ReverseGradTensor.cs`,
-`AutoGradExceptions.cs`, `NivaraAutoGradExtensions.cs`, `AutoDiffDiagnostics.cs`,
-`GraphInfo.cs`.
+Reference files with partial gaps (documented too — human confirmed 2026-08-14):
+`ReverseGradOperations.cs` (32: core ops + class), `Parameter.cs` (10),
+`ReverseGradTensor.cs` (5: operators), `ForwardGradTensor.cs` (5: operators),
+`ForwardGradOperations.cs` (1: Gelu).
+
+Fully documented already (no change): `Im2Col.cs`, `LayerNormKernel.cs`,
+`GradKernels.cs`, `AttentionKernels.cs`, `GradientUtils.cs`, `TypeValidator.cs`,
+`TypeConverter.cs`, `GradTensor.cs`, `AutoGradExceptions.cs`,
+`NivaraAutoGradExtensions.cs`, `AutoDiffDiagnostics.cs`, `GraphInfo.cs`.
 Internal, out of scope: `ComputationGraph.cs`, `OpNode.cs`, `RMSNormKernel.cs`,
 `ModuleHelpers.cs`.
 
@@ -62,7 +66,8 @@ Internal, out of scope: `ComputationGraph.cs`, `OpNode.cs`, `RMSNormKernel.cs`,
 
 ## Verification steps
 
-1. Coverage script reports 0 undocumented public declarations in scope files.
+1. Gate: `dotnet build src/Nivara/Nivara.csproj -p:GenerateDocumentationFile=true` reports
+   **0 CS1591** anywhere under `src/Nivara/AutoDiff/` (baseline: 412 unique members).
 2. `dotnet build Nivara.slnx` succeeds (no warnings/errors introduced).
 3. `dotnet test` — ASK HUMAN BEFORE RUNNING (AGENTS.md rule).
 4. Review doc-count deltas per file (documented files should now have `///` counts
@@ -82,7 +87,8 @@ Internal, out of scope: `ComputationGraph.cs`, `OpNode.cs`, `RMSNormKernel.cs`,
 10. `docs: XML doc comments for optimizers (#197)`
 11. `docs: XML doc comments for training API (#197)`
 12. `docs: XML doc comments for serialization API (#197)`
-13. `docs: mark REVIEW-2026-08-12 finding #1 resolved; CHANGELOG (#197)` +
+13. `docs: XML doc comments for operations and tensor classes (#197)`
+14. `docs: mark REVIEW-2026-08-12 finding #1 resolved; CHANGELOG (#197)` +
     `git rm docs/TODO.md` (plan executed)
 
 ## GitHub issues log
