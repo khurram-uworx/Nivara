@@ -4,12 +4,28 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
+/// <summary>
+/// Binary cross-entropy computed from logits via the numerically stable form
+/// <c>max(0, x) - x·z + softplus(-|x|)</c>, with a fused backward that computes
+/// <c>sigmoid(x) - z</c> directly.
+/// </summary>
 public sealed class BCEWithLogitsLoss<T> : Loss<T> where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>
+    /// Creates a binary cross-entropy-with-logits loss.
+    /// </summary>
+    /// <param name="reduction">The default reduction (mean by default)</param>
     public BCEWithLogitsLoss(Reduction reduction = Reduction.Mean) : base(reduction)
     {
     }
 
+    /// <summary>
+    /// Computes the binary cross-entropy from logits with an explicit reduction.
+    /// </summary>
+    /// <param name="logits">The raw logits</param>
+    /// <param name="targets">The binary targets</param>
+    /// <param name="reduction">How to reduce the element-wise loss</param>
+    /// <returns>The (possibly reduced) loss</returns>
     public override ReverseGradTensor<T> Forward(
         ReverseGradTensor<T> logits,
         ReverseGradTensor<T> targets,

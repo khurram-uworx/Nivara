@@ -4,12 +4,28 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn.Functional;
 
+/// <summary>
+/// Cross-entropy loss over class logits. Accepts one-hot targets (tensor) or integer class
+/// labels (converted to one-hot). Mean reduction divides by the batch size to match PyTorch;
+/// None returns per-sample NLL of shape <c>[N]</c>.
+/// </summary>
 public sealed class CrossEntropyLoss<T> : Loss<T> where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>
+    /// Creates a cross-entropy loss.
+    /// </summary>
+    /// <param name="reduction">The default reduction (mean by default)</param>
     public CrossEntropyLoss(Reduction reduction = Reduction.Mean) : base(reduction)
     {
     }
 
+    /// <summary>
+    /// Computes the cross-entropy from logits and one-hot targets with an explicit reduction.
+    /// </summary>
+    /// <param name="logits">The class logits</param>
+    /// <param name="targets">The one-hot targets</param>
+    /// <param name="reduction">How to reduce the element-wise loss</param>
+    /// <returns>The (possibly reduced) loss</returns>
     public override ReverseGradTensor<T> Forward(
         ReverseGradTensor<T> logits,
         ReverseGradTensor<T> targets,
@@ -30,6 +46,12 @@ public sealed class CrossEntropyLoss<T> : Loss<T> where T : struct, IFloatingPoi
         return Reduce(nll, reduction, batchSize);
     }
 
+    /// <summary>
+    /// Computes the cross-entropy from logits and integer class labels (one-hot encoded internally).
+    /// </summary>
+    /// <param name="logits">The class logits</param>
+    /// <param name="targets">The class label per batch item</param>
+    /// <returns>The (possibly reduced) loss</returns>
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> logits, int[] targets)
     {
         if (logits == null) throw new ArgumentNullException(nameof(logits));
