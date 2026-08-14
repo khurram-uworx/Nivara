@@ -22,7 +22,7 @@ static class TensorsHelper
     /// Transpose a row-major matrix using a cache-friendly tiled loop.
     /// .NET 11: Tensor.Transpose&lt;T&gt;(tensor)
     /// </summary>
-    public static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
+    internal static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
         where T : struct, INumber<T>
     {
         const int tile = 32;
@@ -45,7 +45,7 @@ static class TensorsHelper
     /// <summary>
     /// Null-aware transpose.
     /// </summary>
-    public static void Transpose<T>(
+    internal static void Transpose<T>(
         ReadOnlySpan<T> src, ReadOnlySpan<bool> srcNullMask,
         Span<T> dst, Span<bool> dstNullMask,
         int rows, int cols)
@@ -90,7 +90,7 @@ static class TensorsHelper
     /// <summary>
     /// PRIMARY — Tensor&lt;T&gt; level matmul. Swap target for Tensor.MatrixMultiply.
     /// </summary>
-    public static Tensor<T> Multiply<T>(Tensor<T> a, Tensor<T> b,
+    internal static Tensor<T> Multiply<T>(Tensor<T> a, Tensor<T> b,
         int aRows, int aCols, int bCols)
         where T : unmanaged, INumber<T>
     {
@@ -107,7 +107,7 @@ static class TensorsHelper
     /// Dense (no-null) matmul on Tensor&lt;T&gt; inputs, writing raw T[] result.
     /// This overload's body is the swap target when Tensor.MatrixMultiply ships.
     /// </summary>
-    public static void Multiply<T>(Tensor<T> a, Tensor<T> b, T[] result,
+    internal static void Multiply<T>(Tensor<T> a, Tensor<T> b, T[] result,
         int aRows, int aCols, int bCols)
         where T : unmanaged, INumber<T>
     {
@@ -138,7 +138,7 @@ static class TensorsHelper
     /// <see cref="TensorPrimitives.Dot"/> scalar accumulation. Row parallelism is
     /// gated by <see cref="ShouldParallelize"/> to avoid small-matmul overhead.
     /// </summary>
-    public static void MultiplyCore<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
+    internal static void MultiplyCore<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
         int aRows, int aCols, int bCols, bool bTransposed = false)
         where T : struct, INumber<T>
     {
@@ -377,7 +377,7 @@ static class TensorsHelper
     /// Null-aware matmul: fill nulls with T.Zero, run dense kernel,
     /// compute result mask via boolean OR propagation.
     /// </summary>
-    public static void Multiply<T>(
+    internal static void Multiply<T>(
         ReadOnlySpan<T> a, ReadOnlySpan<bool> aNullMask,
         ReadOnlySpan<T> b, ReadOnlySpan<bool> bNullMask,
         T[] result, Span<bool> resultMask,
@@ -497,7 +497,7 @@ static class TensorsHelper
     /// row-major buffer. Nulls in a row mask only that row; nulls in the query
     /// mask all scores.
     /// </summary>
-    public static void RowDot<T>(
+    internal static void RowDot<T>(
         ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
         ReadOnlySpan<T> query, ReadOnlySpan<bool> queryNullMask,
         Span<T> output, Span<bool> outputMask, int rows, int cols)
@@ -534,7 +534,7 @@ static class TensorsHelper
     /// row of a row-major buffer. Nulls in a row mask only that row; nulls in the
     /// query mask all scores.
     /// </summary>
-    public static void RowCosineSimilarity<T>(
+    internal static void RowCosineSimilarity<T>(
         ReadOnlySpan<T> rowMajor, ReadOnlySpan<bool> rowMajorNullMask,
         ReadOnlySpan<T> query, ReadOnlySpan<bool> queryNullMask,
         Span<T> output, Span<bool> outputMask, int rows, int cols)
@@ -580,7 +580,7 @@ static class TensorsHelper
     /// <see cref="TensorPrimitives.StdDev{T}"/> requires <c>IRootFunctions&lt;T&gt;</c>,
     /// satisfied by <c>IFloatingPointIeee754&lt;T&gt;</c>.
     /// </summary>
-    public static bool TryNormalizeInPlace<T>(Span<T> values)
+    internal static bool TryNormalizeInPlace<T>(Span<T> values)
         where T : struct, IFloatingPointIeee754<T>
     {
         var mean = TensorPrimitives.Average<T>(values);
@@ -604,7 +604,7 @@ static class TensorsHelper
     /// <c>false</c> when the population standard deviation is zero (the caller
     /// keeps the column); on success the destination holds the z-scores.
     /// </summary>
-    public static bool TryNormalizeToDouble<T>(ReadOnlySpan<T> values, Span<double> destination)
+    internal static bool TryNormalizeToDouble<T>(ReadOnlySpan<T> values, Span<double> destination)
         where T : struct, INumber<T>
     {
         if (destination.Length < values.Length)

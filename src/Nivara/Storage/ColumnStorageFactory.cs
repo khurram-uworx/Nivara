@@ -14,7 +14,7 @@ static class ColumnStorageFactory
     /// <typeparam name="T">The type of elements to store</typeparam>
     /// <param name="values">The values to store</param>
     /// <returns>A storage instance</returns>
-    public static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values)
+    internal static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values)
     {
         return new ColumnStorage<T>(values, detectNulls: !typeof(T).IsValueType);
     }
@@ -26,7 +26,7 @@ static class ColumnStorageFactory
     /// <param name="values">The values to store</param>
     /// <param name="nullMask">Optional null mask indicating which positions are null</param>
     /// <returns>A storage instance with the given null mask</returns>
-    public static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values, ReadOnlyMemory<bool>? nullMask)
+    internal static IColumnStorage<T> Create<T>(ReadOnlySpan<T> values, ReadOnlyMemory<bool>? nullMask)
     {
         return new ColumnStorage<T>(values.ToArray().AsMemory(), nullMask);
     }
@@ -52,7 +52,7 @@ static class ColumnStorageFactory
     /// <typeparam name="T">The value type</typeparam>
     /// <param name="values">The nullable values to store</param>
     /// <returns>A storage instance with null positions tracked</returns>
-    public static IColumnStorage<T> Create<T>(ReadOnlySpan<T?> values) where T : struct
+    internal static IColumnStorage<T> Create<T>(ReadOnlySpan<T?> values) where T : struct
     {
         if (values.IsEmpty)
         {
@@ -88,14 +88,14 @@ static class ColumnStorageFactory
     /// </summary>
     /// <typeparam name="T">The type to check</typeparam>
     /// <returns>True if the type supports vectorization, false otherwise</returns>
-    public static bool IsVectorizable<T>() => IsVectorizable(typeof(T));
+    internal static bool IsVectorizable<T>() => IsVectorizable(typeof(T));
 
     /// <summary>
     /// Determines if a type supports vectorized operations
     /// </summary>
     /// <param name="type">The type to check</param>
     /// <returns>True if the type supports vectorization, false otherwise</returns>
-    public static bool IsVectorizable(Type type)
+    internal static bool IsVectorizable(Type type)
     {
         // Check for specific vectorizable numeric types
         return type == typeof(int) ||

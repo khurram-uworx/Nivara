@@ -49,7 +49,7 @@ internal static class RankKernel
     /// <param name="orderBy">The order keys (empty = partition order, valid only for RowNumber)</param>
     /// <param name="kind">The rank function kind</param>
     /// <returns>A long column (row_number/rank/dense_rank) or double column (percent_rank)</returns>
-    public static IColumn Compute(
+    internal static IColumn Compute(
         IReadOnlyDictionary<string, IColumn> columns,
         string[] partitionBy,
         IReadOnlyList<SortKey> orderBy,
