@@ -11,31 +11,31 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
 {
     const int TargetL1Bytes = 32 * 1024;
 
-    readonly int _inChannels;
-    readonly int _outChannels;
-    readonly int _kernelSize;
-    readonly int _stride;
-    readonly int _paddingTop;
-    readonly int _paddingBottom;
-    readonly int _paddingLeft;
-    readonly int _paddingRight;
-    readonly int _groups;
-    readonly bool _useBias;
+    readonly int inChannels;
+    readonly int outChannels;
+    readonly int kernelSize;
+    readonly int stride;
+    readonly int paddingTop;
+    readonly int paddingBottom;
+    readonly int paddingLeft;
+    readonly int paddingRight;
+    readonly int groups;
+    readonly bool useBias;
 
-    readonly Parameter<T> _weight;
-    readonly Parameter<T>? _bias;
+    readonly Parameter<T> weight;
+    readonly Parameter<T>? bias;
 
-    public int InChannels => _inChannels;
-    public int OutChannels => _outChannels;
-    public int KernelSize => _kernelSize;
-    public int Stride => _stride;
-    public int PaddingTop => _paddingTop;
-    public int PaddingBottom => _paddingBottom;
-    public int PaddingLeft => _paddingLeft;
-    public int PaddingRight => _paddingRight;
-    public int Groups => _groups;
-    public Parameter<T>? Weight => _weight;
-    public Parameter<T>? Bias => _bias;
+    public int InChannels => inChannels;
+    public int OutChannels => outChannels;
+    public int KernelSize => kernelSize;
+    public int Stride => stride;
+    public int PaddingTop => paddingTop;
+    public int PaddingBottom => paddingBottom;
+    public int PaddingLeft => paddingLeft;
+    public int PaddingRight => paddingRight;
+    public int Groups => groups;
+    public Parameter<T>? Weight => weight;
+    public Parameter<T>? Bias => bias;
 
     public Conv2d(
         int inChannels,
@@ -73,16 +73,16 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         if (inChannels % groups != 0) throw new ArgumentException($"inChannels ({inChannels}) must be divisible by groups ({groups})");
         if (outChannels % groups != 0) throw new ArgumentException($"outChannels ({outChannels}) must be divisible by groups ({groups})");
 
-        _inChannels = inChannels;
-        _outChannels = outChannels;
-        _kernelSize = kernelSize;
-        _stride = stride;
-        _paddingTop = paddingTop;
-        _paddingBottom = paddingBottom;
-        _paddingLeft = paddingLeft;
-        _paddingRight = paddingRight;
-        _groups = groups;
-        _useBias = bias;
+        this.inChannels = inChannels;
+        this.outChannels = outChannels;
+        this.kernelSize = kernelSize;
+        this.stride = stride;
+        this.paddingTop = paddingTop;
+        this.paddingBottom = paddingBottom;
+        this.paddingLeft = paddingLeft;
+        this.paddingRight = paddingRight;
+        this.groups = groups;
+        useBias = bias;
 
         int cPerGroup = inChannels / groups;
         int oPerGroup = outChannels / groups;
@@ -93,16 +93,16 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
         for (int i = 0; i < weightData.Length; i++)
             weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
 
-        _weight = new Parameter<T>("Weight",
+        weight = new Parameter<T>("Weight",
             ReverseGradTensor<T>.FromMatrix(weightData, outChannels, cPerGroup * kernelSize * kernelSize, requiresGrad: true));
-        RegisterParameters(_weight);
+        RegisterParameters(weight);
 
         if (bias)
         {
             var biasData = new T[outChannels];
-            _bias = new Parameter<T>("Bias",
+            this.bias = new Parameter<T>("Bias",
                 ReverseGradTensor<T>.FromArray(biasData, requiresGrad: true));
-            RegisterParameters(_bias);
+            RegisterParameters(this.bias);
         }
     }
 
@@ -110,20 +110,20 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (input.Rank != 4) throw new ArgumentException($"Conv2d expects 4D input [N, C, H, W], got {input.Rank}D");
-        if (input.Shape[1] != _inChannels)
-            throw new ArgumentException($"Expected {_inChannels} input channels, got {input.Shape[1]}");
+        if (input.Shape[1] != inChannels)
+            throw new ArgumentException($"Expected {inChannels} input channels, got {input.Shape[1]}");
 
         int n = input.Shape[0];
         int c = input.Shape[1];
         int h = input.Shape[2];
         int w = input.Shape[3];
 
-        int oH = (h + _paddingTop + _paddingBottom - _kernelSize) / _stride + 1;
-        int oW = (w + _paddingLeft + _paddingRight - _kernelSize) / _stride + 1;
+        int oH = (h + paddingTop + paddingBottom - kernelSize) / stride + 1;
+        int oW = (w + paddingLeft + paddingRight - kernelSize) / stride + 1;
         if (oH <= 0 || oW <= 0)
             throw new ArgumentException($"Output dimensions are non-positive ({oH}x{oW}). Check input size, kernel, stride, and padding.");
 
-        int kW = _kernelSize;
+        int kW = kernelSize;
         int patchSize = c * kW * kW;
         int totalPatches = n * oH * oW;
 
@@ -131,31 +131,31 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
             ? iSpan
             : ModuleHelpers<T>.CopyToTemp(input.Data, n * c * h * w);
 
-        ReadOnlySpan<T> weightSpan = _weight.Tensor.Data.TryGetSpan(out var wSpan)
+        ReadOnlySpan<T> weightSpan = weight.Tensor.Data.TryGetSpan(out var wSpan)
             ? wSpan
-            : ModuleHelpers<T>.CopyToTemp(_weight.Tensor.Data, _outChannels * patchSize);
+            : ModuleHelpers<T>.CopyToTemp(weight.Tensor.Data, outChannels * patchSize);
 
         ReadOnlySpan<T> biasSpan = ReadOnlySpan<T>.Empty;
-        if (_useBias && _bias != null)
+        if (useBias && bias != null)
         {
-            biasSpan = _bias.Tensor.Data.TryGetSpan(out var bSpan)
+            biasSpan = bias.Tensor.Data.TryGetSpan(out var bSpan)
                 ? bSpan
-                : ModuleHelpers<T>.CopyToTemp(_bias.Tensor.Data, _outChannels);
+                : ModuleHelpers<T>.CopyToTemp(bias.Tensor.Data, outChannels);
         }
 
-        var outputData = new T[n * _outChannels * oH * oW];
+        var outputData = new T[n * outChannels * oH * oW];
 
-        if (_groups == 1)
+        if (groups == 1)
         {
             ConvForwardKernel(inputSpan, weightSpan, biasSpan, outputData,
-                n, c, h, w, kW, _stride, _paddingTop, _paddingLeft, oH, oW, patchSize, totalPatches, _outChannels);
+                n, c, h, w, kW, stride, paddingTop, paddingLeft, oH, oW, patchSize, totalPatches, outChannels);
         }
         else
         {
             int spatialIn = h * w;
             int spatialOut = oH * oW;
-            int cPerGroup = c / _groups;
-            int oPerGroup = _outChannels / _groups;
+            int cPerGroup = c / groups;
+            int oPerGroup = outChannels / groups;
             int groupPatchSize = cPerGroup * kW * kW;
             int groupInputSize = n * cPerGroup * spatialIn;
             int groupOutputSize = n * oPerGroup * spatialOut;
@@ -167,7 +167,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
                 var groupInput = groupInBuf.AsSpan(0, groupInputSize);
                 var groupOutput = groupOutBuf.AsSpan(0, groupOutputSize);
 
-                for (int g = 0; g < _groups; g++)
+                for (int g = 0; g < groups; g++)
                 {
                     for (int b = 0; b < n; b++)
                         inputSpan.Slice((b * c + g * cPerGroup) * spatialIn, cPerGroup * spatialIn)
@@ -178,11 +178,11 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
                     groupOutput.Clear();
 
                     ConvForwardKernel(groupInput, weightGroup, biasGroup, groupOutput,
-                        n, cPerGroup, h, w, kW, _stride, _paddingTop, _paddingLeft, oH, oW, groupPatchSize, totalPatches, oPerGroup);
+                        n, cPerGroup, h, w, kW, stride, paddingTop, paddingLeft, oH, oW, groupPatchSize, totalPatches, oPerGroup);
 
                     for (int b = 0; b < n; b++)
                         groupOutput.Slice(b * oPerGroup * spatialOut, oPerGroup * spatialOut)
-                            .CopyTo(outputData.AsSpan((b * _outChannels + g * oPerGroup) * spatialOut));
+                            .CopyTo(outputData.AsSpan((b * outChannels + g * oPerGroup) * spatialOut));
                 }
             }
             finally
@@ -192,11 +192,11 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
             }
         }
 
-        var outShape = new[] { n, _outChannels, oH, oW };
+        var outShape = new[] { n, outChannels, oH, oW };
         var result = NivaraColumn<T>.Create(outputData);
-        bool shouldTrack = _useBias && _bias != null
-            ? GradientUtils.ShouldTrackGrad(input, _weight.Tensor, _bias.Tensor)
-            : GradientUtils.ShouldTrackGrad(input, _weight.Tensor);
+        bool shouldTrack = useBias && bias != null
+            ? GradientUtils.ShouldTrackGrad(input, weight.Tensor, bias.Tensor)
+            : GradientUtils.ShouldTrackGrad(input, weight.Tensor);
         var resultTensor = new ReverseGradTensor<T>(result, shouldTrack, outShape);
 
         if (shouldTrack)
@@ -205,35 +205,35 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
             var capturedWeightData = weightSpan.ToArray();
             var capturedBiasData = biasSpan.Length > 0 ? biasSpan.ToArray() : null;
 
-            var gradFn = new OpNode<T>("Conv2d", [input, _weight.Tensor], (gradOutput) =>
+            var gradFn = new OpNode<T>("Conv2d", [input, weight.Tensor], (gradOutput) =>
             {
-                var gradOutData = new T[n * _outChannels * oH * oW];
+                var gradOutData = new T[n * outChannels * oH * oW];
                 gradOutput.CopyTo(gradOutData, T.Zero);
 
-                if (_groups == 1)
+                if (groups == 1)
                 {
                     if (input.RequiresGrad)
                     {
                         var inputGrad = new T[n * c * h * w];
                         ConvInputGradKernel(gradOutData, capturedWeightData, inputGrad,
-                            n, c, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, _outChannels, patchSize);
+                            n, c, h, w, oH, oW, kW, stride, paddingTop, paddingLeft, outChannels, patchSize);
                         ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                     }
 
-                    if (_weight.Tensor.RequiresGrad)
+                    if (weight.Tensor.RequiresGrad)
                     {
-                        var weightGrad = new T[_outChannels * patchSize];
+                        var weightGrad = new T[outChannels * patchSize];
                         ConvWeightGradKernel(capturedInputData, gradOutData, weightGrad,
-                            n, c, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, _outChannels, patchSize, totalPatches);
-                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
+                            n, c, h, w, oH, oW, kW, stride, paddingTop, paddingLeft, outChannels, patchSize, totalPatches);
+                        ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                     }
                 }
                 else
                 {
                     int spatialInLocal = h * w;
                     int spatialOutLocal = oH * oW;
-                    int cPerGroupLocal = c / _groups;
-                    int oPerGroupLocal = _outChannels / _groups;
+                    int cPerGroupLocal = c / groups;
+                    int oPerGroupLocal = outChannels / groups;
                     int groupPatchSizeLocal = cPerGroupLocal * kW * kW;
                     int groupInputSizeLocal = n * cPerGroupLocal * spatialInLocal;
                     int groupOutputSizeLocal = n * oPerGroupLocal * spatialOutLocal;
@@ -249,17 +249,17 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
                         {
                             var inputGrad = new T[n * c * h * w];
 
-                            for (int g = 0; g < _groups; g++)
+                            for (int g = 0; g < groups; g++)
                             {
                                 for (int b = 0; b < n; b++)
-                                    gradOutData.AsSpan((b * _outChannels + g * oPerGroupLocal) * spatialOutLocal, oPerGroupLocal * spatialOutLocal)
+                                    gradOutData.AsSpan((b * outChannels + g * oPerGroupLocal) * spatialOutLocal, oPerGroupLocal * spatialOutLocal)
                                         .CopyTo(groupOutGrad.Slice(b * oPerGroupLocal * spatialOutLocal));
 
                                 var weightGroup = capturedWeightData.AsSpan(g * oPerGroupLocal * groupPatchSizeLocal, oPerGroupLocal * groupPatchSizeLocal);
                                 groupInGrad.Clear();
 
                                 ConvInputGradKernel(groupOutGrad, weightGroup, groupInGrad,
-                                    n, cPerGroupLocal, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, oPerGroupLocal, groupPatchSizeLocal);
+                                    n, cPerGroupLocal, h, w, oH, oW, kW, stride, paddingTop, paddingLeft, oPerGroupLocal, groupPatchSizeLocal);
 
                                 for (int b = 0; b < n; b++)
                                     groupInGrad.Slice(b * cPerGroupLocal * spatialInLocal, cPerGroupLocal * spatialInLocal)
@@ -269,11 +269,11 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
                             ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                         }
 
-                        if (_weight.Tensor.RequiresGrad)
+                        if (weight.Tensor.RequiresGrad)
                         {
-                            var weightGrad = new T[_outChannels * cPerGroupLocal * kW * kW];
+                            var weightGrad = new T[outChannels * cPerGroupLocal * kW * kW];
 
-                            for (int g = 0; g < _groups; g++)
+                            for (int g = 0; g < groups; g++)
                             {
                                 var inputGroupBuf = ArrayPool<T>.Shared.Rent(groupInputSizeLocal);
                                 try
@@ -284,13 +284,13 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
                                             .CopyTo(inputGroup.Slice(b * cPerGroupLocal * spatialInLocal));
 
                                     for (int b = 0; b < n; b++)
-                                        gradOutData.AsSpan((b * _outChannels + g * oPerGroupLocal) * spatialOutLocal, oPerGroupLocal * spatialOutLocal)
+                                        gradOutData.AsSpan((b * outChannels + g * oPerGroupLocal) * spatialOutLocal, oPerGroupLocal * spatialOutLocal)
                                             .CopyTo(groupOutGrad.Slice(b * oPerGroupLocal * spatialOutLocal));
 
                                     var weightGradGroup = weightGrad.AsSpan(g * oPerGroupLocal * groupPatchSizeLocal, oPerGroupLocal * groupPatchSizeLocal);
 
                                     ConvWeightGradKernel(inputGroup, groupOutGrad, weightGradGroup,
-                                        n, cPerGroupLocal, h, w, oH, oW, kW, _stride, _paddingTop, _paddingLeft, oPerGroupLocal, groupPatchSizeLocal, totalPatches);
+                                        n, cPerGroupLocal, h, w, oH, oW, kW, stride, paddingTop, paddingLeft, oPerGroupLocal, groupPatchSizeLocal, totalPatches);
                                 }
                                 finally
                                 {
@@ -298,7 +298,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
                                 }
                             }
 
-                            ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
+                            ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                         }
                     }
                     finally
@@ -308,11 +308,11 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
                     }
                 }
 
-                if (_useBias && _bias != null && _bias.Tensor.RequiresGrad)
+                if (useBias && bias != null && bias.Tensor.RequiresGrad)
                 {
-                    var biasGrad = new T[_outChannels];
-                    ConvBiasGradKernel(gradOutData, biasGrad, n, _outChannels, oH, oW);
-                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad));
+                    var biasGrad = new T[outChannels];
+                    ConvBiasGradKernel(gradOutData, biasGrad, n, outChannels, oH, oW);
+                    ReverseGradOperations.AccumulateGradient(bias.Tensor, NivaraColumn<T>.Create(biasGrad));
                 }
             });
 
@@ -642,23 +642,23 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
 
 public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
-    readonly int _inChannels;
-    readonly int _outChannels;
-    readonly int _kernelSize;
-    readonly int _stride;
-    readonly int _padding;
-    readonly bool _useBias;
+    readonly int inChannels;
+    readonly int outChannels;
+    readonly int kernelSize;
+    readonly int stride;
+    readonly int padding;
+    readonly bool useBias;
 
-    readonly Parameter<T> _weight;
-    readonly Parameter<T>? _bias;
+    readonly Parameter<T> weight;
+    readonly Parameter<T>? bias;
 
-    public int InChannels => _inChannels;
-    public int OutChannels => _outChannels;
-    public int KernelSize => _kernelSize;
-    public int Stride => _stride;
-    public int Padding => _padding;
-    public Parameter<T>? Weight => _weight;
-    public Parameter<T>? Bias => _bias;
+    public int InChannels => inChannels;
+    public int OutChannels => outChannels;
+    public int KernelSize => kernelSize;
+    public int Stride => stride;
+    public int Padding => padding;
+    public Parameter<T>? Weight => weight;
+    public Parameter<T>? Bias => bias;
 
     public ConvTranspose2d(
         int inChannels,
@@ -674,12 +674,12 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
         if (stride <= 0) throw new ArgumentOutOfRangeException(nameof(stride));
         if (padding < 0) throw new ArgumentOutOfRangeException(nameof(padding));
 
-        _inChannels = inChannels;
-        _outChannels = outChannels;
-        _kernelSize = kernelSize;
-        _stride = stride;
-        _padding = padding;
-        _useBias = bias;
+        this.inChannels = inChannels;
+        this.outChannels = outChannels;
+        this.kernelSize = kernelSize;
+        this.stride = stride;
+        this.padding = padding;
+        useBias = bias;
 
         int fanIn = inChannels * kernelSize * kernelSize;
         var weightData = new T[inChannels * outChannels * kernelSize * kernelSize];
@@ -688,16 +688,16 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
         for (int i = 0; i < weightData.Length; i++)
             weightData[i] = T.CreateChecked((rng.NextDouble() * 2.0 - 1.0) * double.CreateChecked(kaimingBound));
 
-        _weight = new Parameter<T>("Weight",
+        weight = new Parameter<T>("Weight",
             ReverseGradTensor<T>.FromMatrix(weightData, inChannels, outChannels * kernelSize * kernelSize, requiresGrad: true));
-        RegisterParameters(_weight);
+        RegisterParameters(weight);
 
         if (bias)
         {
             var biasData = new T[outChannels];
-            _bias = new Parameter<T>("Bias",
+            this.bias = new Parameter<T>("Bias",
                 ReverseGradTensor<T>.FromArray(biasData, requiresGrad: true));
-            RegisterParameters(_bias);
+            RegisterParameters(this.bias);
         }
     }
 
@@ -705,16 +705,16 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (input.Rank != 4) throw new ArgumentException($"ConvTranspose2d expects 4D input [N, C, H, W], got {input.Rank}D");
-        if (input.Shape[1] != _inChannels)
-            throw new ArgumentException($"Expected {_inChannels} input channels, got {input.Shape[1]}");
+        if (input.Shape[1] != inChannels)
+            throw new ArgumentException($"Expected {inChannels} input channels, got {input.Shape[1]}");
 
         int n = input.Shape[0];
         int c = input.Shape[1];
         int h = input.Shape[2];
         int w = input.Shape[3];
 
-        int oH = (h - 1) * _stride - 2 * _padding + _kernelSize;
-        int oW = (w - 1) * _stride - 2 * _padding + _kernelSize;
+        int oH = (h - 1) * stride - 2 * padding + kernelSize;
+        int oW = (w - 1) * stride - 2 * padding + kernelSize;
         if (oH <= 0 || oW <= 0)
             throw new ArgumentException($"Output dimensions are non-positive ({oH}x{oW}). Check input size, kernel, stride, and padding.");
 
@@ -722,33 +722,33 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
             ? iSpan
             : ModuleHelpers<T>.CopyToTemp(input.Data, n * c * h * w);
 
-        ReadOnlySpan<T> weightSpan = _weight.Tensor.Data.TryGetSpan(out var wSpan)
+        ReadOnlySpan<T> weightSpan = weight.Tensor.Data.TryGetSpan(out var wSpan)
             ? wSpan
-            : ModuleHelpers<T>.CopyToTemp(_weight.Tensor.Data, c * _outChannels * _kernelSize * _kernelSize);
+            : ModuleHelpers<T>.CopyToTemp(weight.Tensor.Data, c * outChannels * kernelSize * kernelSize);
 
         ReadOnlySpan<T> biasSpan = ReadOnlySpan<T>.Empty;
-        if (_useBias && _bias != null)
+        if (useBias && bias != null)
         {
-            biasSpan = _bias.Tensor.Data.TryGetSpan(out var bSpan)
+            biasSpan = bias.Tensor.Data.TryGetSpan(out var bSpan)
                 ? bSpan
-                : ModuleHelpers<T>.CopyToTemp(_bias.Tensor.Data, _outChannels);
+                : ModuleHelpers<T>.CopyToTemp(bias.Tensor.Data, outChannels);
         }
 
-        var outputData = new T[n * _outChannels * oH * oW];
-        int kW = _kernelSize;
+        var outputData = new T[n * outChannels * oH * oW];
+        int kW = kernelSize;
 
         Im2Col.Col2ImForward(
             inputSpan, weightSpan, outputData,
-            c, _outChannels, h, w, oH, oW,
-            kW, _stride, _padding, n);
+            c, outChannels, h, w, oH, oW,
+            kW, stride, padding, n);
 
         if (biasSpan.Length > 0)
         {
             int spatialSize = oH * oW;
             for (int batch = 0; batch < n; batch++)
             {
-                int outBase = batch * _outChannels * spatialSize;
-                for (int oc = 0; oc < _outChannels; oc++)
+                int outBase = batch * outChannels * spatialSize;
+                for (int oc = 0; oc < outChannels; oc++)
                 {
                     int rowStart = outBase + oc * spatialSize;
                     TensorPrimitives.Add(outputData.AsSpan(rowStart, spatialSize), biasSpan[oc], outputData.AsSpan(rowStart, spatialSize));
@@ -756,11 +756,11 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
             }
         }
 
-        var outShape = new[] { n, _outChannels, oH, oW };
+        var outShape = new[] { n, outChannels, oH, oW };
         var result = NivaraColumn<T>.Create(outputData);
-        bool shouldTrack = _useBias && _bias != null
-            ? GradientUtils.ShouldTrackGrad(input, _weight.Tensor, _bias.Tensor)
-            : GradientUtils.ShouldTrackGrad(input, _weight.Tensor);
+        bool shouldTrack = useBias && bias != null
+            ? GradientUtils.ShouldTrackGrad(input, weight.Tensor, bias.Tensor)
+            : GradientUtils.ShouldTrackGrad(input, weight.Tensor);
         var resultTensor = new ReverseGradTensor<T>(result, shouldTrack, outShape);
 
         if (shouldTrack)
@@ -768,9 +768,9 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
             var capturedInputData = inputSpan.ToArray();
             var capturedWeightData = weightSpan.ToArray();
 
-            var gradFn = new OpNode<T>("ConvTranspose2d", [input, _weight.Tensor], (gradOutput) =>
+            var gradFn = new OpNode<T>("ConvTranspose2d", [input, weight.Tensor], (gradOutput) =>
             {
-                var gradOutData = new T[n * _outChannels * oH * oW];
+                var gradOutData = new T[n * outChannels * oH * oW];
                 gradOutput.CopyTo(gradOutData, T.Zero);
 
                 if (input.RequiresGrad)
@@ -778,36 +778,36 @@ public sealed class ConvTranspose2d<T> : Module<T> where T : struct, IFloatingPo
                     var inputGrad = new T[n * c * h * w];
                     Im2Col.ConvTransposeInputGradKernel(
                         gradOutData, capturedWeightData, inputGrad,
-                        c, _outChannels, h, w, oH, oW,
-                        kW, _stride, _padding, n);
+                        c, outChannels, h, w, oH, oW,
+                        kW, stride, padding, n);
                     ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
                 }
 
-                if (_weight.Tensor.RequiresGrad)
+                if (weight.Tensor.RequiresGrad)
                 {
-                    var weightGrad = new T[c * _outChannels * kW * kW];
+                    var weightGrad = new T[c * outChannels * kW * kW];
                     Im2Col.ConvTransposeWeightGradKernel(
                         capturedInputData, gradOutData, weightGrad,
-                        c, _outChannels, h, w, oH, oW,
-                        kW, _stride, _padding, n);
-                    ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(weightGrad));
+                        c, outChannels, h, w, oH, oW,
+                        kW, stride, padding, n);
+                    ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(weightGrad));
                 }
 
-                if (_useBias && _bias != null && _bias.Tensor.RequiresGrad)
+                if (useBias && bias != null && bias.Tensor.RequiresGrad)
                 {
-                    var biasGrad = new T[_outChannels];
+                    var biasGrad = new T[outChannels];
                     int spatialSize = oH * oW;
-                    for (int oc = 0; oc < _outChannels; oc++)
+                    for (int oc = 0; oc < outChannels; oc++)
                     {
                         T sum = T.Zero;
                         for (int batch = 0; batch < n; batch++)
                         {
-                            int channelBase = batch * _outChannels * spatialSize + oc * spatialSize;
+                            int channelBase = batch * outChannels * spatialSize + oc * spatialSize;
                             sum += T.CreateChecked(double.CreateChecked(TensorPrimitives.Sum(gradOutData.AsSpan(channelBase, spatialSize))));
                         }
                         biasGrad[oc] = sum;
                     }
-                    ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(biasGrad));
+                    ReverseGradOperations.AccumulateGradient(bias.Tensor, NivaraColumn<T>.Create(biasGrad));
                 }
             });
 
