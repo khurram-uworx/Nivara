@@ -54,8 +54,8 @@ public class NivaraSeriesTests
         Assert.That(series3, Is.Not.Null, "Series should be created with mixed object index");
         Assert.That(series3.Length, Is.EqualTo(values3.Length), "Series should preserve length");
         Assert.That(series3["first"], Is.EqualTo(1.0), "Value should be accessible by string label");
-        Assert.That(series3[(object)42], Is.EqualTo(2.0), "Value should be accessible by integer label");
-        Assert.That(series3[DateTime.Today], Is.EqualTo(3.0), "Value should be accessible by DateTime label");
+        Assert.That(series3.GetByLabel(42), Is.EqualTo(2.0), "Value should be accessible by integer label");
+        Assert.That(series3.GetByLabel(DateTime.Today), Is.EqualTo(3.0), "Value should be accessible by DateTime label");
     }
 
     [Test]
@@ -146,10 +146,10 @@ public class NivaraSeriesTests
         Assert.That(series.GetByLabel("string"), Is.EqualTo("value2"), "Should access by string label using GetByLabel");
         Assert.That(series.GetByLabel(DateTime.Today), Is.EqualTo("value3"), "Should access by DateTime label using GetByLabel");
 
-        // Test using indexer with explicit object casting to avoid ambiguity
-        Assert.That(series[(object)1], Is.EqualTo("value1"), "Should access by integer label using indexer");
-        Assert.That(series[(object)"string"], Is.EqualTo("value2"), "Should access by string label using indexer");
-        Assert.That(series[(object)DateTime.Today], Is.EqualTo("value3"), "Should access by DateTime label using indexer");
+        // Test the string indexer directly and non-string labels via GetByLabel
+        Assert.That(series["string"], Is.EqualTo("value2"), "Should access by string label using indexer");
+        Assert.That(series.GetByLabel(1), Is.EqualTo("value1"), "Should access by integer label using GetByLabel");
+        Assert.That(series.GetByLabel(DateTime.Today), Is.EqualTo("value3"), "Should access by DateTime label using GetByLabel");
     }
 
     #endregion
@@ -316,7 +316,7 @@ public class NivaraSeriesTests
         var aligned = series1.Align(series2);
         Assert.That(aligned.Length, Is.EqualTo(2), "Should align based on object equality regardless of type");
         Assert.That(aligned["b"], Is.EqualTo(20), "String index should match");
-        Assert.That(aligned[DateTime.Today], Is.EqualTo(30), "DateTime index should match");
+        Assert.That(aligned.GetByLabel(DateTime.Today), Is.EqualTo(30), "DateTime index should match");
     }
 
     #endregion

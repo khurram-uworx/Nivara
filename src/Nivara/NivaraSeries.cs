@@ -336,12 +336,13 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
     }
 
     /// <summary>
-    /// Gets the value associated with the specified label
+    /// Gets the value associated with the specified string label.
+    /// Integer positions and non-string labels are looked up via <see cref="GetByLabel(object)"/>.
     /// </summary>
-    /// <param name="label">The label to look up</param>
+    /// <param name="label">The string label to look up</param>
     /// <returns>The value associated with the label</returns>
     /// <exception cref="KeyNotFoundException">Thrown when the label is not found</exception>
-    public T this[object label]
+    public T this[string label]
     {
         get
         {
