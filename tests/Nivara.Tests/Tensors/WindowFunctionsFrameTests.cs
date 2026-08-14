@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Operations;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Tensors;
@@ -258,5 +259,143 @@ public class WindowFunctionsFrameTests
         var frame = FrameWith(("v", IntColumn(1, 2, 3)));
 
         Assert.Throws<ArgumentException>(() => frame.RollingSum("v", "v", 3));
+    }
+
+    // ── WindowSpec overloads ──
+
+    [Test]
+    public void RollingSum_WithSpec_PartitionsAndOrders()
+    {
+        var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("t", IntColumn(1, 1, 2, 2, 3, 3)),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+
+        var spec = frame.Over().PartitionBy("g").OrderBy("t");
+        var result = frame.RollingSum("v", "rs", 2, spec);
+
+        var rs = result.GetColumn<int>("rs");
+        Assert.That(rs.IsNull(0), Is.True);
+        Assert.That(rs.IsNull(1), Is.True);
+        Assert.That(rs[2], Is.EqualTo(40));
+        Assert.That(rs[3], Is.EqualTo(60));
+        Assert.That(rs[4], Is.EqualTo(80));
+        Assert.That(rs[5], Is.EqualTo(100));
+    }
+
+    [Test]
+    public void CumulativeSum_WithSpec_PartitionsAndOrders()
+    {
+        var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("t", IntColumn(1, 1, 2, 2, 3, 3)),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+
+        var spec = frame.Over().PartitionBy("g").OrderBy("t");
+        var result = frame.CumulativeSum("v", "cum", spec);
+
+        var cum = result.GetColumn<int>("cum");
+        Assert.That(cum[0], Is.EqualTo(10));
+        Assert.That(cum[1], Is.EqualTo(20));
+        Assert.That(cum[2], Is.EqualTo(40));
+        Assert.That(cum[3], Is.EqualTo(60));
+        Assert.That(cum[4], Is.EqualTo(90));
+        Assert.That(cum[5], Is.EqualTo(120));
+    }
+
+    [Test]
+    public void CumulativeCount_WithSpec_Partitions()
+    {
+        var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+
+        var spec = frame.Over().PartitionBy("g");
+        var result = frame.CumulativeCount("v", "n", spec);
+
+        var n = result.GetColumn<long>("n");
+        Assert.That(n[0], Is.EqualTo(1));
+        Assert.That(n[1], Is.EqualTo(1));
+        Assert.That(n[2], Is.EqualTo(2));
+        Assert.That(n[3], Is.EqualTo(2));
+        Assert.That(n[4], Is.EqualTo(3));
+        Assert.That(n[5], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Shift_WithSpec_PartitionsAndOrders()
+    {
+        var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("t", IntColumn(1, 1, 2, 2, 3, 3)),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+
+        var spec = frame.Over().PartitionBy("g").OrderBy("t");
+        var result = frame.Shift("v", "lag", 1, spec);
+
+        var lag = result.GetColumn<int>("lag");
+        Assert.That(lag.IsNull(0), Is.True);
+        Assert.That(lag.IsNull(1), Is.True);
+        Assert.That(lag[2], Is.EqualTo(10));
+        Assert.That(lag[3], Is.EqualTo(20));
+        Assert.That(lag[4], Is.EqualTo(30));
+        Assert.That(lag[5], Is.EqualTo(40));
+    }
+
+    [Test]
+    public void RollingSum_WithSpec_NullOrderKeyRow_Participates()
+    {
+        var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "A" })),
+            ("t", NivaraColumn<int>.CreateFromSpans(new[] { 3, 0, 1 }, new[] { false, true, false })),
+            ("v", IntColumn(30, 20, 10)));
+
+        var spec = frame.Over().PartitionBy("g").OrderBy("t");
+        var result = frame.RollingSum("v", "rs", 2, spec);
+
+        var rs = result.GetColumn<int>("rs");
+        Assert.That(rs[0], Is.EqualTo(40));
+        Assert.That(rs[1], Is.EqualTo(50));
+        Assert.That(rs.IsNull(2), Is.True);
+    }
+
+    [Test]
+    public void RollingSum_WithEmptySpec_MatchesMethodArgs()
+    {
+        var frame = FrameWith(("v", IntColumn(1, 2, 3, 4)));
+
+        var viaSpec = frame.RollingSum("v", "rs", 3, new WindowSpec());
+        var viaArgs = frame.RollingSum("v", "rsArgs", 3);
+
+        Assert.That(viaSpec.GetColumn<int>("rs").ToArray(), Is.EqualTo(viaArgs.GetColumn<int>("rsArgs").ToArray()));
+    }
+
+    [Test]
+    public void Window_WithSpec_MissingPartitionColumn_ThrowsArgumentException()
+    {
+        var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+
+        var spec = frame.Over().PartitionBy("missing");
+        Assert.Throws<ArgumentException>(() => frame.RollingSum("v", "x", 2, spec));
+    }
+
+    [Test]
+    public void Window_WithSpec_MissingOrderColumn_ThrowsArgumentException()
+    {
+        var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+
+        var spec = frame.Over().OrderBy("missing");
+        Assert.Throws<ArgumentException>(() => frame.RollingSum("v", "x", 2, spec));
+    }
+
+    [Test]
+    public void Window_WithSpec_NonComparableOrderColumn_ThrowsArgumentException()
+    {
+        var frame = FrameWith(
+            ("v", IntColumn(1, 2, 3)),
+            ("o", NivaraColumn<object>.Create(new object[] { new object(), new object(), new object() })));
+
+        var spec = frame.Over().OrderBy("o");
+        Assert.Throws<ArgumentException>(() => frame.RollingSum("v", "x", 2, spec));
     }
 }

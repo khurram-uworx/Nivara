@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Operations;
 using NUnit.Framework;
 
 namespace Nivara.Tests.Query;
@@ -190,5 +191,132 @@ public class WindowOperationTests
         Assert.That(schema.HasColumn("count"), Is.True);
         Assert.That(schema.HasColumn("lag"), Is.True);
         Assert.That(schema.GetColumnType("count"), Is.EqualTo(typeof(long)));
+    }
+
+    // ── WindowSpec ──
+
+    [Test]
+    public void RollingSum_WithSpec_PartitionsAndOrders()
+    {
+        using var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("t", IntColumn(1, 1, 2, 2, 3, 3)),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+        var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
+
+        using var result = frame.AsQueryFrame().RollingSum("v", "rs", 2, spec).Collect();
+
+        var rs = result.GetColumn<int>("rs");
+        Assert.That(rs.IsNull(0), Is.True);
+        Assert.That(rs.IsNull(1), Is.True);
+        Assert.That(rs[2], Is.EqualTo(40));
+        Assert.That(rs[3], Is.EqualTo(60));
+        Assert.That(rs[4], Is.EqualTo(80));
+        Assert.That(rs[5], Is.EqualTo(100));
+    }
+
+    [Test]
+    public void CumulativeSum_WithSpec_PartitionsAndOrders()
+    {
+        using var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("t", IntColumn(1, 1, 2, 2, 3, 3)),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+        var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
+
+        using var result = frame.AsQueryFrame().CumulativeSum("v", "cum", spec).Collect();
+
+        var cum = result.GetColumn<int>("cum");
+        Assert.That(cum[0], Is.EqualTo(10));
+        Assert.That(cum[1], Is.EqualTo(20));
+        Assert.That(cum[2], Is.EqualTo(40));
+        Assert.That(cum[3], Is.EqualTo(60));
+        Assert.That(cum[4], Is.EqualTo(90));
+        Assert.That(cum[5], Is.EqualTo(120));
+    }
+
+    [Test]
+    public void CumulativeCount_WithSpec_Partitions()
+    {
+        using var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+        var spec = frame.AsQueryFrame().Over().PartitionBy("g");
+
+        using var result = frame.AsQueryFrame().CumulativeCount("v", "n", spec).Collect();
+
+        var n = result.GetColumn<long>("n");
+        Assert.That(n[0], Is.EqualTo(1));
+        Assert.That(n[1], Is.EqualTo(1));
+        Assert.That(n[2], Is.EqualTo(2));
+        Assert.That(n[3], Is.EqualTo(2));
+        Assert.That(n[4], Is.EqualTo(3));
+        Assert.That(n[5], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Shift_WithSpec_PartitionsAndOrders()
+    {
+        using var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "B", "A", "B", "A", "B" })),
+            ("t", IntColumn(1, 1, 2, 2, 3, 3)),
+            ("v", IntColumn(10, 20, 30, 40, 50, 60)));
+        var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
+
+        using var result = frame.AsQueryFrame().Shift("v", "lag", 1, spec).Collect();
+
+        var lag = result.GetColumn<int>("lag");
+        Assert.That(lag.IsNull(0), Is.True);
+        Assert.That(lag.IsNull(1), Is.True);
+        Assert.That(lag[2], Is.EqualTo(10));
+        Assert.That(lag[3], Is.EqualTo(20));
+        Assert.That(lag[4], Is.EqualTo(30));
+        Assert.That(lag[5], Is.EqualTo(40));
+    }
+
+    [Test]
+    public void RollingSum_WithSpec_NullOrderKeyRow_Participates()
+    {
+        using var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "A" })),
+            ("t", NivaraColumn<int>.CreateFromSpans(new[] { 3, 0, 1 }, new[] { false, true, false })),
+            ("v", IntColumn(30, 20, 10)));
+        var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
+
+        using var result = frame.AsQueryFrame().RollingSum("v", "rs", 2, spec).Collect();
+
+        var rs = result.GetColumn<int>("rs");
+        Assert.That(rs[0], Is.EqualTo(40));
+        Assert.That(rs[1], Is.EqualTo(50));
+        Assert.That(rs.IsNull(2), Is.True);
+    }
+
+    [Test]
+    public void Window_WithSpec_MissingPartitionColumn_Throws()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        var spec = new WindowSpec().PartitionBy("missing").OrderBy("v");
+
+        Assert.Throws<QueryExecutionException>(() => frame.AsQueryFrame().RollingSum("v", "x", 2, spec).Collect());
+    }
+
+    [Test]
+    public void Window_WithSpec_MissingOrderColumn_Throws()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        var spec = new WindowSpec().OrderBy("missing");
+
+        Assert.Throws<QueryExecutionException>(() => frame.AsQueryFrame().RollingSum("v", "x", 2, spec).Collect());
+    }
+
+    [Test]
+    public void Window_WithSpec_NonComparableOrderColumn_Throws()
+    {
+        using var frame = FrameWith(
+            ("v", IntColumn(1, 2, 3)),
+            ("o", NivaraColumn<object>.Create(new object[] { new object(), new object(), new object() })));
+        var spec = frame.AsQueryFrame().Over().OrderBy("o");
+
+        Assert.Throws<QueryExecutionException>(() => frame.AsQueryFrame().RollingSum("v", "x", 2, spec).Collect());
     }
 }
