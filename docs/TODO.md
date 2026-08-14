@@ -95,7 +95,21 @@ Two open findings from `docs/REVIEW.md` were never filed/fixed and now have trac
 
 ## GitHub issues log
 
-- [ ] (none yet) — create issues at discovery time via `gh issue create --repo khurram-uworx/Nivara` while executing, and record numbers here. Don't rely on memory.
+- [x] (none discovered) — no deferred work or out-of-plan concerns arose during execution.
+
+## Execution status
+
+- [x] 1. plan file
+- [x] 2. canonical `ReadFrame`/`ScanFrame`/`ScanQuery<T>` entry points + test migration (`b7be872`)
+- [x] 3. immutable options with `With()` builders (`ffca5bf`)
+- [x] 4. `CsvTrimOptions`/`ParquetCompression` enums (`94eb7c0`)
+- [x] 5. ParquetWriter Compression/RowGroupSize/WriteMetadata wiring (`0778f80`) + multi-row-group reader fix (`7ea5494`)
+- [x] 6. option immutability + parquet option-wiring tests (`3cf05d8`)
+- [x] 7. Schema/ColumnMetadata equality + clear path (`f33f64d`)
+- [x] 8. Schema/ColumnMetadata metadata-equality + clear-path tests (`f33f64d`)
+- [x] 9. docs: README/GETTING-STARTED/LINQ/changelog updated for #232/#234
+- [ ] 10. remove this file after final verification
+- [ ] Final verification: full `dotnet test` run (pending human approval)
 
 ## Reminder
 

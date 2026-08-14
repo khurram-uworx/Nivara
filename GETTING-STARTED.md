@@ -340,21 +340,19 @@ public sealed class Employee
 }
 
 // Lazy CSV scanning with schema inference (CSV integers infer as int)
-var csvQuery = Csv.ScanAsQuery<Employee>("employees.csv")
+var csvQuery = Csv.ScanQuery<Employee>("employees.csv")
     .Where(e => e.Salary > 70000)
     .Select(e => new { e.Name, e.Department, e.Salary });
 
 var result = csvQuery.Collect();
 
 // Custom CSV options
-var csvOptions = new CsvOptions
-{
-    HasHeaderRecord = true,
-    Delimiter = ",",
-    TrimOptions = true
-};
+var csvOptions = CsvOptions.Default.With(
+    hasHeaderRecord: true,
+    delimiter: ",",
+    trimOptions: CsvTrimOptions.Trim);
 
-var customCsv = Csv.ScanCsvAsQuery<Employee>("data.csv", csvOptions)
+var customCsv = Csv.ScanQuery<Employee>("data.csv", csvOptions)
     .Collect();
 ```
 
@@ -372,7 +370,7 @@ public sealed class User
 }
 
 // Lazy JSON scanning (JSON numbers infer as double)
-var jsonQuery = Json.ScanAsQuery<User>("data.json")
+var jsonQuery = Json.ScanQuery<User>("data.json")
     .Where(u => u.Active)
     .Select(u => new { u.Id, u.Name, u.Email });
 
@@ -939,7 +937,7 @@ public sealed class Employee
 // 2. Multiple filters are combined (operation fusion)
 // 3. Unused columns are eliminated early (projection pushdown)
 
-var query = Csv.ScanAsQuery<Employee>("employees.csv")
+var query = Csv.ScanQuery<Employee>("employees.csv")
     .Where(e => e.Age > 25)
     .Where(e => e.Salary > 50000)
     .Select(e => new { e.Name, e.Salary });
@@ -1382,12 +1380,10 @@ using var fileStream = new FileStream("employees_stream.parquet", FileMode.Creat
 frame.ToParquetStream(fileStream);
 
 // Custom Parquet options
-var parquetOptions = new ParquetWriteOptions
-{
-    Compression = "snappy",
-    RowGroupSize = 10000,
-    ValidateSchema = true
-};
+var parquetOptions = ParquetWriteOptions.Default.With(
+    compression: ParquetCompression.Snappy,
+    rowGroupSize: 10000,
+    validateSchema: true);
 
 frame.ToParquet("employees_custom.parquet", parquetOptions);
 

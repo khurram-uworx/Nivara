@@ -61,11 +61,9 @@ exact or nullable-underlying type, validated eagerly at `Query<T>()` (no data ac
 
 ```csharp
 // Nivara.IO.Json (core) and Nivara.Extensions.IO.Csv (Extensions)
-var query = Json.ScanAsQuery<Person>("data.json");
-var query2 = Json.ScanJsonAsQuery<Person>("data.json");
+var query = Json.ScanQuery<Person>("data.json");
 
-var csvQuery = Csv.ScanAsQuery<Person>("data.csv");
-var csvQuery2 = Csv.ScanCsvAsQuery<Person>("data.csv");
+var csvQuery = Csv.ScanQuery<Person>("data.csv");
 ```
 
 These create a lazy typed query over the file — the schema is inferred from a sample on construction,
@@ -340,7 +338,7 @@ var sampled = frame.Query<Product>().SelectRows(3, 0).ToObjects();
 ```csharp
 using Nivara.IO;
 
-var adults = Csv.ScanAsQuery<Person>("people.csv")
+var adults = Csv.ScanQuery<Person>("people.csv")
     .Where(p => p.Age > 30)
     .ToObjects();
 ```

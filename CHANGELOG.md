@@ -6,6 +6,31 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Canonical file-source entry points (#232)** — `Json`/`Csv` each expose exactly three
+  methods: `ReadFrame(path, options)` (eager `NivaraFrame`), `ScanFrame(path, options)`
+  (lazy `QueryFrame`), and `ScanQuery<T>(path, options)` (lazy `NivaraQuery<T>`); the
+  duplicated `ReadJson`/`ReadCsv`/`ScanJson`/`ScanCsv`/`ScanJsonAsQuery<T>`/`ScanCsvAsQuery<T>`
+  variants are removed.
+
+- **Immutable I/O options with `With()` builders (#232)** — `JsonOptions`,
+  `CsvOptions`, and `ParquetWriteOptions` are now immutable with get-only properties;
+  `Default` is a frozen instance and customization goes through `With(...)`
+  (`JsonOptions.With` clones the `JsonSerializerOptions` to prevent aliasing).
+  `CsvOptions.TrimOptions` is the `CsvTrimOptions { None, Trim }` enum and
+  `ParquetWriteOptions.Compression` is the `ParquetCompression` enum (None, Snappy,
+  Gzip, Lzo, Brotli, LZ4, Zstd, Lz4Raw). `ParquetWriter` now honors all three options —
+  `Compression`, `RowGroupSize` (multi-row-group output), and `WriteMetadata` (gates
+  `nivara.clrType.*` custom metadata). `ParquetReader` also reads **all** row groups
+  (previously silently truncated to the first).
+
+- **Metadata-aware schema equality (#234)** — `ColumnMetadata` gains
+  `ClearDefaultValue()`/`ClearDescription()`/`ClearProperties()` (the previous `With()`
+  could not clear values) plus `Equals`/`GetHashCode` over IsNullable, DefaultValue,
+  Description, and Properties. `Schema` implements `IEquatable<Schema>` with
+  `Equals`/`GetHashCode` including per-column metadata, and `IsCompatibleWith` gains an
+  optional `requireMetadataMatch = false` parameter (existing name+type matching is
+  unchanged by default).
+
 - **`NivaraSeries<T>.Sum()` / `Min()` / `Max()` instance aggregates (#231)** — the series
   level reductions removed in the AutoDiff refactor are restored (issue #231 reverses that
   decision). All three dispatch through the full 17-type numeric domain via
