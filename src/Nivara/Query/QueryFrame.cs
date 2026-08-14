@@ -564,6 +564,19 @@ internal sealed class QueryFrame : IDisposable
     // ── Window functions ──
 
     /// <summary>
+    /// Creates a reusable window specification (<see cref="WindowSpec"/>) for the window
+    /// methods on this query frame. The spec captures partition-by and order-by keys and can be
+    /// reused across multiple window methods.
+    /// </summary>
+    /// <returns>An empty window specification to be configured via <see cref="WindowSpec.PartitionBy"/> and <see cref="WindowSpec.OrderBy"/></returns>
+    /// <remarks>Added as part of issue #162 Over/WindowSpec builder delivery.</remarks>
+    public WindowSpec Over()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return new WindowSpec();
+    }
+
+    /// <summary>
     /// Adds a rolling-sum window operation that appends a result column.
     /// </summary>
     /// <param name="source">The source column name</param>
@@ -618,6 +631,30 @@ internal sealed class QueryFrame : IDisposable
     /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
     public QueryFrame RollingMax(string source, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null)
         => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Max));
+
+    /// <summary>
+    /// Adds a rolling-sum operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame RollingSum(string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, spec, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Sum));
+
+    /// <summary>
+    /// Adds a rolling-mean operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a double result column.
+    /// </summary>
+    public QueryFrame RollingMean(string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, spec, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Mean));
+
+    /// <summary>
+    /// Adds a rolling-minimum operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame RollingMin(string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, spec, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Min));
+
+    /// <summary>
+    /// Adds a rolling-maximum operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame RollingMax(string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new RollingOperation(source, resultColumn, windowSize, spec, minPeriods, nullHandler, NivaraFrameExtensions.RollingKind.Max));
 
     /// <summary>
     /// Adds a cumulative-sum operation that appends a result column.
@@ -679,6 +716,36 @@ internal sealed class QueryFrame : IDisposable
         => AddWindowOperation(new CumulativeOperation(source, resultColumn, null, NivaraFrameExtensions.CumulativeKind.Sum, isCount: true));
 
     /// <summary>
+    /// Adds a cumulative-sum operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeSum(string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, spec, nullHandler, NivaraFrameExtensions.CumulativeKind.Sum));
+
+    /// <summary>
+    /// Adds a cumulative-maximum operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeMax(string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, spec, nullHandler, NivaraFrameExtensions.CumulativeKind.Max));
+
+    /// <summary>
+    /// Adds a cumulative-minimum operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeMin(string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, spec, nullHandler, NivaraFrameExtensions.CumulativeKind.Min));
+
+    /// <summary>
+    /// Adds a cumulative-product operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame CumulativeProduct(string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, spec, nullHandler, NivaraFrameExtensions.CumulativeKind.Product));
+
+    /// <summary>
+    /// Adds a running count-of-non-null operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a long result column.
+    /// </summary>
+    public QueryFrame CumulativeCount(string source, string resultColumn, WindowSpec spec)
+        => AddWindowOperation(new CumulativeOperation(source, resultColumn, spec, null, NivaraFrameExtensions.CumulativeKind.Sum, isCount: true));
+
+    /// <summary>
     /// Adds a shift (lag) operation that appends a result column. Boundary positions are null, or <paramref name="fillValue"/> when provided.
     /// </summary>
     /// <param name="source">The source column name</param>
@@ -703,6 +770,18 @@ internal sealed class QueryFrame : IDisposable
     /// <exception cref="ArgumentException">Thrown when source or resultColumn is whitespace</exception>
     public QueryFrame Lead(string source, string resultColumn, int periods, object? fillValue = null)
         => AddWindowOperation(new ShiftOperation(source, resultColumn, -periods, fillValue));
+
+    /// <summary>
+    /// Adds a shift (lag) operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame Shift(string source, string resultColumn, int periods, WindowSpec spec, object? fillValue = null)
+        => AddWindowOperation(new ShiftOperation(source, resultColumn, periods, spec, fillValue));
+
+    /// <summary>
+    /// Adds a lead operation over a partitioned/ordered window (see <see cref="WindowSpec"/>) that appends a result column.
+    /// </summary>
+    public QueryFrame Lead(string source, string resultColumn, int periods, WindowSpec spec, object? fillValue = null)
+        => AddWindowOperation(new ShiftOperation(source, resultColumn, -periods, spec, fillValue));
 
     /// <summary>
     /// Adds a row-number operation that appends a long result column. With no partition keys the
@@ -752,6 +831,30 @@ internal sealed class QueryFrame : IDisposable
     /// <exception cref="ArgumentException">Thrown when resultColumn is whitespace or no order keys are provided</exception>
     public QueryFrame PercentRank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
         => AddWindowOperation(new RankOperation(resultColumn, RankKind.PercentRank, orderBy, partitionBy));
+
+    /// <summary>
+    /// Adds a row-number operation from a window specification (see <see cref="WindowSpec"/>) that appends a long result column.
+    /// </summary>
+    public QueryFrame RowNumber(string resultColumn, WindowSpec spec)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.RowNumber, spec));
+
+    /// <summary>
+    /// Adds a standard rank operation (gaps on ties) from a window specification (see <see cref="WindowSpec"/>) that appends a long result column.
+    /// </summary>
+    public QueryFrame Rank(string resultColumn, WindowSpec spec)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.Rank, spec));
+
+    /// <summary>
+    /// Adds a dense-rank operation (no gaps on ties) from a window specification (see <see cref="WindowSpec"/>) that appends a long result column.
+    /// </summary>
+    public QueryFrame DenseRank(string resultColumn, WindowSpec spec)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.DenseRank, spec));
+
+    /// <summary>
+    /// Adds a percent-rank operation from a window specification (see <see cref="WindowSpec"/>) that appends a double result column.
+    /// </summary>
+    public QueryFrame PercentRank(string resultColumn, WindowSpec spec)
+        => AddWindowOperation(new RankOperation(resultColumn, RankKind.PercentRank, spec));
 
     // ── Window functions over computed expressions ──
 

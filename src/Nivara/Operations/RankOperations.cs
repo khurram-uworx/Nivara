@@ -79,6 +79,34 @@ sealed class RankOperation : IQueryOperation
     }
 
     /// <summary>
+    /// Initializes a new instance of RankOperation over a window specification (partition/order keys)
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="kind">The rank function kind</param>
+    /// <param name="spec">The window specification</param>
+    /// <exception cref="ArgumentNullException">Thrown when resultColumn or spec is null</exception>
+    /// <exception cref="ArgumentException">Thrown when resultColumn is whitespace, or when
+    /// <paramref name="kind"/> is not RowNumber and the spec has no order keys</exception>
+    public RankOperation(string resultColumn, RankKind kind, WindowSpec spec)
+    {
+        ArgumentNullException.ThrowIfNull(spec);
+
+        if (string.IsNullOrWhiteSpace(resultColumn))
+            throw new ArgumentException("Result column name cannot be null or whitespace", nameof(resultColumn));
+
+        if (kind != RankKind.RowNumber && spec.OrderKeys.Count == 0)
+            throw new ArgumentException($"'{kind}' requires at least one order key", nameof(spec));
+
+        ResultColumn = resultColumn;
+        Kind = kind;
+        orderBy = spec.OrderKeys.ToList();
+        partitionBy = spec.PartitionColumns.ToArray();
+        partitionByExpressions = Array.Empty<ColumnExpression>();
+        orderByExpressions = Array.Empty<SortExpressionKey>();
+        expressionBased = false;
+    }
+
+    /// <summary>
     /// Gets the name of the appended result column
     /// </summary>
     public string ResultColumn { get; }

@@ -277,4 +277,93 @@ public class RankOperationTests
 
         Assert.Throws<ArgumentException>(() => frame.AsQueryFrame().Rank("rnk", Array.Empty<SortKey>()));
     }
+
+    // ── WindowSpec ──
+
+    [Test]
+    public void Rank_WithSpec_MatchesNamedColumns()
+    {
+        var input = Columns(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("v", IntColumn(10, 20, 20, 30)));
+        var spec = new WindowSpec().PartitionBy("g").OrderBy("v");
+        var op = new RankOperation("rnk", RankKind.Rank, spec);
+
+        var result = op.Execute(input);
+
+        var rnk = (NivaraColumn<long>)result["rnk"];
+        Assert.That(rnk[0], Is.EqualTo(1));
+        Assert.That(rnk[1], Is.EqualTo(2));
+        Assert.That(rnk[2], Is.EqualTo(1));
+        Assert.That(rnk[3], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Rank_WithSpec_TransformSchemaAppendsLongColumn()
+    {
+        var op = new RankOperation("rnk", RankKind.Rank, new WindowSpec().OrderBy("v"));
+
+        var schema = op.TransformSchema(SchemaOf(("v", typeof(int))));
+
+        Assert.That(schema.HasColumn("rnk"), Is.True);
+        Assert.That(schema.GetColumnType("rnk"), Is.EqualTo(typeof(long)));
+    }
+
+    [Test]
+    public void Rank_WithSpec_RequiresOrderKeys()
+    {
+        Assert.Throws<ArgumentException>(() => new RankOperation("rnk", RankKind.Rank, new WindowSpec()));
+    }
+
+    [Test]
+    public void Rank_WithSpec_MissingPartitionColumn_Throws()
+    {
+        var op = new RankOperation("rnk", RankKind.Rank, new WindowSpec().PartitionBy("missing").OrderBy("v"));
+
+        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
+    }
+
+    [Test]
+    public void Rank_WithSpec_MissingOrderColumn_Throws()
+    {
+        var op = new RankOperation("rnk", RankKind.Rank, new WindowSpec().OrderBy("missing"));
+
+        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("v", typeof(int)))));
+    }
+
+    [Test]
+    public void Rank_WithSpec_NonComparableOrderColumn_Throws()
+    {
+        var op = new RankOperation("rnk", RankKind.Rank, new WindowSpec().OrderBy("name"));
+
+        Assert.Throws<SchemaValidationException>(() => op.TransformSchema(SchemaOf(("name", typeof(object)))));
+    }
+
+    [Test]
+    public void QueryFrame_Rank_WithSpec_Collect_AddsResultColumn()
+    {
+        using var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("t", IntColumn(2, 1, 2, 1)),
+            ("v", IntColumn(10, 20, 30, 40)));
+        var spec = frame.AsQueryFrame().Over().PartitionBy("g").OrderBy("t");
+
+        using var result = frame.AsQueryFrame().Rank("rnk", spec).Collect();
+
+        Assert.That(result.HasColumn("rnk"), Is.True);
+        var rnk = result.GetColumn<long>("rnk");
+        Assert.That(rnk[0], Is.EqualTo(2));
+        Assert.That(rnk[1], Is.EqualTo(1));
+        Assert.That(rnk[2], Is.EqualTo(2));
+        Assert.That(rnk[3], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void QueryFrame_Rank_WithSpec_MissingPartitionColumn_Throws()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        var spec = new WindowSpec().PartitionBy("missing").OrderBy("v");
+
+        Assert.Throws<QueryExecutionException>(() => frame.AsQueryFrame().Rank("rnk", spec).Collect());
+    }
 }

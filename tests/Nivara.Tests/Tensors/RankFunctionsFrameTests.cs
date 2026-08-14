@@ -168,4 +168,64 @@ public class RankFunctionsFrameTests
 
         Assert.Throws<ArgumentException>(() => frame.Rank("v", new[] { new SortKey("v") }));
     }
+
+    // ── WindowSpec overloads ──
+
+    [Test]
+    public void Rank_WithSpec_MatchesMethodArgs()
+    {
+        var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("t", IntColumn(2, 1, 2, 1)),
+            ("v", IntColumn(10, 20, 30, 40)));
+
+        var spec = frame.Over().PartitionBy("g").OrderBy("t");
+        var viaSpec = frame.Rank("rnk", spec);
+        var viaArgs = frame.Rank("rnkArgs", new[] { new SortKey("t") }, "g");
+
+        Assert.That(viaSpec.GetColumn<long>("rnk").ToArray(), Is.EqualTo(viaArgs.GetColumn<long>("rnkArgs").ToArray()));
+    }
+
+    [Test]
+    public void RowNumber_WithSpec_ResetsPerPartition()
+    {
+        var frame = FrameWith(
+            ("g", NivaraColumn<string>.CreateForReferenceType(new[] { "A", "A", "B", "B" })),
+            ("v", IntColumn(10, 20, 30, 40)));
+
+        var spec = frame.Over().PartitionBy("g");
+        var result = frame.RowNumber("rn", spec);
+
+        var rn = result.GetColumn<long>("rn");
+        Assert.That(rn[0], Is.EqualTo(1));
+        Assert.That(rn[1], Is.EqualTo(2));
+        Assert.That(rn[2], Is.EqualTo(1));
+        Assert.That(rn[3], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Rank_WithSpec_RequiresOrderKeys()
+    {
+        var frame = FrameWith(("v", IntColumn(1, 2)));
+
+        Assert.Throws<ArgumentException>(() => frame.Rank("rnk", new WindowSpec()));
+    }
+
+    [Test]
+    public void Rank_WithSpec_MissingPartitionColumn_Throws()
+    {
+        var frame = FrameWith(("v", IntColumn(1, 2)));
+
+        var spec = frame.Over().PartitionBy("missing").OrderBy("v");
+        Assert.Throws<ArgumentException>(() => frame.Rank("rnk", spec));
+    }
+
+    [Test]
+    public void Rank_WithSpec_MissingOrderColumn_Throws()
+    {
+        var frame = FrameWith(("v", IntColumn(1, 2)));
+
+        var spec = frame.Over().OrderBy("missing");
+        Assert.Throws<ArgumentException>(() => frame.Rank("rnk", spec));
+    }
 }
