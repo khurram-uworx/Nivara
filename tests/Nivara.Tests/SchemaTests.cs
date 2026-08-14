@@ -435,6 +435,90 @@ public class SchemaTests
         Assert.That(schema.GetColumnType("AGE"), Is.EqualTo(typeof(int)));
         Assert.That(schema.GetColumnType("age"), Is.EqualTo(typeof(int)));
     }
+
+    [Test]
+    public void Equals_WithDifferentMetadata_ReturnsFalse()
+    {
+        // Arrange
+        var schema1 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Original"));
+        var schema2 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Different"));
+
+        // Act & Assert
+        Assert.That(schema1.Equals(schema2), Is.False);
+        Assert.That(schema1.Equals((object)schema2), Is.False);
+    }
+
+    [Test]
+    public void Equals_WithSameMetadata_ReturnsTrue()
+    {
+        // Arrange
+        var schema1 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Same"));
+        var schema2 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Same"));
+
+        // Act & Assert
+        Assert.That(schema1.Equals(schema2), Is.True);
+        Assert.That(schema1.Equals((object)schema2), Is.True);
+    }
+
+    [Test]
+    public void GetHashCode_WithDifferentMetadata_ReturnsDifferentHashCodes()
+    {
+        // Arrange
+        var schema1 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Original"));
+        var schema2 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Different"));
+
+        // Act & Assert
+        Assert.That(schema1.GetHashCode(), Is.Not.EqualTo(schema2.GetHashCode()));
+    }
+
+    [Test]
+    public void GetHashCode_WithSameMetadata_ReturnsSameHashCode()
+    {
+        // Arrange
+        var schema1 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Same"));
+        var schema2 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Same"));
+
+        // Act & Assert
+        Assert.That(schema1.GetHashCode(), Is.EqualTo(schema2.GetHashCode()));
+    }
+
+    [Test]
+    public void IsCompatibleWith_IgnoresMetadataByDefault()
+    {
+        // Arrange
+        var schema1 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Original"));
+        var schema2 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Different"));
+
+        // Act & Assert
+        Assert.That(schema1.IsCompatibleWith(schema2), Is.True);
+        Assert.That(schema1.IsCompatibleWith(schema2, requireExactMatch: false), Is.True);
+    }
+
+    [Test]
+    public void IsCompatibleWith_WithRequireMetadataMatch_ChecksMetadata()
+    {
+        // Arrange
+        var schema1 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Original"));
+        var schema2 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Different"));
+        var schema3 = new Schema(new[] { ("Id", typeof(int)) })
+            .WithColumn("Note", typeof(string), new ColumnMetadata(description: "Original"));
+
+        // Act & Assert
+        Assert.That(schema1.IsCompatibleWith(schema2, requireMetadataMatch: true), Is.False);
+        Assert.That(schema1.IsCompatibleWith(schema3, requireMetadataMatch: true), Is.True);
+    }
 }
 
 [TestFixture]
@@ -576,5 +660,157 @@ public class ColumnMetadataTests
         Assert.That(result, Contains.Substring("NOT NULL"));
         Assert.That(result, Contains.Substring("DEFAULT 0"));
         Assert.That(result, Contains.Substring("DESC 'Counter'"));
+    }
+
+    [Test]
+    public void ClearDefaultValue_RemovesDefaultValueAndKeepsOtherValues()
+    {
+        // Arrange
+        var metadata = new ColumnMetadata(
+            isNullable: false,
+            defaultValue: 42,
+            description: "Employee ID");
+
+        // Act
+        var cleared = metadata.ClearDefaultValue();
+
+        // Assert
+        Assert.That(cleared.DefaultValue, Is.Null);
+        Assert.That(cleared.IsNullable, Is.False);
+        Assert.That(cleared.Description, Is.EqualTo("Employee ID"));
+
+        // Original should be unchanged
+        Assert.That(metadata.DefaultValue, Is.EqualTo(42));
+    }
+
+    [Test]
+    public void ClearDescription_RemovesDescriptionAndKeepsOtherValues()
+    {
+        // Arrange
+        var metadata = new ColumnMetadata(
+            isNullable: false,
+            defaultValue: 42,
+            description: "Employee ID");
+
+        // Act
+        var cleared = metadata.ClearDescription();
+
+        // Assert
+        Assert.That(cleared.Description, Is.Null);
+        Assert.That(cleared.IsNullable, Is.False);
+        Assert.That(cleared.DefaultValue, Is.EqualTo(42));
+
+        // Original should be unchanged
+        Assert.That(metadata.Description, Is.EqualTo("Employee ID"));
+    }
+
+    [Test]
+    public void ClearProperties_RemovesAllPropertiesAndKeepsOtherValues()
+    {
+        // Arrange
+        var metadata = new ColumnMetadata(
+            defaultValue: 42,
+            description: "Employee ID")
+            .With(properties: new Dictionary<string, object> { { "Format", "yyyy-MM-dd" } });
+
+        // Act
+        var cleared = metadata.ClearProperties();
+
+        // Assert
+        Assert.That(cleared.Properties.Count, Is.EqualTo(0));
+        Assert.That(cleared.DefaultValue, Is.EqualTo(42));
+        Assert.That(cleared.Description, Is.EqualTo("Employee ID"));
+
+        // Original should be unchanged
+        Assert.That(metadata.Properties["Format"], Is.EqualTo("yyyy-MM-dd"));
+    }
+
+    [Test]
+    public void Equals_WithEqualMetadata_ReturnsTrue()
+    {
+        // Arrange
+        var properties1 = new Dictionary<string, object> { { "Format", "yyyy-MM-dd" } };
+        var properties2 = new Dictionary<string, object> { { "Format", "yyyy-MM-dd" } };
+        var metadata1 = new ColumnMetadata(isNullable: false, defaultValue: 42, description: "ID", properties: properties1);
+        var metadata2 = new ColumnMetadata(isNullable: false, defaultValue: 42, description: "ID", properties: properties2);
+
+        // Act & Assert
+        Assert.That(metadata1.Equals(metadata2), Is.True);
+        Assert.That(metadata1.Equals((object)metadata2), Is.True);
+    }
+
+    [Test]
+    public void Equals_WithDifferentDefaultValue_ReturnsFalse()
+    {
+        // Arrange
+        var metadata1 = new ColumnMetadata(defaultValue: 42);
+        var metadata2 = new ColumnMetadata(defaultValue: 43);
+
+        // Act & Assert
+        Assert.That(metadata1.Equals(metadata2), Is.False);
+    }
+
+    [Test]
+    public void Equals_WithDifferentDescription_ReturnsFalse()
+    {
+        // Arrange
+        var metadata1 = new ColumnMetadata(description: "One");
+        var metadata2 = new ColumnMetadata(description: "Two");
+
+        // Act & Assert
+        Assert.That(metadata1.Equals(metadata2), Is.False);
+    }
+
+    [Test]
+    public void Equals_WithDifferentProperties_ReturnsFalse()
+    {
+        // Arrange
+        var metadata1 = new ColumnMetadata().With(properties: new Dictionary<string, object> { { "Format", "yyyy-MM-dd" } });
+        var metadata2 = new ColumnMetadata().With(properties: new Dictionary<string, object> { { "Format", "dd/MM/yyyy" } });
+
+        // Act & Assert
+        Assert.That(metadata1.Equals(metadata2), Is.False);
+    }
+
+    [Test]
+    public void Equals_WithDifferentIsNullable_ReturnsFalse()
+    {
+        // Arrange
+        var metadata1 = new ColumnMetadata(isNullable: true);
+        var metadata2 = new ColumnMetadata(isNullable: false);
+
+        // Act & Assert
+        Assert.That(metadata1.Equals(metadata2), Is.False);
+    }
+
+    [Test]
+    public void GetHashCode_WithEqualMetadata_ReturnsSameHashCode()
+    {
+        // Arrange
+        var metadata1 = new ColumnMetadata(isNullable: false, defaultValue: 42, description: "ID");
+        var metadata2 = new ColumnMetadata(isNullable: false, defaultValue: 42, description: "ID");
+
+        // Act & Assert
+        Assert.That(metadata1.GetHashCode(), Is.EqualTo(metadata2.GetHashCode()));
+    }
+
+    [Test]
+    public void GetHashCode_WithDifferentPropertyOrder_ReturnsSameHashCode()
+    {
+        // Arrange
+        var metadata1 = new ColumnMetadata().With(properties: new Dictionary<string, object>
+        {
+            { "Format", "yyyy-MM-dd" },
+            { "Culture", "en-US" }
+        });
+        var metadata2 = new ColumnMetadata().With(properties: new Dictionary<string, object>
+        {
+            { "Culture", "en-US" },
+            { "Format", "yyyy-MM-dd" }
+        });
+
+        // Act & Assert
+        Assert.That(metadata1.Equals(metadata2), Is.True);
+        Assert.That(metadata1.GetHashCode(), Is.EqualTo(metadata2.GetHashCode()));
     }
 }

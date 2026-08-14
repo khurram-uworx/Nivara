@@ -7,7 +7,7 @@ namespace Nivara;
 /// Represents the schema of a frame, including column names, types, and metadata.
 /// Provides immutable schema management with transformation capabilities.
 /// </summary>
-public sealed class Schema
+public sealed class Schema : IEquatable<Schema>
 {
     readonly IReadOnlyDictionary<string, Type> columnTypes;
     readonly IReadOnlyDictionary<string, ColumnMetadata> metadata;
@@ -206,8 +206,9 @@ public sealed class Schema
     /// </summary>
     /// <param name="other">The other schema to compare against</param>
     /// <param name="requireExactMatch">Whether to require exact type matches</param>
+    /// <param name="requireMetadataMatch">Whether to also require matching per-column metadata</param>
     /// <returns>True if the schemas are compatible, false otherwise</returns>
-    public bool IsCompatibleWith(Schema other, bool requireExactMatch = true)
+    public bool IsCompatibleWith(Schema other, bool requireExactMatch = true, bool requireMetadataMatch = false)
     {
         if (other == null)
             return false;
@@ -239,6 +240,23 @@ public sealed class Schema
             }
         }
 
+        if (requireMetadataMatch && !MetadataMatches(other))
+            return false;
+
+        return true;
+    }
+
+    /// <summary>
+    /// Compares the per-column metadata of this schema with another schema
+    /// </summary>
+    private bool MetadataMatches(Schema other)
+    {
+        foreach (var name in ColumnNames)
+        {
+            if (!metadata[name].Equals(other.metadata[name]))
+                return false;
+        }
+
         return true;
     }
 
@@ -253,17 +271,28 @@ public sealed class Schema
     }
 
     /// <summary>
+    /// Determines whether the specified schema is equal to the current schema,
+    /// including per-column metadata
+    /// </summary>
+    /// <param name="other">The schema to compare</param>
+    /// <returns>True if the schemas are equal, false otherwise</returns>
+    public bool Equals(Schema? other)
+    {
+        return other is not null && IsCompatibleWith(other, requireExactMatch: true, requireMetadataMatch: true);
+    }
+
+    /// <summary>
     /// Determines whether the specified object is equal to the current schema
     /// </summary>
     /// <param name="obj">The object to compare</param>
     /// <returns>True if the objects are equal, false otherwise</returns>
     public override bool Equals(object? obj)
     {
-        return obj is Schema other && IsCompatibleWith(other, requireExactMatch: true);
+        return Equals(obj as Schema);
     }
 
     /// <summary>
-    /// Returns a hash code for the schema
+    /// Returns a hash code for the schema, including per-column metadata
     /// </summary>
     /// <returns>A hash code for the schema</returns>
     public override int GetHashCode()
@@ -273,6 +302,7 @@ public sealed class Schema
         {
             hash.Add(name.ToLowerInvariant());
             hash.Add(columnTypes[name]);
+            hash.Add(metadata[name]);
         }
         return hash.ToHashCode();
     }
@@ -281,7 +311,7 @@ public sealed class Schema
 /// <summary>
 /// Represents metadata for a column in a schema
 /// </summary>
-public sealed class ColumnMetadata
+public sealed class ColumnMetadata : IEquatable<ColumnMetadata>
 {
     /// <summary>
     /// Initializes a new instance of ColumnMetadata with default values
@@ -352,6 +382,97 @@ public sealed class ColumnMetadata
             defaultValue ?? DefaultValue,
             description ?? Description,
             properties ?? Properties);
+    }
+
+    /// <summary>
+    /// Returns a copy of this metadata with the default value cleared
+    /// </summary>
+    /// <returns>A new ColumnMetadata instance without a default value</returns>
+    public ColumnMetadata ClearDefaultValue()
+    {
+        return new ColumnMetadata(IsNullable, null, Description, Properties);
+    }
+
+    /// <summary>
+    /// Returns a copy of this metadata with the description cleared
+    /// </summary>
+    /// <returns>A new ColumnMetadata instance without a description</returns>
+    public ColumnMetadata ClearDescription()
+    {
+        return new ColumnMetadata(IsNullable, DefaultValue, null, Properties);
+    }
+
+    /// <summary>
+    /// Returns a copy of this metadata with all additional properties cleared
+    /// </summary>
+    /// <returns>A new ColumnMetadata instance without additional properties</returns>
+    public ColumnMetadata ClearProperties()
+    {
+        return new ColumnMetadata(IsNullable, DefaultValue, Description, null);
+    }
+
+    /// <summary>
+    /// Determines whether the specified metadata is equal to the current metadata
+    /// </summary>
+    /// <param name="other">The metadata to compare</param>
+    /// <returns>True if the metadata are equal, false otherwise</returns>
+    public bool Equals(ColumnMetadata? other)
+    {
+        return other is not null
+            && IsNullable == other.IsNullable
+            && Equals(DefaultValue, other.DefaultValue)
+            && string.Equals(Description, other.Description, StringComparison.Ordinal)
+            && PropertiesEqual(Properties, other.Properties);
+    }
+
+    /// <summary>
+    /// Determines whether the specified object is equal to the current metadata
+    /// </summary>
+    /// <param name="obj">The object to compare</param>
+    /// <returns>True if the objects are equal, false otherwise</returns>
+    public override bool Equals(object? obj)
+    {
+        return Equals(obj as ColumnMetadata);
+    }
+
+    /// <summary>
+    /// Returns a hash code for the metadata
+    /// </summary>
+    /// <returns>A hash code for the metadata</returns>
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(IsNullable);
+        hash.Add(DefaultValue);
+        hash.Add(Description);
+        foreach (var (key, value) in Properties.OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+        {
+            hash.Add(key);
+            hash.Add(value);
+        }
+        return hash.ToHashCode();
+    }
+
+    /// <summary>
+    /// Compares two property dictionaries by key and value regardless of ordering
+    /// </summary>
+    private static bool PropertiesEqual(
+        IReadOnlyDictionary<string, object> left,
+        IReadOnlyDictionary<string, object> right)
+    {
+        if (ReferenceEquals(left, right))
+            return true;
+
+        if (left.Count != right.Count)
+            return false;
+
+        foreach (var (key, value) in left)
+        {
+            if (!right.TryGetValue(key, out var otherValue) || !Equals(value, otherValue))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>
