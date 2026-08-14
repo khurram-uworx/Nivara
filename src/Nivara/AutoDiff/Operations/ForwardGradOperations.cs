@@ -1,3 +1,4 @@
+using Nivara.AutoDiff.Nn;
 using Nivara.Helpers;
 using System.Buffers;
 using System.Numerics;
@@ -749,6 +750,65 @@ public static class ForwardGradOperations
         return new ForwardGradTensor<T>(resultData, tangent, ScalarShape());
     }
 
+    /// <summary>
+    /// Reduces a tensor by averaging non-overlapping pools: input is [batch*poolSize, embedDim]
+    /// flattened, output is [batchSize, embedDim].
+    /// JVP: t_out = MeanPool(t_a, poolSize, embedDim) — the pooling transform is linear.
+    /// </summary>
+    public static ForwardGradTensor<T> MeanPool<T>(ForwardGradTensor<T> a, int poolSize, int embedDim)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (poolSize <= 0) throw new ArgumentOutOfRangeException(nameof(poolSize));
+        if (embedDim <= 0) throw new ArgumentOutOfRangeException(nameof(embedDim));
+        if (a.Length == 0) throw new InvalidOperationException("Cannot mean-pool an empty tensor.");
+        if (a.Length % (poolSize * embedDim) != 0)
+            throw new ArgumentException(
+                $"Tensor length {a.Length} is not divisible by poolSize*embedDim = {poolSize * embedDim}.");
+
+        int batchSize = a.Length / (poolSize * embedDim);
+        T tPoolSize = T.CreateChecked(poolSize);
+
+        var src = new T[a.Length];
+        a.Data.CopyTo(src, default(T)!);
+
+        var resultValues = new T[batchSize * embedDim];
+        for (int b = 0; b < batchSize; b++)
+        {
+            int rowOffset = b * poolSize * embedDim;
+            for (int d = 0; d < embedDim; d++)
+            {
+                T sum = T.Zero;
+                for (int l = 0; l < poolSize; l++)
+                    sum += src[rowOffset + l * embedDim + d];
+                resultValues[b * embedDim + d] = sum / tPoolSize;
+            }
+        }
+
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var tanSpan);
+            var tanValues = new T[batchSize * embedDim];
+            for (int b = 0; b < batchSize; b++)
+            {
+                int rowOffset = b * poolSize * embedDim;
+                for (int d = 0; d < embedDim; d++)
+                {
+                    T sum = T.Zero;
+                    for (int l = 0; l < poolSize; l++)
+                        sum += tanSpan[rowOffset + l * embedDim + d];
+                    tanValues[b * embedDim + d] = sum / tPoolSize;
+                }
+            }
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanValues);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, new[] { batchSize, embedDim });
+    }
+
     #endregion
 
     #region Activation Functions
@@ -797,6 +857,31 @@ public static class ForwardGradOperations
             a.Tangent.TryGetSpan(out var aTanSpan);
             var tanArr = new T[a.Length];
             GradKernels.GeluGradient(aSpan, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
+    /// <summary>
+    /// Applies the exact Gaussian error linear unit (erf-based).
+    /// JVP: t_out = GeluExactGradient(a) * t_a
+    /// </summary>
+    public static ForwardGradTensor<T> GeluExact<T>(ForwardGradTensor<T> a)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var resultArr = new T[a.Length];
+        GradKernels.GeluExact(a.AsSpan(), resultArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(resultArr);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.GeluExactGradient(a.AsSpan(), aTanSpan, tanArr);
             tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
@@ -1007,6 +1092,24 @@ public static class ForwardGradOperations
     }
 
     /// <summary>
+    /// Raises each element to a scalar power: result[i] = a[i]^exponent.
+    /// JVP: t_out = exponent * a^(exponent-1) * t_a
+    /// </summary>
+    public static ForwardGradTensor<T> Pow<T>(ForwardGradTensor<T> a, double exponent)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var primal = GradOperationKernels.ApplyPow(a.Data, exponent);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+            tangent = GradOperationKernels.ApplyPowGradient(a.Data, a.Tangent, exponent);
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
+    /// <summary>
     /// Applies the Softmax function along the last dimension.
     /// JVP: s ⊙ (t_a - Σ(s * t_a)) where s = softmax(a)
     /// The Jacobian is symmetric, so SoftmaxGradient(result, t_a, dim) computes the JVP.
@@ -1104,6 +1207,260 @@ public static class ForwardGradOperations
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(input));
+    }
+
+    #endregion
+
+    #region Normalization Operations
+
+    /// <summary>
+    /// Applies RMS normalization: result[i] = input[i] / sqrt(mean(input^2) + eps).
+    /// The RMSNorm Jacobian is symmetric, so the JVP uses the reverse-mode gradient kernel.
+    /// JVP: t_out = ApplyRMSNormGradient(a, t_a, eps)
+    /// </summary>
+    public static ForwardGradTensor<T> RMSNorm<T>(ForwardGradTensor<T> a, double eps = 1e-5)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var primal = GradOperationKernels.ApplyRMSNorm(a.Data, eps);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+            tangent = GradOperationKernels.ApplyRMSNormGradient(a.Data, a.Tangent, eps);
+
+        return new ForwardGradTensor<T>(primal, tangent, a.shape);
+    }
+
+    /// <summary>
+    /// Applies RMS normalization independently to each row of a [rows, cols] tensor.
+    /// The per-row Jacobian is symmetric, so the JVP reuses the backward kernel.
+    /// JVP: t_out = PerRowRMSNormBackwardKernel(a, t_a, rows, cols, eps)
+    /// </summary>
+    public static ForwardGradTensor<T> PerRowRMSNorm<T>(ForwardGradTensor<T> a, int rows, int cols, double eps = 1e-5)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        var srcData = new T[a.Length];
+        a.Data.CopyTo(srcData, default(T)!);
+        var resultData = new T[rows * cols];
+        RMSNormKernel<T>.PerRowRMSNormForwardKernel(srcData, resultData, rows, cols, eps);
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultData);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            var tanSrc = new T[a.Length];
+            a.Tangent.CopyTo(tanSrc, default(T)!);
+            var tanResult = new T[rows * cols];
+            RMSNormKernel<T>.PerRowRMSNormBackwardKernel(srcData, tanSrc, tanResult, rows, cols, eps);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanResult);
+        }
+
+        return new ForwardGradTensor<T>(resultCol, tangent, a.Shape);
+    }
+
+    #endregion
+
+    #region Broadcasting Operations
+
+    /// <summary>
+    /// Adds a per-column bias to each row of a matrix: result[i, j] = a[i, j] + bias[j].
+    /// JVP: t_out = t_a + broadcast(t_bias)
+    /// </summary>
+    public static ForwardGradTensor<T> AddBias<T>(ForwardGradTensor<T> a, ForwardGradTensor<T> bias)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (bias == null) throw new ArgumentNullException(nameof(bias));
+
+        if (a.Rank != 2)
+            throw new ArgumentException($"AddBias expects a matrix (rank 2) input, got rank {a.Rank}", nameof(a));
+
+        var rows = a.shape[0];
+        var cols = a.shape[1];
+        if (bias.Length != cols)
+            throw new ArgumentException($"AddBias bias length ({bias.Length}) must equal the input column count ({cols}).");
+
+        var aSpan = a.AsSpan();
+        var biasSpan = bias.AsSpan();
+        var resultArr = new T[a.Length];
+        for (int r = 0; r < rows; r++)
+        {
+            var resultRow = resultArr.AsSpan(r * cols, cols);
+            TensorPrimitives.Add(aSpan.Slice(r * cols, cols), biasSpan, resultRow);
+        }
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(resultArr);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent || bias.RequiresTangent)
+        {
+            var aTan = a.Tangent;
+            var bTan = bias.Tangent;
+
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[a.Length];
+                for (int r = 0; r < rows; r++)
+                {
+                    var row = tanArr.AsSpan(r * cols, cols);
+                    TensorPrimitives.Add(aTanSpan.Slice(r * cols, cols), bTanSpan, row);
+                }
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                tangent = aTan;
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[a.Length];
+                for (int r = 0; r < rows; r++)
+                    bTanSpan.CopyTo(tanArr.AsSpan(r * cols, cols));
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, a.shape);
+    }
+
+    /// <summary>
+    /// Broadcasts a per-channel scale across a 2D+ input:
+    /// result[i, c, ...] = input[i, c, ...] * scale[c].
+    /// JVP: t_out = t_input * scale + input * broadcast(t_scale)
+    /// </summary>
+    public static ForwardGradTensor<T> BroadcastMultiply<T>(ForwardGradTensor<T> input, ForwardGradTensor<T> scale)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (scale == null) throw new ArgumentNullException(nameof(scale));
+        if (input.Rank < 2) throw new ArgumentException($"Input must be at least 2D [batch, channels, ...], got {input.Rank}D");
+        if (scale.Rank != 1) throw new ArgumentException($"Scale must be 1D [channels], got {scale.Rank}D");
+
+        int c = input.shape[1];
+        if (scale.Length != c)
+            throw new ArgumentException($"Scale length ({scale.Length}) must match input channel dimension ({c})");
+
+        var inputData = new T[input.Length];
+        input.Data.CopyTo(inputData, T.Zero);
+        var scaleData = new T[c];
+        scale.Data.CopyTo(scaleData, T.Zero);
+
+        int channelStride = 1;
+        for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
+
+        var outputData = new T[input.Length];
+        for (int idx = 0; idx < input.Length; idx++)
+        {
+            int ch = (idx / channelStride) % c;
+            outputData[idx] = inputData[idx] * scaleData[ch];
+        }
+
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(outputData);
+
+        NivaraColumn<T>? tangent = null;
+        if (input.RequiresTangent || scale.RequiresTangent)
+        {
+            var tanData = new T[input.Length];
+            if (input.Tangent != null)
+            {
+                input.Tangent.TryGetSpan(out var inputTanSpan);
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanData[idx] = inputTanSpan[idx] * scaleData[ch];
+                }
+            }
+
+            if (scale.Tangent != null)
+            {
+                scale.Tangent.TryGetSpan(out var scaleTanSpan);
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanData[idx] += inputData[idx] * scaleTanSpan[ch];
+                }
+            }
+
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanData);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, input.shape);
+    }
+
+    /// <summary>
+    /// Broadcasts a per-channel bias across a 2D+ input: result[i, c, ...] = input[i, c, ...] + bias[c].
+    /// JVP: t_out = t_input + broadcast(t_bias)
+    /// </summary>
+    public static ForwardGradTensor<T> BroadcastAdd<T>(ForwardGradTensor<T> input, ForwardGradTensor<T> bias)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (bias == null) throw new ArgumentNullException(nameof(bias));
+        if (input.Rank < 2) throw new ArgumentException($"Input must be at least 2D [batch, channels, ...], got {input.Rank}D");
+        if (bias.Rank != 1) throw new ArgumentException($"Bias must be 1D [channels], got {bias.Rank}D");
+
+        int c = input.shape[1];
+        if (bias.Length != c)
+            throw new ArgumentException($"Bias length ({bias.Length}) must match input channel dimension ({c})");
+
+        var inputData = new T[input.Length];
+        input.Data.CopyTo(inputData, T.Zero);
+        var biasData = new T[c];
+        bias.Data.CopyTo(biasData, T.Zero);
+
+        int channelStride = 1;
+        for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
+
+        var outputData = new T[input.Length];
+        for (int idx = 0; idx < input.Length; idx++)
+        {
+            int ch = (idx / channelStride) % c;
+            outputData[idx] = inputData[idx] + biasData[ch];
+        }
+
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(outputData);
+
+        NivaraColumn<T>? tangent = null;
+        if (input.RequiresTangent || bias.RequiresTangent)
+        {
+            var aTan = input.Tangent;
+            var bTan = bias.Tangent;
+
+            if (aTan != null && bTan != null)
+            {
+                aTan.TryGetSpan(out var aTanSpan);
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[input.Length];
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanArr[idx] = aTanSpan[idx] + bTanSpan[ch];
+                }
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+            else if (aTan != null)
+            {
+                tangent = aTan;
+            }
+            else if (bTan != null)
+            {
+                bTan.TryGetSpan(out var bTanSpan);
+                var tanArr = new T[input.Length];
+                for (int idx = 0; idx < input.Length; idx++)
+                {
+                    int ch = (idx / channelStride) % c;
+                    tanArr[idx] = bTanSpan[ch];
+                }
+                tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+            }
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, input.shape);
     }
 
     #endregion
