@@ -1,6 +1,7 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Query;
+using Nivara.Tensors;
 
 namespace Nivara.Operations;
 
@@ -22,6 +23,18 @@ abstract class WindowOperationBase : IQueryOperation
     }
 
     /// <summary>
+    /// Initializes a new instance of WindowOperationBase over a named source column with a
+    /// window specification (partition/order keys)
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="spec">The window specification</param>
+    protected WindowOperationBase(string source, string resultColumn, WindowSpec spec)
+        : this(source: source ?? throw new ArgumentNullException(nameof(source)), sourceExpression: null, resultColumn, spec)
+    {
+    }
+
+    /// <summary>
     /// Initializes a new instance of WindowOperationBase over a computed source expression
     /// </summary>
     /// <param name="sourceExpression">The computed source column expression</param>
@@ -31,7 +44,7 @@ abstract class WindowOperationBase : IQueryOperation
     {
     }
 
-    WindowOperationBase(string? source, ColumnExpression? sourceExpression, string resultColumn)
+    WindowOperationBase(string? source, ColumnExpression? sourceExpression, string resultColumn, WindowSpec? spec = null)
     {
         if (source is not null && string.IsNullOrWhiteSpace(source))
             throw new ArgumentException("Source column name cannot be null or whitespace", nameof(source));
@@ -39,6 +52,7 @@ abstract class WindowOperationBase : IQueryOperation
         Source = source;
         SourceExpression = sourceExpression;
         ResultColumn = resultColumn ?? throw new ArgumentNullException(nameof(resultColumn));
+        Spec = spec;
     }
 
     /// <summary>
@@ -50,6 +64,11 @@ abstract class WindowOperationBase : IQueryOperation
     /// Gets the computed source column expression (null when a named source column is used)
     /// </summary>
     public ColumnExpression? SourceExpression { get; }
+
+    /// <summary>
+    /// Gets the optional window specification (partition/order keys). Null or empty = unpartitioned row order.
+    /// </summary>
+    public WindowSpec? Spec { get; }
 
     /// <summary>
     /// Gets the result column name
@@ -90,6 +109,28 @@ abstract class WindowOperationBase : IQueryOperation
         if (inputSchema.HasColumn(ResultColumn))
             throw new ArgumentException($"Result column '{ResultColumn}' already exists in the schema", nameof(ResultColumn));
 
+        if (Spec is { IsEmpty: false })
+        {
+            foreach (var partition in Spec.PartitionColumns)
+            {
+                if (!inputSchema.HasColumn(partition))
+                    throw new SchemaValidationException(
+                        $"Partition column '{partition}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
+            }
+
+            foreach (var sortKey in Spec.OrderKeys)
+            {
+                if (!inputSchema.HasColumn(sortKey.ColumnName))
+                    throw new SchemaValidationException(
+                        $"Order column '{sortKey.ColumnName}' not found in schema. Available columns: {string.Join(", ", inputSchema.ColumnNames)}");
+
+                var columnType = inputSchema.GetColumnType(sortKey.ColumnName);
+                if (!SortOperation.IsComparableType(columnType))
+                    throw new SchemaValidationException(
+                        $"Order column '{sortKey.ColumnName}' of type '{columnType.Name}' is not comparable and cannot be used for the window");
+            }
+        }
+
         var resultType = GetResultType(sourceType);
         return inputSchema.WithColumn(ResultColumn, resultType);
     }
@@ -112,7 +153,9 @@ abstract class WindowOperationBase : IQueryOperation
                 throw new ColumnNotFoundException(Source!, input.Keys);
             }
 
-            var resultColumn = Compute(sourceColumn);
+            var resultColumn = Spec is { IsEmpty: false }
+                ? PartitionedWindowEngine.Compute(input, sourceColumn, Spec, Compute)
+                : Compute(sourceColumn);
 
             var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
             foreach (var kvp in input)
@@ -142,7 +185,10 @@ abstract class WindowOperationBase : IQueryOperation
 
     /// <inheritdoc />
     public override string ToString()
-        => $"{OperationType}({(SourceExpression is not null ? SourceExpression.Name : Source)} -> {ResultColumn})";
+    {
+        var baseStr = $"{OperationType}({(SourceExpression is not null ? SourceExpression.Name : Source)} -> {ResultColumn})";
+        return Spec is { IsEmpty: false } ? $"{baseStr} {Spec}" : baseStr;
+    }
 }
 
 /// <summary>
@@ -184,6 +230,30 @@ sealed class RollingOperation : WindowOperationBase
     /// <exception cref="ArgumentOutOfRangeException">Thrown when windowSize is not positive</exception>
     public RollingOperation(ColumnExpression sourceExpression, string resultColumn, int windowSize, int? minPeriods = null, Func<object?>? nullHandler = null, NivaraFrameExtensions.RollingKind kind = NivaraFrameExtensions.RollingKind.Sum)
         : base(sourceExpression, resultColumn)
+    {
+        if (windowSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(windowSize), "Window size must be positive");
+
+        WindowSize = windowSize;
+        MinPeriods = minPeriods;
+        NullHandler = nullHandler;
+        Kind = kind;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of RollingOperation over a named source column with a
+    /// window specification (partition/order keys)
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="windowSize">The rolling window size</param>
+    /// <param name="spec">The window specification</param>
+    /// <param name="minPeriods">The minimum number of valid observations required</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <param name="kind">The rolling aggregate kind</param>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when windowSize is not positive</exception>
+    public RollingOperation(string source, string resultColumn, int windowSize, WindowSpec spec, int? minPeriods = null, Func<object?>? nullHandler = null, NivaraFrameExtensions.RollingKind kind = NivaraFrameExtensions.RollingKind.Sum)
+        : base(source, resultColumn, spec ?? throw new ArgumentNullException(nameof(spec)))
     {
         if (windowSize <= 0)
             throw new ArgumentOutOfRangeException(nameof(windowSize), "Window size must be positive");
@@ -267,6 +337,24 @@ sealed class CumulativeOperation : WindowOperationBase
     }
 
     /// <summary>
+    /// Initializes a new instance of CumulativeOperation over a named source column with a
+    /// window specification (partition/order keys)
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="spec">The window specification</param>
+    /// <param name="nullHandler">Optional null-replacement handler</param>
+    /// <param name="kind">The cumulative aggregate kind</param>
+    /// <param name="isCount">Whether this is a running count-of-non-null operation</param>
+    public CumulativeOperation(string source, string resultColumn, WindowSpec spec, Func<object?>? nullHandler = null, NivaraFrameExtensions.CumulativeKind kind = NivaraFrameExtensions.CumulativeKind.Sum, bool isCount = false)
+        : base(source, resultColumn, spec ?? throw new ArgumentNullException(nameof(spec)))
+    {
+        NullHandler = nullHandler;
+        Kind = kind;
+        IsCount = isCount;
+    }
+
+    /// <summary>
     /// Gets the optional null-replacement handler
     /// </summary>
     public Func<object?>? NullHandler { get; }
@@ -327,6 +415,22 @@ sealed class ShiftOperation : WindowOperationBase
     /// <param name="fillValue">Optional fill value for boundary positions</param>
     public ShiftOperation(ColumnExpression sourceExpression, string resultColumn, int periods, object? fillValue = null)
         : base(sourceExpression, resultColumn)
+    {
+        Periods = periods;
+        FillValue = fillValue;
+    }
+
+    /// <summary>
+    /// Initializes a new instance of ShiftOperation over a named source column with a
+    /// window specification (partition/order keys)
+    /// </summary>
+    /// <param name="source">The source column name</param>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="periods">The number of positions to shift by (negative = lead)</param>
+    /// <param name="spec">The window specification</param>
+    /// <param name="fillValue">Optional fill value for boundary positions</param>
+    public ShiftOperation(string source, string resultColumn, int periods, WindowSpec spec, object? fillValue = null)
+        : base(source, resultColumn, spec ?? throw new ArgumentNullException(nameof(spec)))
     {
         Periods = periods;
         FillValue = fillValue;
