@@ -728,11 +728,11 @@ public static class ForwardGradOperations
                 nameof(keepMask));
 
         var savedMask = keepMask.ToArray();
-        var primal = ApplyDropout(input.Data, savedMask, scale);
+        var primal = GradOperationKernels.ApplyDropout(input.Data, savedMask, scale);
         NivaraColumn<T>? tangent = null;
         if (input.RequiresTangent && input.Tangent != null)
         {
-            tangent = ApplyDropoutTangent(input.Data, input.Tangent, savedMask, scale);
+            tangent = GradOperationKernels.ApplyDropoutGradient(input.Data, input.Tangent, savedMask, scale);
         }
 
         return new ForwardGradTensor<T>(primal, tangent, PropagateShape(input));
@@ -760,7 +760,7 @@ public static class ForwardGradOperations
                 $"mean length ({mean.Length}) must equal logVar length ({logVar.Length})",
                 nameof(logVar));
 
-        var klElements = ApplyKlElementWise(mean.Data, logVar.Data);
+        var klElements = GradOperationKernels.ApplyKlElementWise(mean.Data, logVar.Data);
         klElements.TryGetSpan(out var klSpan);
         var klSum = TensorPrimitives.Sum(klSpan);
         var resultData = NivaraColumn<T>.CreateFromOwnedArray(new T[] { klSum });
@@ -816,14 +816,14 @@ public static class ForwardGradOperations
         int n = mean.Length;
         var epsilon = RandomGeneration.GenerateStandardNormal<T>(n, seed);
         var epsilonCol = NivaraColumn<T>.CreateFromOwnedArray(epsilon);
-        var primal = ApplySampleNormalForward(mean.Data, logVar.Data, epsilonCol);
+        var primal = GradOperationKernels.ApplySampleNormalForward(mean.Data, logVar.Data, epsilonCol);
 
         NivaraColumn<T>? tangent = null;
         if (mean.RequiresTangent || logVar.RequiresTangent)
         {
             if (mean.Tangent != null && logVar.Tangent != null)
             {
-                var dLogVar = ApplySampleNormalLogVarTangent(logVar.Data, logVar.Tangent, epsilonCol);
+                var dLogVar = GradOperationKernels.ApplySampleNormalLogVarGradient(logVar.Data, logVar.Tangent, epsilonCol);
                 tangent = mean.Tangent + dLogVar;
             }
             else if (mean.Tangent != null)
@@ -832,7 +832,7 @@ public static class ForwardGradOperations
             }
             else if (logVar.Tangent != null)
             {
-                tangent = ApplySampleNormalLogVarTangent(logVar.Data, logVar.Tangent, epsilonCol);
+                tangent = GradOperationKernels.ApplySampleNormalLogVarGradient(logVar.Data, logVar.Tangent, epsilonCol);
             }
         }
 
@@ -856,105 +856,6 @@ public static class ForwardGradOperations
     private static int[] ScalarShape()
     {
         return new[] { 1 };
-    }
-
-    private static NivaraColumn<T> ApplyDropout<T>(NivaraColumn<T> input, ReadOnlySpan<bool> keepMask, T scale)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = input.Length;
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-
-        try
-        {
-            input.TryGetSpan(out var span);
-            for (int i = 0; i < n; i++)
-                resultBuf[i] = keepMask[i] ? span[i] * scale : T.Zero;
-
-            return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-        }
-    }
-
-    private static NivaraColumn<T> ApplyDropoutTangent<T>(
-        NivaraColumn<T> input,
-        NivaraColumn<T> tangent,
-        ReadOnlySpan<bool> keepMask,
-        T scale)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = input.Length;
-        var gradBuf = ArrayPool<T>.Shared.Rent(n);
-        var resultBuf = ArrayPool<T>.Shared.Rent(n);
-
-        try
-        {
-            tangent.CopyTo(gradBuf.AsSpan(0, n), T.Zero);
-            for (int i = 0; i < n; i++)
-                resultBuf[i] = keepMask[i] ? gradBuf[i] * scale : T.Zero;
-
-            return NivaraColumn<T>.Create(resultBuf.AsSpan(0, n));
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(gradBuf, clearArray: true);
-            ArrayPool<T>.Shared.Return(resultBuf, clearArray: true);
-        }
-    }
-
-    private static NivaraColumn<T> ApplyKlElementWise<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = mean.Length;
-        mean.TryGetSpan(out var mSpan);
-        logVar.TryGetSpan(out var lvSpan);
-        var result = new T[n];
-        var m2 = new T[n];
-        var expLv = new T[n];
-        var tmp = new T[n];
-        TensorPrimitives.Multiply(mSpan, mSpan, m2);
-        TensorPrimitives.Exp(lvSpan, expLv);
-        TensorPrimitives.Add(lvSpan, T.One, tmp);
-        TensorPrimitives.Subtract(tmp, m2, tmp);
-        TensorPrimitives.Subtract(tmp, expLv, tmp);
-        TensorPrimitives.Multiply(tmp, T.CreateChecked(-0.5), result);
-        return NivaraColumn<T>.CreateFromOwnedArray(result);
-    }
-
-    private static NivaraColumn<T> ApplySampleNormalForward<T>(NivaraColumn<T> mean, NivaraColumn<T> logVar, NivaraColumn<T> epsilon)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = mean.Length;
-        mean.TryGetSpan(out var mSpan);
-        logVar.TryGetSpan(out var lvSpan);
-        epsilon.TryGetSpan(out var eSpan);
-        var result = new T[n];
-        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
-        TensorPrimitives.Exp(result, result);
-        TensorPrimitives.Multiply(result, eSpan, result);
-        TensorPrimitives.Add(result, mSpan, result);
-        return NivaraColumn<T>.CreateFromOwnedArray(result);
-    }
-
-    private static NivaraColumn<T> ApplySampleNormalLogVarTangent<T>(
-        NivaraColumn<T> logVar,
-        NivaraColumn<T> tangent,
-        NivaraColumn<T> epsilon)
-        where T : struct, IFloatingPointIeee754<T>
-    {
-        int n = logVar.Length;
-        logVar.TryGetSpan(out var lvSpan);
-        tangent.TryGetSpan(out var gSpan);
-        epsilon.TryGetSpan(out var eSpan);
-        var result = new T[n];
-        TensorPrimitives.Multiply(lvSpan, T.CreateChecked(0.5), result);
-        TensorPrimitives.Exp(result, result);
-        TensorPrimitives.Multiply(result, eSpan, result);
-        TensorPrimitives.Multiply(result, gSpan, result);
-        TensorPrimitives.Multiply(result, T.CreateChecked(0.5), result);
-        return NivaraColumn<T>.CreateFromOwnedArray(result);
     }
 
     #endregion
