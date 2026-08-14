@@ -4,16 +4,29 @@ using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
 
+/// <summary>
+/// Learnable lookup table mapping token IDs to dense vectors. Supports both single-token and
+/// batched lookups via <see cref="ReverseGradOperations.Gather"/>. Weights are initialized
+/// with a normal distribution (std 0.02).
+/// </summary>
 public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
     readonly int numEmbeddings;
     readonly int embeddingDim;
     readonly Parameter<T> weight;
 
+    /// <summary>Gets the size of the vocabulary (number of embedding rows).</summary>
     public int NumEmbeddings => numEmbeddings;
+    /// <summary>Gets the dimension of each embedding vector.</summary>
     public int EmbeddingDim => embeddingDim;
+    /// <summary>Gets the weight parameter (shape <c>[numEmbeddings, embeddingDim]</c>).</summary>
     public Parameter<T>? Weight => weight;
 
+    /// <summary>
+    /// Creates an embedding table.
+    /// </summary>
+    /// <param name="numEmbeddings">Size of the vocabulary (must be positive)</param>
+    /// <param name="embeddingDim">Dimension of each embedding vector (must be positive)</param>
     public Embedding(int numEmbeddings, int embeddingDim)
     {
         if (numEmbeddings <= 0) throw new ArgumentOutOfRangeException(nameof(numEmbeddings));
@@ -31,6 +44,12 @@ public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIee
         init.Initialize(weight);
     }
 
+    /// <summary>
+    /// Looks up the embedding vector for each token ID in the input, producing a tensor of
+    /// shape <c>inputShape + [embeddingDim]</c> (or <c>[numTokens, embeddingDim]</c> for flat input).
+    /// </summary>
+    /// <param name="input">Tensor of token IDs, each in <c>[0, numEmbeddings)</c></param>
+    /// <returns>The embedded tensor</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
@@ -62,6 +81,11 @@ public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIee
         return result;
     }
 
+    /// <summary>
+    /// Looks up the embedding vector for a single token ID.
+    /// </summary>
+    /// <param name="tokenId">The token ID in <c>[0, numEmbeddings)</c></param>
+    /// <returns>The embedding vector of length <c>embeddingDim</c></returns>
     public ReverseGradTensor<T> Forward(int tokenId)
     {
         if (tokenId < 0 || tokenId >= numEmbeddings)
