@@ -15,6 +15,7 @@ is available.
 | `ColumnSigmoid 1M x float` | Raw kernel — `TensorPrimitives.Sigmoid` over a pre-allocated 1M destination (the `NivaraColumn<float>.Sigmoid()` extension was removed in Task 8 of the refactor) |
 | `Span chain 1M x 3 ops (raw)` | `TensorPrimitives.Add`/`Multiply`/`Subtract` into three pre-allocated 1M destinations — zero-allocation control for the wrapper-cost isolation (P3) |
 | `Column chain 1M x 3 ops (wrapper)` | Same three ops through `NivaraColumn<float>.Add`/`Multiply`/`Subtract`, which allocate a fresh result column per op — isolates the column+storage wrapper cost (P3) |
+| `Fused chain 1M x (Salary*1.1)+1000-Tax` | The fused-evaluator compiled target for `Col("Salary") * 1.1 + 1000 - Col("Tax")` at a vectorized length (gates on the `KernelSelector` heuristic) |
 | `Linear forward [32x256] -> [32x256]` | `Linear<float>` inference forward (no `Grad()` scope) |
 | `Linear forward+backward [32x256]` | `Linear<float>` forward + `Backward` inside `GradientUtils.Grad()` |
 | `TransformerBlock forward [32x64, 4 heads]` | `TransformerBlock<float>` inference forward |
@@ -24,6 +25,7 @@ is available.
 | `Attn batched fwd+bwd [B16 L128 D64 H4]` | `BatchedMultiHeadAttention` forward + `Backward` inside `GradientUtils.Grad()` |
 | `RowScore per-row copy+dot [10k x 128]` | Status-quo row scoring — per row, copy 128 column values into scratch then `TensorPrimitives.Dot` (10k dots) |
 | `Frame RowDot [10k x 128]` | Public `NivaraFrame.RowDot` — row-major materialization + `TensorsHelper.RowDot` (#138, #141) |
+| `Frame Slice [10k x 128]` | Public `NivaraFrame.Slice(0, 5000)` — the reflection-free `IColumn.Slice` path (#173) |
 | `RowDot kernel raw [10k x 128]` | Raw `TensorsHelper.RowDot` over a pre-built row-major buffer + null mask — the kernel floor (#141) |
 | `RowCosineSimilarity kernel raw [10k x 128]` | Raw `TensorsHelper.RowCosineSimilarity` over a pre-built row-major buffer — kernel floor with norm (#141) |
 
@@ -87,8 +89,8 @@ Per-phase workflow (on an idle machine — see the load caveat below):
 ### Baseline policy (do not re-litigate)
 
 - The **Results** table below is the canonical baseline (**point A**) for
-  future A/B comparisons — last recorded 2026-08-06 against the current HEAD
-  with the fixed `--runs` harness (commit `e3ac8b7`).
+  future A/B comparisons — last recorded 2026-08-14 on the v1.3.0 release-prep
+  HEAD (`release/130`) with the fixed `--runs` harness.
 - **Never rebuild past commits to re-derive point A.** The previous A/B tables
   (built in git worktrees at `549c6cc` and recorded 2026-08-04/05) are
   superseded; their findings still hold (the ColumnAdd branch-removal win, the
@@ -101,58 +103,62 @@ Per-phase workflow (on an idle machine — see the load caveat below):
 
 ## Results
 
-**Baseline (point A)** recorded **2026-08-06** on the current HEAD (post-v1.2.0
-release prep, ADR-002 P0–P4 complete). **Medians of 3 independent child-process
-runs** (`--runs 3` on the fixed harness, commit `e3ac8b7`). This replaces the
-2026-08-05 point A, which was recorded on a different machine and is **not
-comparable** to this machine's numbers (e.g. ColumnAdd 1,672 there vs ~620
-here) — compare only within this table from here on. The four batched-attention
-scenarios (fused `MultiHeadAttention` / `BatchedMultiHeadAttention` kernels,
-issue #86) were already in the harness but are now documented here for the
-first time.
+**Baseline (point A)** recorded **2026-08-14** on the v1.3.0 release-prep HEAD
+(`release/130`). **Medians of 3 independent child-process runs** (`--runs 3` on
+the fixed harness). This replaces the 2026-08-06 point A, which was recorded on
+a different machine (16 logical processors) and is **not comparable** to this
+machine's numbers (e.g. ColumnAdd ~620 there vs ~1,049 here) — compare only
+within this table from here on. The harness also gained two scenarios since the
+2026-08-06 baseline (`Fused chain`, `Frame Slice`), both documented in the
+scenario table above.
 
-Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 3 child processes.
+Machine: 8 logical processors, x64, .NET 10.0.11 (Release). Medians of 3 child processes.
 
 | Scenario | ops/s | B/op | gen0/op |
 |---|---|---|---|
-| ColumnAdd 1M x float | 620 | 4,000,525 | 0.24 |
-| ColumnSigmoid 1M x float | 386 | 0 | 0.00 |
-| Span chain 1M x 3 ops (raw) | 360 | 0 | 0.00 |
-| Column chain 1M x 3 ops (wrapper) | 182 | 12,001,719 | 0.33 |
-| Linear forward [32x256] | 420 | 69,257 | 0.00 |
-| Linear forward+backward [32x256] | 103 | 670,159 | 0.10 |
-| TransformerBlock forward [32x64, 4 heads] | 124 | 188,283 | 0.00 |
-| Attn per-seq forward [B16 L128 D64 H4] | 30 | 2,137,638 | 0.17 |
-| Attn batched forward [B16 L128 D64 H4] | 137 | 529,029 | 0.00 |
-| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 12 | 7,962,735 | 1.08 |
-| Attn batched fwd+bwd [B16 L128 D64 H4] | 71 | 7,876,743 | 0.25 |
-| RowScore per-row copy+dot [10k x 128] | 61 | 2 | 0.00 |
-| Frame RowDot [10k x 128] | 151 | 452,639 | 0.10 |
-| RowDot kernel raw [10k x 128] | 438 | 1 | 0.00 |
-| RowCosineSimilarity kernel raw [10k x 128] | 336 | 1 | 0.00 |
+| ColumnAdd 1M x float | 1,049 | 4,000,192 | 0.24 |
+| ColumnSigmoid 1M x float | 663 | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 603 | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 269 | 12,000,416 | 0.34 |
+| Fused chain 1M x (Salary*1.1)+1000-Tax | 219 | 16,003,330 | 0.34 |
+| Linear forward [32x256] -> [32x256] | 819 | 68,536 | 0.02 |
+| Linear forward+backward [32x256] | 126 | 668,240 | 0.20 |
+| TransformerBlock forward [32x64, 4 heads] | 204 | 185,889 | 0.03 |
+| Attn per-seq forward [B16 L128 D64 H4] | 54 | 2,125,991 | 0.50 |
+| Attn batched forward [B16 L128 D64 H4] | 143 | 528,259 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 14 | 7,939,247 | 1.50 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 50 | 7,876,385 | 0.50 |
+| RowScore per-row copy+dot [10k x 128] | 65 | 2 | 0.00 |
+| Frame RowDot [10k x 128] | 177 | 51,722 | 0.00 |
+| Frame Slice [10k x 128] | 7,236 | 89,936 | 0.01 |
+| RowDot kernel raw [10k x 128] | 686 | 1 | 0.00 |
+| RowCosineSimilarity kernel raw [10k x 128] | 317 | 1 | 0.00 |
 
 ### Notes
 
-- **The four row-scoring rows were recorded 2026-08-07 on a different machine
-  (8 logical processors) and are not ops/s-comparable to the rows above
-  (recorded on the 16-processor machine).** `Frame RowDot`'s B/op is dominated
-  by result construction (`NivaraSeries` materializes a boxed default index),
-  not by the kernel — the raw `RowDot`/`RowCosineSimilarity` kernels are 1 B/op,
-  and the frame API beats the per-row status quo ~2.5× on this machine (151 vs
-  61 ops/s). New scenario rows are seeded as `NEW` in the gate and become gated
+- **All 17 rows were recorded 2026-08-14 on the same machine (8 logical
+  processors).** The 2026-08-07 row-scoring rows (previously on an 8-processor
+  machine while the rest were on 16) are now part of the same-machine table.
+  `Frame RowDot`'s B/op dropped from 452,639 to 51,722 since the 2026-08-06
+  point A — result construction no longer materializes a boxed default index
+  (the `NivaraSeries<T>` virtual-index change, #231) — and gen0/op fell from
+  0.10 to 0.00; the raw `RowDot`/`RowCosineSimilarity` kernels stay ~1 B/op,
+  and the frame API beats the per-row status quo ~2.7× on this machine (177 vs
+  65 ops/s). New scenario rows are seeded as `NEW` in the gate and become gated
   once a `--json` baseline captures them.
 
-- **This table is the first current-machine point A.** The 2026-08-05 point A
-  was recorded on a different machine; its shape still holds (ColumnSigmoid and
-  the raw span chain are allocation-free, batched attention outruns per-seq,
-  Linear forward+backward allocation is the ArrayPool-backed `61ff968` number),
-  but its ops/s are not comparable to this machine. Do not mix numbers across
-  machines.
+- **This table is the current-machine point A.** The 2026-08-06 point A was
+  recorded on a different machine (16 logical processors); its shape still holds
+  (ColumnSigmoid and the raw span chain are allocation-free, batched attention
+  outruns per-seq, Linear forward+backward allocation is the ArrayPool-backed
+  `61ff968` number), but its ops/s are not comparable to this machine. Do not
+  mix numbers across machines.
 - **ops/s remain load-sensitive on this machine.** The table above was recorded
-  with the machine busy-ish (idle CPU ~4–9%): ColumnAdd ~620 here. Under heavier
-  load the same harness reads ~2× lower, so treat ops/s as order-of-magnitude
-  until measured under comparable load; **B/op and gen0/op are allocation-driven
-  and stable** and are the reliable regression signals for the `--compare` gate.
+  with the machine busy-ish (idle CPU ~4–9%): ColumnAdd ~1,049 here. Under
+  heavier load the same harness reads ~2× lower, so treat ops/s as
+  order-of-magnitude until measured under comparable load; **B/op and gen0/op
+  are allocation-driven and stable** and are the reliable regression signals
+  for the `--compare` gate.
 - **ColumnSigmoid is not comparable to the 2026-08-03 point A.** Task 8
   stripped the `NivaraColumn<float>.Sigmoid()` extension, so the scenario now
   measures the raw kernel with the destination array allocated up front —
@@ -169,3 +175,6 @@ Machine: 16 logical processors, x64, .NET 10.0.9 (Release). Medians of 3 child p
   the immutable result-column allocation itself (each op must produce a new
   column), not an overhead that Option B's raw `Tensor<T>` backing would remove
   — closing F7 with evidence on hand (no ADR-002 amendment filed).
+- **The `Fused chain` and `Frame Slice` rows were added after the 2026-08-06
+  point A** (fused-evaluator and #173-slice regression gates). They are gated
+  from the next baseline capture forward.
