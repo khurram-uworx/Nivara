@@ -1,6 +1,37 @@
 using Microsoft.ML;
+using Microsoft.ML.Data;
 
 namespace Nivara.MLNet;
+
+/// <summary>
+/// The kind of ML.NET task a <see cref="ModelIntegration"/> pipeline performs.
+/// </summary>
+public enum ModelTaskKind
+{
+    /// <summary>Binary classification.</summary>
+    BinaryClassification,
+
+    /// <summary>Multiclass classification.</summary>
+    MulticlassClassification,
+
+    /// <summary>Regression.</summary>
+    Regression
+}
+
+/// <summary>
+/// Strongly-typed evaluation metrics for a trained model. Exactly one of
+/// <see cref="Binary"/>, <see cref="Multiclass"/>, or <see cref="Regression"/> is
+/// non-null, matching the <see cref="Kind"/> detected for the pipeline.
+/// </summary>
+/// <param name="Kind">The detected task kind</param>
+/// <param name="Binary">Binary classification metrics, or null for other tasks</param>
+/// <param name="Multiclass">Multiclass classification metrics, or null for other tasks</param>
+/// <param name="Regression">Regression metrics, or null for other tasks</param>
+public sealed record ModelEvaluationResult(
+    ModelTaskKind Kind,
+    BinaryClassificationMetrics? Binary = null,
+    MulticlassClassificationMetrics? Multiclass = null,
+    RegressionMetrics? Regression = null);
 
 /// <summary>
 /// Provides high-level integration between Nivara DataFrames and ML.NET models.
@@ -87,7 +118,7 @@ public class ModelIntegration
     /// <param name="trainingData">The training data as a NivaraFrame</param>
     /// <param name="testingData">The testing data as a NivaraFrame</param>
     /// <returns>A trained model and evaluation metrics</returns>
-    public (ITransformer Model, object Metrics) TrainAndEvaluate(
+    public (ITransformer Model, ModelEvaluationResult Metrics) TrainAndEvaluate(
         IEstimator<ITransformer> pipeline,
         NivaraFrame trainingData,
         NivaraFrame testingData)
@@ -107,7 +138,7 @@ public class ModelIntegration
         var predictions = model.Transform(testDataView);
 
         // Evaluate based on the type of problem (inferred from pipeline)
-        object metrics = EvaluateModel(predictions, pipeline);
+        var metrics = EvaluateModel(predictions, pipeline);
 
         return (model, metrics);
     }
@@ -226,19 +257,25 @@ public class ModelIntegration
     }
 
     // Private helper methods
-    private object EvaluateModel(IDataView predictions, IEstimator<ITransformer> pipeline)
+    private ModelEvaluationResult EvaluateModel(IDataView predictions, IEstimator<ITransformer> pipeline)
     {
         if (IsBinaryClassificationPipeline(pipeline))
         {
-            return mlContext.BinaryClassification.Evaluate(predictions);
+            return new ModelEvaluationResult(
+                ModelTaskKind.BinaryClassification,
+                Binary: mlContext.BinaryClassification.Evaluate(predictions));
         }
         else if (IsMulticlassClassificationPipeline(pipeline))
         {
-            return mlContext.MulticlassClassification.Evaluate(predictions);
+            return new ModelEvaluationResult(
+                ModelTaskKind.MulticlassClassification,
+                Multiclass: mlContext.MulticlassClassification.Evaluate(predictions));
         }
         else if (IsRegressionPipeline(pipeline))
         {
-            return mlContext.Regression.Evaluate(predictions);
+            return new ModelEvaluationResult(
+                ModelTaskKind.Regression,
+                Regression: mlContext.Regression.Evaluate(predictions));
         }
         else
         {
