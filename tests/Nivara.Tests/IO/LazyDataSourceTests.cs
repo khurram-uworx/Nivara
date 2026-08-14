@@ -165,9 +165,9 @@ public class LazyDataSourceTests
         // Assert
         Assert.That(frame, Is.Not.Null);
         Assert.That(frame.ColumnCount, Is.EqualTo(3)); // Headers still present
-        Assert.That(frame.GetColumn<string>("Name").Length, Is.EqualTo(0));
-        Assert.That(frame.GetColumn<int>("Age").Length, Is.EqualTo(0));
-        Assert.That(frame.GetColumn<int>("Salary").Length, Is.EqualTo(0));
+        Assert.That(frame.GetColumn("Name").Length, Is.EqualTo(0));
+        Assert.That(frame.GetColumn("Age").Length, Is.EqualTo(0));
+        Assert.That(frame.GetColumn("Salary").Length, Is.EqualTo(0));
     }
 
     [Test]
