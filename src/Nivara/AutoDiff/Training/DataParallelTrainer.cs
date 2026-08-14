@@ -7,6 +7,12 @@ using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Training;
 
+/// <summary>
+/// Data-parallel training loop: splits each epoch's rows into chunks, computes forward passes
+/// and losses for all chunks in parallel inside <see cref="GradientUtils.Grad"/> scopes,
+/// backpropagates each chunk, sums the gradients, applies a single optimizer step, and reports
+/// per-epoch metrics including the summed-gradient norm.
+/// </summary>
 public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
     readonly Module<T> model;
@@ -17,6 +23,17 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
     readonly int? maxDegreeOfParallelism;
     bool disposed;
 
+    /// <summary>
+    /// Creates a data-parallel trainer.
+    /// </summary>
+    /// <param name="model">The model to train</param>
+    /// <param name="loader">The data loader supplying the dataset</param>
+    /// <param name="lossFn">Loss function of (output, labels)</param>
+    /// <param name="optimizer">The optimizer used to update parameters</param>
+    /// <param name="epochs">Number of epochs to run</param>
+    /// <param name="maxDegreeOfParallelism">Optional cap on parallel workers; defaults to the processor count</param>
+    /// <exception cref="ArgumentNullException">Thrown when any required argument is null</exception>
+    /// <exception cref="ArgumentException">Thrown when <paramref name="epochs"/> is not positive</exception>
     public DataParallelTrainer(
         Module<T> model,
         DataLoader<T> loader,
@@ -37,6 +54,10 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
         this.maxDegreeOfParallelism = maxDegreeOfParallelism;
     }
 
+    /// <summary>
+    /// Runs the data-parallel training loop for all configured epochs.
+    /// </summary>
+    /// <returns>A summary of the training run</returns>
     public DataParallelTrainingResult<T> Run()
     {
         var epochResults = new List<DataParallelEpochResult<T>>(epochs);
@@ -247,6 +268,9 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
         return Math.Sqrt(sumSq);
     }
 
+    /// <summary>
+    /// Disposes the model and optimizer.
+    /// </summary>
     public void Dispose()
     {
         Dispose(true);
@@ -264,6 +288,12 @@ public class DataParallelTrainer<T> : IDisposable where T : struct, IFloatingPoi
         disposed = true;
     }
 
+    /// <summary>Called at the start of each epoch. Override to hook epoch boundaries.</summary>
+    /// <param name="epoch">The epoch number about to start</param>
     protected virtual void OnEpochStart(int epoch) { }
+
+    /// <summary>Called at the end of each epoch. Override to hook epoch completion.</summary>
+    /// <param name="epoch">The epoch number that finished</param>
+    /// <param name="result">The epoch result</param>
     protected virtual void OnEpochEnd(int epoch, DataParallelEpochResult<T> result) { }
 }
