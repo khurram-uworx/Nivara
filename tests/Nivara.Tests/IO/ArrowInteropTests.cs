@@ -475,15 +475,15 @@ public class ArrowInteropTests
     [Test]
     public void ToArrowArray_UnsupportedType_ThrowsUnsupportedTypeException()
     {
-        // Arrange - Create a series with an unsupported type (Guid)
-        var guidData = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        var guidSeries = NivaraSeries<Guid>.Create(guidData);
+        // Arrange - Create a series with an unsupported type (Int128)
+        var int128Data = new[] { (Int128)1, (Int128)2, (Int128)3 };
+        var int128Series = NivaraSeries<Int128>.Create(int128Data);
 
         // Act & Assert
-        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(guidSeries));
-        Assert.That(ex!.UnsupportedType, Is.EqualTo(typeof(Guid)));
+        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(int128Series));
+        Assert.That(ex!.UnsupportedType, Is.EqualTo(typeof(Int128)));
         Assert.That(ex.SuggestedAlternatives, Is.Not.Empty);
-        Assert.That(ex.SuggestedAlternatives, Contains.Item("int"));
+        Assert.That(ex.Message, Does.Contain("not supported"));
     }
 
     [Test]
@@ -542,12 +542,12 @@ public class ArrowInteropTests
     public void ToArrowArray_ValidationEnabled_ValidatesSeriesType()
     {
         // Arrange
-        var guidSeries = NivaraSeries<Guid>.Create(new[] { Guid.NewGuid() });
+        var int128Series = NivaraSeries<Int128>.Create(new[] { (Int128)1 });
         var options = new ArrowConversionOptions { ValidateTypes = true };
 
         // Act & Assert
-        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(guidSeries, options));
-        Assert.That(ex!.UnsupportedType, Is.EqualTo(typeof(Guid)));
+        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(int128Series, options));
+        Assert.That(ex!.UnsupportedType, Is.EqualTo(typeof(Int128)));
     }
 
     [Test]
@@ -600,24 +600,24 @@ public class ArrowInteropTests
         // Test that error messages contain helpful information for debugging
 
         // Test unsupported type error message
-        var guidSeries = NivaraSeries<Guid>.Create(new[] { Guid.NewGuid() });
-        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(guidSeries));
+        var int128Series = NivaraSeries<Int128>.Create(new[] { (Int128)1 });
+        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(int128Series));
 
-        Assert.That(ex!.Message, Does.Contain("Guid"));
+        Assert.That(ex!.Message, Does.Contain("Int128"));
         Assert.That(ex.Message, Does.Contain("not supported"));
-        Assert.That(ex.SuggestedAlternatives, Contains.Item("int"));
+        Assert.That(ex.SuggestedAlternatives, Is.Not.Empty);
     }
 
     [Test]
     public void ErrorMessages_PreserveInnerExceptionContext()
     {
         // Arrange - Create a scenario that will cause a wrapped exception
-        var guidSeries = NivaraSeries<Guid>.Create(new[] { Guid.NewGuid() });
+        var int128Series = NivaraSeries<Int128>.Create(new[] { (Int128)1 });
 
         // Act & Assert
-        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(guidSeries));
+        var ex = Assert.Throws<UnsupportedTypeException>(() => ArrowInterop.ToArrowArray(int128Series));
         // UnsupportedTypeException doesn't typically have inner exceptions, but we can verify the message is helpful
-        Assert.That(ex!.Message, Does.Contain("Guid"));
+        Assert.That(ex!.Message, Does.Contain("Int128"));
         Assert.That(ex.Message, Does.Contain("not supported"));
     }
 
@@ -1006,14 +1006,16 @@ public class ArrowInteropTests
                 $"Required type {requiredType.Name} from Requirement 1.5 should be supported");
         }
 
-        // ArrowInterop currently round-trips this subset of TypeMapper's domain; the extended
-        // domain types (Half, nint/nuint, char, DateOnly/TimeOnly, Guid, TimeSpan, DateTimeOffset)
-        // get dedicated round-trip coverage once implemented (issue 190, Steps 5-6).
+        // ArrowInterop round-trips TypeMapper's full domain, including the extended types
+        // (Half, nint/nuint, char, DateOnly/TimeOnly, Guid, TimeSpan, DateTimeOffset), which
+        // are restored via nivara.clrType schema metadata (issue 190, Steps 5-6).
         var arrowRoundTripTypes = new[]
         {
             typeof(bool), typeof(int), typeof(long), typeof(float), typeof(double),
             typeof(DateTime), typeof(string), typeof(byte), typeof(short),
-            typeof(uint), typeof(ulong), typeof(ushort), typeof(sbyte)
+            typeof(uint), typeof(ulong), typeof(ushort), typeof(sbyte),
+            typeof(Half), typeof(nint), typeof(nuint), typeof(char),
+            typeof(DateOnly), typeof(TimeOnly), typeof(Guid), typeof(DateTimeOffset), typeof(TimeSpan)
         };
         supportedTypes = supportedTypes.Where(arrowRoundTripTypes.Contains).ToList();
 
@@ -1194,6 +1196,15 @@ public class ArrowInteropTests
             Type t when t == typeof(ulong) => new[] { 1ul, 2ul, 3ul },
             Type t when t == typeof(ushort) => new[] { (ushort)1, (ushort)2, (ushort)3 },
             Type t when t == typeof(sbyte) => new[] { (sbyte)1, (sbyte)2, (sbyte)3 },
+            Type t when t == typeof(Half) => new[] { (Half)1.5f, (Half)2.5f, (Half)3.5f },
+            Type t when t == typeof(nint) => new[] { (nint)1, (nint)2, (nint)3 },
+            Type t when t == typeof(nuint) => new[] { (nuint)1, (nuint)2, (nuint)3 },
+            Type t when t == typeof(char) => new[] { 'a', 'b', 'c' },
+            Type t when t == typeof(DateOnly) => new[] { new DateOnly(2024, 1, 1), new DateOnly(2024, 1, 2), new DateOnly(2024, 1, 3) },
+            Type t when t == typeof(TimeOnly) => new[] { new TimeOnly(1, 2, 3), new TimeOnly(4, 5, 6), new TimeOnly(7, 8, 9) },
+            Type t when t == typeof(Guid) => new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() },
+            Type t when t == typeof(DateTimeOffset) => new[] { new DateTimeOffset(2024, 1, 1, 12, 0, 0, TimeSpan.Zero), new DateTimeOffset(2024, 1, 2, 12, 0, 0, TimeSpan.Zero), new DateTimeOffset(2024, 1, 3, 12, 0, 0, TimeSpan.Zero) },
+            Type t when t == typeof(TimeSpan) => new[] { TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3) },
             _ => throw new ArgumentException($"Unsupported type for sample data: {type.Name}")
         };
     }
@@ -1218,6 +1229,15 @@ public class ArrowInteropTests
             Type t when t == typeof(ulong) => NivaraFrame.Create((columnName, NivaraColumn<ulong>.Create((ulong[])data))),
             Type t when t == typeof(ushort) => NivaraFrame.Create((columnName, NivaraColumn<ushort>.Create((ushort[])data))),
             Type t when t == typeof(sbyte) => NivaraFrame.Create((columnName, NivaraColumn<sbyte>.Create((sbyte[])data))),
+            Type t when t == typeof(Half) => NivaraFrame.Create((columnName, NivaraColumn<Half>.Create((Half[])data))),
+            Type t when t == typeof(nint) => NivaraFrame.Create((columnName, NivaraColumn<nint>.Create((nint[])data))),
+            Type t when t == typeof(nuint) => NivaraFrame.Create((columnName, NivaraColumn<nuint>.Create((nuint[])data))),
+            Type t when t == typeof(char) => NivaraFrame.Create((columnName, NivaraColumn<char>.Create((char[])data))),
+            Type t when t == typeof(DateOnly) => NivaraFrame.Create((columnName, NivaraColumn<DateOnly>.Create((DateOnly[])data))),
+            Type t when t == typeof(TimeOnly) => NivaraFrame.Create((columnName, NivaraColumn<TimeOnly>.Create((TimeOnly[])data))),
+            Type t when t == typeof(Guid) => NivaraFrame.Create((columnName, NivaraColumn<Guid>.Create((Guid[])data))),
+            Type t when t == typeof(DateTimeOffset) => NivaraFrame.Create((columnName, NivaraColumn<DateTimeOffset>.Create((DateTimeOffset[])data))),
+            Type t when t == typeof(TimeSpan) => NivaraFrame.Create((columnName, NivaraColumn<TimeSpan>.Create((TimeSpan[])data))),
             _ => throw new ArgumentException($"Unsupported type for frame creation: {type.Name}")
         };
     }
@@ -1242,6 +1262,15 @@ public class ArrowInteropTests
             Type t when t == typeof(ulong) => NivaraSeries<ulong>.Create((ulong[])data),
             Type t when t == typeof(ushort) => NivaraSeries<ushort>.Create((ushort[])data),
             Type t when t == typeof(sbyte) => NivaraSeries<sbyte>.Create((sbyte[])data),
+            Type t when t == typeof(Half) => NivaraSeries<Half>.Create((Half[])data),
+            Type t when t == typeof(nint) => NivaraSeries<nint>.Create((nint[])data),
+            Type t when t == typeof(nuint) => NivaraSeries<nuint>.Create((nuint[])data),
+            Type t when t == typeof(char) => NivaraSeries<char>.Create((char[])data),
+            Type t when t == typeof(DateOnly) => NivaraSeries<DateOnly>.Create((DateOnly[])data),
+            Type t when t == typeof(TimeOnly) => NivaraSeries<TimeOnly>.Create((TimeOnly[])data),
+            Type t when t == typeof(Guid) => NivaraSeries<Guid>.Create((Guid[])data),
+            Type t when t == typeof(DateTimeOffset) => NivaraSeries<DateTimeOffset>.Create((DateTimeOffset[])data),
+            Type t when t == typeof(TimeSpan) => NivaraSeries<TimeSpan>.Create((TimeSpan[])data),
             _ => throw new ArgumentException($"Unsupported type for series creation: {type.Name}")
         };
     }
@@ -1269,10 +1298,10 @@ public class ArrowInteropTests
     /// </summary>
     private static NivaraFrame CreateFrameWithUnsupportedType()
     {
-        // Create a frame with a Guid column, which is not supported
-        var guidData = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
-        var guidColumn = NivaraColumn<Guid>.Create(guidData);
-        return NivaraFrame.Create(("UnsupportedGuidColumn", guidColumn));
+        // Create a frame with an Int128 column, which has no Arrow representation
+        var int128Data = new[] { (Int128)1, (Int128)2, (Int128)3 };
+        var int128Column = NivaraColumn<Int128>.Create(int128Data);
+        return NivaraFrame.Create(("UnsupportedInt128Column", int128Column));
     }
 
     #endregion

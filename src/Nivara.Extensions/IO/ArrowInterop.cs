@@ -1,4 +1,5 @@
 using Apache.Arrow;
+using Apache.Arrow.Arrays;
 using Apache.Arrow.Types;
 
 namespace Nivara.IO;
@@ -45,6 +46,7 @@ public static class ArrowInterop
 
             var fields = new List<Field>();
             var arrowArrays = new List<IArrowArray>();
+            Dictionary<string, string>? clrTypeMetadata = null;
 
             foreach (var columnName in frame.ColumnNames)
             {
@@ -57,6 +59,15 @@ public static class ArrowInterop
                     if (column.ElementType == typeof(DateTime) && arrowType is TimestampType)
                     {
                         arrowType = new TimestampType(TimeUnit.Microsecond, options.TimeZone);
+                    }
+
+                    // Preserve the original CLR type for extended-domain columns so a round-trip
+                    // restores nint/nuint/char/DateTimeOffset/Half/TimeSpan/DateOnly/TimeOnly/Guid
+                    // even though the Arrow representation is widened (or shared with a base type).
+                    if (TypeMapper.IsExtendedDomainType(column.ElementType))
+                    {
+                        (clrTypeMetadata ??= new Dictionary<string, string>())[TypeMapper.GetClrTypeMetadataKey(columnName)]
+                            = column.ElementType.FullName!;
                     }
 
                     // Create field with proper nullability
@@ -78,7 +89,7 @@ public static class ArrowInterop
                 }
             }
 
-            var schema = new Apache.Arrow.Schema(fields, null);
+            var schema = new Apache.Arrow.Schema(fields, clrTypeMetadata);
             var recordBatch = new RecordBatch(schema, arrowArrays, frame.RowCount);
 
             return Table.TableFromRecordBatches(schema, new[] { recordBatch });
@@ -139,7 +150,7 @@ public static class ArrowInterop
                     var arrowColumn = arrowTable.Column(fieldIndex);
 
                     // Convert Arrow column to Nivara column
-                    var column = ConvertArrowColumnToNivaraColumn(arrowColumn, field.DataType, options);
+                    var column = ConvertArrowColumnToNivaraColumn(arrowColumn, field.DataType, options, columnName, arrowTable.Schema.Metadata);
 
                     System.Diagnostics.Debug.WriteLine($"Created column '{columnName}' with HasNulls: {column.HasNulls}");
 
@@ -293,8 +304,33 @@ public static class ArrowInterop
             Type t when t == typeof(ulong) => new UInt64Array.Builder().Build(),
             Type t when t == typeof(ushort) => new UInt16Array.Builder().Build(),
             Type t when t == typeof(sbyte) => new Int8Array.Builder().Build(),
+            Type t when t == typeof(Half) => new HalfFloatArray.Builder().Build(),
+            Type t when t == typeof(nint) => new Int64Array.Builder().Build(),
+            Type t when t == typeof(nuint) => new UInt64Array.Builder().Build(),
+            Type t when t == typeof(char) => new StringArray.Builder().Build(),
+            Type t when t == typeof(DateOnly) => new Date32Array.Builder().Build(),
+            Type t when t == typeof(TimeOnly) => new Time64Array.Builder(new Time64Type(TimeUnit.Nanosecond)).Build(),
+            Type t when t == typeof(Guid) => CreateEmptyFixedSizeBinaryArray(),
+            Type t when t == typeof(DateTimeOffset) => new TimestampArray.Builder(new TimestampType(TimeUnit.Microsecond, TimeZoneInfo.Utc)).Build(),
+            Type t when t == typeof(TimeSpan) => new DurationArray.Builder(DurationType.Nanosecond).Build(),
             _ => throw new UnsupportedTypeException(typeof(T), TypeMapper.GetTypeSuggestions(typeof(T)))
         };
+    }
+
+    /// <summary>
+    /// Creates an empty fixed-size-binary Arrow array for a 16-byte Guid representation
+    /// </summary>
+    private static IArrowArray CreateEmptyFixedSizeBinaryArray()
+    {
+        var arrayData = new ArrayData(
+            new FixedSizeBinaryType(16),
+            0,
+            0,
+            0,
+            new[] { ArrowBuffer.Empty, ArrowBuffer.Empty },
+            System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
     }
 
     /// <summary>
@@ -319,6 +355,15 @@ public static class ArrowInterop
             Type t when t == typeof(ulong) => ConvertColumnToArrowArrayTyped<ulong>(column, options),
             Type t when t == typeof(ushort) => ConvertColumnToArrowArrayTyped<ushort>(column, options),
             Type t when t == typeof(sbyte) => ConvertColumnToArrowArrayTyped<sbyte>(column, options),
+            Type t when t == typeof(Half) => ConvertColumnToArrowArrayTyped<Half>(column, options),
+            Type t when t == typeof(nint) => ConvertColumnToArrowArrayTyped<nint>(column, options),
+            Type t when t == typeof(nuint) => ConvertColumnToArrowArrayTyped<nuint>(column, options),
+            Type t when t == typeof(char) => ConvertColumnToArrowArrayTyped<char>(column, options),
+            Type t when t == typeof(DateOnly) => ConvertColumnToArrowArrayTyped<DateOnly>(column, options),
+            Type t when t == typeof(TimeOnly) => ConvertColumnToArrowArrayTyped<TimeOnly>(column, options),
+            Type t when t == typeof(Guid) => ConvertColumnToArrowArrayTyped<Guid>(column, options),
+            Type t when t == typeof(DateTimeOffset) => ConvertColumnToArrowArrayTyped<DateTimeOffset>(column, options),
+            Type t when t == typeof(TimeSpan) => ConvertColumnToArrowArrayTyped<TimeSpan>(column, options),
             _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
     }
@@ -345,6 +390,15 @@ public static class ArrowInterop
             Type t when t == typeof(ulong) => CreateUInt64Array((NivaraColumn<ulong>)(object)typedColumn, options),
             Type t when t == typeof(ushort) => CreateUInt16Array((NivaraColumn<ushort>)(object)typedColumn, options),
             Type t when t == typeof(sbyte) => CreateInt8Array((NivaraColumn<sbyte>)(object)typedColumn, options),
+            Type t when t == typeof(Half) => CreateHalfFloatArray((NivaraColumn<Half>)(object)typedColumn, options),
+            Type t when t == typeof(nint) => CreateInt64Array((NivaraColumn<nint>)(object)typedColumn, options),
+            Type t when t == typeof(nuint) => CreateUInt64Array((NivaraColumn<nuint>)(object)typedColumn, options),
+            Type t when t == typeof(char) => CreateStringArray((NivaraColumn<char>)(object)typedColumn, options),
+            Type t when t == typeof(DateOnly) => CreateDate32Array((NivaraColumn<DateOnly>)(object)typedColumn, options),
+            Type t when t == typeof(TimeOnly) => CreateTime64Array((NivaraColumn<TimeOnly>)(object)typedColumn, options),
+            Type t when t == typeof(Guid) => CreateFixedSizeBinaryArray((NivaraColumn<Guid>)(object)typedColumn, options),
+            Type t when t == typeof(DateTimeOffset) => CreateTimestampArray((NivaraColumn<DateTimeOffset>)(object)typedColumn, options),
+            Type t when t == typeof(TimeSpan) => CreateDurationArray((NivaraColumn<TimeSpan>)(object)typedColumn, options),
             _ => throw new UnsupportedTypeException(typeof(T))
         };
     }
@@ -618,11 +672,218 @@ public static class ArrowInterop
     }
 
     /// <summary>
+    /// Creates a HalfFloat Arrow array from a NivaraColumn of <see cref="Half"/>
+    /// </summary>
+    private static IArrowArray CreateHalfFloatArray(NivaraColumn<Half> column, ArrowConversionOptions options)
+    {
+        var builder = new HalfFloatArray.Builder();
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+                builder.AppendNull();
+            else
+                builder.Append(column[i]);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates an Int64 Arrow array from a NivaraColumn of <see cref="nint"/> (widened representation)
+    /// </summary>
+    private static IArrowArray CreateInt64Array(NivaraColumn<nint> column, ArrowConversionOptions options)
+    {
+        var builder = new Int64Array.Builder();
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+                builder.AppendNull();
+            else
+                builder.Append((long)column[i]);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates a UInt64 Arrow array from a NivaraColumn of <see cref="nuint"/> (widened representation)
+    /// </summary>
+    private static IArrowArray CreateUInt64Array(NivaraColumn<nuint> column, ArrowConversionOptions options)
+    {
+        var builder = new UInt64Array.Builder();
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+                builder.AppendNull();
+            else
+                builder.Append((ulong)column[i]);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates a String Arrow array from a NivaraColumn of <see cref="char"/> (widened representation)
+    /// </summary>
+    private static IArrowArray CreateStringArray(NivaraColumn<char> column, ArrowConversionOptions options)
+    {
+        var builder = new StringArray.Builder();
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+                builder.AppendNull();
+            else
+                builder.Append(column[i].ToString());
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates a Date32 Arrow array from a NivaraColumn of <see cref="DateOnly"/>
+    /// </summary>
+    private static IArrowArray CreateDate32Array(NivaraColumn<DateOnly> column, ArrowConversionOptions options)
+    {
+        var builder = new Date32Array.Builder();
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+                builder.AppendNull();
+            else
+                builder.Append(column[i]);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates a Time64 (nanosecond) Arrow array from a NivaraColumn of <see cref="TimeOnly"/>
+    /// </summary>
+    private static IArrowArray CreateTime64Array(NivaraColumn<TimeOnly> column, ArrowConversionOptions options)
+    {
+        var builder = new Time64Array.Builder(new Time64Type(TimeUnit.Nanosecond));
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+                builder.AppendNull();
+            else
+                builder.Append(column[i]);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates a FixedSizeBinary(16) Arrow array from a NivaraColumn of <see cref="Guid"/>
+    /// </summary>
+    private static IArrowArray CreateFixedSizeBinaryArray(NivaraColumn<Guid> column, ArrowConversionOptions options)
+    {
+        const int byteLength = 16;
+        var values = new byte[column.Length * byteLength];
+        var validity = new byte[(column.Length + 7) / 8];
+        int nullCount = 0;
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+            {
+                nullCount++;
+                continue;
+            }
+
+            column[i].ToByteArray().CopyTo(values, i * byteLength);
+            validity[i / 8] |= (byte)(1 << (i % 8));
+        }
+
+        var arrayData = new ArrayData(
+            new FixedSizeBinaryType(byteLength),
+            column.Length,
+            nullCount,
+            0,
+            new[] { new ArrowBuffer(validity), new ArrowBuffer(values) },
+            System.Array.Empty<ArrayData>());
+
+        return ArrowArrayFactory.BuildArray(arrayData);
+    }
+
+    /// <summary>
+    /// Creates a Timestamp Arrow array from a NivaraColumn of <see cref="DateTimeOffset"/>,
+    /// storing each value's UTC instant
+    /// </summary>
+    private static IArrowArray CreateTimestampArray(NivaraColumn<DateTimeOffset> column, ArrowConversionOptions options)
+    {
+        var timestampType = new TimestampType(TimeUnit.Microsecond, TimeZoneInfo.Utc);
+        var builder = new TimestampArray.Builder(timestampType);
+
+        // Define safe DateTime range for Arrow conversion
+        var minSafeDateTime = new DateTime(1677, 9, 21, 0, 0, 0, DateTimeKind.Utc);
+        var maxSafeDateTime = new DateTime(2262, 4, 11, 23, 47, 16, DateTimeKind.Utc);
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+            {
+                builder.AppendNull();
+            }
+            else
+            {
+                var utcDateTime = column[i].ToUniversalTime().UtcDateTime;
+
+                if (utcDateTime < minSafeDateTime)
+                {
+                    utcDateTime = minSafeDateTime;
+                }
+                else if (utcDateTime > maxSafeDateTime)
+                {
+                    utcDateTime = maxSafeDateTime;
+                }
+
+                builder.Append(new DateTimeOffset(utcDateTime, TimeSpan.Zero));
+            }
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
+    /// Creates a Duration (nanosecond) Arrow array from a NivaraColumn of <see cref="TimeSpan"/>
+    /// </summary>
+    private static IArrowArray CreateDurationArray(NivaraColumn<TimeSpan> column, ArrowConversionOptions options)
+    {
+        var builder = new DurationArray.Builder(DurationType.Nanosecond);
+
+        for (int i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+                builder.AppendNull();
+            else
+                builder.Append(column[i]);
+        }
+
+        return builder.Build();
+    }
+
+    /// <summary>
     /// Converts an Arrow column to a Nivara column using dynamic dispatch
     /// </summary>
-    private static IColumn ConvertArrowColumnToNivaraColumn(Column arrowColumn, IArrowType arrowType, ArrowConversionOptions options)
+    private static IColumn ConvertArrowColumnToNivaraColumn(Column arrowColumn, IArrowType arrowType, ArrowConversionOptions options, string columnName, IReadOnlyDictionary<string, string>? metadata)
     {
         var clrType = TypeMapper.MapArrowToClr(arrowType);
+
+        // Restore the original CLR type for columns written by Nivara. Types with a shared
+        // Arrow representation (nint via Int64, nuint via UInt64, char via String,
+        // DateTimeOffset via Timestamp) depend on this metadata to round-trip correctly.
+        var restoredType = TypeMapper.ResolveMetadataClrType(metadata, columnName);
+        if (restoredType is not null)
+        {
+            clrType = restoredType;
+        }
 
         return clrType switch
         {
@@ -639,6 +900,15 @@ public static class ArrowInterop
             Type t when t == typeof(ulong) => ConvertArrowColumnToNivaraColumnTyped<ulong>(arrowColumn, options),
             Type t when t == typeof(ushort) => ConvertArrowColumnToNivaraColumnTyped<ushort>(arrowColumn, options),
             Type t when t == typeof(sbyte) => ConvertArrowColumnToNivaraColumnTyped<sbyte>(arrowColumn, options),
+            Type t when t == typeof(Half) => ConvertArrowColumnToNivaraColumnTyped<Half>(arrowColumn, options),
+            Type t when t == typeof(nint) => ConvertArrowColumnToNivaraColumnTyped<nint>(arrowColumn, options),
+            Type t when t == typeof(nuint) => ConvertArrowColumnToNivaraColumnTyped<nuint>(arrowColumn, options),
+            Type t when t == typeof(char) => ConvertArrowColumnToNivaraColumnTyped<char>(arrowColumn, options),
+            Type t when t == typeof(DateOnly) => ConvertArrowColumnToNivaraColumnTyped<DateOnly>(arrowColumn, options),
+            Type t when t == typeof(TimeOnly) => ConvertArrowColumnToNivaraColumnTyped<TimeOnly>(arrowColumn, options),
+            Type t when t == typeof(Guid) => ConvertArrowColumnToNivaraColumnTyped<Guid>(arrowColumn, options),
+            Type t when t == typeof(DateTimeOffset) => ConvertArrowColumnToNivaraColumnTyped<DateTimeOffset>(arrowColumn, options),
+            Type t when t == typeof(TimeSpan) => ConvertArrowColumnToNivaraColumnTyped<TimeSpan>(arrowColumn, options),
             _ => throw new UnsupportedTypeException(clrType)
         };
     }
@@ -762,6 +1032,15 @@ public static class ArrowInterop
                 Type t when t == typeof(ulong) => CreateNullableColumn<ulong>(values),
                 Type t when t == typeof(ushort) => CreateNullableColumn<ushort>(values),
                 Type t when t == typeof(sbyte) => CreateNullableColumn<sbyte>(values),
+                Type t when t == typeof(Half) => CreateNullableColumn<Half>(values),
+                Type t when t == typeof(nint) => CreateNullableColumn<nint>(values),
+                Type t when t == typeof(nuint) => CreateNullableColumn<nuint>(values),
+                Type t when t == typeof(char) => CreateNullableColumn<char>(values),
+                Type t when t == typeof(DateOnly) => CreateNullableColumn<DateOnly>(values),
+                Type t when t == typeof(TimeOnly) => CreateNullableColumn<TimeOnly>(values),
+                Type t when t == typeof(Guid) => CreateNullableColumn<Guid>(values),
+                Type t when t == typeof(DateTimeOffset) => CreateNullableColumn<DateTimeOffset>(values),
+                Type t when t == typeof(TimeSpan) => CreateNullableColumn<TimeSpan>(values),
                 _ => throw new UnsupportedTypeException(typeof(T))
             };
         }
@@ -816,7 +1095,83 @@ public static class ArrowInterop
             UInt64Array ulongArray when typeof(T) == typeof(ulong) => (T)(object)ulongArray.GetValue(index)!.Value,
             UInt16Array ushortArray when typeof(T) == typeof(ushort) => (T)(object)ushortArray.GetValue(index)!.Value,
             Int8Array sbyteArray when typeof(T) == typeof(sbyte) => (T)(object)sbyteArray.GetValue(index)!.Value,
+            HalfFloatArray halfFloatArray when typeof(T) == typeof(Half) => (T)(object)halfFloatArray.GetValue(index)!.Value,
+            Int64Array nintArray when typeof(T) == typeof(nint) => (T)(object)(nint)nintArray.GetValue(index)!.Value,
+            UInt64Array nuintArray when typeof(T) == typeof(nuint) => (T)(object)(nuint)nuintArray.GetValue(index)!.Value,
+            StringArray charArray when typeof(T) == typeof(char) => (T)(object)ExtractCharFromString(charArray, index),
+            Date32Array date32Array when typeof(T) == typeof(DateOnly) => (T)(object)date32Array.GetDateOnly(index)!.Value,
+            Date64Array date64Array when typeof(T) == typeof(DateOnly) => (T)(object)date64Array.GetDateOnly(index)!.Value,
+            Time64Array time64Array when typeof(T) == typeof(TimeOnly) => (T)(object)Time64ToTimeOnly(time64Array, index),
+            Time32Array time32Array when typeof(T) == typeof(TimeOnly) => (T)(object)Time32ToTimeOnly(time32Array, index),
+            DurationArray durationArray when typeof(T) == typeof(TimeSpan) => (T)(object)durationArray.GetTimeSpan(index)!.Value,
+            FixedSizeBinaryArray fixedSizeBinaryArray when typeof(T) == typeof(Guid) => (T)(object)new Guid(fixedSizeBinaryArray.GetBytes(index)),
+            TimestampArray timestampArray when typeof(T) == typeof(DateTimeOffset) => (T)(object)TimestampToDateTimeOffset(timestampArray, index),
             _ => throw new UnsupportedTypeException(typeof(T), new[] { $"Arrow array type {array.GetType().Name} not supported for CLR type {typeof(T).Name}" })
+        };
+    }
+
+    /// <summary>
+    /// Extracts a single <see cref="char"/> from a widened string representation
+    /// </summary>
+    private static char ExtractCharFromString(StringArray stringArray, int index)
+    {
+        var value = stringArray.GetString(index);
+        if (value.Length != 1)
+        {
+            throw new UnsupportedTypeException(
+                typeof(char),
+                new[] { $"String value at index {index} has length {value.Length}; a char column requires exactly one character" });
+        }
+
+        return value[0];
+    }
+
+    /// <summary>
+    /// Converts a Time64 (nanoseconds since midnight) value to <see cref="TimeOnly"/>
+    /// </summary>
+    private static TimeOnly Time64ToTimeOnly(Time64Array time64Array, int index)
+    {
+        var nanoseconds = time64Array.GetValue(index)!.Value;
+        return new TimeOnly(nanoseconds / 100);
+    }
+
+    /// <summary>
+    /// Converts a Time32 (seconds or milliseconds since midnight) value to <see cref="TimeOnly"/>
+    /// </summary>
+    private static TimeOnly Time32ToTimeOnly(Time32Array time32Array, int index)
+    {
+        var value = time32Array.GetValue(index)!.Value;
+        var unit = ((Time32Type)time32Array.Data.DataType).Unit;
+
+        return unit == TimeUnit.Second
+            ? TimeOnly.FromTimeSpan(TimeSpan.FromSeconds(value))
+            : TimeOnly.FromTimeSpan(TimeSpan.FromMilliseconds(value));
+    }
+
+    /// <summary>
+    /// Converts a timestamp value to <see cref="DateTimeOffset"/>, preserving the UTC instant
+    /// regardless of the configured timezone
+    /// </summary>
+    private static DateTimeOffset TimestampToDateTimeOffset(TimestampArray timestampArray, int index)
+    {
+        var unit = ((TimestampType)timestampArray.Data.DataType).Unit;
+        var utcDateTime = ConvertTimestampValueToDateTime(timestampArray.GetValue(index)!.Value, unit);
+        return new DateTimeOffset(DateTime.SpecifyKind(utcDateTime, DateTimeKind.Utc), TimeSpan.Zero);
+    }
+
+    /// <summary>
+    /// Converts a timestamp value (in the given unit since the Unix epoch) to a UTC <see cref="DateTime"/>
+    /// </summary>
+    private static DateTime ConvertTimestampValueToDateTime(long value, TimeUnit unit)
+    {
+        var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
+        return unit switch
+        {
+            TimeUnit.Second => unixEpoch.AddSeconds(value),
+            TimeUnit.Millisecond => unixEpoch.AddMilliseconds(value),
+            TimeUnit.Nanosecond => unixEpoch.AddTicks(value / 100),
+            _ => unixEpoch.AddMicroseconds(value)
         };
     }
 
@@ -826,10 +1181,10 @@ public static class ArrowInterop
     private static DateTime ConvertTimestampToDateTime(TimestampArray timestampArray, int index, ArrowConversionOptions options)
     {
         var timestampValue = timestampArray.GetValue(index)!.Value;
-        var unixEpoch = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var unit = ((TimestampType)timestampArray.Data.DataType).Unit;
 
-        // Convert from microseconds since Unix epoch to DateTime
-        var dateTime = unixEpoch.AddMicroseconds(timestampValue);
+        // Convert from the field's unit since Unix epoch to DateTime (UTC)
+        var dateTime = ConvertTimestampValueToDateTime(timestampValue, unit);
 
         // Convert to the specified timezone if needed
         if (options.TimeZone != TimeZoneInfo.Utc)
