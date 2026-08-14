@@ -215,6 +215,15 @@ static class Program
         Run("Fused chain 1M x (Salary*1.1)+1000-Tax", 5, 50,
             () => CreateFusedChainScenario(1_000_000));
 
+        Run("Fused chain chunked 1M x 64k rows", 5, 50,
+            () => CreateFusedChunkedChainScenario(1_000_000, 65_536));
+
+        Run("Fused single-op TP 1M x (Salary*1.1)", 5, 50,
+            () => CreateFusedSingleOpScenario(1_000_000));
+
+        Run("Column mul-scalar 1M (wrapper)", 5, 100,
+            () => CreateColumnMulScalarScenario(1_000_000));
+
         Run("Linear forward [32x256] -> [32x256]", 5, 100,
             () =>
             {
@@ -649,19 +658,67 @@ static class Program
     }
 
     /// <summary>
-    /// Measures the mean execution time of an operation after a warmup phase.
+    /// Builds the chunked fused-chain scenario: same expression as <see cref="CreateFusedChainScenario"/>
+    /// but evaluated through <see cref="FusedExpressionEvaluator.EvaluateChunked"/> in 64k-row batches,
+    /// which slices the existing leaf storage instead of copying it (issue #167).
     /// </summary>
-    static double MeasureNs(Action op, int warmup, int iterations)
+    static Action CreateFusedChunkedChainScenario(int length, int chunkSize)
     {
-        for (int i = 0; i < warmup; i++)
-            op();
+        var salary = NivaraColumn<double>.Create(Fill(new double[length]));
+        var tax = NivaraColumn<double>.Create(Fill(new double[length]));
+        var input = new Dictionary<string, IColumn> { ["Salary"] = salary, ["Tax"] = tax };
+        var expression = ColumnExpressions.Col("Salary") * 1.1 + 1000 - ColumnExpressions.Col("Tax");
 
-        var sw = Stopwatch.StartNew();
-        for (int i = 0; i < iterations; i++)
-            op();
-        sw.Stop();
+        if (KernelSelector.DetermineKernelType(length, ColumnStorageFactory.IsVectorizable<double>()) != KernelType.Vectorized)
+        {
+            throw new InvalidOperationException(
+                $"Fused-chain gate requires the vectorized kernel heuristic at length {length} (length >= vectorSize * 4)");
+        }
 
-        return sw.Elapsed.TotalNanoseconds / iterations;
+        var fused = new FusedExpressionEvaluator();
+
+        for (int i = 0; i < 3; i++)
+        {
+            fused.EvaluateChunked(expression, input, chunkSize);
+        }
+
+        return () => fused.EvaluateChunked(expression, input, chunkSize);
+    }
+
+    /// <summary>
+    /// Builds the single-op fused scenario: a null-free single Multiply dispatches to the
+    /// TensorPrimitives SIMD kernel in one call (issue #167).
+    /// </summary>
+    static Action CreateFusedSingleOpScenario(int length)
+    {
+        var salary = NivaraColumn<double>.Create(Fill(new double[length]));
+        var input = new Dictionary<string, IColumn> { ["Salary"] = salary };
+        var expression = ColumnExpressions.Col("Salary") * 1.1;
+
+        if (KernelSelector.DetermineKernelType(length, ColumnStorageFactory.IsVectorizable<double>()) != KernelType.Vectorized)
+        {
+            throw new InvalidOperationException(
+                $"Fused-single-op gate requires the vectorized kernel heuristic at length {length} (length >= vectorSize * 4)");
+        }
+
+        var fused = new FusedExpressionEvaluator();
+
+        for (int i = 0; i < 3; i++)
+        {
+            fused.Evaluate(expression, input);
+        }
+
+        return () => fused.Evaluate(expression, input);
+    }
+
+    /// <summary>
+    /// Builds the column-wrapper multiply-scalar scenario (the multi-pass baseline for the fused
+    /// single-op TensorPrimitives path).
+    /// </summary>
+    static Action CreateColumnMulScalarScenario(int length)
+    {
+        var salary = NivaraColumn<double>.Create(Fill(new double[length]));
+        return () => salary.Multiply(1.1);
     }
 
     static float[] Fill(float[] values)
