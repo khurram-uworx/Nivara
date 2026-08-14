@@ -5,7 +5,13 @@ using System.Numerics;
 namespace Nivara.AutoDiff.Nn;
 
 /// <summary>Selects the normalization applied before each attention/MLP sub-block.</summary>
-public enum NormType { RMSNorm, LayerNorm }
+public enum NormType
+{
+    /// <summary>Root-mean-square normalization.</summary>
+    RMSNorm,
+    /// <summary>Layer normalization.</summary>
+    LayerNorm
+}
 
 /// <summary>
 /// Pre-norm transformer block: multi-head self-attention with a GELU two-layer MLP,

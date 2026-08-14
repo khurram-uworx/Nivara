@@ -10,6 +10,7 @@ namespace Nivara.AutoDiff.Optimizer;
 /// </summary>
 public abstract class Optimizer<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
 {
+    /// <summary>The parameter groups managed by this optimizer.</summary>
     protected readonly List<ParameterGroup> ParameterGroups = [];
     bool disposed;
     T learningRate;
