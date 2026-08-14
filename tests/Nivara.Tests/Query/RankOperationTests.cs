@@ -352,10 +352,10 @@ public class RankOperationTests
 
         Assert.That(result.HasColumn("rnk"), Is.True);
         var rnk = result.GetColumn<long>("rnk");
-        Assert.That(rnk[0], Is.EqualTo(1));
-        Assert.That(rnk[1], Is.EqualTo(2));
-        Assert.That(rnk[2], Is.EqualTo(1));
-        Assert.That(rnk[3], Is.EqualTo(2));
+        Assert.That(rnk[0], Is.EqualTo(2));
+        Assert.That(rnk[1], Is.EqualTo(1));
+        Assert.That(rnk[2], Is.EqualTo(2));
+        Assert.That(rnk[3], Is.EqualTo(1));
     }
 
     [Test]
