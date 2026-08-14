@@ -29,7 +29,8 @@ sealed class FusedExpressionEvaluator
 {
     int fusedPathEvaluationCount;
     int compiledPathEvaluationCount;
-    int nodeTreePathEvaluationCount;
+    int spanKernelPathEvaluationCount;
+    int tensorPrimitivesPathEvaluationCount;
 
     /// <summary>
     /// Gets how many fused evaluations were applied by the most recent operations on this instance.
@@ -43,17 +44,26 @@ sealed class FusedExpressionEvaluator
     internal int CompiledPathEvaluationCount => compiledPathEvaluationCount;
 
     /// <summary>
-    /// Gets how many of those evaluations ran through the generic node-tree kernel fallback.
+    /// Gets how many of those evaluations ran through the generic span-kernel interpreter.
     /// </summary>
-    internal int NodeTreePathEvaluationCount => nodeTreePathEvaluationCount;
+    internal int SpanKernelPathEvaluationCount => spanKernelPathEvaluationCount;
 
-    static readonly ConcurrentDictionary<string, Func<object[], int, Array>> compiledKernelCache = new();
+    /// <summary>
+    /// Gets how many of those evaluations ran through the TensorPrimitives single-op backend.
+    /// </summary>
+    internal int TensorPrimitivesPathEvaluationCount => tensorPrimitivesPathEvaluationCount;
+
+    delegate void CompiledFusedInvoke(object[] leafArrays, Array dest, int start, int count, int destStart);
+
+    static readonly ConcurrentDictionary<string, CompiledFusedInvoke> compiledKernelCache = new();
 
     static readonly ConcurrentDictionary<Type, MethodInfo> snapshotKernelCache = new();
 
     static readonly ConcurrentDictionary<Type, MethodInfo> createColumnKernelCache = new();
 
     static readonly ConcurrentDictionary<Type, MethodInfo> createFromSpansKernelCache = new();
+
+    static readonly ConcurrentDictionary<Type, MethodInfo> allocateArrayKernelCache = new();
 
     /// <summary>
     /// Evaluates a column expression and returns the result column through the fused path.
@@ -69,7 +79,33 @@ sealed class FusedExpressionEvaluator
 
         try
         {
-            return EvaluateCore(expression, input);
+            return EvaluateCore(expression, input, null);
+        }
+        catch (Exception ex) when (ex is not QueryExecutionException)
+        {
+            throw new QueryExecutionException($"Failed to evaluate expression '{expression.Name}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Evaluates a column expression in row-batches of <paramref name="chunkSize"/> through the fused
+    /// kernels, producing a single result column. Leaf data is never copied: each backend slices the
+    /// existing column storage per chunk (issue #167). Bit-identical to whole-column evaluation.
+    /// </summary>
+    /// <param name="expression">The expression to evaluate</param>
+    /// <param name="input">The input columns</param>
+    /// <param name="chunkSize">The row-batch size</param>
+    /// <returns>The result column</returns>
+    /// <exception cref="QueryExecutionException">Thrown when evaluation fails</exception>
+    internal IColumn EvaluateChunked(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input, int chunkSize)
+    {
+        ArgumentNullException.ThrowIfNull(expression);
+        ArgumentNullException.ThrowIfNull(input);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkSize);
+
+        try
+        {
+            return EvaluateCore(expression, input, chunkSize);
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
@@ -155,7 +191,7 @@ sealed class FusedExpressionEvaluator
         }
     }
 
-    IColumn EvaluateCore(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input)
+    IColumn EvaluateCore(ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input, int? chunkSize)
     {
         // Hydrate window expressions before any kernel planning: each window node is materialized
         // through its own evaluation (rolling/cumulative/shift/rank kernels over the computed source
@@ -208,32 +244,59 @@ sealed class FusedExpressionEvaluator
         ValidateLeafLengths(plan);
         var length = plan.Columns[0].Column.Length;
 
+        var kernelPlan = KernelLowerer.Lower(expression, plan);
+
         // Span kernel first: null-bearing uniform generic-math plans fuse values and the OR'd null
-        // mask in a single zero-copy pass — no leaf snapshots, no separate mask pass. Everything else
-        // (null-free uniform, heterogeneous, and every bool-result plan) stays on the compiled path,
+        // mask in a single zero-copy pass — no leaf snapshots, no separate mask pass. Null-free
+        // single-op uniform plans skip straight to the TensorPrimitives SIMD kernel. Everything else
+        // (null-free chains, heterogeneous, and every bool-result plan) stays on the compiled path,
         // preserving the JIT-vectorized fused win for the common null-free case.
-        if (plan.IsGenericMath
-            && plan.ResultType != typeof(bool)
-            && plan.HasNulls
-            && plan.Columns.All(l => l.Column.ElementType == plan.ResultType))
+        if (kernelPlan.IsUniformNumeric && kernelPlan.HasNulls)
         {
-            return EvaluateNodeTree(expression, plan, length);
+            return EvaluateNodeTree(expression, plan, kernelPlan, length, chunkSize);
         }
 
+        if (kernelPlan.IsTensorPrimitivesCandidate && !kernelPlan.HasNulls)
+        {
+            return EvaluateTensorPrimitives(expression, plan, kernelPlan, length, chunkSize);
+        }
+
+        return EvaluateCompiled(expression, plan, kernelPlan, length, chunkSize);
+    }
+
+    /// <summary>
+    /// Evaluates through the compiled expression-tree target: whole-column in one call, or batched by
+    /// <paramref name="chunkSize"/> into the shared result array through the offset-based delegate.
+    /// </summary>
+    IColumn EvaluateCompiled(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length, int? chunkSize)
+    {
         var leafArrays = SnapshotLeaves(plan);
 
-        Func<object[], int, Array> action;
+        CompiledFusedInvoke invoke;
         try
         {
-            action = compiledKernelCache.GetOrAdd(plan.Signature, key => BuildCompiledDelegate(expression, plan));
+            invoke = compiledKernelCache.GetOrAdd(plan.Signature, key => BuildCompiledDelegate(kernelPlan));
             compiledPathEvaluationCount++;
         }
         catch (NotSupportedException)
         {
-            return EvaluateNodeTree(expression, plan, length);
+            return EvaluateNodeTree(expression, plan, kernelPlan, length, null);
         }
 
-        var resultArray = ExecuteCompiled(action, leafArrays, length);
+        var resultArray = AllocateResultArray(plan.ResultType, length);
+        if (chunkSize == null || chunkSize.Value >= length)
+        {
+            invoke(leafArrays, resultArray, 0, length, 0);
+        }
+        else
+        {
+            for (var start = 0; start < length; start += chunkSize.Value)
+            {
+                var count = Math.Min(chunkSize.Value, length - start);
+                invoke(leafArrays, resultArray, start, count, start);
+            }
+        }
+
         var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
 
         if (mask != null && plan.ResultType == typeof(bool))
@@ -252,14 +315,18 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Runs the compiled delegate through its typed invocation wrapper, writing results into a
-    /// freshly allocated typed array. The wrapper casts the leaf arrays and invokes the concrete
-    /// <c>Action&lt;T1[], ..., TN[], R[]&gt;</c> directly — no <see cref="Delegate.DynamicInvoke"/>.
+    /// Creates a typed result array for the compiled delegate to write into. The delegate is shared
+    /// across evaluations, so the caller owns the allocation (whole-column and per-chunk alike).
     /// </summary>
-    static Array ExecuteCompiled(Func<object[], int, Array> action, object[] leafArrays, int length)
+    static Array AllocateResultArray(Type elementType, int length)
     {
-        return action(leafArrays, length);
+        var kernel = allocateArrayKernelCache.GetOrAdd(elementType, static t =>
+            typeof(FusedExpressionEvaluator).GetMethod(nameof(AllocateResultArrayOf), BindingFlags.Static | BindingFlags.NonPublic)!
+                .MakeGenericMethod(t));
+        return (Array)kernel.Invoke(null, new object?[] { length })!;
     }
+
+    static T[] AllocateResultArrayOf<T>(int length) => new T[length];
 
     static bool ContainsWindowExpression(ColumnExpression node)
     {
@@ -380,26 +447,17 @@ sealed class FusedExpressionEvaluator
     /// math and leaf columns already sharing the result element type. The null mask is fused into the
     /// kernel (OR semantics), so no separate <see cref="ComputeMask"/> pass runs.
     /// </summary>
-    IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, int length)
+    IColumn EvaluateNodeTree(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length, int? chunkSize)
     {
-        if (!plan.IsGenericMath)
+        if (!kernelPlan.IsUniformNumeric)
         {
             throw new NotSupportedException(
                 $"Expression '{expression.Name}' is not supported by the fused evaluator for element type {plan.ResultType.Name}");
         }
 
-        foreach (var leaf in plan.Columns)
-        {
-            if (leaf.Column.ElementType != plan.ResultType)
-            {
-                throw new NotSupportedException(
-                    $"Expression '{expression.Name}' mixes element types that the generic node-tree kernel cannot fuse");
-            }
-        }
-
         var runner = GetNodeTreeRunner(plan.ResultType);
-        var result = runner(expression, plan.Columns);
-        nodeTreePathEvaluationCount++;
+        var result = runner(kernelPlan, chunkSize);
+        spanKernelPathEvaluationCount++;
         fusedPathEvaluationCount++;
         RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "Span fused kernel");
         return result;
@@ -408,11 +466,11 @@ sealed class FusedExpressionEvaluator
     static class FusedNodeTreeRunner<T>
         where T : struct, INumber<T>
     {
-        internal static IColumn Run(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves)
-            => FusedKernel.Evaluate<T>(expression, leaves);
+        internal static IColumn Run(KernelPlan plan, int? chunkSize)
+            => FusedKernel.Evaluate<T>(plan, chunkSize);
     }
 
-    delegate IColumn FusedNodeTreeInvoker(ColumnExpression expression, IReadOnlyList<FusedColumnBinding> leaves);
+    delegate IColumn FusedNodeTreeInvoker(KernelPlan plan, int? chunkSize);
 
     static readonly ConcurrentDictionary<Type, FusedNodeTreeInvoker> nodeTreeRunnerCache = new();
 
@@ -423,6 +481,60 @@ sealed class FusedExpressionEvaluator
             var method = typeof(FusedNodeTreeRunner<>).MakeGenericType(t)
                 .GetMethod(nameof(FusedNodeTreeRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!;
             return (FusedNodeTreeInvoker)method.CreateDelegate(typeof(FusedNodeTreeInvoker));
+        });
+    }
+
+    /// <summary>
+    /// Evaluates through the TensorPrimitives single-op backend: null-free uniform plans that are a
+    /// single Add/Subtract/Multiply/Divide over leaves and literals dispatch to the SIMD-vectorized
+    /// <see cref="System.Numerics.Tensors.TensorPrimitives"/> overloads in one call.
+    /// </summary>
+    IColumn EvaluateTensorPrimitives(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length, int? chunkSize)
+    {
+        if (!TensorPrimitivesKernel.IsDispatchable(kernelPlan))
+        {
+            throw new NotSupportedException(
+                $"Expression '{expression.Name}' is not dispatchable to the TensorPrimitives single-op backend");
+        }
+
+        var runner = GetTensorPrimitivesRunner(plan.ResultType);
+        var result = runner(kernelPlan, chunkSize);
+        tensorPrimitivesPathEvaluationCount++;
+        fusedPathEvaluationCount++;
+        RecordDiagnostics(length, plan.ResultType, plan.HasNulls, ColumnStorageFactory.IsVectorizable(plan.ResultType), "TensorPrimitives fused kernel");
+        return result;
+    }
+
+    static class TensorPrimitivesRunner<T>
+        where T : struct, INumber<T>
+    {
+        internal static IColumn Run(KernelPlan plan, int? chunkSize)
+        {
+            var leaves = new NivaraColumn<T>[plan.Columns.Count];
+            for (int i = 0; i < plan.Columns.Count; i++)
+                leaves[i] = (NivaraColumn<T>)plan.Columns[i].Column;
+
+            var length = leaves.Length == 0 ? 1 : leaves[0].Length;
+            var ok = chunkSize == null
+                ? TensorPrimitivesKernel.TryEvaluate<T>(plan, leaves, length, out var result)
+                : TensorPrimitivesKernel.TryEvaluateChunked<T>(plan, leaves, length, chunkSize.Value, out result);
+            if (!ok)
+                throw new NotSupportedException($"Plan is not dispatchable to the TensorPrimitives single-op backend for element type {typeof(T).Name}");
+            return result;
+        }
+    }
+
+    delegate IColumn TensorPrimitivesInvoker(KernelPlan plan, int? chunkSize);
+
+    static readonly ConcurrentDictionary<Type, TensorPrimitivesInvoker> tensorPrimitivesRunnerCache = new();
+
+    static TensorPrimitivesInvoker GetTensorPrimitivesRunner(Type elementType)
+    {
+        return tensorPrimitivesRunnerCache.GetOrAdd(elementType, static t =>
+        {
+            var method = typeof(TensorPrimitivesRunner<>).MakeGenericType(t)
+                .GetMethod(nameof(TensorPrimitivesRunner<int>.Run), BindingFlags.Static | BindingFlags.NonPublic)!;
+            return (TensorPrimitivesInvoker)method.CreateDelegate(typeof(TensorPrimitivesInvoker));
         });
     }
 
@@ -561,111 +673,144 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Builds a compiled <c>Action&lt;T1[], ..., TN[], R[]&gt;</c> delegate that runs the whole
-    /// expression over the leaf arrays in a single loop, writing into the result array, plus a
-    /// cached typed invocation wrapper (<c>Func&lt;object[], int, Array&gt;</c>) that casts the
-    /// leaf arrays and calls the concrete action directly (no per-evaluation
-    /// <see cref="Delegate.DynamicInvoke"/>).
+    /// Builds a compiled <c>Action&lt;T1[], ..., TN[], R[], int, int, int&gt;</c> delegate that runs the
+    /// whole expression over the leaf arrays in a single loop, writing into a caller-provided result
+    /// array at an offset, plus a cached typed invocation wrapper
+    /// (<see cref="CompiledFusedInvoke"/>) that casts the leaf arrays and calls the concrete action
+    /// directly (no per-evaluation <see cref="Delegate.DynamicInvoke"/>). The loop reads
+    /// <c>leaf[i + start]</c> and writes <c>dest[destStart + i]</c>, so one cached delegate serves
+    /// whole-column and chunked execution alike (issue #167).
     /// </summary>
-    static Func<object[], int, Array> BuildCompiledDelegate(ColumnExpression expression, FusedExpressionPlan plan)
+    static CompiledFusedInvoke BuildCompiledDelegate(KernelPlan plan)
     {
-        var leafIndex = new Dictionary<ColumnReference, int>(ReferenceEqualityComparer.Instance);
-        for (int i = 0; i < plan.Columns.Count; i++)
-            leafIndex[plan.Columns[i].Reference] = i;
-
         var leafParams = new ParameterExpression[plan.Columns.Count];
         for (int i = 0; i < plan.Columns.Count; i++)
             leafParams[i] = Expression.Parameter(plan.Columns[i].Column.ElementType.MakeArrayType(), "leaf" + i);
 
         var destParam = Expression.Parameter(plan.ResultType.MakeArrayType(), "dest");
+        var startParam = Expression.Parameter(typeof(int), "start");
+        var countParam = Expression.Parameter(typeof(int), "count");
+        var destStartParam = Expression.Parameter(typeof(int), "destStart");
         var indexVar = Expression.Parameter(typeof(int), "i");
 
-        var value = BuildNode(expression, leafParams, leafIndex, indexVar);
-        var loopBody = BuildForLoop(indexVar, value, destParam);
+        var value = BuildCompiledNode(plan, plan.RootNode, leafParams, indexVar, startParam);
+        var loopBody = BuildOffsetForLoop(indexVar, value, destParam, destStartParam, countParam);
 
-        var paramTypes = new Type[plan.Columns.Count + 1];
+        var paramTypes = new Type[plan.Columns.Count + 4];
         for (int i = 0; i < plan.Columns.Count; i++)
             paramTypes[i] = leafParams[i].Type;
         paramTypes[plan.Columns.Count] = destParam.Type;
+        paramTypes[plan.Columns.Count + 1] = startParam.Type;
+        paramTypes[plan.Columns.Count + 2] = countParam.Type;
+        paramTypes[plan.Columns.Count + 3] = destStartParam.Type;
 
         var actionType = Expression.GetActionType(paramTypes);
         var body = Expression.Block(new[] { indexVar }, loopBody);
-        var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam));
+        var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam).Append(startParam).Append(countParam).Append(destStartParam));
         var typedAction = lambda.Compile();
 
         var argsParam = Expression.Parameter(typeof(object[]), "args");
-        var lengthParam = Expression.Parameter(typeof(int), "length");
-        var destVar = Expression.Variable(plan.ResultType.MakeArrayType(), "dest");
+        var destObjectParam = Expression.Parameter(typeof(Array), "dest");
+        var startObjectParam = Expression.Parameter(typeof(int), "start");
+        var countObjectParam = Expression.Parameter(typeof(int), "count");
+        var destStartObjectParam = Expression.Parameter(typeof(int), "destStart");
 
-        var callArgs = new Expression[leafParams.Length + 1];
+        var callArgs = new Expression[leafParams.Length + 4];
         for (int i = 0; i < leafParams.Length; i++)
             callArgs[i] = Expression.Convert(Expression.ArrayIndex(argsParam, Expression.Constant(i)), leafParams[i].Type);
-        callArgs[leafParams.Length] = destVar;
+        callArgs[leafParams.Length] = Expression.Convert(destObjectParam, destParam.Type);
+        callArgs[leafParams.Length + 1] = startObjectParam;
+        callArgs[leafParams.Length + 2] = countObjectParam;
+        callArgs[leafParams.Length + 3] = destStartObjectParam;
 
-        var wrapperBody = Expression.Block(
-            new[] { destVar },
-            Expression.Assign(destVar, Expression.NewArrayBounds(plan.ResultType, lengthParam)),
-            Expression.Invoke(Expression.Constant(typedAction), callArgs),
-            destVar);
+        var wrapperBody = Expression.Invoke(Expression.Constant(typedAction), callArgs);
 
-        return Expression.Lambda<Func<object[], int, Array>>(wrapperBody, argsParam, lengthParam).Compile();
+        return Expression.Lambda<CompiledFusedInvoke>(wrapperBody, argsParam, destObjectParam, startObjectParam, countObjectParam, destStartObjectParam).Compile();
     }
 
     /// <summary>
-    /// Builds the per-row value expression for a node, returning an expression of the node's compute
-    /// type. Numeric nodes promote their operands (C# binary numeric promotion via
+    /// Builds the per-row value expression for an IR node, returning an expression of the node's
+    /// compute type. Numeric nodes promote their operands (C# binary numeric promotion via
     /// <see cref="NumericPromoter"/>) and insert widening conversions on the leaf/literal operands.
+    /// Leaf reads use <c>leaf[i + start]</c> so one cached delegate serves whole-column and chunked
+    /// execution alike (issue #167).
     /// </summary>
-    static Expression BuildNode(ColumnExpression node, ParameterExpression[] leafParams, IReadOnlyDictionary<ColumnReference, int> leafIndex, ParameterExpression indexVar)
+    static Expression BuildCompiledNode(KernelPlan plan, int nodeIndex, ParameterExpression[] leafParams, ParameterExpression indexVar, ParameterExpression startParam)
     {
-        switch (node)
+        var node = plan.Nodes[nodeIndex];
+        switch (node.Op)
         {
-            case ColumnReference columnRef:
+            case KernelOp.Column:
+                return Expression.ArrayAccess(leafParams[node.Left], Expression.Add(indexVar, startParam));
+
+            case KernelOp.Literal:
+                return Expression.Constant(node.Value, node.Value!.GetType());
+
+            case KernelOp.Add:
+            case KernelOp.Subtract:
+            case KernelOp.Multiply:
+            case KernelOp.Divide:
+            case KernelOp.Modulo:
                 {
-                    var leafParam = leafParams[leafIndex[columnRef]];
-                    return Expression.ArrayAccess(leafParam, indexVar);
+                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
+                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
+                    return ApplyArithmetic(MapToBinaryOperator(node.Op), ConvertTo(left, node.ComputeType), ConvertTo(right, node.ComputeType));
                 }
 
-            case LiteralExpression literal:
-                return Expression.Constant(literal.Value, literal.Value!.GetType());
-
-            case ScalarExpression scalar:
+            case KernelOp.And:
+            case KernelOp.Or:
                 {
-                    var columnValue = BuildNode(scalar.Column, leafParams, leafIndex, indexVar);
-                    var scalarType = scalar.Scalar!.GetType();
-                    var promoted = NumericPromoter.GetPromotedType(columnValue.Type, scalarType)!;
-                    var left = ConvertTo(columnValue, promoted);
-                    var right = ConvertTo(Expression.Constant(scalar.Scalar, scalarType), promoted);
-                    return ApplyArithmetic(scalar.Operator, left, right);
+                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
+                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
+                    return node.Op == KernelOp.And ? Expression.AndAlso(left, right) : Expression.OrElse(left, right);
                 }
 
-            case BinaryExpression binary when binary.Operator is not (BinaryOperator.And or BinaryOperator.Or):
+            case KernelOp.Equal:
+            case KernelOp.NotEqual:
+            case KernelOp.GreaterThan:
+            case KernelOp.LessThan:
+            case KernelOp.GreaterThanOrEqual:
+            case KernelOp.LessThanOrEqual:
                 {
-                    var left = BuildNode(binary.Left, leafParams, leafIndex, indexVar);
-                    var right = BuildNode(binary.Right, leafParams, leafIndex, indexVar);
-                    var promoted = NumericPromoter.GetPromotedType(left.Type, right.Type)!;
-                    return ApplyArithmetic(binary.Operator, ConvertTo(left, promoted), ConvertTo(right, promoted));
-                }
-
-            case BinaryExpression binary:
-                return binary.Operator == BinaryOperator.And
-                    ? Expression.AndAlso(BuildNode(binary.Left, leafParams, leafIndex, indexVar), BuildNode(binary.Right, leafParams, leafIndex, indexVar))
-                    : Expression.OrElse(BuildNode(binary.Left, leafParams, leafIndex, indexVar), BuildNode(binary.Right, leafParams, leafIndex, indexVar));
-
-            case ComparisonExpression comparison:
-                {
-                    var left = BuildNode(comparison.Left, leafParams, leafIndex, indexVar);
-                    var right = BuildNode(comparison.Right, leafParams, leafIndex, indexVar);
+                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
+                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
                     var operandType = NumericPromoter.GetPromotedType(left.Type, right.Type) ?? left.Type;
-                    return BuildComparison(comparison.Operator, ConvertTo(left, operandType), ConvertTo(right, operandType));
+                    return BuildComparison(MapToComparisonOperator(node.Op), ConvertTo(left, operandType), ConvertTo(right, operandType));
                 }
 
-            case NotExpression not:
-                return Expression.Not(BuildNode(not.Operand, leafParams, leafIndex, indexVar));
+            case KernelOp.Not:
+                return Expression.Not(BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam));
 
             default:
-                throw new NotSupportedException($"Expression type {node.GetType().Name} is not supported by the fused evaluator");
+                throw new NotSupportedException($"Kernel op {node.Op} is not supported by the compiled fused target");
         }
+    }
+
+    static BinaryOperator MapToBinaryOperator(KernelOp op)
+    {
+        return op switch
+        {
+            KernelOp.Add => BinaryOperator.Add,
+            KernelOp.Subtract => BinaryOperator.Subtract,
+            KernelOp.Multiply => BinaryOperator.Multiply,
+            KernelOp.Divide => BinaryOperator.Divide,
+            KernelOp.Modulo => BinaryOperator.Modulo,
+            _ => throw new NotSupportedException($"Kernel op {op} is not an arithmetic operator")
+        };
+    }
+
+    static ComparisonOperator MapToComparisonOperator(KernelOp op)
+    {
+        return op switch
+        {
+            KernelOp.Equal => ComparisonOperator.Equal,
+            KernelOp.NotEqual => ComparisonOperator.NotEqual,
+            KernelOp.GreaterThan => ComparisonOperator.GreaterThan,
+            KernelOp.LessThan => ComparisonOperator.LessThan,
+            KernelOp.GreaterThanOrEqual => ComparisonOperator.GreaterThanOrEqual,
+            KernelOp.LessThanOrEqual => ComparisonOperator.LessThanOrEqual,
+            _ => throw new NotSupportedException($"Kernel op {op} is not a comparison operator")
+        };
     }
 
     static Expression ConvertTo(Expression expression, Type target)
@@ -729,16 +874,17 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Builds a <c>for (i = 0; i &lt; dest.Length; i++) dest[i] = value;</c> loop over the result array.
+    /// Builds a <c>for (i = 0; i &lt; count; i++) dest[destStart + i] = value;</c> loop writing into a
+    /// caller-provided result array at an offset, with leaf reads at <c>[start + i]</c>.
     /// </summary>
-    static Expression BuildForLoop(ParameterExpression index, Expression value, ParameterExpression dest)
+    static Expression BuildOffsetForLoop(ParameterExpression index, Expression value, ParameterExpression dest, ParameterExpression destStart, ParameterExpression count)
     {
         var breakLabel = Expression.Label();
         return Expression.Loop(
             Expression.IfThenElse(
-                Expression.LessThan(index, Expression.ArrayLength(dest)),
+                Expression.LessThan(index, count),
                 Expression.Block(
-                    Expression.Assign(Expression.ArrayAccess(dest, index), value),
+                    Expression.Assign(Expression.ArrayAccess(dest, Expression.Add(destStart, index)), value),
                     Expression.PostIncrementAssign(index)),
                 Expression.Break(breakLabel)),
             breakLabel);

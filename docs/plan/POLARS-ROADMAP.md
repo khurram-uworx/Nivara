@@ -66,6 +66,8 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 
 **Status (delivered):** Expression trees fuse into a single pass through `FusedExpressionEvaluator` (`src/Nivara/Expressions/FusedExpressionEvaluator.cs`, `FusedKernel.cs`, `ExpressionTypeInferer.cs`) with a compiled-first `Expression.Compile` target over `T[]` arrays plus a generic sealed node-tree fallback; `Filter`/`Select`/`SortByExpression` and the parallel sort route through it. The boxed/`dynamic` fallbacks in `ExpressionEvaluator`, `NivaraColumn<T>` arithmetic, and `NivaraSeries` Sum/Average are removed (unsupported combinations throw), the numeric domain is extended (`Half`, `decimal`, `nint`/`nuint`, `Int128`/`UInt128`), and `MultiColumnComparer` sorts without boxing. Fused vs multi-pass benchmark at 1M rows: ~11.6x faster, ~44% less allocation. The `NivaraColumn<T>` arithmetic kernels now dispatch the full numeric domain (`Half`, `decimal`, `nint`/`nuint`, `Int128`/`UInt128` included) through the `INumber<T>`-constrained `NumericTensorKernels<T>` typed switch (#157).
 
+**Status (issue #167, delivered):** The fused engine gained a single kernel-IR representation and three backends. `KernelLowerer` lowers every expression tree to a post-order `KernelPlan` (`src/Nivara/Expressions/KernelIR.cs`); the evaluator routes null-bearing uniform numeric plans to a flat IR span interpreter in `FusedKernel` (per-element `ReadOnlyMemory<T>` access + inline OR mask), null-free uniform single-op plans (Add/Subtract/Multiply/Divide) to a `TensorPrimitives` SIMD backend (`TensorPrimitivesKernel.cs`), and everything else to the offset-based compiled delegate. Execution is chunk-capable: `EvaluateChunked(expression, input, chunkSize)` slices the existing contiguous leaf storage (zero-copy) and writes into one shared output array, bit-identical to whole-column evaluation — enabling memory-budgeted streaming boundaries for the Phase 4 async bridge (#171). Chunked/whole bit-identity, null-mask propagation, and backend-routing guardrails are pinned by unit tests.
+
 **Scope:**
 - **Kernel fusion:** lower expression trees to fused single-pass kernels over `ReadOnlySpan<T>`, with two compile targets:
   - Generic `INumber<T>` / `IFloatingPointIeee754<T>` static kernels via SAIS (the native monomorphization).
@@ -73,9 +75,9 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 - **OrderBy computed keys:** teach the sort layer to accept an evaluated key column (remove the `NotSupportedException` in `NivaraLinqExtensions.OrderBy`), routing complex expressions through the fused evaluator.
 - **Generic-math collapse:** replace the explicit `float`/`double` branches in `NivaraColumn<T>` arithmetic (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`, and operator overloads) with `INumber<T>` generic paths, keeping `TensorPrimitives` on the vectorizable fast path.
 
-**Scope (remaining):** `BFloat16`-typed kernels stay deferred to the net11 migration (#137); the fused compiled target runs over `T[]` arrays rather than spans (ref-structs are excluded from expression trees — span-capable target tracked as #155).
+**Scope (remaining):** `BFloat16`-typed kernels stay deferred to the net11 migration (#137); the compiled `Expression.Compile` delegate target still runs over `T[]` arrays, but the IR interpreter and chunked execution deliver the span-capable, memory-budgeted target (#167); remaining span work tracked as #155.
 
-**Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraLinqExtensions.cs`, `src/Nivara/Optimization/OperationFusionRule.cs`, `src/Nivara/KernelSelector.cs`.
+**Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/Expressions/KernelIR.cs`, `src/Nivara/Expressions/KernelLowerer.cs`, `src/Nivara/Expressions/FusedKernel.cs`, `src/Nivara/Expressions/TensorPrimitivesKernel.cs`, `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraLinqExtensions.cs`, `src/Nivara/Optimization/OperationFusionRule.cs`, `src/Nivara/KernelSelector.cs`.
 
 **Dependencies:** Phase 1.
 
@@ -176,6 +178,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 | `OrderBy` computed keys (Phase 2) | Small | ✅ Delivered |
 | Generic-math collapse of column arithmetic (Phase 2) | Medium | ✅ Delivered |
 | Fused single-pass kernels (Phase 2) | Medium-High | ✅ Delivered |
+| Fused kernel IR + span/chunked execution (Phase 2, #167) | High | ✅ Delivered |
 | Window functions, core set (Phase 3) | High | ✅ Delivered (#135) |
 | `Over`/`Rank`/`DenseRank` (Phase 3 remainder) | High | ✅ Delivered (#156) |
 | Async-native streaming (Phase 4) | Medium | Phase 4 |

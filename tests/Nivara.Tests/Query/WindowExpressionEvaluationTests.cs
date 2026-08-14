@@ -50,7 +50,7 @@ public class WindowExpressionEvaluationTests
         var result = fused.Evaluate(ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2) * 2, input);
 
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(2), "window source + one fused outer pass");
-        Assert.That(fused.NodeTreePathEvaluationCount, Is.EqualTo(1), "null-bearing window result fused through the span kernel");
+        Assert.That(fused.SpanKernelPathEvaluationCount, Is.EqualTo(1), "null-bearing window result fused through the span kernel");
         AssertColumn(result, new int?[] { null, 6, 10, 14 });
     }
 

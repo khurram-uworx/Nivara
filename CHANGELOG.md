@@ -2,6 +2,12 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
+## [Unreleased]
+
+### Added
+
+- **Fused expression kernel IR + span/chunked execution (#167)** — the fused expression engine now lowers every expression tree to a single post-order `KernelPlan` (`KernelLowerer`/`KernelIR`) and routes it to one of three backends: a flat IR span interpreter in `FusedKernel` for null-bearing uniform numeric plans (per-element `ReadOnlyMemory<T>` leaf access, hoisted literals, inline OR null-mask), a `TensorPrimitives` SIMD backend for null-free single-op plans (Add/Subtract/Multiply/Divide, one BCL SIMD call), and the compiled offset delegate (`start`/`count`/`destStart`) for everything else (null-free chains, bool, heterogeneous plans). Execution is chunk-capable: `FusedExpressionEvaluator.EvaluateChunked(expression, input, chunkSize)` slices the existing contiguous leaf storage zero-copy and writes into one shared output array, bit-identical to whole-column evaluation — the memory-budgeted primitive the Phase 4 async streaming bridge (#171) needs. Chunked/whole bit-identity, null-mask propagation, and backend-routing guardrails are pinned by unit tests (`EvaluateChunked_*`, `Evaluate_NullFreeSingleOp_*`); `NodeTreePathEvaluationCount` was renamed `SpanKernelPathEvaluationCount` to reflect the IR span fallback. Design rationale recorded in `docs/adr/004-fused-expression-engine-kernel-ir-span-backends.md`.
+
 ## [1.3.0] - 2026-08-14
 
 ### Added
