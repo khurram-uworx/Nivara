@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Numerics;
 using System.Reflection;
 using SortKey = Nivara.Operations.SortKey;
+using WindowSpec = Nivara.Operations.WindowSpec;
 
 namespace Nivara;
 
@@ -15,6 +16,22 @@ namespace Nivara;
 /// <remarks>Added as part of issue #135 window functions delivery.</remarks>
 public static partial class NivaraFrameExtensions
 {
+    // ── Window specification ──
+
+    /// <summary>
+    /// Creates a reusable window specification (<see cref="WindowSpec"/>) for the window-function
+    /// extensions on <see cref="NivaraFrame"/>. The spec captures partition-by and order-by keys
+    /// and can be reused across multiple window methods.
+    /// </summary>
+    /// <param name="frame">The source frame (unused by the builder; present for API discoverability)</param>
+    /// <returns>An empty window specification to be configured via <see cref="WindowSpec.PartitionBy"/> and <see cref="WindowSpec.OrderBy"/></returns>
+    /// <remarks>Added as part of issue #162 Over/WindowSpec builder delivery.</remarks>
+    public static WindowSpec Over(this NivaraFrame frame)
+    {
+        ArgumentNullException.ThrowIfNull(frame);
+        return new WindowSpec();
+    }
+
     // ── Rolling ──
 
     /// <summary>

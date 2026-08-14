@@ -564,6 +564,19 @@ internal sealed class QueryFrame : IDisposable
     // ── Window functions ──
 
     /// <summary>
+    /// Creates a reusable window specification (<see cref="WindowSpec"/>) for the window
+    /// methods on this query frame. The spec captures partition-by and order-by keys and can be
+    /// reused across multiple window methods.
+    /// </summary>
+    /// <returns>An empty window specification to be configured via <see cref="WindowSpec.PartitionBy"/> and <see cref="WindowSpec.OrderBy"/></returns>
+    /// <remarks>Added as part of issue #162 Over/WindowSpec builder delivery.</remarks>
+    public WindowSpec Over()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        return new WindowSpec();
+    }
+
+    /// <summary>
     /// Adds a rolling-sum window operation that appends a result column.
     /// </summary>
     /// <param name="source">The source column name</param>
