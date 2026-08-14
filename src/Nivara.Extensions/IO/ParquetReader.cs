@@ -284,10 +284,17 @@ public static class ParquetReader
         return elementType switch
         {
             Type t when t == typeof(bool) => await ReadParquetColumnAsync<bool>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(byte) => await ReadParquetColumnAsync<byte>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(sbyte) => await ReadParquetColumnAsync<sbyte>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(short) => await ReadParquetColumnAsync<short>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(ushort) => await ReadParquetColumnAsync<ushort>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(int) => await ReadParquetColumnAsync<int>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(uint) => await ReadParquetColumnAsync<uint>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(long) => await ReadParquetColumnAsync<long>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(ulong) => await ReadParquetColumnAsync<ulong>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(float) => await ReadParquetColumnAsync<float>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(double) => await ReadParquetColumnAsync<double>(rowGroupReader, field, length, cancellationToken),
+            Type t when t == typeof(decimal) => await ReadParquetColumnAsync<decimal>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(DateTime) => await ReadParquetColumnAsync<DateTime>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(DateOnly) => await ReadParquetColumnAsync<DateOnly>(rowGroupReader, field, length, cancellationToken),
             Type t when t == typeof(Guid) => await ReadParquetColumnAsync<Guid>(rowGroupReader, field, length, cancellationToken),
@@ -321,17 +328,28 @@ public static class ParquetReader
         if (originalType == typeof(nint)) return CreateConvertedColumn<nint>(columnData, static v => v is long l ? (nint)l : null);
         if (originalType == typeof(nuint)) return CreateConvertedColumn<nuint>(columnData, static v => v is ulong ul ? (nuint)ul : null);
         if (originalType == typeof(char)) return CreateConvertedColumn<char>(columnData, static v => v is ushort us ? (char)us : null);
-        if (originalType == typeof(DateTimeOffset)) return CreateConvertedColumn<DateTimeOffset>(columnData, static v => v is DateTime dt ? new DateTimeOffset(dt) : null);
+        // Parquet.Net reports Date logical fields with ClrType DateTime, so restore DateOnly from the date part
+        if (originalType == typeof(DateOnly)) return CreateConvertedColumn<DateOnly>(columnData, static v => v is DateTime dt ? DateOnly.FromDateTime(dt) : null);
+        // The stored DateTime is always UTC (the writer converts to UtcDateTime); interpret the
+        // read-back value as UTC regardless of the Kind Parquet.Net assigns to it
+        if (originalType == typeof(DateTimeOffset)) return CreateConvertedColumn<DateTimeOffset>(columnData, static v => v is DateTime dt ? new DateTimeOffset(DateTime.SpecifyKind(dt, DateTimeKind.Utc), TimeSpan.Zero) : null);
         if (originalType == typeof(TimeSpan)) return CreateConvertedColumn<TimeSpan>(columnData, static v => v is long l ? TimeSpan.FromTicks(l) : null);
         if (originalType == typeof(TimeOnly)) return CreateConvertedColumn<TimeOnly>(columnData, static v => v is long l ? TimeOnly.FromTimeSpan(TimeSpan.FromTicks(l / 100)) : null);
 
         return elementType switch
         {
             Type t when t == typeof(bool) => CreateNivaraColumn<bool>(columnData),
+            Type t when t == typeof(byte) => CreateNivaraColumn<byte>(columnData),
+            Type t when t == typeof(sbyte) => CreateNivaraColumn<sbyte>(columnData),
+            Type t when t == typeof(short) => CreateNivaraColumn<short>(columnData),
+            Type t when t == typeof(ushort) => CreateNivaraColumn<ushort>(columnData),
             Type t when t == typeof(int) => CreateNivaraColumn<int>(columnData),
+            Type t when t == typeof(uint) => CreateNivaraColumn<uint>(columnData),
             Type t when t == typeof(long) => CreateNivaraColumn<long>(columnData),
+            Type t when t == typeof(ulong) => CreateNivaraColumn<ulong>(columnData),
             Type t when t == typeof(float) => CreateNivaraColumn<float>(columnData),
             Type t when t == typeof(double) => CreateNivaraColumn<double>(columnData),
+            Type t when t == typeof(decimal) => CreateNivaraColumn<decimal>(columnData),
             Type t when t == typeof(DateTime) => CreateNivaraColumn<DateTime>(columnData),
             Type t when t == typeof(DateOnly) => CreateNivaraColumn<DateOnly>(columnData),
             Type t when t == typeof(Guid) => CreateNivaraColumn<Guid>(columnData),

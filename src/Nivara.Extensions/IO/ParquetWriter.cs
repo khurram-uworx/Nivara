@@ -417,41 +417,43 @@ public static class ParquetWriter
 
     private static Task WriteParquetColumnAsync(Parquet.ParquetRowGroupWriter rowGroupWriter, DataField field, Array columnData, CancellationToken cancellationToken)
     {
-        return columnData switch
+        var elementType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
+
+        if (TypeMapper.IsStringType(elementType))
+            return rowGroupWriter.WriteAsync(field, (string[])columnData, null);
+
+        // Dispatch on the DataField element type rather than the array runtime type:
+        // .NET 10 treats same-width signed/unsigned primitive arrays (long[]/ulong[],
+        // int[]/uint[], short[]/ushort[], byte[]/sbyte[]) as type-equivalent in pattern
+        // matching, so a runtime-type switch would pick the wrong WriteAsync<T> arm.
+        return elementType switch
         {
-            bool[] values => rowGroupWriter.WriteAsync<bool>(field, values, null, null, cancellationToken),
-            bool?[] values => rowGroupWriter.WriteAsync<bool>(field, values, null, null, cancellationToken),
-            int[] values => rowGroupWriter.WriteAsync<int>(field, values, null, null, cancellationToken),
-            int?[] values => rowGroupWriter.WriteAsync<int>(field, values, null, null, cancellationToken),
-            long[] values => rowGroupWriter.WriteAsync<long>(field, values, null, null, cancellationToken),
-            long?[] values => rowGroupWriter.WriteAsync<long>(field, values, null, null, cancellationToken),
-            float[] values => rowGroupWriter.WriteAsync<float>(field, values, null, null, cancellationToken),
-            float?[] values => rowGroupWriter.WriteAsync<float>(field, values, null, null, cancellationToken),
-            double[] values => rowGroupWriter.WriteAsync<double>(field, values, null, null, cancellationToken),
-            double?[] values => rowGroupWriter.WriteAsync<double>(field, values, null, null, cancellationToken),
-            DateTime[] values => rowGroupWriter.WriteAsync<DateTime>(field, values, null, null, cancellationToken),
-            DateTime?[] values => rowGroupWriter.WriteAsync<DateTime>(field, values, null, null, cancellationToken),
-            byte[] values => rowGroupWriter.WriteAsync<byte>(field, values, null, null, cancellationToken),
-            byte?[] values => rowGroupWriter.WriteAsync<byte>(field, values, null, null, cancellationToken),
-            short[] values => rowGroupWriter.WriteAsync<short>(field, values, null, null, cancellationToken),
-            short?[] values => rowGroupWriter.WriteAsync<short>(field, values, null, null, cancellationToken),
-            uint[] values => rowGroupWriter.WriteAsync<uint>(field, values, null, null, cancellationToken),
-            uint?[] values => rowGroupWriter.WriteAsync<uint>(field, values, null, null, cancellationToken),
-            ulong[] values => rowGroupWriter.WriteAsync<ulong>(field, values, null, null, cancellationToken),
-            ulong?[] values => rowGroupWriter.WriteAsync<ulong>(field, values, null, null, cancellationToken),
-            ushort[] values => rowGroupWriter.WriteAsync<ushort>(field, values, null, null, cancellationToken),
-            ushort?[] values => rowGroupWriter.WriteAsync<ushort>(field, values, null, null, cancellationToken),
-            sbyte[] values => rowGroupWriter.WriteAsync<sbyte>(field, values, null, null, cancellationToken),
-            sbyte?[] values => rowGroupWriter.WriteAsync<sbyte>(field, values, null, null, cancellationToken),
-            decimal[] values => rowGroupWriter.WriteAsync<decimal>(field, values, null, null, cancellationToken),
-            decimal?[] values => rowGroupWriter.WriteAsync<decimal>(field, values, null, null, cancellationToken),
-            DateOnly[] values => rowGroupWriter.WriteAsync<DateOnly>(field, values, null, null, cancellationToken),
-            DateOnly?[] values => rowGroupWriter.WriteAsync<DateOnly>(field, values, null, null, cancellationToken),
-            Guid[] values => rowGroupWriter.WriteAsync<Guid>(field, values, null, null, cancellationToken),
-            Guid?[] values => rowGroupWriter.WriteAsync<Guid>(field, values, null, null, cancellationToken),
-            string[] values => rowGroupWriter.WriteAsync(field, values, null),
-            _ => throw new UnsupportedTypeException(columnData.GetType().GetElementType() ?? columnData.GetType(), TypeMapper.GetTypeSuggestions(columnData.GetType().GetElementType() ?? columnData.GetType()))
+            Type t when t == typeof(bool) => WriteParquetColumnTypedAsync<bool>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(byte) => WriteParquetColumnTypedAsync<byte>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(sbyte) => WriteParquetColumnTypedAsync<sbyte>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(short) => WriteParquetColumnTypedAsync<short>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(ushort) => WriteParquetColumnTypedAsync<ushort>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(int) => WriteParquetColumnTypedAsync<int>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(uint) => WriteParquetColumnTypedAsync<uint>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(long) => WriteParquetColumnTypedAsync<long>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(ulong) => WriteParquetColumnTypedAsync<ulong>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(float) => WriteParquetColumnTypedAsync<float>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(double) => WriteParquetColumnTypedAsync<double>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(decimal) => WriteParquetColumnTypedAsync<decimal>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(DateTime) => WriteParquetColumnTypedAsync<DateTime>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(DateOnly) => WriteParquetColumnTypedAsync<DateOnly>(rowGroupWriter, field, columnData, cancellationToken),
+            Type t when t == typeof(Guid) => WriteParquetColumnTypedAsync<Guid>(rowGroupWriter, field, columnData, cancellationToken),
+            _ => throw new UnsupportedTypeException(elementType, TypeMapper.GetTypeSuggestions(elementType))
         };
+    }
+
+    private static Task WriteParquetColumnTypedAsync<T>(Parquet.ParquetRowGroupWriter rowGroupWriter, DataField field, Array columnData, CancellationToken cancellationToken)
+        where T : struct
+    {
+        if (field.IsNullable)
+            return rowGroupWriter.WriteAsync<T>(field, (T?[])columnData, null, null, cancellationToken);
+
+        return rowGroupWriter.WriteAsync<T>(field, (T[])columnData, null, null, cancellationToken);
     }
 
     /// <summary>
