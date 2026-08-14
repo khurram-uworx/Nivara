@@ -5,16 +5,16 @@ namespace Nivara.AutoDiff.Nn;
 
 public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
-    readonly Conv2d<T>[] _encoderConvs;
-    readonly Conv2d<T> _muConv;
-    readonly Conv2d<T> _logVarConv;
-    readonly ConvTranspose2d<T>[] _decoderConvs;
-    readonly ConvTranspose2d<T> _reconConv;
-    readonly int _latentChannels;
-    readonly int _spatialSize;
+    readonly Conv2d<T>[] encoderConvs;
+    readonly Conv2d<T> muConv;
+    readonly Conv2d<T> logVarConv;
+    readonly ConvTranspose2d<T>[] decoderConvs;
+    readonly ConvTranspose2d<T> reconConv;
+    readonly int latentChannels;
+    readonly int spatialSize;
 
-    public int LatentChannels => _latentChannels;
-    public int SpatialSize => _spatialSize;
+    public int LatentChannels => latentChannels;
+    public int SpatialSize => spatialSize;
 
     public ConvVAE(
         int inputChannels,
@@ -30,38 +30,38 @@ public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee7
         if (latentChannels <= 0) throw new ArgumentOutOfRangeException(nameof(latentChannels));
         if (spatialSize <= 0) throw new ArgumentOutOfRangeException(nameof(spatialSize));
 
-        _latentChannels = latentChannels;
-        _spatialSize = spatialSize;
+        this.latentChannels = latentChannels;
+        this.spatialSize = spatialSize;
 
-        _encoderConvs = new Conv2d<T>[encoderChannels.Length];
+        encoderConvs = new Conv2d<T>[encoderChannels.Length];
         for (int i = 0; i < encoderChannels.Length; i++)
         {
             int inC = i == 0 ? inputChannels : encoderChannels[i - 1];
-            _encoderConvs[i] = new Conv2d<T>(inC, encoderChannels[i], kernelSize, stride, padding, bias: false);
+            encoderConvs[i] = new Conv2d<T>(inC, encoderChannels[i], kernelSize, stride, padding, bias: false);
         }
 
         int lastEncCh = encoderChannels[^1];
-        _muConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false);
-        _logVarConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false);
+        muConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false);
+        logVarConv = new Conv2d<T>(lastEncCh, latentChannels, 1, bias: false);
 
         int decoderSteps = encoderChannels.Length;
         var decoderChannels = new int[decoderSteps];
         for (int i = 0; i < decoderSteps; i++)
             decoderChannels[i] = encoderChannels[decoderSteps - 1 - i];
 
-        _decoderConvs = new ConvTranspose2d<T>[decoderSteps];
+        decoderConvs = new ConvTranspose2d<T>[decoderSteps];
         for (int i = 0; i < decoderSteps; i++)
         {
             int inC = i == 0 ? latentChannels : decoderChannels[i - 1];
-            _decoderConvs[i] = new ConvTranspose2d<T>(inC, decoderChannels[i], kernelSize, stride, padding, bias: false);
+            decoderConvs[i] = new ConvTranspose2d<T>(inC, decoderChannels[i], kernelSize, stride, padding, bias: false);
         }
 
-        _reconConv = new ConvTranspose2d<T>(decoderChannels[^1], inputChannels, 1, bias: true);
+        reconConv = new ConvTranspose2d<T>(decoderChannels[^1], inputChannels, 1, bias: true);
 
-        RegisterModules(_encoderConvs);
-        RegisterModules(_muConv, _logVarConv);
-        RegisterModules(_decoderConvs);
-        RegisterModules(_reconConv);
+        RegisterModules(encoderConvs);
+        RegisterModules(muConv, logVarConv);
+        RegisterModules(decoderConvs);
+        RegisterModules(reconConv);
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -74,14 +74,14 @@ public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee7
     public (ReverseGradTensor<T> Mu, ReverseGradTensor<T> LogVar) Encode(ReverseGradTensor<T> input)
     {
         var h = input;
-        for (int i = 0; i < _encoderConvs.Length; i++)
+        for (int i = 0; i < encoderConvs.Length; i++)
         {
-            h = _encoderConvs[i].Forward(h);
+            h = encoderConvs[i].Forward(h);
             h = Activation.Relu(h);
         }
 
-        var mu = _muConv.Forward(h);
-        var logVar = _logVarConv.Forward(h);
+        var mu = muConv.Forward(h);
+        var logVar = logVarConv.Forward(h);
         return (mu, logVar);
     }
 
@@ -91,13 +91,13 @@ public sealed class ConvVAE<T> : Module<T> where T : struct, IFloatingPointIeee7
     public ReverseGradTensor<T> Decode(ReverseGradTensor<T> z)
     {
         var h = z;
-        for (int i = 0; i < _decoderConvs.Length; i++)
+        for (int i = 0; i < decoderConvs.Length; i++)
         {
-            h = _decoderConvs[i].Forward(h);
+            h = decoderConvs[i].Forward(h);
             h = Activation.Relu(h);
         }
 
-        return _reconConv.Forward(h);
+        return reconConv.Forward(h);
     }
 
     public ReverseGradTensor<T> ElboLoss(

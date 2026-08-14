@@ -5,18 +5,18 @@ namespace Nivara.AutoDiff.Nn;
 
 public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
-    readonly int _normalizedShape;
-    readonly T _eps;
-    readonly bool _affine;
+    readonly int normalizedShape;
+    readonly T eps;
+    readonly bool affine;
 
-    readonly Parameter<T>? _weight;
-    readonly Parameter<T>? _bias;
+    readonly Parameter<T>? weight;
+    readonly Parameter<T>? bias;
 
-    public int NormalizedShape => _normalizedShape;
-    public T Eps => _eps;
-    public bool Affine => _affine;
-    public Parameter<T>? Weight => _weight;
-    public Parameter<T>? Bias => _bias;
+    public int NormalizedShape => normalizedShape;
+    public T Eps => eps;
+    public bool Affine => affine;
+    public Parameter<T>? Weight => weight;
+    public Parameter<T>? Bias => bias;
 
     public LayerNorm(
         int normalizedShape,
@@ -26,9 +26,9 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
         if (normalizedShape <= 0) throw new ArgumentOutOfRangeException(nameof(normalizedShape));
         if (eps <= 0) throw new ArgumentOutOfRangeException(nameof(eps));
 
-        _normalizedShape = normalizedShape;
-        _eps = T.CreateChecked(eps);
-        _affine = affine;
+        this.normalizedShape = normalizedShape;
+        this.eps = T.CreateChecked(eps);
+        this.affine = affine;
 
         if (affine)
         {
@@ -39,9 +39,9 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
                 weightData[i] = T.One;
                 biasData[i] = T.Zero;
             }
-            _weight = new Parameter<T>("Weight", ReverseGradTensor<T>.FromArray(weightData, requiresGrad: true));
-            _bias = new Parameter<T>("Bias", ReverseGradTensor<T>.FromArray(biasData, requiresGrad: true));
-            RegisterParameters(_weight, _bias);
+            weight = new Parameter<T>("Weight", ReverseGradTensor<T>.FromArray(weightData, requiresGrad: true));
+            bias = new Parameter<T>("Bias", ReverseGradTensor<T>.FromArray(biasData, requiresGrad: true));
+            RegisterParameters(weight, bias);
         }
     }
 
@@ -49,28 +49,28 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
         if (input.Rank < 2) throw new ArgumentException($"LayerNorm expects at least 2D input, got {input.Rank}D");
-        if (input.Shape[^1] != _normalizedShape)
-            throw new ArgumentException($"Expected last dimension {_normalizedShape}, got {input.Shape[^1]}");
+        if (input.Shape[^1] != normalizedShape)
+            throw new ArgumentException($"Expected last dimension {normalizedShape}, got {input.Shape[^1]}");
 
-        var gamma = _affine && _weight != null
-            ? GetParamSpan(_weight.Tensor)
+        var gamma = affine && weight != null
+            ? GetParamSpan(weight.Tensor)
             : ReadOnlySpan<T>.Empty;
-        var beta = _affine && _bias != null
-            ? GetParamSpan(_bias.Tensor)
+        var beta = affine && bias != null
+            ? GetParamSpan(bias.Tensor)
             : ReadOnlySpan<T>.Empty;
 
         var inputData = GetInputSpan(input);
-        int rows = input.Length / _normalizedShape;
+        int rows = input.Length / normalizedShape;
 
         if (!input.RequiresGrad)
         {
-            var output = LayerNormKernel<T>.ForwardInference(inputData, rows, _normalizedShape, gamma, beta, _eps, _affine);
+            var output = LayerNormKernel<T>.ForwardInference(inputData, rows, normalizedShape, gamma, beta, eps, affine);
             return new ReverseGradTensor<T>(
                 NivaraColumn<T>.CreateFromOwnedArray(output),
                 false, input.Shape);
         }
 
-        var result = LayerNormKernel<T>.Forward(inputData, rows, _normalizedShape, gamma, beta, _eps, _affine);
+        var result = LayerNormKernel<T>.Forward(inputData, rows, normalizedShape, gamma, beta, eps, affine);
 
         var resultTensor = new ReverseGradTensor<T>(
             NivaraColumn<T>.Create(result.Output),
@@ -81,9 +81,9 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
             var savedXHat = result.XHat;
             var savedInvStd = result.InvStd;
             var savedGamma = gamma.Length > 0 ? gamma.ToArray() : [];
-            bool affine = _affine;
+            bool useAffine = affine;
             int savedRows = rows;
-            int savedNormShape = _normalizedShape;
+            int savedNormShape = normalizedShape;
 
             var gradFn = new OpNode<T>("LayerNorm", [input], (typedGradOutput) =>
             {
@@ -92,21 +92,21 @@ public sealed class LayerNorm<T> : Module<T> where T : struct, IFloatingPointIee
 
                 var gradInputData = LayerNormKernel<T>.BackwardInput(
                     gradOutData, savedXHat, savedGamma, savedInvStd,
-                    savedRows, savedNormShape, affine);
+                    savedRows, savedNormShape, useAffine);
 
                 ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(gradInputData));
 
-                if (affine)
+                if (useAffine)
                 {
                     var gradGammaData = LayerNormKernel<T>.BackwardWeight(
                         gradOutData, savedXHat, savedRows, savedNormShape);
                     var gradBetaData = LayerNormKernel<T>.BackwardBias(
                         gradOutData, savedRows, savedNormShape);
 
-                    if (_weight != null)
-                        ReverseGradOperations.AccumulateGradient(_weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
-                    if (_bias != null)
-                        ReverseGradOperations.AccumulateGradient(_bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
+                    if (weight != null)
+                        ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.Create(gradGammaData));
+                    if (bias != null)
+                        ReverseGradOperations.AccumulateGradient(bias.Tensor, NivaraColumn<T>.Create(gradBetaData));
                 }
             });
 

@@ -6,22 +6,22 @@ namespace Nivara.AutoDiff.Nn;
 
 public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> where T : struct, IFloatingPointIeee754<T>
 {
-    readonly int _embedDim;
-    readonly int _numHeads;
-    readonly int _headDim;
-    readonly T _attnScale;
-    readonly bool _causal;
+    readonly int embedDim;
+    readonly int numHeads;
+    readonly int headDim;
+    readonly T attnScale;
+    readonly bool causal;
 
-    readonly Linear<T> _qProj;
-    readonly Linear<T> _kProj;
-    readonly Linear<T> _vProj;
-    readonly Linear<T> _oProj;
+    readonly Linear<T> qProj;
+    readonly Linear<T> kProj;
+    readonly Linear<T> vProj;
+    readonly Linear<T> oProj;
 
-    readonly Dropout<T>? _attnDropout;
+    readonly Dropout<T>? attnDropout;
 
-    public int EmbedDim => _embedDim;
-    public int NumHeads => _numHeads;
-    public int HeadDim => _headDim;
+    public int EmbedDim => embedDim;
+    public int NumHeads => numHeads;
+    public int HeadDim => headDim;
 
     public MultiheadAttention(
         int embedDim,
@@ -33,26 +33,26 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
         if (embedDim % numHeads != 0)
             throw new ArgumentException($"embedDim ({embedDim}) must be divisible by numHeads ({numHeads}).");
 
-        _embedDim = embedDim;
-        _numHeads = numHeads;
-        _headDim = embedDim / numHeads;
-        _attnScale = T.CreateChecked(1.0 / Math.Sqrt(_headDim));
-        _causal = causal;
+        this.embedDim = embedDim;
+        this.numHeads = numHeads;
+        headDim = embedDim / numHeads;
+        attnScale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
+        this.causal = causal;
 
         var weightInit = new NormalInitializer<T>(T.Zero, T.CreateChecked(initStd));
         var outInit = new NormalInitializer<T>(T.Zero, T.Zero);
 
-        _qProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: weightInit);
-        _kProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: weightInit);
-        _vProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: weightInit);
-        _oProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: outInit);
+        qProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: weightInit);
+        kProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: weightInit);
+        vProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: weightInit);
+        oProj = new Linear<T>(embedDim, embedDim, bias: false, weightInitializer: outInit);
 
-        RegisterModules(_qProj, _kProj, _vProj, _oProj);
+        RegisterModules(qProj, kProj, vProj, oProj);
 
         if (dropout > 0.0)
         {
-            _attnDropout = new Dropout<T>(dropout);
-            RegisterModules(_attnDropout);
+            attnDropout = new Dropout<T>(dropout);
+            RegisterModules(attnDropout);
         }
     }
 
@@ -64,14 +64,14 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
         int L = input.shape[0];
         int D = input.shape[1];
 
-        var Q = _qProj.Forward(input);
-        var K = _kProj.Forward(input);
-        var V = _vProj.Forward(input);
+        var Q = qProj.Forward(input);
+        var K = kProj.Forward(input);
+        var V = vProj.Forward(input);
 
         var xAttn = ComputeAttention(Q, K, V, L);
-        var xProj = _oProj.Forward(xAttn);
+        var xProj = oProj.Forward(xAttn);
 
-        return _attnDropout != null ? _attnDropout.Forward(xProj) : xProj;
+        return attnDropout != null ? attnDropout.Forward(xProj) : xProj;
     }
 
     public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, ReverseGradTensor<T> paddingMask)
@@ -81,14 +81,14 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
 
         int L = input.shape[0];
 
-        var Q = _qProj.Forward(input);
-        var K = _kProj.Forward(input);
-        var V = _vProj.Forward(input);
+        var Q = qProj.Forward(input);
+        var K = kProj.Forward(input);
+        var V = vProj.Forward(input);
 
         var xAttn = ComputeAttention(Q, K, V, L, paddingMask: paddingMask);
-        var xProj = _oProj.Forward(xAttn);
+        var xProj = oProj.Forward(xAttn);
 
-        return _attnDropout != null ? _attnDropout.Forward(xProj) : xProj;
+        return attnDropout != null ? attnDropout.Forward(xProj) : xProj;
     }
 
     public ReverseGradTensor<T> Forward(
@@ -104,14 +104,14 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
 
         int L = query.shape[0];
 
-        var Q = _qProj.Forward(query);
-        var K = _kProj.Forward(key);
-        var V = _vProj.Forward(value);
+        var Q = qProj.Forward(query);
+        var K = kProj.Forward(key);
+        var V = vProj.Forward(value);
 
         var xAttn = ComputeAttention(Q, K, V, L, causal, paddingMask);
-        var xProj = _oProj.Forward(xAttn);
+        var xProj = oProj.Forward(xAttn);
 
-        return _attnDropout != null ? _attnDropout.Forward(xProj) : xProj;
+        return attnDropout != null ? attnDropout.Forward(xProj) : xProj;
     }
 
     ReverseGradTensor<T> ComputeAttention(
@@ -122,7 +122,7 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
         bool? overrideCausal = null,
         ReverseGradTensor<T>? paddingMask = null)
     {
-        bool useCausal = overrideCausal ?? _causal;
+        bool useCausal = overrideCausal ?? causal;
         int kvLen = K.shape[0];
 
         ReverseGradTensor<T>? mask = null;
@@ -131,7 +131,7 @@ public sealed class MultiheadAttention<T> : Module<T>, IMultipleInputModule<T> w
         else if (paddingMask != null)
             mask = CreatePaddingMask(paddingMask, qLen, kvLen);
 
-        return ReverseGradOperations.MultiHeadAttention(Q, K, V, _numHeads, _attnScale, mask);
+        return ReverseGradOperations.MultiHeadAttention(Q, K, V, numHeads, attnScale, mask);
     }
 
     ReverseGradTensor<T> CreatePaddingMask(ReverseGradTensor<T> paddingMask, int qLen, int kvLen)

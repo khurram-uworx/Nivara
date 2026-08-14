@@ -6,22 +6,22 @@ namespace Nivara.AutoDiff.Nn;
 
 public sealed class MaxPool2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
-    readonly int _kernelSize;
-    readonly int _stride;
-    readonly int _padding;
+    readonly int kernelSize;
+    readonly int stride;
+    readonly int padding;
 
-    public int KernelSize => _kernelSize;
-    public int Stride => _stride;
-    public int Padding => _padding;
+    public int KernelSize => kernelSize;
+    public int Stride => stride;
+    public int Padding => padding;
 
     public MaxPool2d(int kernelSize, int stride = 0, int padding = 0)
     {
         if (kernelSize <= 0) throw new ArgumentOutOfRangeException(nameof(kernelSize));
         if (padding < 0) throw new ArgumentOutOfRangeException(nameof(padding));
 
-        _kernelSize = kernelSize;
-        _stride = stride <= 0 ? kernelSize : stride;
-        _padding = padding;
+        this.kernelSize = kernelSize;
+        this.stride = stride <= 0 ? kernelSize : stride;
+        this.padding = padding;
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -33,13 +33,13 @@ public sealed class MaxPool2d<T> : Module<T> where T : struct, IFloatingPointIee
                 $"MaxPool2d expects 4D input [N, C, H, W], got {input.Shape.Length}D.");
 
         int n = input.Shape[0], c = input.Shape[1], h = input.Shape[2], w = input.Shape[3];
-        int oH = (h + 2 * _padding - _kernelSize) / _stride + 1;
-        int oW = (w + 2 * _padding - _kernelSize) / _stride + 1;
+        int oH = (h + 2 * padding - kernelSize) / stride + 1;
+        int oW = (w + 2 * padding - kernelSize) / stride + 1;
 
         if (oH <= 0 || oW <= 0)
             throw new InvalidOperationException(
                 $"MaxPool2d output dimensions are non-positive: oH={oH}, oW={oW}. " +
-                $"Input: [{n},{c},{h},{w}], kernel={_kernelSize}, stride={_stride}, padding={_padding}.");
+                $"Input: [{n},{c},{h},{w}], kernel={kernelSize}, stride={stride}, padding={padding}.");
 
         var outputData = new T[n * c * oH * oW];
         var argmaxData = new int[n * c * oH * oW];
@@ -49,7 +49,7 @@ public sealed class MaxPool2d<T> : Module<T> where T : struct, IFloatingPointIee
             : ModuleHelpers<T>.CopyToTemp(input.Data, n * c * h * w);
 
         MaxPoolForwardKernel(inputSpan, outputData, argmaxData,
-            n, c, h, w, oH, oW, _kernelSize, _stride, _padding);
+            n, c, h, w, oH, oW, kernelSize, stride, padding);
 
         var outShape = new[] { n, c, oH, oW };
         var result = NivaraColumn<T>.Create(outputData);
@@ -67,7 +67,7 @@ public sealed class MaxPool2d<T> : Module<T> where T : struct, IFloatingPointIee
                 gradOutput.CopyTo(gradOutData, T.Zero);
 
                 MaxPoolBackwardKernel(gradOutData, inputGrad, capturedArgmax,
-                    n, c, h, w, oH, oW, _kernelSize, _stride, _padding);
+                    n, c, h, w, oH, oW, kernelSize, stride, padding);
 
                 ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.Create(inputGrad));
             });

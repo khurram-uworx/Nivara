@@ -6,14 +6,14 @@ namespace Nivara.AutoDiff.Nn;
 
 public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
-    readonly int _outputSize;
+    readonly int outputSize;
 
-    public int OutputSize => _outputSize;
+    public int OutputSize => outputSize;
 
     public AdaptiveAvgPool2d(int outputSize)
     {
         if (outputSize <= 0) throw new ArgumentOutOfRangeException(nameof(outputSize));
-        _outputSize = outputSize;
+        this.outputSize = outputSize;
     }
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
@@ -25,7 +25,7 @@ public sealed class AdaptiveAvgPool2d<T> : Module<T> where T : struct, IFloating
                 $"AdaptiveAvgPool2d expects 4D input [N, C, H, W], got {input.Shape.Length}D.");
 
         int n = input.Shape[0], c = input.Shape[1], h = input.Shape[2], w = input.Shape[3];
-        int outH = _outputSize, outW = _outputSize;
+        int outH = outputSize, outW = outputSize;
         int outputLen = n * c * outH * outW;
         var outputData = new T[outputLen];
 
