@@ -7,9 +7,9 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara.Extensions</PackageId>
-    <PackageVersion>1.2.0</PackageVersion>
+    <PackageVersion>1.3.0</PackageVersion>
     <Description>I/O adapters, Parquet, Apache Arrow, ML.NET, and AI integration for Nivara</Description>
-    <PackageReleaseNotes>v1.2.0: NivaraEmbeddingGenerator&lt;TInput&gt; wraps any IEmbeddingGenerator&lt;TInput, Embedding&lt;float&gt;&gt; as a label column generator for NivaraFrame.FromRows; brings Microsoft.Extensions.AI.Abstractions into Extensions; ArrowConversionOptions.UseZeroCopy removed (placeholder paths were silently copying; real zero-copy returns with ARROW-ROADMAP Phase D). Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, CsvHelper-based CSV parsing, lazy data source infrastructure.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.3.0: Parquet and Apache Arrow extended-CLR-domain round-trip (Half, DateOnly, TimeOnly, Guid, TimeSpan, nint/nuint, char, DateTimeOffset) via native field types plus nivara.clrType schema metadata, with Int128/UInt128 throwing documented UnsupportedTypeException; faithful ML.NET ToNivaraFrame reading every primitive DataView type (ConvertToFloat throws for non-numeric values instead of silently returning 0f); immutable JsonOptions/CsvOptions/ParquetWriteOptions with With() builders, CsvTrimOptions and ParquetCompression enums, ParquetWriter honoring Compression/RowGroupSize/WriteMetadata, and ParquetReader reading all row groups; canonical Json/Csv entry points (ReadFrame/ScanFrame/ScanQuery). Existing surface: Parquet read/write with compression, Apache Arrow bidirectional conversion, ML.NET DataView integration, CsvHelper-based CSV parsing, lazy data source infrastructure.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <NoWarn>$(NoWarn);SYSLIB5001</NoWarn>
   </PropertyGroup>
