@@ -24,16 +24,19 @@ public sealed class DataParallelTrainingResult<T> where T : struct, IFloatingPoi
         TotalElapsed = totalElapsed;
     }
 
-    /// <summary>Prints a summary of the run to the console.</summary>
-    public void PrintSummary()
+    /// <summary>
+    /// Prints a summary of the run to the given writer (or the console by default).
+    /// </summary>
+    public void PrintSummary(TextWriter? writer = null)
     {
-        Console.WriteLine($"Data-parallel training completed in {TotalElapsed.TotalSeconds:F2}s");
-        Console.WriteLine($"Epochs: {Epochs.Count}");
-        Console.WriteLine();
+        writer ??= Console.Out;
+        writer.WriteLine($"Data-parallel training completed in {TotalElapsed.TotalSeconds:F2}s");
+        writer.WriteLine($"Epochs: {Epochs.Count}");
+        writer.WriteLine();
 
         foreach (var epoch in Epochs)
         {
-            Console.WriteLine(
+            writer.WriteLine(
                 $"Epoch {epoch.Epoch,3} | Loss: {epoch.Loss,10:F6} | " +
                 $"Workers: {epoch.Workers,2} | Chunks: {epoch.Chunks,4} | " +
                 $"Grad Norm: {epoch.GradientNorm,10:F6} | Time: {epoch.Elapsed.TotalSeconds:F2}s");

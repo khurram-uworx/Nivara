@@ -1,6 +1,8 @@
 using Microsoft.ML;
 using Nivara.MLNet;
+using Nivara.Tensors;
 using NUnit.Framework;
+using System.Numerics.Tensors;
 
 namespace Nivara.Tests.MLNet;
 
@@ -114,7 +116,7 @@ public class MLNetIntegrationTests
         var dataView = originalFrame.ToDataView(mlContext);
 
         // Convert back to NivaraFrame
-        var roundTripFrame = MLNetInterop.ToNivaraFrame(dataView, mlContext);
+        var roundTripFrame = mlContext.ToNivaraFrame(dataView);
 
         // Assert structure is preserved
         Assert.That(roundTripFrame.RowCount, Is.EqualTo(originalFrame.RowCount));
@@ -471,19 +473,19 @@ public class MLNetIntegrationTests
     }
 
     [Test]
-    public void ReshapeToArray_CreatesCorrectDimensions()
+    public void ReshapeToTensor_CreatesCorrectDimensions()
     {
         // Create a series with 12 elements
         var data = Enumerable.Range(1, 12).Select(i => (float)i).ToArray();
-        var series = NivaraSeries<float>.Create(data);
+        using var series = NivaraSeries<float>.Create(data);
 
         // Reshape to 3x4 tensor
-        var tensor = series.ReshapeToArray(3, 4);
+        var tensor = series.ReshapeToTensor(3, 4);
 
         // Verify dimensions
         Assert.That(tensor.Rank, Is.EqualTo(2));
-        Assert.That(tensor.GetLength(0), Is.EqualTo(3));
-        Assert.That(tensor.GetLength(1), Is.EqualTo(4));
+        Assert.That(tensor.Lengths[0], Is.EqualTo((nint)3));
+        Assert.That(tensor.Lengths[1], Is.EqualTo((nint)4));
 
         // Verify data mapping (row-major order)
         var expected = new float[,] {
@@ -492,35 +494,35 @@ public class MLNetIntegrationTests
             { 9f, 10f, 11f, 12f }
         };
 
+        var span = tensor.AsTensorSpan();
         for (int i = 0; i < 3; i++)
         {
             for (int j = 0; j < 4; j++)
             {
-                Assert.That((float)tensor.GetValue(i, j)!, Is.EqualTo(expected[i, j]));
+                Assert.That(span[i, j], Is.EqualTo(expected[i, j]));
             }
         }
     }
 
     [Test]
-    public void ReshapeToArray_ThrowsOnDimensionMismatch()
+    public void ReshapeToTensor_ThrowsOnDimensionMismatch()
     {
-        var series = NivaraSeries<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f });
+        using var series = NivaraSeries<float>.Create(new float[] { 1f, 2f, 3f, 4f, 5f });
 
         // Try to reshape 5 elements into 2x3 (6 elements) - should fail
-        Assert.Throws<ArgumentException>(() => series.ReshapeToArray(2, 3));
+        Assert.Throws<ArgumentException>(() => series.ReshapeToTensor(2, 3));
     }
 
     [Test]
     public void FlattenFromTensor_ReconstructsOriginalSeries()
     {
         // Create a 2x3 tensor
-        var tensor = new float[,] {
-            { 1.1f, 2.2f, 3.3f },
-            { 4.4f, 5.5f, 6.6f }
-        };
+        var tensor = Tensor.Create(
+            new float[] { 1.1f, 2.2f, 3.3f, 4.4f, 5.5f, 6.6f },
+            new ReadOnlySpan<nint>(new nint[] { 2, 3 }));
 
         // Flatten to series
-        var series = TensorConversions.FlattenFromTensor<float>(tensor);
+        using var series = TensorInteropExtensions.FlattenFromTensor(tensor);
 
         // Verify structure
         Assert.That(series.Length, Is.EqualTo(6));
@@ -538,11 +540,11 @@ public class MLNetIntegrationTests
     {
         // Create original series
         var originalData = new double[] { 1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8 };
-        var originalSeries = NivaraSeries<double>.Create(originalData);
+        using var originalSeries = NivaraSeries<double>.Create(originalData);
 
         // Round trip: Series -> Tensor -> Series
-        var tensor = originalSeries.ReshapeToArray(2, 4);
-        var reconstructedSeries = TensorConversions.FlattenFromTensor<double>(tensor);
+        var tensor = originalSeries.ReshapeToTensor(2, 4);
+        using var reconstructedSeries = TensorInteropExtensions.FlattenFromTensor(tensor);
 
         // Verify data preservation
         Assert.That(reconstructedSeries.Length, Is.EqualTo(originalSeries.Length));

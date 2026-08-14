@@ -77,7 +77,7 @@ public class MLNetConversionTests
         }).ToList();
 
         var dataView = mlContext.Data.LoadFromEnumerable(data);
-        var frame = MLNetInterop.ToNivaraFrame(dataView, mlContext);
+        var frame = mlContext.ToNivaraFrame(dataView);
 
         Assert.That(frame.ColumnCount, Is.EqualTo(14));
         Assert.That(frame.GetColumn("BoolValue").ElementType, Is.EqualTo(typeof(bool)));
@@ -114,7 +114,7 @@ public class MLNetConversionTests
         var data = Enumerable.Range(0, 5).Select(i => new SimpleIntRow { A = i, B = i * 10 }).ToList();
         var dataView = mlContext.Data.LoadFromEnumerable(data);
 
-        var frame = MLNetInterop.ToNivaraFrame(dataView, mlContext);
+        var frame = mlContext.ToNivaraFrame(dataView);
 
         Assert.That(frame.ColumnNames, Contains.Item("A"));
         Assert.That(frame.ColumnNames, Contains.Item("B"));
@@ -132,7 +132,7 @@ public class MLNetConversionTests
         var dataView = mlContext.Data.LoadFromEnumerable(data);
         var keyed = mlContext.Transforms.Conversion.MapValueToKey("Key", "Text").Fit(dataView).Transform(dataView);
 
-        var frame = MLNetInterop.ToNivaraFrame(keyed, mlContext);
+        var frame = mlContext.ToNivaraFrame(keyed);
 
         Assert.That(frame.ColumnNames, Contains.Item("Key"));
         Assert.That(frame.GetColumn("Key").ElementType, Is.EqualTo(typeof(uint)));
@@ -151,7 +151,7 @@ public class MLNetConversionTests
         };
         var dataView = mlContext.Data.LoadFromEnumerable(data);
 
-        var frame = MLNetInterop.ToNivaraFrame(dataView, mlContext);
+        var frame = mlContext.ToNivaraFrame(dataView);
 
         Assert.That(frame.GetColumn("Features").ElementType, Is.EqualTo(typeof(float)));
         Assert.That(frame.GetColumn<float>("Features")[0], Is.EqualTo(1f));
@@ -164,7 +164,7 @@ public class MLNetConversionTests
         var data = new[] { new DoubleVectorRow { Features = new double[] { 1.0, 2.0 } } };
         var dataView = mlContext.Data.LoadFromEnumerable(data);
 
-        var ex = Assert.Throws<NotSupportedException>(() => MLNetInterop.ToNivaraFrame(dataView, mlContext));
+        var ex = Assert.Throws<NotSupportedException>(() => mlContext.ToNivaraFrame(dataView));
         Assert.That(ex!.Message, Does.Contain("Features"));
     }
 
@@ -209,7 +209,7 @@ public class MLNetConversionTests
         var frame = NivaraFrame.Create(("Value", column));
 
         var dataView = frame.ToDataView(mlContext);
-        var roundTrip = MLNetInterop.ToNivaraFrame(dataView, mlContext);
+        var roundTrip = mlContext.ToNivaraFrame(dataView);
 
         // A 1-column frame maps to ML.NET's GenericData.Features vector contract
         Assert.That(roundTrip.ColumnNames, Is.EqualTo(new[] { "Features" }));

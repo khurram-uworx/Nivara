@@ -73,7 +73,7 @@ public static class MLNetInterop
         }
     }
 
-    static NivaraFrame ConvertFromDataView(IDataView dataView, MLContext mlContext)
+    internal static NivaraFrame ConvertFromDataView(IDataView dataView, MLContext mlContext)
     {
         var columns = new List<(string Name, IColumn Column)>();
 
@@ -259,22 +259,6 @@ public static class MLNetInterop
     }
 
     /// <summary>
-    /// Creates a NivaraFrame from an ML.NET IDataView.
-    /// </summary>
-    /// <param name="dataView">The ML.NET IDataView to convert</param>
-    /// <param name="mlContext">The ML.NET context</param>
-    /// <returns>A NivaraFrame representation of the IDataView</returns>
-    public static NivaraFrame ToNivaraFrame(IDataView dataView, MLContext mlContext)
-    {
-        if (dataView == null) throw new ArgumentNullException(nameof(dataView));
-        if (mlContext == null) throw new ArgumentNullException(nameof(mlContext));
-
-        var schema = dataView.Schema;
-
-        return ConvertFromDataView(dataView, mlContext);
-    }
-
-    /// <summary>
     /// Converts a numeric NivaraSeries to an ML.NET tensor format.
     /// </summary>
     /// <typeparam name="T">The numeric type</typeparam>
@@ -382,28 +366,29 @@ public static class MLNetInterop
 }
 
 /// <summary>
-/// Data classes for ML.NET compatibility.
+/// Data classes for ML.NET compatibility. Internal — implementation detail of
+/// <see cref="ToDataView"/>, not public API.
 /// </summary>
-public class TwoColumnData
+internal class TwoColumnData
 {
     public float Col1 { get; set; }
     public float Col2 { get; set; }
 }
 
-public class TwoColumnFeatureData
+internal class TwoColumnFeatureData
 {
     public float Feature1 { get; set; }
     public float Feature2 { get; set; }
 }
 
-public class ThreeColumnData
+internal class ThreeColumnData
 {
     public float Feature1 { get; set; }
     public float Feature2 { get; set; }
     public float Label { get; set; }
 }
 
-public class GenericData
+internal class GenericData
 {
     public float[]? Features { get; set; }
 }

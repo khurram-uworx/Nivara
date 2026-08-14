@@ -27,16 +27,19 @@ public sealed class TrainingResult<T> where T : struct, IFloatingPointIeee754<T>
         TotalElapsed = totalElapsed;
     }
 
-    /// <summary>Prints a summary of the run to the console.</summary>
-    public void PrintSummary()
+    /// <summary>
+    /// Prints a summary of the run to the given writer (or the console by default).
+    /// </summary>
+    public void PrintSummary(TextWriter? writer = null)
     {
-        Console.WriteLine($"Training completed in {TotalElapsed.TotalSeconds:F2}s");
-        Console.WriteLine($"Epochs: {Epochs.Count}");
-        Console.WriteLine();
+        writer ??= Console.Out;
+        writer.WriteLine($"Training completed in {TotalElapsed.TotalSeconds:F2}s");
+        writer.WriteLine($"Epochs: {Epochs.Count}");
+        writer.WriteLine();
 
         foreach (var epoch in Epochs)
         {
-            Console.WriteLine(
+            writer.WriteLine(
                 $"Epoch {epoch.Epoch,3} | Loss: {epoch.Loss,10:F6} | " +
                 $"Batches: {epoch.Batches,4} | Time: {epoch.Elapsed.TotalSeconds:F2}s");
         }
