@@ -89,9 +89,9 @@ All notable changes to Nivara are documented here. Released versions are publish
   conversion (e.g. `nint → double`, `UInt128 → double`), cached per `(source, target)` pair.
   Previously such mixed-type literal plans threw or produced wrong-typed results.
 
-- **`RowNumber` numbers rows with null order keys last instead of emitting null (#254)** —
-  **behavior change.** `row_number` now numbers every partition row: rows with null order keys
-  are placed after the valid rows in stable partition order (SQL semantics), e.g. order keys
+- **`RowNumber` numbers rows with null order keys instead of emitting null (#254)** —
+  **behavior change.** `row_number` now numbers every partition row: null-key rows are placed per
+  the order keys' `NullOrdering` (default `NULLS LAST`), e.g. ascending order keys
   `[2, null, 1, null]` produce `[2, 3, 1, 4]`. `rank`/`dense_rank`/`percent_rank` keep the
   existing null-order-key semantics (null output, excluded from numbering and the percent_rank
   denominator), which match Polars. The rank-family kernel is now cross-validated against
