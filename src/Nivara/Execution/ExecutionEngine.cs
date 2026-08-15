@@ -150,7 +150,7 @@ internal sealed class ExecutionEngine
 
             return result;
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             diagnostics.RecordWarning(new PerformanceWarning(
                 PerformanceWarningSeverity.Critical,
@@ -216,7 +216,7 @@ internal sealed class ExecutionEngine
             // Execute using the selected strategy
             return await strategy.ExecuteAsync(optimizedPlan, context);
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             diagnostics.RecordWarning(new PerformanceWarning(
                 PerformanceWarningSeverity.Critical,
