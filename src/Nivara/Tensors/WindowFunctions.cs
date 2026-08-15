@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Numerics;
 
 namespace Nivara.Tensors;
@@ -106,13 +107,19 @@ public static class WindowFunctions
     {
         ArgumentNullException.ThrowIfNull(column);
         var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
-        var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
             return NivaraColumn<T>.Create(Array.Empty<T>());
 
         var result = new T[length];
         var resultMask = new bool[length];
+
+        if (!column.HasNulls && column.TryGetSpan(out var span))
+            return isIntFamily<T>()
+                ? rollingSumFromSpanInt(span, windowSize, min, result, resultMask)
+                : rollingSumFromSpan(span, windowSize, min, result, resultMask);
+
+        var (effective, valid) = buildEffective(column, nullHandler);
 
         if (isIntFamily<T>())
         {
@@ -163,13 +170,19 @@ public static class WindowFunctions
     {
         ArgumentNullException.ThrowIfNull(column);
         var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
-        var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
             return NivaraColumn<double>.Create(Array.Empty<double>());
 
         var result = new double[length];
         var resultMask = new bool[length];
+
+        if (!column.HasNulls && column.TryGetSpan(out var span))
+            return isIntFamily<T>()
+                ? rollingMeanFromSpanInt(span, windowSize, min, result, resultMask)
+                : rollingMeanFromSpan(span, windowSize, min, result, resultMask);
+
+        var (effective, valid) = buildEffective(column, nullHandler);
 
         if (isIntFamily<T>())
         {
@@ -220,10 +233,14 @@ public static class WindowFunctions
     {
         ArgumentNullException.ThrowIfNull(column);
         var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
-        var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
             return NivaraColumn<T>.Create(Array.Empty<T>());
+
+        if (!column.HasNulls && column.TryGetSpan(out var span))
+            return rollingExtremeFromSpan(span, windowSize, min, takeMax: true);
+
+        var (effective, valid) = buildEffective(column, nullHandler);
 
         return rollingExtreme(effective, valid, windowSize, min, takeMax: true);
     }
@@ -239,10 +256,14 @@ public static class WindowFunctions
     {
         ArgumentNullException.ThrowIfNull(column);
         var min = resolveWindowArgs(windowSize, minPeriods, relaxWhenHandler: nullHandler != null);
-        var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
             return NivaraColumn<T>.Create(Array.Empty<T>());
+
+        if (!column.HasNulls && column.TryGetSpan(out var span))
+            return rollingExtremeFromSpan(span, windowSize, min, takeMax: false);
+
+        var (effective, valid) = buildEffective(column, nullHandler);
 
         return rollingExtreme(effective, valid, windowSize, min, takeMax: false);
     }
@@ -355,13 +376,50 @@ public static class WindowFunctions
     static NivaraColumn<T> cumulativeScan<T>(NivaraColumn<T> column, Func<T>? nullHandler, bool isSum, bool isMax, bool isProduct)
         where T : struct, INumber<T>
     {
-        var (effective, valid) = buildEffective(column, nullHandler);
         var length = column.Length;
         if (length == 0)
             return NivaraColumn<T>.Create(Array.Empty<T>());
 
         var result = new T[length];
         var resultMask = new bool[length];
+
+        if (!column.HasNulls && column.TryGetSpan(out var span))
+        {
+            if (isIntFamily<T>() && (isSum || isProduct))
+            {
+                long accumulator = long.CreateChecked(span[0]);
+                result[0] = T.CreateChecked(accumulator);
+                for (int i = 1; i < length; i++)
+                {
+                    // Checked: a product of several large int-family values can overflow the widened
+                    // long accumulator itself (e.g. [int.MaxValue] * 3). Without checked, the wrap
+                    // could land inside the result type's range and be silently returned instead of
+                    // throwing (issue #248).
+                    checked
+                    {
+                        accumulator = isSum
+                            ? accumulator + long.CreateChecked(span[i])
+                            : accumulator * long.CreateChecked(span[i]);
+                    }
+
+                    result[i] = T.CreateChecked(accumulator);
+                }
+            }
+            else
+            {
+                T accumulator = span[0];
+                result[0] = accumulator;
+                for (int i = 1; i < length; i++)
+                    result[i] = accumulator = isSum ? accumulator + span[i]
+                        : isProduct ? accumulator * span[i]
+                        : isMax ? T.Max(accumulator, span[i])
+                        : T.Min(accumulator, span[i]);
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        }
+
+        var (effective, valid) = buildEffective(column, nullHandler);
 
         if (isIntFamily<T>() && (isSum || isProduct))
         {
@@ -477,6 +535,197 @@ public static class WindowFunctions
         }
 
         return (prefixSum, prefixCount);
+    }
+
+    static (T[] PrefixSum, bool Rented) buildPrefixFromSpan<T>(ReadOnlySpan<T> span)
+        where T : struct, INumber<T>
+    {
+        var length = span.Length;
+        var rented = length > 1024;
+        var prefix = rented ? ArrayPool<T>.Shared.Rent(length) : new T[length];
+        T running = T.Zero;
+
+        for (int i = 0; i < length; i++)
+        {
+            running += span[i];
+            prefix[i] = running;
+        }
+
+        return (prefix, rented);
+    }
+
+    static (long[] PrefixSum, bool Rented) buildWidenedPrefixFromSpan<T>(ReadOnlySpan<T> span)
+        where T : struct, INumber<T>
+    {
+        var length = span.Length;
+        var rented = length > 1024;
+        var prefix = rented ? ArrayPool<long>.Shared.Rent(length) : new long[length];
+        long running = 0;
+
+        for (int i = 0; i < length; i++)
+        {
+            checked { running += long.CreateChecked(span[i]); }
+            prefix[i] = running;
+        }
+
+        return (prefix, rented);
+    }
+
+    static NivaraColumn<T> rollingSumFromSpan<T>(ReadOnlySpan<T> span, int windowSize, int min, T[] result, bool[] resultMask)
+        where T : struct, INumber<T>
+    {
+        var length = span.Length;
+        var (prefix, rented) = buildPrefixFromSpan(span);
+
+        try
+        {
+            for (int i = 0; i < length; i++)
+            {
+                int lo = i - windowSize + 1;
+                T windowSum = prefix[i] - (lo >= 1 ? prefix[lo - 1] : T.Zero);
+                int windowCount = Math.Min(i + 1, windowSize);
+
+                if (windowCount >= min)
+                    result[i] = windowSum;
+                else
+                    resultMask[i] = true;
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        }
+        finally
+        {
+            if (rented)
+                ArrayPool<T>.Shared.Return(prefix);
+        }
+    }
+
+    static NivaraColumn<T> rollingSumFromSpanInt<T>(ReadOnlySpan<T> span, int windowSize, int min, T[] result, bool[] resultMask)
+        where T : struct, INumber<T>
+    {
+        var length = span.Length;
+        var (prefix, rented) = buildWidenedPrefixFromSpan(span);
+
+        try
+        {
+            for (int i = 0; i < length; i++)
+            {
+                int lo = i - windowSize + 1;
+                long windowSum = prefix[i] - (lo >= 1 ? prefix[lo - 1] : 0L);
+                int windowCount = Math.Min(i + 1, windowSize);
+
+                if (windowCount >= min)
+                    result[i] = T.CreateChecked(windowSum);
+                else
+                    resultMask[i] = true;
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        }
+        finally
+        {
+            if (rented)
+                ArrayPool<long>.Shared.Return(prefix);
+        }
+    }
+
+    static NivaraColumn<double> rollingMeanFromSpan<T>(ReadOnlySpan<T> span, int windowSize, int min, double[] result, bool[] resultMask)
+        where T : struct, INumber<T>
+    {
+        var length = span.Length;
+        var (prefix, rented) = buildPrefixFromSpan(span);
+
+        try
+        {
+            for (int i = 0; i < length; i++)
+            {
+                int lo = i - windowSize + 1;
+                T windowSum = prefix[i] - (lo >= 1 ? prefix[lo - 1] : T.Zero);
+                int windowCount = Math.Min(i + 1, windowSize);
+
+                if (windowCount >= min)
+                    result[i] = double.CreateChecked(windowSum) / windowCount;
+                else
+                    resultMask[i] = true;
+            }
+
+            return NivaraColumn<double>.CreateFromSpans(result, resultMask);
+        }
+        finally
+        {
+            if (rented)
+                ArrayPool<T>.Shared.Return(prefix);
+        }
+    }
+
+    static NivaraColumn<double> rollingMeanFromSpanInt<T>(ReadOnlySpan<T> span, int windowSize, int min, double[] result, bool[] resultMask)
+        where T : struct, INumber<T>
+    {
+        var length = span.Length;
+        var (prefix, rented) = buildWidenedPrefixFromSpan(span);
+
+        try
+        {
+            for (int i = 0; i < length; i++)
+            {
+                int lo = i - windowSize + 1;
+                long windowSum = prefix[i] - (lo >= 1 ? prefix[lo - 1] : 0L);
+                int windowCount = Math.Min(i + 1, windowSize);
+
+                if (windowCount >= min)
+                    result[i] = double.CreateChecked(windowSum) / windowCount;
+                else
+                    resultMask[i] = true;
+            }
+
+            return NivaraColumn<double>.CreateFromSpans(result, resultMask);
+        }
+        finally
+        {
+            if (rented)
+                ArrayPool<long>.Shared.Return(prefix);
+        }
+    }
+
+    static NivaraColumn<T> rollingExtremeFromSpan<T>(ReadOnlySpan<T> span, int windowSize, int minPeriods, bool takeMax)
+        where T : struct, INumber<T>
+    {
+        var length = span.Length;
+        var rented = length > 1024;
+        var deque = rented ? ArrayPool<int>.Shared.Rent(length) : new int[length];
+        int head = 0;
+        int tail = 0;
+        var result = new T[length];
+        var resultMask = new bool[length];
+
+        try
+        {
+            for (int i = 0; i < length; i++)
+            {
+                int lo = i - windowSize + 1;
+
+                while (head < tail && deque[head] < lo)
+                    head++;
+
+                var current = span[i];
+                while (head < tail && (takeMax ? span[deque[tail - 1]] <= current : span[deque[tail - 1]] >= current))
+                    tail--;
+
+                deque[tail++] = i;
+
+                if (Math.Min(i + 1, windowSize) >= minPeriods)
+                    result[i] = span[deque[head]];
+                else
+                    resultMask[i] = true;
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        }
+        finally
+        {
+            if (rented)
+                ArrayPool<int>.Shared.Return(deque);
+        }
     }
 
     static NivaraColumn<T> rollingExtreme<T>(T[] effective, bool[] valid, int windowSize, int minPeriods, bool takeMax)
