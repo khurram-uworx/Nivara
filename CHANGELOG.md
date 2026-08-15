@@ -46,6 +46,32 @@ All notable changes to Nivara are documented here. Released versions are publish
   `IsVectorizable`), `TensorsHelper` (10 tensor kernels), and `RankKernel.Compute`.
   `RankKind` remains public. No behavioral change.
 
+### Fixed
+
+- **Fused plan signatures now encode the literal runtime type (#246)** —
+  `ExpressionTypeInferer.FormatValue` appends `:{value.GetType().FullName}` to each literal
+  signature fragment, so two plans that differ only in literal types (e.g. `Column + (int)1`
+  vs `Column + (long)1`) no longer collide in the fused-plan cache and return stale results.
+
+- **Compiled fused kernels write masked positions before real values (#247)** — the compiled
+  delegate now passes an OR'd `bool[] mask` to `NivaraColumn<T>.CreateFromSpans` and writes
+  `Expression.Default(elementType)` at masked positions before the real-value pass. Previously
+  the write order could leave a genuine computed value at a position the mask marked null.
+
+- **Window-bearing operations now run whole-column in streaming/parallel execution (#245)** —
+  `StreamingExecutionStrategy` and `ParallelExecutionStrategy` inspect operations for window
+  expressions (`SelectOperation` columns, `FilterOperation` conditions) via the new
+  `WindowExpressionInspector` and fall back to whole-column execution instead of silently
+  producing incorrect chunked/parallel results. Streaming no longer reads chunks for such
+  plans (`ChunksRead == 0`) and parallel dispatch honors the same gate.
+
+- **Int-family window accumulators no longer wrap silently (#248)** — `RollingSum`/`RollingMean`
+  prefix sums and `CumulativeSum`/`CumulativeProduct` accumulate in `long` for the int family
+  (`sbyte`/`byte`/`short`/`ushort`/`int`/`uint`/`char`), matching `NivaraSeries` promotion.
+  Per-window sums that stay in range are correct even when the running prefix overflows the
+  element type; genuine overflow of the result type now throws `OverflowException` instead of
+  silently wrapping. `long`/`float`/`double` and the max/min scans are unchanged.
+
 ### Removed
 
 - **`MLNetInterop.ToNivaraFrame(IDataView, MLContext)` static (#233)** — removed the
