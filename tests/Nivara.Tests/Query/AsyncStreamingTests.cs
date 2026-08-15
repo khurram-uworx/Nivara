@@ -1,5 +1,7 @@
+using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.IO;
+using Nivara.Operations;
 using Nivara.Query;
 using NUnit.Framework;
 
@@ -399,6 +401,125 @@ public class AsyncStreamingTests
         finally
         {
             Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task StreamingStrategy_ChannelPipeline_ParityWithLazy()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 10000);
+            var source = new CsvLazySource(csvPath, CsvOptions.Default);
+            var plan = new QueryPlan(source, new List<IQueryOperation>
+            {
+                new FilterOperation(ColumnExpressions.Col("Age") > 30),
+                new SelectOperation(new[] { ColumnExpressions.Col("Salary") * 2 })
+            });
+
+            var engine = new ExecutionEngine();
+
+            using var streamingResult = await engine.ExecuteAsync(
+                plan, new NivaraExecutionContext(ExecutionStrategy.Streaming) { MemoryBudget = 2_000_000 });
+            using var lazyResult = await engine.ExecuteAsync(
+                plan, new NivaraExecutionContext(ExecutionStrategy.Lazy));
+
+            AssertFrameValuesEqual(streamingResult, lazyResult);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task StreamingStrategy_BoundaryOperation_FlushesAndResumes()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 10000);
+            var source = new CsvLazySource(csvPath, CsvOptions.Default);
+            var plan = new QueryPlan(source, new List<IQueryOperation>
+            {
+                new FilterOperation(ColumnExpressions.Col("Age") > 30),
+                new SortOperation(new List<SortKey> { new SortKey("Age") })
+            });
+
+            var engine = new ExecutionEngine();
+
+            using var streamingResult = await engine.ExecuteAsync(
+                plan, new NivaraExecutionContext(ExecutionStrategy.Streaming) { MemoryBudget = 2_000_000 });
+            using var lazyResult = await engine.ExecuteAsync(
+                plan, new NivaraExecutionContext(ExecutionStrategy.Lazy));
+
+            AssertFrameValuesEqual(streamingResult, lazyResult);
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public void CsvLazySource_ReadChunk_ReconstructsFullData()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 2500);
+            var source = new CsvLazySource(csvPath, CsvOptions.Default);
+
+            var expectedAge = source.Execute()["Age"];
+
+            var chunk0 = source.ReadChunk(0, 1000);
+            var chunk1 = source.ReadChunk(1, 1000);
+            var chunk2 = source.ReadChunk(2, 1000);
+
+            Assert.That(chunk0["Age"].Length, Is.EqualTo(1000));
+            Assert.That(chunk1["Age"].Length, Is.EqualTo(1000));
+            Assert.That(chunk2["Age"].Length, Is.EqualTo(500));
+
+            Assert.That(chunk0["Age"].GetValue(0), Is.EqualTo(expectedAge.GetValue(0)));
+            Assert.That(chunk1["Age"].GetValue(0), Is.EqualTo(expectedAge.GetValue(1000)));
+            Assert.That(chunk2["Age"].GetValue(499), Is.EqualTo(expectedAge.GetValue(2499)));
+
+            // Backward re-read after the reader has reached EOF must reopen and stay correct
+            var chunk0Again = source.ReadChunk(0, 1000);
+            Assert.That(chunk0Again["Age"].GetValue(999), Is.EqualTo(expectedAge.GetValue(999)));
+
+            source.Dispose();
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    static string CreateCsvFile(string tempDir, int rowCount)
+    {
+        var csvPath = Path.Combine(tempDir, "data.csv");
+        var lines = new List<string> { "Name,Age,Salary" };
+        for (int i = 0; i < rowCount; i++)
+            lines.Add($"P{i},{i % 100},{50000 + i}");
+        File.WriteAllText(csvPath, string.Join("\n", lines));
+        return csvPath;
+    }
+
+    static void AssertFrameValuesEqual(NivaraFrame actual, NivaraFrame expected)
+    {
+        Assert.That(actual.RowCount, Is.EqualTo(expected.RowCount));
+        Assert.That(actual.ColumnNames, Is.EquivalentTo(expected.ColumnNames));
+        foreach (var name in expected.ColumnNames)
+        {
+            var actualColumn = actual.GetColumn(name);
+            var expectedColumn = expected.GetColumn(name);
+            for (int i = 0; i < expected.RowCount; i++)
+                Assert.That(actualColumn.GetValue(i), Is.EqualTo(expectedColumn.GetValue(i)));
         }
     }
 }
