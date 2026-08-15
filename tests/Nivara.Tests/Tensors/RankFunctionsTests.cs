@@ -152,6 +152,35 @@ public class RankFunctionsTests
     }
 
     [Test]
+    public void RowNumber_NullOrderKey_NullsFirstOrdering_NumberedFirst()
+    {
+        var columns = Columns(("v", NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 3 }, new[] { false, true, false })));
+
+        var result = Rank<long>(RankKernel.Compute(
+            columns, [], [new SortKey("v", SortDirection.Ascending, NullOrdering.NullsFirst)], RankKind.RowNumber), RankKind.RowNumber);
+
+        Assert.That(result.HasNulls, Is.False);
+        Assert.That(result[0], Is.EqualTo(2));
+        Assert.That(result[1], Is.EqualTo(1));
+        Assert.That(result[2], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void RowNumber_NullOrderKey_MultipleKeys_OrderedPerSecondKey()
+    {
+        var columns = Columns(
+            ("a", NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 0, 2 }, new[] { false, true, true, false })),
+            ("b", NivaraColumn<int>.Create(new[] { 9, 5, 2, 1 })));
+
+        var result = Rank<long>(RankKernel.Compute(columns, [], [new SortKey("a"), new SortKey("b")], RankKind.RowNumber), RankKind.RowNumber);
+
+        Assert.That(result[0], Is.EqualTo(1));
+        Assert.That(result[1], Is.EqualTo(4));
+        Assert.That(result[2], Is.EqualTo(3));
+        Assert.That(result[3], Is.EqualTo(2));
+    }
+
+    [Test]
     public void Rank_NullOrderKey_NullOutput_ExcludedFromNumbering()
     {
         var columns = Columns(("v", NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 3 }, new[] { false, true, false })));

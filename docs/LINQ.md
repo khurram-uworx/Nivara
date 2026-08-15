@@ -299,7 +299,8 @@ partition. Rows that would cross a partition boundary (or the frame edge) become
 
 The rank family reuses the existing `RankKernel`. For `Rank` / `DenseRank` / `PercentRank`, a null
 order-key produces a null rank result (unchanged semantics); `RowNumber` instead numbers every row,
-placing null-key rows last in stable partition order (issue #254). `RowNumber` accepts a spec without
+placing null-key rows per the order keys' `NullOrdering` (default `NULLS LAST`, ties preserve stable
+partition order) (issue #254). `RowNumber` accepts a spec without
 order keys (partition order within a partition is insertion order); the other rank functions require
 order keys.
 
