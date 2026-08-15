@@ -9,6 +9,7 @@ static class ColumnFilterHelper
     static readonly MethodInfo s_createEmptyColumnTyped = getMethod(nameof(createEmptyColumnTyped));
     static readonly MethodInfo s_concatenateColumnsTyped = getMethod(nameof(concatenateColumnsTyped));
     static readonly MethodInfo s_createNullColumnTyped = getMethod(nameof(createNullColumnTyped));
+    static readonly MethodInfo s_scatterPartsTyped = getMethod(nameof(scatterPartsTyped));
 
     static MethodInfo getMethod(string name)
         => typeof(ColumnFilterHelper).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)!;
@@ -83,6 +84,25 @@ static class ColumnFilterHelper
             .Invoke(null, new object[] { length })!;
     }
 
+    /// <summary>
+    /// Scatters concatenated partition results back to the original row order in a single pass.
+    /// <paramref name="positions"/> maps each concatenated position to its target row
+    /// (<c>result[positions[i]] = value[i]</c>); partition boundaries are derived from the part lengths.
+    /// </summary>
+    public static IColumn ScatterPartsColumn(IReadOnlyList<IColumn> parts, int[] positions)
+    {
+        var elementType = unwrapNullable(parts[0].ElementType);
+
+        foreach (var column in parts)
+            if (unwrapNullable(column.ElementType) != elementType)
+                throw new ArgumentException(
+                    $"Cannot scatter columns of different types: {column.ElementType.Name} vs {parts[0].ElementType.Name}");
+
+        return (IColumn)s_scatterPartsTyped
+            .MakeGenericMethod(elementType)
+            .Invoke(null, new object[] { parts, positions })!;
+    }
+
     static IColumn createFilteredColumnTyped<T>(IColumn column, List<int> indices)
     {
         if (typeof(T).IsValueType)
@@ -120,6 +140,31 @@ static class ColumnFilterHelper
 
     static IColumn reorderColumnTyped<T>(IColumn column, int[] indices)
     {
+        if (typeof(T).IsValueType && column is NivaraColumn<T> typed)
+        {
+            var reorderedValues = new T[indices.Length];
+            var nullMask = new bool[indices.Length];
+            bool hasNulls = typed.HasNulls;
+            bool anyNull = false;
+            for (int i = 0; i < indices.Length; i++)
+            {
+                int index = indices[i];
+                if (hasNulls && typed.IsNull(index))
+                {
+                    nullMask[i] = true;
+                    anyNull = true;
+                }
+                else
+                {
+                    reorderedValues[i] = typed[index];
+                }
+            }
+
+            if (anyNull)
+                return NivaraColumn<T>.CreateFromSpans(reorderedValues, nullMask);
+            return NivaraColumn<T>.CreateFromOwnedArray(reorderedValues);
+        }
+
         if (typeof(T).IsValueType)
         {
             var reorderedValues = new T[indices.Length];
@@ -220,6 +265,77 @@ static class ColumnFilterHelper
         {
             var nullArray = new T[length];
             return NivaraColumn<T>.CreateForReferenceType(nullArray);
+        }
+    }
+
+    static IColumn scatterPartsTyped<T>(IReadOnlyList<IColumn> parts, int[] positions)
+    {
+        if (typeof(T).IsValueType && parts.All(p => p is NivaraColumn<T>))
+        {
+            var result = new T[positions.Length];
+            var nullMask = new bool[positions.Length];
+            bool anyNull = false;
+            int pos = 0;
+            foreach (NivaraColumn<T> part in parts)
+            {
+                bool hasNulls = part.HasNulls;
+                for (int i = 0; i < part.Length; i++)
+                {
+                    int target = positions[pos];
+                    if (hasNulls && part.IsNull(i))
+                    {
+                        nullMask[target] = true;
+                        anyNull = true;
+                    }
+                    else
+                    {
+                        result[target] = part[i];
+                    }
+                    pos++;
+                }
+            }
+
+            if (anyNull)
+                return NivaraColumn<T>.CreateFromSpans(result, nullMask);
+            return NivaraColumn<T>.CreateFromOwnedArray(result);
+        }
+
+        if (typeof(T).IsValueType)
+        {
+            var result = new T[positions.Length];
+            var nullMask = new bool[positions.Length];
+
+            int pos = 0;
+            foreach (var part in parts)
+            {
+                for (int i = 0; i < part.Length; i++)
+                {
+                    var value = part.GetValue(i);
+                    if (value != null)
+                        result[positions[pos]] = (T)value;
+                    else
+                        nullMask[positions[pos]] = true;
+                    pos++;
+                }
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(result, nullMask);
+        }
+        else
+        {
+            var result = new T[positions.Length];
+
+            int pos = 0;
+            foreach (var part in parts)
+            {
+                for (int i = 0; i < part.Length; i++)
+                {
+                    result[positions[pos]] = (T)part.GetValue(i)!;
+                    pos++;
+                }
+            }
+
+            return NivaraColumn<T>.CreateForReferenceType(result);
         }
     }
 }

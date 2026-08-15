@@ -1,5 +1,7 @@
 using Nivara.Expressions;
 using NUnit.Framework;
+using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 namespace Nivara.Tests.Query;
 
@@ -521,22 +523,42 @@ public class FusedExpressionEvaluatorTests
     }
 
     /// <summary>
-    /// Asserts chunked evaluation of the expression is bit-identical to whole-column evaluation
-    /// (values and null masks) for every requested chunk size.
+    /// Evaluates the expression once against the whole input and once per chunk size, asserting
+    /// identical output for every requested chunk size. Null masks must match at every position,
+    /// and backing values (via typed <see cref="NivaraColumn{T}"/> access) must match at masked
+    /// positions too — masked positions must not diverge between chunked and whole evaluation.
     /// </summary>
     static void AssertChunkedMatchesWhole(FusedExpressionEvaluator fused, ColumnExpression expression, IReadOnlyDictionary<string, IColumn> input, IReadOnlyList<int> chunkSizes)
     {
         var whole = fused.Evaluate(expression, input);
         foreach (var chunkSize in chunkSizes)
+            AssertChunkedMatchesWhole(whole, fused.EvaluateChunked(expression, input, chunkSize), $"chunkSize {chunkSize}");
+    }
+
+    static void AssertChunkedMatchesWhole(IColumn whole, IColumn chunked, string label)
+    {
+        var assertMethod = typeof(FusedExpressionEvaluatorTests)
+            .GetMethod(nameof(AssertChunkedMatchesWholeCore), System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+        try
         {
-            var chunked = fused.EvaluateChunked(expression, input, chunkSize);
-            Assert.That(chunked.Length, Is.EqualTo(whole.Length), $"chunkSize {chunkSize}: length must match");
-            for (int i = 0; i < whole.Length; i++)
-            {
-                Assert.That(chunked.IsNull(i), Is.EqualTo(whole.IsNull(i)), $"chunkSize {chunkSize}: null mask at {i}");
-                if (!whole.IsNull(i))
-                    Assert.That(chunked.GetValue(i), Is.EqualTo(whole.GetValue(i)), $"chunkSize {chunkSize}: value at {i}");
-            }
+            assertMethod.MakeGenericMethod(whole.ElementType).Invoke(null, new object[] { whole, chunked, label });
+        }
+        catch (TargetInvocationException tie)
+        {
+            ExceptionDispatchInfo.Capture(tie.InnerException!).Throw();
+            throw;
+        }
+    }
+
+    static void AssertChunkedMatchesWholeCore<T>(IColumn whole, IColumn chunked, string label)
+    {
+        var wholeTyped = (NivaraColumn<T>)whole;
+        var chunkedTyped = (NivaraColumn<T>)chunked;
+        Assert.That(chunkedTyped.Length, Is.EqualTo(wholeTyped.Length), $"{label}: length must match");
+        for (int i = 0; i < wholeTyped.Length; i++)
+        {
+            Assert.That(chunkedTyped.IsNull(i), Is.EqualTo(wholeTyped.IsNull(i)), $"{label}: null mask at {i}");
+            Assert.That(chunkedTyped[i], Is.EqualTo(wholeTyped[i]), $"{label}: backing value at masked position {i}");
         }
     }
 

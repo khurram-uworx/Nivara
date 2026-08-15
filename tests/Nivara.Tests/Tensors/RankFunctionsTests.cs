@@ -299,4 +299,57 @@ public class RankFunctionsTests
             }
         }
     }
+
+    [Test]
+    public void RowNumber_LargeSinglePartition_UsesPooledScratchAndStableTieOrder()
+    {
+        // >1024 rows forces the ArrayPool scratch path; duplicate order keys must preserve
+        // ascending row order within each key group (OrderBy stability reproduced by the tiebreak).
+        const int n = 2048;
+        var values = new int[n];
+        for (int i = 0; i < n; i++)
+            values[i] = (i / 8) % 3;
+
+        var columns = Columns(("v", NivaraColumn<int>.Create(values)));
+        var orderBy = new[] { new SortKey("v", SortDirection.Ascending) };
+
+        var result = Rank<long>(RankKernel.Compute(columns, [], orderBy, RankKind.RowNumber), RankKind.RowNumber);
+
+        for (int i = 0; i < n; i++)
+        {
+            int lessCount = values.Count(v => v < values[i]);
+            int equalBefore = 0;
+            for (int j = 0; j < i; j++)
+                if (values[j] == values[i])
+                    equalBefore++;
+            Assert.That(result[i], Is.EqualTo((long)lessCount + equalBefore + 1), $"rowNumber mismatch at {i}");
+        }
+    }
+
+    [Test]
+    public void Rank_LargePartitionManyTies_MatchesReferenceCounting()
+    {
+        const int n = 1500;
+        var values = new int[n];
+        for (int i = 0; i < n; i++)
+            values[i] = (i * 7919) % 10;
+
+        var columns = Columns(("v", NivaraColumn<int>.Create(values)));
+        var orderBy = new[] { new SortKey("v", SortDirection.Ascending) };
+
+        var rank = Rank<long>(RankKernel.Compute(columns, [], orderBy, RankKind.Rank), RankKind.Rank);
+        var denseRank = Rank<long>(RankKernel.Compute(columns, [], orderBy, RankKind.DenseRank), RankKind.DenseRank);
+
+        var distinct = values.Distinct().OrderBy(v => v).ToArray();
+        var denseBase = new Dictionary<int, int>();
+        for (int i = 0; i < distinct.Length; i++)
+            denseBase[distinct[i]] = i + 1;
+
+        for (int i = 0; i < n; i++)
+        {
+            int lessCount = values.Count(v => v < values[i]);
+            Assert.That(rank[i], Is.EqualTo((long)lessCount + 1), $"rank mismatch at {i}");
+            Assert.That(denseRank[i], Is.EqualTo(denseBase[values[i]]), $"denseRank mismatch at {i}");
+        }
+    }
 }

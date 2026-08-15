@@ -102,14 +102,18 @@ sealed class StubChunkedQuerySource : IQuerySource
 {
     readonly int totalRowCount;
     readonly int? estimatedRowCount;
+    readonly bool includeNullableColumn;
 
-    public StubChunkedQuerySource(int totalRowCount = 2000, int? estimatedRowCount = null)
+    public StubChunkedQuerySource(int totalRowCount = 2000, int? estimatedRowCount = null, bool includeNullableColumn = false)
     {
         this.totalRowCount = totalRowCount;
         this.estimatedRowCount = estimatedRowCount;
+        this.includeNullableColumn = includeNullableColumn;
     }
 
-    public Schema Schema => new(new[] { ("A", typeof(int)) });
+    public Schema Schema => includeNullableColumn
+        ? new Schema(new[] { ("A", typeof(int)), ("B", typeof(int)) })
+        : new Schema(new[] { ("A", typeof(int)) });
     public bool IsLazy => false;
     public bool CanReadInChunks => true;
     public int? EstimatedRowCount => estimatedRowCount ?? totalRowCount;
@@ -120,7 +124,9 @@ sealed class StubChunkedQuerySource : IQuerySource
     {
         var data = new int[totalRowCount];
         for (int i = 0; i < totalRowCount; i++) data[i] = i;
-        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
+        var result = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
+        if (includeNullableColumn) result["B"] = buildNullableColumn(0, totalRowCount);
+        return result;
     }
 
     public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
@@ -132,7 +138,20 @@ sealed class StubChunkedQuerySource : IQuerySource
         var length = Math.Min(chunkSize, totalRowCount - start);
         var data = new int[length];
         for (int i = 0; i < length; i++) data[i] = start + i;
-        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
+        var result = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(data) };
+        if (includeNullableColumn) result["B"] = buildNullableColumn(start, length);
+        return result;
+    }
+
+    static NivaraColumn<int> buildNullableColumn(int start, int count)
+    {
+        var values = new int?[count];
+        for (int i = 0; i < count; i++)
+        {
+            var global = start + i;
+            values[i] = global % 5 == 0 ? null : global * 10;
+        }
+        return NivaraColumn.CreateFromNullable(values);
     }
 
     public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
@@ -207,6 +226,11 @@ static class ExecutionTestHelpers
         return new StubChunkedQuerySource(rowCount, estimatedRowCount);
     }
 
+    public static StubChunkedQuerySource CreateNullableChunkedSource(int rowCount, int? estimatedRowCount = null)
+    {
+        return new StubChunkedQuerySource(rowCount, estimatedRowCount, includeNullableColumn: true);
+    }
+
     public static QueryPlan CreateChunkedTestPlan(
         int sourceRowCount = 2000,
         IEnumerable<IQueryOperation>? operations = null,
@@ -226,11 +250,33 @@ static class ExecutionTestHelpers
 
         foreach (var colName in expected.ColumnNames)
         {
-            var expectedCol = expected.GetColumn<object>(colName);
-            var actualCol = actual.GetColumn<object>(colName);
+            var expectedCol = expected.GetColumn(colName);
+            var actualCol = actual.GetColumn(colName);
             for (int i = 0; i < expected.RowCount; i++)
-                Assert.That(actualCol[i], Is.EqualTo(expectedCol[i]),
+                Assert.That(actualCol.GetValue(i), Is.EqualTo(expectedCol.GetValue(i)),
                     $"Row {i} column '{colName}' mismatch");
+        }
+    }
+
+    public static void AssertFramesEqualWithMasks(NivaraFrame expected, NivaraFrame actual)
+    {
+        Assert.That(actual, Is.Not.Null);
+        Assert.That(actual.RowCount, Is.EqualTo(expected.RowCount));
+        Assert.That(actual.ColumnCount, Is.EqualTo(expected.ColumnCount));
+        Assert.That(actual.ColumnNames, Is.EquivalentTo(expected.ColumnNames));
+
+        foreach (var colName in expected.ColumnNames)
+        {
+            var expectedCol = expected.GetColumn(colName);
+            var actualCol = actual.GetColumn(colName);
+            for (int i = 0; i < expected.RowCount; i++)
+            {
+                Assert.That(actualCol.IsNull(i), Is.EqualTo(expectedCol.IsNull(i)),
+                    $"Row {i} column '{colName}' null-mask mismatch");
+                if (!expectedCol.IsNull(i))
+                    Assert.That(actualCol.GetValue(i), Is.EqualTo(expectedCol.GetValue(i)),
+                        $"Row {i} column '{colName}' value mismatch");
+            }
         }
     }
 
