@@ -123,7 +123,7 @@ Every query predicate or projection that goes through `QueryFrame` (`.Where(...)
 
 ## 5. Secondary gaps
 
-1. **Operator-level fusion only.** `OperationFusionRule` fuses *plan operators* (`src/Nivara/Optimization/OperationFusionRule.cs`). There is no *kernel-level* expression fusion — `(Salary * 1.1) + 1000` still materializes intermediate columns instead of running as one span pass.
+1. **No operator-level fusion rule.** The inert `OperationFusionRule` was removed; the optimizer currently focuses on pushdown and column elimination. Kernel-level expression fusion is provided by `FusedExpressionEvaluator`, but chained plan operators still materialize intermediate columns.
 2. **No window functions.** No `Over`/rolling/cumulative/lag/rank anywhere in `src/` (confirmed by grep). This is the largest *analytical feature* gap versus Polars.
 3. **Generic-math collapse pending.** `NivaraColumn<T>` arithmetic branches on `float`/`double` explicitly. AutoDiff proves the generic `IFloatingPointIeee754<T>` pattern works; the column layer has not adopted it.
 4. **Async not first-class in streaming.** The seams exist; the streaming strategy is still a synchronous chunk puller with async wrappers.
@@ -134,7 +134,7 @@ Every query predicate or projection that goes through `QueryFrame` (`.Where(...)
 ## 6. What is already right (and should not be changed)
 
 - **Storage is native, not a port.** Sole-owner `ColumnStorage<T>` + pooled buffers is exactly Pillar 1. Do not rewrite it to an Arrow-internal format; Arrow belongs at the boundary (Pillar 7).
-- **The optimizer is real.** Pushdown + fusion + elimination rules with plan inspection and diagnostics is a genuine native asset.
+- **The optimizer is real.** Pushdown + column elimination with plan inspection and diagnostics is a genuine native asset.
 - **AutoDiff is the proof-of-pattern.** It already demonstrates generic-math SAIS kernels, span-first implementations, `ArrayPool` discipline, and the inference-default model. The column layer should copy its techniques, not invent new ones.
 - **Diagnostics everywhere.** `OperationDiagnostics`, `ExecutionEngine.LastDiagnostics`, `QueryPlan` inspection — observability is a native strength no Python/Rust stack matches ergonomically.
 
