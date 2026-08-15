@@ -250,7 +250,6 @@ internal sealed class OptimizationEngine
         // Add standard optimization rules in priority order
         engine.AddRule(new PredicatePushdownRule());
         engine.AddRule(new ProjectionPushdownRule());
-        engine.AddRule(new OperationFusionRule());
         engine.AddRule(new ColumnEliminationRule());
 
         return engine;
