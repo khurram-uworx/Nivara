@@ -439,6 +439,16 @@ public class WindowFunctionsTests
     }
 
     [Test]
+    public void CumulativeProduct_IntProductOverflowsWidenedLong_ThrowsOverflowException()
+    {
+        // The true product (2^93 range) overflows even the widened long accumulator. Without
+        // checked arithmetic the wrap lands inside int range (~2^29) and is silently returned.
+        var column = NivaraColumn<int>.Create(new[] { int.MaxValue, int.MaxValue, int.MaxValue });
+
+        Assert.Throws<OverflowException>(() => column.CumulativeProduct());
+    }
+
+    [Test]
     public void RollingSum_ShortFamily_WidenedAccumulator_MatchesLongReference()
     {
         // Prefix overflows short at p2 (30000+1000+30000 = 61000), but each 2-element

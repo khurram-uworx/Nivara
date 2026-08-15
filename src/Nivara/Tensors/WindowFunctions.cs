@@ -383,9 +383,16 @@ public static class WindowFunctions
                 }
                 else
                 {
-                    accumulator = isSum
-                        ? accumulator + long.CreateChecked(effective[i])
-                        : accumulator * long.CreateChecked(effective[i]);
+                    // Checked: a product of several large int-family values can overflow the widened
+                    // long accumulator itself (e.g. [int.MaxValue] * 3). Without checked, the wrap
+                    // could land inside the result type's range and be silently returned instead of
+                    // throwing (issue #248).
+                    checked
+                    {
+                        accumulator = isSum
+                            ? accumulator + long.CreateChecked(effective[i])
+                            : accumulator * long.CreateChecked(effective[i]);
+                    }
                 }
 
                 result[i] = T.CreateChecked(accumulator);
@@ -437,7 +444,7 @@ public static class WindowFunctions
         {
             if (valid[i])
             {
-                runningSum += long.CreateChecked(effective[i]);
+                checked { runningSum += long.CreateChecked(effective[i]); }
                 runningCount++;
             }
 

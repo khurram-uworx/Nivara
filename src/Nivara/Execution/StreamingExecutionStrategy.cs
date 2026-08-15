@@ -17,10 +17,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         return true;
     }
 
-    static bool isOperationStreamable(IQueryOperation op)
-        => !NonStreamableOperations.Contains(op.OperationType)
-            && !WindowExpressionInspector.HasWindowExpression(op);
-
     static int calculateChunkSize(long memoryBudget)
     {
         const long estimatedBytesPerRow = 100;
