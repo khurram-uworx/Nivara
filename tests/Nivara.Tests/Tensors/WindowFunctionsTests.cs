@@ -340,6 +340,143 @@ public class WindowFunctionsTests
     }
 
     [Test]
+    public void RollingMean_Int_RandomArrays_MatchesNaive()
+    {
+        var random = new Random(43);
+        int length = 200;
+        int[] values = new int[length];
+        bool[] mask = new bool[length];
+        for (int i = 0; i < length; i++)
+        {
+            values[i] = random.Next(-50, 51);
+            mask[i] = random.Next(4) == 0;
+        }
+        var column = NivaraColumn<int>.CreateFromSpans(values, mask);
+
+        for (int window = 1; window <= 7; window++)
+        {
+            for (int minPeriods = 1; minPeriods <= window; minPeriods++)
+            {
+                var result = column.RollingMean(window, minPeriods);
+
+                int validInWindow = 0;
+                double sum = 0;
+                for (int i = 0; i < length; i++)
+                {
+                    if (i - window >= 0 && !mask[i - window])
+                    {
+                        validInWindow--;
+                        sum -= values[i - window];
+                    }
+
+                    if (!mask[i])
+                    {
+                        validInWindow++;
+                        sum += values[i];
+                    }
+
+                    Assert.That(result.IsNull(i), Is.EqualTo(validInWindow < minPeriods),
+                        $"null mismatch at {i} window={window} minPeriods={minPeriods}");
+
+                    if (validInWindow >= minPeriods)
+                        Assert.That(result[i], Is.EqualTo(sum / validInWindow).Within(1e-9),
+                            $"value mismatch at {i} window={window} minPeriods={minPeriods}");
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void RollingMin_Int_RandomArrays_MatchesNaive()
+    {
+        var random = new Random(44);
+        int length = 200;
+        int[] values = new int[length];
+        bool[] mask = new bool[length];
+        for (int i = 0; i < length; i++)
+        {
+            values[i] = random.Next(-50, 51);
+            mask[i] = random.Next(4) == 0;
+        }
+        var column = NivaraColumn<int>.CreateFromSpans(values, mask);
+
+        for (int window = 1; window <= 7; window++)
+        {
+            for (int minPeriods = 1; minPeriods <= window; minPeriods++)
+            {
+                var result = column.RollingMin(window, minPeriods);
+
+                for (int i = 0; i < length; i++)
+                {
+                    int lo = Math.Max(0, i - window + 1);
+                    int validInWindow = 0;
+                    int windowMin = int.MaxValue;
+                    for (int j = lo; j <= i; j++)
+                    {
+                        if (!mask[j])
+                        {
+                            validInWindow++;
+                            windowMin = Math.Min(windowMin, values[j]);
+                        }
+                    }
+
+                    Assert.That(result.IsNull(i), Is.EqualTo(validInWindow < minPeriods),
+                        $"null mismatch at {i} window={window} minPeriods={minPeriods}");
+
+                    if (validInWindow >= minPeriods)
+                        Assert.That(result[i], Is.EqualTo(windowMin),
+                            $"value mismatch at {i} window={window} minPeriods={minPeriods}");
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void RollingMax_Int_RandomArrays_MatchesNaive()
+    {
+        var random = new Random(45);
+        int length = 200;
+        int[] values = new int[length];
+        bool[] mask = new bool[length];
+        for (int i = 0; i < length; i++)
+        {
+            values[i] = random.Next(-50, 51);
+            mask[i] = random.Next(4) == 0;
+        }
+        var column = NivaraColumn<int>.CreateFromSpans(values, mask);
+
+        for (int window = 1; window <= 7; window++)
+        {
+            for (int minPeriods = 1; minPeriods <= window; minPeriods++)
+            {
+                var result = column.RollingMax(window, minPeriods);
+
+                for (int i = 0; i < length; i++)
+                {
+                    int lo = Math.Max(0, i - window + 1);
+                    int validInWindow = 0;
+                    int windowMax = int.MinValue;
+                    for (int j = lo; j <= i; j++)
+                    {
+                        if (!mask[j])
+                        {
+                            validInWindow++;
+                            windowMax = Math.Max(windowMax, values[j]);
+                        }
+                    }
+
+                    Assert.That(result.IsNull(i), Is.EqualTo(validInWindow < minPeriods),
+                        $"null mismatch at {i} window={window} minPeriods={minPeriods}");
+
+                    if (validInWindow >= minPeriods)
+                        Assert.That(result[i], Is.EqualTo(windowMax),
+                            $"value mismatch at {i} window={window} minPeriods={minPeriods}");
+                }
+            }
+        }
+    }
+
+    [Test]
     public void CumulativeSum_Int_RandomArrays_MatchesNaive()
     {
         var random = new Random(7);

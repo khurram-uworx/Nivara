@@ -237,8 +237,8 @@ new `tests/Nivara.Tests/Query/RollingWindowCrossValidationTests.cs`
 7. `test: rolling allocation budgets + perf scenarios (#251)` — ✓ `04898b6`
 8. `test: streaming-vs-eager chunk equivalence with masks (#252)` — ✓ done
 9. `test: all-null, window>length, and shift boundary cases (#252)` — ✓ done
-10. `test: rolling mean/min/max property tests (#252)` — ⏳ next
-11. `test: partitioned rolling property tests (#252)`
+10. `test: rolling mean/min/max property tests (#252)` — ✓ done
+11. `test: partitioned rolling property tests (#252)` — ⏳ next
 12. `test: Polars rolling fixtures + cross-validation (#252)`
 13. `test: chunked masked-position backing-value assertions (#252)`
 14. `docs: remove TODO.md — plan executed` (only after full review)
