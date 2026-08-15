@@ -111,21 +111,41 @@ public static class WindowFunctions
         if (length == 0)
             return NivaraColumn<T>.Create(Array.Empty<T>());
 
-        var (prefixSum, prefixCount) = buildPrefix(effective, valid);
         var result = new T[length];
         var resultMask = new bool[length];
 
-        for (int i = 0; i < length; i++)
+        if (isIntFamily<T>())
         {
-            int lo = i - windowSize + 1;
-            T windowSum = prefixSum[i] - (lo >= 1 ? prefixSum[lo - 1] : T.Zero);
-            int windowCount = prefixCount[i] - (lo >= 1 ? prefixCount[lo - 1] : 0);
-
-            if (windowCount >= min)
-                result[i] = windowSum;
-            else
+            var (prefixSum, prefixCount) = buildWidenedPrefix(effective, valid);
+            for (int i = 0; i < length; i++)
             {
-                resultMask[i] = true;
+                int lo = i - windowSize + 1;
+                long windowSum = prefixSum[i] - (lo >= 1 ? prefixSum[lo - 1] : 0L);
+                int windowCount = prefixCount[i] - (lo >= 1 ? prefixCount[lo - 1] : 0);
+
+                if (windowCount >= min)
+                    result[i] = T.CreateChecked(windowSum);
+                else
+                {
+                    resultMask[i] = true;
+                }
+            }
+        }
+        else
+        {
+            var (prefixSum, prefixCount) = buildPrefix(effective, valid);
+            for (int i = 0; i < length; i++)
+            {
+                int lo = i - windowSize + 1;
+                T windowSum = prefixSum[i] - (lo >= 1 ? prefixSum[lo - 1] : T.Zero);
+                int windowCount = prefixCount[i] - (lo >= 1 ? prefixCount[lo - 1] : 0);
+
+                if (windowCount >= min)
+                    result[i] = windowSum;
+                else
+                {
+                    resultMask[i] = true;
+                }
             }
         }
 
@@ -148,21 +168,41 @@ public static class WindowFunctions
         if (length == 0)
             return NivaraColumn<double>.Create(Array.Empty<double>());
 
-        var (prefixSum, prefixCount) = buildPrefix(effective, valid);
         var result = new double[length];
         var resultMask = new bool[length];
 
-        for (int i = 0; i < length; i++)
+        if (isIntFamily<T>())
         {
-            int lo = i - windowSize + 1;
-            T windowSum = prefixSum[i] - (lo >= 1 ? prefixSum[lo - 1] : T.Zero);
-            int windowCount = prefixCount[i] - (lo >= 1 ? prefixCount[lo - 1] : 0);
-
-            if (windowCount >= min)
-                result[i] = double.CreateChecked(windowSum) / windowCount;
-            else
+            var (prefixSum, prefixCount) = buildWidenedPrefix(effective, valid);
+            for (int i = 0; i < length; i++)
             {
-                resultMask[i] = true;
+                int lo = i - windowSize + 1;
+                long windowSum = prefixSum[i] - (lo >= 1 ? prefixSum[lo - 1] : 0L);
+                int windowCount = prefixCount[i] - (lo >= 1 ? prefixCount[lo - 1] : 0);
+
+                if (windowCount >= min)
+                    result[i] = double.CreateChecked(windowSum) / windowCount;
+                else
+                {
+                    resultMask[i] = true;
+                }
+            }
+        }
+        else
+        {
+            var (prefixSum, prefixCount) = buildPrefix(effective, valid);
+            for (int i = 0; i < length; i++)
+            {
+                int lo = i - windowSize + 1;
+                T windowSum = prefixSum[i] - (lo >= 1 ? prefixSum[lo - 1] : T.Zero);
+                int windowCount = prefixCount[i] - (lo >= 1 ? prefixCount[lo - 1] : 0);
+
+                if (windowCount >= min)
+                    result[i] = double.CreateChecked(windowSum) / windowCount;
+                else
+                {
+                    resultMask[i] = true;
+                }
             }
         }
 
@@ -255,6 +295,12 @@ public static class WindowFunctions
 
     // ── Shared kernels ──
 
+    static bool isIntFamily<T>()
+        where T : struct, INumber<T>
+        => typeof(T) is var t
+            && (t == typeof(sbyte) || t == typeof(byte) || t == typeof(short) || t == typeof(ushort)
+                || t == typeof(int) || t == typeof(uint) || t == typeof(char));
+
     static int resolveWindowArgs(int windowSize, int? minPeriods, bool relaxWhenHandler = false)
     {
         if (windowSize < 1)
@@ -316,8 +362,47 @@ public static class WindowFunctions
 
         var result = new T[length];
         var resultMask = new bool[length];
-        bool hasAccumulator = false;
-        T accumulator = default;
+
+        if (isIntFamily<T>() && (isSum || isProduct))
+        {
+            bool hasAccumulator = false;
+            long accumulator = 0;
+
+            for (int i = 0; i < length; i++)
+            {
+                if (!valid[i])
+                {
+                    resultMask[i] = true;
+                    continue;
+                }
+
+                if (!hasAccumulator)
+                {
+                    accumulator = long.CreateChecked(effective[i]);
+                    hasAccumulator = true;
+                }
+                else
+                {
+                    // Checked: a product of several large int-family values can overflow the widened
+                    // long accumulator itself (e.g. [int.MaxValue] * 3). Without checked, the wrap
+                    // could land inside the result type's range and be silently returned instead of
+                    // throwing (issue #248).
+                    checked
+                    {
+                        accumulator = isSum
+                            ? accumulator + long.CreateChecked(effective[i])
+                            : accumulator * long.CreateChecked(effective[i]);
+                    }
+                }
+
+                result[i] = T.CreateChecked(accumulator);
+            }
+
+            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        }
+
+        bool hasTAccumulator = false;
+        T tAccumulator = default;
 
         for (int i = 0; i < length; i++)
         {
@@ -327,23 +412,47 @@ public static class WindowFunctions
                 continue;
             }
 
-            if (!hasAccumulator)
+            if (!hasTAccumulator)
             {
-                accumulator = effective[i];
-                hasAccumulator = true;
+                tAccumulator = effective[i];
+                hasTAccumulator = true;
             }
             else
             {
-                accumulator = isSum ? accumulator + effective[i]
-                    : isProduct ? accumulator * effective[i]
-                    : isMax ? T.Max(accumulator, effective[i])
-                    : T.Min(accumulator, effective[i]);
+                tAccumulator = isSum ? tAccumulator + effective[i]
+                    : isProduct ? tAccumulator * effective[i]
+                    : isMax ? T.Max(tAccumulator, effective[i])
+                    : T.Min(tAccumulator, effective[i]);
             }
 
-            result[i] = accumulator;
+            result[i] = tAccumulator;
         }
 
         return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+    }
+
+    static (long[] PrefixSum, int[] PrefixCount) buildWidenedPrefix<T>(T[] effective, bool[] valid)
+        where T : struct, INumber<T>
+    {
+        var length = effective.Length;
+        var prefixSum = new long[length];
+        var prefixCount = new int[length];
+        long runningSum = 0;
+        int runningCount = 0;
+
+        for (int i = 0; i < length; i++)
+        {
+            if (valid[i])
+            {
+                checked { runningSum += long.CreateChecked(effective[i]); }
+                runningCount++;
+            }
+
+            prefixSum[i] = runningSum;
+            prefixCount[i] = runningCount;
+        }
+
+        return (prefixSum, prefixCount);
     }
 
     static (T[] PrefixSum, int[] PrefixCount) buildPrefix<T>(T[] effective, bool[] valid)

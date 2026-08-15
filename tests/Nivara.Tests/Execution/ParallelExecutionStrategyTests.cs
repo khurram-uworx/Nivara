@@ -245,6 +245,54 @@ public class ParallelExecutionStrategyTests
         Assert.That(trackingOp.ThreadIds.Count, Is.EqualTo(1), "Small dataset should run on single thread");
     }
 
+    [Test]
+    public void ExecuteFilter_WithWindowCondition_RunsWholeColumn_MatchesLazy()
+    {
+        var strategy = new ParallelExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var source = new StubQuerySource(schema: new Schema(new[] { ("A", typeof(int)) }));
+        source.ExecuteFn = () => ExecutionTestHelpers.CreateLargeIntColumn(2000);
+
+        var condition = ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2) > 1000;
+        var filterOp = new FilterOperation(condition);
+        var plan = ExecutionTestHelpers.CreateTestPlan(source: source, operations: new[] { filterOp });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Parallel);
+        context.MaxDegreeOfParallelism = Environment.ProcessorCount;
+
+        using var result = strategy.Execute(plan, context);
+        using var lazyResult = lazyStrategy.Execute(plan, ExecutionTestHelpers.CreateTestContext());
+
+        Assert.That(result.RowCount, Is.EqualTo(lazyResult.RowCount));
+        var expectedCol = lazyResult.GetColumn<int>("A");
+        var actualCol = result.GetColumn<int>("A");
+        Assert.That(actualCol.Length, Is.EqualTo(expectedCol.Length));
+        for (int i = 0; i < expectedCol.Length; i++)
+            Assert.That(actualCol[i], Is.EqualTo(expectedCol[i]), $"Row {i} column 'A' mismatch");
+    }
+
+    [Test]
+    public void ExecuteFilter_WithWindowCondition_MatchesHandComputedWholeColumn()
+    {
+        var strategy = new ParallelExecutionStrategy();
+        var source = new StubQuerySource(schema: new Schema(new[] { ("A", typeof(int)) }));
+        source.ExecuteFn = () => ExecutionTestHelpers.CreateLargeIntColumn(2000);
+
+        // Rolling sum with window 2 over values 0..1999: row i holds (i-1) + i = 2i-1 (null at row 0).
+        // Keep rows where the rolling sum is > 2000, i.e. 2i-1 > 2000 => i >= 1001.
+        var condition = ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2) > 2000;
+        var filterOp = new FilterOperation(condition);
+        var plan = ExecutionTestHelpers.CreateTestPlan(source: source, operations: new[] { filterOp });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Parallel);
+        context.MaxDegreeOfParallelism = Environment.ProcessorCount;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(result.RowCount, Is.EqualTo(999));
+        var colA = result.GetColumn<int>("A");
+        Assert.That(colA[0], Is.EqualTo(1001));
+        Assert.That(colA[^1], Is.EqualTo(1999));
+    }
+
     // ── Concatenation parallel tests ──
 
     [Test]

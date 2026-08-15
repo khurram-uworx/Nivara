@@ -368,4 +368,107 @@ public class WindowFunctionsTests
             Assert.That(result[i], Is.EqualTo(running));
         }
     }
+
+    // ── #248: int-family window accumulators must not silently wrap ──
+
+    [Test]
+    public void RollingSum_IntPrefixOverflow_PerWindowSumsStayCorrect()
+    {
+        // Prefix accumulates in int: p2 = MaxValue + MaxValue wraps. Per-window sums fit in long.
+        var column = NivaraColumn<int>.Create(new[] { int.MaxValue, 0, int.MaxValue, 0 });
+
+        var result = column.RollingSum(windowSize: 2);
+
+        Assert.That(result.Length, Is.EqualTo(4));
+        Assert.That(result.IsNull(0), Is.True);
+        Assert.That(result[1], Is.EqualTo(int.MaxValue));
+        Assert.That(result[2], Is.EqualTo(int.MaxValue));
+        Assert.That(result[3], Is.EqualTo(int.MaxValue));
+    }
+
+    [Test]
+    public void RollingMean_IntPrefixOverflow_PerWindowMeansStayCorrect()
+    {
+        var column = NivaraColumn<int>.Create(new[] { int.MaxValue, int.MaxValue, 0 });
+
+        var result = column.RollingMean(windowSize: 2);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result.IsNull(0), Is.True);
+        Assert.That(result[1], Is.EqualTo((double)int.MaxValue));
+        Assert.That(result[2], Is.EqualTo(int.MaxValue / 2.0));
+    }
+
+    [Test]
+    public void CumulativeSum_IntGenuineOverflow_ThrowsOverflowException()
+    {
+        var column = NivaraColumn<int>.Create(new[] { int.MaxValue, 1 });
+
+        Assert.Throws<OverflowException>(() => column.CumulativeSum());
+    }
+
+    [Test]
+    public void CumulativeSum_IntGenuineOverflow_UintLargestStaysCorrect()
+    {
+        var column = NivaraColumn<uint>.Create(new[] { uint.MaxValue, 0u });
+
+        var result = column.CumulativeSum();
+
+        Assert.That(result[0], Is.EqualTo(uint.MaxValue));
+        Assert.That(result[1], Is.EqualTo(uint.MaxValue));
+    }
+
+    [Test]
+    public void CumulativeProduct_IntWidened_MatchesLongReference()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1000, 2000 });
+
+        var result = column.CumulativeProduct();
+
+        Assert.That(result.Length, Is.EqualTo(2));
+        Assert.That(result[0], Is.EqualTo(1000));
+        Assert.That(result[1], Is.EqualTo(2_000_000));
+    }
+
+    [Test]
+    public void CumulativeProduct_IntGenuineOverflow_ThrowsOverflowException()
+    {
+        var column = NivaraColumn<int>.Create(new[] { int.MaxValue, 2 });
+
+        Assert.Throws<OverflowException>(() => column.CumulativeProduct());
+    }
+
+    [Test]
+    public void CumulativeProduct_IntProductOverflowsWidenedLong_ThrowsOverflowException()
+    {
+        // The true product (2^93 range) overflows even the widened long accumulator. Without
+        // checked arithmetic the wrap lands inside int range (~2^29) and is silently returned.
+        var column = NivaraColumn<int>.Create(new[] { int.MaxValue, int.MaxValue, int.MaxValue });
+
+        Assert.Throws<OverflowException>(() => column.CumulativeProduct());
+    }
+
+    [Test]
+    public void RollingSum_ShortFamily_WidenedAccumulator_MatchesLongReference()
+    {
+        // Prefix overflows short at p2 (30000+1000+30000 = 61000), but each 2-element
+        // window sum fits in short. Widened accumulator must keep them correct.
+        var column = NivaraColumn<short>.Create(new[] { (short)30000, (short)1000, (short)30000 });
+
+        var result = column.RollingSum(windowSize: 2);
+
+        Assert.That(result.Length, Is.EqualTo(3));
+        Assert.That(result.IsNull(0), Is.True);
+        Assert.That(result[1], Is.EqualTo(31000));
+        Assert.That(result[2], Is.EqualTo(31000));
+    }
+
+    [Test]
+    public void RollingSum_IntWindowSumsExceedingIntRange_ThrowsOverflowException()
+    {
+        // A single 2-element window sums to 4,294,967,294 which does not fit int.
+        var column = NivaraColumn<int>.Create(new[] { int.MaxValue, int.MaxValue });
+
+        Assert.Throws<OverflowException>(() => column.RollingSum(windowSize: 2));
+    }
 }

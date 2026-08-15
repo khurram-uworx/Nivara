@@ -1,5 +1,7 @@
+using Nivara;
 using Nivara.Exceptions;
 using Nivara.Execution;
+using Nivara.Expressions;
 using Nivara.Query;
 using NUnit.Framework;
 
@@ -363,6 +365,73 @@ public class StreamingExecutionStrategyTests
         using var result = strategy.Execute(plan, context);
 
         Assert.That(result.RowCount, Is.EqualTo(100));
+    }
+
+    [Test]
+    public void ValidatePlan_SelectWithWindowExpression_ReturnsFalse()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 3),
+        });
+        var plan = ExecutionTestHelpers.CreateChunkedTestPlan(
+            sourceRowCount: 2000,
+            operations: new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+
+        Assert.That(strategy.ValidatePlan(plan, context), Is.False);
+    }
+
+    [Test]
+    public void Execute_SelectWithWindowExpression_FallsBackToLazy_ProducesWholeColumnResult()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2),
+        });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+
+        using var result = strategy.Execute(plan, context);
+        using var lazyResult = lazyStrategy.Execute(plan, ExecutionTestHelpers.CreateTestContext());
+
+        Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
+            "Window-bearing select must fall back to whole-column execution, not read chunks");
+        assertIntColumnEqual(lazyResult, result, "RollingSum(A, 2)");
+    }
+
+    static void assertIntColumnEqual(NivaraFrame expected, NivaraFrame actual, string columnName)
+    {
+        var expectedCol = expected.GetColumn<int>(columnName);
+        var actualCol = actual.GetColumn<int>(columnName);
+        Assert.That(actualCol.Length, Is.EqualTo(expectedCol.Length));
+        for (int i = 0; i < expectedCol.Length; i++)
+            Assert.That(actualCol[i], Is.EqualTo(expectedCol[i]), $"Row {i} column '{columnName}' mismatch");
+    }
+
+    [Test]
+    public void ExecuteAsync_SelectWithWindowExpression_FallsBackToLazy_ProducesWholeColumnResult()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2),
+        });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+
+        using var result = strategy.ExecuteAsync(plan, context).GetAwaiter().GetResult();
+        using var lazyResult = lazyStrategy.ExecuteAsync(plan, ExecutionTestHelpers.CreateTestContext()).GetAwaiter().GetResult();
+
+        Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
+            "Window-bearing select must fall back to whole-column execution, not read chunks");
+        assertIntColumnEqual(lazyResult, result, "RollingSum(A, 2)");
     }
 
     [Test]
