@@ -1,6 +1,6 @@
 ---
 name: iterative-work
-description: Use when completing discrete steps of multi-step work. Suggests/asks for a feature branch and switches to it, writes the plan to docs/TODO.md first, commits locally after each logical change unit (does NOT push), asks before running tests, deletes docs/TODO.md once the plan is fully executed, then offers to push and create/update a PR. Push and PRs are always human-confirmed.
+description: Use when completing discrete steps of multi-step work. Suggests/asks for a feature branch and switches to it, writes the plan to docs/TODO.md first, commits locally after each logical change unit (does NOT push), asks before running tests, deletes docs/TODO.md once the plan is fully executed, then offers to push and create/update a PR. Push and PRs are always human-confirmed. Once the branch/PR is ready, reviews the finished branch from a distance (issue specs vs commits, acceptance criteria, dead code) before considering the work complete.
 ---
 
 # Iterative Work Workflow
@@ -27,6 +27,22 @@ Persist the plan before executing so it is saved at highest fidelity, even if co
 3. **Execute iteratively** — complete one logical change at a time, committing after each (see Workflow below). Ask before running `dotnet test`.
 4. **Review `docs/TODO.md` when the plan is complete** — read it over and confirm every item is taken care of. If so, remove it and commit the removal (`git rm docs/TODO.md` → `docs: remove TODO.md — plan executed`). Only leave it in place if an item is still pending.
 5. **Offer push + PR** — report the completed work, then offer to push the branch and create (or update) a pull request. Ask explicitly; do not push or open a PR without the human's confirmation. Push remains human-controlled by default.
+
+## Branch review (from a distance)
+
+Once the branch is ready (all commits landed, pushed, PR created/updated), review the finished work holistically **before** considering the task complete. The branch is the cheapest place to catch problems: the diff is compact, one logical change per commit, and nothing has hit `main`. This is a fresh, critical pass — not a re-run of step-by-step work.
+
+1. **Re-read each issue spec** — `gh issue view <n> --repo khurram-uworx/Nivara` and compare the problem/root cause/acceptance criteria against the corresponding commit. Ask per issue:
+   - Is the root cause actually fixed (not just the symptom)?
+   - Are **all** acceptance criteria met, literally?
+   - Is the fix minimal and scoped, with no unrelated changes bundled in?
+2. **Inspect each commit's diff** — `git show <hash>` / `git diff main...<branch> --stat`. Look for:
+   - Edits that are dead code (defined but never called) or leave similar dead code behind.
+   - Silent failure modes the fix claims to eliminate but doesn't fully cover (e.g. a widened accumulator that can still wrap, a cache key that can still collide, a per-chunk path left ungated).
+   - Correctness under chunked/reused/cached execution (offsets, masks, shared cached delegates) — not just the whole-column case.
+3. **Verify the tests pin the acceptance criteria** — do the added tests actually assert the failure mode from the issue (e.g. the exact overflow/collision case), or just a happy path? Are edge cases (chunked paths, cross-backend parity, masked backing values) covered?
+4. **Fix what the review surfaces** — if a real gap is found, fix it properly (including regression test + CHANGELOG if the public contract changed), as an **additional commit** on the same branch; push to update the PR. Breaking changes are acceptable while the library is early — prefer correctness over preserving a wrong contract.
+5. **Dispose of residual concerns** — anything found that is real but out of scope → create a GitHub issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record it in the issues log; never hold it in memory.
 
 ## GitHub issues log
 
