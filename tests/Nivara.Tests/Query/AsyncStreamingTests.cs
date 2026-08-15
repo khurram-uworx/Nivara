@@ -213,7 +213,7 @@ public class AsyncStreamingTests
             Assert.That(chunk0["Index"].Length, Is.EqualTo(1000));
             Assert.That(chunk1["Index"].Length, Is.EqualTo(1000));
             Assert.That(chunk2["Index"].Length, Is.EqualTo(500));
-            Assert.That(chunk3["Index"].Length, Is.EqualTo(0));
+            Assert.That(chunk3.Count, Is.EqualTo(0));
 
             Assert.That(chunk0["Index"].GetValue(0), Is.EqualTo(0));
             Assert.That(chunk1["Index"].GetValue(0), Is.EqualTo(2000));
