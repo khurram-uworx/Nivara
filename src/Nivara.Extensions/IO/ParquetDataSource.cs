@@ -168,11 +168,11 @@ sealed class ParquetLazySource : IQuerySource
 
         var fields = reader.Schema.GetDataFields();
         using var rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
-        var columns = await ReadRowGroupColumnsAsync(rowGroupReader, fields, ct).ConfigureAwait(false);
+        var columns = await ReadRowGroupColumnsAsync(rowGroupReader, fields, reader.CustomMetadata, ct).ConfigureAwait(false);
         return NivaraFrame.Create(columns);
     }
 
-    private static async Task<IReadOnlyDictionary<string, IColumn>> ReadRowGroupColumnsAsync(Parquet.ParquetRowGroupReader rowGroupReader, DataField[] fields, CancellationToken ct)
+    private static async Task<IReadOnlyDictionary<string, IColumn>> ReadRowGroupColumnsAsync(Parquet.ParquetRowGroupReader rowGroupReader, DataField[] fields, IReadOnlyDictionary<string, string>? clrTypeMetadata, CancellationToken ct)
     {
         var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
 
@@ -184,7 +184,7 @@ sealed class ParquetLazySource : IQuerySource
                 continue;
 
             var data = await NivaraParquetReader.ReadParquetColumnAsync(rowGroupReader, field, ct).ConfigureAwait(false);
-            var column = NivaraParquetReader.CreateNivaraColumnFromParquetData(data, field, null);
+            var column = NivaraParquetReader.CreateNivaraColumnFromParquetData(data, field, clrTypeMetadata);
             columns[field.Name] = column;
         }
 
@@ -267,7 +267,10 @@ sealed class ParquetLazySource : IQuerySource
             }
             else
             {
-                columnDefinitions.Add((field.Name, field.ClrType));
+                // Parquet.Net reports string fields as ReadOnlyMemory<char>; data columns are
+                // NivaraColumn<string>, so the schema must report string to stay consistent.
+                var clrType = TypeMapper.IsStringType(field.ClrType) ? typeof(string) : field.ClrType;
+                columnDefinitions.Add((field.Name, clrType));
             }
         }
 
