@@ -188,7 +188,7 @@ public class ParallelExecutionHelperTests
     [Test]
     public void MergeGroupByDictionaries_SingleMap_ReturnsCopy()
     {
-        var key = new GroupKey(new[] { "a" }, new object[] { 1 });
+        var key = GroupKey.FromValues(new object[] { new[] { "a" }, new object[] { 1 } });
         var partial = new Dictionary<GroupKey, List<int>>
         {
             [key] = new List<int> { 0, 1 }
@@ -204,7 +204,7 @@ public class ParallelExecutionHelperTests
     [Test]
     public void MergeGroupByDictionaries_OverlappingKeys_MergesCorrectly()
     {
-        var key = new GroupKey(new[] { "a" }, new object[] { 1 });
+        var key = GroupKey.FromValues(new object[] { new[] { "a" }, new object[] { 1 } });
         var partials = new[]
         {
             new Dictionary<GroupKey, List<int>> { [key] = new List<int> { 0, 1 } },

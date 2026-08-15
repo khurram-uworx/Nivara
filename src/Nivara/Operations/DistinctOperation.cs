@@ -1,3 +1,4 @@
+using System.Buffers;
 using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
@@ -36,18 +37,51 @@ sealed class DistinctOperation : IQueryOperation
             if (rowCount <= 1)
                 return input;
 
-            var seen = new HashSet<GroupKey>();
+            var keyColumns = columnNames != null
+                ? columnNames.Select(n => input[n]).ToArray()
+                : input.Values.ToArray();
+            var readers = keyColumns.Select(GroupKeyReaderFactory.Create).ToArray();
             var uniqueIndices = new List<int>();
 
-            for (int i = 0; i < rowCount; i++)
+            var pooled = rowCount > 1024;
+            var hashes = pooled ? ArrayPool<int>.Shared.Rent(rowCount) : new int[rowCount];
+            try
             {
-                var keyValues = columnNames != null
-                    ? columnNames.Select(n => input[n].GetValue(i)).ToArray()
-                    : input.Values.Select(c => c.GetValue(i)).ToArray();
+                TypedGroupHash.ComputeRowHashes(readers, rowCount, hashes);
+                var hashBuckets = new Dictionary<int, List<int>>();
 
-                var key = new GroupKey(keyValues);
-                if (seen.Add(key))
-                    uniqueIndices.Add(i);
+                for (int i = 0; i < rowCount; i++)
+                {
+                    int hash = hashes[i];
+
+                    if (!hashBuckets.TryGetValue(hash, out var reps))
+                    {
+                        hashBuckets[hash] = new List<int>(1) { i };
+                        uniqueIndices.Add(i);
+                        continue;
+                    }
+
+                    bool duplicate = false;
+                    foreach (var rep in reps)
+                    {
+                        if (!TypedGroupHash.RowsEqual(readers, rep, i))
+                            continue;
+
+                        duplicate = true;
+                        break;
+                    }
+
+                    if (!duplicate)
+                    {
+                        reps.Add(i);
+                        uniqueIndices.Add(i);
+                    }
+                }
+            }
+            finally
+            {
+                if (pooled)
+                    ArrayPool<int>.Shared.Return(hashes);
             }
 
             var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);

@@ -11,8 +11,8 @@ public class GroupedDataTests
         // Arrange
         var groups = new Dictionary<GroupKey, List<int>>
         {
-            [new GroupKey("Alice")] = new List<int> { 0, 2 },
-            [new GroupKey("Bob")] = new List<int> { 1, 3 }
+            [GroupKey.FromValues(new object[] { "Alice" })] = new List<int> { 0, 2 },
+            [GroupKey.FromValues(new object[] { "Bob" })] = new List<int> { 1, 3 }
         };
 
         var keyColumnNames = new[] { "Name" };
@@ -35,8 +35,8 @@ public class GroupedDataTests
     public void GetGroupIndices_WithExistingKey_ReturnsCorrectIndices()
     {
         // Arrange
-        var aliceKey = new GroupKey("Alice");
-        var bobKey = new GroupKey("Bob");
+        var aliceKey = GroupKey.FromValues(new object[] { "Alice" });
+        var bobKey = GroupKey.FromValues(new object[] { "Bob" });
 
         var groups = new Dictionary<GroupKey, List<int>>
         {
@@ -69,7 +69,7 @@ public class GroupedDataTests
         // Arrange
         var groups = new Dictionary<GroupKey, List<int>>
         {
-            [new GroupKey("Alice")] = new List<int> { 0, 2 }
+            [GroupKey.FromValues(new object[] { "Alice" })] = new List<int> { 0, 2 }
         };
 
         var keyColumnNames = new[] { "Name" };
@@ -79,7 +79,7 @@ public class GroupedDataTests
         };
 
         var groupedData = new GroupedData(groups, keyColumnNames, sourceColumns);
-        var nonExistentKey = new GroupKey("Charlie");
+        var nonExistentKey = GroupKey.FromValues(new object[] { "Charlie" });
 
         // Act
         var indices = groupedData.GetGroupIndices(nonExistentKey);
@@ -92,8 +92,8 @@ public class GroupedDataTests
     public void GetAllGroups_ReturnsAllGroupsWithIndices()
     {
         // Arrange
-        var aliceKey = new GroupKey("Alice");
-        var bobKey = new GroupKey("Bob");
+        var aliceKey = GroupKey.FromValues(new object[] { "Alice" });
+        var bobKey = GroupKey.FromValues(new object[] { "Bob" });
 
         var groups = new Dictionary<GroupKey, List<int>>
         {
@@ -129,8 +129,8 @@ public class GroupedDataTests
     public void GroupKeys_ReturnsAllKeys()
     {
         // Arrange
-        var aliceKey = new GroupKey("Alice");
-        var bobKey = new GroupKey("Bob");
+        var aliceKey = GroupKey.FromValues(new object[] { "Alice" });
+        var bobKey = GroupKey.FromValues(new object[] { "Bob" });
 
         var groups = new Dictionary<GroupKey, List<int>>
         {
@@ -163,7 +163,7 @@ public class GroupKeyTests
     public void Constructor_WithValidValues_CreatesGroupKey()
     {
         // Arrange & Act
-        var key = new GroupKey("Alice", 25);
+        var key = GroupKey.FromValues(new object[] { "Alice", 25 });
 
         // Assert
         Assert.That(key.Values, Has.Count.EqualTo(2));
@@ -175,15 +175,15 @@ public class GroupKeyTests
     public void Constructor_WithNullValues_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => new GroupKey(null!));
+        Assert.Throws<ArgumentNullException>(() => GroupKey.FromValues(null!));
     }
 
     [Test]
     public void Equals_WithSameValues_ReturnsTrue()
     {
         // Arrange
-        var key1 = new GroupKey("Alice", 25);
-        var key2 = new GroupKey("Alice", 25);
+        var key1 = GroupKey.FromValues(new object[] { "Alice", 25 });
+        var key2 = GroupKey.FromValues(new object[] { "Alice", 25 });
 
         // Act & Assert
         Assert.That(key1.Equals(key2), Is.True);
@@ -195,8 +195,8 @@ public class GroupKeyTests
     public void Equals_WithDifferentValues_ReturnsFalse()
     {
         // Arrange
-        var key1 = new GroupKey("Alice", 25);
-        var key2 = new GroupKey("Bob", 30);
+        var key1 = GroupKey.FromValues(new object[] { "Alice", 25 });
+        var key2 = GroupKey.FromValues(new object[] { "Bob", 30 });
 
         // Act & Assert
         Assert.That(key1.Equals(key2), Is.False);
@@ -206,8 +206,8 @@ public class GroupKeyTests
     public void Equals_WithDifferentLengths_ReturnsFalse()
     {
         // Arrange
-        var key1 = new GroupKey("Alice");
-        var key2 = new GroupKey("Alice", 25);
+        var key1 = GroupKey.FromValues(new object[] { "Alice" });
+        var key2 = GroupKey.FromValues(new object[] { "Alice", 25 });
 
         // Act & Assert
         Assert.That(key1.Equals(key2), Is.False);
@@ -217,9 +217,9 @@ public class GroupKeyTests
     public void Equals_WithNullValues_HandlesCorrectly()
     {
         // Arrange
-        var key1 = new GroupKey("Alice", null);
-        var key2 = new GroupKey("Alice", null);
-        var key3 = new GroupKey("Alice", 25);
+        var key1 = GroupKey.FromValues(new object?[] { "Alice", null });
+        var key2 = GroupKey.FromValues(new object?[] { "Alice", null });
+        var key3 = GroupKey.FromValues(new object[] { "Alice", 25 });
 
         // Act & Assert
         Assert.That(key1.Equals(key2), Is.True);
@@ -230,7 +230,7 @@ public class GroupKeyTests
     public void Equals_WithNull_ReturnsFalse()
     {
         // Arrange
-        var key = new GroupKey("Alice");
+        var key = GroupKey.FromValues(new object[] { "Alice" });
 
         // Act & Assert
         Assert.That(key.Equals(null), Is.False);
@@ -240,7 +240,7 @@ public class GroupKeyTests
     public void ToString_ReturnsFormattedString()
     {
         // Arrange
-        var key = new GroupKey("Alice", 25, null);
+        var key = GroupKey.FromValues(new object?[] { "Alice", 25, null });
 
         // Act
         var result = key.ToString();
@@ -253,8 +253,8 @@ public class GroupKeyTests
     public void GetHashCode_WithSameValues_ReturnsSameHashCode()
     {
         // Arrange
-        var key1 = new GroupKey("Alice", 25);
-        var key2 = new GroupKey("Alice", 25);
+        var key1 = GroupKey.FromValues(new object[] { "Alice", 25 });
+        var key2 = GroupKey.FromValues(new object[] { "Alice", 25 });
 
         // Act
         var hash1 = key1.GetHashCode();
@@ -268,8 +268,8 @@ public class GroupKeyTests
     public void GetHashCode_WithDifferentValues_ReturnsDifferentHashCodes()
     {
         // Arrange
-        var key1 = new GroupKey("Alice", 25);
-        var key2 = new GroupKey("Bob", 30);
+        var key1 = GroupKey.FromValues(new object[] { "Alice", 25 });
+        var key2 = GroupKey.FromValues(new object[] { "Bob", 30 });
 
         // Act
         var hash1 = key1.GetHashCode();
@@ -277,5 +277,105 @@ public class GroupKeyTests
 
         // Assert
         Assert.That(hash1, Is.Not.EqualTo(hash2));
+    }
+}
+
+[TestFixture]
+public class TypedGroupKeyTests
+{
+    [Test]
+    public void CreateGroupsInternal_MixedTypeNullKeys_GroupsCorrectly()
+    {
+        var columns = new Dictionary<string, IColumn>
+        {
+            ["Name"] = NivaraColumn<string>.Create(new[] { "A", "A", "B", "B", "A", "C" }),
+            ["Score"] = NivaraColumn.CreateFromNullable(new int?[] { 1, null, 2, 2, 1, null }),
+            ["Weight"] = NivaraColumn<double>.Create(new[] { 1.0, 2.0, 3.0, 3.0, 1.0, 2.0 })
+        };
+
+        var grouped = GroupByOperation.CreateGroupsInternal(columns, new[] { "Name", "Score", "Weight" }, offset: 0);
+
+        Assert.That(grouped.GroupCount, Is.EqualTo(4));
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object?[] { "A", 1, 1.0 })), Is.EquivalentTo(new[] { 0, 4 }));
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object?[] { "A", null, 2.0 })), Is.EquivalentTo(new[] { 1 }));
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object?[] { "B", 2, 3.0 })), Is.EquivalentTo(new[] { 2, 3 }));
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object?[] { "C", null, 2.0 })), Is.EquivalentTo(new[] { 5 }));
+    }
+
+    [Test]
+    public void CreateGroupsInternal_Offset_AppliesToGroupIndices()
+    {
+        var columns = new Dictionary<string, IColumn>
+        {
+            ["K"] = NivaraColumn<string>.Create(new[] { "X", "Y", "X" })
+        };
+
+        var grouped = GroupByOperation.CreateGroupsInternal(columns, new[] { "K" }, offset: 10);
+
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object[] { "X" })), Is.EquivalentTo(new[] { 10, 12 }));
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object[] { "Y" })), Is.EquivalentTo(new[] { 11 }));
+    }
+
+    [Test]
+    public void TypedKey_FromDifferentColumnInstances_AreEqual()
+    {
+        var columnA = NivaraColumn<int>.Create(new[] { 42, 7 });
+        var columnB = NivaraColumn<int>.Create(new[] { 42, 8 });
+        var readersA = new IGroupKeyReader[] { GroupKeyReaderFactory.Create(columnA) };
+        var readersB = new IGroupKeyReader[] { GroupKeyReaderFactory.Create(columnB) };
+
+        var keyA = new GroupKey(readersA, 0);
+        var keyB = new GroupKey(readersB, 0);
+
+        Assert.That(keyA.Equals(keyB), Is.True);
+        Assert.That(keyA.GetHashCode(), Is.EqualTo(keyB.GetHashCode()));
+    }
+
+    [Test]
+    public void TypedKey_NullVsNonNullValue_AreNotEqual()
+    {
+        var columnA = NivaraColumn.CreateFromNullable(new int?[] { null, 5 });
+        var columnB = NivaraColumn.CreateFromNullable(new int?[] { 5, 5 });
+        var readersA = new IGroupKeyReader[] { GroupKeyReaderFactory.Create(columnA) };
+        var readersB = new IGroupKeyReader[] { GroupKeyReaderFactory.Create(columnB) };
+
+        var keyA = new GroupKey(readersA, 0);
+        var keyB = new GroupKey(readersB, 0);
+
+        Assert.That(keyA.Equals(keyB), Is.False);
+    }
+
+    [Test]
+    public void TypedKey_HashCollisionDifferentRows_ResolvesCorrectly()
+    {
+        var columnA = NivaraColumn<int>.Create(new[] { 0, 1 });
+        var columnB = NivaraColumn<int>.Create(new[] { 31, 0 });
+
+        var grouped = GroupByOperation.CreateGroupsInternal(
+            new Dictionary<string, IColumn> { ["A"] = columnA, ["B"] = columnB }, new[] { "A", "B" });
+
+        var readers = new IGroupKeyReader[]
+        {
+            GroupKeyReaderFactory.Create(columnA),
+            GroupKeyReaderFactory.Create(columnB)
+        };
+        Assert.That(TypedGroupHash.ComputeRowHash(readers, 0), Is.EqualTo(TypedGroupHash.ComputeRowHash(readers, 1)));
+        Assert.That(grouped.GroupCount, Is.EqualTo(2));
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object[] { 0, 31 })), Is.EquivalentTo(new[] { 0 }));
+        Assert.That(grouped.GetGroupIndices(GroupKey.FromValues(new object[] { 1, 0 })), Is.EquivalentTo(new[] { 1 }));
+    }
+
+    [Test]
+    public void TypedKey_Values_BoxesLazily()
+    {
+        var column = NivaraColumn<string>.Create(new[] { "Alpha" });
+        var readers = new IGroupKeyReader[] { GroupKeyReaderFactory.Create(column) };
+
+        var key = new GroupKey(readers, 0);
+
+        Assert.That(key.KeyCount, Is.EqualTo(1));
+        Assert.That(key.GetValue(0), Is.EqualTo("Alpha"));
+        Assert.That(key.Values, Is.EquivalentTo(new object?[] { "Alpha" }));
+        Assert.That(key.ToString(), Is.EqualTo("(Alpha)"));
     }
 }

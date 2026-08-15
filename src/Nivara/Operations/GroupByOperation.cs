@@ -1,3 +1,4 @@
+using System.Buffers;
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Expressions;
@@ -74,39 +75,104 @@ internal sealed class GroupedData
 }
 
 /// <summary>
-/// Represents a composite key for grouping operations with proper equality and hashing
+/// Represents a composite key for grouping operations with proper equality and hashing.
+/// Hot paths construct it once per distinct group from typed <see cref="IGroupKeyReader"/>s over
+/// the key columns, so no per-row boxed key objects are allocated; <see cref="FromValues"/> boxes
+/// for non-hot callers (tests, aggregation fixtures).
 /// </summary>
 internal sealed class GroupKey : IEquatable<GroupKey>
 {
-    readonly object?[] values;
+    readonly IReadOnlyList<IGroupKeyReader>? readers;
+    readonly int rowIndex;
+    readonly IReadOnlyList<object?>? boxedValues;
     readonly int hashCode;
+    object?[]? materializedValues;
 
     /// <summary>
-    /// Initializes a new instance of GroupKey
+    /// Constructs a typed key from the key-column readers and the row holding the key values,
+    /// with a precomputed row hash (avoids re-hashing in bulk grouping).
     /// </summary>
-    /// <param name="values">The key values</param>
-    public GroupKey(params object?[] values)
+    internal GroupKey(IReadOnlyList<IGroupKeyReader> readers, int rowIndex, int hashCode)
     {
-        this.values = values ?? throw new ArgumentNullException(nameof(values));
-        hashCode = ComputeHashCode(values);
+        this.readers = readers;
+        this.rowIndex = rowIndex;
+        this.hashCode = hashCode;
     }
 
     /// <summary>
-    /// Gets the key values
+    /// Constructs a typed key from the key-column readers and the row holding the key values.
     /// </summary>
-    public IReadOnlyList<object?> Values => values;
+    internal GroupKey(IReadOnlyList<IGroupKeyReader> readers, int rowIndex)
+        : this(readers, rowIndex, TypedGroupHash.ComputeRowHash(readers, rowIndex))
+    {
+    }
+
+    GroupKey(IReadOnlyList<object?> values)
+    {
+        boxedValues = values;
+        int hash = 17;
+        foreach (var value in values)
+            hash = hash * 31 + (value?.GetHashCode() ?? 0);
+        hashCode = hash;
+    }
+
+    /// <summary>
+    /// Builds a boxed key from literal values for non-hot construction paths.
+    /// </summary>
+    public static GroupKey FromValues(IReadOnlyList<object?> values)
+        => new(values ?? throw new ArgumentNullException(nameof(values)));
+
+    /// <summary>
+    /// Gets the number of key columns.
+    /// </summary>
+    public int KeyCount => readers?.Count ?? boxedValues!.Count;
+
+    /// <summary>
+    /// Gets the key value at the given column index (boxed).
+    /// </summary>
+    public object? GetValue(int index)
+        => readers != null ? readers[index].GetValue(rowIndex) : boxedValues![index];
+
+    /// <summary>
+    /// Gets the key values (boxed; materialized lazily for typed keys).
+    /// </summary>
+    public IReadOnlyList<object?> Values
+    {
+        get
+        {
+            if (boxedValues != null)
+                return boxedValues;
+
+            if (materializedValues == null)
+            {
+                var values = new object?[readers!.Count];
+                for (int i = 0; i < values.Length; i++)
+                    values[i] = readers[i].GetValue(rowIndex);
+                materializedValues = values;
+            }
+
+            return materializedValues;
+        }
+    }
 
     /// <inheritdoc />
     public bool Equals(GroupKey? other)
     {
         if (other is null) return false;
         if (ReferenceEquals(this, other)) return true;
-        if (values.Length != other.values.Length) return false;
+        if (KeyCount != other.KeyCount) return false;
 
-        for (int i = 0; i < values.Length; i++)
-            if (!Equals(values[i], other.values[i]))
+        if (readers != null && other.readers != null)
+        {
+            for (int i = 0; i < readers.Count; i++)
+                if (!readers[i].ValuesEqual(rowIndex, other.readers[i], other.rowIndex))
+                    return false;
+            return true;
+        }
+
+        for (int i = 0; i < KeyCount; i++)
+            if (!Equals(GetValue(i), other.GetValue(i)))
                 return false;
-
         return true;
     }
 
@@ -116,24 +182,12 @@ internal sealed class GroupKey : IEquatable<GroupKey>
     /// <inheritdoc />
     public override int GetHashCode() => hashCode;
 
-    /// <summary>
-    /// Computes a hash code for the given values
-    /// </summary>
-    /// <param name="values">The values to hash</param>
-    /// <returns>The computed hash code</returns>
-    static int ComputeHashCode(object?[] values)
-    {
-        var hash = new HashCode();
-        foreach (var value in values)
-            hash.Add(value);
-
-        return hash.ToHashCode();
-    }
-
     /// <inheritdoc />
     public override string ToString()
     {
-        var valueStrings = values.Select(v => v?.ToString() ?? "null");
+        var valueStrings = new string[KeyCount];
+        for (int i = 0; i < KeyCount; i++)
+            valueStrings[i] = GetValue(i)?.ToString() ?? "null";
         return $"({string.Join(", ", valueStrings)})";
     }
 }
@@ -332,7 +386,9 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
     }
 
     /// <summary>
-    /// Creates grouped data using hash-based grouping with vectorized key comparison
+    /// Creates grouped data using typed multi-column key hashing with no per-row boxing.
+    /// A <see cref="GroupKey"/> is constructed once per distinct group from its representative row;
+    /// rows are bucketed by a typed composite hash and disambiguated with typed equality.
     /// </summary>
     /// <param name="input">The input columns</param>
     /// <param name="keyColumns">The key column names</param>
@@ -341,29 +397,56 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
     {
         var firstColumn = input.Values.First();
         var rowCount = firstColumn.Length;
+        var readers = keyColumns.Select(name => GroupKeyReaderFactory.Create(input[name])).ToArray();
         var groups = new Dictionary<GroupKey, List<int>>();
+        var hashBuckets = new Dictionary<int, List<int>>();
+        var repToKey = new Dictionary<int, GroupKey>();
 
-        // Get key columns
-        var keyColumnData = keyColumns.Select(name => input[name]).ToArray();
-
-        // Group rows by creating composite keys
-        for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
+        var pooled = rowCount > 1024;
+        var hashes = pooled ? ArrayPool<int>.Shared.Rent(rowCount) : new int[rowCount];
+        try
         {
-            // Create composite key for this row
-            var keyValues = new object?[keyColumns.Length];
-            for (int keyIndex = 0; keyIndex < keyColumns.Length; keyIndex++)
-                keyValues[keyIndex] = keyColumnData[keyIndex].GetValue(rowIndex);
+            TypedGroupHash.ComputeRowHashes(readers, rowCount, hashes);
 
-            var groupKey = new GroupKey(keyValues);
-
-            // Add row to appropriate group
-            if (!groups.TryGetValue(groupKey, out var rowIndices))
+            for (int rowIndex = 0; rowIndex < rowCount; rowIndex++)
             {
-                rowIndices = new List<int>();
-                groups[groupKey] = rowIndices;
-            }
+                int hash = hashes[rowIndex];
 
-            rowIndices.Add(rowIndex + offset);
+                if (!hashBuckets.TryGetValue(hash, out var reps))
+                {
+                    reps = new List<int>(1);
+                    hashBuckets[hash] = reps;
+                    var groupKey = new GroupKey(readers, rowIndex, hash);
+                    repToKey[rowIndex] = groupKey;
+                    reps.Add(rowIndex);
+                    groups[groupKey] = new List<int>(1) { rowIndex + offset };
+                    continue;
+                }
+
+                bool joined = false;
+                foreach (var rep in reps)
+                {
+                    if (!TypedGroupHash.RowsEqual(readers, rep, rowIndex))
+                        continue;
+
+                    groups[repToKey[rep]].Add(rowIndex + offset);
+                    joined = true;
+                    break;
+                }
+
+                if (!joined)
+                {
+                    reps.Add(rowIndex);
+                    var groupKey = new GroupKey(readers, rowIndex, hash);
+                    repToKey[rowIndex] = groupKey;
+                    groups[groupKey] = new List<int>(1) { rowIndex + offset };
+                }
+            }
+        }
+        finally
+        {
+            if (pooled)
+                ArrayPool<int>.Shared.Return(hashes);
         }
 
         return new GroupedData(groups, keyColumns, input);
@@ -383,7 +466,7 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
             throw new ArgumentException($"Column '{columnName}' is not a key column", nameof(columnName));
 
         var distinctValues = groupedData.GroupKeys
-            .Select(key => key.Values[keyColumnIndex])
+            .Select(key => key.GetValue(keyColumnIndex))
             .ToArray();
 
         return CreateColumnFromValues(sourceColumn.ElementType, distinctValues);

@@ -765,8 +765,8 @@ public class AggregationFunctionTests
 
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1, 2 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 3, 4, 5 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1, 2 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 3, 4, 5 })
             };
 
             var sumAggregation = AggregationFunctions.Sum();
@@ -786,8 +786,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<ulong>.Create(new ulong[] { 10, 20, 30 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Sum().ApplyToGroups(column, groups);
@@ -803,8 +803,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<Int128>.Create(new Int128[] { 10, 20, 30 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Sum().ApplyToGroups(column, groups);
@@ -820,8 +820,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<UInt128>.Create(new UInt128[] { 10, 20, 30 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Sum().ApplyToGroups(column, groups);
@@ -837,8 +837,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<Half>.Create(new Half[] { (Half)10, (Half)20, (Half)30 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
@@ -854,8 +854,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<nint>.Create(new nint[] { 10, 20, 30 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Max().ApplyToGroups(column, groups);
@@ -871,8 +871,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<char>.Create(new char[] { 'c', 'a', 'b' });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
@@ -888,8 +888,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<sbyte>.Create(new sbyte[] { -5, 3, 7 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
@@ -905,8 +905,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<ushort>.Create(new ushort[] { 10, 20, 30 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Max().ApplyToGroups(column, groups);
@@ -922,8 +922,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<uint>.Create(new uint[] { 10, 20, 30 });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
@@ -942,8 +942,8 @@ public class AggregationFunctionTests
             var column = NivaraColumn<DateTimeOffset>.Create(new[] { first, second, third });
             var groups = new[]
             {
-                (new GroupKey("A"), (IReadOnlyList<int>)new List<int> { 0, 1 }),
-                (new GroupKey("B"), (IReadOnlyList<int>)new List<int> { 2 })
+                (GroupKey.FromValues(new object[] { "A" }), (IReadOnlyList<int>)new List<int> { 0, 1 }),
+                (GroupKey.FromValues(new object[] { "B" }), (IReadOnlyList<int>)new List<int> { 2 })
             };
 
             var result = AggregationFunctions.Min().ApplyToGroups(column, groups);
