@@ -140,6 +140,31 @@ static class ColumnFilterHelper
 
     static IColumn reorderColumnTyped<T>(IColumn column, int[] indices)
     {
+        if (typeof(T).IsValueType && column is NivaraColumn<T> typed)
+        {
+            var reorderedValues = new T[indices.Length];
+            var nullMask = new bool[indices.Length];
+            bool hasNulls = typed.HasNulls;
+            bool anyNull = false;
+            for (int i = 0; i < indices.Length; i++)
+            {
+                int index = indices[i];
+                if (hasNulls && typed.IsNull(index))
+                {
+                    nullMask[i] = true;
+                    anyNull = true;
+                }
+                else
+                {
+                    reorderedValues[i] = typed[index];
+                }
+            }
+
+            if (anyNull)
+                return NivaraColumn<T>.CreateFromSpans(reorderedValues, nullMask);
+            return NivaraColumn<T>.CreateFromOwnedArray(reorderedValues);
+        }
+
         if (typeof(T).IsValueType)
         {
             var reorderedValues = new T[indices.Length];
@@ -245,6 +270,36 @@ static class ColumnFilterHelper
 
     static IColumn scatterPartsTyped<T>(IReadOnlyList<IColumn> parts, int[] positions)
     {
+        if (typeof(T).IsValueType && parts.All(p => p is NivaraColumn<T>))
+        {
+            var result = new T[positions.Length];
+            var nullMask = new bool[positions.Length];
+            bool anyNull = false;
+            int pos = 0;
+            foreach (NivaraColumn<T> part in parts)
+            {
+                bool hasNulls = part.HasNulls;
+                for (int i = 0; i < part.Length; i++)
+                {
+                    int target = positions[pos];
+                    if (hasNulls && part.IsNull(i))
+                    {
+                        nullMask[target] = true;
+                        anyNull = true;
+                    }
+                    else
+                    {
+                        result[target] = part[i];
+                    }
+                    pos++;
+                }
+            }
+
+            if (anyNull)
+                return NivaraColumn<T>.CreateFromSpans(result, nullMask);
+            return NivaraColumn<T>.CreateFromOwnedArray(result);
+        }
+
         if (typeof(T).IsValueType)
         {
             var result = new T[positions.Length];

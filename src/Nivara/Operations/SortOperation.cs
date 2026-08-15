@@ -377,9 +377,9 @@ internal sealed class MultiColumnComparer : IComparer<int>
 
     public int Compare(int x, int y)
     {
-        // Compare using each sort key in order
-        foreach (var sortKey in sortKeys)
+        for (int i = 0; i < sortKeys.Count; i++)
         {
+            var sortKey = sortKeys[i];
             var column = columns[sortKey.ColumnName];
             var result = compareValues(column, x, y, sortKey);
 
