@@ -589,6 +589,128 @@ public class FusedExpressionEvaluatorTests
         AssertColumn(result, new uint?[] { 7u, 7u, 7u });
     }
 
+    // ── #250: native-size and 128-bit integer promotions in fused expressions ──
+
+    [Test]
+    public void Evaluate_NIntColumnPlusIntScalar_ProducesNIntColumn()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<nint>.Create(new nint[] { 10, 15, 20 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + 5, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<nint>>(), "nint + int must stay nint");
+        AssertColumn(result, new nint?[] { 15, 20, 25 });
+    }
+
+    [Test]
+    public void Evaluate_NIntColumnPlusUIntScalar_PromotesToLong()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<nint>.Create(new nint[] { 10, 15, 20 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + 5u, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<long>>(), "nint + uint must promote to long");
+        AssertColumn(result, new long?[] { 15, 20, 25 });
+    }
+
+    [Test]
+    public void Evaluate_NIntColumnPlusULongScalar_PromotesToDouble()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<nint>.Create(new nint[] { 10, 15, 20 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + (ulong)5, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<double>>(), "nint + ulong is a C# error pair -> safe superset double");
+        AssertColumn(result, new double?[] { 15, 20, 25 });
+    }
+
+    [Test]
+    public void Evaluate_NIntColumnPlusNIntScalar_ProducesNIntColumn()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<nint>.Create(new nint[] { 10, 15, 20 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + ColumnExpressions.Lit((nint)5), input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<nint>>());
+        AssertColumn(result, new nint?[] { 15, 20, 25 });
+    }
+
+    [Test]
+    public void Evaluate_Int128ColumnPlusIntScalar_ProducesInt128Column()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<Int128>.Create(new Int128[] { 10, 15, 20 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + 5, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<Int128>>(), "Int128 + int must stay Int128");
+        AssertColumn(result, new Int128?[] { 15, 20, 25 });
+    }
+
+    [Test]
+    public void Evaluate_UInt128ColumnPlusIntScalar_PromotesToDouble()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<UInt128>.Create(new UInt128[] { 10, 15, 20 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + 5, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<double>>(), "UInt128 + int is a C# error pair -> safe superset double");
+        AssertColumn(result, new double?[] { 15, 20, 25 });
+    }
+
+    [Test]
+    public void Evaluate_HalfColumnPlusIntScalar_PromotesToDouble()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<Half>.Create(new Half[] { (Half)1, (Half)2, (Half)3 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + 1, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<double>>(), "Half + int is a C# error pair -> safe superset double");
+        AssertColumn(result, new double?[] { 2, 3, 4 });
+    }
+
+    [Test]
+    public void Evaluate_NIntColumnWithIntScalar_NullBearing_RunsThroughFusedPath()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn.CreateFromNullable(new nint?[] { 10, null, 20 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + 5, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<nint>>());
+        AssertColumn(result, new nint?[] { 15, null, 25 });
+    }
+
     [Test]
     public void Evaluate_LitDateOnlyConstant_ProducesTypedColumn()
     {

@@ -65,6 +65,8 @@ sealed class FusedExpressionEvaluator
 
     static readonly ConcurrentDictionary<Type, MethodInfo> allocateArrayKernelCache = new();
 
+    static readonly ConcurrentDictionary<(Type Source, Type Target), MethodInfo> numericConvertKernelCache = new();
+
     /// <summary>
     /// Evaluates a column expression and returns the result column through the fused path.
     /// </summary>
@@ -826,7 +828,37 @@ sealed class FusedExpressionEvaluator
     }
 
     static Expression ConvertTo(Expression expression, Type target)
-        => expression.Type == target ? expression : Expression.Convert(expression, target);
+    {
+        if (expression.Type == target)
+            return expression;
+
+        try
+        {
+            return Expression.Convert(expression, target);
+        }
+        catch (InvalidOperationException)
+        {
+            // Extended numeric domain: nint/nuint/Int128/UInt128/Half/decimal have no built-in CLR
+            // conversion to the promoted compute type (e.g. nint -> double, UInt128 -> double). Fall
+            // back to a typed INumber<T>.CreateChecked dispatch matching C# promotion (issue #250).
+            var source = expression.Type;
+            var convert = numericConvertKernelCache.GetOrAdd((source, target), static pair =>
+                typeof(FusedExpressionEvaluator).GetMethod(nameof(ConvertNumeric), BindingFlags.Static | BindingFlags.NonPublic)!
+                    .MakeGenericMethod(pair.Source, pair.Target));
+            return Expression.Call(convert, expression);
+        }
+    }
+
+    /// <summary>
+    /// Converts a numeric value between the extended numeric domain via
+    /// <c>TResult.CreateChecked</c>, mirroring the runtime type-switch in
+    /// <see cref="FusedKernel.CoerceLiteral{T}"/>. Only emitted by the compiled target when
+    /// <see cref="Expression.Convert"/> has no built-in conversion for the pair.
+    /// </summary>
+    static TResult ConvertNumeric<TSource, TResult>(TSource value)
+        where TSource : struct, INumber<TSource>
+        where TResult : struct, INumber<TResult>
+        => TResult.CreateChecked(value);
 
     static Expression ApplyArithmetic(BinaryOperator op, Expression left, Expression right)
     {

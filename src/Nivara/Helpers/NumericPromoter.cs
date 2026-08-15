@@ -4,6 +4,9 @@ namespace Nivara.Helpers;
 /// Computes the common promoted type for mixed numeric operand pairs using
 /// C# binary numeric promotion rules (C# spec §12.4.7.3). The promoted type is
 /// the result type of arithmetic on the pair and the type the operator runs in.
+/// Pairs that are binding-time errors in C# (e.g. <c>long + ulong</c>,
+/// <c>nint + ulong</c>, <c>UInt128 + int</c>, <c>Half + int</c>) resolve to the
+/// safe superset <c>double</c>, so magnitude is never lost silently.
 /// </summary>
 internal static class NumericPromoter
 {
@@ -36,12 +39,62 @@ internal static class NumericPromoter
 
         // C# rule 1: decimal wins over integrals. float/double has no implicit
         // conversion to decimal (a binding-time error in C#); resolve to double.
+        // Int128/UInt128 likewise cannot convert to decimal, and decimal cannot hold
+        // their full range, so those pairs also resolve to double (safe superset).
         if (left == typeof(decimal) || right == typeof(decimal))
         {
             var other = left == typeof(decimal) ? right : left;
             return other == typeof(float) || other == typeof(double)
+                || other == typeof(Int128) || other == typeof(UInt128)
                 ? typeof(double)
                 : typeof(decimal);
+        }
+
+        // Native-size (nint/nuint) and 128-bit (Int128/UInt128) integers follow C#
+        // implicit-conversion search (§10.4.7.3): the widest target both operands can
+        // convert to, or double (safe superset) when no common implicit target exists.
+        if (IsNativeOrWide(left) || IsNativeOrWide(right))
+        {
+            if (left == typeof(Int128) || right == typeof(Int128))
+            {
+                var other = left == typeof(Int128) ? right : left;
+                return other == typeof(UInt128) || other == typeof(float) || other == typeof(double)
+                    ? typeof(double)
+                    : typeof(Int128);
+            }
+
+            if (left == typeof(UInt128) || right == typeof(UInt128))
+            {
+                var other = left == typeof(UInt128) ? right : left;
+                return other == typeof(Int128)
+                    || other == typeof(float) || other == typeof(double)
+                    || other == typeof(sbyte) || other == typeof(short) || other == typeof(int)
+                    || other == typeof(long) || other == typeof(nint)
+                    ? typeof(double)
+                    : typeof(UInt128);
+            }
+
+            if (left == typeof(nint) || right == typeof(nint))
+            {
+                var other = left == typeof(nint) ? right : left;
+                if (other == typeof(nuint) || other == typeof(ulong))
+                    return typeof(double);
+                if (other == typeof(uint) || other == typeof(long))
+                    return typeof(long);
+                return other == typeof(byte) || other == typeof(sbyte) || other == typeof(ushort)
+                    || other == typeof(short) || other == typeof(char) || other == typeof(int)
+                    ? typeof(nint)
+                    : other;
+            }
+
+            var otherOperand = left == typeof(nuint) ? right : left;
+            if (otherOperand == typeof(nint) || otherOperand == typeof(sbyte) || otherOperand == typeof(short)
+                || otherOperand == typeof(int) || otherOperand == typeof(long))
+                return typeof(double);
+            if (otherOperand == typeof(byte) || otherOperand == typeof(ushort) || otherOperand == typeof(char)
+                || otherOperand == typeof(uint))
+                return typeof(nuint);
+            return otherOperand == typeof(ulong) ? typeof(ulong) : otherOperand;
         }
 
         // C# rule 2/3: floating types dominate.
@@ -88,5 +141,16 @@ internal static class NumericPromoter
             || type == typeof(short)
             || type == typeof(ushort)
             || type == typeof(char);
+    }
+
+    static bool IsNativeOrWide(Type type)
+    {
+        // nint/nuint (native-size integers) and Int128/UInt128 participate in binary
+        // numeric promotion through implicit-conversion search rather than the fixed
+        // integral ladder, so they get their own arms (issue #250).
+        return type == typeof(nint)
+            || type == typeof(nuint)
+            || type == typeof(Int128)
+            || type == typeof(UInt128);
     }
 }
