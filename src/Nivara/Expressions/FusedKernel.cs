@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Numerics;
 
 namespace Nivara.Expressions;
@@ -280,13 +279,40 @@ internal static class FusedKernel
         return new FusedExpressionPlan(typeof(T), true, hasNulls, expression.Name, leaves);
     }
 
+    /// <summary>
+    /// Coerces a boxed literal to the kernel's compute type <typeparamref name="T"/> via a typed
+    /// <c>CreateChecked</c> dispatch per literal runtime type. <see cref="Convert.ChangeType"/>
+    /// cannot convert across the extended numeric domain (int→Half/nint/Int128/UInt128,
+    /// decimal→Half/Int128, Half→double all throw); each boxed type converts through its own
+    /// checked conversion instead, matching C# binary numeric promotion semantics (issue #250).
+    /// </summary>
     internal static T CoerceLiteral<T>(object? value)
         where T : struct, INumber<T>
     {
         if (value == null)
             throw new NotSupportedException("Null literals cannot run through the generic span kernel");
 
-        var converted = Convert.ChangeType(value, typeof(T), CultureInfo.InvariantCulture);
-        return T.CreateChecked((T)converted);
+        return value switch
+        {
+            byte v => T.CreateChecked(v),
+            sbyte v => T.CreateChecked(v),
+            short v => T.CreateChecked(v),
+            ushort v => T.CreateChecked(v),
+            char v => T.CreateChecked(v),
+            int v => T.CreateChecked(v),
+            uint v => T.CreateChecked(v),
+            long v => T.CreateChecked(v),
+            ulong v => T.CreateChecked(v),
+            nint v => T.CreateChecked(v),
+            nuint v => T.CreateChecked(v),
+            Int128 v => T.CreateChecked(v),
+            UInt128 v => T.CreateChecked(v),
+            Half v => T.CreateChecked(v),
+            float v => T.CreateChecked(v),
+            double v => T.CreateChecked(v),
+            decimal v => T.CreateChecked(v),
+            _ => throw new NotSupportedException(
+                $"Literal of type {value.GetType().Name} cannot be coerced to {typeof(T).Name}")
+        };
     }
 }

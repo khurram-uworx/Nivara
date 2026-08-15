@@ -65,6 +65,8 @@ sealed class FusedExpressionEvaluator
 
     static readonly ConcurrentDictionary<Type, MethodInfo> allocateArrayKernelCache = new();
 
+    static readonly ConcurrentDictionary<(Type Source, Type Target), MethodInfo> numericConvertKernelCache = new();
+
     /// <summary>
     /// Evaluates a column expression and returns the result column through the fused path.
     /// </summary>
@@ -235,10 +237,20 @@ sealed class FusedExpressionEvaluator
         }
 
         var plan = ExpressionTypeInferer.TryInfer(expression, input);
-        if (plan == null || plan.Columns.Count == 0)
+        if (plan == null)
         {
             throw new NotSupportedException(
                 $"Expression '{expression.Name}' cannot run through the fused evaluator: unsupported operand combination");
+        }
+
+        // Literal-only expressions have no leaf columns to size or route against (e.g. `Lit(2) * 2`).
+        // They constant-fold through the compiled target at the input length instead of being rejected
+        // as unsupported (issue #249); the span and TensorPrimitives backends both require a column leaf.
+        if (plan.Columns.Count == 0)
+        {
+            var constantLength = input.Values.FirstOrDefault()?.Length ?? 1;
+            var constantPlan = KernelLowerer.Lower(expression, plan);
+            return EvaluateCompiled(expression, plan, constantPlan, constantLength, chunkSize);
         }
 
         ValidateLeafLengths(plan);
@@ -357,7 +369,7 @@ sealed class FusedExpressionEvaluator
             case WindowExpression window:
                 {
                     var result = MaterializeWindow(window, input);
-                    var name = SyntheticWindowPrefix + synthetic.Count;
+                    var name = NextSyntheticName(input, synthetic);
                     synthetic[name] = result;
                     return new ColumnReference(name, result.ElementType);
                 }
@@ -438,6 +450,36 @@ sealed class FusedExpressionEvaluator
     }
 
     static string SyntheticWindowPrefix => "__window_";
+
+    /// <summary>
+    /// Picks the first <c>__window_N</c> name that neither an input column nor an already-generated
+    /// synthetic column uses (OrdinalIgnoreCase). Without this, a user column literally named
+    /// <c>__window_0</c> would be silently overwritten when the synthetic columns are merged into the
+    /// input dictionary, corrupting every other reference to that user column (issue #255).
+    /// </summary>
+    static string NextSyntheticName(IReadOnlyDictionary<string, IColumn> input, IReadOnlyDictionary<string, IColumn> synthetic)
+    {
+        var index = 0;
+        string name;
+        do
+        {
+            name = SyntheticWindowPrefix + index++;
+        }
+        while (SyntheticNameInUse(name, input, synthetic));
+        return name;
+    }
+
+    static bool SyntheticNameInUse(string name, IReadOnlyDictionary<string, IColumn> input, IReadOnlyDictionary<string, IColumn> synthetic)
+    {
+        if (synthetic.ContainsKey(name))
+            return true;
+        foreach (var key in input.Keys)
+        {
+            if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// Evaluates through the generic span kernel: primary path for null-bearing uniform generic-math
@@ -816,7 +858,37 @@ sealed class FusedExpressionEvaluator
     }
 
     static Expression ConvertTo(Expression expression, Type target)
-        => expression.Type == target ? expression : Expression.Convert(expression, target);
+    {
+        if (expression.Type == target)
+            return expression;
+
+        try
+        {
+            return Expression.Convert(expression, target);
+        }
+        catch (InvalidOperationException)
+        {
+            // Extended numeric domain: nint/nuint/Int128/UInt128/Half/decimal have no built-in CLR
+            // conversion to the promoted compute type (e.g. nint -> double, UInt128 -> double). Fall
+            // back to a typed INumber<T>.CreateChecked dispatch matching C# promotion (issue #250).
+            var source = expression.Type;
+            var convert = numericConvertKernelCache.GetOrAdd((source, target), static pair =>
+                typeof(FusedExpressionEvaluator).GetMethod(nameof(ConvertNumeric), BindingFlags.Static | BindingFlags.NonPublic)!
+                    .MakeGenericMethod(pair.Source, pair.Target));
+            return Expression.Call(convert, expression);
+        }
+    }
+
+    /// <summary>
+    /// Converts a numeric value between the extended numeric domain via
+    /// <c>TResult.CreateChecked</c>, mirroring the runtime type-switch in
+    /// <see cref="FusedKernel.CoerceLiteral{T}"/>. Only emitted by the compiled target when
+    /// <see cref="Expression.Convert"/> has no built-in conversion for the pair.
+    /// </summary>
+    static TResult ConvertNumeric<TSource, TResult>(TSource value)
+        where TSource : struct, INumber<TSource>
+        where TResult : struct, INumber<TResult>
+        => TResult.CreateChecked(value);
 
     static Expression ApplyArithmetic(BinaryOperator op, Expression left, Expression right)
     {

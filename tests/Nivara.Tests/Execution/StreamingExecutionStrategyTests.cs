@@ -1,4 +1,3 @@
-using Nivara;
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Expressions;

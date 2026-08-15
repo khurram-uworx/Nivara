@@ -34,8 +34,11 @@ public enum RankKind
 /// <para>
 /// Partitions rows by the partition keys (reusing the hash-based grouping from
 /// <see cref="GroupByOperation"/>), then stable-sorts each partition by the order keys
-/// using <see cref="MultiColumnComparer"/>. Rows with any null order key produce a null
-/// output and are excluded from numbering and from the percent_rank denominator.
+/// using <see cref="MultiColumnComparer"/>. For rank/dense_rank/percent_rank, rows with any
+/// null order key produce a null output and are excluded from numbering and from the
+/// percent_rank denominator. Row_number instead numbers every partition row in the sorted
+/// order (null-key rows placed per the order keys' <see cref="NullOrdering"/>; ties preserve
+/// stable partition order), matching SQL semantics (issue #254).
 /// </para>
 /// </summary>
 /// <remarks>Added as part of issue #156 rank family window functions delivery.</remarks>
@@ -77,6 +80,18 @@ internal static class RankKernel
 
         foreach (var partition in partitions)
         {
+            if (kind == RankKind.RowNumber)
+            {
+                // RowNumber numbers every partition row, null-key rows included, ordered per the
+                // order keys' NullOrdering (ties preserve stable partition order) (issue #254).
+                var ordered = comparer == null
+                    ? partition.ToArray()
+                    : partition.OrderBy(i => i, comparer).ToArray();
+                for (int pos = 0; pos < ordered.Length; pos++)
+                    rankResult[ordered[pos]] = pos + 1;
+                continue;
+            }
+
             var valid = new List<int>(partition.Length);
             for (int i = 0; i < partition.Length; i++)
             {
@@ -109,9 +124,6 @@ internal static class RankKernel
                 var row = sorted[pos];
                 switch (kind)
                 {
-                    case RankKind.RowNumber:
-                        rankResult[row] = pos + 1;
-                        break;
                     case RankKind.Rank:
                         rankResult[row] = gapRank;
                         break;

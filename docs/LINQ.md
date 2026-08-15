@@ -253,7 +253,10 @@ A window function with a spec runs in four phases:
 4. **Scatter** — results are mapped back to original row positions.
 
 Order-key nulls participate as ordinary rows — with `NULLS LAST` the null-key rows sort to the
-end of their partition and are not dropped from the result.
+end of their partition and are not dropped from the result. The rank family runs through
+`RankKernel` instead and keeps its own null-order-key semantics (see below): `Rank` /
+`DenseRank` / `PercentRank` null out rows with null order keys, while `RowNumber` numbers every
+row with null-key rows placed per `NullOrdering`.
 
 ### Eager `NivaraFrame` surface
 
@@ -297,9 +300,12 @@ partition. Rows that would cross a partition boundary (or the frame edge) become
 | `DenseRank(result, spec)` | `long` |
 | `PercentRank(result, spec)` | `double` |
 
-The rank family reuses the existing `RankKernel`, so a null order-key produces a null rank
-result (unchanged semantics). `RowNumber` accepts a spec without order keys (partition order
-within a partition is insertion order); the other rank functions require order keys.
+The rank family reuses the existing `RankKernel`. For `Rank` / `DenseRank` / `PercentRank`, a null
+order-key produces a null rank result (unchanged semantics); `RowNumber` instead numbers every row,
+placing null-key rows per the order keys' `NullOrdering` (default `NULLS LAST`, ties preserve stable
+partition order) (issue #254). `RowNumber` accepts a spec without
+order keys (partition order within a partition is insertion order); the other rank functions require
+order keys.
 
 ### Lazy `QueryFrame` surface
 
