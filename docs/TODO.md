@@ -124,12 +124,15 @@ Tests in `tests/Nivara.Tests/Tensors/WindowFunctionsTests.cs`:
 ## Commits
 
 1. `docs: plan bugfix batch #245-#248 in TODO.md`
-2. `fix: include literal runtime type in fused plan signatures (#246)`
-3. `fix: mask before value pass in compiled fused kernel (#247)`
-4. `fix: run window-bearing operations whole-column in streaming/parallel (#245)`
+2. `fix: include literal runtime type in fused plan signatures (#246)` ✓ `a3cba89`
+3. `fix: mask before value pass in compiled fused kernel (#247)` ✓ `d1ff242`
+4. `fix: run window-bearing operations whole-column in streaming/parallel (#245)` ✓ `8367bce`
 5. `fix: widen int-family window accumulators to avoid silent wrap (#248)`
 6. `docs: changelog for #245-#248`
 
 ## GitHub issues log
 
-- [ ] (log created; no new issues discovered yet — update as work executes)
+- [x] #246 — no new issue; fixed FormatValue literal-type collision.
+- [x] #247 — no new issue; fixed compiled-path masked evaluation.
+- [x] #245 — no new issue; op-level window inspector added (WindowExpressionInspector).
+- [ ] #248 — in progress.
