@@ -105,6 +105,32 @@ static class ColumnFilterHelper
 
     static IColumn createFilteredColumnTyped<T>(IColumn column, List<int> indices)
     {
+        if (typeof(T).IsValueType && column is NivaraColumn<T> typed)
+        {
+            var filteredValues = new T[indices.Count];
+            var nullMask = new bool[indices.Count];
+            bool hasNulls = typed.HasNulls;
+            bool anyNull = false;
+
+            for (int i = 0; i < indices.Count; i++)
+            {
+                int index = indices[i];
+                if (hasNulls && typed.IsNull(index))
+                {
+                    nullMask[i] = true;
+                    anyNull = true;
+                }
+                else
+                {
+                    filteredValues[i] = typed[index];
+                }
+            }
+
+            if (!anyNull)
+                return NivaraColumn<T>.CreateFromOwnedArray(filteredValues);
+            return NivaraColumn<T>.CreateFromSpans(filteredValues, nullMask);
+        }
+
         if (typeof(T).IsValueType)
         {
             var filteredValues = new T[indices.Count];
@@ -208,7 +234,34 @@ static class ColumnFilterHelper
 
     static IColumn concatenateColumnsTyped<T>(List<IColumn> columns)
     {
+        if (columns.Count == 1)
+            return columns[0];
+
         var totalLength = columns.Sum(c => c.Length);
+
+        if (typeof(T).IsValueType && columns.All(c => c is NivaraColumn<T>))
+        {
+            var concatenatedValues = new T[totalLength];
+            var nullMask = new bool[totalLength];
+
+            int currentIndex = 0;
+            foreach (var column in columns)
+            {
+                var typedColumn = (NivaraColumn<T>)column;
+                for (int i = 0; i < column.Length; i++)
+                {
+                    if (typedColumn.IsNull(i))
+                        nullMask[currentIndex] = true;
+                    else
+                        concatenatedValues[currentIndex] = typedColumn[i];
+                    currentIndex++;
+                }
+            }
+
+            if (!nullMask.Any())
+                return NivaraColumn<T>.CreateFromOwnedArray(concatenatedValues);
+            return NivaraColumn<T>.CreateFromSpans(concatenatedValues, nullMask);
+        }
 
         if (typeof(T).IsValueType)
         {
