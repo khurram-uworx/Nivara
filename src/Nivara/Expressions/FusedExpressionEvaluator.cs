@@ -53,7 +53,7 @@ sealed class FusedExpressionEvaluator
     /// </summary>
     internal int TensorPrimitivesPathEvaluationCount => tensorPrimitivesPathEvaluationCount;
 
-    delegate void CompiledFusedInvoke(object[] leafArrays, Array dest, int start, int count, int destStart);
+    delegate void CompiledFusedInvoke(object[] leafArrays, Array dest, int start, int count, int destStart, bool[]? mask);
 
     static readonly ConcurrentDictionary<string, CompiledFusedInvoke> compiledKernelCache = new();
 
@@ -284,27 +284,25 @@ sealed class FusedExpressionEvaluator
         }
 
         var resultArray = AllocateResultArray(plan.ResultType, length);
+
+        // OR the leaf null masks up front (null-propagation rule) and hand them to the delegate:
+        // the compiled loop short-circuits masked positions to default(T) instead of computing a
+        // value there. The span kernel already does this; without the mask the compiled path would
+        // evaluate every position (e.g. masked decimalCol / intCol with a null int → DivideByZero)
+        // and write real values behind the mask (issue #247).
+        var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
+
         if (chunkSize == null || chunkSize.Value >= length)
         {
-            invoke(leafArrays, resultArray, 0, length, 0);
+            invoke(leafArrays, resultArray, 0, length, 0, mask);
         }
         else
         {
             for (var start = 0; start < length; start += chunkSize.Value)
             {
                 var count = Math.Min(chunkSize.Value, length - start);
-                invoke(leafArrays, resultArray, start, count, start);
+                invoke(leafArrays, resultArray, start, count, start, mask);
             }
-        }
-
-        var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
-
-        if (mask != null && plan.ResultType == typeof(bool))
-        {
-            var boolResult = (bool[])resultArray;
-            for (int i = 0; i < length; i++)
-                if (mask[i])
-                    boolResult[i] = false;
         }
 
         fusedPathEvaluationCount++;
@@ -691,22 +689,24 @@ sealed class FusedExpressionEvaluator
         var startParam = Expression.Parameter(typeof(int), "start");
         var countParam = Expression.Parameter(typeof(int), "count");
         var destStartParam = Expression.Parameter(typeof(int), "destStart");
+        var maskParam = Expression.Parameter(typeof(bool[]), "mask");
         var indexVar = Expression.Parameter(typeof(int), "i");
 
         var value = BuildCompiledNode(plan, plan.RootNode, leafParams, indexVar, startParam);
-        var loopBody = BuildOffsetForLoop(indexVar, value, destParam, destStartParam, countParam);
+        var loopBody = BuildOffsetForLoop(indexVar, value, destParam, destStartParam, countParam, maskParam, plan.ResultType);
 
-        var paramTypes = new Type[plan.Columns.Count + 4];
+        var paramTypes = new Type[plan.Columns.Count + 5];
         for (int i = 0; i < plan.Columns.Count; i++)
             paramTypes[i] = leafParams[i].Type;
         paramTypes[plan.Columns.Count] = destParam.Type;
         paramTypes[plan.Columns.Count + 1] = startParam.Type;
         paramTypes[plan.Columns.Count + 2] = countParam.Type;
         paramTypes[plan.Columns.Count + 3] = destStartParam.Type;
+        paramTypes[plan.Columns.Count + 4] = maskParam.Type;
 
         var actionType = Expression.GetActionType(paramTypes);
         var body = Expression.Block(new[] { indexVar }, loopBody);
-        var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam).Append(startParam).Append(countParam).Append(destStartParam));
+        var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam).Append(startParam).Append(countParam).Append(destStartParam).Append(maskParam));
         var typedAction = lambda.Compile();
 
         var argsParam = Expression.Parameter(typeof(object[]), "args");
@@ -714,18 +714,20 @@ sealed class FusedExpressionEvaluator
         var startObjectParam = Expression.Parameter(typeof(int), "start");
         var countObjectParam = Expression.Parameter(typeof(int), "count");
         var destStartObjectParam = Expression.Parameter(typeof(int), "destStart");
+        var maskObjectParam = Expression.Parameter(typeof(bool[]), "mask");
 
-        var callArgs = new Expression[leafParams.Length + 4];
+        var callArgs = new Expression[leafParams.Length + 5];
         for (int i = 0; i < leafParams.Length; i++)
             callArgs[i] = Expression.Convert(Expression.ArrayIndex(argsParam, Expression.Constant(i)), leafParams[i].Type);
         callArgs[leafParams.Length] = Expression.Convert(destObjectParam, destParam.Type);
         callArgs[leafParams.Length + 1] = startObjectParam;
         callArgs[leafParams.Length + 2] = countObjectParam;
         callArgs[leafParams.Length + 3] = destStartObjectParam;
+        callArgs[leafParams.Length + 4] = maskObjectParam;
 
         var wrapperBody = Expression.Invoke(Expression.Constant(typedAction), callArgs);
 
-        return Expression.Lambda<CompiledFusedInvoke>(wrapperBody, argsParam, destObjectParam, startObjectParam, countObjectParam, destStartObjectParam).Compile();
+        return Expression.Lambda<CompiledFusedInvoke>(wrapperBody, argsParam, destObjectParam, startObjectParam, countObjectParam, destStartObjectParam, maskObjectParam).Compile();
     }
 
     /// <summary>
@@ -874,18 +876,32 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Builds a <c>for (i = 0; i &lt; count; i++) dest[destStart + i] = value;</c> loop writing into a
-    /// caller-provided result array at an offset, with leaf reads at <c>[start + i]</c>.
+    /// Builds a <c>for (i = 0; i &lt; count; i++) dest[destStart + i] = ...;</c> loop writing into a
+    /// caller-provided result array at an offset, with leaf reads at <c>[start + i]</c>. When
+    /// <paramref name="mask"/> is provided, positions whose mask bit is set are short-circuited to
+    /// <c>default(T)</c> instead of computing a value there (the span kernel's masked-position
+    /// semantics; the OR'd mask itself was computed before the value pass).
     /// </summary>
-    static Expression BuildOffsetForLoop(ParameterExpression index, Expression value, ParameterExpression dest, ParameterExpression destStart, ParameterExpression count)
+    static Expression BuildOffsetForLoop(ParameterExpression index, Expression value, ParameterExpression dest, ParameterExpression destStart, ParameterExpression count, ParameterExpression? mask, Type elementType)
     {
         var breakLabel = Expression.Label();
+        var destPosition = Expression.ArrayAccess(dest, Expression.Add(destStart, index));
+        var write = Expression.Assign(destPosition, value);
+
+        Expression loopStep = write;
+        if (mask != null)
+        {
+            var masked = Expression.Assign(destPosition, Expression.Default(elementType));
+            var isMasked = Expression.AndAlso(
+                Expression.NotEqual(mask, Expression.Constant(null, mask.Type)),
+                Expression.ArrayAccess(mask, Expression.Add(destStart, index)));
+            loopStep = Expression.Condition(isMasked, masked, write);
+        }
+
         return Expression.Loop(
             Expression.IfThenElse(
                 Expression.LessThan(index, count),
-                Expression.Block(
-                    Expression.Assign(Expression.ArrayAccess(dest, Expression.Add(destStart, index)), value),
-                    Expression.PostIncrementAssign(index)),
+                Expression.Block(loopStep, Expression.PostIncrementAssign(index)),
                 Expression.Break(breakLabel)),
             breakLabel);
     }

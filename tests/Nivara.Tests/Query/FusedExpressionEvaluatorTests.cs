@@ -653,4 +653,68 @@ public class FusedExpressionEvaluatorTests
         AssertColumn(decimalResult, new decimal?[] { 2.1m, 3.1m });
         AssertColumn(doubleResult, new double?[] { 2.1, 3.1 });
     }
+
+    // ── #247: compiled path must short-circuit masked positions ──
+
+    [Test]
+    public void Evaluate_CompiledMaskedDivide_DoesNotThrow_AndMasksToDefault()
+    {
+        // decimal is not generic math, so this plan routes to the compiled delegate. The right
+        // leaf carries a null, whose backing storage is default(int) = 0 — dividing by it must
+        // not throw, and masked positions must hold default(decimal), not a computed value.
+        var left = NivaraColumn<decimal>.Create(new decimal[] { 10m, 20m, 30m, 40m });
+        var right = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, null });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") / ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "decimal plans must run through the compiled target");
+        AssertColumn(result, new decimal?[] { 5m, null, 7.5m, null });
+        Assert.That(((NivaraColumn<decimal>)result)[1], Is.EqualTo(0m), "masked position must hold default(decimal)");
+        Assert.That(((NivaraColumn<decimal>)result)[3], Is.EqualTo(0m), "masked position must hold default(decimal)");
+    }
+
+    [Test]
+    public void EvaluateChunked_CompiledMaskedDivide_MatchesWholeColumn()
+    {
+        var left = NivaraColumn<decimal>.Create(new decimal[] { 10m, 20m, 30m, 40m, 50m, 60m, 70m, 80m });
+        var right = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, null, 5, null, 7, 8 });
+        var input = new Dictionary<string, IColumn> { ["A"] = left, ["B"] = right };
+        var expression = ColumnExpressions.Col("A") / ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        AssertChunkedMatchesWhole(fused, expression, input, new[] { 2, 3, 5 });
+
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(4), "whole + 3 chunk sizes must all route to the compiled target");
+    }
+
+    [Test]
+    public void Evaluate_CompiledAndSpanBackends_MaskedDivergence_IsClosed()
+    {
+        // The span kernel (uniform generic math, null-bearing) already short-circuits masked
+        // positions to default(T). The compiled path (decimal, not generic math) must now agree
+        // on both the null mask and the raw masked backing values.
+        var spanLeft = NivaraColumn.CreateFromNullable(new double?[] { 10.0, 20.0, 30.0, 40.0 });
+        var spanRight = NivaraColumn.CreateFromNullable(new double?[] { 2.0, null, 4.0, null });
+        var spanInput = new Dictionary<string, IColumn> { ["A"] = spanLeft, ["B"] = spanRight };
+        var spanFused = new FusedExpressionEvaluator();
+        var spanResult = spanFused.Evaluate(ColumnExpressions.Col("A") / ColumnExpressions.Col("B"), spanInput);
+        Assert.That(spanFused.SpanKernelPathEvaluationCount, Is.EqualTo(1), "double plans with nulls must route to the span kernel");
+
+        var compiledLeft = NivaraColumn<decimal>.Create(new decimal[] { 10m, 20m, 30m, 40m });
+        var compiledRight = NivaraColumn.CreateFromNullable(new int?[] { 2, null, 4, null });
+        var compiledInput = new Dictionary<string, IColumn> { ["A"] = compiledLeft, ["B"] = compiledRight };
+        var compiledFused = new FusedExpressionEvaluator();
+        var compiledResult = compiledFused.Evaluate(ColumnExpressions.Col("A") / ColumnExpressions.Col("B"), compiledInput);
+        Assert.That(compiledFused.CompiledPathEvaluationCount, Is.EqualTo(1), "decimal plans must route to the compiled target");
+
+        for (int i = 0; i < 4; i++)
+        {
+            Assert.That(compiledResult.IsNull(i), Is.EqualTo(spanResult.IsNull(i)), $"null mask at {i}");
+            if (!spanResult.IsNull(i))
+                Assert.That(compiledResult.GetValue(i), Is.EqualTo(spanResult.GetValue(i)), $"value at {i}");
+        }
+    }
 }
