@@ -369,7 +369,7 @@ sealed class FusedExpressionEvaluator
             case WindowExpression window:
                 {
                     var result = MaterializeWindow(window, input);
-                    var name = SyntheticWindowPrefix + synthetic.Count;
+                    var name = NextSyntheticName(input, synthetic);
                     synthetic[name] = result;
                     return new ColumnReference(name, result.ElementType);
                 }
@@ -450,6 +450,36 @@ sealed class FusedExpressionEvaluator
     }
 
     static string SyntheticWindowPrefix => "__window_";
+
+    /// <summary>
+    /// Picks the first <c>__window_N</c> name that neither an input column nor an already-generated
+    /// synthetic column uses (OrdinalIgnoreCase). Without this, a user column literally named
+    /// <c>__window_0</c> would be silently overwritten when the synthetic columns are merged into the
+    /// input dictionary, corrupting every other reference to that user column (issue #255).
+    /// </summary>
+    static string NextSyntheticName(IReadOnlyDictionary<string, IColumn> input, IReadOnlyDictionary<string, IColumn> synthetic)
+    {
+        var index = 0;
+        string name;
+        do
+        {
+            name = SyntheticWindowPrefix + index++;
+        }
+        while (SyntheticNameInUse(name, input, synthetic));
+        return name;
+    }
+
+    static bool SyntheticNameInUse(string name, IReadOnlyDictionary<string, IColumn> input, IReadOnlyDictionary<string, IColumn> synthetic)
+    {
+        if (synthetic.ContainsKey(name))
+            return true;
+        foreach (var key in input.Keys)
+        {
+            if (string.Equals(key, name, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
 
     /// <summary>
     /// Evaluates through the generic span kernel: primary path for null-bearing uniform generic-math

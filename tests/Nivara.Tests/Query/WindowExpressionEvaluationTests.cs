@@ -157,4 +157,51 @@ public class WindowExpressionEvaluationTests
         Assert.That(result.ElementType, Is.EqualTo(typeof(bool)));
         AssertColumn(result, new bool?[] { null, false, true, true });
     }
+
+    // ── #255: synthetic window names must not collide with user columns ──
+
+    [Test]
+    public void Evaluate_WindowNameCollidesWithUserColumn_DoesNotShadowUserColumn()
+    {
+        var input = Input(
+            ("A", NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })),
+            ("__window_0", NivaraColumn<int>.Create(new[] { 100, 200, 300, 400 })));
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2) + ColumnExpressions.Col("__window_0"),
+            input);
+
+        AssertColumn(result, new int?[] { null, 203, 305, 407 });
+    }
+
+    [Test]
+    public void Evaluate_StandaloneWindow_WithCollidingUserColumn_UsesNextName()
+    {
+        var input = Input(
+            ("A", NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })),
+            ("__window_0", NivaraColumn<int>.Create(new[] { 100, 200, 300, 400 })));
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2), input);
+
+        AssertColumn(result, new int?[] { null, 3, 5, 7 });
+    }
+
+    [Test]
+    public void Evaluate_MultipleWindows_SkipAllCollidingSyntheticNames()
+    {
+        var input = Input(
+            ("A", NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })),
+            ("B", NivaraColumn<int>.Create(new[] { 10, 20, 30, 40 })),
+            ("__window_0", NivaraColumn<int>.Create(new[] { 1, 1, 1, 1 })),
+            ("__window_1", NivaraColumn<int>.Create(new[] { 2, 2, 2, 2 })));
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2) + ColumnExpressions.RollingSum(ColumnExpressions.Col("B"), 2),
+            input);
+
+        AssertColumn(result, new int?[] { null, 33, 55, 77 });
+    }
 }
