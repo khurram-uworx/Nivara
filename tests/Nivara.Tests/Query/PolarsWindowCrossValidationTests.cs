@@ -1,7 +1,7 @@
-using System.Text.Json;
 using Nivara.Operations;
 using Nivara.Tensors;
 using NUnit.Framework;
+using System.Text.Json;
 
 namespace Nivara.Tests.Query;
 

@@ -1,5 +1,5 @@
-using System.Numerics;
 using Nivara.Helpers;
+using System.Numerics;
 
 namespace Nivara.Expressions;
 
