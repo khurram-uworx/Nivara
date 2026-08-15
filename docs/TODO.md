@@ -89,14 +89,14 @@ Async seams exist on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` at `I
 
 ## Planned Commit List
 
-1. `feat: add ExecuteAsync to IQueryOperation with default fallback to sync Execute`
-2. `feat: override ExecuteAsync on streamable operations (Filter, Select, Slice, SelectRows)`
-3. `refactor: channel-based streaming pipeline with backpressure and flush-concatenate-resume`
-4. `feat: add CollectAsync/ToListAsync/AsStream public async entry points`
-5. `feat: make CsvLazySource and JsonLazySource chunk-capable with CanReadInChunks`
-6. `feat: add ParquetLazySource with row-group chunking`
-7. `feat: add IAsyncDisposable to QueryFrame and resource cleanup in streaming strategy`
-8. `test: add async streaming tests covering parity, cancellation, memory budget, and IO chunking`
+1. ✅ `feat: add ExecuteAsync to IQueryOperation with default fallback to sync Execute` (done — commit 64092b1)
+2. ✅ folded into commit 1 — ExecuteAsync on streamable operations (Filter, Select, Slice, SelectRows)
+3. ✅ `refactor: channel-based streaming pipeline with backpressure and flush-concatenate-resume` (done — commit 20aae2e)
+4. ✅ `feat: add CollectAsync, ToListAsync, AsStream public async entry points` (done — commit b43f9fe; AsStream is on QueryFrame, collect via NivaraFrameExtensions)
+5. ✅ `feat: make CsvLazySource and JsonLazySource chunk-capable with CanReadInChunks` (done — commit f6ee6ca)
+6. ✅ `feat: add ParquetLazySource with row-group chunking` (done — commit 4ca14bf; bundled Steps 6+7 since IAsyncDisposable changes were already in working tree)
+7. ✅ bundled into commit 4ca14bf — `feat: add IAsyncDisposable to QueryFrame and resource cleanup in streaming strategy`
+8. ✅ `test: add async streaming tests covering parity, cancellation, memory budget, and IO chunking` (done — commit 7a3b2f1)
 
 ## GitHub issues log
 
