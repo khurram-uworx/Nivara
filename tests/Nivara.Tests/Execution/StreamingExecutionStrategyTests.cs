@@ -1,6 +1,7 @@
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Expressions;
+using Nivara.Operations;
 using Nivara.Query;
 using NUnit.Framework;
 
@@ -431,6 +432,121 @@ public class StreamingExecutionStrategyTests
         Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
             "Window-bearing select must fall back to whole-column execution, not read chunks");
         assertIntColumnEqual(lazyResult, result, "RollingSum(A, 2)");
+    }
+
+    static readonly long[] chunkEquivalenceBudgets = { 1024 * 1024, 2L * 1024 * 1024, 4L * 1024 * 1024 };
+
+    [Test]
+    public void Property_StreamingVsLazy_FilterOnNullableColumn_ValuesAndMasksMatchAcrossChunkSizes()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var lazySource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 6000);
+        var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 100),
+        });
+
+        foreach (var memoryBudget in chunkEquivalenceBudgets)
+        {
+            var streamingSource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 6000);
+            var streamingPlan = new QueryPlan(streamingSource, new IQueryOperation[]
+            {
+                new FilterOperation(ColumnExpressions.Col<int>("A") > 100),
+            });
+            var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+            context.MemoryBudget = memoryBudget;
+
+            using var streamingResult = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+            using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+            Assert.That(streamingSource.ChunksRead.Count, Is.GreaterThan(1),
+                $"Budget {memoryBudget} should stream multiple chunks");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, streamingResult);
+        }
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_SelectOnNullableColumn_ValuesAndMasksMatchAcrossChunkSizes()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var lazySource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 6000);
+        var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[]
+        {
+            new SelectOperation(new[] { ColumnExpressions.Col<int>("B") }),
+        });
+
+        foreach (var memoryBudget in chunkEquivalenceBudgets)
+        {
+            var streamingSource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 6000);
+            var streamingPlan = new QueryPlan(streamingSource, new IQueryOperation[]
+            {
+                new SelectOperation(new[] { ColumnExpressions.Col<int>("B") }),
+            });
+            var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+            context.MemoryBudget = memoryBudget;
+
+            using var streamingResult = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+            using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+            Assert.That(streamingSource.ChunksRead.Count, Is.GreaterThan(1),
+                $"Budget {memoryBudget} should stream multiple chunks");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, streamingResult);
+        }
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_FilterOnNullableConditionColumn_ValuesAndMasksMatchAcrossChunkSizes()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var lazySource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 6000);
+        var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("B") > 1000),
+        });
+
+        foreach (var memoryBudget in chunkEquivalenceBudgets)
+        {
+            var streamingSource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 6000);
+            var streamingPlan = new QueryPlan(streamingSource, new IQueryOperation[]
+            {
+                new FilterOperation(ColumnExpressions.Col<int>("B") > 1000),
+            });
+            var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+            context.MemoryBudget = memoryBudget;
+
+            using var streamingResult = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+            using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+            Assert.That(streamingSource.ChunksRead.Count, Is.GreaterThan(1),
+                $"Budget {memoryBudget} should stream multiple chunks");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, streamingResult);
+        }
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_WindowSelectFallsBackToLazy_ValuesAndMasksMatchAcrossChunkSizes()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2),
+        });
+
+        foreach (var memoryBudget in chunkEquivalenceBudgets)
+        {
+            var source = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 2000);
+            var plan = new QueryPlan(source, new IQueryOperation[] { select });
+            var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+            context.MemoryBudget = memoryBudget;
+
+            using var result = strategy.Execute(plan, context);
+            using var lazyResult = lazyStrategy.Execute(plan, ExecutionTestHelpers.CreateTestContext());
+
+            Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
+                "Window-bearing select must fall back to whole-column execution, not read chunks");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+        }
     }
 
     [Test]

@@ -233,10 +233,10 @@ new `tests/Nivara.Tests/Query/RollingWindowCrossValidationTests.cs`
 3. `refactor: typed multi-column grouping in group-by/distinct (#251)` — ✓ `76be81f`
 4. `perf: pooled scratch + stable in-place sort in RankKernel (#251)` — ✓ `d81ecd3`
 5. `perf: index-map scatter in PartitionedWindowEngine (#251)` — ✓ `13763d9`
-6. `perf: kill per-comparison enumerator boxing + box-free reorder/scatter fast paths (#251)` — ⏳ next
-7. `test: rolling allocation budgets + perf scenarios (#251)` — ⏳ next (after #6)
-8. `test: streaming-vs-eager chunk equivalence with masks (#252)`
-9. `test: all-null, window>length, and shift boundary cases (#252)`
+6. `perf: kill per-comparison enumerator boxing + box-free reorder/scatter fast paths (#251)` — ✓ `8eb80c5`
+7. `test: rolling allocation budgets + perf scenarios (#251)` — ✓ `04898b6`
+8. `test: streaming-vs-eager chunk equivalence with masks (#252)` — ✓ done
+9. `test: all-null, window>length, and shift boundary cases (#252)` — ⏳ next
 10. `test: rolling mean/min/max property tests (#252)`
 11. `test: partitioned rolling property tests (#252)`
 12. `test: Polars rolling fixtures + cross-validation (#252)`
