@@ -129,4 +129,157 @@ public class PartitionedWindowEngineTests
         Assert.That(delegateCalled, Is.True);
         Assert.That(result[2], Is.EqualTo(5));
     }
+
+    // ── Property tests: each partition behaves as if computed independently (#252) ──
+
+    static (int[] Values, bool[] Mask) SumOracle(int[] group, int[] order, int[] value, bool[] mask, int windowSize, int minPeriods)
+    {
+        int n = group.Length;
+        var expected = new int[n];
+        var expectedMask = new bool[n];
+
+        foreach (var g in group.Distinct())
+        {
+            var rows = Enumerable.Range(0, n).Where(i => group[i] == g).ToArray();
+            var sorted = rows.OrderBy(i => order[i]).ToArray();
+
+            int validInWindow = 0;
+            long sum = 0;
+            for (int k = 0; k < sorted.Length; k++)
+            {
+                int i = sorted[k];
+                if (k - windowSize >= 0 && !mask[sorted[k - windowSize]])
+                {
+                    validInWindow--;
+                    sum -= value[sorted[k - windowSize]];
+                }
+
+                if (!mask[i])
+                {
+                    validInWindow++;
+                    sum += value[i];
+                }
+
+                expectedMask[i] = validInWindow < minPeriods;
+                expected[i] = validInWindow >= minPeriods ? (int)sum : 0;
+            }
+        }
+
+        return (expected, expectedMask);
+    }
+
+    [Test]
+    public void Compute_RandomMultiPartition_RollingSum_MatchesIndependentOracle()
+    {
+        var random = new Random(51);
+        int n = 120;
+        int[] group = new int[n];
+        int[] order = new int[n];
+        int[] value = new int[n];
+        bool[] mask = new bool[n];
+        for (int i = 0; i < n; i++)
+        {
+            group[i] = random.Next(4);
+            order[i] = random.Next(10);
+            value[i] = random.Next(-50, 51);
+            mask[i] = random.Next(4) == 0;
+        }
+
+        var columns = Columns(
+            ("g", NivaraColumn<int>.Create(group)),
+            ("t", NivaraColumn<int>.Create(order)),
+            ("v", NivaraColumn<int>.CreateFromSpans(value, mask)));
+        var spec = new WindowSpec().PartitionBy("g").OrderBy("t");
+
+        for (int window = 1; window <= 4; window++)
+        {
+            for (int minPeriods = 1; minPeriods <= window; minPeriods++)
+            {
+                var result = (NivaraColumn<int>)PartitionedWindowEngine.Compute(columns, columns["v"], spec, RollingSum(window, minPeriods));
+                var (expectedValues, expectedMask) = SumOracle(group, order, value, mask, window, minPeriods);
+
+                for (int i = 0; i < n; i++)
+                {
+                    Assert.That(result.IsNull(i), Is.EqualTo(expectedMask[i]),
+                        $"mask mismatch at {i} window={window} minPeriods={minPeriods}");
+                    if (!expectedMask[i])
+                        Assert.That(result[i], Is.EqualTo(expectedValues[i]),
+                            $"value mismatch at {i} window={window} minPeriods={minPeriods}");
+                }
+            }
+        }
+    }
+
+    [Test]
+    public void Compute_RandomMultiPartition_RollingMeanMinMax_MatchesIndependentOracle()
+    {
+        var random = new Random(52);
+        int n = 120;
+        int[] group = new int[n];
+        int[] order = new int[n];
+        int[] value = new int[n];
+        bool[] mask = new bool[n];
+        for (int i = 0; i < n; i++)
+        {
+            group[i] = random.Next(4);
+            order[i] = random.Next(10);
+            value[i] = random.Next(-50, 51);
+            mask[i] = random.Next(4) == 0;
+        }
+
+        var columns = Columns(
+            ("g", NivaraColumn<int>.Create(group)),
+            ("t", NivaraColumn<int>.Create(order)),
+            ("v", NivaraColumn<int>.CreateFromSpans(value, mask)));
+        var spec = new WindowSpec().PartitionBy("g").OrderBy("t");
+
+        const int windowSize = 3;
+        const int minPeriods = 2;
+
+        var mean = (NivaraColumn<double>)PartitionedWindowEngine.Compute(
+            columns, columns["v"], spec, col => ((NivaraColumn<int>)col).RollingMean(windowSize, minPeriods));
+        var min = (NivaraColumn<int>)PartitionedWindowEngine.Compute(
+            columns, columns["v"], spec, col => ((NivaraColumn<int>)col).RollingMin(windowSize, minPeriods));
+        var max = (NivaraColumn<int>)PartitionedWindowEngine.Compute(
+            columns, columns["v"], spec, col => ((NivaraColumn<int>)col).RollingMax(windowSize, minPeriods));
+
+        foreach (var g in group.Distinct())
+        {
+            var rows = Enumerable.Range(0, n).Where(i => group[i] == g).ToArray();
+            var sorted = rows.OrderBy(i => order[i]).ToArray();
+
+            for (int k = 0; k < sorted.Length; k++)
+            {
+                int lo = Math.Max(0, k - windowSize + 1);
+                int validInWindow = 0;
+                int windowMin = int.MaxValue;
+                int windowMax = int.MinValue;
+                long sum = 0;
+                for (int j = lo; j <= k; j++)
+                {
+                    int src = sorted[j];
+                    if (!mask[src])
+                    {
+                        validInWindow++;
+                        sum += value[src];
+                        windowMin = Math.Min(windowMin, value[src]);
+                        windowMax = Math.Max(windowMax, value[src]);
+                    }
+                }
+
+                int originalRow = sorted[k];
+                bool isNull = validInWindow < minPeriods;
+                Assert.That(mean.IsNull(originalRow), Is.EqualTo(isNull), $"mean mask mismatch at {originalRow}");
+                Assert.That(min.IsNull(originalRow), Is.EqualTo(isNull), $"min mask mismatch at {originalRow}");
+                Assert.That(max.IsNull(originalRow), Is.EqualTo(isNull), $"max mask mismatch at {originalRow}");
+
+                if (!isNull)
+                {
+                    Assert.That(mean[originalRow], Is.EqualTo((double)sum / validInWindow).Within(1e-9), $"mean mismatch at {originalRow}");
+                    Assert.That(min[originalRow], Is.EqualTo(windowMin), $"min mismatch at {originalRow}");
+                    Assert.That(max[originalRow], Is.EqualTo(windowMax), $"max mismatch at {originalRow}");
+                }
+            }
+        }
+    }
 }
