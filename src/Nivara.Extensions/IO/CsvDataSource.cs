@@ -139,6 +139,7 @@ sealed class CsvLazySource : IQuerySource
     private StreamReader? chunkStreamReader;
     private CsvReader? chunkCsvReader;
     private int rowsConsumed;
+    private bool eofReached;
     private bool disposed;
 
     /// <summary>
@@ -323,7 +324,11 @@ sealed class CsvLazySource : IQuerySource
             while (rowsRead < chunkSize)
             {
                 if (!csv.Read())
+                {
+                    eofReached = true;
+                    DisposeChunkReader();
                     break;
+                }
 
                 var recordDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < csv.HeaderRecord?.Length; i++)
@@ -416,7 +421,11 @@ sealed class CsvLazySource : IQuerySource
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!csv.Read())
+                {
+                    eofReached = true;
+                    DisposeChunkReader();
                     break;
+                }
 
                 var recordDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
                 for (int i = 0; i < csv.HeaderRecord?.Length; i++)
@@ -488,9 +497,13 @@ sealed class CsvLazySource : IQuerySource
     {
         var targetRow = (long)chunkIndex * chunkSize;
 
+        if (eofReached && targetRow >= rowsConsumed)
+            return false;
+
         if (chunkCsvReader == null || targetRow < rowsConsumed)
         {
             DisposeChunkReader();
+            eofReached = false;
             var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync);
             var streamReader = new StreamReader(stream);
             var csv = new CsvReader(streamReader, options.ToCsvConfiguration());
@@ -499,6 +512,7 @@ sealed class CsvLazySource : IQuerySource
                 chunkStreamReader = streamReader;
                 chunkCsvReader = csv;
                 rowsConsumed = 0;
+                eofReached = true;
                 return false;
             }
             if (options.HasHeaderRecord)
@@ -511,7 +525,10 @@ sealed class CsvLazySource : IQuerySource
         while (rowsConsumed < targetRow)
         {
             if (!chunkCsvReader!.Read())
+            {
+                eofReached = true;
                 return false;
+            }
             rowsConsumed++;
         }
         return true;
