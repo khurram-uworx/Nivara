@@ -79,6 +79,14 @@ sealed class FilterOperation : IQueryOperation
         }
     }
 
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(Execute(input));
+    }
+
     /// <summary>
     /// Applies a boolean mask to a column to filter its values
     /// </summary>

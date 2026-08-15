@@ -12,6 +12,11 @@ internal interface IQueryOperation
     string OperationType { get; }
     Schema TransformSchema(Schema inputSchema);
     IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input);
+
+    ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+        => new(Execute(input));
 }
 
 internal interface IQuerySource : IDisposable
