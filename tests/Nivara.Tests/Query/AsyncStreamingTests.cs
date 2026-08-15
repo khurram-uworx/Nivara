@@ -68,7 +68,7 @@ public class AsyncStreamingTests
             using var ct = new CancellationTokenSource();
             ct.Cancel();
 
-            Assert.Throws<OperationCanceledException>(() => queryFrame.CollectAsync(ct.Token));
+            Assert.ThrowsAsync<OperationCanceledException>(() => queryFrame.CollectAsync(ct.Token));
         }
         finally
         {
@@ -246,7 +246,8 @@ public class AsyncStreamingTests
 
             using var result = await queryFrame.CollectAsync();
 
-            Assert.That(result.RowCount, Is.EqualTo(1000));
+            // Filter Index > 1000 over 0,2,4,...,4998 (2500 rows) keeps 1002..4998 = 1999 rows
+            Assert.That(result.RowCount, Is.EqualTo(1999));
         }
         finally
         {
