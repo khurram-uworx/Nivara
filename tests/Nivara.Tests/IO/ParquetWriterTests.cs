@@ -23,7 +23,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile, options));
+            Assert.DoesNotThrow(() => NivaraParquetWriter.WriteParquet(frame, tempFile, options));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
@@ -54,7 +54,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrowAsync(async () => await ParquetWriter.WriteParquetAsync(frame, tempFile));
+            Assert.DoesNotThrowAsync(async () => await NivaraParquetWriter.WriteParquetAsync(frame, tempFile));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
@@ -81,7 +81,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile));
+            Assert.DoesNotThrow(() => NivaraParquetWriter.WriteParquet(frame, tempFile));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
@@ -105,7 +105,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert
-            Assert.Throws<ArgumentNullException>(() => ParquetWriter.WriteParquet(null!, tempFile));
+            Assert.Throws<ArgumentNullException>(() => NivaraParquetWriter.WriteParquet(null!, tempFile));
         }
         finally
         {
@@ -125,7 +125,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert
-            Assert.Throws<ArgumentNullException>(() => ParquetWriter.WriteParquet(frame, (string)null!));
+            Assert.Throws<ArgumentNullException>(() => NivaraParquetWriter.WriteParquet(frame, (string)null!));
         }
         finally
         {
@@ -147,7 +147,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, stream, options));
+            Assert.DoesNotThrow(() => NivaraParquetWriter.WriteParquet(frame, stream, options));
 
             // Verify data was written
             Assert.That(stream.Length, Is.GreaterThan(0));
@@ -179,7 +179,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrow(() => ParquetWriter.WriteParquetBatch(frames, tempFile));
+            Assert.DoesNotThrow(() => NivaraParquetWriter.WriteParquetBatch(frames, tempFile));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
@@ -213,7 +213,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert
-            Assert.Throws<SchemaValidationException>(() => ParquetWriter.WriteParquetBatch(frames, tempFile));
+            Assert.Throws<SchemaValidationException>(() => NivaraParquetWriter.WriteParquetBatch(frames, tempFile));
         }
         finally
         {
@@ -245,7 +245,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile));
+            Assert.DoesNotThrow(() => NivaraParquetWriter.WriteParquet(frame, tempFile));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
@@ -277,7 +277,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrow(() => ParquetWriter.WriteParquet(frame, tempFile));
+            Assert.DoesNotThrow(() => NivaraParquetWriter.WriteParquet(frame, tempFile));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
@@ -303,7 +303,7 @@ public class ParquetWriterTests
         try
         {
             // Act
-            ParquetWriter.WriteParquet(frame, tempFile, ParquetWriteOptions.Default.With(rowGroupSize: 1000));
+            NivaraParquetWriter.WriteParquet(frame, tempFile, ParquetWriteOptions.Default.With(rowGroupSize: 1000));
 
             // Assert - file contains one row group per 1000 rows
             using var fileStream = new FileStream(tempFile, FileMode.Open, FileAccess.Read);
@@ -311,7 +311,7 @@ public class ParquetWriterTests
             Assert.That(parquetReader.RowGroupCount, Is.EqualTo(3));
 
             // All row groups round-trip through the Nivara reader
-            var roundTrip = ParquetReader.ReadParquet(tempFile);
+            var roundTrip = NivaraParquetReader.ReadParquet(tempFile);
             Assert.That(roundTrip.RowCount, Is.EqualTo(2500));
             Assert.That(roundTrip.GetColumn<int>("Index")[2499], Is.EqualTo(4998));
             Assert.That(roundTrip.GetColumn<int>("Index")[1000], Is.EqualTo(2000));
@@ -337,11 +337,11 @@ public class ParquetWriterTests
         try
         {
             // Act
-            ParquetWriter.WriteParquet(frame, gzipFile, ParquetWriteOptions.Default.With(compression: ParquetCompression.Gzip));
-            ParquetWriter.WriteParquet(frame, noneFile, ParquetWriteOptions.Default.With(compression: ParquetCompression.None));
+            NivaraParquetWriter.WriteParquet(frame, gzipFile, ParquetWriteOptions.Default.With(compression: ParquetCompression.Gzip));
+            NivaraParquetWriter.WriteParquet(frame, noneFile, ParquetWriteOptions.Default.With(compression: ParquetCompression.None));
 
             // Assert - data round-trips under the configured compression
-            var roundTrip = ParquetReader.ReadParquet(gzipFile);
+            var roundTrip = NivaraParquetReader.ReadParquet(gzipFile);
             Assert.That(roundTrip.RowCount, Is.EqualTo(5000));
             Assert.That(roundTrip.GetColumn<string>("Name")[123], Is.EqualTo(strings[123]));
 
@@ -371,15 +371,15 @@ public class ParquetWriterTests
         try
         {
             // Act
-            ParquetWriter.WriteParquet(frame, noMetadataFile, ParquetWriteOptions.Default.With(writeMetadata: false));
-            ParquetWriter.WriteParquet(frame, withMetadataFile);
+            NivaraParquetWriter.WriteParquet(frame, noMetadataFile, ParquetWriteOptions.Default.With(writeMetadata: false));
+            NivaraParquetWriter.WriteParquet(frame, withMetadataFile);
 
             // Assert - without metadata the widened on-disk representation is read back
-            var noMetadata = ParquetReader.ReadParquet(noMetadataFile);
+            var noMetadata = NivaraParquetReader.ReadParquet(noMetadataFile);
             Assert.That(noMetadata.Schema.GetColumnType("Measurement"), Is.EqualTo(typeof(float)));
 
             // With default metadata the original CLR type is restored
-            var withMetadata = ParquetReader.ReadParquet(withMetadataFile);
+            var withMetadata = NivaraParquetReader.ReadParquet(withMetadataFile);
             Assert.That(withMetadata.Schema.GetColumnType("Measurement"), Is.EqualTo(typeof(Half)));
             Assert.That(withMetadata.GetColumn<Half>("Measurement")[0], Is.EqualTo((Half)1.5f));
         }

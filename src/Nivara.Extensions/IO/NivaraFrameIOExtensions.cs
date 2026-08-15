@@ -30,7 +30,7 @@ public static class NivaraFrameIOExtensions
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
-        ParquetWriter.WriteParquet(frame, filePath, options);
+        NivaraParquetWriter.WriteParquet(frame, filePath, options);
     }
 
     /// <summary>
@@ -53,7 +53,7 @@ public static class NivaraFrameIOExtensions
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
-        return ParquetWriter.WriteParquetAsync(frame, filePath, options, cancellationToken);
+        return NivaraParquetWriter.WriteParquetAsync(frame, filePath, options, cancellationToken);
     }
 
     /// <summary>
@@ -73,7 +73,7 @@ public static class NivaraFrameIOExtensions
         if (!stream.CanWrite)
             throw new ArgumentException("Stream must be writable", nameof(stream));
 
-        ParquetWriter.WriteParquet(frame, stream, options);
+        NivaraParquetWriter.WriteParquet(frame, stream, options);
     }
 
     /// <summary>
@@ -96,7 +96,7 @@ public static class NivaraFrameIOExtensions
         if (!stream.CanWrite)
             throw new ArgumentException("Stream must be writable", nameof(stream));
 
-        return ParquetWriter.WriteParquetAsync(frame, stream, options, cancellationToken);
+        return NivaraParquetWriter.WriteParquetAsync(frame, stream, options, cancellationToken);
     }
 
     /// <summary>
@@ -116,7 +116,7 @@ public static class NivaraFrameIOExtensions
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
-        return ParquetReader.ReadParquet(filePath, options);
+        return NivaraParquetReader.ReadParquet(filePath, options);
     }
 
     /// <summary>
@@ -138,7 +138,7 @@ public static class NivaraFrameIOExtensions
         if (string.IsNullOrWhiteSpace(filePath))
             throw new ArgumentException("File path cannot be empty or whitespace", nameof(filePath));
 
-        return ParquetReader.ReadParquetAsync(filePath, options, cancellationToken);
+        return NivaraParquetReader.ReadParquetAsync(filePath, options, cancellationToken);
     }
 
     /// <summary>
@@ -157,7 +157,7 @@ public static class NivaraFrameIOExtensions
         if (!stream.CanRead)
             throw new ArgumentException("Stream must be readable", nameof(stream));
 
-        return ParquetReader.ReadParquet(stream, options);
+        return NivaraParquetReader.ReadParquet(stream, options);
     }
 
     /// <summary>
@@ -178,7 +178,7 @@ public static class NivaraFrameIOExtensions
         if (!stream.CanRead)
             throw new ArgumentException("Stream must be readable", nameof(stream));
 
-        return ParquetReader.ReadParquetAsync(stream, options, cancellationToken);
+        return NivaraParquetReader.ReadParquetAsync(stream, options, cancellationToken);
     }
 
     #endregion

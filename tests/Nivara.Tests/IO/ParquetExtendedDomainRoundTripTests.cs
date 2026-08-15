@@ -215,8 +215,8 @@ public class ParquetExtendedDomainRoundTripTests
 
         try
         {
-            await ParquetWriter.WriteParquetAsync(frame, tempFile);
-            var result = await ParquetReader.ReadParquetAsync(tempFile);
+            await NivaraParquetWriter.WriteParquetAsync(frame, tempFile);
+            var result = await NivaraParquetReader.ReadParquetAsync(tempFile);
 
             Assert.That(result.GetColumn<Half>("HalfColumn")[0], Is.EqualTo((Half)1.5f));
             Assert.That(result.GetColumn<Guid>("GuidColumn")[0], Is.EqualTo(frame.GetColumn<Guid>("GuidColumn")[0]));
@@ -246,8 +246,8 @@ public class ParquetExtendedDomainRoundTripTests
 
         try
         {
-            ParquetWriter.WriteParquetBatch(new[] { frame1, frame2 }, tempFile);
-            var result = ParquetReader.ReadParquet(tempFile);
+            NivaraParquetWriter.WriteParquetBatch(new[] { frame1, frame2 }, tempFile);
+            var result = NivaraParquetReader.ReadParquet(tempFile);
 
             Assert.That(result.RowCount, Is.EqualTo(3));
             Assert.That(result.GetColumn<Half>("HalfColumn")[2], Is.EqualTo((Half)3.5f));
@@ -267,8 +267,8 @@ public class ParquetExtendedDomainRoundTripTests
         var tempFile = Path.GetTempFileName();
         try
         {
-            ParquetWriter.WriteParquet(frame, tempFile);
-            return ParquetReader.ReadParquet(tempFile);
+            NivaraParquetWriter.WriteParquet(frame, tempFile);
+            return NivaraParquetReader.ReadParquet(tempFile);
         }
         finally
         {

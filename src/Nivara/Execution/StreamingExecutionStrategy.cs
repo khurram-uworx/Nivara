@@ -276,6 +276,44 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         return result;
     }
 
+    /// <summary>
+    /// Streams processed chunks from the source as an async enumerable.
+    /// Each yielded frame is a processed chunk (source chunk + streamable operations applied).
+    /// Non-streamable boundary operations are applied after all chunks have been consumed.
+    /// </summary>
+    public async IAsyncEnumerable<NivaraFrame> StreamChunksAsync(
+        QueryPlan plan,
+        NivaraExecutionContext context,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
+    {
+        var diag = context.ExecutionDiagnostics;
+        using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "StreamChunksAsync") : null;
+
+        if (!isSuitableForStreaming(plan) || !plan.Source.CanReadInChunks)
+        {
+            var columns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
+            var processed = await executeOperationsOnDataAsync(columns, plan.Operations, ct).ConfigureAwait(false);
+            yield return NivaraFrame.Create(processed);
+            yield break;
+        }
+
+        var chunkSize = calculateChunkSize(context.MemoryBudget);
+        var segments = PartitionAtNonStreamableOps(plan.Operations);
+        var segmentsIdx = 0;
+
+        await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
+            .ConfigureAwait(false))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var segment = segments[segmentsIdx];
+            var processedData = await executeOperationsOnDataAsync(
+                chunkData, segment.StreamableOps, ct).ConfigureAwait(false);
+
+            yield return NivaraFrame.Create(processedData);
+        }
+    }
+
     public override bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context)
     {
         if (plan == null || context == null)

@@ -9,7 +9,7 @@ namespace Nivara.IO;
 /// This class supports both file-based and stream-based writing operations,
 /// with configurable compression and row group sizes for optimal performance.
 /// </remarks>
-public static class ParquetWriter
+public static class NivaraParquetWriter
 {
     /// <summary>
     /// Writes a NivaraFrame to a Parquet file asynchronously

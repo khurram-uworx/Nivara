@@ -246,6 +246,16 @@ internal sealed class ExecutionEngine
     }
 
     /// <summary>
+    /// Gets the registered execution strategy for the specified type
+    /// </summary>
+    /// <param name="strategyType">The execution strategy type</param>
+    /// <returns>The execution strategy, or null if not found</returns>
+    internal IExecutionStrategy? GetStrategy(ExecutionStrategy strategyType)
+    {
+        return strategies.TryGetValue(strategyType, out var strategy) ? strategy : null;
+    }
+
+    /// <summary>
     /// Validates that a query plan can be executed without actually executing it
     /// </summary>
     /// <param name="plan">The query plan to validate</param>

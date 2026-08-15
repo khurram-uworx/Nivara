@@ -11,7 +11,7 @@ namespace Nivara.Query;
 /// Represents a lazy query frame that builds query plans without immediate execution.
 /// Provides a fluent API for constructing complex queries that are executed only when Collect() is called.
 /// </summary>
-internal sealed class QueryFrame : IDisposable
+internal sealed class QueryFrame : IDisposable, IAsyncDisposable
 {
     readonly IQuerySource source;
     readonly List<IQueryOperation> operations;
@@ -418,6 +418,31 @@ internal sealed class QueryFrame : IDisposable
         {
             throw new QueryExecutionException($"Query execution failed: {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Streams processed chunks from the query as an async enumerable.
+    /// Each chunk is a NivaraFrame containing the source data with streamable operations applied.
+    /// Consumers can process chunks lazily without waiting for the full result.
+    /// </summary>
+    /// <param name="chunkSize">The target number of rows per chunk</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
+    internal IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        var queryPlan = new QueryPlan(source, operations);
+        var engine = new ExecutionEngine();
+        var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
+        {
+            CancellationToken = ct,
+            MemoryBudget = (long)chunkSize * 100
+        };
+
+        var strategy = engine.GetStrategy(ExecutionStrategy.Streaming) as StreamingExecutionStrategy
+            ?? throw new QueryExecutionException("Streaming execution strategy is not registered");
+        return strategy.StreamChunksAsync(queryPlan, context, ct);
     }
 
     /// <summary>
@@ -1010,12 +1035,21 @@ internal sealed class QueryFrame : IDisposable
     {
         if (!disposed)
         {
-            // Untrack from resource manager
+            NivaraResourceManager.UntrackResource(this);
+            disposed = true;
+        }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask DisposeAsync()
+    {
+        if (!disposed)
+        {
             NivaraResourceManager.UntrackResource(this);
 
-            // QueryFrame doesn't own the source in most cases, so we don't dispose it
-            // The source is typically owned by the caller or factory methods
-            // Operations are value types or immutable, no disposal needed
+            if (source is IAsyncDisposable asyncDisposable)
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+
             disposed = true;
         }
     }
