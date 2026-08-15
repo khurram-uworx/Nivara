@@ -136,6 +136,9 @@ sealed class CsvLazySource : IQuerySource
     private readonly CsvOptions options;
     private readonly Lazy<Schema> lazySchema;
     private readonly DeferredErrorHandler errorHandler;
+    private StreamReader? chunkStreamReader;
+    private CsvReader? chunkCsvReader;
+    private int rowsConsumed;
     private bool disposed;
 
     /// <summary>
@@ -309,24 +312,10 @@ sealed class CsvLazySource : IQuerySource
             var columnNames = schema.ColumnNames;
             var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
 
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: false);
-            using var reader = new StreamReader(stream);
-            using var csv = new CsvReader(reader, options.ToCsvConfiguration());
+            if (!EnsureChunkPosition(chunkIndex, chunkSize, useAsync: false))
+                return new Dictionary<string, IColumn>();
 
-            if (options.HasHeaderRecord)
-            {
-                if (!csv.Read())
-                    return new Dictionary<string, IColumn>();
-                csv.ReadHeader();
-            }
-
-            // Skip to the start of the requested chunk
-            var rowsToSkip = chunkIndex * chunkSize;
-            for (int i = 0; i < rowsToSkip; i++)
-            {
-                if (!csv.Read())
-                    return new Dictionary<string, IColumn>();
-            }
+            var csv = chunkCsvReader!;
 
             // Read chunkSize records
             var records = new List<IDictionary<string, object>>(chunkSize);
@@ -348,6 +337,7 @@ sealed class CsvLazySource : IQuerySource
                 }
                 records.Add(recordDict);
                 rowsRead++;
+                rowsConsumed++;
             }
 
             if (records.Count == 0)
@@ -412,26 +402,12 @@ sealed class CsvLazySource : IQuerySource
             var columnNames = schema.ColumnNames;
             var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
 
-            using var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
-            using var reader = new StreamReader(stream);
-            using var csv = new CsvReader(reader, options.ToCsvConfiguration());
+            cancellationToken.ThrowIfCancellationRequested();
 
-            if (options.HasHeaderRecord)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!csv.Read())
-                    return new Dictionary<string, IColumn>();
-                csv.ReadHeader();
-            }
+            if (!EnsureChunkPosition(chunkIndex, chunkSize, useAsync: true))
+                return new Dictionary<string, IColumn>();
 
-            // Skip to the start of the requested chunk
-            var rowsToSkip = chunkIndex * chunkSize;
-            for (int i = 0; i < rowsToSkip; i++)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (!csv.Read())
-                    return new Dictionary<string, IColumn>();
-            }
+            var csv = chunkCsvReader!;
 
             // Read chunkSize records
             var records = new List<IDictionary<string, object>>(chunkSize);
@@ -454,6 +430,7 @@ sealed class CsvLazySource : IQuerySource
                 }
                 records.Add(recordDict);
                 rowsRead++;
+                rowsConsumed++;
             }
 
             if (records.Count == 0)
@@ -496,6 +473,56 @@ sealed class CsvLazySource : IQuerySource
         {
             throw new DataSourceException($"Failed to read CSV chunk from file '{filePath}': {ex.Message}", ex);
         }
+    }
+
+    /// <summary>
+    /// Positions the persistent chunk reader so the next record read is the first data row
+    /// of the requested chunk. Sequential chunk reads continue from the current position
+    /// (single pass); backward access or re-reads reopen the file and skip forward.
+    /// </summary>
+    /// <param name="chunkIndex">The zero-based chunk index.</param>
+    /// <param name="chunkSize">The number of rows per chunk.</param>
+    /// <param name="useAsync">Whether to open the underlying stream with async I/O.</param>
+    /// <returns>False when the file has fewer data rows than the requested chunk start.</returns>
+    private bool EnsureChunkPosition(int chunkIndex, int chunkSize, bool useAsync)
+    {
+        var targetRow = (long)chunkIndex * chunkSize;
+
+        if (chunkCsvReader == null || targetRow < rowsConsumed)
+        {
+            DisposeChunkReader();
+            var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync);
+            var streamReader = new StreamReader(stream);
+            var csv = new CsvReader(streamReader, options.ToCsvConfiguration());
+            if (options.HasHeaderRecord && !csv.Read())
+            {
+                chunkStreamReader = streamReader;
+                chunkCsvReader = csv;
+                rowsConsumed = 0;
+                return false;
+            }
+            if (options.HasHeaderRecord)
+                csv.ReadHeader();
+            chunkStreamReader = streamReader;
+            chunkCsvReader = csv;
+            rowsConsumed = 0;
+        }
+
+        while (rowsConsumed < targetRow)
+        {
+            if (!chunkCsvReader!.Read())
+                return false;
+            rowsConsumed++;
+        }
+        return true;
+    }
+
+    private void DisposeChunkReader()
+    {
+        chunkCsvReader?.Dispose();
+        chunkCsvReader = null;
+        chunkStreamReader?.Dispose();
+        chunkStreamReader = null;
     }
 
     /// <summary>
@@ -750,8 +777,7 @@ sealed class CsvLazySource : IQuerySource
     {
         if (!disposed)
         {
-            // CsvLazySource doesn't hold any unmanaged resources
-            // The errorHandler and lazySchema don't require disposal
+            DisposeChunkReader();
             disposed = true;
         }
     }
