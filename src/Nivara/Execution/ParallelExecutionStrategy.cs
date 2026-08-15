@@ -30,6 +30,13 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         };
     }
 
+    // Window expressions must run over the whole column: slicing the input first (as the parallel
+    // per-slice filter does) would compute each window over a partial range, changing the result
+    // (issue #245).
+    static bool isParallelizable(IQueryOperation operation)
+        => isParallelizable(operation.OperationType)
+            && !WindowExpressionInspector.HasWindowExpression(operation);
+
     static bool shouldUseParallelism(IReadOnlyDictionary<string, IColumn> input, NivaraExecutionContext context)
     {
         var totalRows = input.Values.FirstOrDefault()?.Length ?? 0;
@@ -61,7 +68,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         IReadOnlyDictionary<string, IColumn> input,
         NivaraExecutionContext context)
     {
-        if (!isParallelizable(operation.OperationType) || !shouldUseParallelism(input, context))
+        if (!isParallelizable(operation) || !shouldUseParallelism(input, context))
             return operation.Execute(input);
 
         var totalRows = input.Values.FirstOrDefault()?.Length ?? 0;
@@ -84,7 +91,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             return executeJoinParallelSync(joinOp, maxDop, context.CancellationToken);
         if (operation is IParallelConcatenationOperation concatOp)
             return executeConcatenationParallelSync(concatOp, input, maxDop, context.CancellationToken);
-        if (isParallelizable(operation.OperationType))
+        if (isParallelizable(operation))
             return executeFilterParallelSync(operation, input, ranges, maxDop, context.CancellationToken);
 
         return operation.Execute(input);
@@ -327,7 +334,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         IReadOnlyDictionary<string, IColumn> input,
         NivaraExecutionContext context)
     {
-        if (!isParallelizable(operation.OperationType) || !shouldUseParallelism(input, context))
+        if (!isParallelizable(operation) || !shouldUseParallelism(input, context))
             return await Task.Run(() => operation.Execute(input), context.CancellationToken).ConfigureAwait(false);
 
         var totalRows = input.Values.FirstOrDefault()?.Length ?? 0;
@@ -350,7 +357,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
             return executeJoinParallelAsync(joinOp, maxDop, context.CancellationToken);
         if (operation is IParallelConcatenationOperation concatOp)
             return executeConcatenationParallelAsync(concatOp, input, maxDop, context.CancellationToken);
-        if (isParallelizable(operation.OperationType))
+        if (isParallelizable(operation))
             return executeFilterParallelAsync(operation, input, ranges, maxDop, context.CancellationToken);
 
         return await Task.Run(() => operation.Execute(input), context.CancellationToken).ConfigureAwait(false);

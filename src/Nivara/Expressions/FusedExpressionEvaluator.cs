@@ -326,7 +326,7 @@ sealed class FusedExpressionEvaluator
 
     static T[] AllocateResultArrayOf<T>(int length) => new T[length];
 
-    static bool ContainsWindowExpression(ColumnExpression node)
+    internal static bool ContainsWindowExpression(ColumnExpression node)
     {
         switch (node)
         {

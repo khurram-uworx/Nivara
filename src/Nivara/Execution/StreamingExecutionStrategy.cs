@@ -1,4 +1,5 @@
 using Nivara.Diagnostics;
+using Nivara.Expressions;
 using Nivara.Query;
 
 namespace Nivara.Execution;
@@ -10,13 +11,15 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     static bool isSuitableForStreaming(QueryPlan plan)
     {
         foreach (var operation in plan.Operations)
-            if (NonStreamableOperations.Contains(operation.OperationType))
+            if (NonStreamableOperations.Contains(operation.OperationType)
+                || WindowExpressionInspector.HasWindowExpression(operation))
                 return false;
         return true;
     }
 
     static bool isOperationStreamable(IQueryOperation op)
-        => !NonStreamableOperations.Contains(op.OperationType);
+        => !NonStreamableOperations.Contains(op.OperationType)
+            && !WindowExpressionInspector.HasWindowExpression(op);
 
     static int calculateChunkSize(long memoryBudget)
     {
