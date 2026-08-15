@@ -98,17 +98,13 @@ sealed class ParquetLazySource : IQuerySource
 
             if (frames.Count == 1)
             {
-                var cols = frames[0].ColumnNames.ToDictionary(
+                return frames[0].ColumnNames.ToDictionary(
                     name => name, name => frames[0].GetColumn(name), StringComparer.OrdinalIgnoreCase);
-                frames[0].Dispose();
-                return cols;
             }
 
             var merged = NivaraParquetWriter.ConcatenateFrames(frames);
-            var result = merged.ColumnNames.ToDictionary(
+            return merged.ColumnNames.ToDictionary(
                 name => name, name => merged.GetColumn(name), StringComparer.OrdinalIgnoreCase);
-            merged.Dispose();
-            return result;
         }
         catch (DataSourceException)
         {
@@ -150,10 +146,8 @@ sealed class ParquetLazySource : IQuerySource
                 return new Dictionary<string, IColumn>();
 
             var frame = await ReadRowGroupAsync(chunkIndex, cancellationToken).ConfigureAwait(false);
-            var columns = frame.ColumnNames.ToDictionary(
+            return frame.ColumnNames.ToDictionary(
                 name => name, name => frame.GetColumn(name), StringComparer.OrdinalIgnoreCase);
-            frame.Dispose();
-            return columns;
         }
         catch (OperationCanceledException)
         {
