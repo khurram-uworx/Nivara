@@ -115,22 +115,19 @@ Replace per-chunk file reopen in `CsvLazySource` with persistent state:
 
 ## GitHub issues log
 
-(Record deferred issues here as they are created — see "Deferred (out of scope)" below.)
+| Issue | Title |
+|-------|-------|
+| #264 | Streaming: public AsStream API and explicit non-streamable boundary behavior |
+| #265 | Streaming: JsonLazySource chunking is cosmetic (whole-file load) |
+| #266 | Async: CollectAsync/ToListAsync wrap the sync executor (not async-native) |
+| #267 | Streaming: memory budget is advisory; StreamingBufferManager unused; AsStream chunkSize divided by 10 |
+| #268 | QueryFrame: DisposeAsync disposes source, sync Dispose does not (inconsistent) |
+| #269 | Streaming: sync ExecuteCore vs async ExecuteCoreAsync diverge on non-streamable plans |
 
-## Deferred (out of scope, logged as GitHub issues when this plan runs)
+## Deferred (out of scope, tracked as GitHub issues)
 
-- Public `AsStream` + explicit handling of non-streamable boundary operations in
-  the streaming API (currently internal; AsStream silently yields a single merged
-  frame for non-streamable plans).
-- `JsonLazySource` chunking is cosmetic (whole file loaded via `ReadAllText`);
-  true `Utf8JsonReader` streaming deferred.
-- `CollectAsync`/`ToListAsync` route to the Lazy strategy (`Task.Run` of the sync
-  executor) rather than an async-native pipeline end to end.
-- `StreamingBufferManager`/advisory memory budget not actually used by the
-  streaming strategy; `AsStream(chunkSize:)` is effectively divided by 10 by the
-  budget round-trip.
-- `QueryFrame.DisposeAsync` disposes the source while sync `Dispose()` does not
-  (inconsistent ownership semantics).
-- `StreamingExecutionStrategy.ExecuteCore` (sync) re-checks
-  `isSuitableForStreaming` while `ExecuteCoreAsync` does not — behavior asymmetry
-  for non-streamable plans; document or align.
+Deferred items are logged above in the GitHub issues log (#264–#269): public
+`AsStream` + non-streamable boundary behavior, cosmetic JSON chunking, non-native
+async entry points, advisory memory budget / unused `StreamingBufferManager`,
+`QueryFrame` dispose inconsistency, and the sync/async streaming-strategy
+divergence.
