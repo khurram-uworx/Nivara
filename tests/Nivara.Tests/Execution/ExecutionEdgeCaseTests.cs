@@ -99,10 +99,10 @@ public class ExecutionEdgeCaseTests
             {
                 CancellationToken = cts.Token
             };
-            var ex = Assert.Throws<QueryExecutionException>(() =>
+            // Phase 4 contract: pre-cancelled tokens surface as a clean OperationCanceledException
+            Assert.Throws<OperationCanceledException>(() =>
                 CreateEngine().Execute(plan, context),
                 $"Strategy {strategy} should throw on pre-cancelled token");
-            Assert.That(ex!.InnerException, Is.TypeOf<OperationCanceledException>());
         }
     }
 
