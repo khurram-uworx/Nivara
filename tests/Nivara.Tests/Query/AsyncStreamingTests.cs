@@ -1,7 +1,5 @@
-using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.IO;
-using Nivara.Linq;
 using Nivara.Query;
 using NUnit.Framework;
 

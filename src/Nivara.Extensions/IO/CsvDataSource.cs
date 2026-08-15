@@ -4,7 +4,6 @@ using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
 using System.Globalization;
-using System.Threading;
 
 namespace Nivara.IO;
 

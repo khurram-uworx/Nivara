@@ -101,7 +101,7 @@ sealed class SliceOperation : IQueryOperation
     {
         ct.ThrowIfCancellationRequested();
         return new(Execute(input));
-}
+    }
 
     /// <summary>
     /// Slices a column using the column's built-in Slice method

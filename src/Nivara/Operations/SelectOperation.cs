@@ -123,7 +123,7 @@ sealed class SelectOperation : IQueryOperation
     {
         ct.ThrowIfCancellationRequested();
         return new(Execute(input));
- }
+    }
 
     /// <summary>
     /// Gets the name for a column expression in the result schema

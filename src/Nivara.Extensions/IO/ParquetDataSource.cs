@@ -1,8 +1,6 @@
 using Nivara.Exceptions;
-using Nivara.Helpers;
 using Nivara.Query;
 using Parquet.Schema;
-using System.Threading;
 
 namespace Nivara.IO;
 

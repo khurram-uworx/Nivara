@@ -1,7 +1,7 @@
-using System.Buffers;
 using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
+using System.Buffers;
 
 namespace Nivara.Operations;
 

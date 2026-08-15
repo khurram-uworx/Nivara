@@ -1,6 +1,6 @@
-using System.Buffers;
 using Nivara.Helpers;
 using Nivara.Operations;
+using System.Buffers;
 
 namespace Nivara.Tensors;
 
