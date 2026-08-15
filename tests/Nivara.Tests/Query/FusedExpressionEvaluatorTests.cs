@@ -604,6 +604,58 @@ public class FusedExpressionEvaluatorTests
         Assert.That(result.GetValue(1), Is.EqualTo(date));
     }
 
+    // ── #249: literal-only plans must constant-fold instead of throwing ──
+
+    [Test]
+    public void Evaluate_LiteralOnlyArithmetic_ProducesConstantColumn()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Lit(2) * 2, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1), "literal-only plan must run through the fused evaluator");
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "literal-only plan must run through the compiled target");
+        Assert.That(result.ElementType, Is.EqualTo(typeof(int)));
+        AssertColumn(result, new int?[] { 4, 4, 4 });
+    }
+
+    [Test]
+    public void Evaluate_LiteralOnlyMixedNumeric_PromotesCorrectly()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Lit(2.5) * 2, input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(double)), "2.5 * 2 must promote to double");
+        AssertColumn(result, new double?[] { 5.0, 5.0 });
+    }
+
+    [Test]
+    public void Evaluate_LiteralOnlyComparison_ProducesConstantBoolColumn()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var strings = fused.Evaluate(ColumnExpressions.Lit("a") == ColumnExpressions.Lit("b"), input);
+        var numbers = fused.Evaluate(ColumnExpressions.Lit(1) > ColumnExpressions.Lit(2), input);
+
+        AssertColumn(strings, new bool?[] { false, false });
+        AssertColumn(numbers, new bool?[] { false, false });
+    }
+
+    [Test]
+    public void Evaluate_LiteralOnlyPlan_WithEmptyInput_ProducesLengthOneColumn()
+    {
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Lit(2) * 2, new Dictionary<string, IColumn>());
+
+        Assert.That(result.Length, Is.EqualTo(1), "no input columns means a single-element constant column");
+        AssertColumn(result, new int?[] { 4 });
+    }
+
     // ── #246: literal runtime type must be part of the plan signature ──
 
     [Test]

@@ -235,10 +235,20 @@ sealed class FusedExpressionEvaluator
         }
 
         var plan = ExpressionTypeInferer.TryInfer(expression, input);
-        if (plan == null || plan.Columns.Count == 0)
+        if (plan == null)
         {
             throw new NotSupportedException(
                 $"Expression '{expression.Name}' cannot run through the fused evaluator: unsupported operand combination");
+        }
+
+        // Literal-only expressions have no leaf columns to size or route against (e.g. `Lit(2) * 2`).
+        // They constant-fold through the compiled target at the input length instead of being rejected
+        // as unsupported (issue #249); the span and TensorPrimitives backends both require a column leaf.
+        if (plan.Columns.Count == 0)
+        {
+            var constantLength = input.Values.FirstOrDefault()?.Length ?? 1;
+            var constantPlan = KernelLowerer.Lower(expression, plan);
+            return EvaluateCompiled(expression, plan, constantPlan, constantLength, chunkSize);
         }
 
         ValidateLeafLengths(plan);
