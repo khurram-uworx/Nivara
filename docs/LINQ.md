@@ -253,7 +253,10 @@ A window function with a spec runs in four phases:
 4. **Scatter** — results are mapped back to original row positions.
 
 Order-key nulls participate as ordinary rows — with `NULLS LAST` the null-key rows sort to the
-end of their partition and are not dropped from the result.
+end of their partition and are not dropped from the result. The rank family runs through
+`RankKernel` instead and keeps its own null-order-key semantics (see below): `Rank` /
+`DenseRank` / `PercentRank` null out rows with null order keys, while `RowNumber` numbers every
+row with null-key rows placed per `NullOrdering`.
 
 ### Eager `NivaraFrame` surface
 
