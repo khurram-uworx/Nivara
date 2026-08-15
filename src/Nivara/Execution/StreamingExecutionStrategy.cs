@@ -278,8 +278,9 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
     /// <summary>
     /// Streams processed chunks from the source as an async enumerable.
-    /// Each yielded frame is a processed chunk (source chunk + streamable operations applied).
-    /// Non-streamable boundary operations are applied after all chunks have been consumed.
+    /// Each yielded frame is a source chunk with the streamable operations applied.
+    /// Plans that are not streamable (non-streamable operations) or whose source
+    /// cannot read in chunks fall back to a single frame produced from the full source.
     /// </summary>
     public async IAsyncEnumerable<NivaraFrame> StreamChunksAsync(
         QueryPlan plan,
@@ -298,17 +299,14 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         }
 
         var chunkSize = calculateChunkSize(context.MemoryBudget);
-        var segments = PartitionAtNonStreamableOps(plan.Operations);
-        var segmentsIdx = 0;
 
         await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
             .ConfigureAwait(false))
         {
             ct.ThrowIfCancellationRequested();
 
-            var segment = segments[segmentsIdx];
             var processedData = await executeOperationsOnDataAsync(
-                chunkData, segment.StreamableOps, ct).ConfigureAwait(false);
+                chunkData, plan.Operations, ct).ConfigureAwait(false);
 
             yield return NivaraFrame.Create(processedData);
         }
