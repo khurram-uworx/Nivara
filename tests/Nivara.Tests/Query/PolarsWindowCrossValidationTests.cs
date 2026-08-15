@@ -35,6 +35,9 @@ public class PolarsWindowCrossValidationTests
 
         foreach (var caseEl in cases)
         {
+            if (caseEl.TryGetProperty("kind", out var kind) && kind.GetString() == "rolling")
+                continue;
+
             var name = caseEl.GetProperty("name").GetString()!;
             var order = caseEl.GetProperty("order").EnumerateArray()
                 .Select(e => e.ValueKind == JsonValueKind.Null ? (long?)null : e.GetInt64())

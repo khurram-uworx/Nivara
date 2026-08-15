@@ -239,8 +239,8 @@ new `tests/Nivara.Tests/Query/RollingWindowCrossValidationTests.cs`
 9. `test: all-null, window>length, and shift boundary cases (#252)` — ✓ done
 10. `test: rolling mean/min/max property tests (#252)` — ✓ done
 11. `test: partitioned rolling property tests (#252)` — ✓ done
-12. `test: Polars rolling fixtures + cross-validation (#252)` — ⏳ next
-13. `test: chunked masked-position backing-value assertions (#252)`
+12. `test: Polars rolling fixtures + cross-validation (#252)` — ✓ done
+13. `test: chunked masked-position backing-value assertions (#252)` — ⏳ next
 14. `docs: remove TODO.md — plan executed` (only after full review)
 
 ## GitHub issues log
