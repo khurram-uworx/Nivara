@@ -87,6 +87,11 @@ change per commit, `dotnet test` runs only with explicit human confirmation, no 
 - `PartitionScatterKernel.Scatter(IColumn[] computedParts, int[] sortedAll, int[] offsets, int[] lengths)`:
   type-switch on `computedParts[0].ElementType` → generic scatter over `NivaraColumn<T>` (indexer +
   `IsNull`, no boxing).
+- **Executed as `ColumnFilterHelper.ScatterPartsColumn` / `scatterPartsTyped<T>`** (not a new
+  `PartitionScatterKernel.cs` file): single-pass `result[positions[i]] = value[i]` with type
+  consistency checks. The typed path also gained a **box-free fast path** (see #251-5 commit 2):
+  `NivaraColumn<T>` casts + indexer/`IsNull` + `CreateFromOwnedArray`, dropping ~16MB of per-row
+  `GetValue` boxing per 1M-row reorder/scatter.
 - Result: full-column passes 3 → 1 (only the source gather); ~2 result-sized buffers + inverse
   eliminated per call.
 
@@ -124,14 +129,29 @@ new `src/Nivara/Operations/GroupKeyReaders.cs`
   (int+string+null), equality across distinct column instances, Distinct typed keys,
   hash-collision disambiguation.
 
-### 5. Measurement (#251 acceptance)
-- Scenarios in `tests/Nivara.PerformanceTests/Program.cs` (`Run(name, warmup, runs, setup)` pattern,
-  Program.cs:164): `RollingSum`/`RollingMin` 1M null-free, `RollingSum` 1M with nulls,
-  `CumulativeSum` 1M, `RankKernel` 100k × 3 partitions, partitioned rolling (spec) 1M,
-  `CreateGroupsInternal` 100k × 2 keys, `Distinct` 100k.
-- New `tests/Nivara.Tests/Tensors/WindowAllocationTests.cs`: AllocationQuantum-style budgets via
-  `GC.GetAllocatedBytesForCurrentThread` with warmup (pattern: `tests/Nivara.Tests/AutoDiff/PerfTests.cs`),
-  locking the null-free rolling budget.
+### 5. Measurement (#251 acceptance) — DONE, two commits
+- **Commit 2 (production fixes)** — `src/Nivara/Operations/SortOperation.cs`,
+  `src/Nivara/Helpers/ColumnFilterHelper.cs`:
+  - `MultiColumnComparer.Compare` was doing `foreach` over an `IReadOnlyList<SortKey>` — **boxes a
+    new enumerator per comparison** (32B/call × O(n log n) during `Array.Sort`). Replaced with an
+    index loop. Measured effect: RankKernel RowNumber 100k **47MB → 2.5MB/op** (also benefits the
+    Sort operation and PartitionedWindowEngine's per-partition sorts).
+  - `reorderColumnTyped<T>` / `scatterPartsTyped<T>` boxed every element via `GetValue` (~16MB per
+    1M rows) and double-copied through `CreateFromSpans → Create`. Added a typed fast path
+    (value types only): `NivaraColumn<T>` cast, indexer + `IsNull`, `CreateFromOwnedArray` when
+    null-free. Measured effect: PartitionedWindow 1M × 100 parts **96MB → 40MB/op**.
+- **Commit 1 (scenarios + budgets)** — `tests/Nivara.PerformanceTests/Program.cs` +
+  new `tests/Nivara.Tests/Tensors/WindowAllocationTests.cs`:
+  - Scenarios: `RollingSum null-free 1M int (w10)`, `RollingSum nulls 1M int (w10)`,
+    `RankKernel RowNumber 100k`, `GroupBy 1M × 1000 keys (typed)`,
+    `GroupBy 1M × 100 string keys (typed)`, `PartitionedWindow RollingSum 1M × 100 parts`.
+  - Regression budgets via `GC.GetAllocatedBytesForCurrentThread` (pattern:
+    `tests/Nivara.Tests/AutoDiff/PerfTests.cs`), wide margins from harness measurements:
+    null-free < null-masked; null-free < 16MB; RankKernel < 8MB (guards the boxing fix);
+    GroupBy typed < 25MB; PartitionedWindow < 70MB (guards the box-free reorder/scatter).
+- **Deferred (#259)**: `createFilteredColumnTyped<T>` (ColumnFilterHelper.cs:106) and
+  `concatenateColumnsTyped<T>` (:184) still box every element via `column.GetValue`. Same
+  box-free typed fast path applies; out of #251's window/rank/group-by scope.
 
 ## Issue #252 changes
 
@@ -208,23 +228,26 @@ new `tests/Nivara.Tests/Query/RollingWindowCrossValidationTests.cs`
 
 ## Planned commits
 
-1. `docs: plan #251 window allocation + #252 window/expression test coverage`
-2. `perf: null-free fast path + pooled scratch in rolling/cumulative window kernels (#251)`
-3. `refactor: typed multi-column grouping in group-by/distinct (#251)`
-4. `perf: pooled scratch + stable in-place sort in RankKernel (#251)`
-5. `perf: index-map scatter in PartitionedWindowEngine (#251)`
-6. `test: rolling allocation budgets + perf scenarios (#251)`
-7. `test: streaming-vs-eager chunk equivalence with masks (#252)`
-8. `test: all-null, window>length, and shift boundary cases (#252)`
-9. `test: rolling mean/min/max property tests (#252)`
-10. `test: partitioned rolling property tests (#252)`
-11. `test: Polars rolling fixtures + cross-validation (#252)`
-12. `test: chunked masked-position backing-value assertions (#252)`
-13. `docs: remove TODO.md — plan executed` (only after full review)
+1. `docs: plan #251 window allocation + #252 window/expression test coverage` — ✓ `4986045`
+2. `perf: null-free fast path + pooled scratch in rolling/cumulative window kernels (#251)` — ✓ `8ad71f7`
+3. `refactor: typed multi-column grouping in group-by/distinct (#251)` — ✓ `76be81f`
+4. `perf: pooled scratch + stable in-place sort in RankKernel (#251)` — ✓ `d81ecd3`
+5. `perf: index-map scatter in PartitionedWindowEngine (#251)` — ✓ `13763d9`
+6. `perf: kill per-comparison enumerator boxing + box-free reorder/scatter fast paths (#251)` — ⏳ next
+7. `test: rolling allocation budgets + perf scenarios (#251)` — ⏳ next (after #6)
+8. `test: streaming-vs-eager chunk equivalence with masks (#252)`
+9. `test: all-null, window>length, and shift boundary cases (#252)`
+10. `test: rolling mean/min/max property tests (#252)`
+11. `test: partitioned rolling property tests (#252)`
+12. `test: Polars rolling fixtures + cross-validation (#252)`
+13. `test: chunked masked-position backing-value assertions (#252)`
+14. `docs: remove TODO.md — plan executed` (only after full review)
 
 ## GitHub issues log
 
-- [ ] (none yet — created during execution as deferred work is discovered)
+- **#259** — `ColumnFilterHelper` filter/concat kernels still box per row via `GetValue`
+  (`createFilteredColumnTyped` :106, `concatenateColumnsTyped` :184); apply the same box-free typed
+  fast path as the #251-5 reorder/scatter kernels.
 
 > Reminder: as each task executes, if you find deferred work or a concern (known limitations,
 > follow-ups, refactors) outside the current plan, create a GitHub issue immediately
