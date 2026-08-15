@@ -32,7 +32,7 @@ The current roadmap already provides a strong foundation:
 - chunk-capable execution
 - execution diagnostics
 
-The roadmap's remaining work includes async-native streaming and Roslyn source generators for typed accessors and specialized query builders.
+The roadmap's remaining work includes Roslyn source generators for typed accessors and specialized query builders.
 
 Incident Lab intentionally exercises these capabilities in one coherent, real-world workload.
 
@@ -197,6 +197,14 @@ The important property is that the workload is large enough to exercise:
 - streaming
 - cancellation
 - diagnostics
+
+### Async-native IAsyncEnumerable pipeline (Phase 4 ✓)
+
+- `CollectAsync()` / `ToListAsync()` async entry points on `NivaraQuery<T>` and `QueryFrame`
+- `IAsyncEnumerable<Chunk>` streaming via `AsStream()` on `QueryFrame`
+- Bounded `Channel<T>` with consumer-driven backpressure in `StreamingExecutionStrategy`
+- Chunk-capable IO sources: `CsvLazySource`, `JsonLazySource`, `ParquetLazySource`
+- `IAsyncDisposable` on `QueryFrame` for async resource cleanup
 
 ---
 
@@ -567,7 +575,7 @@ These discoveries are successes, not failures.
 
 # Phase 4 forcing function
 
-Incident Lab should naturally drive the async-first streaming work.
+Phase 4 is complete. Incident Lab should now use these capabilities and expose any remaining gaps.
 
 The desired architecture is:
 
@@ -587,16 +595,18 @@ IAsyncEnumerable<Chunk>
       CollectAsync()
 ```
 
-Requirements:
+Requirements met:
+- ✅ cancellation flows end-to-end (ThrowIfCancellationRequested at chunk boundaries and in executeOperationsOnDataAsync)
+- ✅ memory remains bounded (bounded Channel, capacity = clamp(memoryBudget / (100 * chunkSize), 2, 16))
+- ✅ chunks do not require unnecessary copies (zero-copy column extraction in ParquetLazySource)
+- ✅ results agree with eager execution (CollectAsync produces identical results to Collect)
+- ⚠️ window semantics across chunk boundaries — non-streamable operations (window expressions, Sort, GroupBy, Join) currently cause StreamChunksAsync to fall back to full materialization rather than computing windows across chunk boundaries
+- ✅ resources disposed across async boundaries (QueryFrame : IAsyncDisposable; streams via `await using`)
 
-- cancellation must flow end-to-end
-- memory must remain bounded
-- chunks must not require unnecessary copies
-- results should agree with eager execution
-- window semantics must remain correct across chunk boundaries
-- resources must be disposed correctly across async boundaries
-
-The sample therefore becomes a real consumer of Phase 4 rather than a synthetic test case.
+Gaps for Incident Lab to expose:
+1. Rolling windows on chunked Parquet data fall back to single-chunk materialization (non-streamable boundary). The sample should measure whether this prevents true streaming for window-heavy queries.
+2. `ParquetLazySource.Execute()` uses sync-over-async (`.GetAwaiter().GetResult()`) for the `Execute()` interface method — safe in server/CLI contexts but not in UI SynchronizationContext.
+3. `Channel<T>` provides backpressure but memory budget is advisory, not a hard limit.
 
 ---
 
@@ -662,6 +672,8 @@ NIVARA INCIDENT LAB
 Dataset       4.2 GB
 Rows          48,921,332
 Duration      2.14 s
+Streamed      48,921,332 (3 chunks)
+Backpressure  4 chunks in flight (bounded channel)
 
 TOP IMPACTED SERVICES
 
@@ -725,27 +737,27 @@ The differentiating goal is the combination:
 The intended architecture is:
 
 ```text
-                 C# / LINQ
-                     │
-                     ▼
-             Typed expression
-                     │
-                     ▼
-                 Kernel IR
-                     │
-          ┌──────────┴──────────┐
-          ▼                     ▼
-    SIMD kernel            Fused kernel
-          │                     │
-          └──────────┬──────────┘
-                     ▼
-               Columnar memory
-                     │
-                     ▼
-              Async/chunked data
-                     │
-                     ▼
-             Incident analysis
+                  C# / LINQ
+                      │
+                      ▼
+          Typed expression
+                      │
+                      ▼
+              Async execution plan
+                      │
+           ┌──────────┴──────────┐
+           ▼                     ▼
+     SIMD kernel            Fused kernel
+           │                     │
+           └──────────┬──────────┘
+                      ▼
+                Columnar memory
+                      │
+                      ▼
+           Async/chunked data
+                      │
+                      ▼
+          Incident analysis
 ```
 
 That is the story the sample should make tangible.
@@ -830,14 +842,19 @@ Deliver:
 ```text
 Historical telemetry
         ↓
-IAsyncEnumerable
+IAsyncEnumerable<Chunk>
         ↓
-Nivara
+Nivara plan
         ↓
 Live dashboard
 ```
 
 This becomes the primary forcing function for Phase 4.
+
+With Phase 4 complete, `ParquetLazySource` provides row-group chunk boundaries for
+historical Parquet replay, `CsvLazySource` and `JsonLazySource` provide row-based
+chunking, and `AsStream()` yields processed chunks through a bounded channel with
+backpressure. Cancellation flows end-to-end.
 
 ---
 
@@ -885,7 +902,7 @@ Incident Lab is successful when a .NET engineer can:
 2. Run the sample with a single command.
 3. Generate or load a realistic incident dataset.
 4. Open the dashboard.
-5. Replay an incident.
+5. Replay an incident using `IAsyncEnumerable<Chunk>` streaming.
 6. Understand how the incident evolved.
 7. Inspect the Nivara query/physical execution plan.
 8. See meaningful execution diagnostics.
