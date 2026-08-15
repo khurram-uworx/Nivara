@@ -471,4 +471,210 @@ public class WindowFunctionsTests
 
         Assert.Throws<OverflowException>(() => column.RollingSum(windowSize: 2));
     }
+
+    // ── All-null columns and window-size boundaries (#252) ──
+
+    [Test]
+    public void Rolling_AllNullColumn_AllPositionsMasked()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+
+        var sum = column.RollingSum(2);
+        var mean = column.RollingMean(2);
+        var min = column.RollingMin(2);
+        var max = column.RollingMax(2);
+
+        foreach (var result in new IColumn[] { sum, mean, min, max })
+        {
+            Assert.That(result.HasNulls, Is.True);
+            for (int i = 0; i < column.Length; i++)
+                Assert.That(result.IsNull(i), Is.True, $"all-null rolling output masked at {i}");
+        }
+    }
+
+    [Test]
+    public void Rolling_AllNullColumn_WithNullHandler_FillsEveryPosition()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+
+        var sum = column.RollingSum(2, nullHandler: () => 0);
+        var mean = column.RollingMean(2, nullHandler: () => 10);
+        var min = column.RollingMin(2, nullHandler: () => 5);
+        var max = column.RollingMax(2, nullHandler: () => 5);
+
+        Assert.That(sum.HasNulls, Is.False);
+        Assert.That(mean.HasNulls, Is.False);
+        Assert.That(min.HasNulls, Is.False);
+        Assert.That(max.HasNulls, Is.False);
+        Assert.That(sum[3], Is.EqualTo(0));
+        Assert.That(mean[3], Is.EqualTo(10.0).Within(1e-9));
+        Assert.That(min[3], Is.EqualTo(5));
+        Assert.That(max[3], Is.EqualTo(5));
+    }
+
+    [Test]
+    public void Cumulative_AllNullColumn_AllPositionsMasked()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+
+        var sum = column.CumulativeSum();
+        var min = column.CumulativeMin();
+        var max = column.CumulativeMax();
+
+        foreach (var result in new IColumn[] { sum, min, max })
+        {
+            Assert.That(result.HasNulls, Is.True);
+            for (int i = 0; i < column.Length; i++)
+                Assert.That(result.IsNull(i), Is.True);
+        }
+    }
+
+    [Test]
+    public void Cumulative_AllNullColumn_WithNullHandler_FillsEveryPosition()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+
+        var sum = column.CumulativeSum(() => 2);
+        var max = column.CumulativeMax(() => 2);
+
+        Assert.That(sum.HasNulls, Is.False);
+        Assert.That(max.HasNulls, Is.False);
+        Assert.That(sum[2], Is.EqualTo(6));
+        Assert.That(max[2], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Shift_AllNullColumn_AllPositionsMasked()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+
+        var shifted = column.Shift(1);
+        var filled = column.Shift(1, 0);
+
+        Assert.That(shifted.HasNulls, Is.True);
+        for (int i = 0; i < column.Length; i++)
+            Assert.That(shifted.IsNull(i), Is.True);
+
+        // Fill value only covers out-of-range positions; in-range nulls stay null.
+        Assert.That(filled.IsNull(0), Is.False);
+        Assert.That(filled[0], Is.EqualTo(0));
+        Assert.That(filled.IsNull(1), Is.True);
+        Assert.That(filled.IsNull(2), Is.True);
+    }
+
+    [Test]
+    public void Rolling_WindowLargerThanColumn_AllPositionsMasked()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+
+        var sum = column.RollingSum(5);
+        var mean = column.RollingMean(5);
+        var min = column.RollingMin(5);
+        var max = column.RollingMax(5);
+
+        foreach (var result in new IColumn[] { sum, mean, min, max })
+        {
+            Assert.That(result.HasNulls, Is.True);
+            for (int i = 0; i < column.Length; i++)
+                Assert.That(result.IsNull(i), Is.True);
+        }
+    }
+
+    [Test]
+    public void Rolling_WindowLargerThanColumn_MinPeriodsRelaxed_Computes()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+
+        var sum = column.RollingSum(5, minPeriods: 1);
+        var max = column.RollingMax(5, minPeriods: 1);
+
+        Assert.That(sum[0], Is.EqualTo(1));
+        Assert.That(sum[1], Is.EqualTo(3));
+        Assert.That(sum[2], Is.EqualTo(6));
+        Assert.That(max[0], Is.EqualTo(1));
+        Assert.That(max[1], Is.EqualTo(2));
+        Assert.That(max[2], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Rolling_WindowEqualsColumnLength_FirstOutputAtLastRow()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+
+        var sum = column.RollingSum(3);
+        var mean = column.RollingMean(3);
+        var max = column.RollingMax(3);
+        var min = column.RollingMin(3);
+
+        Assert.That(sum.IsNull(0), Is.True);
+        Assert.That(sum.IsNull(1), Is.True);
+        Assert.That(sum[2], Is.EqualTo(6));
+        Assert.That(mean[2], Is.EqualTo(2.0).Within(1e-9));
+        Assert.That(max[2], Is.EqualTo(3));
+        Assert.That(min[2], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Shift_PeriodZero_IsIdentity_PreservesInRangeNulls()
+    {
+        var column = NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 3 }, new[] { false, true, false });
+
+        var shifted = column.Shift(0);
+
+        Assert.That(shifted.Length, Is.EqualTo(column.Length));
+        Assert.That(shifted[0], Is.EqualTo(1));
+        Assert.That(shifted.IsNull(1), Is.True);
+        Assert.That(shifted[2], Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Shift_PeriodEqualToLength_AllBoundaryMasked()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+
+        var shifted = column.Shift(3);
+        var lead = column.Lead(3);
+        var negativeShift = column.Shift(-3);
+
+        foreach (var result in new IColumn[] { shifted, lead, negativeShift })
+        {
+            Assert.That(result.HasNulls, Is.True);
+            for (int i = 0; i < column.Length; i++)
+                Assert.That(result.IsNull(i), Is.True);
+        }
+    }
+
+    [Test]
+    public void Shift_PeriodEqualToLength_WithFillValue_FillsAllBoundaries()
+    {
+        var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+
+        var shifted = column.Shift(3, 7);
+        var lead = column.Lead(3, 7);
+
+        Assert.That(shifted.HasNulls, Is.False);
+        Assert.That(lead.HasNulls, Is.False);
+        for (int i = 0; i < column.Length; i++)
+        {
+            Assert.That(shifted[i], Is.EqualTo(7));
+            Assert.That(lead[i], Is.EqualTo(7));
+        }
+    }
+
+    [Test]
+    public void Shift_InRangeNullsPreserved_WithoutFillValue()
+    {
+        var column = NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 3 }, new[] { false, true, false });
+
+        var shifted = column.Shift(1);
+        var led = column.Shift(-1);
+
+        Assert.That(shifted.IsNull(0), Is.True);
+        Assert.That(shifted[1], Is.EqualTo(1));
+        Assert.That(shifted.IsNull(2), Is.True);
+
+        Assert.That(led.IsNull(0), Is.True);
+        Assert.That(led[1], Is.EqualTo(3));
+        Assert.That(led.IsNull(2), Is.True);
+    }
 }

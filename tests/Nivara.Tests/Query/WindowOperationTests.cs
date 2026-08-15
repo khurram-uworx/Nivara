@@ -319,4 +319,99 @@ public class WindowOperationTests
 
         Assert.Throws<QueryExecutionException>(() => frame.AsQueryFrame().RollingSum("v", "x", 2, spec).Collect());
     }
+
+    // ── All-null columns and window-size boundaries (#252) ──
+
+    [Test]
+    public void Rolling_AllNullColumn_ThroughPipeline_AllMasked()
+    {
+        var source = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+        using var frame = FrameWith(("v", source));
+        using var result = frame.AsQueryFrame()
+            .RollingSum("v", "sum", 2)
+            .RollingMin("v", "min", 2)
+            .RollingMax("v", "max", 2)
+            .RollingMean("v", "mean", 2)
+            .Collect();
+
+        var sum = result.GetColumn<int>("sum");
+        var min = result.GetColumn<int>("min");
+        var max = result.GetColumn<int>("max");
+        var mean = result.GetColumn<double>("mean");
+
+        foreach (var col in new IColumn[] { sum, min, max, mean })
+            for (int i = 0; i < 4; i++)
+                Assert.That(col.IsNull(i), Is.True);
+    }
+
+    [Test]
+    public void Rolling_AllNullColumn_ThroughPipeline_WithNullHandler_Fills()
+    {
+        var source = NivaraColumn.CreateFromNullable(new int?[] { null, null, null, null });
+        using var frame = FrameWith(("v", source));
+        using var result = frame.AsQueryFrame()
+            .RollingSum("v", "sum", 2, nullHandler: () => 0)
+            .RollingMax("v", "max", 2, nullHandler: () => 5)
+            .Collect();
+
+        var sum = result.GetColumn<int>("sum");
+        var max = result.GetColumn<int>("max");
+        Assert.That(sum.HasNulls, Is.False);
+        Assert.That(max.HasNulls, Is.False);
+        Assert.That(sum[3], Is.EqualTo(0));
+        Assert.That(max[3], Is.EqualTo(5));
+    }
+
+    [Test]
+    public void Rolling_WindowLargerThanData_ThroughPipeline_AllMasked()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        using var result = frame.AsQueryFrame().RollingSum("v", "sum", 5).Collect();
+
+        var sum = result.GetColumn<int>("sum");
+        for (int i = 0; i < 3; i++)
+            Assert.That(sum.IsNull(i), Is.True);
+    }
+
+    [Test]
+    public void Rolling_WindowEqualsDataLength_ThroughPipeline_FirstOutputAtLastRow()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        using var result = frame.AsQueryFrame().RollingSum("v", "sum", 3).Collect();
+
+        var sum = result.GetColumn<int>("sum");
+        Assert.That(sum.IsNull(0), Is.True);
+        Assert.That(sum.IsNull(1), Is.True);
+        Assert.That(sum[2], Is.EqualTo(6));
+    }
+
+    [Test]
+    public void Shift_PeriodEqualToLength_ThroughPipeline_AllMasked()
+    {
+        using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
+        using var result = frame.AsQueryFrame()
+            .Shift("v", "lag", 3)
+            .Lead("v", "lead", 3)
+            .Collect();
+
+        var lag = result.GetColumn<int>("lag");
+        var lead = result.GetColumn<int>("lead");
+        for (int i = 0; i < 3; i++)
+        {
+            Assert.That(lag.IsNull(i), Is.True);
+            Assert.That(lead.IsNull(i), Is.True);
+        }
+    }
+
+    [Test]
+    public void Shift_AllNullColumn_ThroughPipeline_AllMasked()
+    {
+        var source = NivaraColumn.CreateFromNullable(new int?[] { null, null, null });
+        using var frame = FrameWith(("v", source));
+        using var result = frame.AsQueryFrame().Shift("v", "lag", 1).Collect();
+
+        var lag = result.GetColumn<int>("lag");
+        for (int i = 0; i < 3; i++)
+            Assert.That(lag.IsNull(i), Is.True);
+    }
 }
