@@ -1,3 +1,4 @@
+using System.Buffers;
 using Nivara.Helpers;
 using Nivara.Operations;
 
@@ -10,14 +11,17 @@ namespace Nivara.Tensors;
 /// <para>
 /// The engine partitions rows by the spec's partition keys (reusing the hash-based grouping
 /// from <see cref="GroupByOperation"/>), stable-sorts each partition by the order keys using
-/// <see cref="MultiColumnComparer"/>, computes the window per partition via the supplied
-/// delegate, concatenates the per-partition results, then scatters them back to the original
-/// row order. Null order-key rows are ordered per the sort keys' <see cref="NullOrdering"/>
-/// and participate in the window (SQL-faithful). An empty spec short-circuits to the raw
-/// delegate so behavior is identical to the existing unpartitioned paths.
+/// <see cref="MultiColumnComparer"/> with a row-index tiebreak, computes the window per
+/// partition via the supplied delegate over contiguous sorted slices of a single gathered
+/// source column, then scatters the per-partition results back to the original row order in
+/// one pass (no concatenation or inverse-permutation step). Null order-key rows are ordered
+/// per the sort keys' <see cref="NullOrdering"/> and participate in the window (SQL-faithful).
+/// An empty spec short-circuits to the raw delegate so behavior is identical to the existing
+/// unpartitioned paths.
 /// </para>
 /// </summary>
-/// <remarks>Added as part of issue #162 Over/WindowSpec builder delivery.</remarks>
+/// <remarks>Added as part of issue #162 Over/WindowSpec builder delivery; scatter refactor part of
+/// issue #251 allocation reduction.</remarks>
 internal static class PartitionedWindowEngine
 {
     /// <summary>
@@ -50,41 +54,78 @@ internal static class PartitionedWindowEngine
         if (rowCount == 0)
             return partitionCompute(sourceColumn);
 
-        var partitions = spec.PartitionColumns.Count == 0
-            ? new[] { Enumerable.Range(0, rowCount).ToArray() }
+        var singlePartition = spec.PartitionColumns.Count == 0;
+        var partitions = singlePartition
+            ? Array.Empty<int[]>()
             : GroupByOperation.CreateGroupsInternal(columns, spec.PartitionColumns.ToArray())
                 .GetAllGroups()
                 .Select(g => g.Indices.ToArray())
                 .ToArray();
 
         var comparer = new MultiColumnComparer(columns, spec.OrderKeys);
+        var tieBreakComparer = new RankTieBreakComparer(comparer);
 
-        var sortedAll = new int[rowCount];
-        int cursor = 0;
-        foreach (var partition in partitions)
+        // positions[pos] = original row holding the sorted position `pos`.
+        var positions = new int[rowCount];
+
+        int[]? scratch = null;
+        bool scratchPooled = false;
+        if (singlePartition)
         {
-            var sorted = partition.OrderBy(i => i, comparer).ToArray();
-            sorted.CopyTo(sortedAll, cursor);
-            cursor += sorted.Length;
+            if (rowCount > 1024)
+            {
+                scratch = ArrayPool<int>.Shared.Rent(rowCount);
+                scratchPooled = true;
+            }
+            else
+            {
+                scratch = new int[rowCount];
+            }
+
+            for (int i = 0; i < rowCount; i++)
+                scratch[i] = i;
+            if (spec.OrderKeys.Count > 0)
+                Array.Sort(scratch, 0, rowCount, tieBreakComparer);
+            scratch.CopyTo(positions, 0);
+        }
+        else
+        {
+            int cursor = 0;
+            foreach (var partition in partitions)
+            {
+                if (spec.OrderKeys.Count > 0)
+                    Array.Sort(partition, 0, partition.Length, tieBreakComparer);
+                partition.CopyTo(positions, cursor);
+                cursor += partition.Length;
+            }
         }
 
-        var sortedSource = ColumnFilterHelper.ReorderColumn(sourceColumn, sortedAll);
-
-        var computedParts = new List<IColumn>(partitions.Length);
-        cursor = 0;
-        foreach (var partition in partitions)
+        try
         {
-            computedParts.Add(partitionCompute(sortedSource.Slice(cursor, partition.Length)));
-            cursor += partition.Length;
+            var sortedSource = ColumnFilterHelper.ReorderColumn(sourceColumn, positions);
+
+            var computedParts = new List<IColumn>(singlePartition ? 1 : partitions.Length);
+            int offset = 0;
+            if (singlePartition)
+            {
+                computedParts.Add(partitionCompute(sortedSource));
+            }
+            else
+            {
+                foreach (var partition in partitions)
+                {
+                    computedParts.Add(partitionCompute(sortedSource.Slice(offset, partition.Length)));
+                    offset += partition.Length;
+                }
+            }
+
+            return ColumnFilterHelper.ScatterPartsColumn(computedParts, positions);
         }
-
-        var sortedResult = ColumnFilterHelper.ConcatenateColumns(computedParts);
-
-        var inverse = new int[rowCount];
-        for (int i = 0; i < sortedAll.Length; i++)
-            inverse[sortedAll[i]] = i;
-
-        return ColumnFilterHelper.ReorderColumn(sortedResult, inverse);
+        finally
+        {
+            if (scratchPooled)
+                ArrayPool<int>.Shared.Return(scratch!);
+        }
     }
 
     /// <summary>
