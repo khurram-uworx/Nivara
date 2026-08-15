@@ -103,6 +103,20 @@ public class WindowExpressionEvaluationTests
     }
 
     [Test]
+    public void Evaluate_RowNumber_NullOrderKey_NumberedLast()
+    {
+        var input = Input(("v", NivaraColumn.CreateFromNullable(new int?[] { 2, null, 1, null })));
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(
+            ColumnExpressions.RowNumber(null, new[] { new SortExpressionKey(ColumnExpressions.Col("v")) }),
+            input);
+
+        Assert.That(result.ElementType, Is.EqualTo(typeof(long)));
+        AssertColumn(result, new long?[] { 2, 3, 1, 4 });
+    }
+
+    [Test]
     public void Evaluate_Shift_WithFillValue_AppliesAtBoundary()
     {
         var input = Input(("A", NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 })));

@@ -34,8 +34,10 @@ public enum RankKind
 /// <para>
 /// Partitions rows by the partition keys (reusing the hash-based grouping from
 /// <see cref="GroupByOperation"/>), then stable-sorts each partition by the order keys
-/// using <see cref="MultiColumnComparer"/>. Rows with any null order key produce a null
-/// output and are excluded from numbering and from the percent_rank denominator.
+/// using <see cref="MultiColumnComparer"/>. For rank/dense_rank/percent_rank, rows with any
+/// null order key produce a null output and are excluded from numbering and from the
+/// percent_rank denominator. Row_number instead numbers every partition row, placing
+/// null-key rows last in stable partition order (issue #254), matching SQL semantics.
 /// </para>
 /// </summary>
 /// <remarks>Added as part of issue #156 rank family window functions delivery.</remarks>
@@ -78,13 +80,30 @@ internal static class RankKernel
         foreach (var partition in partitions)
         {
             var valid = new List<int>(partition.Length);
+            var nullKeyRows = kind == RankKind.RowNumber ? new List<int>() : null;
             for (int i = 0; i < partition.Length; i++)
             {
                 var row = partition[i];
                 if (comparer != null && hasNullKey(columns, orderBy, row))
-                    mask[row] = true;
+                {
+                    if (nullKeyRows is not null)
+                        nullKeyRows.Add(row);
+                    else
+                        mask[row] = true;
+                }
                 else
+                {
                     valid.Add(row);
+                }
+            }
+
+            if (nullKeyRows is not null && nullKeyRows.Count > 0)
+            {
+                // RowNumber numbers every partition row: null-key rows sort last (stable, original
+                // partition order) and follow the numbered non-null rows (issue #254).
+                var nextNumber = valid.Count + 1;
+                foreach (var row in nullKeyRows)
+                    rankResult[row] = nextNumber++;
             }
 
             if (valid.Count == 0)

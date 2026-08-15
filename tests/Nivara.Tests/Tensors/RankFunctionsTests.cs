@@ -139,11 +139,24 @@ public class RankFunctionsTests
     // ── Null order keys ──
 
     [Test]
-    public void Rank_NullOrderKey_NullOutput_ExcludedFromNumbering()
+    public void RowNumber_NullOrderKey_NumberedLast()
     {
         var columns = Columns(("v", NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 3 }, new[] { false, true, false })));
 
         var result = Rank<long>(RankKernel.Compute(columns, [], [new SortKey("v")], RankKind.RowNumber), RankKind.RowNumber);
+
+        Assert.That(result.HasNulls, Is.False, "row_number numbers every row including null-key rows (issue #254)");
+        Assert.That(result[0], Is.EqualTo(1));
+        Assert.That(result[1], Is.EqualTo(3));
+        Assert.That(result[2], Is.EqualTo(2));
+    }
+
+    [Test]
+    public void Rank_NullOrderKey_NullOutput_ExcludedFromNumbering()
+    {
+        var columns = Columns(("v", NivaraColumn<int>.CreateFromSpans(new[] { 1, 0, 3 }, new[] { false, true, false })));
+
+        var result = Rank<long>(RankKernel.Compute(columns, [], [new SortKey("v")], RankKind.Rank), RankKind.Rank);
 
         Assert.That(result[0], Is.EqualTo(1));
         Assert.That(result.IsNull(1), Is.True);
@@ -218,9 +231,16 @@ public class RankFunctionsTests
         foreach (var group in new[] { 0, 1, 2 })
         {
             var validRows = new List<int>();
+            var nullRows = new List<int>();
             for (int i = 0; i < length; i++)
-                if (groups[i] == group && !mask[i])
+            {
+                if (groups[i] != group)
+                    continue;
+                if (mask[i])
+                    nullRows.Add(i);
+                else
                     validRows.Add(i);
+            }
 
             var distinctValues = validRows.Select(i => values[i]).Distinct().OrderBy(x => x).ToList();
             var denseBase = new Dictionary<int, long>();
@@ -239,15 +259,14 @@ public class RankFunctionsTests
                 Assert.That(percentRank[row], Is.EqualTo(expectedPercent).Within(1e-9), $"percentRank mismatch at {row}");
             }
 
-            for (int i = 0; i < length; i++)
+            for (int n = 0; n < nullRows.Count; n++)
             {
-                if (groups[i] != group || !mask[i])
-                    continue;
-
-                Assert.That(rowNumber.IsNull(i), Is.True, $"rowNumber null mismatch at {i}");
-                Assert.That(rank.IsNull(i), Is.True, $"rank null mismatch at {i}");
-                Assert.That(denseRank.IsNull(i), Is.True, $"denseRank null mismatch at {i}");
-                Assert.That(percentRank.IsNull(i), Is.True, $"percentRank null mismatch at {i}");
+                var row = nullRows[n];
+                Assert.That(rowNumber[row], Is.EqualTo((long)validRows.Count + n + 1), $"rowNumber null-key row mismatch at {row}");
+                Assert.That(rowNumber.IsNull(row), Is.False, $"rowNumber must not be null at {row}");
+                Assert.That(rank.IsNull(row), Is.True, $"rank null mismatch at {row}");
+                Assert.That(denseRank.IsNull(row), Is.True, $"denseRank null mismatch at {row}");
+                Assert.That(percentRank.IsNull(row), Is.True, $"percentRank null mismatch at {row}");
             }
         }
     }

@@ -233,6 +233,24 @@ public class RankOperationTests
     }
 
     [Test]
+    public void QueryFrame_RowNumber_NullOrderKey_NumberedLast()
+    {
+        using var frame = FrameWith(
+            ("t", NivaraColumn.CreateFromNullable(new int?[] { 2, null, 1, null })),
+            ("v", IntColumn(10, 20, 30, 40)));
+        using var result = frame.AsQueryFrame()
+            .RowNumber("rn", null, new[] { new SortKey("t") })
+            .Collect();
+
+        var rn = result.GetColumn<long>("rn");
+        Assert.That(rn.HasNulls, Is.False, "row_number numbers every row including null-key rows (issue #254)");
+        Assert.That(rn[0], Is.EqualTo(2));
+        Assert.That(rn[1], Is.EqualTo(3));
+        Assert.That(rn[2], Is.EqualTo(1));
+        Assert.That(rn[3], Is.EqualTo(4));
+    }
+
+    [Test]
     public void QueryFrame_Rank_SchemaReflectsColumnTypes()
     {
         using var frame = FrameWith(("v", IntColumn(1, 2, 3)));
