@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.Helpers;
 using Nivara.Operations;
@@ -393,15 +394,25 @@ internal sealed class QueryFrame : IDisposable
     /// </summary>
     /// <returns>A materialized NivaraFrame with the query results</returns>
     /// <exception cref="QueryExecutionException">Thrown when query execution fails</exception>
-    public NivaraFrame Collect()
+    public NivaraFrame Collect() => CollectAsync(default).GetAwaiter().GetResult()!;
+
+    /// <summary>
+    /// Executes the query asynchronously and returns a materialized NivaraFrame
+    /// This is the execution barrier that triggers lazy query evaluation
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A task representing the materialized NivaraFrame with the query results</returns>
+    /// <exception cref="QueryExecutionException">Thrown when query execution fails</exception>
+    public Task<NivaraFrame> CollectAsync(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
         try
         {
             var queryPlan = new QueryPlan(source, operations);
-            var executor = new QueryExecutor();
-            return executor.Execute(queryPlan);
+            var engine = new ExecutionEngine();
+            var context = new NivaraExecutionContext(ExecutionStrategy.Lazy) { CancellationToken = ct };
+            return engine.ExecuteAsync(queryPlan, context);
         }
         catch (Exception ex) when (ex is not QueryExecutionException)
         {
