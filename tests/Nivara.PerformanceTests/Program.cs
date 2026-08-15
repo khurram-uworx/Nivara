@@ -4,6 +4,7 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Diagnostics;
 using Nivara.Expressions;
+using Nivara.Operations;
 using Nivara.Storage;
 using Nivara.Tensors;
 using System.Diagnostics;
@@ -272,6 +273,78 @@ static class Program
 
         RunBatchedAttentionScenarios();
         RunRowScoringScenarios();
+        RunWindowAllocationScenarios();
+    }
+
+    static void RunWindowAllocationScenarios()
+    {
+        Run("RollingSum null-free 1M x int (w10)", 5, 50,
+            () =>
+            {
+                var data = NivaraColumn<int>.Create(FillInt(new int[1_000_000]));
+                return () => data.RollingSum(10);
+            });
+
+        Run("RollingSum nulls 1M x int (w10)", 5, 50,
+            () =>
+            {
+                var data = FillInt(new int[1_000_000]);
+                var mask = new bool[1_000_000];
+                for (int i = 0; i < mask.Length; i++)
+                    mask[i] = i % 7 == 0;
+                var col = NivaraColumn<int>.CreateFromSpans(data, mask);
+                return () => col.RollingSum(10, nullHandler: () => 0);
+            });
+
+        Run("RankKernel RowNumber 100k x int", 5, 50,
+            () =>
+            {
+                var columns = new Dictionary<string, IColumn> { ["v"] = NivaraColumn<int>.Create(FillInt(new int[100_000])) };
+                var orderBy = new[] { new SortKey("v", SortDirection.Ascending) };
+                return () => RankKernel.Compute(columns, [], orderBy, RankKind.RowNumber);
+            });
+
+        Run("GroupBy 1M rows x 1000 keys (typed)", 5, 20,
+            () =>
+            {
+                var keys = new int[1_000_000];
+                for (int i = 0; i < keys.Length; i++)
+                    keys[i] = i % 1000;
+                var columns = new Dictionary<string, IColumn> { ["k"] = NivaraColumn<int>.Create(keys) };
+                return () => GroupByOperation.CreateGroupsInternal(columns, new[] { "k" });
+            });
+
+        Run("GroupBy 1M rows x 100 string keys (typed)", 5, 20,
+            () =>
+            {
+                var groups = new string[1_000_000];
+                for (int i = 0; i < groups.Length; i++)
+                    groups[i] = (i % 100).ToString();
+                var columns = new Dictionary<string, IColumn> { ["g"] = NivaraColumn<string>.CreateForReferenceType(groups) };
+                return () => GroupByOperation.CreateGroupsInternal(columns, new[] { "g" });
+            });
+
+        Run("PartitionedWindow RollingSum 1M x 100 parts", 5, 20,
+            () =>
+            {
+                var data = new int[1_000_000];
+                var groups = new string[1_000_000];
+                for (int i = 0; i < data.Length; i++)
+                {
+                    data[i] = i;
+                    groups[i] = (i % 100).ToString();
+                }
+
+                var columns = new Dictionary<string, IColumn>
+                {
+                    ["g"] = NivaraColumn<string>.CreateForReferenceType(groups),
+                    ["v"] = NivaraColumn<int>.Create(data),
+                };
+                var spec = new WindowSpec().PartitionBy("g");
+                return () => PartitionedWindowEngine.Compute(
+                    columns, columns["v"], spec,
+                    col => ((NivaraColumn<int>)col).RollingSum(10, 1));
+            });
     }
 
     static void RunRowScoringScenarios()
@@ -732,6 +805,13 @@ static class Program
     {
         for (int i = 0; i < values.Length; i++)
             values[i] = i * 0.001;
+        return values;
+    }
+
+    static int[] FillInt(int[] values)
+    {
+        for (int i = 0; i < values.Length; i++)
+            values[i] = i;
         return values;
     }
 }
