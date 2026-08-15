@@ -603,4 +603,54 @@ public class FusedExpressionEvaluatorTests
         Assert.That(result.GetValue(0), Is.EqualTo(date));
         Assert.That(result.GetValue(1), Is.EqualTo(date));
     }
+
+    // ── #246: literal runtime type must be part of the plan signature ──
+
+    [Test]
+    public void Infer_LiteralTypesWithSameText_HaveDistinctSignatures()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2 }) };
+
+        var floatSig = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + 0.1f, input)!.Signature;
+        var doubleSig = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + 0.1, input)!.Signature;
+        var decimalSig = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + 1.1m, input)!.Signature;
+        var doubleSig2 = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + 1.1, input)!.Signature;
+        var intSig = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + 7, input)!.Signature;
+        var nintSig = ExpressionTypeInferer.TryInfer(ColumnExpressions.Col("A") + (nint)7, input)!.Signature;
+
+        Assert.That(floatSig, Is.Not.EqualTo(doubleSig), "0.1f and 0.1 must not share a signature");
+        Assert.That(decimalSig, Is.Not.EqualTo(doubleSig2), "1.1m and 1.1 must not share a signature");
+        Assert.That(decimalSig, Is.Not.EqualTo(floatSig));
+        Assert.That(intSig, Is.Not.EqualTo(nintSig), "int and nint literals must not share a signature");
+    }
+
+    [Test]
+    public void Evaluate_FloatAndDoubleLiterals_ProduceTypedResults()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var floatResult = fused.Evaluate(ColumnExpressions.Col("A") + 0.1f, input);
+        var doubleResult = fused.Evaluate(ColumnExpressions.Col("A") + 0.1, input);
+
+        Assert.That(floatResult.ElementType, Is.EqualTo(typeof(float)));
+        Assert.That(doubleResult.ElementType, Is.EqualTo(typeof(double)));
+        AssertColumn(floatResult, new float?[] { 1.1f, 2.1f, 3.1f });
+        AssertColumn(doubleResult, new double?[] { 1.1, 2.1, 3.1 });
+    }
+
+    [Test]
+    public void Evaluate_DecimalAndDoubleLiterals_ProduceTypedResults()
+    {
+        var input = new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2 }) };
+        var fused = new FusedExpressionEvaluator();
+
+        var decimalResult = fused.Evaluate(ColumnExpressions.Col("A") + 1.1m, input);
+        var doubleResult = fused.Evaluate(ColumnExpressions.Col("A") + 1.1, input);
+
+        Assert.That(decimalResult.ElementType, Is.EqualTo(typeof(decimal)));
+        Assert.That(doubleResult.ElementType, Is.EqualTo(typeof(double)));
+        AssertColumn(decimalResult, new decimal?[] { 2.1m, 3.1m });
+        AssertColumn(doubleResult, new double?[] { 2.1, 3.1 });
+    }
 }

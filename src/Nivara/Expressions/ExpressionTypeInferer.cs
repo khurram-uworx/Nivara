@@ -183,9 +183,13 @@ internal static class ExpressionTypeInferer
         if (value == null)
             return "null";
 
-        if (value is IFormattable formattable)
-            return formattable.ToString(null, CultureInfo.InvariantCulture);
+        // Include the literal runtime type: two literals that stringify identically
+        // (0.1f vs 0.1, 1.1m vs 1.1, nint vs int) must not share a signature, or the
+        // compiled-delegate cache would reuse the wrong typed kernel (issue #246).
+        var text = value is IFormattable formattable
+            ? formattable.ToString(null, CultureInfo.InvariantCulture)
+            : value.ToString() ?? string.Empty;
 
-        return value.ToString() ?? string.Empty;
+        return $"{text}:{value.GetType().FullName}";
     }
 }
