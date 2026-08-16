@@ -147,62 +147,30 @@ before implementation starts. Every item is marked with its **verified status**:
 | **ADR-001 non-nullable AutoDiff boundary** | ✅ done | Constructors throw `AutoGradException("ADR-001 …")` on null input (`src/Nivara/AutoDiff/ReverseGradTensor.cs:47`, `ForwardGradTensor.cs:38`), zero-copy `FromColumn/FromSeries/FromArray/FromMatrix`, inference-default via `GradientUtils.Grad()`. |
 | **AutoDiff ops span-ified + `TensorPrimitives`** | ✅ done | `ReverseGradOperations.cs` / `ForwardGradOperations.cs` / `GradKernels.cs` operate on contiguous spans with `TensorPrimitives`; no `NivaraColumn.Data` access in kernels (ADR-002). |
 
+### Resolved by Phase 1 core gap-fills (branch `khurram/incident`)
+
+The five core library gaps the plan's Phase 1 shipped against were fixed in core on
+`khurram/incident` (commits listed; tracked as executed in the plan's 1.6 completion marker).
+
+| # | Capability | Status | Evidence |
+|---|------------|--------|----------|
+| 1 | **Percentile / quantile / median aggregation** | ✅ resolved | `QuantileAggregation`/`MedianAggregation` in `src/Nivara/Operations/AggregationFunction.cs` + `NivaraSeries<T>.Quantile(q)`/`Median()` (commit `9a4b2b5`). The `ColumnExpressions.Quantile` window/aggregation expression node remains deferred to issue #277 (needed for group→aggregate→rank plans). |
+| 2 | **StdDev / Variance aggregation** | ✅ resolved | `StdDevAggregation`/`VarianceAggregation` + `NivaraSeries<T>.StdDev()`/`Variance()` (commit `4f20023`). |
+| 3 | **Execution diagnostics reachable through the public query path** | ✅ resolved | Public `QueryFrame.LastExecutionDiagnostics` / `GetExecutionDiagnostics()` with `RowsRead`/`RowsReturned`/`MaterializedColumns` counters instrumented across all four strategies + `GenerateReport()` (commit `17e106f`); the `InternalsVisibleTo` alternative is obsolete. |
+| 4 | **Parquet chunk streaming without per-chunk metadata reparse** | ✅ resolved | `ParquetLazySource` reuses a single `ParquetReader` (footer metadata parsed once) guarded by a `SemaphoreSlim`, with true-sync `Execute`/`ReadChunk` and row-group-aligned chunks; `ReadParquetStreaming` yields one frame per row group (commit `2529e63`). |
+| 7 | **Streamed row materialization** | ✅ resolved | `NivaraQuery<T>.ToObjectsAsync` per-chunk row projection with constant memory (commit `3e45188`). |
+
 ### Open gaps to fix while implementing this sample
 
-These are the items the implementation plan (`../Incident-PLAN.md`) targets first. Each was
+These are the items the implementation plan (`../Incident-PLAN.md`) targets. Gaps 1, 2, 3, 4, and
+7 above were fixed in core by the Phase 1 branch; the remaining items below are **deferred** to a
+follow-up tracked in issue #284 (Phase 2 AutoDiff cleanup/SIMD = gaps 9/10; Phase 3 sample
+measurements = gaps 5/6/8), except gap 8's design-test which is escalated to Phase 3. Each was
 verified as genuinely missing on `main` by the pre-implementation audit.
 
-#### 1. Percentile / quantile / median aggregation (missing analytical capability)
+#### 5. Window semantics across chunk boundaries (non-streamable fallback) — **DEFERRED to issue #284 (Phase 3 measurement)**
 
-The IDEA's "Percentiles and distributions" forcing function is **unmet**: there is no public
-`Quantile`/`Percentile`/`Median` anywhere in the core (grep for `Quantile|Percentile|Median`
-in `src/Nivara` returns only an internal `TryNormalize*` helper in `TensorsHelper.cs`).
-Latency P50/P95/P99 is the single most common incident-analysis metric and cannot be expressed.
-
-Needs: a `QuantileAggregation`/`MedianAggregation` (median = q0.5) in
-`src/Nivara/Operations/AggregationFunction.cs`, a `NivaraSeries.Quantile(q)` method, and
-`ColumnExpressions.Quantile(...)` window/aggregation expression so group→aggregate→rank plans
-can carry it. Should be added with Polars cross-validation fixtures (extend `Python/gen_reference.py`).
-
-#### 2. StdDev / Variance aggregation (missing analytical capability)
-
-`TensorPrimitives.StdDev` is only consumed by an internal `TryNormalize*` helper; there is no
-`StdDevAggregation`/`VarianceAggregation`, no `NivaraSeries.StdDev`, and no expression node.
-Anomaly detection over latency and error-rate series needs stddev (z-scores). Same delivery
-shape as percentile.
-
-#### 3. Execution diagnostics are unreachable through the public query path
-
-`ExecutionEngine.LastDiagnostics` (`src/Nivara/Execution/ExecutionEngine.cs:108`) is public on an
-**internal** class; `QueryFrame.Collect()`/`CollectAsync()` build an engine internally with no
-`ExecutionDiagnostics` attached and **discard the diagnostics**. `NivaraExecutionContext` is
-internal. The only public surface is string rendering (`QueryFrame.ExplainPlan()`,
-`GetDiagnosticInfo(mode)`, `AnalyzeOptimizations()`, `AnalyzeQueryPlan()`).
-
-The IDEA's "Query Plan / Execution" UI view wants *rows read, rows returned, kernels executed,
-materialized columns, intermediate allocations, peak memory, elapsed* — most of which are not
-instrumented at all today (there is no `RowsRead`/`RowsReturned`/materialized-columns field
-anywhere). Options: (a) add public diagnostics accessors on `QueryFrame` (e.g.
-`GetExecutionDiagnostics()`) and row-count instrumentation in the execution strategies, or
-(b) give the sample `InternalsVisibleTo` access. (a) is preferred — it is the product-visible
-result the IDEA's "visible execution model" goal is really about.
-
-#### 4. Parquet chunk streaming is per-row-group with per-chunk metadata reparse
-
-`ParquetLazySource` (`src/Nivara.Extensions/IO/ParquetDataSource.cs`) treats **one chunk = one
-row group** (`ReadChunk` at `:118`), and each `ReadRowGroupAsync` (`:164`) opens a fresh
-`FileStream` + `ParquetReader` that re-parses thrift metadata every chunk. Column extraction
-copies element-by-element through `Convert.ChangeType` (`NivaraParquetReader.cs:379`), so the
-IDEA's "zero-copy column extraction" is aspirational, not implemented. Additionally
-`ParquetLazySource.Execute()` uses **sync-over-async** (`ParquetDataSource.cs:65`,
-`.GetAwaiter().GetResult()`) — the IDEA's own flagged gap #2. And `ReadParquetStreaming`
-(`NivaraParquetReader.cs:164-193`) is a stub that reads the whole file as one chunk.
-
-For the replay demo the sample must write Parquet with small row groups (writer-controlled via
-`rowGroupSize`) so replay timing is meaningful; the reader-side work is: reuse one
-`ParquetReader` across chunks, keep the metadata parse once, and honor chunkSize where feasible.
-
-#### 5. Window semantics across chunk boundaries (non-streamable fallback)
+The IDEA's flagged gap #1 stands: window expressions (`ColumnExpressions.RowNumber/.Rank/...`),
 
 The IDEA's flagged gap #1 stands: window expressions (`ColumnExpressions.RowNumber/.Rank/...`),
 `Rolling`, `Cumulative`, `Shift`, `Rank`, `Sort`, `GroupBy`, `Join`, `Distinct` are
@@ -212,7 +180,7 @@ uses flush-concatenate-resume. The sample should **measure** whether window-heav
 defeat true streaming, and decide (with evidence) whether cross-chunk window computation is a
 core improvement worth pursuing.
 
-#### 6. Memory budget is advisory, not a hard limit
+#### 6. Memory budget is advisory, not a hard limit — **DEFERRED to issue #284 (Phase 3 measurement)**
 
 The bounded `Channel<T>` (capacity clamped to [2,16], `StreamingExecutionStrategy:86`) bounds
 in-flight chunks, but there is no byte-level enforcement on the query path. `StreamingBufferManager`
@@ -220,15 +188,7 @@ in-flight chunks, but there is no byte-level enforcement on the query path. `Str
 into** the query strategy (its only caller is the stub `ReadParquetStreamingInternal`). The sample
 should stress this with a large replay and report peak memory vs budget.
 
-#### 7. No streamed row materialization (`ToListAsync` materializes the whole result)
-
-`NivaraQuery<T>.ToListAsync` (`src/Nivara/Linq/NivaraQuery.cs:260-274`) calls
-`frame.CollectAsync` then converts rows — it is not constant-memory. `ToObjectsAsync`
-(per-chunk row projection) was explicitly deferred (PHASE4 resolved decision 5). For the CLI
-"streamed N rows" story the sample needs a per-chunk row projection, either in the sample or as
-a new public `ToObjectsAsync`.
-
-#### 8. Query API ergonomics for group→aggregate→rank→filter
+#### 8. Query API ergonomics for group→aggregate→rank→filter — **DEFERRED to issue #284 (Phase 3 design-test)**
 
 `QueryFrame` has `GroupBy` but no `Aggregate`/`Having`/`Where` alias (`Filter` is the only
 predicate, `QueryFrame.cs:108`). The eager `NivaraFrameExtensions.GroupBy(frame, string[],
@@ -240,7 +200,7 @@ the keys — its own comment calls it a "simplified implementation". The typed
 plan-representability of "group → aggregate → rank → filter" should be exercised and reported
 (the IDEA's design-test principle) before deciding whether the core needs a cleaner fluent path.
 
-#### 9. ADR-001 residual cleanup (dead branches inside the non-null domain)
+#### 9. ADR-001 residual cleanup (dead branches inside the non-null domain) — **DEFERRED to issue #284 (Phase 2)**
 
 The AutoDiff audit confirms the domain is **fully compliant** — no null-mask propagation remains
 in hot paths; all 8 data-null checks are legitimate boundary enforcement. Two cosmetic dead
@@ -251,7 +211,7 @@ branches remain and should be removed while touching these files:
 - `BroadcastGradient` (`GradOperationKernels.cs:241-258`): same `TryGetSpan` + `ArrayPool`
   fallback pattern.
 
-#### 10. SIMD opportunities discovered by the audit
+#### 10. SIMD opportunities discovered by the audit — **DEFERRED to issue #284 (Phase 2)**
 
 These are performance improvements, not correctness fixes. Prioritized:
 
@@ -285,9 +245,8 @@ The important properties are **bounded memory** during replay (channel backpress
 
 - **Not yet implemented** — this README documents the audited gap inventory and the planned
   surface; the implementation plan lives in `../Incident-PLAN.md`. All "planned surface" items
-  above are targets, not delivered code.
-- Percentile/stddev aggregation does not exist in core yet (Gap 1/2) — the first milestone
-  cannot be completed without it.
+  above are targets, not delivered code. Phase 1 core gap-fills (gaps 1, 2, 3, 4, 7) are resolved
+  on `khurram/incident`; the sample itself is still to be built (Phase 3, issue #284).
 - `AsStream` window-heavy queries fall back to single-frame materialization (Gap 5) — the replay
   demo may not be truly chunked for window-heavy analyses until this is measured and addressed.
 
