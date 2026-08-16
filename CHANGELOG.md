@@ -23,6 +23,14 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **`CollectAsync`/`ToListAsync` now run genuinely asynchronously (#266)** — the async query
+  path no longer hops to the thread pool via `Task.Run`. `LazyExecutionStrategy` gained an
+  async-native `ExecuteCoreAsync` that drives sources through `IQuerySource.ExecuteAsync` and
+  operations through `IQueryOperation.ExecuteAsync` (the default `ExecuteAsync` no longer
+  wraps sync `Execute` in `Task.Run`), and `CsvLazySource`/`JsonLazySource` read chunks with
+  real async I/O (`CsvReader.ReadAsync`, async buffer refill in `JsonRecordStreamReader`).
+  Awaits continue on the caller's context and cancellation propagates without an extra thread.
+
 - **Strongly-typed ML.NET training metrics (#233)** — `ModelIntegration.TrainAndEvaluate`
   now returns `(ITransformer Model, ModelEvaluationResult Metrics)` instead of
   `(ITransformer Model, object Metrics)`. `ModelEvaluationResult` is a sealed record with
@@ -70,6 +78,14 @@ All notable changes to Nivara are documented here. Released versions are publish
   every non-streamable boundary op on the already-processed result (a pre-existing async edge case
   surfaced while aligning the paths in #269). Boundary ops now run exactly once on the empty-source
   path.
+
+- **`QueryFrame.AsStream(chunkSize)` now honors the requested row count (#267)** — the chunk
+  size was previously encoded as `MemoryBudget = chunkSize * 100` and then re-derived by the
+  streaming strategy, which clamped small values to a 1000-row minimum. `NivaraExecutionContext`
+  now carries an explicit `ChunkSize` that `AsStream` sets directly and the streaming strategy
+  prefers over its budget-derived default; `StreamingExecutionStrategy.ValidatePlan` rejects
+  non-positive values. Honored by row-oriented sources (CSV, JSON); advisory for columnar
+  sources aligned to native row-group boundaries (e.g. Parquet).
 
 - **Fused plan signatures now encode the literal runtime type (#246)** —
   `ExpressionTypeInferer.FormatValue` appends `:{value.GetType().FullName}` to each literal
@@ -126,6 +142,17 @@ All notable changes to Nivara are documented here. Released versions are publish
   by scanning the input column names (ordinal, case-insensitive) instead of blindly using the
   next counter value. Previously a user column literally named `__window_0` was silently
   overwritten by the first materialized window.
+
+- **`JsonLazySource` chunk reads are now truly streaming (#265)** — `ReadChunk`/
+  `ReadChunkAsync` no longer slice a whole-file `JsonElement[]` produced by
+  `File.ReadAllText` + `JsonSerializer.Deserialize`. A new internal `JsonRecordStreamReader`
+  (a persistent `Utf8JsonReader` walker that resumes mid-array across `JsonReaderState`
+  reconstructions and grows its rented buffer past the 64 KB start) token-walks the file to
+  locate each chunk's `[start, end)` byte range, which is then read and parsed on demand;
+  schema inference and the `JsonEagerSource` ctor validation also read only the
+  `SchemaInferenceRecords` sample. Memory stays bounded to one chunk, the persistent file
+  handle is released once streaming reaches EOF, and backward/random chunk access reopens and
+  re-walks. Chunk-level locks serialize parallel chunk reads.
 
 ### Removed
 

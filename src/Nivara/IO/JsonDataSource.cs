@@ -1,6 +1,7 @@
 using Nivara.Exceptions;
 using Nivara.Helpers;
 using Nivara.Query;
+using System.Buffers;
 using System.Text.Json;
 
 namespace Nivara.IO;
@@ -76,8 +77,11 @@ sealed class JsonLazySource : IQuerySource
     private readonly string filePath;
     private readonly JsonOptions options;
     private readonly Lazy<Schema> lazySchema;
-    private readonly Lazy<JsonElement[]> lazyRecords;
     private readonly DeferredErrorHandler errorHandler;
+    private readonly SemaphoreSlim chunkLock = new(1, 1);
+    private JsonRecordStreamReader? chunkReader;
+    private int recordsConsumed;
+    private bool eofReached;
     private bool disposed;
 
     /// <summary>
@@ -92,7 +96,6 @@ sealed class JsonLazySource : IQuerySource
         this.errorHandler = new DeferredErrorHandler();
 
         lazySchema = new Lazy<Schema>(InferSchemaWithErrorHandling);
-        lazyRecords = new Lazy<JsonElement[]>(LoadRecords);
     }
     /// <inheritdoc />
     public Schema Schema
@@ -145,31 +148,6 @@ sealed class JsonLazySource : IQuerySource
         }
     }
 
-    private JsonElement[] LoadRecords()
-    {
-        var jsonText = File.ReadAllText(filePath);
-        if (string.IsNullOrWhiteSpace(jsonText))
-            return Array.Empty<JsonElement>();
-
-        try
-        {
-            if (options.IsArray)
-            {
-                var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
-                return records ?? Array.Empty<JsonElement>();
-            }
-            else
-            {
-                var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
-                return new[] { record };
-            }
-        }
-        catch (JsonException)
-        {
-            throw;
-        }
-    }
-
     /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
@@ -187,6 +165,24 @@ sealed class JsonLazySource : IQuerySource
 
         var columns = ReadAllChunks();
         return columns;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Check for deferred errors first
+        errorHandler.ThrowIfHasDeferredErrors("JSON data source execution");
+
+        if (!File.Exists(filePath))
+            throw new DataSourceException($"JSON file not found: '{filePath}'");
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+            throw new DataSourceException($"{filePath}: JSON file is empty");
+
+        return await ReadAllChunksAsync(cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -208,6 +204,65 @@ sealed class JsonLazySource : IQuerySource
         while (true)
         {
             var chunk = ReadChunk(chunkIndex, chunkSize);
+            if (chunk == null || chunk.Count == 0)
+                break;
+
+            int rowCount = chunk.Values.FirstOrDefault()?.Length ?? 0;
+            if (rowCount == 0)
+                break;
+
+            foreach (var name in columnNames)
+            {
+                var columnList = allColumns[name];
+                var column = chunk[name];
+                CopyColumnToList(column, columnList);
+            }
+
+            chunkIndex++;
+        }
+
+        if (allColumns.Values.All(l => l.Count == 0))
+        {
+            // Return empty columns based on schema
+            var emptyColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
+            {
+                var columnType = columnTypes[columnName];
+                emptyColumns[columnName] = ColumnFactory.Create(columnType, Array.Empty<object?>());
+            }
+            return emptyColumns;
+        }
+
+        var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+        {
+            var columnType = columnTypes[name];
+            var values = allColumns[name].ToArray();
+            result[name] = ColumnFactory.Create(columnType, values);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reads all data by iterating through chunks asynchronously and concatenating the results.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, IColumn>> ReadAllChunksAsync(CancellationToken cancellationToken)
+    {
+        var schema = Schema;
+        var columnNames = schema.ColumnNames;
+        var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+        var allColumns = new Dictionary<string, List<object?>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+            allColumns[name] = new List<object?>();
+
+        int chunkIndex = 0;
+        int chunkSize = 10000;
+
+        while (true)
+        {
+            var chunk = await ReadChunkAsync(chunkIndex, chunkSize, cancellationToken).ConfigureAwait(false);
             if (chunk == null || chunk.Count == 0)
                 break;
 
@@ -299,36 +354,33 @@ sealed class JsonLazySource : IQuerySource
             var columnNames = schema.ColumnNames;
             var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
 
-            var allRecords = lazyRecords.Value;
-            var start = chunkIndex * chunkSize;
-            if (start >= allRecords.Length)
-                return new Dictionary<string, IColumn>();
-
-            var end = Math.Min(start + chunkSize, allRecords.Length);
-            var chunkRecords = allRecords[start..end];
-
-            if (chunkRecords.Length == 0)
-                return new Dictionary<string, IColumn>();
-
-            var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-            foreach (var columnName in columnNames)
+            chunkLock.Wait();
+            try
             {
-                var columnType = columnTypes[columnName];
-                var values = new object?[chunkRecords.Length];
-                for (int i = 0; i < chunkRecords.Length; i++)
-                {
-                    object? value = null;
-                    if (chunkRecords[i].ValueKind == JsonValueKind.Object &&
-                        chunkRecords[i].TryGetProperty(columnName, out var property))
-                    {
-                        value = ConvertJsonValue(property, columnType);
-                    }
-                    values[i] = value;
-                }
-                columns[columnName] = ColumnFactory.Create(columnType, values);
-            }
+                if (!EnsureChunkPosition(chunkIndex, chunkSize))
+                    return new Dictionary<string, IColumn>();
 
-            return columns;
+                var range = chunkReader!.LocateRange((int)((long)chunkIndex * chunkSize), chunkSize, options.IsArray);
+                recordsConsumed = chunkReader.NextRecordIndex;
+                eofReached = range.Eof;
+
+                if (range.Rows == 0)
+                {
+                    if (eofReached)
+                        CloseChunkReader();
+                    return new Dictionary<string, IColumn>();
+                }
+
+                var chunkRecords = ReadRangeRecords(range);
+                if (eofReached)
+                    CloseChunkReader();
+
+                return BuildColumns(chunkRecords, columnNames, columnTypes);
+            }
+            finally
+            {
+                chunkLock.Release();
+            }
         }
         catch (JsonException ex)
         {
@@ -367,39 +419,33 @@ sealed class JsonLazySource : IQuerySource
             var columnNames = schema.ColumnNames;
             var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
 
-            // Ensure records are loaded (lazy, cached)
-            var allRecords = lazyRecords.Value;
-
-            var start = chunkIndex * chunkSize;
-            if (start >= allRecords.Length)
-                return new Dictionary<string, IColumn>();
-
-            var end = Math.Min(start + chunkSize, allRecords.Length);
-            var chunkRecords = allRecords[start..end];
-
-            if (chunkRecords.Length == 0)
-                return new Dictionary<string, IColumn>();
-
-            var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-            foreach (var columnName in columnNames)
+            await chunkLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                cancellationToken.ThrowIfCancellationRequested();
-                var columnType = columnTypes[columnName];
-                var values = new object?[chunkRecords.Length];
-                for (int i = 0; i < chunkRecords.Length; i++)
-                {
-                    object? value = null;
-                    if (chunkRecords[i].ValueKind == JsonValueKind.Object &&
-                        chunkRecords[i].TryGetProperty(columnName, out var property))
-                    {
-                        value = ConvertJsonValue(property, columnType);
-                    }
-                    values[i] = value;
-                }
-                columns[columnName] = ColumnFactory.Create(columnType, values);
-            }
+                if (!EnsureChunkPosition(chunkIndex, chunkSize))
+                    return new Dictionary<string, IColumn>();
 
-            return columns;
+                var range = await chunkReader!.LocateRangeAsync((int)((long)chunkIndex * chunkSize), chunkSize, options.IsArray, cancellationToken).ConfigureAwait(false);
+                recordsConsumed = chunkReader.NextRecordIndex;
+                eofReached = range.Eof;
+
+                if (range.Rows == 0)
+                {
+                    if (eofReached)
+                        CloseChunkReader();
+                    return new Dictionary<string, IColumn>();
+                }
+
+                var chunkRecords = await ReadRangeRecordsAsync(range, cancellationToken).ConfigureAwait(false);
+                if (eofReached)
+                    CloseChunkReader();
+
+                return BuildColumns(chunkRecords, columnNames, columnTypes);
+            }
+            finally
+            {
+                chunkLock.Release();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -420,6 +466,120 @@ sealed class JsonLazySource : IQuerySource
     }
 
     /// <summary>
+    /// Positions the persistent chunk reader so the next record scanned is the first record
+    /// of the requested chunk. Sequential chunk reads continue from the current position
+    /// (single pass); backward access or re-reads reopen the file and re-walk from the top.
+    /// </summary>
+    /// <param name="chunkIndex">The zero-based chunk index.</param>
+    /// <param name="chunkSize">The number of records per chunk.</param>
+    /// <returns>False when the file has fewer records than the requested chunk start.</returns>
+    private bool EnsureChunkPosition(int chunkIndex, int chunkSize)
+    {
+        var targetRecord = (long)chunkIndex * chunkSize;
+        if (targetRecord > int.MaxValue)
+            return false;
+
+        var target = (int)targetRecord;
+
+        if (eofReached && target >= recordsConsumed)
+            return false;
+
+        if (chunkReader == null || target < recordsConsumed)
+        {
+            CloseChunkReader();
+            chunkReader = new JsonRecordStreamReader(filePath, JsonRecordStreamReader.ToJsonReaderOptions(options.SerializerOptions));
+            recordsConsumed = 0;
+            eofReached = false;
+        }
+
+        return true;
+    }
+
+    private void CloseChunkReader()
+    {
+        chunkReader?.Dispose();
+        chunkReader = null;
+    }
+
+    /// <summary>
+    /// Reads the byte range of a chunk, wraps it as a JSON array, and materializes the
+    /// records as <see cref="JsonElement"/> instances.
+    /// </summary>
+    private JsonElement[] ReadRangeRecords(JsonRecordRange range) =>
+        ReadRangeRecords(chunkReader!, range, JsonRecordStreamReader.ToJsonDocumentOptions(options.SerializerOptions));
+
+    private static JsonElement[] ReadRangeRecords(JsonRecordStreamReader reader, JsonRecordRange range, JsonDocumentOptions documentOptions)
+    {
+        int length = checked((int)(range.End - range.Start));
+        var rented = ArrayPool<byte>.Shared.Rent(length + 2);
+        try
+        {
+            int read = reader.ReadRange(range.Start, range.End, rented);
+            rented[0] = (byte)'[';
+            rented[read + 1] = (byte)']';
+            using var document = JsonDocument.Parse(rented.AsMemory(0, read + 2), documentOptions);
+            var records = new List<JsonElement>(range.Rows);
+            foreach (var element in document.RootElement.EnumerateArray())
+                records.Add(element.Clone());
+            return records.ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private async Task<JsonElement[]> ReadRangeRecordsAsync(JsonRecordRange range, CancellationToken cancellationToken)
+    {
+        int length = checked((int)(range.End - range.Start));
+        var rented = ArrayPool<byte>.Shared.Rent(length + 2);
+        try
+        {
+            int read = await chunkReader!.ReadRangeAsync(range.Start, range.End, rented, cancellationToken).ConfigureAwait(false);
+            rented[0] = (byte)'[';
+            rented[read + 1] = (byte)']';
+            using var document = JsonDocument.Parse(rented.AsMemory(0, read + 2), JsonRecordStreamReader.ToJsonDocumentOptions(options.SerializerOptions));
+            var records = new List<JsonElement>(range.Rows);
+            foreach (var element in document.RootElement.EnumerateArray())
+                records.Add(element.Clone());
+            return records.ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    /// <summary>
+    /// Builds typed columns from the records of a single chunk.
+    /// </summary>
+    private static IReadOnlyDictionary<string, IColumn> BuildColumns(
+        JsonElement[] chunkRecords,
+        IReadOnlyList<string> columnNames,
+        IReadOnlyDictionary<string, Type> columnTypes)
+    {
+        var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var columnName in columnNames)
+        {
+            var columnType = columnTypes[columnName];
+            var values = new object?[chunkRecords.Length];
+            for (int i = 0; i < chunkRecords.Length; i++)
+            {
+                object? value = null;
+                if (chunkRecords[i].ValueKind == JsonValueKind.Object &&
+                    chunkRecords[i].TryGetProperty(columnName, out var property))
+                {
+                    value = ConvertJsonValue(property, columnType);
+                }
+                values[i] = value;
+            }
+            columns[columnName] = ColumnFactory.Create(columnType, values);
+        }
+
+        return columns;
+    }
+
+    /// <summary>
     /// Infers the schema from the JSON file by reading a sample of records
     /// </summary>
     /// <returns>The inferred schema</returns>
@@ -433,10 +593,29 @@ sealed class JsonLazySource : IQuerySource
                 throw new DataSourceException($"JSON file not found: '{filePath}'");
             }
 
-            string jsonText;
+            JsonElement[] sampleRecords;
+
             try
             {
-                jsonText = File.ReadAllText(filePath);
+                using var reader = new JsonRecordStreamReader(filePath, JsonRecordStreamReader.ToJsonReaderOptions(options.SerializerOptions));
+                var range = reader.LocateRange(0, options.SchemaInferenceRecords, options.IsArray);
+
+                if (range.Rows == 0)
+                {
+                    if (!reader.SawAnyToken)
+                        throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
+                    throw new DataSourceException($"No records found in JSON file for schema inference: '{filePath}'");
+                }
+
+                sampleRecords = ReadRangeRecords(reader, range, JsonRecordStreamReader.ToJsonDocumentOptions(options.SerializerOptions));
+            }
+            catch (JsonException ex)
+            {
+                throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
+            }
+            catch (NotSupportedException ex)
+            {
+                throw new DataSourceException($"Unsupported JSON format in file '{filePath}': {ex.Message}", ex);
             }
             catch (UnauthorizedAccessException ex)
             {
@@ -453,39 +632,6 @@ sealed class JsonLazySource : IQuerySource
             catch (IOException ex)
             {
                 throw new DataSourceException($"IO error reading JSON file '{filePath}': {ex.Message}", ex);
-            }
-
-            if (string.IsNullOrWhiteSpace(jsonText))
-            {
-                throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
-            }
-
-            JsonElement[] sampleRecords;
-
-            try
-            {
-                if (options.IsArray)
-                {
-                    var allRecords = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
-                    if (allRecords == null)
-                    {
-                        throw new DataSourceException($"Failed to deserialize JSON array from file '{filePath}': result was null");
-                    }
-                    sampleRecords = allRecords.Take(options.SchemaInferenceRecords).ToArray();
-                }
-                else
-                {
-                    var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
-                    sampleRecords = new[] { record };
-                }
-            }
-            catch (JsonException ex)
-            {
-                throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
-            }
-            catch (NotSupportedException ex)
-            {
-                throw new DataSourceException($"Unsupported JSON format in file '{filePath}': {ex.Message}", ex);
             }
 
             if (sampleRecords.Length == 0)
@@ -646,8 +792,8 @@ sealed class JsonLazySource : IQuerySource
     {
         if (!disposed)
         {
-            // JsonLazySource doesn't hold any unmanaged resources
-            // The errorHandler and lazySchema don't require disposal
+            CloseChunkReader();
+            chunkLock.Dispose();
             disposed = true;
         }
     }
@@ -690,34 +836,24 @@ sealed class JsonEagerSource : IQuerySource
             if (fileInfo.Length == 0)
                 throw new DataSourceException($"JSON file is empty: '{filePath}'");
 
-            string jsonText;
             try
             {
-                jsonText = File.ReadAllText(filePath);
+                using var probe = new JsonRecordStreamReader(filePath, JsonRecordStreamReader.ToJsonReaderOptions(options.SerializerOptions));
+                var range = probe.LocateRange(0, 1, options.IsArray);
+                if (range.Rows == 0)
+                {
+                    if (!probe.SawAnyToken)
+                        throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
+                    throw new DataSourceException($"No records found in JSON file for schema inference: '{filePath}'");
+                }
+            }
+            catch (JsonException ex)
+            {
+                throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
             }
             catch (Exception ex)
             {
                 throw new DataSourceException($"IO error reading JSON file '{filePath}': {ex.Message}", ex);
-            }
-
-            if (string.IsNullOrWhiteSpace(jsonText))
-                throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
-
-            // If JSON is an array, ensure there is at least one record for schema inference
-            if (options.IsArray)
-            {
-                try
-                {
-                    var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
-                    if (records == null || records.Length == 0)
-                    {
-                        throw new DataSourceException($"No records found in JSON file for schema inference: '{filePath}'");
-                    }
-                }
-                catch (JsonException ex)
-                {
-                    throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
-                }
             }
 
             // Delegate to lazy execution for the full processing

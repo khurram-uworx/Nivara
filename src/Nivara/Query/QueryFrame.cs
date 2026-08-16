@@ -425,7 +425,9 @@ internal sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// Each chunk is a NivaraFrame containing the source data with streamable operations applied.
     /// Consumers can process chunks lazily without waiting for the full result.
     /// </summary>
-    /// <param name="chunkSize">The target number of rows per chunk</param>
+    /// <param name="chunkSize">The target number of rows per chunk. Honored by row-oriented
+    /// sources (CSV, JSON); for columnar sources such as Parquet the value is advisory and
+    /// chunks are aligned to native row-group boundaries.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
     internal IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
@@ -437,7 +439,7 @@ internal sealed class QueryFrame : IDisposable, IAsyncDisposable
         var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
         {
             CancellationToken = ct,
-            MemoryBudget = (long)chunkSize * 100
+            ChunkSize = chunkSize
         };
 
         var strategy = engine.GetStrategy(ExecutionStrategy.Streaming) as StreamingExecutionStrategy

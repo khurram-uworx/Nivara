@@ -1,4 +1,5 @@
 using Nivara.Diagnostics;
+using Nivara.Exceptions;
 using Nivara.Query;
 
 namespace Nivara.Execution;
@@ -16,6 +17,87 @@ sealed class LazyExecutionStrategy : ExecutionStrategyBase
             : executor.Execute(plan);
         context.Progress?.Report(new ExecutionProgress("Lazy execution completed", 1, 1));
         return result;
+    }
+
+    protected override async Task<NivaraFrame> ExecuteCoreAsync(QueryPlan plan, NivaraExecutionContext context)
+    {
+        var diag = context.ExecutionDiagnostics;
+        context.Progress?.Report(new ExecutionProgress("Starting lazy execution", 0, 1));
+        var result = diag != null
+            ? await DiagnosticHelper.ExecuteWithDiagnosticsAsync(diag, "LazyExecutionAsync", () => executeAsyncCore(plan, context)).ConfigureAwait(false)
+            : await executeAsyncCore(plan, context).ConfigureAwait(false);
+        context.Progress?.Report(new ExecutionProgress("Lazy execution completed", 1, 1));
+        return result;
+    }
+
+    /// <summary>
+    /// Mirrors <see cref="QueryExecutor.Execute"/> semantics over the async seams: the source is
+    /// read via <see cref="IQuerySource.ExecuteAsync"/> and each operation is applied via
+    /// <see cref="IQueryOperation.ExecuteAsync"/>, so IO-bound sources participate in a genuine
+    /// async pipeline instead of the whole plan being pushed onto a thread-pool thread.
+    /// </summary>
+    async Task<NivaraFrame> executeAsyncCore(QueryPlan plan, NivaraExecutionContext context)
+    {
+        var ct = context.CancellationToken;
+
+        if (!executor.ValidatePlan(plan))
+        {
+            var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+            throw new QueryExecutionException($"Query plan validation failed. {diagnosticInfo}");
+        }
+
+        IReadOnlyDictionary<string, IColumn> currentColumns;
+        try
+        {
+            currentColumns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan, ex);
+            throw new QueryExecutionException($"Data source execution failed: {ex.Message}. {diagnosticInfo}", ex);
+        }
+
+        if (currentColumns == null)
+        {
+            var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+            throw new QueryExecutionException($"Data source returned null columns. {diagnosticInfo}");
+        }
+
+        for (int i = 0; i < plan.Operations.Count; i++)
+        {
+            var operation = plan.Operations[i];
+            try
+            {
+                currentColumns = await operation.ExecuteAsync(currentColumns, ct).ConfigureAwait(false);
+
+                if (currentColumns == null)
+                {
+                    var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+                    throw new QueryExecutionException($"Operation '{operation.OperationType}' at position {i + 1} returned null columns. {diagnosticInfo}");
+                }
+            }
+            catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
+            {
+                var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan, ex);
+                throw new QueryExecutionException(
+                    $"Operation '{operation.OperationType}' at position {i + 1} failed: {ex.Message}. {diagnosticInfo}",
+                    operation.OperationType,
+                    ex);
+            }
+        }
+
+        if (currentColumns.Count == 0)
+        {
+            var diagnosticInfo = QueryPlanAnalyzer.GenerateDiagnosticInfo(plan);
+            throw new QueryExecutionException($"Query execution resulted in no columns. {diagnosticInfo}");
+        }
+
+        var namedColumns = currentColumns.Select(kvp => (kvp.Key, kvp.Value));
+        return new NivaraFrame(namedColumns);
     }
 
     public override bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context)
