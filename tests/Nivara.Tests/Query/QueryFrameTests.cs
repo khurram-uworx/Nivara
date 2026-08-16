@@ -326,4 +326,92 @@ public class QueryFrameTests
         Assert.That(parallelResult.RowCount, Is.EqualTo(serialResult.RowCount));
         Assert.That(parallelResult.GetColumn<int>("x")[0], Is.EqualTo(serialResult.GetColumn<int>("x")[0]));
     }
+
+    // ── Ownership / disposal isolation (#279) ──
+
+    [Test]
+    public void QueryFrame_Dispose_DoesNotDisposeSourceFrameColumns()
+    {
+        var frame = NivaraFrame.Create("A", NivaraColumn<int>.Create([1, 2, 3]));
+
+        var queryFrame = frame.AsQueryFrame();
+        queryFrame.Dispose();
+
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.GetColumn<int>("A")[0], Is.EqualTo(1));
+        Assert.That(() => queryFrame.Collect(), Throws.TypeOf<ObjectDisposedException>());
+    }
+
+    [Test]
+    public async Task QueryFrame_DisposeAsync_DoesNotDisposeSourceFrameColumns()
+    {
+        var frame = NivaraFrame.Create("A", NivaraColumn<int>.Create([1, 2, 3]));
+
+        var queryFrame = frame.AsQueryFrame();
+        await queryFrame.DisposeAsync();
+
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.GetColumn<int>("A")[0], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Collect_NoOperations_ResultDisposal_DoesNotAffectSourceFrame()
+    {
+        var frame = NivaraFrame.Create("A", NivaraColumn<int>.Create([1, 2, 3]));
+        var queryFrame = frame.AsQueryFrame();
+
+        var result = queryFrame.Collect();
+        result.Dispose();
+
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.GetColumn<int>("A")[0], Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Collect_SelectPassthrough_ResultDisposal_DoesNotAffectSourceFrame()
+    {
+        var frame = NivaraFrame.Create(
+            ("A", NivaraColumn<int>.Create([1, 2, 3])),
+            ("B", NivaraColumn<int>.Create([4, 5, 6])));
+        var queryFrame = frame.AsQueryFrame().Select("A");
+
+        var result = queryFrame.Collect();
+        var selectedValue = result.GetColumn<int>("A")[0];
+        result.Dispose();
+
+        Assert.That(selectedValue, Is.EqualTo(1));
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.GetColumn<int>("A")[0], Is.EqualTo(1));
+        Assert.That(frame.GetColumn<int>("B")[0], Is.EqualTo(4));
+    }
+
+    [Test]
+    public void Collect_RepeatedResults_AreMutuallyIndependent()
+    {
+        var frame = NivaraFrame.Create("A", NivaraColumn<int>.Create([1, 2, 3]));
+        var queryFrame = frame.AsQueryFrame();
+
+        var first = queryFrame.Collect();
+        var second = queryFrame.Collect();
+        first.Dispose();
+
+        Assert.That(second.GetColumn<int>("A")[0], Is.EqualTo(1));
+        second.Dispose();
+
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.GetColumn<int>("A")[0], Is.EqualTo(1));
+    }
+
+    [Test]
+    public async Task CollectAsync_ResultDisposal_DoesNotAffectSourceFrame()
+    {
+        var frame = NivaraFrame.Create("A", NivaraColumn<int>.Create([1, 2, 3]));
+        var queryFrame = frame.AsQueryFrame();
+
+        var result = await queryFrame.CollectAsync();
+        result.Dispose();
+
+        Assert.That(frame.RowCount, Is.EqualTo(3));
+        Assert.That(frame.GetColumn<int>("A")[0], Is.EqualTo(1));
+    }
 }
