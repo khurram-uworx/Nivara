@@ -83,13 +83,19 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         return segments;
     }
 
-    static int CalculateChannelCapacity(long memoryBudget, int chunkSize)
+    internal static int CalculateChannelCapacity(long memoryBudget, int chunkSize)
     {
         const long estimatedBytesPerRow = 100;
         var bytesPerChunk = (long)chunkSize * estimatedBytesPerRow;
         if (bytesPerChunk <= 0) return 2;
         var capacity = (int)(memoryBudget / bytesPerChunk);
         return Math.Max(2, Math.Min(capacity, 16));
+    }
+
+    internal static Channel<NivaraFrame> CreateBoundChannel(long memoryBudget, int chunkSize)
+    {
+        var capacity = CalculateChannelCapacity(memoryBudget, chunkSize);
+        return Channel.CreateBounded<NivaraFrame>(capacity);
     }
 
     protected override string StrategyName => "Streaming";
@@ -221,8 +227,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             : -1;
 
         var segments = PartitionAtNonStreamableOps(plan.Operations);
-        var channelCapacity = CalculateChannelCapacity(context.MemoryBudget, chunkSize);
-        var channel = Channel.CreateBounded<NivaraFrame>(channelCapacity);
+        var channel = CreateBoundChannel(context.MemoryBudget, chunkSize);
         var chunkIndex = 0;
 
         var producer = Task.Run(async () =>
