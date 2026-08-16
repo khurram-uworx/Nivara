@@ -161,6 +161,52 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Execute_ExplicitChunkSize_TakesPrecedenceOverBudget()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
+        var plan = new QueryPlan(source, new[] { new StubQueryOperation("Filter") });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024L * 1024 * 1024;
+        context.ChunkSize = 5;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(result.RowCount, Is.EqualTo(100));
+        Assert.That(source.ChunksRead.Count, Is.EqualTo(21),
+            "20 data chunks of 5 rows plus the EOF-probe read; the 1GB budget-derived chunk size would read a single chunk");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_ExplicitChunkSize_Honored()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
+        var plan = new QueryPlan(source, new[] { new StubQueryOperation("Filter") });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024L * 1024 * 1024;
+        context.ChunkSize = 5;
+
+        using var result = await strategy.ExecuteAsync(plan, context);
+
+        Assert.That(result.RowCount, Is.EqualTo(100));
+        Assert.That(source.ChunksRead.Count, Is.EqualTo(21),
+            "20 data chunks of 5 rows plus the EOF-probe read; the 1GB budget-derived chunk size would read a single chunk");
+    }
+
+    [Test]
+    public void ValidatePlan_NonPositiveChunkSize_ReturnsFalse()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var plan = ExecutionTestHelpers.CreateTestPlan(
+            operations: new IQueryOperation[] { new StubQueryOperation("Filter") });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 0;
+
+        Assert.That(strategy.ValidatePlan(plan, context), Is.False);
+    }
+
+    [Test]
     public void EstimateExecutionCost_ReturnsExpectedCost()
     {
         var strategy = new StreamingExecutionStrategy();

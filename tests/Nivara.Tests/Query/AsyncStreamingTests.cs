@@ -156,6 +156,70 @@ public class AsyncStreamingTests
     }
 
     [Test]
+    public async Task AsStream_HonorsRequestedChunkSize()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 10000);
+            var queryFrame = Nivara.IO.Csv.ScanFrame(csvPath);
+
+            var chunks = new List<NivaraFrame>();
+            await foreach (var chunk in queryFrame.AsStream(chunkSize: 2000))
+                chunks.Add(chunk);
+
+            try
+            {
+                Assert.That(chunks.Count, Is.EqualTo(5));
+                foreach (var chunk in chunks)
+                    Assert.That(chunk.RowCount, Is.EqualTo(2000));
+            }
+            finally
+            {
+                foreach (var chunk in chunks)
+                    chunk.Dispose();
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task AsStream_SmallChunkSize_NotClamped()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 100);
+            var queryFrame = Nivara.IO.Csv.ScanFrame(csvPath);
+
+            var chunks = new List<NivaraFrame>();
+            await foreach (var chunk in queryFrame.AsStream(chunkSize: 5))
+                chunks.Add(chunk);
+
+            try
+            {
+                Assert.That(chunks.Count, Is.EqualTo(20));
+                foreach (var chunk in chunks)
+                    Assert.That(chunk.RowCount, Is.LessThanOrEqualTo(5));
+            }
+            finally
+            {
+                foreach (var chunk in chunks)
+                    chunk.Dispose();
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
     public void ParquetLazySource_MultipleRowGroups_ExecutesCorrectly()
     {
         var tempFile = Path.GetTempFileName();
