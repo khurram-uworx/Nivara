@@ -11,7 +11,7 @@ namespace Nivara.Query;
 /// Represents a lazy query frame that builds query plans without immediate execution.
 /// Provides a fluent API for constructing complex queries that are executed only when Collect() is called.
 /// </summary>
-internal sealed class QueryFrame : IDisposable, IAsyncDisposable
+public sealed class QueryFrame : IDisposable, IAsyncDisposable
 {
     readonly IQuerySource source;
     readonly List<IQueryOperation> operations;
@@ -1010,7 +1010,7 @@ internal sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// Extracts the query plan for inspection or custom execution via <see cref="Execution.ExecutionEngine"/>.
     /// </summary>
     /// <returns>A QueryPlan representing this query's source and operations</returns>
-    public QueryPlan ToQueryPlan()
+    internal QueryPlan ToQueryPlan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return new QueryPlan(source, operations);

@@ -7,7 +7,7 @@ namespace Nivara.Operations;
 /// <summary>
 /// Describes a single computed sort key: a column expression, direction, and null ordering.
 /// </summary>
-internal readonly struct SortExpressionKey
+public readonly struct SortExpressionKey
 {
     /// <summary>
     /// Initializes a new instance of SortExpressionKey

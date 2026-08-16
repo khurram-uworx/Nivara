@@ -88,4 +88,4 @@ passthrough on `NivaraQuery<T>`.
 
 ## GitHub issues log
 
-- [ ] (none yet)
+- [ ] #275 — Public QueryFrame: ToQueryPlan/QueryPlan/ExecutionEngine remain internal (created while making QueryFrame public for #264)
