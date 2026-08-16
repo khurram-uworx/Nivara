@@ -567,6 +567,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         var currentColumns = diag != null
             ? DiagnosticHelper.ExecuteWithDiagnostics(diag, "SourceExecute", () => plan.Source.Execute())
             : plan.Source.Execute();
+        diag?.AddRowsRead(QueryExecutor.GetRowCount(currentColumns));
         context.Progress?.Report(new ExecutionProgress("Data source executed", 1, plan.Operations.Count + 1));
 
         for (int i = 0; i < plan.Operations.Count; i++)
@@ -610,6 +611,7 @@ sealed class ParallelExecutionStrategy : ExecutionStrategyBase
         var currentColumns = diag != null
             ? await DiagnosticHelper.ExecuteWithDiagnosticsAsync(diag, "SourceExecute", () => readSourceAsync(plan.Source, context)).ConfigureAwait(false)
             : await readSourceAsync(plan.Source, context).ConfigureAwait(false);
+        diag?.AddRowsRead(QueryExecutor.GetRowCount(currentColumns));
         context.Progress?.Report(new ExecutionProgress("Data source executed", 1, plan.Operations.Count + 1));
 
         for (int i = 0; i < plan.Operations.Count; i++)

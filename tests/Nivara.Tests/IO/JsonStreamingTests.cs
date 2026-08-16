@@ -1,12 +1,11 @@
-using System.Buffers;
-using System.Text;
-using System.Text.Json;
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.IO;
-using Nivara.Query;
 using NUnit.Framework;
+using System.Buffers;
+using System.Text;
+using System.Text.Json;
 
 namespace Nivara.Tests.IO;
 

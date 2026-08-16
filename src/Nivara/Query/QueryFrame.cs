@@ -1,3 +1,4 @@
+using Nivara.Diagnostics;
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Expressions;
@@ -15,6 +16,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
 {
     readonly IQuerySource source;
     readonly List<IQueryOperation> operations;
+    ExecutionDiagnostics? lastDiagnostics;
     bool disposed;
 
     /// <summary>
@@ -403,7 +405,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>A task representing the materialized NivaraFrame with the query results</returns>
     /// <exception cref="QueryExecutionException">Thrown when query execution fails</exception>
-    public Task<NivaraFrame> CollectAsync(CancellationToken ct = default)
+    public async Task<NivaraFrame> CollectAsync(CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -411,14 +413,45 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
         {
             var queryPlan = new QueryPlan(source, operations);
             var engine = new ExecutionEngine();
-            var context = new NivaraExecutionContext(ExecutionStrategy.Lazy) { CancellationToken = ct };
-            return engine.ExecuteAsync(queryPlan, context);
+            var diagnostics = new ExecutionDiagnostics();
+            var context = new NivaraExecutionContext(ExecutionStrategy.Lazy)
+            {
+                CancellationToken = ct,
+                ExecutionDiagnostics = diagnostics
+            };
+            try
+            {
+                var result = await engine.ExecuteAsync(queryPlan, context);
+                lastDiagnostics = diagnostics;
+                return result;
+            }
+            catch
+            {
+                lastDiagnostics = diagnostics;
+                throw;
+            }
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             throw new QueryExecutionException($"Query execution failed: {ex.Message}", ex);
         }
     }
+
+    /// <summary>
+    /// Gets the diagnostics from the most recent execution of this query frame.
+    /// Populated by <see cref="Collect"/>, <see cref="CollectAsync"/>, and after the
+    /// enumerable returned by <see cref="AsStream"/> has been fully enumerated.
+    /// Returns null when no execution has completed yet.
+    /// </summary>
+    public ExecutionDiagnostics? LastExecutionDiagnostics => lastDiagnostics;
+
+    /// <summary>
+    /// Gets the diagnostics from the most recent execution of this query frame.
+    /// Populated by <see cref="Collect"/>, <see cref="CollectAsync"/>, and after the
+    /// enumerable returned by <see cref="AsStream"/> has been fully enumerated.
+    /// Returns null when no execution has completed yet.
+    /// </summary>
+    public ExecutionDiagnostics? GetExecutionDiagnostics() => lastDiagnostics;
 
     /// <summary>
     /// Streams processed chunks from the query as an async enumerable.
@@ -462,15 +495,31 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
 
         var queryPlan = new QueryPlan(source, operations);
         var engine = new ExecutionEngine();
+        var diagnostics = new ExecutionDiagnostics();
         var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
         {
             CancellationToken = ct,
-            ChunkSize = chunkSize
+            ChunkSize = chunkSize,
+            ExecutionDiagnostics = diagnostics
         };
 
         var strategy = engine.GetStrategy(ExecutionStrategy.Streaming) as StreamingExecutionStrategy
             ?? throw new QueryExecutionException("Streaming execution strategy is not registered");
-        return strategy.StreamChunksAsync(queryPlan, context, ct);
+        return captureDiagnosticsOnComplete(strategy.StreamChunksAsync(queryPlan, context, ct), diagnostics);
+    }
+
+    /// <summary>
+    /// Passes through streamed chunks unchanged and records the execution diagnostics
+    /// once the stream has been fully enumerated (or cancelled/faulted).
+    /// </summary>
+    async IAsyncEnumerable<NivaraFrame> captureDiagnosticsOnComplete(
+        IAsyncEnumerable<NivaraFrame> chunks,
+        ExecutionDiagnostics diagnostics)
+    {
+        await using var enumerator = chunks.GetAsyncEnumerator();
+        while (await enumerator.MoveNextAsync())
+            yield return enumerator.Current;
+        lastDiagnostics = diagnostics;
     }
 
     /// <summary>

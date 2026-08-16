@@ -6,15 +6,27 @@ namespace Nivara.IO;
 
 /// <summary>
 /// Lazy Parquet data source that defers reading until execution.
-/// Supports chunked reading at row-group boundaries for streaming execution.
+/// Reuses a single <see cref="Parquet.ParquetReader"/> (footer metadata parsed exactly once)
+/// across all <see cref="Execute"/>/<see cref="ExecuteAsync"/>/<see cref="ReadChunk"/>/
+/// <see cref="ReadChunkAsync"/> calls, seeking row groups by index instead of reopening the
+/// file per chunk.
 /// </summary>
+/// <remarks>
+/// Chunks are aligned to native row-group boundaries: <c>chunkIndex</c> maps directly to a row
+/// group index and <c>chunkSize</c> is advisory (row-group granularity is the honest replay
+/// model). All reads are serialized through a <see cref="SemaphoreSlim"/> because Parquet.Net
+/// readers are not thread-safe and <see cref="Nivara.Execution.ParallelExecutionStrategy"/>
+/// issues concurrent <see cref="ReadChunkAsync"/> calls.
+/// </remarks>
 sealed class ParquetLazySource : IQuerySource
 {
     private readonly string filePath;
     private readonly ParquetReadOptions options;
+    private readonly Lazy<Parquet.ParquetReader> lazyReader;
     private readonly Lazy<Schema> lazySchema;
     private readonly Lazy<int> lazyRowGroupCount;
     private readonly Lazy<int> lazyTotalRowCount;
+    private readonly SemaphoreSlim gate = new(1, 1);
     private bool disposed;
 
     /// <summary>
@@ -27,6 +39,7 @@ sealed class ParquetLazySource : IQuerySource
         this.filePath = filePath ?? throw new ArgumentNullException(nameof(filePath));
         this.options = options ?? new ParquetReadOptions();
 
+        lazyReader = new Lazy<Parquet.ParquetReader>(CreateReader, LazyThreadSafetyMode.ExecutionAndPublication);
         lazySchema = new Lazy<Schema>(InferSchema);
         lazyRowGroupCount = new Lazy<int>(GetRowGroupCount);
         lazyTotalRowCount = new Lazy<int>(GetTotalRowCount);
@@ -49,7 +62,7 @@ sealed class ParquetLazySource : IQuerySource
     public bool CanReadInChunks => true;
 
     /// <summary>
-    /// Gets the estimated row count from Parquet metadata.
+    /// Gets the total row count from Parquet metadata.
     /// </summary>
     public int? EstimatedRowCount => lazyTotalRowCount.Value > 0 ? lazyTotalRowCount.Value : null;
 
@@ -62,7 +75,28 @@ sealed class ParquetLazySource : IQuerySource
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        return ExecuteAsync(CancellationToken.None).GetAwaiter().GetResult();
+
+        try
+        {
+            var reader = lazyReader.Value;
+            var rowGroupCount = reader.RowGroupCount;
+            if (rowGroupCount == 0)
+                return new Dictionary<string, IColumn>();
+
+            var frames = new List<NivaraFrame>(rowGroupCount);
+            for (int rg = 0; rg < rowGroupCount; rg++)
+                frames.Add(ReadRowGroup(rg));
+
+            return ToColumns(frames);
+        }
+        catch (DataSourceException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DataSourceException($"Failed to read Parquet file '{filePath}': {ex.Message}", ex);
+        }
     }
 
     /// <inheritdoc />
@@ -72,37 +106,19 @@ sealed class ParquetLazySource : IQuerySource
 
         try
         {
-            if (!File.Exists(filePath))
-                throw new DataSourceException($"Parquet file not found: '{filePath}'");
-
-            var fileInfo = new FileInfo(filePath);
-            if (fileInfo.Length == 0)
-                throw new DataSourceException($"Parquet file is empty: '{filePath}'");
-
-            var rowGroupCount = lazyRowGroupCount.Value;
+            var reader = lazyReader.Value;
+            var rowGroupCount = reader.RowGroupCount;
             if (rowGroupCount == 0)
                 return new Dictionary<string, IColumn>();
 
-            var frames = new List<NivaraFrame>();
+            var frames = new List<NivaraFrame>(rowGroupCount);
             for (int rg = 0; rg < rowGroupCount; rg++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var frame = await ReadRowGroupAsync(rg, cancellationToken).ConfigureAwait(false);
-                frames.Add(frame);
+                frames.Add(await ReadRowGroupAsync(rg, cancellationToken).ConfigureAwait(false));
             }
 
-            if (frames.Count == 0)
-                return new Dictionary<string, IColumn>();
-
-            if (frames.Count == 1)
-            {
-                return frames[0].ColumnNames.ToDictionary(
-                    name => name, name => frames[0].GetColumn(name), StringComparer.OrdinalIgnoreCase);
-            }
-
-            var merged = NivaraParquetWriter.ConcatenateFrames(frames);
-            return merged.ColumnNames.ToDictionary(
-                name => name, name => merged.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+            return ToColumns(frames);
         }
         catch (DataSourceException)
         {
@@ -118,7 +134,29 @@ sealed class ParquetLazySource : IQuerySource
     public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
-        return ReadChunkAsync(chunkIndex, chunkSize, CancellationToken.None).GetAwaiter().GetResult();
+
+        if (chunkIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        if (chunkSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkSize));
+
+        try
+        {
+            var reader = lazyReader.Value;
+            if (chunkIndex >= reader.RowGroupCount)
+                return new Dictionary<string, IColumn>();
+
+            return ToColumns(ReadRowGroup(chunkIndex));
+        }
+        catch (DataSourceException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DataSourceException($"Failed to read Parquet chunk from file '{filePath}': {ex.Message}", ex);
+        }
     }
 
     /// <inheritdoc />
@@ -136,16 +174,12 @@ sealed class ParquetLazySource : IQuerySource
 
         try
         {
-            if (!File.Exists(filePath))
-                throw new DataSourceException($"Parquet file not found: '{filePath}'");
-
-            var rowGroupCount = lazyRowGroupCount.Value;
-            if (chunkIndex >= rowGroupCount)
+            var reader = lazyReader.Value;
+            if (chunkIndex >= reader.RowGroupCount)
                 return new Dictionary<string, IColumn>();
 
             var frame = await ReadRowGroupAsync(chunkIndex, cancellationToken).ConfigureAwait(false);
-            return frame.ColumnNames.ToDictionary(
-                name => name, name => frame.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+            return ToColumns(frame);
         }
         catch (OperationCanceledException)
         {
@@ -161,15 +195,56 @@ sealed class ParquetLazySource : IQuerySource
         }
     }
 
+    private NivaraFrame ReadRowGroup(int rowGroupIndex)
+    {
+        gate.Wait();
+        try
+        {
+            var reader = lazyReader.Value;
+            var fields = reader.Schema.GetDataFields();
+            using var rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
+            var columns = ReadRowGroupColumns(rowGroupReader, fields, reader.CustomMetadata);
+            return NivaraFrame.Create(columns);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
     private async Task<NivaraFrame> ReadRowGroupAsync(int rowGroupIndex, CancellationToken ct)
     {
-        await using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
-        await using var reader = await Parquet.ParquetReader.CreateAsync(fileStream).ConfigureAwait(false);
+        await gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var reader = lazyReader.Value;
+            var fields = reader.Schema.GetDataFields();
+            using var rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
+            var columns = await ReadRowGroupColumnsAsync(rowGroupReader, fields, reader.CustomMetadata, ct).ConfigureAwait(false);
+            return NivaraFrame.Create(columns);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
 
-        var fields = reader.Schema.GetDataFields();
-        using var rowGroupReader = reader.OpenRowGroupReader(rowGroupIndex);
-        var columns = await ReadRowGroupColumnsAsync(rowGroupReader, fields, reader.CustomMetadata, ct).ConfigureAwait(false);
-        return NivaraFrame.Create(columns);
+    private static IReadOnlyDictionary<string, IColumn> ReadRowGroupColumns(Parquet.ParquetRowGroupReader rowGroupReader, DataField[] fields, IReadOnlyDictionary<string, string>? clrTypeMetadata)
+    {
+        var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+
+        for (int i = 0; i < fields.Length; i++)
+        {
+            var field = fields[i];
+            if (field.Name == "_empty")
+                continue;
+
+            var data = NivaraParquetReader.ReadParquetColumn(rowGroupReader, field);
+            var column = NivaraParquetReader.CreateNivaraColumnFromParquetData(data, field, clrTypeMetadata);
+            columns[field.Name] = column;
+        }
+
+        return columns;
     }
 
     private static async Task<IReadOnlyDictionary<string, IColumn>> ReadRowGroupColumnsAsync(Parquet.ParquetRowGroupReader rowGroupReader, DataField[] fields, IReadOnlyDictionary<string, string>? clrTypeMetadata, CancellationToken ct)
@@ -191,21 +266,50 @@ sealed class ParquetLazySource : IQuerySource
         return columns;
     }
 
-    private Schema InferSchema()
+    private static IReadOnlyDictionary<string, IColumn> ToColumns(NivaraFrame frame)
+        => frame.ColumnNames.ToDictionary(
+            name => name, name => frame.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlyDictionary<string, IColumn> ToColumns(List<NivaraFrame> frames)
+    {
+        if (frames.Count == 0)
+            return new Dictionary<string, IColumn>();
+
+        if (frames.Count == 1)
+            return ToColumns(frames[0]);
+
+        var merged = NivaraParquetWriter.ConcatenateFrames(frames);
+        return ToColumns(merged);
+    }
+
+    private Parquet.ParquetReader CreateReader()
     {
         if (!File.Exists(filePath))
             throw new DataSourceException($"Parquet file not found: '{filePath}'");
 
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+            throw new DataSourceException($"Parquet file is empty: '{filePath}'");
+
+        var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
         try
         {
-            using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var reader = Parquet.ParquetReader.CreateAsync(fileStream).GetAwaiter().GetResult();
+            return Parquet.ParquetReader.CreateAsync(fileStream, null, leaveStreamOpen: false, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            fileStream.Dispose();
+            throw new DataSourceException($"Failed to open Parquet file '{filePath}': {ex.Message}", ex);
+        }
+    }
 
-            var schema = reader.Schema;
-            var dataFields = schema.GetDataFields();
-            var clrTypeMetadata = reader.CustomMetadata;
-
-            return BuildSchema(dataFields, clrTypeMetadata);
+    private Schema InferSchema()
+    {
+        try
+        {
+            var reader = lazyReader.Value;
+            return BuildSchema(reader.Schema.GetDataFields(), reader.CustomMetadata);
         }
         catch (Exception ex)
         {
@@ -217,9 +321,7 @@ sealed class ParquetLazySource : IQuerySource
     {
         try
         {
-            using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var reader = Parquet.ParquetReader.CreateAsync(fileStream).GetAwaiter().GetResult();
-            return reader.RowGroupCount;
+            return lazyReader.Value.RowGroupCount;
         }
         catch
         {
@@ -231,16 +333,22 @@ sealed class ParquetLazySource : IQuerySource
     {
         try
         {
-            using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
-            var reader = Parquet.ParquetReader.CreateAsync(fileStream).GetAwaiter().GetResult();
-
-            int total = 0;
-            for (int rg = 0; rg < reader.RowGroupCount; rg++)
+            var reader = lazyReader.Value;
+            gate.Wait();
+            try
             {
-                using var rowGroupReader = reader.OpenRowGroupReader(rg);
-                total += (int)rowGroupReader.RowCount;
+                int total = 0;
+                for (int rg = 0; rg < reader.RowGroupCount; rg++)
+                {
+                    using var rowGroupReader = reader.OpenRowGroupReader(rg);
+                    total += checked((int)rowGroupReader.RowCount);
+                }
+                return total;
             }
-            return total;
+            finally
+            {
+                gate.Release();
+            }
         }
         catch
         {
@@ -286,6 +394,18 @@ sealed class ParquetLazySource : IQuerySource
         if (!disposed)
         {
             disposed = true;
+            if (lazyReader.IsValueCreated)
+            {
+                try
+                {
+                    lazyReader.Value.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                catch
+                {
+                    // Best-effort disposal; the reader owns the file stream.
+                }
+            }
+            gate.Dispose();
         }
     }
 }

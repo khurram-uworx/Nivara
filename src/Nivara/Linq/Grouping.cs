@@ -161,6 +161,177 @@ public sealed class Grouping<TKey, T>
     /// </summary>
     public decimal Max(Func<T, decimal> selector) => Unreachable<decimal>();
 
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>; the result is a double because the median of even-length
+    /// data is fractional.
+    /// </summary>
+    public double Median(Func<T, byte> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, short> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, int> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, long> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, float> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, double> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, decimal> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation; the result is a double.
+    /// </summary>
+    public double Quantile(Func<T, byte> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, short> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, int> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, long> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, float> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, double> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, decimal> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the standard deviation of the selected values in the group with the given delta
+    /// degrees of freedom (0 = population, 1 = sample). Translated to a <see cref="StdDevAggregation"/>;
+    /// the result is a double.
+    /// </summary>
+    public double StdDev(Func<T, byte> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the standard deviation of the selected values in the group with the given delta
+    /// degrees of freedom. Translated to a <see cref="StdDevAggregation"/>.
+    /// </summary>
+    public double StdDev(Func<T, short> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the standard deviation of the selected values in the group with the given delta
+    /// degrees of freedom. Translated to a <see cref="StdDevAggregation"/>.
+    /// </summary>
+    public double StdDev(Func<T, int> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the standard deviation of the selected values in the group with the given delta
+    /// degrees of freedom. Translated to a <see cref="StdDevAggregation"/>.
+    /// </summary>
+    public double StdDev(Func<T, long> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the standard deviation of the selected values in the group with the given delta
+    /// degrees of freedom. Translated to a <see cref="StdDevAggregation"/>.
+    /// </summary>
+    public double StdDev(Func<T, float> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the standard deviation of the selected values in the group with the given delta
+    /// degrees of freedom. Translated to a <see cref="StdDevAggregation"/>.
+    /// </summary>
+    public double StdDev(Func<T, double> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the standard deviation of the selected values in the group with the given delta
+    /// degrees of freedom. Translated to a <see cref="StdDevAggregation"/>.
+    /// </summary>
+    public double StdDev(Func<T, decimal> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the variance of the selected values in the group with the given delta degrees of
+    /// freedom (0 = population, 1 = sample). Translated to a <see cref="VarianceAggregation"/>;
+    /// the result is a double.
+    /// </summary>
+    public double Variance(Func<T, byte> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the variance of the selected values in the group with the given delta degrees of
+    /// freedom. Translated to a <see cref="VarianceAggregation"/>.
+    /// </summary>
+    public double Variance(Func<T, short> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the variance of the selected values in the group with the given delta degrees of
+    /// freedom. Translated to a <see cref="VarianceAggregation"/>.
+    /// </summary>
+    public double Variance(Func<T, int> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the variance of the selected values in the group with the given delta degrees of
+    /// freedom. Translated to a <see cref="VarianceAggregation"/>.
+    /// </summary>
+    public double Variance(Func<T, long> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the variance of the selected values in the group with the given delta degrees of
+    /// freedom. Translated to a <see cref="VarianceAggregation"/>.
+    /// </summary>
+    public double Variance(Func<T, float> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the variance of the selected values in the group with the given delta degrees of
+    /// freedom. Translated to a <see cref="VarianceAggregation"/>.
+    /// </summary>
+    public double Variance(Func<T, double> selector, int ddof = 0) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the variance of the selected values in the group with the given delta degrees of
+    /// freedom. Translated to a <see cref="VarianceAggregation"/>.
+    /// </summary>
+    public double Variance(Func<T, decimal> selector, int ddof = 0) => Unreachable<double>();
+
     static TValue Unreachable<TValue>()
         => throw new NotSupportedException("Grouping<TKey, T> instances are marker types and are never invoked.");
 }

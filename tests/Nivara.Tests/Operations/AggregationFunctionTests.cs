@@ -724,6 +724,357 @@ public class AggregationFunctionTests
     }
 
     [TestFixture]
+    public class QuantileAggregationTests
+    {
+        [Test]
+        public void Apply_WithIntegerValues_ReturnsCorrectQuantile()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 1, 2, 3, 4 });
+            var indices = new List<int> { 0, 1, 2, 3 };
+            var aggregation = AggregationFunctions.Quantile(0.5);
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(2.5).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithFloatValues_InterpolatesLinearly()
+        {
+            var column = NivaraColumn<double>.Create(new[] { 10.0, 20.0, 30.0, 40.0, 50.0 });
+            var indices = new List<int> { 0, 1, 2, 3, 4 };
+            var aggregation = AggregationFunctions.Quantile(0.9);
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(46.0).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithMinQuantile_ReturnsMinimum()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 3, 9, 6 });
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Quantile(0.0);
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(3.0));
+        }
+
+        [Test]
+        public void Apply_WithMaxQuantile_ReturnsMaximum()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 3, 9, 6 });
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Quantile(1.0);
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(9.0));
+        }
+
+        [Test]
+        public void Apply_WithNullValues_IgnoresNulls()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var indices = new List<int> { 0, 1, 2, 3, 4 };
+            var aggregation = AggregationFunctions.Quantile(0.25);
+
+            var result = aggregation.Apply(column, indices);
+
+            Assert.That(result, Is.EqualTo(2.5).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithAllNullValues_ReturnsNull()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Quantile(0.5);
+
+            Assert.That(aggregation.Apply(column, indices), Is.Null);
+        }
+
+        [Test]
+        public void Apply_WithEmptyIndices_ReturnsNull()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+            var aggregation = AggregationFunctions.Quantile(0.5);
+
+            Assert.That(aggregation.Apply(column, new List<int>()), Is.Null);
+        }
+
+        [Test]
+        public void Apply_WithInt128Values_ReturnsCorrectQuantile()
+        {
+            var column = NivaraColumn<Int128>.Create(new Int128[] { 1, 2, 3, 4 });
+            var indices = new List<int> { 0, 1, 2, 3 };
+            var aggregation = AggregationFunctions.Quantile(0.5);
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(2.5).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithHalfValues_ReturnsCorrectQuantile()
+        {
+            var column = NivaraColumn<Half>.Create(new Half[] { (Half)1, (Half)2, (Half)3, (Half)4 });
+            var indices = new List<int> { 0, 1, 2, 3 };
+            var aggregation = AggregationFunctions.Quantile(0.5);
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(2.5).Within(1e-3));
+        }
+
+        [Test]
+        public void Apply_WithStringValues_ThrowsArgumentException()
+        {
+            var column = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" });
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Quantile(0.5);
+
+            Assert.Throws<ArgumentException>(() => aggregation.Apply(column, indices));
+        }
+
+        [Test]
+        public void Constructor_InvalidQuantile_ThrowsArgumentOutOfRangeException()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => AggregationFunctions.Quantile(-0.1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => AggregationFunctions.Quantile(1.1));
+            Assert.Throws<ArgumentOutOfRangeException>(() => AggregationFunctions.Quantile(double.NaN));
+        }
+
+        [Test]
+        public void Name_ReflectsQuantileArgument()
+        {
+            Assert.That(AggregationFunctions.Quantile(0.25).Name, Is.EqualTo("Quantile(0.25)"));
+        }
+
+        [Test]
+        public void GetResultType_ReturnsDouble()
+        {
+            Assert.That(AggregationFunctions.Quantile(0.5).GetResultType(typeof(int)), Is.EqualTo(typeof(double)));
+            Assert.That(AggregationFunctions.Quantile(0.5).GetResultType(typeof(double)), Is.EqualTo(typeof(double)));
+        }
+    }
+
+    [TestFixture]
+    public class MedianAggregationTests
+    {
+        [Test]
+        public void Apply_WithOddLengthValues_ReturnsMiddleValue()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 3, 1, 2 });
+            var indices = new List<int> { 0, 1, 2 };
+            var aggregation = AggregationFunctions.Median();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(2.0));
+        }
+
+        [Test]
+        public void Apply_WithEvenLengthValues_AveragesMiddleTwo()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 1, 3, 2, 4 });
+            var indices = new List<int> { 0, 1, 2, 3 };
+            var aggregation = AggregationFunctions.Median();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(2.5).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithNullValues_IgnoresNulls()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var indices = new List<int> { 0, 1, 2, 3, 4 };
+            var aggregation = AggregationFunctions.Median();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(3.5).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithAllNullValues_ReturnsNull()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Median();
+
+            Assert.That(aggregation.Apply(column, indices), Is.Null);
+        }
+
+        [Test]
+        public void Name_IsMedian()
+        {
+            Assert.That(AggregationFunctions.Median().Name, Is.EqualTo("Median"));
+        }
+
+        [Test]
+        public void GetResultType_ReturnsDouble()
+        {
+            Assert.That(AggregationFunctions.Median().GetResultType(typeof(long)), Is.EqualTo(typeof(double)));
+        }
+    }
+
+    [TestFixture]
+    public class StdDevAggregationTests
+    {
+        [Test]
+        public void Apply_WithValues_ReturnsPopulationStdDev()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+            var indices = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
+            var aggregation = AggregationFunctions.StdDev();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(2.0).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithSampleDdof_ReturnsSampleStdDev()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+            var indices = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
+            var aggregation = AggregationFunctions.StdDev(1);
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(2.138089935299395).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithNullValues_IgnoresNulls()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var indices = new List<int> { 0, 1, 2, 3, 4 };
+            var aggregation = AggregationFunctions.StdDev();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(1.479019945774904).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithSingleValuePopulation_ReturnsZero()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 7 });
+            var indices = new List<int> { 0 };
+            var aggregation = AggregationFunctions.StdDev();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(0.0));
+        }
+
+        [Test]
+        public void Apply_WithAllNullValues_ReturnsNull()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.StdDev();
+
+            Assert.That(aggregation.Apply(column, indices), Is.Null);
+        }
+
+        [Test]
+        public void Apply_WithEmptyIndices_ReturnsNull()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 1, 2, 3 });
+            var aggregation = AggregationFunctions.StdDev();
+
+            Assert.That(aggregation.Apply(column, new List<int>()), Is.Null);
+        }
+
+        [Test]
+        public void Apply_WithStringValues_ThrowsArgumentException()
+        {
+            var column = NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b" });
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.StdDev();
+
+            Assert.Throws<ArgumentException>(() => aggregation.Apply(column, indices));
+        }
+
+        [Test]
+        public void Constructor_NegativeDdof_ThrowsArgumentOutOfRangeException()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => AggregationFunctions.StdDev(-1));
+        }
+
+        [Test]
+        public void Apply_SampleOverSingleValue_ThrowsInvalidOperationException()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 7 });
+            var indices = new List<int> { 0 };
+            var aggregation = AggregationFunctions.StdDev(1);
+
+            Assert.Throws<InvalidOperationException>(() => aggregation.Apply(column, indices));
+        }
+
+        [Test]
+        public void Name_ReflectsDdof()
+        {
+            Assert.That(AggregationFunctions.StdDev().Name, Is.EqualTo("StdDev"));
+            Assert.That(AggregationFunctions.StdDev(1).Name, Is.EqualTo("StdDev(1)"));
+        }
+
+        [Test]
+        public void GetResultType_ReturnsDouble()
+        {
+            Assert.That(AggregationFunctions.StdDev().GetResultType(typeof(int)), Is.EqualTo(typeof(double)));
+        }
+    }
+
+    [TestFixture]
+    public class VarianceAggregationTests
+    {
+        [Test]
+        public void Apply_WithValues_ReturnsPopulationVariance()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+            var indices = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
+            var aggregation = AggregationFunctions.Variance();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(4.0).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithSampleDdof_ReturnsSampleVariance()
+        {
+            var column = NivaraColumn<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+            var indices = new List<int> { 0, 1, 2, 3, 4, 5, 6, 7 };
+            var aggregation = AggregationFunctions.Variance(1);
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(4.571428571428571).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithNullValues_IgnoresNulls()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+            var indices = new List<int> { 0, 1, 2, 3, 4 };
+            var aggregation = AggregationFunctions.Variance();
+
+            Assert.That(aggregation.Apply(column, indices), Is.EqualTo(2.1875).Within(1e-9));
+        }
+
+        [Test]
+        public void Apply_WithAllNullValues_ReturnsNull()
+        {
+            var column = NivaraColumn.CreateFromNullable(new double?[] { null, null });
+            var indices = new List<int> { 0, 1 };
+            var aggregation = AggregationFunctions.Variance();
+
+            Assert.That(aggregation.Apply(column, indices), Is.Null);
+        }
+
+        [Test]
+        public void Constructor_NegativeDdof_ThrowsArgumentOutOfRangeException()
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => AggregationFunctions.Variance(-1));
+        }
+
+        [Test]
+        public void Name_ReflectsDdof()
+        {
+            Assert.That(AggregationFunctions.Variance().Name, Is.EqualTo("Variance"));
+            Assert.That(AggregationFunctions.Variance(1).Name, Is.EqualTo("Variance(1)"));
+        }
+
+        [Test]
+        public void GetResultType_ReturnsDouble()
+        {
+            Assert.That(AggregationFunctions.Variance().GetResultType(typeof(long)), Is.EqualTo(typeof(double)));
+        }
+    }
+
+    [TestFixture]
     public class AggregationFactoryTests
     {
         [Test]
@@ -733,12 +1084,16 @@ public class AggregationFunctionTests
             var functions = AggregationFunctions.GetStandardFunctions();
 
             // Assert
-            Assert.That(functions, Has.Count.EqualTo(5));
+            Assert.That(functions, Has.Count.EqualTo(9));
             Assert.That(functions.Select(f => f.Name), Contains.Item("Count"));
             Assert.That(functions.Select(f => f.Name), Contains.Item("Sum"));
             Assert.That(functions.Select(f => f.Name), Contains.Item("Min"));
             Assert.That(functions.Select(f => f.Name), Contains.Item("Max"));
             Assert.That(functions.Select(f => f.Name), Contains.Item("Mean"));
+            Assert.That(functions.Select(f => f.Name), Contains.Item("Median"));
+            Assert.That(functions.Select(f => f.Name), Contains.Item("Quantile(0.25)"));
+            Assert.That(functions.Select(f => f.Name), Contains.Item("Quantile(0.5)"));
+            Assert.That(functions.Select(f => f.Name), Contains.Item("Quantile(0.75)"));
         }
 
         [Test]
@@ -750,6 +1105,8 @@ public class AggregationFunctionTests
             Assert.That(AggregationFunctions.Min(), Is.InstanceOf<MinAggregation>());
             Assert.That(AggregationFunctions.Max(), Is.InstanceOf<MaxAggregation>());
             Assert.That(AggregationFunctions.Mean(), Is.InstanceOf<MeanAggregation>());
+            Assert.That(AggregationFunctions.Median(), Is.InstanceOf<MedianAggregation>());
+            Assert.That(AggregationFunctions.Quantile(0.5), Is.InstanceOf<QuantileAggregation>());
         }
     }
 

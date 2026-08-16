@@ -144,6 +144,31 @@ public sealed class ExecutionDiagnostics
     public ExecutionStrategy ExecutionStrategy { get; internal set; } = ExecutionStrategy.Eager;
 
     /// <summary>
+    /// Gets the number of rows read from the data source during execution.
+    /// For chunked (streaming/parallel) execution this is the sum across all chunks.
+    /// </summary>
+    public long RowsRead { get; internal set; }
+
+    /// <summary>
+    /// Gets the number of rows in the materialized result frame.
+    /// </summary>
+    public long RowsReturned { get; internal set; }
+
+    /// <summary>
+    /// Gets the number of columns in the materialized result frame.
+    /// </summary>
+    public int MaterializedColumns { get; internal set; }
+
+    /// <summary>
+    /// Accumulates the number of rows read from the data source (chunk-safe).
+    /// </summary>
+    internal void AddRowsRead(long count)
+    {
+        if (count > 0)
+            RowsRead += count;
+    }
+
+    /// <summary>
     /// Gets the operation timings recorded during execution
     /// </summary>
     public IReadOnlyList<OperationTiming> OperationTimings => operationTimings;
@@ -197,6 +222,7 @@ public sealed class ExecutionDiagnostics
         report.AppendLine($"Memory Usage: {MemoryAllocated / 1024.0 / 1024.0:F2} MB allocated, {PeakMemoryUsage / 1024.0 / 1024.0:F2} MB peak");
         report.AppendLine($"Execution Strategy: {ExecutionStrategy}");
         report.AppendLine($"Parallelism Degree: {ParallelismDegree}");
+        report.AppendLine($"Rows: {RowsRead:N0} read, {RowsReturned:N0} returned, {MaterializedColumns:N0} columns");
         report.AppendLine();
 
         // Operation Breakdown
@@ -317,7 +343,10 @@ public sealed class ExecutionDiagnostics
             warnings.Count,
             optimizationsApplied.Count,
             ExecutionStrategy,
-            ParallelismDegree);
+            ParallelismDegree,
+            RowsRead,
+            RowsReturned,
+            MaterializedColumns);
     }
 }
 
@@ -471,7 +500,10 @@ public sealed class ExecutionSummary
         int warningCount,
         int optimizationCount,
         ExecutionStrategy executionStrategy,
-        int parallelismDegree)
+        int parallelismDegree,
+        long rowsRead,
+        long rowsReturned,
+        int materializedColumns)
     {
         TotalExecutionTime = totalExecutionTime;
         MemoryAllocated = memoryAllocated;
@@ -483,6 +515,9 @@ public sealed class ExecutionSummary
         OptimizationCount = optimizationCount;
         ExecutionStrategy = executionStrategy;
         ParallelismDegree = parallelismDegree;
+        RowsRead = rowsRead;
+        RowsReturned = rowsReturned;
+        MaterializedColumns = materializedColumns;
     }
 
     /// <summary>
@@ -536,6 +571,21 @@ public sealed class ExecutionSummary
     public int ParallelismDegree { get; }
 
     /// <summary>
+    /// Gets the number of rows read from the data source during execution
+    /// </summary>
+    public long RowsRead { get; }
+
+    /// <summary>
+    /// Gets the number of rows in the materialized result frame
+    /// </summary>
+    public long RowsReturned { get; }
+
+    /// <summary>
+    /// Gets the number of columns in the materialized result frame
+    /// </summary>
+    public int MaterializedColumns { get; }
+
+    /// <summary>
     /// Returns a string representation of the execution summary
     /// </summary>
     /// <returns>A formatted string with summary statistics</returns>
@@ -544,7 +594,7 @@ public sealed class ExecutionSummary
         return $"ExecutionSummary {{ " +
                $"Time: {TotalExecutionTime.TotalMilliseconds:F2}ms, " +
                $"Memory: {MemoryAllocated / 1024.0 / 1024.0:F2}MB, " +
-               $"Rows: {TotalRowsProcessed:N0}, " +
+               $"Rows: {RowsRead:N0} read, {RowsReturned:N0} returned, " +
                $"Throughput: {AverageThroughput:F0} rows/sec, " +
                $"Operations: {OperationCount}, " +
                $"Warnings: {WarningCount}, " +

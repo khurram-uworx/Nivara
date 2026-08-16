@@ -2,8 +2,10 @@ using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace Nivara.Linq;
 
@@ -230,6 +232,35 @@ public sealed class NivaraQuery<T>
         => frame.AsStream(chunkSize, ct);
 
     /// <summary>
+    /// Executes the query and streams the result rows as typed objects with bounded memory:
+    /// each chunk is projected to rows as it arrives instead of materializing the whole frame
+    /// first, so the CLI can print "Streamed N rows (M chunks)" for arbitrarily large results.
+    /// </summary>
+    /// <param name="chunkSize">The target number of rows per chunk. Honored by row-oriented
+    /// sources (CSV, JSON); for columnar sources such as Parquet the value is advisory and
+    /// chunks are aligned to native row-group boundaries.</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of typed rows, one per result row</returns>
+    public async IAsyncEnumerable<T> ToObjectsAsync(
+        int chunkSize = 10000,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkSize);
+
+        await foreach (var chunk in frame.AsStream(chunkSize, ct).ConfigureAwait(false))
+        {
+            var factory = TypedRowFactory<T>.GetFactory(chunk.Schema);
+            var columns = chunk.ColumnNames.Select(name => chunk.GetColumn(name)).ToArray();
+
+            for (int i = 0; i < chunk.RowCount; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return factory(columns, i);
+            }
+        }
+    }
+
+    /// <summary>
     /// Executes the query and materializes the result rows as objects
     /// </summary>
     /// <returns>A read-only list of typed rows</returns>
@@ -444,6 +475,30 @@ public sealed class NivaraGroupedQuery<TKey, T>
             return new GroupAggregate(new ColumnReference(keyColumnName), new RowCountAggregation());
         }
 
+        if (string.Equals(methodName, nameof(Grouping<TKey, T>.Quantile), StringComparison.Ordinal))
+        {
+            if (call.Arguments.Count != 2 || call.Arguments[0] is not LambdaExpression quantileSelector)
+                throw new UnsupportedQueryExpressionException("g.Quantile(...) requires a selector lambda and a constant quantile argument in [0, 1].");
+
+            var q = ExtractQuantileArgument(call.Arguments[1]);
+            var quantileSource = translator.Translate(quantileSelector.Body);
+            return new GroupAggregate(quantileSource, new QuantileAggregation(q));
+        }
+
+        if (string.Equals(methodName, nameof(Grouping<TKey, T>.StdDev), StringComparison.Ordinal)
+            || string.Equals(methodName, nameof(Grouping<TKey, T>.Variance), StringComparison.Ordinal))
+        {
+            if (call.Arguments.Count is < 1 or > 2 || call.Arguments[0] is not LambdaExpression momentsSelector)
+                throw new UnsupportedQueryExpressionException($"g.{methodName}(...) requires a selector lambda and an optional constant ddof argument.");
+
+            var ddof = ExtractDdofArgument(methodName, call.Arguments.Count == 2 ? call.Arguments[1] : null);
+            var momentsSource = translator.Translate(momentsSelector.Body);
+            var momentFunction = string.Equals(methodName, nameof(Grouping<TKey, T>.StdDev), StringComparison.Ordinal)
+                ? (AggregationFunction)new StdDevAggregation(ddof)
+                : new VarianceAggregation(ddof);
+            return new GroupAggregate(momentsSource, momentFunction);
+        }
+
         if (call.Arguments.Count != 1 || call.Arguments[0] is not LambdaExpression selector)
             throw new UnsupportedQueryExpressionException($"g.{methodName}(...) requires a single selector lambda.");
 
@@ -453,11 +508,68 @@ public sealed class NivaraGroupedQuery<TKey, T>
             nameof(Grouping<TKey, T>.Average) => new MeanAggregation(),
             nameof(Grouping<TKey, T>.Min) => new MinAggregation(),
             nameof(Grouping<TKey, T>.Max) => new MaxAggregation(),
-            _ => throw new UnsupportedQueryExpressionException($"Group aggregate '{methodName}' is not supported. Supported aggregates: Count, Sum, Average, Min, Max.")
+            nameof(Grouping<TKey, T>.Median) => new MedianAggregation(),
+            _ => throw new UnsupportedQueryExpressionException($"Group aggregate '{methodName}' is not supported. Supported aggregates: Count, Sum, Average, Min, Max, Median, Quantile.")
         };
 
         var source = translator.Translate(selector.Body);
         return new GroupAggregate(source, function);
+    }
+
+    /// <summary>
+    /// Extracts the constant quantile argument from a <c>g.Quantile(...)</c> call. Accepts a literal
+    /// constant or a side-effect-free constant-foldable expression, and validates it is in [0, 1].
+    /// </summary>
+    static double ExtractQuantileArgument(Expression argument)
+    {
+        double q;
+        try
+        {
+            var value = argument is ConstantExpression constant
+                ? constant.Value
+                : Expression.Lambda(argument).Compile().DynamicInvoke();
+
+            q = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            throw new UnsupportedQueryExpressionException("g.Quantile(...) requires a constant quantile argument in [0, 1].");
+        }
+
+        if (double.IsNaN(q) || q < 0d || q > 1d)
+            throw new UnsupportedQueryExpressionException($"g.Quantile(...) quantile must be in [0, 1], got {q}.");
+
+        return q;
+    }
+
+    /// <summary>
+    /// Extracts the optional ddof argument from a <c>g.StdDev(...)</c> / <c>g.Variance(...)</c>
+    /// call. The compiler binds the <c>ddof = 0</c> default into the expression tree, so a
+    /// <c>null</c> argument only occurs when no second argument was ever provided.
+    /// </summary>
+    static int ExtractDdofArgument(string methodName, Expression? argument)
+    {
+        if (argument is null)
+            return 0;
+
+        int ddof;
+        try
+        {
+            var value = argument is ConstantExpression constant
+                ? constant.Value
+                : Expression.Lambda(argument).Compile().DynamicInvoke();
+
+            ddof = Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            throw new UnsupportedQueryExpressionException($"g.{methodName}(...) requires a constant integer ddof argument.");
+        }
+
+        if (ddof < 0)
+            throw new UnsupportedQueryExpressionException($"g.{methodName}(...) ddof must be >= 0, got {ddof}.");
+
+        return ddof;
     }
 
     readonly record struct GroupAggregate(ColumnExpression Source, AggregationFunction Function);

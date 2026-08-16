@@ -341,6 +341,106 @@ public class TypedLinqTests
     }
 
     [Test]
+    public void GroupBy_SelectMedianAndQuantile_ComputesCorrectly()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .GroupBy(p => p.City)
+            .Select(g => new { g.Key, MedAge = g.Median(p => p.Age), P90 = g.Quantile(p => p.Age, 0.9) })
+            .ToObjects();
+
+        var nyc = rows.Single(r => r.Key == "NYC");
+        Assert.That(nyc.MedAge, Is.EqualTo(35.0).Within(1e-9));          // {25, 35, 50}
+        Assert.That(nyc.P90, Is.EqualTo(47.0).Within(1e-9));             // 35 + 0.8 * (50 - 35)
+
+        var la = rows.Single(r => r.Key == "LA");
+        Assert.That(la.MedAge, Is.EqualTo(30.0).Within(1e-9));           // {20, 40}
+        Assert.That(la.P90, Is.EqualTo(38.0).Within(1e-9));              // 20 + 0.9 * (40 - 20)
+    }
+
+    [Test]
+    public void GroupBy_QuantileMedian_AgreeAtHalf()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .GroupBy(p => p.City)
+            .Select(g => new { g.Key, Med = g.Median(p => p.Salary), Q50 = g.Quantile(p => p.Salary, 0.5) })
+            .ToObjects();
+
+        foreach (var row in rows)
+            Assert.That(row.Q50, Is.EqualTo(row.Med).Within(1e-9));
+    }
+
+    [Test]
+    public void GroupBy_OutOfRangeQuantile_FailsFast()
+    {
+        using var frame = CreatePeopleFrame();
+
+        Assert.Throws<UnsupportedQueryExpressionException>(() =>
+            frame.Query<Person>().GroupBy(p => p.City).Select(g => new { g.Key, Q = g.Quantile(p => p.Age, 1.5) }));
+    }
+
+    [Test]
+    public void GroupBy_NonConstantQuantileArgument_FailsFast()
+    {
+        using var frame = CreatePeopleFrame();
+
+        Assert.Throws<UnsupportedQueryExpressionException>(() =>
+            frame.Query<Person>().GroupBy(p => p.City).Select(g => new { g.Key, Q = g.Quantile(p => p.Age, g.Key.Length * 0.2) }));
+    }
+
+    [Test]
+    public void GroupBy_SelectStdDevAndVariance_ComputesCorrectly()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .GroupBy(p => p.City)
+            .Select(g => new { g.Key, Std = g.StdDev(p => p.Age), Var = g.Variance(p => p.Age) })
+            .ToObjects();
+
+        var nyc = rows.Single(r => r.Key == "NYC");
+        Assert.That(nyc.Var, Is.EqualTo(2850.0 / 27.0).Within(1e-9));               // {25, 35, 50}
+        Assert.That(nyc.Std, Is.EqualTo(Math.Sqrt(2850.0 / 27.0)).Within(1e-9));
+
+        var la = rows.Single(r => r.Key == "LA");
+        Assert.That(la.Var, Is.EqualTo(100.0).Within(1e-9));                        // {20, 40}
+        Assert.That(la.Std, Is.EqualTo(10.0).Within(1e-9));
+    }
+
+    [Test]
+    public void GroupBy_SampleStdDevAndVariance_UseDdofOne()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .GroupBy(p => p.City)
+            .Select(g => new { g.Key, Std = g.StdDev(p => p.Age, 1), Var = g.Variance(p => p.Age, 1) })
+            .ToObjects();
+
+        var nyc = rows.Single(r => r.Key == "NYC");
+        Assert.That(nyc.Var, Is.EqualTo(2850.0 / 18.0).Within(1e-9));               // population * 3/2
+        Assert.That(nyc.Std, Is.EqualTo(Math.Sqrt(2850.0 / 18.0)).Within(1e-9));
+
+        var la = rows.Single(r => r.Key == "LA");
+        Assert.That(la.Var, Is.EqualTo(200.0).Within(1e-9));                        // population * 2/1
+        Assert.That(la.Std, Is.EqualTo(Math.Sqrt(200.0)).Within(1e-9));
+    }
+
+    [Test]
+    public void GroupBy_NegativeDdof_FailsFast()
+    {
+        using var frame = CreatePeopleFrame();
+
+        Assert.Throws<UnsupportedQueryExpressionException>(() =>
+            frame.Query<Person>().GroupBy(p => p.City).Select(g => new { g.Key, S = g.StdDev(p => p.Age, -1) }));
+        Assert.Throws<UnsupportedQueryExpressionException>(() =>
+            frame.Query<Person>().GroupBy(p => p.City).Select(g => new { g.Key, V = g.Variance(p => p.Age, -1) }));
+    }
+
+    [Test]
     public void GroupBy_Collect_ReturnsDistinctKeys()
     {
         using var frame = CreatePeopleFrame();
