@@ -1,7 +1,6 @@
 using Nivara.Execution;
 using Nivara.Query;
 using NUnit.Framework;
-using System.Threading.Channels;
 
 namespace Nivara.Tests.Execution;
 
