@@ -2429,16 +2429,6 @@ public static class ReverseGradOperations
                         span.Slice(srcOffset, stride).CopyTo(resultValues.AsSpan(dstOffset, stride));
                     }
                 }
-                else
-                {
-                    for (int i = 0; i < indices.Length; i++)
-                    {
-                        int srcOffset = indices[i] * stride;
-                        int dstOffset = i * stride;
-                        for (int j = 0; j < stride; j++)
-                            resultValues[dstOffset + j] = source.Data[srcOffset + j];
-                    }
-                }
 
                 var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
 
