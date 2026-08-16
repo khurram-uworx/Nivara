@@ -1,4 +1,3 @@
-using Nivara.Operations;
 using NUnit.Framework;
 using System.Text.Json;
 

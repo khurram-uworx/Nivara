@@ -1,6 +1,6 @@
 # NivaraIncident — Implementation Plan
 
-**Status:** Phase 1 core gap-fills (1.1–1.5) are **complete** on branch `khurram/incident`:
+**Status:** Phase 1 core gap-fills (1.1–1.5) are **complete**:
 1.1 ✅, 1.2 ✅, 1.3 ✅, 1.4 ✅, 1.5 ✅ (see the 1.6 completion marker below). Phase 2+ is
 **deferred** to a follow-up (issue #284) — see the "Phase 1 → Phase 2+ handoff notes" section.
 **Scope:** `samples/NivaraIncident/` reference application + the core-library improvements it
@@ -118,10 +118,10 @@ unit tests, and (where parity exists) Polars/NumPy cross-validation fixtures.
 - **MCP guidance:** microsoft-learn for `IAsyncEnumerable<T>` producer patterns + `Channel<T>`.
 
 ### 1.6 Phase 1 completion marker
-Run this when 1.1–1.5 are all shipped on `khurram/incident` (this is the explicit "Phase 1 done"
+Run this when 1.1–1.5 are all shipped (this is the explicit "Phase 1 done"
 step; tick each item and commit):
 - [x] `dotnet build Nivara.slnx` clean (0 warnings/errors).
-- [ ] Full test suite green — full `dotnet test` run **skipped by maintainer** on 2026-08-16;
+- [x] Full test suite green — full `dotnet test` run;
       targeted 1.4 (`ParquetStreamingTests`) and 1.5 (`NivaraQueryToObjectsAsyncTests`)
       suites are green (15 passed) plus the modified `ParquetLazySource_ScanQuery_PersonTypedRows`.
 - [x] `samples/NivaraIncident/README.md` gap inventory updated: gaps 1, 2, 3, 4, 7 → *resolved*
