@@ -5,6 +5,7 @@ using Nivara.Query;
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 
 namespace Nivara.Linq;
 
@@ -229,6 +230,35 @@ public sealed class NivaraQuery<T>
     /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
     public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
         => frame.AsStream(chunkSize, ct);
+
+    /// <summary>
+    /// Executes the query and streams the result rows as typed objects with bounded memory:
+    /// each chunk is projected to rows as it arrives instead of materializing the whole frame
+    /// first, so the CLI can print "Streamed N rows (M chunks)" for arbitrarily large results.
+    /// </summary>
+    /// <param name="chunkSize">The target number of rows per chunk. Honored by row-oriented
+    /// sources (CSV, JSON); for columnar sources such as Parquet the value is advisory and
+    /// chunks are aligned to native row-group boundaries.</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of typed rows, one per result row</returns>
+    public async IAsyncEnumerable<T> ToObjectsAsync(
+        int chunkSize = 10000,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(chunkSize);
+
+        await foreach (var chunk in frame.AsStream(chunkSize, ct).ConfigureAwait(false))
+        {
+            var factory = TypedRowFactory<T>.GetFactory(chunk.Schema);
+            var columns = chunk.ColumnNames.Select(name => chunk.GetColumn(name)).ToArray();
+
+            for (int i = 0; i < chunk.RowCount; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return factory(columns, i);
+            }
+        }
+    }
 
     /// <summary>
     /// Executes the query and materializes the result rows as objects
