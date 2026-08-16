@@ -1634,26 +1634,16 @@ public static class ReverseGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var aArr = new T[a.Length];
-        a.AsSpan().CopyTo(aArr.AsSpan());
-        var resultArr = new T[a.Length];
-        for (int i = 0; i < a.Length; i++)
-            resultArr[i] = T.CreateChecked(Math.Pow(double.CreateChecked(aArr[i]), exponent));
-
-        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
+        var resultTensor = new ReverseGradTensor<T>(
+            GradOperationKernels.ApplyPow(a.Data, exponent),
+            GradientUtils.ShouldTrackGrad(a),
+            a.shape);
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
             var gradFn = new OpNode<T>("Pow", [a], (typedGradOutput) =>
             {
-                var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                {
-                    double x = double.CreateChecked(aArr[i]);
-                    double g = double.CreateChecked(typedGradOutput[i]);
-                    gradArr[i] = T.CreateChecked(exponent * Math.Pow(x, exponent - 1.0) * g);
-                }
-                AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
+                AccumulateGradient(a, GradOperationKernels.ApplyPowGradient(a.Data, typedGradOutput, exponent));
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
