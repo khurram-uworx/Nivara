@@ -1038,6 +1038,16 @@ internal sealed class QueryFrame : IDisposable, IAsyncDisposable
         if (!disposed)
         {
             NivaraResourceManager.UntrackResource(this);
+
+            try
+            {
+                source.Dispose();
+            }
+            catch
+            {
+                // Ignore disposal errors, mirroring the abandoned-resource cleanup path.
+            }
+
             disposed = true;
         }
     }
@@ -1051,6 +1061,8 @@ internal sealed class QueryFrame : IDisposable, IAsyncDisposable
 
             if (source is IAsyncDisposable asyncDisposable)
                 await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            else
+                source.Dispose();
 
             disposed = true;
         }

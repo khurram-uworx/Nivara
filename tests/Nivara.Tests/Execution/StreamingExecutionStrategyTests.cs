@@ -38,7 +38,7 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void Execute_WithNonStreamablePlan_FallsBackToLazy()
+    public void Execute_NonStreamableOp_NonChunkedSource_ReturnsFrame()
     {
         var strategy = new StreamingExecutionStrategy();
         var plan = ExecutionTestHelpers.CreateTestPlan(
@@ -360,6 +360,58 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Execute_EmptyChunkedSourceWithBoundaryOp_RunsBoundaryOpOnce()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 0);
+        var boundaryCalls = 0;
+        var boundaryOp = new StubQueryOperation("Sort")
+        {
+            ExecuteFn = input =>
+            {
+                boundaryCalls++;
+                return input;
+            },
+        };
+        var plan = new QueryPlan(source, new IQueryOperation[] { boundaryOp });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(boundaryCalls, Is.EqualTo(1),
+            "The empty-source fallback already applies the full plan; boundary ops must not re-apply");
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        Assert.That(result.RowCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_EmptyChunkedSourceWithBoundaryOp_RunsBoundaryOpOnce()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 0);
+        var boundaryCalls = 0;
+        var boundaryOp = new StubQueryOperation("Sort")
+        {
+            ExecuteFn = input =>
+            {
+                boundaryCalls++;
+                return input;
+            },
+        };
+        var plan = new QueryPlan(source, new IQueryOperation[] { boundaryOp });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+
+        using var result = strategy.ExecuteAsync(plan, context).GetAwaiter().GetResult();
+
+        Assert.That(boundaryCalls, Is.EqualTo(1),
+            "The empty-source fallback already applies the full plan; boundary ops must not re-apply");
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        Assert.That(result.RowCount, Is.EqualTo(0));
+    }
+
+    [Test]
     public void Execute_SingleRowSource_Works()
     {
         var strategy = new StreamingExecutionStrategy();
@@ -614,16 +666,20 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void Execute_NonStreamableOpInChunkedSource_FallsBackToLazy()
+    public void Execute_NonStreamableOpInChunkedSource_StreamsPrefixThenAppliesBoundary()
     {
         var strategy = new StreamingExecutionStrategy();
-        var plan = ExecutionTestHelpers.CreateChunkedTestPlan(
-            sourceRowCount: 100,
-            operations: new IQueryOperation[] { new StubQueryOperation("GroupBy") });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new GroupByOperation(new[] { ColumnExpressions.Col<int>("A") }),
+        });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
         using var result = strategy.Execute(plan, context);
 
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(0),
+            "Non-streamable boundary ops must stream the streamable prefix instead of falling back to Lazy");
         Assert.That(result, Is.Not.Null);
         Assert.That(result.ColumnCount, Is.GreaterThan(0));
     }
@@ -742,33 +798,67 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void Execute_SortInChunkedPlan_FallsBackToLazy()
+    public void Execute_SortInChunkedPlan_StreamsPrefixThenAppliesBoundary()
     {
         var strategy = new StreamingExecutionStrategy();
-        var plan = ExecutionTestHelpers.CreateChunkedTestPlan(
-            sourceRowCount: 100,
-            operations: new IQueryOperation[] { new StubQueryOperation("Sort") });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
         using var result = strategy.Execute(plan, context);
 
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(0),
+            "Sort as a boundary op must stream the streamable prefix instead of falling back to Lazy");
         Assert.That(result, Is.Not.Null);
         Assert.That(result.RowCount, Is.GreaterThan(0));
     }
 
     [Test]
-    public void Execute_JoinInChunkedPlan_FallsBackToLazy()
+    public void Execute_JoinInChunkedPlan_StreamsPrefixThenAppliesBoundary()
     {
         var strategy = new StreamingExecutionStrategy();
-        var plan = ExecutionTestHelpers.CreateChunkedTestPlan(
-            sourceRowCount: 100,
-            operations: new IQueryOperation[] { new StubQueryOperation("Join") });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
+        var joinData = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<int>.Create(Enumerable.Range(0, 100).ToArray()),
+        };
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new JoinOperation(joinData, joinData, JoinType.Inner, new[] { new JoinKey("A", "A") }),
+        });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
         using var result = strategy.Execute(plan, context);
 
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(0),
+            "Join as a boundary op must stream the streamable prefix instead of falling back to Lazy");
         Assert.That(result, Is.Not.Null);
         Assert.That(result.RowCount, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void Execute_FilterThenSortInChunkedSource_StreamsPrefixThenAppliesBoundary()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        using var result = strategy.Execute(plan, context);
+        using var lazyResult = lazyStrategy.Execute(plan, ExecutionTestHelpers.CreateTestContext());
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1),
+            "Filter-then-Sort must stream the filter prefix per chunk, not fall back to Lazy");
+        assertIntColumnEqual(lazyResult, result, "A");
     }
 
     [Test]

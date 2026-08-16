@@ -56,6 +56,29 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`QueryFrame` disposal now releases the underlying source on both sync and async paths (#268)** —
+  `Dispose()` previously only untracked the frame and never disposed the `IQuerySource`, while
+  `DisposeAsync()` released it only when the source happened to implement `IAsyncDisposable` (none
+  do), so explicit disposal of a lazy CSV/Parquet frame could leak the persistent chunk-reader
+  file handle while GC-abandonment cleanup did release it. `Dispose()` now calls `source.Dispose()`
+  (swallowing errors, mirroring the abandoned-resource cleanup) and `DisposeAsync()` falls back to
+  `source.Dispose()` for non-`IAsyncDisposable` sources. Fluent chains share one source, so
+  disposing any node releases it — the same semantics abandoned-resource cleanup already applied.
+
+- **Sync streaming execution now streams the streamable prefix before non-streamable boundary ops (#269)** —
+  sync `ExecuteCore` re-checked `isSuitableForStreaming` and fell back entirely to Lazy for plans
+  containing Sort/GroupBy/Join/Distinct/etc., while async `ExecuteCoreAsync` streamed the prefix and
+  ran boundary ops on the materialized frame (flush-concatenate-resume). Both paths now behave
+  identically: only window-expression plans fall back to Lazy; intermediate chunk frames are
+  disposed after concatenation.
+
+- **Streaming empty-source fallback no longer re-applies boundary ops (#270)** — when a chunk-capable
+  source yields zero chunks, both sync `ExecuteCore` and async `ExecuteCoreAsync` fall back to a
+  single full-plan execution; previously the flush-concatenate-resume segment loop then re-applied
+  every non-streamable boundary op on the already-processed result (a pre-existing async edge case
+  surfaced while aligning the paths in #269). Boundary ops now run exactly once on the empty-source
+  path.
+
 - **`QueryFrame.AsStream(chunkSize)` now honors the requested row count (#267)** — the chunk
   size was previously encoded as `MemoryBudget = chunkSize * 100` and then re-derived by the
   streaming strategy, which clamped small values to a 1000-row minimum. `NivaraExecutionContext`
