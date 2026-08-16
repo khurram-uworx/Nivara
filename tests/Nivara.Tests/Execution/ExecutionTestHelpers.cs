@@ -69,6 +69,41 @@ sealed class ThrowingQuerySource : IQuerySource
     public void Dispose() { }
 }
 
+sealed class AsyncOnlyQuerySource : IQuerySource
+{
+    public Schema Schema => new(new[] { ("A", typeof(int)), ("B", typeof(string)) });
+    public bool IsLazy => false;
+
+    public IReadOnlyDictionary<string, IColumn> Execute()
+        => throw new InvalidOperationException("Sync Execute must not be called on the async path");
+
+    public Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult<IReadOnlyDictionary<string, IColumn>>(
+            new Dictionary<string, IColumn>
+            {
+                ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }),
+                ["B"] = NivaraColumn<string>.Create(new[] { "x", "y", "z" }),
+            });
+    }
+
+    public void Dispose() { }
+}
+
+sealed class AsyncOnlyQueryOperation : IQueryOperation
+{
+    public string OperationType => global::Nivara.Query.OperationType.Filter;
+    public Schema TransformSchema(Schema input) => input;
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input)
+        => throw new InvalidOperationException("Sync Execute must not be called on the async path");
+
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input, CancellationToken ct = default)
+        => ValueTask.FromResult(input);
+}
+
 sealed class ThrowingQueryOperation : IQueryOperation
 {
     public string OperationType => global::Nivara.Query.OperationType.Filter;

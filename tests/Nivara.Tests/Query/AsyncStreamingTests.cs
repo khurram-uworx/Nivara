@@ -405,6 +405,83 @@ public class AsyncStreamingTests
     }
 
     [Test]
+    public async Task CollectAsync_JsonLazySource_ParityWithCollect()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        var jsonPath = Path.Combine(tempDir, "data.json");
+
+        try
+        {
+            var records = Enumerable.Range(0, 100)
+                .Select(i => $"{{\"Name\":\"Person{i}\",\"Age\":{20 + i},\"Salary\":{50000 + i}}}");
+            File.WriteAllText(jsonPath, "[" + string.Join(",", records) + "]");
+
+            var queryFrame = Nivara.IO.Json.ScanFrame(jsonPath);
+
+            using var syncResult = queryFrame.Collect();
+            using var asyncResult = await queryFrame.CollectAsync();
+
+            Assert.That(asyncResult.RowCount, Is.EqualTo(syncResult.RowCount));
+            Assert.That(asyncResult.ColumnNames, Is.EquivalentTo(syncResult.ColumnNames));
+
+            for (int i = 0; i < syncResult.RowCount; i++)
+            {
+                Assert.That(asyncResult.GetColumn("Name").GetValue(i), Is.EqualTo(syncResult.GetColumn("Name").GetValue(i)));
+                Assert.That(asyncResult.GetColumn("Age").GetValue(i), Is.EqualTo(syncResult.GetColumn("Age").GetValue(i)));
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public void CsvLazySource_ReadChunkAsync_CancelledToken_ThrowsOperationCanceledException()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 100);
+            using var source = new CsvLazySource(csvPath, CsvOptions.Default);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            Assert.ThrowsAsync<OperationCanceledException>(() => source.ReadChunkAsync(0, 10, cts.Token).AsTask());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public void JsonLazySource_ReadChunkAsync_CancelledToken_ThrowsOperationCanceledException()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var jsonPath = Path.Combine(tempDir, "data.json");
+            var records = Enumerable.Range(0, 100)
+                .Select(i => $"{{\"Name\":\"Person{i}\",\"Age\":{20 + i},\"Salary\":{50000 + i}}}");
+            File.WriteAllText(jsonPath, "[" + string.Join(",", records) + "]");
+
+            using var source = new JsonLazySource(jsonPath, JsonOptions.Default);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            Assert.ThrowsAsync<OperationCanceledException>(() => source.ReadChunkAsync(0, 10, cts.Token).AsTask());
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
     public async Task StreamingStrategy_ChannelPipeline_ParityWithLazy()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
