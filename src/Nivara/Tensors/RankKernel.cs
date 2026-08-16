@@ -1,5 +1,5 @@
-using System.Buffers;
 using Nivara.Operations;
+using System.Buffers;
 
 namespace Nivara.Tensors;
 

@@ -150,7 +150,7 @@ internal sealed class ExecutionEngine
 
             return result;
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             diagnostics.RecordWarning(new PerformanceWarning(
                 PerformanceWarningSeverity.Critical,
@@ -216,7 +216,7 @@ internal sealed class ExecutionEngine
             // Execute using the selected strategy
             return await strategy.ExecuteAsync(optimizedPlan, context);
         }
-        catch (Exception ex) when (ex is not QueryExecutionException)
+        catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {
             diagnostics.RecordWarning(new PerformanceWarning(
                 PerformanceWarningSeverity.Critical,
@@ -243,6 +243,16 @@ internal sealed class ExecutionEngine
             throw new ArgumentNullException(nameof(strategy));
 
         strategies.AddOrUpdate(strategyType, strategy, (_, _) => strategy);
+    }
+
+    /// <summary>
+    /// Gets the registered execution strategy for the specified type
+    /// </summary>
+    /// <param name="strategyType">The execution strategy type</param>
+    /// <returns>The execution strategy, or null if not found</returns>
+    internal IExecutionStrategy? GetStrategy(ExecutionStrategy strategyType)
+    {
+        return strategies.TryGetValue(strategyType, out var strategy) ? strategy : null;
     }
 
     /// <summary>

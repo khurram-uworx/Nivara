@@ -1,9 +1,9 @@
-using System.Buffers;
 using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.Helpers;
 using Nivara.Query;
+using System.Buffers;
 
 namespace Nivara;
 

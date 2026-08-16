@@ -12,6 +12,11 @@ internal interface IQueryOperation
     string OperationType { get; }
     Schema TransformSchema(Schema inputSchema);
     IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input);
+
+    ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+        => new(Execute(input));
 }
 
 internal interface IQuerySource : IDisposable
@@ -41,12 +46,9 @@ internal interface IQuerySource : IDisposable
         if (!CanReadInChunks)
             throw new NotSupportedException("This source does not support chunked reading.");
 
-        var estimated = EstimatedRowCount;
-        int maxChunks = estimated.HasValue
-            ? (int)((estimated.Value + chunkSize - 1) / chunkSize)
-            : int.MaxValue;
-
-        for (int chunkIndex = 0; chunkIndex < maxChunks; chunkIndex++)
+        // Chunk-capable sources return an empty chunk at EOF, so termination does not depend on
+        // EstimatedRowCount (a deliberate heuristic for some sources, e.g. CSV) and never drops data.
+        for (int chunkIndex = 0; ; chunkIndex++)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var chunk = await ReadChunkAsync(chunkIndex, chunkSize, cancellationToken).ConfigureAwait(false);

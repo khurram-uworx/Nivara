@@ -136,6 +136,10 @@ sealed class CsvLazySource : IQuerySource
     private readonly CsvOptions options;
     private readonly Lazy<Schema> lazySchema;
     private readonly DeferredErrorHandler errorHandler;
+    private StreamReader? chunkStreamReader;
+    private CsvReader? chunkCsvReader;
+    private int rowsConsumed;
+    private bool eofReached;
     private bool disposed;
 
     /// <summary>
@@ -166,6 +170,50 @@ sealed class CsvLazySource : IQuerySource
     public bool IsLazy => true;
 
     /// <inheritdoc />
+    public bool CanReadInChunks => true;
+
+    /// <summary>
+    /// Gets the estimated row count based on file size and average bytes per row
+    /// from schema inference, or null if estimation is not possible.
+    /// </summary>
+    public int? EstimatedRowCount
+    {
+        get
+        {
+            if (!File.Exists(filePath))
+                return null;
+
+            try
+            {
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Length == 0)
+                    return 0;
+
+                // Use sample data from schema inference to estimate average bytes per row
+                var schema = lazySchema.Value;
+                if (schema == null || !lazySchema.IsValueCreated)
+                    return null;
+
+                // Estimate average bytes per row from the header + average field length
+                // Sample inference reads up to SchemaInferenceRecords rows; use file size
+                // and sample-based heuristic
+                var columnCount = schema.ColumnNames.Count;
+                if (columnCount == 0)
+                    return null;
+
+                // Heuristic: ~10 bytes per field (conservative for CSV)
+                var estimatedBytesPerRow = columnCount * 10;
+                var estimatedRows = (int)(fileInfo.Length / estimatedBytesPerRow);
+                return Math.Max(0, estimatedRows);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -173,102 +221,325 @@ sealed class CsvLazySource : IQuerySource
         // Check for deferred errors first
         errorHandler.ThrowIfHasDeferredErrors("CSV data source execution");
 
+        if (!File.Exists(filePath))
+            throw new DataSourceException($"CSV file not found: '{filePath}'");
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+            throw new DataSourceException($"CSV file is empty: '{filePath}'");
+
+        var columns = ReadAllChunks();
+        return columns;
+    }
+
+    /// <summary>
+    /// Reads all data by iterating through chunks and concatenating the results.
+    /// </summary>
+    private IReadOnlyDictionary<string, IColumn> ReadAllChunks()
+    {
+        var schema = Schema;
+        var columnNames = schema.ColumnNames;
+        var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+        var allColumns = new Dictionary<string, List<object?>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+            allColumns[name] = new List<object?>();
+
+        int chunkIndex = 0;
+        int chunkSize = 10000;
+
+        while (true)
+        {
+            var chunk = ReadChunk(chunkIndex, chunkSize);
+            if (chunk == null || chunk.Count == 0)
+                break;
+
+            int rowCount = chunk.Values.FirstOrDefault()?.Length ?? 0;
+            if (rowCount == 0)
+                break;
+
+            foreach (var name in columnNames)
+            {
+                var columnList = allColumns[name];
+                var column = chunk[name];
+                CopyColumnToList(column, columnTypes[name], columnList);
+            }
+
+            chunkIndex++;
+        }
+
+        if (allColumns.Values.All(l => l.Count == 0))
+        {
+            // Return empty columns based on schema
+            var emptyColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
+            {
+                var columnType = columnTypes[columnName];
+                emptyColumns[columnName] = ColumnFactory.Create(columnType, Array.Empty<object?>());
+            }
+            return emptyColumns;
+        }
+
+        var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+        {
+            var columnType = columnTypes[name];
+            var values = allColumns[name].ToArray();
+            result[name] = ColumnFactory.Create(columnType, values);
+        }
+
+        return result;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        errorHandler.ThrowIfHasDeferredErrors("CSV chunk reading");
+
+        if (chunkIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        if (chunkSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkSize));
+
+        if (!File.Exists(filePath))
+            throw new DataSourceException($"CSV file not found: '{filePath}'");
+
         try
         {
-            // Check file existence and accessibility first
-            if (!File.Exists(filePath))
-            {
-                throw new DataSourceException($"CSV file not found: '{filePath}'");
-            }
+            var schema = Schema;
+            var columnNames = schema.ColumnNames;
+            var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
 
-            FileInfo fileInfo;
-            try
-            {
-                fileInfo = new FileInfo(filePath);
-            }
-            catch (Exception ex)
-            {
-                throw new DataSourceException($"Cannot access CSV file '{filePath}': {ex.Message}", ex);
-            }
+            if (!EnsureChunkPosition(chunkIndex, chunkSize, useAsync: false))
+                return new Dictionary<string, IColumn>();
 
-            if (fileInfo.Length == 0)
-            {
-                throw new DataSourceException($"CSV file is empty: '{filePath}'");
-            }
+            var csv = chunkCsvReader!;
 
-            string fileContent;
-            try
+            // Read chunkSize records
+            var records = new List<IDictionary<string, object>>(chunkSize);
+            int rowsRead = 0;
+            while (rowsRead < chunkSize)
             {
-                fileContent = File.ReadAllText(filePath);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new DataSourceException($"Access denied to CSV file '{filePath}'. Check file permissions.", ex);
-            }
-            catch (DirectoryNotFoundException ex)
-            {
-                throw new DataSourceException($"Directory not found for CSV file '{filePath}': {ex.Message}", ex);
-            }
-            catch (FileNotFoundException ex)
-            {
-                throw new DataSourceException($"CSV file not found: '{filePath}': {ex.Message}", ex);
-            }
-            catch (IOException ex)
-            {
-                throw new DataSourceException($"IO error reading CSV file '{filePath}': {ex.Message}", ex);
-            }
+                if (!csv.Read())
+                {
+                    eofReached = true;
+                    DisposeChunkReader();
+                    break;
+                }
 
-            using var reader = new StringReader(fileContent);
-            using var csv = new CsvReader(reader, options.ToCsvConfiguration());
-
-            // Read all records as dynamic objects
-            List<dynamic> records;
-            try
-            {
-                records = csv.GetRecords<dynamic>().ToList();
-            }
-            catch (Exception ex) when (ex.GetType().Name.Contains("Csv"))
-            {
-                throw new DataSourceException($"CSV parsing error in file '{filePath}': {ex.Message}", ex);
-            }
-            catch (Exception ex)
-            {
-                throw new DataSourceException($"Unexpected error parsing CSV file '{filePath}': {ex.Message}", ex);
+                var recordDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < csv.HeaderRecord?.Length; i++)
+                {
+                    var header = csv.HeaderRecord?[i];
+                    if (header != null)
+                    {
+                        var fieldValue = csv.GetField(i);
+                        recordDict[header] = fieldValue ?? string.Empty;
+                    }
+                }
+                records.Add(recordDict);
+                rowsRead++;
+                rowsConsumed++;
             }
 
             if (records.Count == 0)
+                return new Dictionary<string, IColumn>();
+
+            // Build columns from records
+            var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
             {
-                // Return empty columns based on schema
-                var emptyColumns = new Dictionary<string, IColumn>();
-                foreach (var columnName in Schema.ColumnNames)
+                var columnType = columnTypes[columnName];
+                var values = new object?[records.Count];
+                for (int i = 0; i < records.Count; i++)
                 {
-                    var columnType = Schema.GetColumnType(columnName);
-                    emptyColumns[columnName] = CreateEmptyColumn(columnType);
+                    object? value = null;
+                    if (records[i].TryGetValue(columnName, out var rawValue) && rawValue != null)
+                    {
+                        var stringValue = rawValue.ToString();
+                        value = ConvertValue(stringValue, columnType);
+                    }
+                    values[i] = value;
                 }
-                return emptyColumns;
-            }
-
-            // Convert records to columns
-            var columns = new Dictionary<string, IColumn>();
-
-            foreach (var columnName in Schema.ColumnNames)
-            {
-                var columnType = Schema.GetColumnType(columnName);
-                var columnData = ExtractColumnData(records, columnName, columnType);
-                columns[columnName] = CreateColumn(columnData, columnType);
+                columns[columnName] = ColumnFactory.Create(columnType, values);
             }
 
             return columns;
         }
+        catch (Exception ex) when (ex.GetType().Name.Contains("Csv"))
+        {
+            throw new DataSourceException($"CSV parsing error in file '{filePath}': {ex.Message}", ex);
+        }
         catch (DataSourceException)
         {
-            // Re-throw DataSourceException as-is
             throw;
         }
         catch (Exception ex)
         {
-            throw new DataSourceException($"Failed to read CSV file '{filePath}': {ex.Message}", ex);
+            throw new DataSourceException($"Failed to read CSV chunk from file '{filePath}': {ex.Message}", ex);
         }
+    }
+
+    /// <inheritdoc />
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        errorHandler.ThrowIfHasDeferredErrors("CSV chunk reading");
+
+        if (chunkIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        if (chunkSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkSize));
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (!File.Exists(filePath))
+            throw new DataSourceException($"CSV file not found: '{filePath}'");
+
+        try
+        {
+            var schema = Schema;
+            var columnNames = schema.ColumnNames;
+            var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!EnsureChunkPosition(chunkIndex, chunkSize, useAsync: true))
+                return new Dictionary<string, IColumn>();
+
+            var csv = chunkCsvReader!;
+
+            // Read chunkSize records
+            var records = new List<IDictionary<string, object>>(chunkSize);
+            int rowsRead = 0;
+            while (rowsRead < chunkSize)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!csv.Read())
+                {
+                    eofReached = true;
+                    DisposeChunkReader();
+                    break;
+                }
+
+                var recordDict = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+                for (int i = 0; i < csv.HeaderRecord?.Length; i++)
+                {
+                    var header = csv.HeaderRecord?[i];
+                    if (header != null)
+                    {
+                        var fieldValue = csv.GetField(i);
+                        recordDict[header] = fieldValue ?? string.Empty;
+                    }
+                }
+                records.Add(recordDict);
+                rowsRead++;
+                rowsConsumed++;
+            }
+
+            if (records.Count == 0)
+                return new Dictionary<string, IColumn>();
+
+            // Build columns from records
+            var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
+            {
+                var columnType = columnTypes[columnName];
+                var values = new object?[records.Count];
+                for (int i = 0; i < records.Count; i++)
+                {
+                    object? value = null;
+                    if (records[i].TryGetValue(columnName, out var rawValue) && rawValue != null)
+                    {
+                        var stringValue = rawValue.ToString();
+                        value = ConvertValue(stringValue, columnType);
+                    }
+                    values[i] = value;
+                }
+                columns[columnName] = ColumnFactory.Create(columnType, values);
+            }
+
+            return columns;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex.GetType().Name.Contains("Csv"))
+        {
+            throw new DataSourceException($"CSV parsing error in file '{filePath}': {ex.Message}", ex);
+        }
+        catch (DataSourceException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DataSourceException($"Failed to read CSV chunk from file '{filePath}': {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// Positions the persistent chunk reader so the next record read is the first data row
+    /// of the requested chunk. Sequential chunk reads continue from the current position
+    /// (single pass); backward access or re-reads reopen the file and skip forward.
+    /// </summary>
+    /// <param name="chunkIndex">The zero-based chunk index.</param>
+    /// <param name="chunkSize">The number of rows per chunk.</param>
+    /// <param name="useAsync">Whether to open the underlying stream with async I/O.</param>
+    /// <returns>False when the file has fewer data rows than the requested chunk start.</returns>
+    private bool EnsureChunkPosition(int chunkIndex, int chunkSize, bool useAsync)
+    {
+        var targetRow = (long)chunkIndex * chunkSize;
+
+        if (eofReached && targetRow >= rowsConsumed)
+            return false;
+
+        if (chunkCsvReader == null || targetRow < rowsConsumed)
+        {
+            DisposeChunkReader();
+            eofReached = false;
+            var stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync);
+            var streamReader = new StreamReader(stream);
+            var csv = new CsvReader(streamReader, options.ToCsvConfiguration());
+            if (options.HasHeaderRecord && !csv.Read())
+            {
+                chunkStreamReader = streamReader;
+                chunkCsvReader = csv;
+                rowsConsumed = 0;
+                eofReached = true;
+                return false;
+            }
+            if (options.HasHeaderRecord)
+                csv.ReadHeader();
+            chunkStreamReader = streamReader;
+            chunkCsvReader = csv;
+            rowsConsumed = 0;
+        }
+
+        while (rowsConsumed < targetRow)
+        {
+            if (!chunkCsvReader!.Read())
+            {
+                eofReached = true;
+                return false;
+            }
+            rowsConsumed++;
+        }
+        return true;
+    }
+
+    private void DisposeChunkReader()
+    {
+        chunkCsvReader?.Dispose();
+        chunkCsvReader = null;
+        chunkStreamReader?.Dispose();
+        chunkStreamReader = null;
     }
 
     /// <summary>
@@ -464,38 +735,6 @@ sealed class CsvLazySource : IQuerySource
     }
 
     /// <summary>
-    /// Extracts column data from records
-    /// </summary>
-    /// <param name="records">The records to extract from</param>
-    /// <param name="columnName">The name of the column</param>
-    /// <param name="columnType">The type of the column</param>
-    /// <returns>Array of column values</returns>
-    private static Array ExtractColumnData(List<dynamic> records, string columnName, Type columnType)
-    {
-        var array = Array.CreateInstance(columnType, records.Count);
-
-        for (int i = 0; i < records.Count; i++)
-        {
-            var dict = (IDictionary<string, object>)records[i];
-            object? value = null;
-
-            if (dict.TryGetValue(columnName, out var rawValue) && rawValue != null)
-            {
-                var stringValue = rawValue.ToString();
-                value = ConvertValue(stringValue, columnType);
-            }
-            else
-            {
-                value = GetDefaultValue(columnType);
-            }
-
-            array.SetValue(value, i);
-        }
-
-        return array;
-    }
-
-    /// <summary>
     /// Converts a string value to the specified type
     /// </summary>
     /// <param name="value">The string value to convert</param>
@@ -542,41 +781,12 @@ sealed class CsvLazySource : IQuerySource
     }
 
     /// <summary>
-    /// Creates an empty column of the specified type
+    /// Copies values from a typed column into the accumulator list for vertical concatenation.
     /// </summary>
-    /// <param name="columnType">The type of the column</param>
-    /// <returns>An empty column</returns>
-    private static IColumn CreateEmptyColumn(Type columnType)
+    private static void CopyColumnToList(IColumn column, Type columnType, List<object?> accumulator)
     {
-        // Create empty typed array
-        var emptyArray = Array.CreateInstance(columnType, 0);
-
-        // Use reflection to call the appropriate Create method
-        var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
-            .GetMethod("Create", new[] { columnType.MakeArrayType() });
-
-        if (createMethod == null)
-            throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-
-        return (IColumn)createMethod.Invoke(null, new object[] { emptyArray })!;
-    }
-
-    /// <summary>
-    /// Creates a column from the specified data
-    /// </summary>
-    /// <param name="data">The column data</param>
-    /// <param name="columnType">The type of the column</param>
-    /// <returns>A column containing the data</returns>
-    private static IColumn CreateColumn(Array data, Type columnType)
-    {
-        // Use reflection to call the appropriate Create method
-        var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
-            .GetMethod("Create", new[] { columnType.MakeArrayType() });
-
-        if (createMethod == null)
-            throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-
-        return (IColumn)createMethod.Invoke(null, new object[] { data })!;
+        for (int i = 0; i < column.Length; i++)
+            accumulator.Add(column.GetValue(i));
     }
 
     /// <inheritdoc />
@@ -584,8 +794,7 @@ sealed class CsvLazySource : IQuerySource
     {
         if (!disposed)
         {
-            // CsvLazySource doesn't hold any unmanaged resources
-            // The errorHandler and lazySchema don't require disposal
+            DisposeChunkReader();
             disposed = true;
         }
     }

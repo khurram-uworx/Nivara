@@ -207,7 +207,14 @@ public sealed class NivaraQuery<T>
     /// Executes the query and returns a materialized frame
     /// </summary>
     /// <returns>A NivaraFrame with the query results</returns>
-    public NivaraFrame Collect() => frame.Collect();
+    public NivaraFrame Collect() => CollectAsync(default).GetAwaiter().GetResult()!;
+
+    /// <summary>
+    /// Executes the query asynchronously and returns a materialized frame
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A task representing the materialized NivaraFrame with the query results</returns>
+    public Task<NivaraFrame> CollectAsync(CancellationToken ct = default) => frame.CollectAsync(ct);
 
     /// <summary>
     /// Executes the query and materializes the result rows as objects
@@ -231,6 +238,27 @@ public sealed class NivaraQuery<T>
     /// </summary>
     /// <returns>A list of typed rows</returns>
     public List<T> ToList() => ToObjects().ToList();
+
+    /// <summary>
+    /// Executes the query asynchronously and materializes the result rows as objects
+    /// </summary>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A task representing a list of typed rows</returns>
+    public async Task<List<T>> ToListAsync(CancellationToken ct = default)
+    {
+        var result = await frame.CollectAsync(ct).ConfigureAwait(false);
+        var factory = TypedRowFactory<T>.GetFactory(result.Schema);
+        var columns = result.ColumnNames.Select(name => result.GetColumn(name)).ToArray();
+
+        var rows = new List<T>(result.RowCount);
+        for (int i = 0; i < result.RowCount; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            rows.Add(factory(columns, i));
+        }
+
+        return rows;
+    }
 
     /// <summary>
     /// Executes the query and materializes the result rows as objects (alias for <see cref="ToObjects"/>)

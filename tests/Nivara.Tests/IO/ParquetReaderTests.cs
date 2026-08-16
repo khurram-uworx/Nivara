@@ -10,28 +10,28 @@ public class ParquetReaderTests
     public void ReadParquet_NullFilePath_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => ParquetReader.ReadParquet((string)null!));
+        Assert.Throws<ArgumentNullException>(() => NivaraParquetReader.ReadParquet((string)null!));
     }
 
     [Test]
     public void ReadParquetAsync_NullFilePath_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.ThrowsAsync<ArgumentNullException>(async () => await ParquetReader.ReadParquetAsync((string)null!));
+        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraParquetReader.ReadParquetAsync((string)null!));
     }
 
     [Test]
     public void ReadParquet_NullStream_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => ParquetReader.ReadParquet((Stream)null!));
+        Assert.Throws<ArgumentNullException>(() => NivaraParquetReader.ReadParquet((Stream)null!));
     }
 
     [Test]
     public void ReadParquetAsync_NullStream_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.ThrowsAsync<ArgumentNullException>(async () => await ParquetReader.ReadParquetAsync((Stream)null!));
+        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraParquetReader.ReadParquetAsync((Stream)null!));
     }
 
     [Test]
@@ -41,7 +41,7 @@ public class ParquetReaderTests
         var nonExistentPath = "non_existent_file.parquet";
 
         // Act & Assert
-        Assert.Throws<FileNotFoundException>(() => ParquetReader.ReadParquet(nonExistentPath));
+        Assert.Throws<FileNotFoundException>(() => NivaraParquetReader.ReadParquet(nonExistentPath));
     }
 
     [Test]
@@ -51,14 +51,14 @@ public class ParquetReaderTests
         var nonExistentPath = "non_existent_file.parquet";
 
         // Act & Assert
-        Assert.ThrowsAsync<FileNotFoundException>(async () => await ParquetReader.ReadParquetAsync(nonExistentPath));
+        Assert.ThrowsAsync<FileNotFoundException>(async () => await NivaraParquetReader.ReadParquetAsync(nonExistentPath));
     }
 
     [Test]
     public void ReadParquetStreaming_NullFilePath_ThrowsArgumentNullException()
     {
         // Act & Assert
-        Assert.Throws<ArgumentNullException>(() => ParquetReader.ReadParquetStreaming((string)null!).ToList());
+        Assert.Throws<ArgumentNullException>(() => NivaraParquetReader.ReadParquetStreaming((string)null!).ToList());
     }
 
     [Test]

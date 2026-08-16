@@ -1,3 +1,5 @@
+using Nivara.Linq;
+using Nivara.Query;
 using Parquet.Schema;
 
 namespace Nivara.IO;
@@ -5,7 +7,7 @@ namespace Nivara.IO;
 /// <summary>
 /// Provides Parquet reading capabilities with columnar compression and complex schema support.
 /// </summary>
-public static class ParquetReader
+public static class NivaraParquetReader
 {
     /// <summary>
     /// Reads a Parquet file into a NivaraFrame asynchronously.
@@ -90,6 +92,41 @@ public static class ParquetReader
     public static NivaraFrame ReadParquet(string filePath, ParquetReadOptions? options = null)
     {
         return ReadParquetAsync(filePath, options).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
+    /// Creates a lazy query frame that scans a Parquet file without immediately reading it.
+    /// The returned frame supports chunked reading at row-group boundaries.
+    /// </summary>
+    /// <param name="filePath">The path to the Parquet file</param>
+    /// <param name="options">Optional Parquet reading options</param>
+    /// <returns>A QueryFrame that will read the Parquet file when executed</returns>
+    internal static QueryFrame ScanFrame(string filePath, ParquetReadOptions? options = null)
+    {
+        if (string.IsNullOrWhiteSpace(filePath))
+            throw new ArgumentNullException(nameof(filePath));
+
+        if (!File.Exists(filePath))
+            throw new FileNotFoundException($"Parquet file not found: {filePath}");
+
+        var source = new ParquetLazySource(filePath, options);
+        return new QueryFrame(source);
+    }
+
+    /// <summary>
+    /// Creates a lazy typed query that scans a Parquet file without immediately reading it.
+    /// </summary>
+    /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map
+    /// (case-insensitively) to the file's columns with exact or nullable-compatible types.</typeparam>
+    /// <param name="filePath">The path to the Parquet file</param>
+    /// <param name="options">Optional Parquet reading options</param>
+    /// <returns>A lazy typed query that will read the Parquet file when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the file does not exist</exception>
+    public static NivaraQuery<T> ScanQuery<T>(string filePath, ParquetReadOptions? options = null)
+        where T : class, new()
+    {
+        return NivaraTypedLinqExtensions.FromFrame<T>(ScanFrame(filePath, options));
     }
 
     /// <summary>
@@ -224,7 +261,7 @@ public static class ParquetReader
         if (frames.Count == 1)
             return frames[0];
 
-        return ParquetWriter.ConcatenateFrames(frames);
+        return NivaraParquetWriter.ConcatenateFrames(frames);
     }
 
     /// <summary>
@@ -267,9 +304,17 @@ public static class ParquetReader
     }
 
     /// <summary>
+    /// Synchronous version: reads a Parquet column from a row group
+    /// </summary>
+    internal static Array ReadParquetColumn(Parquet.ParquetRowGroupReader rowGroupReader, DataField field)
+    {
+        return ReadParquetColumnAsync(rowGroupReader, field, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
     /// Creates a NivaraColumn from Parquet column data.
     /// </summary>
-    private static async Task<Array> ReadParquetColumnAsync(Parquet.ParquetRowGroupReader rowGroupReader, DataField field, CancellationToken cancellationToken)
+    internal static async Task<Array> ReadParquetColumnAsync(Parquet.ParquetRowGroupReader rowGroupReader, DataField field, CancellationToken cancellationToken)
     {
         var length = checked((int)rowGroupReader.RowCount);
         var elementType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
@@ -302,7 +347,7 @@ public static class ParquetReader
         };
     }
 
-    private static async Task<Array> ReadParquetColumnAsync<T>(Parquet.ParquetRowGroupReader rowGroupReader, DataField field, int length, CancellationToken cancellationToken)
+    internal static async Task<Array> ReadParquetColumnAsync<T>(Parquet.ParquetRowGroupReader rowGroupReader, DataField field, int length, CancellationToken cancellationToken)
         where T : struct
     {
         if (field.IsNullable)
@@ -317,7 +362,7 @@ public static class ParquetReader
         return values;
     }
 
-    private static IColumn CreateNivaraColumnFromParquetData(Array columnData, DataField field, IReadOnlyDictionary<string, string>? clrTypeMetadata)
+    internal static IColumn CreateNivaraColumnFromParquetData(Array columnData, DataField field, IReadOnlyDictionary<string, string>? clrTypeMetadata)
     {
         var elementType = Nullable.GetUnderlyingType(field.ClrType) ?? field.ClrType;
 

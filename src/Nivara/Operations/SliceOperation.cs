@@ -95,6 +95,14 @@ sealed class SliceOperation : IQueryOperation
         }
     }
 
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(Execute(input));
+    }
+
     /// <summary>
     /// Slices a column using the column's built-in Slice method
     /// </summary>

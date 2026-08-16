@@ -76,6 +76,7 @@ sealed class JsonLazySource : IQuerySource
     private readonly string filePath;
     private readonly JsonOptions options;
     private readonly Lazy<Schema> lazySchema;
+    private readonly Lazy<JsonElement[]> lazyRecords;
     private readonly DeferredErrorHandler errorHandler;
     private bool disposed;
 
@@ -91,8 +92,8 @@ sealed class JsonLazySource : IQuerySource
         this.errorHandler = new DeferredErrorHandler();
 
         lazySchema = new Lazy<Schema>(InferSchemaWithErrorHandling);
+        lazyRecords = new Lazy<JsonElement[]>(LoadRecords);
     }
-
     /// <inheritdoc />
     public Schema Schema
     {
@@ -107,6 +108,69 @@ sealed class JsonLazySource : IQuerySource
     public bool IsLazy => true;
 
     /// <inheritdoc />
+    public bool CanReadInChunks => true;
+
+    /// <summary>
+    /// Gets the estimated row count based on file size and average bytes per record.
+    /// </summary>
+    public int? EstimatedRowCount
+    {
+        get
+        {
+            if (!File.Exists(filePath))
+                return null;
+
+            try
+            {
+                var fileInfo = new FileInfo(filePath);
+                if (fileInfo.Length == 0)
+                    return 0;
+
+                var schema = lazySchema.Value;
+                if (schema == null || schema.ColumnNames.Count == 0)
+                    return null;
+
+                // Heuristic: ~50 bytes per JSON object per field
+                var estimatedBytesPerRecord = schema.ColumnNames.Count * 50;
+                if (estimatedBytesPerRecord == 0)
+                    return null;
+
+                var estimatedRows = (int)(fileInfo.Length / estimatedBytesPerRecord);
+                return Math.Max(0, estimatedRows);
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+
+    private JsonElement[] LoadRecords()
+    {
+        var jsonText = File.ReadAllText(filePath);
+        if (string.IsNullOrWhiteSpace(jsonText))
+            return Array.Empty<JsonElement>();
+
+        try
+        {
+            if (options.IsArray)
+            {
+                var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
+                return records ?? Array.Empty<JsonElement>();
+            }
+            else
+            {
+                var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
+                return new[] { record };
+            }
+        }
+        catch (JsonException)
+        {
+            throw;
+        }
+    }
+
+    /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -114,87 +178,74 @@ sealed class JsonLazySource : IQuerySource
         // Check for deferred errors first
         errorHandler.ThrowIfHasDeferredErrors("JSON data source execution");
 
-        try
+        if (!File.Exists(filePath))
+            throw new DataSourceException($"JSON file not found: '{filePath}'");
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+            throw new DataSourceException($"{filePath}: JSON file is empty");
+
+        var columns = ReadAllChunks();
+        return columns;
+    }
+
+    /// <summary>
+    /// Reads all data by iterating through chunks and concatenating the results.
+    /// </summary>
+    private IReadOnlyDictionary<string, IColumn> ReadAllChunks()
+    {
+        var schema = Schema;
+        var columnNames = schema.ColumnNames;
+        var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+        var allColumns = new Dictionary<string, List<object?>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+            allColumns[name] = new List<object?>();
+
+        int chunkIndex = 0;
+        int chunkSize = 10000;
+
+        while (true)
         {
-            // Check file existence and accessibility first
-            if (!File.Exists(filePath))
+            var chunk = ReadChunk(chunkIndex, chunkSize);
+            if (chunk == null || chunk.Count == 0)
+                break;
+
+            int rowCount = chunk.Values.FirstOrDefault()?.Length ?? 0;
+            if (rowCount == 0)
+                break;
+
+            foreach (var name in columnNames)
             {
-                throw new DataSourceException($"JSON file not found: '{filePath}'");
+                var columnList = allColumns[name];
+                var column = chunk[name];
+                CopyColumnToList(column, columnList);
             }
 
-            FileInfo fileInfo;
-            try
-            {
-                fileInfo = new FileInfo(filePath);
-            }
-            catch (Exception ex)
-            {
-                throw new DataSourceException($"Cannot access JSON file '{filePath}': {ex.Message}", ex);
-            }
-
-            if (fileInfo.Length == 0)
-            {
-                throw new DataSourceException($"{filePath}: JSON file is empty");
-            }
-
-            string jsonText;
-            try
-            {
-                jsonText = File.ReadAllText(filePath);
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                throw new DataSourceException($"Access denied to JSON file '{filePath}'. Check file permissions.", ex);
-            }
-            catch (DirectoryNotFoundException ex)
-            {
-                throw new DataSourceException($"Directory not found for JSON file '{filePath}': {ex.Message}", ex);
-            }
-            catch (FileNotFoundException ex)
-            {
-                throw new DataSourceException($"JSON file not found: '{filePath}': {ex.Message}", ex);
-            }
-            catch (IOException ex)
-            {
-                throw new DataSourceException($"IO error reading JSON file '{filePath}': {ex.Message}", ex);
-            }
-
-            if (string.IsNullOrWhiteSpace(jsonText))
-            {
-                throw new DataSourceException($"JSON file is empty or contains only whitespace: '{filePath}'");
-            }
-
-            try
-            {
-                if (options.IsArray)
-                {
-                    var records = JsonSerializer.Deserialize<JsonElement[]>(jsonText, options.SerializerOptions);
-                    return ProcessJsonRecords(records ?? Array.Empty<JsonElement>());
-                }
-                else
-                {
-                    var record = JsonSerializer.Deserialize<JsonElement>(jsonText, options.SerializerOptions);
-                    return ProcessJsonRecords(new[] { record });
-                }
-            }
-            catch (JsonException ex)
-            {
-                throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
-            }
-            catch (NotSupportedException ex)
-            {
-                throw new DataSourceException($"Unsupported JSON format in file '{filePath}': {ex.Message}", ex);
-            }
+            chunkIndex++;
         }
-        catch (DataSourceException)
+
+        if (allColumns.Values.All(l => l.Count == 0))
         {
-            // Re-throw DataSourceException as-is
-            throw;
+            // Return empty columns based on schema
+            var emptyColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
+            {
+                var columnType = columnTypes[columnName];
+                emptyColumns[columnName] = ColumnFactory.Create(columnType, Array.Empty<object?>());
+            }
+            return emptyColumns;
         }
-        catch (Exception ex)
+
+        var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
         {
-            throw new DataSourceException($"Failed to read JSON file '{filePath}': {ex.Message}", ex);
+            var columnType = columnTypes[name];
+            var values = allColumns[name].ToArray();
+            result[name] = ColumnFactory.Create(columnType, values);
         }
+
+        return result;
     }
 
     /// <summary>
@@ -225,35 +276,147 @@ sealed class JsonLazySource : IQuerySource
     }
 
     /// <summary>
-    /// Processes JSON records into columns
+    /// Reads a chunk of records from the JSON file.
     /// </summary>
-    /// <param name="records">The JSON records to process</param>
-    /// <returns>A dictionary of columns</returns>
-    private IReadOnlyDictionary<string, IColumn> ProcessJsonRecords(JsonElement[] records)
+    /// <param name="chunkIndex">The zero-based index of the chunk to read</param>
+    /// <param name="chunkSize">The maximum number of records in the chunk</param>
+    /// <returns>A dictionary of columns for the chunk</returns>
+    public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
     {
-        if (records.Length == 0)
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        errorHandler.ThrowIfHasDeferredErrors("JSON chunk reading");
+
+        if (chunkIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        if (chunkSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkSize));
+
+        try
         {
-            // Return empty columns based on schema
-            var emptyColumns = new Dictionary<string, IColumn>();
-            foreach (var columnName in Schema.ColumnNames)
+            var schema = Schema;
+            var columnNames = schema.ColumnNames;
+            var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+            var allRecords = lazyRecords.Value;
+            var start = chunkIndex * chunkSize;
+            if (start >= allRecords.Length)
+                return new Dictionary<string, IColumn>();
+
+            var end = Math.Min(start + chunkSize, allRecords.Length);
+            var chunkRecords = allRecords[start..end];
+
+            if (chunkRecords.Length == 0)
+                return new Dictionary<string, IColumn>();
+
+            var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
             {
-                var columnType = Schema.GetColumnType(columnName);
-                emptyColumns[columnName] = CreateEmptyColumn(columnType);
+                var columnType = columnTypes[columnName];
+                var values = new object?[chunkRecords.Length];
+                for (int i = 0; i < chunkRecords.Length; i++)
+                {
+                    object? value = null;
+                    if (chunkRecords[i].ValueKind == JsonValueKind.Object &&
+                        chunkRecords[i].TryGetProperty(columnName, out var property))
+                    {
+                        value = ConvertJsonValue(property, columnType);
+                    }
+                    values[i] = value;
+                }
+                columns[columnName] = ColumnFactory.Create(columnType, values);
             }
-            return emptyColumns;
+
+            return columns;
         }
-
-        // Convert records to columns
-        var columns = new Dictionary<string, IColumn>();
-
-        foreach (var columnName in Schema.ColumnNames)
+        catch (JsonException ex)
         {
-            var columnType = Schema.GetColumnType(columnName);
-            var columnData = ExtractColumnData(records, columnName, columnType);
-            columns[columnName] = CreateColumn(columnData, columnType);
+            throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
         }
+        catch (DataSourceException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DataSourceException($"Failed to read JSON chunk from file '{filePath}': {ex.Message}", ex);
+        }
+    }
 
-        return columns;
+    /// <summary>
+    /// Reads a chunk of records from the JSON file asynchronously.
+    /// </summary>
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        errorHandler.ThrowIfHasDeferredErrors("JSON chunk reading");
+
+        if (chunkIndex < 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkIndex));
+
+        if (chunkSize <= 0)
+            throw new ArgumentOutOfRangeException(nameof(chunkSize));
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        try
+        {
+            var schema = Schema;
+            var columnNames = schema.ColumnNames;
+            var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+            // Ensure records are loaded (lazy, cached)
+            var allRecords = lazyRecords.Value;
+
+            var start = chunkIndex * chunkSize;
+            if (start >= allRecords.Length)
+                return new Dictionary<string, IColumn>();
+
+            var end = Math.Min(start + chunkSize, allRecords.Length);
+            var chunkRecords = allRecords[start..end];
+
+            if (chunkRecords.Length == 0)
+                return new Dictionary<string, IColumn>();
+
+            var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var columnType = columnTypes[columnName];
+                var values = new object?[chunkRecords.Length];
+                for (int i = 0; i < chunkRecords.Length; i++)
+                {
+                    object? value = null;
+                    if (chunkRecords[i].ValueKind == JsonValueKind.Object &&
+                        chunkRecords[i].TryGetProperty(columnName, out var property))
+                    {
+                        value = ConvertJsonValue(property, columnType);
+                    }
+                    values[i] = value;
+                }
+                columns[columnName] = ColumnFactory.Create(columnType, values);
+            }
+
+            return columns;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (JsonException ex)
+        {
+            throw new DataSourceException($"JSON parsing error in file '{filePath}': {ex.Message}", ex);
+        }
+        catch (DataSourceException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            throw new DataSourceException($"Failed to read JSON chunk from file '{filePath}': {ex.Message}", ex);
+        }
     }
 
     /// <summary>
@@ -423,37 +586,6 @@ sealed class JsonLazySource : IQuerySource
     }
 
     /// <summary>
-    /// Extracts column data from JSON records
-    /// </summary>
-    /// <param name="records">The records to extract from</param>
-    /// <param name="propertyName">The name of the property</param>
-    /// <param name="columnType">The type of the column</param>
-    /// <returns>Array of column values</returns>
-    private static Array ExtractColumnData(JsonElement[] records, string propertyName, Type columnType)
-    {
-        var array = Array.CreateInstance(columnType, records.Length);
-
-        for (int i = 0; i < records.Length; i++)
-        {
-            object? value = null;
-
-            if (records[i].ValueKind == JsonValueKind.Object &&
-                records[i].TryGetProperty(propertyName, out var property))
-            {
-                value = ConvertJsonValue(property, columnType);
-            }
-            else
-            {
-                value = GetDefaultValue(columnType);
-            }
-
-            array.SetValue(value, i);
-        }
-
-        return array;
-    }
-
-    /// <summary>
     /// Converts a JSON value to the specified type
     /// </summary>
     /// <param name="jsonElement">The JSON element to convert</param>
@@ -501,41 +633,12 @@ sealed class JsonLazySource : IQuerySource
     }
 
     /// <summary>
-    /// Creates an empty column of the specified type
+    /// Copies values from a typed column into the accumulator list for vertical concatenation.
     /// </summary>
-    /// <param name="columnType">The type of the column</param>
-    /// <returns>An empty column</returns>
-    private static IColumn CreateEmptyColumn(Type columnType)
+    private static void CopyColumnToList(IColumn column, List<object?> accumulator)
     {
-        // Create empty typed array
-        var emptyArray = Array.CreateInstance(columnType, 0);
-
-        // Use reflection to call the appropriate Create method
-        var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
-            .GetMethod("Create", new[] { columnType.MakeArrayType() });
-
-        if (createMethod == null)
-            throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-
-        return (IColumn)createMethod.Invoke(null, new object[] { emptyArray })!;
-    }
-
-    /// <summary>
-    /// Creates a column from the specified data
-    /// </summary>
-    /// <param name="data">The column data</param>
-    /// <param name="columnType">The type of the column</param>
-    /// <returns>A column containing the data</returns>
-    private static IColumn CreateColumn(Array data, Type columnType)
-    {
-        // Use reflection to call the appropriate Create method
-        var createMethod = typeof(NivaraColumn<>).MakeGenericType(columnType)
-            .GetMethod("Create", new[] { columnType.MakeArrayType() });
-
-        if (createMethod == null)
-            throw new InvalidOperationException($"Could not find Create method for type {columnType.Name}");
-
-        return (IColumn)createMethod.Invoke(null, new object[] { data })!;
+        for (int i = 0; i < column.Length; i++)
+            accumulator.Add(column.GetValue(i));
     }
 
     /// <inheritdoc />

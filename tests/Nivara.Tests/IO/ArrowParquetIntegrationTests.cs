@@ -55,11 +55,11 @@ public class ArrowParquetIntegrationTests
         {
             // Act - Complete workflow
             // Step 1: NivaraFrame → Parquet
-            ParquetWriter.WriteParquet(originalFrame, parquetFile);
+            NivaraParquetWriter.WriteParquet(originalFrame, parquetFile);
             Assert.That(File.Exists(parquetFile), Is.True, "Parquet file should be created");
 
             // Step 2: Parquet → NivaraFrame
-            var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
+            var frameFromParquet = NivaraParquetReader.ReadParquet(parquetFile);
             Assert.That(frameFromParquet, Is.Not.Null, "Frame should be read from Parquet");
 
             // Step 3: NivaraFrame → Arrow
@@ -113,8 +113,8 @@ public class ArrowParquetIntegrationTests
         try
         {
             // Act - Complete workflow with nulls
-            ParquetWriter.WriteParquet(originalFrame, parquetFile);
-            var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
+            NivaraParquetWriter.WriteParquet(originalFrame, parquetFile);
+            var frameFromParquet = NivaraParquetReader.ReadParquet(parquetFile);
 
             // Debug: Check if nulls are preserved after Parquet round-trip
             TestContext.Out.WriteLine("=== After Parquet round-trip ===");
@@ -187,8 +187,8 @@ public class ArrowParquetIntegrationTests
         try
         {
             // Act - Async workflow
-            await ParquetWriter.WriteParquetAsync(originalFrame, parquetFile);
-            var frameFromParquet = await ParquetReader.ReadParquetAsync(parquetFile);
+            await NivaraParquetWriter.WriteParquetAsync(originalFrame, parquetFile);
+            var frameFromParquet = await NivaraParquetReader.ReadParquetAsync(parquetFile);
             var arrowTable = ArrowInterop.ToArrowTable(frameFromParquet);
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable);
 
@@ -233,8 +233,8 @@ public class ArrowParquetIntegrationTests
         try
         {
             // Act - Batch processing workflow
-            ParquetWriter.WriteParquetBatch(frames, parquetFile);
-            var combinedFrame = ParquetReader.ReadParquet(parquetFile);
+            NivaraParquetWriter.WriteParquetBatch(frames, parquetFile);
+            var combinedFrame = NivaraParquetReader.ReadParquet(parquetFile);
             var arrowTable = ArrowInterop.ToArrowTable(combinedFrame);
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable);
 
@@ -283,12 +283,12 @@ public class ArrowParquetIntegrationTests
             using var memoryStream = new MemoryStream();
 
             // Write to stream
-            ParquetWriter.WriteParquet(originalFrame, memoryStream);
+            NivaraParquetWriter.WriteParquet(originalFrame, memoryStream);
             Assert.That(memoryStream.Length, Is.GreaterThan(0), "Data should be written to stream");
 
             // Read from stream
             memoryStream.Position = 0; // Reset position for reading
-            var frameFromStream = ParquetReader.ReadParquet(memoryStream);
+            var frameFromStream = NivaraParquetReader.ReadParquet(memoryStream);
 
             // Convert through Arrow
             var arrowTable = ArrowInterop.ToArrowTable(frameFromStream);
@@ -336,8 +336,8 @@ public class ArrowParquetIntegrationTests
         try
         {
             // Act - Workflow with custom configuration
-            ParquetWriter.WriteParquet(originalFrame, parquetFile, parquetOptions);
-            var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
+            NivaraParquetWriter.WriteParquet(originalFrame, parquetFile, parquetOptions);
+            var frameFromParquet = NivaraParquetReader.ReadParquet(parquetFile);
             var arrowTable = ArrowInterop.ToArrowTable(frameFromParquet, arrowOptions);
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable, arrowOptions);
 
@@ -368,8 +368,8 @@ public class ArrowParquetIntegrationTests
         try
         {
             // Act - Complete workflow with empty frame
-            ParquetWriter.WriteParquet(originalFrame, parquetFile);
-            var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
+            NivaraParquetWriter.WriteParquet(originalFrame, parquetFile);
+            var frameFromParquet = NivaraParquetReader.ReadParquet(parquetFile);
             var arrowTable = ArrowInterop.ToArrowTable(frameFromParquet);
             var finalFrame = ArrowInterop.FromArrowTable(arrowTable);
 
@@ -406,11 +406,11 @@ public class ArrowParquetIntegrationTests
             // Act - Complete workflow with large dataset
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 
-            ParquetWriter.WriteParquet(originalFrame, parquetFile);
+            NivaraParquetWriter.WriteParquet(originalFrame, parquetFile);
             var writeTime = stopwatch.ElapsedMilliseconds;
 
             stopwatch.Restart();
-            var frameFromParquet = ParquetReader.ReadParquet(parquetFile);
+            var frameFromParquet = NivaraParquetReader.ReadParquet(parquetFile);
             var readTime = stopwatch.ElapsedMilliseconds;
 
             stopwatch.Restart();

@@ -84,7 +84,7 @@ public sealed class Sst2Dataset
 
     static List<Sst2Example> ParseParquet(string path)
     {
-        var frame = ParquetReader.ReadParquet(path);
+        var frame = NivaraParquetReader.ReadParquet(path);
         var sentences = frame.GetColumn<string>("sentence");
         var labelLongs = frame.GetColumn<long>("label");
 

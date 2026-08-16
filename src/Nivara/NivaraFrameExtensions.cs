@@ -1175,6 +1175,25 @@ public static partial class NivaraFrameExtensions
     }
 
     /// <summary>
+    /// Executes any pending operations and returns a materialized DataFrame (execution barrier)
+    /// For already materialized DataFrames, this returns the frame as-is
+    /// </summary>
+    /// <param name="frame">The source DataFrame</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>A task representing the materialized DataFrame</returns>
+    /// <exception cref="ArgumentNullException">Thrown when frame is null</exception>
+    public static Task<NivaraFrame> CollectAsync(this NivaraFrame frame, CancellationToken ct = default)
+    {
+        if (frame == null)
+            throw new ArgumentNullException(nameof(frame));
+
+        ct.ThrowIfCancellationRequested();
+
+        // For materialized frames, Collect() is a no-op
+        return Task.FromResult(frame);
+    }
+
+    /// <summary>
     /// Helper method to sort a DataFrame using SortOperation
     /// </summary>
     /// <param name="frame">The source DataFrame</param>

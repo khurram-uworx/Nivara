@@ -117,6 +117,14 @@ sealed class SelectOperation : IQueryOperation
         }
     }
 
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+        IReadOnlyDictionary<string, IColumn> input,
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        return new(Execute(input));
+    }
+
     /// <summary>
     /// Gets the name for a column expression in the result schema
     /// </summary>
