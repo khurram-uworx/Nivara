@@ -719,7 +719,7 @@ public class AsyncStreamingTests
     }
 
     [Test]
-    public void StreamingStrategy_CancellationMidStream_ThrowsOperationCanceledException()
+    public async Task StreamingStrategy_CancellationMidStream_ThrowsOperationCanceledException()
     {
         var source = new CancellationChunkSource(totalRows: 200_000, cancelAfterChunks: 3);
         var plan = new QueryPlan(source, Array.Empty<IQueryOperation>());
@@ -732,7 +732,15 @@ public class AsyncStreamingTests
         };
         source.CancelWhenChunkCountReaches(cts, 3);
 
-        Assert.ThrowsAsync<OperationCanceledException>(() => engine.ExecuteAsync(plan, context));
+        try
+        {
+            using var result = await engine.ExecuteAsync(plan, context);
+            Assert.Fail(
+                $"Expected OperationCanceledException, but the streaming run completed with {result.RowCount} rows (chunks read: {source.ChunksRead}).");
+        }
+        catch (OperationCanceledException)
+        {
+        }
 
         Assert.That(source.ChunksRead, Is.GreaterThan(0), "cancellation must fire mid-stream, not pre-cancelled");
         Assert.That(source.ChunksRead, Is.LessThan(20), "run must not complete the full source");
