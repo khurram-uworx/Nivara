@@ -807,11 +807,10 @@ static class Program
     /// Phase 4 AC2 scenario: cancels a chunk-capable streaming run mid-stream through the
     /// bounded-channel pipeline (<c>StreamingExecutionStrategy.ExecuteCoreAsync</c>, issue #266)
     /// and asserts a clean <see cref="OperationCanceledException"/> — not wrapped in
-    /// <c>QueryExecutionException</c> — with prompt unwind. This scenario currently fails on
-    /// issue #280: the consumer-side catch calls <c>channel.Writer.Complete()</c> on an
-    /// already-completed channel, so <c>ChannelClosedException</c> masks the OCE. Once #280 is
-    /// fixed, B/op will also capture the in-flight and channel-buffered chunk frames that are
-    /// never disposed on consumer-side cancellation.
+    /// <c>QueryExecutionException</c> — with prompt unwind. Issue #280 (consumer-side catch
+    /// calling <c>channel.Writer.Complete()</c> on an already-completed channel, masking the
+    /// OCE with <c>ChannelClosedException</c>) is fixed; the scenario now goes green and B/op
+    /// captures any in-flight/channel-buffered chunk frames the cancelled path must dispose.
     /// </summary>
     static Action CreateStreamingCancellationScenario(int totalRows, int chunkSize, int cancelAfterChunks)
     {
