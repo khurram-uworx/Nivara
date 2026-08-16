@@ -823,6 +823,32 @@ def run():
     print(f"  matmul_transposed_b: a={mmtb_a.shape} b={mmtb_b.shape} output={mmtb_out.shape}")
 
     # =========================================================================
+    # Pow tests (scalar-exponent element-wise pow, reverse-mode Pow op)
+    # Dedicated RNG keeps the main and ops_rng streams bit-stable. Exponent 2.0
+    # over randn input avoids the NaN edge cases of fractional exponents.
+    # Saves forward output + input gradient (of the sum) for backward parity.
+    # =========================================================================
+    pow_rng = torch.Generator().manual_seed(404)
+
+    pow_inp = torch.randn(8, generator=pow_rng)
+    pow_out = pow_inp.pow(2.0)
+    pow_inp_grad = pow_inp.detach().requires_grad_(True)
+    pow_inp_grad.pow(2.0).sum().backward()
+
+    pow_inp.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "pow_input.bin"))
+    pow_out.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "pow_output.bin"))
+    pow_inp_grad.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, "pow_grad.bin"))
+
+    manifest["pow"] = {
+        "layer": "Pow",
+        "input_shape": list(pow_inp.shape),
+        "output_shape": list(pow_out.shape),
+        "grad_shape": list(pow_inp_grad.grad.shape),
+        "params": {"exponent": 2.0},
+    }
+    print(f"  pow: input={pow_inp.shape} output={pow_out.shape}")
+
+    # =========================================================================
     # Fused multi-head attention tests (ReverseGradOperations.MultiHeadAttention)
     # Dedicated RNG keeps the main stream bit-stable. scale = 1/sqrt(headDim).
     # =========================================================================

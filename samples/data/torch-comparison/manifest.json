@@ -1019,6 +1019,21 @@
       16
     ]
   },
+  "pow": {
+    "layer": "Pow",
+    "input_shape": [
+      8
+    ],
+    "output_shape": [
+      8
+    ],
+    "grad_shape": [
+      8
+    ],
+    "params": {
+      "exponent": 2.0
+    }
+  },
   "attn_self_causal": {
     "layer": "MultiHeadAttention",
     "q_shape": [

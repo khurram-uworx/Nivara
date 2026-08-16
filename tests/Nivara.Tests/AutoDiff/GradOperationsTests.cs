@@ -897,6 +897,40 @@ public class GradOperationsTests
         Assert.That(tanhResult.RequiresGrad, Is.False);
     }
 
+    [Test]
+    public void Pow_Backward_MatchesHandComputedGradient()
+    {
+        // d/dx x^2 = 2x
+        var aData = NivaraColumn<float>.Create(new float[] { 2f, 3f, 4f });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+
+        var result = ReverseGradOperations.Sum(ReverseGradOperations.Pow(a, 2.0));
+        result.Backward();
+
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(a.Grad!.Length, Is.EqualTo(3));
+        Assert.That(a.Grad[0], Is.EqualTo(4f).Within(1e-5f));
+        Assert.That(a.Grad[1], Is.EqualTo(6f).Within(1e-5f));
+        Assert.That(a.Grad[2], Is.EqualTo(8f).Within(1e-5f));
+    }
+
+    [Test]
+    public void Pow_Backward_FractionalExponent_PositiveInput()
+    {
+        // d/dx x^0.5 = 0.5 * x^-0.5 (valid for x > 0)
+        var aData = NivaraColumn<float>.Create(new float[] { 1f, 4f, 9f });
+        var a = new ReverseGradTensor<float>(aData, requiresGrad: true);
+
+        var result = ReverseGradOperations.Sum(ReverseGradOperations.Pow(a, 0.5));
+        result.Backward();
+
+        Assert.That(a.Grad, Is.Not.Null);
+        Assert.That(a.Grad!.Length, Is.EqualTo(3));
+        Assert.That(a.Grad[0], Is.EqualTo(0.5f).Within(1e-5f));
+        Assert.That(a.Grad[1], Is.EqualTo(0.25f).Within(1e-5f));
+        Assert.That(a.Grad[2], Is.EqualTo(1f / 6f).Within(1e-5f));
+    }
+
     #endregion
 
     #region Integration Tests
