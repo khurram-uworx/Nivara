@@ -65,7 +65,7 @@ public class StreamingBackpressureTests
     }
 
     [Test]
-    public async Task CreateBoundChannel_UnderLoad_PeakInflightEqualsCapacity()
+    public async Task CreateBoundChannel_UnderLoad_ProducerBlocksAndNeverExceedsCapacity()
     {
         const long budget = 800_000;
         const int chunkSize = 1_000;
@@ -75,35 +75,45 @@ public class StreamingBackpressureTests
         var channel = StreamingExecutionStrategy.CreateBoundChannel(budget, chunkSize);
         const int frameCount = 64;
 
-        var inFlight = 0;
-        var peakInFlight = 0;
+        var capacityReached = new TaskCompletionSource<bool>();
+        int accepted = 0;
 
         var producer = Task.Run(async () =>
         {
             for (int i = 0; i < frameCount; i++)
             {
                 await channel.Writer.WriteAsync(CreateFrame(i)).ConfigureAwait(false);
-                var current = Interlocked.Increment(ref inFlight);
-                if (current > Volatile.Read(ref peakInFlight))
-                    Volatile.Write(ref peakInFlight, current);
+                if (Interlocked.Increment(ref accepted) == capacity)
+                    capacityReached.TrySetResult(true);
             }
             channel.Writer.TryComplete();
         });
 
-        var consumed = 0;
+        // Deterministic backpressure proof: with no consumer running yet, the fast
+        // producer fills the channel to exactly its capacity and then blocks on the
+        // (capacity+1)-th write. No timing assumption — the handshake fires only after
+        // `capacity` writes have been accepted.
+        await capacityReached.Task.WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
+        Assert.That(channel.Reader.Count, Is.EqualTo(capacity));
+        Assert.That(producer.IsCompleted, Is.False);
+
+        // Drain against the still-active producer (fast producer + slow consumer):
+        // Reader.Count is the channel's own authoritative in-flight measure and must
+        // never exceed the bound.
+        var consumed = new List<int>();
+        var peakBuffered = 0;
         await foreach (var frame in channel.Reader.ReadAllAsync())
         {
             await Task.Delay(5).ConfigureAwait(false);
-            Interlocked.Decrement(ref inFlight);
-            consumed++;
+            consumed.Add((int)frame.GetColumn("A").GetValue(0)!);
+            peakBuffered = Math.Max(peakBuffered, channel.Reader.Count);
             frame.Dispose();
         }
 
         await producer.ConfigureAwait(false);
 
-        Assert.That(consumed, Is.EqualTo(frameCount));
-        Assert.That(Volatile.Read(ref peakInFlight), Is.EqualTo(capacity));
-        Assert.That(Volatile.Read(ref inFlight), Is.Zero);
+        Assert.That(consumed, Is.EqualTo(Enumerable.Range(0, frameCount)));
+        Assert.That(peakBuffered, Is.LessThanOrEqualTo(capacity));
     }
 
     [Test]
