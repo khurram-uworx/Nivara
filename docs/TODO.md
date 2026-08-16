@@ -97,4 +97,5 @@ CHANGELOG.md entry.
 
 ## GitHub issues log
 
-- None yet. As each task executes, any deferred work or concern found should be logged via `gh issue create --repo khurram-uworx/Nivara` and recorded here — never held in memory.
+- [ ] #270 — Streaming: empty-source fallback re-applies boundary ops in flush-concatenate-resume (created while implementing #269)
+- As each task executes, any deferred work or concern found should be logged via `gh issue create --repo khurram-uworx/Nivara` and recorded here — never held in memory.
