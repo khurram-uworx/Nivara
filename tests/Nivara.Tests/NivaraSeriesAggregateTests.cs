@@ -789,6 +789,155 @@ public class NivaraSeriesAggregateTests
 
     #endregion
 
+    #region StdDev Tests
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev computation")]
+    public void StdDev_Population_ReturnsCorrectStdDev()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+
+        Assert.That(series.StdDev(), Is.EqualTo(2.0).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev computation")]
+    public void StdDev_Sample_ReturnsCorrectStdDev()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+
+        Assert.That(series.StdDev(1), Is.EqualTo(2.138089935299395).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev with null handling")]
+    public void StdDev_WithNullValues_IgnoresNulls()
+    {
+        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        using var series = new NivaraSeries<double>(column);
+
+        Assert.That(series.StdDev(), Is.EqualTo(1.479019945774904).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev computation")]
+    public void StdDev_ConstantSeries_ReturnsZero()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 3, 3, 3 });
+
+        Assert.That(series.StdDev(), Is.EqualTo(0.0));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev error handling")]
+    public void StdDev_NegativeDdof_ThrowsArgumentOutOfRangeException()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 1, 2, 3 });
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => series.StdDev(-1));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev error handling")]
+    public void StdDev_EmptySeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(Array.Empty<int>());
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.StdDev());
+        Assert.That(ex.Message, Does.Contain("Cannot compute StdDev of empty series"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev error handling")]
+    public void StdDev_SampleOverSingleValue_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 7 });
+
+        Assert.Throws<InvalidOperationException>(() => series.StdDev(1));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: StdDev type validation")]
+    public void StdDev_NonNumericSeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<string>.Create(new[] { "a", "b" });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.StdDev());
+        Assert.That(ex.Message, Does.Contain("StdDev operation is not supported"));
+    }
+
+    #endregion
+
+    #region Variance Tests
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Variance computation")]
+    public void Variance_Population_ReturnsCorrectVariance()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+
+        Assert.That(series.Variance(), Is.EqualTo(4.0).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Variance computation")]
+    public void Variance_Sample_ReturnsCorrectVariance()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 2, 4, 4, 4, 5, 5, 7, 9 });
+
+        Assert.That(series.Variance(1), Is.EqualTo(4.571428571428571).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Variance with null handling")]
+    public void Variance_WithNullValues_IgnoresNulls()
+    {
+        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        using var series = new NivaraSeries<double>(column);
+
+        Assert.That(series.Variance(), Is.EqualTo(2.1875).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Variance error handling")]
+    public void Variance_NegativeDdof_ThrowsArgumentOutOfRangeException()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 1, 2, 3 });
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => series.Variance(-1));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Variance error handling")]
+    public void Variance_EmptySeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(Array.Empty<int>());
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Variance());
+        Assert.That(ex.Message, Does.Contain("Cannot compute Variance of empty series"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Variance error handling")]
+    public void Variance_SampleOverSingleValue_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 7 });
+
+        Assert.Throws<InvalidOperationException>(() => series.Variance(1));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Variance type validation")]
+    public void Variance_NonNumericSeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<string>.Create(new[] { "a", "b" });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Variance());
+        Assert.That(ex.Message, Does.Contain("Variance operation is not supported"));
+    }
+
+    #endregion
+
     #region Edge Cases and Error Handling
 
     /// <summary>

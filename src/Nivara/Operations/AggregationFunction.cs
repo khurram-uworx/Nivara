@@ -690,6 +690,148 @@ public sealed class MedianAggregation : AggregationFunction
 }
 
 /// <summary>
+/// Standard-deviation aggregation function. Follows numpy <c>ddof</c> semantics: 0 is the
+/// population standard deviation (divide by n), 1 is the sample standard deviation (divide by
+/// n - 1). Groups with no valid values aggregate to null.
+/// </summary>
+public sealed class StdDevAggregation : AggregationFunction
+{
+    readonly int ddof;
+
+    /// <summary>
+    /// Initializes a standard-deviation aggregation with the requested delta degrees of freedom.
+    /// </summary>
+    /// <param name="ddof">Delta degrees of freedom (0 = population, 1 = sample)</param>
+    public StdDevAggregation(int ddof = 0)
+    {
+        if (ddof < 0)
+            throw new ArgumentOutOfRangeException(nameof(ddof), "ddof must be >= 0.");
+        this.ddof = ddof;
+    }
+
+    /// <summary>
+    /// Gets the delta degrees of freedom this aggregation uses.
+    /// </summary>
+    public int Ddof => ddof;
+
+    /// <inheritdoc />
+    public override string Name => ddof == 0 ? "StdDev" : $"StdDev({ddof})";
+
+    /// <inheritdoc />
+    public override Type GetResultType(Type inputType)
+    {
+        ValidateInputType(inputType);
+
+        // Standard deviation of a numeric column is a fractional value regardless of input width.
+        return typeof(double);
+    }
+
+    /// <inheritdoc />
+    public override object? Apply(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        if (column == null)
+            throw new ArgumentNullException(nameof(column));
+        if (groupIndices == null)
+            throw new ArgumentNullException(nameof(groupIndices));
+
+        ValidateInputType(column.ElementType);
+
+        return MomentsKernel.ComputeStdDevFromBoxed(ExtractValidValues(column, groupIndices), ddof);
+    }
+
+    /// <inheritdoc />
+    protected override void ValidateInputType(Type inputType)
+    {
+        var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
+        if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
+            throw new ArgumentException($"StdDev aggregation requires numeric type, got {inputType.Name}");
+    }
+
+    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        var validValues = new List<object>(groupIndices.Count);
+        foreach (var index in groupIndices)
+        {
+            var value = column.GetValue(index);
+            if (value != null)
+                validValues.Add(value);
+        }
+        return validValues;
+    }
+}
+
+/// <summary>
+/// Variance aggregation function. Follows numpy <c>ddof</c> semantics: 0 is the population
+/// variance (divide by n), 1 is the sample variance (divide by n - 1). Groups with no valid
+/// values aggregate to null.
+/// </summary>
+public sealed class VarianceAggregation : AggregationFunction
+{
+    readonly int ddof;
+
+    /// <summary>
+    /// Initializes a variance aggregation with the requested delta degrees of freedom.
+    /// </summary>
+    /// <param name="ddof">Delta degrees of freedom (0 = population, 1 = sample)</param>
+    public VarianceAggregation(int ddof = 0)
+    {
+        if (ddof < 0)
+            throw new ArgumentOutOfRangeException(nameof(ddof), "ddof must be >= 0.");
+        this.ddof = ddof;
+    }
+
+    /// <summary>
+    /// Gets the delta degrees of freedom this aggregation uses.
+    /// </summary>
+    public int Ddof => ddof;
+
+    /// <inheritdoc />
+    public override string Name => ddof == 0 ? "Variance" : $"Variance({ddof})";
+
+    /// <inheritdoc />
+    public override Type GetResultType(Type inputType)
+    {
+        ValidateInputType(inputType);
+
+        // Variance of a numeric column is a fractional value regardless of input width.
+        return typeof(double);
+    }
+
+    /// <inheritdoc />
+    public override object? Apply(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        if (column == null)
+            throw new ArgumentNullException(nameof(column));
+        if (groupIndices == null)
+            throw new ArgumentNullException(nameof(groupIndices));
+
+        ValidateInputType(column.ElementType);
+
+        return MomentsKernel.ComputeVarianceFromBoxed(ExtractValidValues(column, groupIndices), ddof);
+    }
+
+    /// <inheritdoc />
+    protected override void ValidateInputType(Type inputType)
+    {
+        var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
+        if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
+            throw new ArgumentException($"Variance aggregation requires numeric type, got {inputType.Name}");
+    }
+
+    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        var validValues = new List<object>(groupIndices.Count);
+        foreach (var index in groupIndices)
+        {
+            var value = column.GetValue(index);
+            if (value != null)
+                validValues.Add(value);
+        }
+        return validValues;
+    }
+}
+
+/// <summary>
 /// Factory class for creating standard aggregation functions
 /// </summary>
 public static class AggregationFunctions
@@ -742,6 +884,20 @@ public static class AggregationFunctions
     /// </summary>
     /// <returns>A new MedianAggregation instance</returns>
     public static MedianAggregation Median() => new();
+
+    /// <summary>
+    /// Creates a standard-deviation aggregation function.
+    /// </summary>
+    /// <param name="ddof">Delta degrees of freedom (0 = population, 1 = sample)</param>
+    /// <returns>A new StdDevAggregation instance</returns>
+    public static StdDevAggregation StdDev(int ddof = 0) => new(ddof);
+
+    /// <summary>
+    /// Creates a variance aggregation function.
+    /// </summary>
+    /// <param name="ddof">Delta degrees of freedom (0 = population, 1 = sample)</param>
+    /// <returns>A new VarianceAggregation instance</returns>
+    public static VarianceAggregation Variance(int ddof = 0) => new(ddof);
 
     /// <summary>
     /// Gets all standard aggregation functions

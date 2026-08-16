@@ -800,6 +800,82 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         return quantileCore(0.5);
     }
 
+    /// <summary>
+    /// Computes the variance of all valid elements in the series with the given delta degrees of
+    /// freedom (numpy <c>ddof</c> semantics): 0 is the population variance (divide by n), 1 is the
+    /// sample variance (divide by n - 1). Null values are excluded from the computation.
+    /// </summary>
+    /// <param name="ddof">Delta degrees of freedom (0 = population, 1 = sample)</param>
+    /// <returns>The variance of all valid elements</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when ddof is negative</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T is not a numeric type</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series has fewer than ddof + 1 valid values</exception>
+    public double Variance(int ddof = 0)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (ddof < 0)
+            throw new ArgumentOutOfRangeException(nameof(ddof), "ddof must be >= 0.");
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Variance of empty series. Series must contain at least one element.");
+
+        validateQuantileType("Variance");
+
+        return momentsCore(ddof, sqrt: false);
+    }
+
+    /// <summary>
+    /// Computes the standard deviation of all valid elements in the series with the given delta
+    /// degrees of freedom (numpy <c>ddof</c> semantics): 0 is the population standard deviation
+    /// (divide by n), 1 is the sample standard deviation (divide by n - 1). Null values are
+    /// excluded from the computation.
+    /// </summary>
+    /// <param name="ddof">Delta degrees of freedom (0 = population, 1 = sample)</param>
+    /// <returns>The standard deviation of all valid elements</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when ddof is negative</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T is not a numeric type</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series has fewer than ddof + 1 valid values</exception>
+    public double StdDev(int ddof = 0)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (ddof < 0)
+            throw new ArgumentOutOfRangeException(nameof(ddof), "ddof must be >= 0.");
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute StdDev of empty series. Series must contain at least one element.");
+
+        validateQuantileType("StdDev");
+
+        return momentsCore(ddof, sqrt: true);
+    }
+
+    double momentsCore(int ddof, bool sqrt)
+    {
+        var validValues = getValidValues();
+        double[] buffer;
+        if (validValues != null)
+        {
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute aggregate: all values are null. Series must contain at least one valid value.");
+
+            buffer = new double[validValues.Count];
+            for (int i = 0; i < buffer.Length; i++)
+                buffer[i] = toDouble(validValues[i]);
+        }
+        else
+        {
+            buffer = new double[Length];
+            for (int i = 0; i < Length; i++)
+                buffer[i] = toDouble(values[i]);
+        }
+
+        return sqrt
+            ? MomentsKernel.StdDev(buffer, ddof)
+            : MomentsKernel.Variance(buffer, ddof);
+    }
+
     double quantileCore(double q)
     {
         var validValues = getValidValues();

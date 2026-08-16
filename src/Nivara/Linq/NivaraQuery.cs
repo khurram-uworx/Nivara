@@ -455,6 +455,20 @@ public sealed class NivaraGroupedQuery<TKey, T>
             return new GroupAggregate(quantileSource, new QuantileAggregation(q));
         }
 
+        if (string.Equals(methodName, nameof(Grouping<TKey, T>.StdDev), StringComparison.Ordinal)
+            || string.Equals(methodName, nameof(Grouping<TKey, T>.Variance), StringComparison.Ordinal))
+        {
+            if (call.Arguments.Count is < 1 or > 2 || call.Arguments[0] is not LambdaExpression momentsSelector)
+                throw new UnsupportedQueryExpressionException($"g.{methodName}(...) requires a selector lambda and an optional constant ddof argument.");
+
+            var ddof = ExtractDdofArgument(methodName, call.Arguments.Count == 2 ? call.Arguments[1] : null);
+            var momentsSource = translator.Translate(momentsSelector.Body);
+            var momentFunction = string.Equals(methodName, nameof(Grouping<TKey, T>.StdDev), StringComparison.Ordinal)
+                ? (AggregationFunction)new StdDevAggregation(ddof)
+                : new VarianceAggregation(ddof);
+            return new GroupAggregate(momentsSource, momentFunction);
+        }
+
         if (call.Arguments.Count != 1 || call.Arguments[0] is not LambdaExpression selector)
             throw new UnsupportedQueryExpressionException($"g.{methodName}(...) requires a single selector lambda.");
 
@@ -496,6 +510,36 @@ public sealed class NivaraGroupedQuery<TKey, T>
             throw new UnsupportedQueryExpressionException($"g.Quantile(...) quantile must be in [0, 1], got {q}.");
 
         return q;
+    }
+
+    /// <summary>
+    /// Extracts the optional ddof argument from a <c>g.StdDev(...)</c> / <c>g.Variance(...)</c>
+    /// call. The compiler binds the <c>ddof = 0</c> default into the expression tree, so a
+    /// <c>null</c> argument only occurs when no second argument was ever provided.
+    /// </summary>
+    static int ExtractDdofArgument(string methodName, Expression? argument)
+    {
+        if (argument is null)
+            return 0;
+
+        int ddof;
+        try
+        {
+            var value = argument is ConstantExpression constant
+                ? constant.Value
+                : Expression.Lambda(argument).Compile().DynamicInvoke();
+
+            ddof = Convert.ToInt32(value, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            throw new UnsupportedQueryExpressionException($"g.{methodName}(...) requires a constant integer ddof argument.");
+        }
+
+        if (ddof < 0)
+            throw new UnsupportedQueryExpressionException($"g.{methodName}(...) ddof must be >= 0, got {ddof}.");
+
+        return ddof;
     }
 
     readonly record struct GroupAggregate(ColumnExpression Source, AggregationFunction Function);

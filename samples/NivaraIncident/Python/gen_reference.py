@@ -85,6 +85,21 @@ MEDIAN_CASES = [
     ("median_partitioned", ["A", "A", "B", "B", "A", "B"], [10, 30, 2, 8, 20, 6]),
 ]
 
+# StdDev/Variance cases: (name, kind, values with nulls, ddof). Pinned against numpy
+# np.std/np.var (equivalently polars Series.std/var with ddof), so ddof=0 is population
+# (divide by n) and ddof=1 is sample (divide by n-1). Every case keeps at least ddof+1
+# non-null values so the divisor is positive.
+MOMENT_CASES = [
+    ("std_pop_basic", "stddev", [2, 4, 4, 4, 5, 5, 7, 9], 0),
+    ("std_sample_basic", "stddev", [2, 4, 4, 4, 5, 5, 7, 9], 1),
+    ("std_single_pop", "stddev", [7], 0),
+    ("std_nulls", "stddev", [5, None, 3, 1, 4], 0),
+    ("std_constant", "stddev", [3, 3, 3], 0),
+    ("var_pop_basic", "variance", [2, 4, 4, 4, 5, 5, 7, 9], 0),
+    ("var_sample_basic", "variance", [2, 4, 4, 4, 5, 5, 7, 9], 1),
+    ("var_nulls", "variance", [5, None, 3, 1, 4], 0),
+]
+
 
 def col_values(out, cname):
     """Polars column to a Python list, preserving nulls."""
@@ -176,6 +191,9 @@ def run():
     quantile_manifest = emit_quantile_fixtures(pl)
     print(f"\nTotal quantile/median test cases: {len(quantile_manifest)}")
 
+    moments_manifest = emit_moment_fixtures(pl)
+    print(f"\nTotal stddev/variance test cases: {len(moments_manifest)}")
+
 
 def emit_quantile_fixtures(pl):
     """Emit polars quantile(linear) and median fixtures to samples/data/polars-quantile/."""
@@ -230,6 +248,41 @@ def emit_quantile_fixtures(pl):
         json.dump(quantile_manifest, f, indent=2)
     print(f"\nQuantile manifest: {manifest_path}")
     return quantile_manifest
+
+
+def emit_moment_fixtures(pl):
+    """Emit numpy/polars stddev & variance fixtures to samples/data/polars-moments/.
+
+    polars Series.std/var with an explicit ddof are numerically identical to numpy
+    np.std/np.var (same sum-of-squared-deviation over n-ddof definition), so this
+    doubles as the NumPy parity fixture from the plan. ddof=0 is population, ddof=1
+    is sample. Nulls are ignored.
+    """
+    moments_dir = os.path.join(REPO_ROOT, "samples", "data", "polars-moments")
+    os.makedirs(moments_dir, exist_ok=True)
+    moments_manifest = []
+
+    for name, kind, values, ddof in MOMENT_CASES:
+        series = pl.Series("v", values, dtype=pl.Float64)
+        if kind == "stddev":
+            value = series.std(ddof=ddof)
+        else:
+            value = series.var(ddof=ddof)
+        case = {
+            "name": name,
+            "kind": kind,
+            "v": [None if v is None else float(v) for v in values],
+            "ddof": ddof,
+            "value": None if value is None else float(value),
+        }
+        moments_manifest.append(case)
+        print(f"  {name}: {kind} ddof={ddof} value={case['value']}")
+
+    manifest_path = os.path.join(moments_dir, "manifest.json")
+    with open(manifest_path, "w") as f:
+        json.dump(moments_manifest, f, indent=2)
+    print(f"\nMoments manifest: {manifest_path}")
+    return moments_manifest
 
 
 if __name__ == "__main__":
