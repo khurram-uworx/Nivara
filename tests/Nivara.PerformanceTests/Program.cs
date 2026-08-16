@@ -890,8 +890,6 @@ sealed class PerfChunkedSource : IQuerySource
 
     public int? EstimatedRowCount => totalRowCount;
 
-    public int ChunksRead => Volatile.Read(ref chunksRead);
-
     public void CancelWhenChunkCountReaches(CancellationTokenSource cts, int targetChunk)
     {
         cancelCts = cts;
