@@ -1,6 +1,8 @@
 # NivaraIncident — Implementation Plan
 
-**Status:** planned (execution happens in a separate session)
+**Status:** Phase 1 core gap-fills (1.1–1.5) are executing on branch `khurram/incident`:
+1.1 ✅, 1.2 ✅, 1.3 ✅, 1.4 🔄, 1.5 ⏳ (see the 1.6 completion marker below). Phase 2+ is
+**deferred** to a follow-up (issue #284) — see the "Phase 1 → Phase 2+ handoff notes" section.
 **Scope:** `samples/NivaraIncident/` reference application + the core-library improvements it
 drives (`src/Nivara`, `src/Nivara.Extensions`)
 **Inputs:** `samples/NivaraIncident/IDEA.md` (product spec), `samples/NivaraIncident/README.md`
@@ -115,11 +117,58 @@ unit tests, and (where parity exists) Polars/NumPy cross-validation fixtures.
   issue (per the escalation rule).
 - **MCP guidance:** microsoft-learn for `IAsyncEnumerable<T>` producer patterns + `Channel<T>`.
 
+### 1.6 Phase 1 completion marker
+Run this when 1.1–1.5 are all shipped on `khurram/incident` (this is the explicit "Phase 1 done"
+step; tick each item and commit):
+- [ ] `dotnet build Nivara.slnx` clean (0 warnings/errors).
+- [ ] Full test suite green — **ask the human before `dotnet test`** (baseline after 1.3:
+      3028 passing, 0 failures).
+- [ ] `samples/NivaraIncident/README.md` gap inventory updated: gaps 1, 2, 3, 4, 7 → *resolved*
+      with commit/issue references; gap 8 stays *open* (Phase 3 design-test, escalated there).
+- [ ] `docs/TODO.md` removed as executed (commit: `docs: remove TODO.md — plan executed`).
+- [ ] This file's Status header updated to reflect the completed Phase 1 and the deferred Phase 2+.
+- [ ] Phase 2+ deferred work remains tracked only in issue #284 (never re-expanded in memory).
+
+---
+
+## Phase 1 → Phase 2+ handoff notes
+
+Facts the Phase 2+ agents/teams need from the Phase 1 branch (`khurram/incident`):
+
+- **Scope as executed (maintainer decision 2026-08-16):** this branch ships Phase 1 only
+  (1.1–1.5). Phase 2 (2.1–2.2), Phase 3 sample, Phase 4 bench, and web UI (3.5) are tracked in
+  issue #284 and must build on top of these fixed APIs.
+- **1.1:** Quantile/Median shipped via the aggregation classes (`AggregationFunction.cs`) and
+  `NivaraSeries<T>.Quantile/Median`. The `ColumnExpressions.Quantile` expression node did
+  **not** ship — deferred to issue #277. Group→aggregate→rank plans (Phase 3, README gap 8) may
+  need it; resume from #277.
+- **1.3:** execution diagnostics are now public: `QueryFrame.LastExecutionDiagnostics` and
+  `QueryFrame.GetExecutionDiagnostics()` (incl. `RowsRead` / `RowsReturned` /
+  `MaterializedColumns`). The plan's "alternative sample-only route" (`InternalsVisibleTo`) is
+  obsolete — use the public surface for the Phase 3.4 CLI summary and 3.5 query-plan view.
+- **1.4:** row-group-aligned chunks are the contract (`chunkSize` below row-group granularity is
+  only a hint). One `ParquetReader` is reused for the source lifetime with metadata parsed once,
+  guarded by a `SemaphoreSlim` — Parquet.Net readers are **not** thread-safe and
+  `ParallelExecutionStrategy` issues concurrent `ReadChunkAsync` calls, so the guard is required.
+  `Execute`/`ReadChunk` are true sync paths; `ExecuteAsync`/`ReadChunkAsync` are async.
+  `ReadParquetStreaming` now yields one frame per row group. Phase 3.1 generator should write
+  small row groups (`ParquetWriteOptions.With(rowGroupSize: ...)`) and 3.2 replay should consume
+  chunked `QueryFrame.AsStream`.
+- **1.5:** `NivaraQuery<T>.ToObjectsAsync` gives constant-memory per-chunk row projection — use it
+  for the Phase 3.4 CLI streamed output.
+- **Phase 2 anchors:** the line numbers in 2.1/2.2 (e.g. `ReverseGradOperations.cs:2423-2441`)
+  were recorded before the ADR-001/span-ification refactors and may be stale — re-grep fresh
+  before editing, and re-run the ADR-001 null-audit sweep before and after (the domain interior
+  must stay null-free; boundary checks stay).
+- **Test baseline:** 3028 tests green after 1.3 (0 failures); keep it that way, and ask the
+  human before running `dotnet test`.
+
 ---
 
 ## Phase 2 — AutoDiff ADR-001 cleanup + SIMD (small, high-value, low-risk)
 
-Do these while the sample is being built; each is a verified, isolated improvement.
+> **Status: DEFERRED** to a follow-up (issue #284). Do these while the sample is being built;
+> each is a verified, isolated improvement.
 
 ### 2.1 Dead branch removal inside the non-null domain
 - `Gather` (`ReverseGradOperations.cs:2423-2441`): drop the unreachable `TryGetSpan` `else`
@@ -152,6 +201,8 @@ Do these while the sample is being built; each is a verified, isolated improveme
 ---
 
 ## Phase 3 — The Incident Lab sample itself
+
+> **Status: DEFERRED** to a follow-up (issue #284).
 
 Layout (IDEA §"Architecture"): `IncidentLab.Core` / `IncidentLab.Analysis` / `IncidentLab.Ingestion`
 / `IncidentLab.App` / `IncidentLab.Cli` / `IncidentLab.Web` / `IncidentLab.Tests`, or a slimmer
@@ -215,6 +266,8 @@ Implement, as plain Nivara query code, the incident answers:
 
 ## Phase 4 — Performance assessment
 
+> **Status: DEFERRED** to a follow-up (issue #284).
+
 Produce a small benchmark/report (CLI `--bench` or a `Nivara.PerformanceTests`-style harness):
 
 1. End-to-end analyze of the full dataset: elapsed, rows read/returned, peak memory vs budget.
@@ -230,6 +283,9 @@ as a GitHub issue referencing the sample.
 ---
 
 ## Definition of done
+
+> **On `khurram/incident` the DoD is scoped to Phase 1 only:** the Phase 1 items below, plus the
+> 1.6 completion marker. The full DoD (replay/CLI/Web UI convergence) applies when Phase 2+ land.
 
 - All README gap items marked **open** are either fixed in core, worked around in the sample with
   an escalation issue recorded, or explicitly accepted with evidence.
