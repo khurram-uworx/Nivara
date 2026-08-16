@@ -107,19 +107,14 @@ await foreach (var chunk in query.AsStream(chunkSize: 50_000, ct))
     }
 }
 
-// Non-streamable fallback: Sort needs the whole dataset → single frame
+// Non-streamable fallback: Sort needs the whole dataset → single frame.
+// The single frame is consumer-owned too — dispose it when done.
 await foreach (var frame in Csv.ScanAsQueryFrame("telemetry.csv")
                  .Sort("timestamp")
                  .AsStream())
 {
-    try
-    {
-        // frame holds ALL rows — same as CollectAsync()
-    }
-    finally
-    {
-        frame.Dispose();
-    }
+    // frame holds ALL rows — same as CollectAsync()
+    frame.Dispose();
 }
 ```
 
