@@ -31,6 +31,18 @@ public class AsyncStreamingTests
         public double Salary { get; set; }
     }
 
+    sealed class DisposalRecordingSource : IQuerySource
+    {
+        public Schema Schema { get; } = new(new[] { ("A", typeof(int)) });
+        public bool IsLazy => true;
+        public bool Disposed { get; private set; }
+
+        public IReadOnlyDictionary<string, IColumn> Execute() =>
+            new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(new[] { 1, 2, 3 }) };
+
+        public void Dispose() => Disposed = true;
+    }
+
     [Test]
     public async Task CollectAsync_ParityWithCollect_ProducesIdenticalResults()
     {
@@ -374,6 +386,32 @@ public class AsyncStreamingTests
         {
             frame.Dispose();
         }
+    }
+
+    [Test]
+    public void QueryFrame_Dispose_ReleasesSourceResources()
+    {
+        var source = new DisposalRecordingSource();
+        var queryFrame = new QueryFrame(source);
+
+        queryFrame.Dispose();
+
+        Assert.That(source.Disposed, Is.True,
+            "Sync Dispose must release the underlying IQuerySource to align with DisposeAsync");
+        Assert.Throws<ObjectDisposedException>(() => queryFrame.Collect());
+    }
+
+    [Test]
+    public async Task QueryFrame_DisposeAsync_ReleasesSourceResources()
+    {
+        var source = new DisposalRecordingSource();
+        var queryFrame = new QueryFrame(source);
+
+        await queryFrame.DisposeAsync();
+
+        Assert.That(source.Disposed, Is.True,
+            "DisposeAsync must release the underlying IQuerySource");
+        Assert.Throws<ObjectDisposedException>(() => queryFrame.Collect());
     }
 
     [Test]
