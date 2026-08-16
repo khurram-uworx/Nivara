@@ -225,6 +225,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         var producer = Task.Run(async () =>
         {
+            NivaraFrame? inFlight = null;
             try
             {
                 await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, context.CancellationToken)
@@ -241,7 +242,9 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                         chunkScope.SetRowCount(processedData.Values.FirstOrDefault()?.Length ?? 0);
 
                     var chunkFrame = NivaraFrame.Create(processedData);
+                    inFlight = chunkFrame;
                     await channel.Writer.WriteAsync(chunkFrame, context.CancellationToken).ConfigureAwait(false);
+                    inFlight = null;
 
                     chunkIndex++;
                     var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
@@ -250,7 +253,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             }
             finally
             {
-                channel.Writer.Complete();
+                inFlight?.Dispose();
+                channel.Writer.TryComplete();
             }
         }, context.CancellationToken);
 
@@ -267,7 +271,10 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         catch
         {
             foreach (var f in chunkFrames) f.Dispose();
-            channel.Writer.Complete();
+            channel.Writer.TryComplete();
+            while (channel.Reader.TryRead(out var buffered))
+                buffered.Dispose();
+            try { await producer.ConfigureAwait(false); } catch { }
             throw;
         }
 
