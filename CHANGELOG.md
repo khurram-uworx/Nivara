@@ -72,6 +72,37 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **Streaming cancellation no longer masks the OCE with `ChannelClosedException` (#280)** —
+  consumer-side cancellation of the bounded-channel pipeline (`StreamingExecutionStrategy.
+  ExecuteCoreAsync`) surfaced `QueryExecutionException("Async Streaming execution failed:
+  The channel has been closed.")` because the consumer catch called `channel.Writer.Complete()`
+  on a channel the producer's `finally` had already completed (and `Complete()` throws when
+  the channel is closed). The producer now tracks its in-flight chunk frame and disposes it in
+  its own `finally`, both sides complete the channel with no-throw `TryComplete()`, the
+  consumer catch drains and disposes channel-buffered frames after completing, and the producer
+  task is awaited (swallowing its fault) so the consumer's own `OperationCanceledException`
+  propagates cleanly and the task is never left unobserved. Phase 4 AC2 now holds: clean OCE
+  with no resource leaks.
+
+- **`docs/STREAMING.md` now documents the correct chunk-frame ownership contract (#278)** —
+  the doc claimed chunk frames are "disposed by the pipeline after the consumer moves past
+  them", but `StreamChunksAsync` yields raw frames and never disposes them (`await foreach`
+  only disposes the enumerator), so callers following the doc leaked chunk frames. The doc now
+  states the consumer owns each yielded frame (including the single-frame fallback) and shows
+  `try/finally chunk.Dispose()` in the samples; `StreamChunksAsync`'s XML doc carries the same
+  note.
+
+- **`NivaraFrame.AsQueryFrame()` no longer aliases the source frame's columns (#279)** — the
+  in-memory query source shared the source frame's own column instances but behaved as their
+  owner: disposing a `QueryFrame` built from `AsQueryFrame()` disposed each column, and a
+  collected result (no-op `Collect()`, or `Select` of a bare column reference, whose evaluator
+  passes the input instance through) owned those same instances — so disposing either side
+  threw `ObjectDisposedException` from the other. `MemoryQuerySource` is now explicitly
+  non-owning: `Dispose()` only invalidates the source, and `Execute()`/`ExecuteAsync()` return
+  fresh column instances (zero-copy `Slice(0, Length)` over the same backing storage) with
+  independent disposal, so the source frame, the query frame, and each collected result are
+  safe to dispose in any order and query frames stay reusable after disposing a result.
+
 - **`QueryFrame` disposal now releases the underlying source on both sync and async paths (#268)** —
   `Dispose()` previously only untracked the frame and never disposed the `IQuerySource`, while
   `DisposeAsync()` released it only when the source happened to implement `IAsyncDisposable` (none

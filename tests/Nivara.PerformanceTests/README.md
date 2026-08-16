@@ -28,6 +28,7 @@ is available.
 | `Frame Slice [10k x 128]` | Public `NivaraFrame.Slice(0, 5000)` — the reflection-free `IColumn.Slice` path (#173) |
 | `RowDot kernel raw [10k x 128]` | Raw `TensorsHelper.RowDot` over a pre-built row-major buffer + null mask — the kernel floor (#141) |
 | `RowCosineSimilarity kernel raw [10k x 128]` | Raw `TensorsHelper.RowCosineSimilarity` over a pre-built row-major buffer — kernel floor with norm (#141) |
+| `Streaming cancel mid-stream 200k rows x 10k chunk` | Phase 4 AC2 probe (#266): `StreamingExecutionStrategy.ExecuteAsync` over a chunk-capable source, cancelled after ~3 chunks. Asserts a clean `OperationCanceledException` with prompt unwind (#280 fixed — the consumer-side catch now uses `TryComplete()`, observes the producer, and disposes in-flight/channel-buffered frames, so the OCE is no longer masked by `ChannelClosedException`). B/op captures the frames the cancelled path disposes |
 
 Each scenario reports **ops/s**, **ns/op**, **bytes/op** (`GC.GetAllocatedBytesForCurrentThread`
 delta), and **gen0/op** (`GC.CollectionCount(0)` delta).

@@ -50,6 +50,74 @@ public class AsyncStreamingTests
         public void Dispose() => Disposed = true;
     }
 
+    sealed class CancellationChunkSource : IQuerySource
+    {
+        readonly int totalRowCount;
+        int chunksRead;
+        int cancelTarget = -1;
+        CancellationTokenSource? cancelCts;
+
+        public CancellationChunkSource(int totalRows, int cancelAfterChunks)
+        {
+            totalRowCount = totalRows;
+            cancelTarget = cancelAfterChunks;
+        }
+
+        public Schema Schema => new(new[] { ("A", typeof(int)) });
+        public bool IsLazy => false;
+        public bool CanReadInChunks => true;
+        public int? EstimatedRowCount => totalRowCount;
+        public int ChunksRead => chunksRead;
+
+        public void CancelWhenChunkCountReaches(CancellationTokenSource cts, int targetChunk)
+        {
+            cancelCts = cts;
+            cancelTarget = targetChunk;
+        }
+
+        public IReadOnlyDictionary<string, IColumn> Execute() =>
+            new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(BuildData(0, totalRowCount)) };
+
+        public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
+        {
+            var start = chunkIndex * chunkSize;
+            var length = Math.Min(chunkSize, totalRowCount - start);
+            if (length <= 0)
+                return new Dictionary<string, IColumn>(0);
+            return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(BuildData(start, length)) };
+        }
+
+        public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+            int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var n = Interlocked.Increment(ref chunksRead);
+            if (cancelCts != null && n >= cancelTarget)
+                cancelCts.Cancel();
+
+            await Task.Yield();
+
+            var start = chunkIndex * chunkSize;
+            var length = Math.Min(chunkSize, totalRowCount - start);
+            if (length <= 0)
+                return new Dictionary<string, IColumn>(0);
+            return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(BuildData(start, length)) };
+        }
+
+        static int[] BuildData(int start, int count)
+        {
+            var data = new int[count];
+            for (int i = 0; i < count; i++)
+                data[i] = start + i;
+            return data;
+        }
+
+        public void Dispose()
+        {
+        }
+    }
+
     [Test]
     public async Task CollectAsync_ParityWithCollect_ProducesIdenticalResults()
     {
@@ -648,6 +716,34 @@ public class AsyncStreamingTests
         {
             Directory.Delete(tempDir, true);
         }
+    }
+
+    [Test]
+    public async Task StreamingStrategy_CancellationMidStream_ThrowsOperationCanceledException()
+    {
+        var source = new CancellationChunkSource(totalRows: 200_000, cancelAfterChunks: 3);
+        var plan = new QueryPlan(source, Array.Empty<IQueryOperation>());
+        var engine = new ExecutionEngine();
+        using var cts = new CancellationTokenSource();
+        var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
+        {
+            CancellationToken = cts.Token,
+            ChunkSize = 10_000,
+        };
+        source.CancelWhenChunkCountReaches(cts, 3);
+
+        try
+        {
+            using var result = await engine.ExecuteAsync(plan, context);
+            Assert.Fail(
+                $"Expected OperationCanceledException, but the streaming run completed with {result.RowCount} rows (chunks read: {source.ChunksRead}).");
+        }
+        catch (OperationCanceledException)
+        {
+        }
+
+        Assert.That(source.ChunksRead, Is.GreaterThan(0), "cancellation must fire mid-stream, not pre-cancelled");
+        Assert.That(source.ChunksRead, Is.LessThan(20), "run must not complete the full source");
     }
 
     [Test]

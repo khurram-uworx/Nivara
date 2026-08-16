@@ -310,6 +310,8 @@ public sealed class NivaraFrame : IFrame
     /// Creates a QueryFrame from an existing NivaraFrame for lazy query operations.
     /// The returned frame is backed by a non-chunked in-memory source, so
     /// <see cref="Query.QueryFrame.AsStream"/> yields a single frame.
+    /// The QueryFrame is a non-owning view: disposing it (or any collected result)
+    /// never disposes this frame's columns. Results share backing storage zero-copy.
     /// </summary>
     /// <returns>A QueryFrame that can be used to build query chains</returns>
     public QueryFrame AsQueryFrame()

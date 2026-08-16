@@ -3,8 +3,10 @@ using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Diagnostics;
+using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.Operations;
+using Nivara.Query;
 using Nivara.Storage;
 using Nivara.Tensors;
 using System.Diagnostics;
@@ -274,6 +276,7 @@ static class Program
         RunBatchedAttentionScenarios();
         RunRowScoringScenarios();
         RunWindowAllocationScenarios();
+        RunStreamingCancellationScenarios();
     }
 
     static void RunWindowAllocationScenarios()
@@ -345,6 +348,12 @@ static class Program
                     columns, columns["v"], spec,
                     col => ((NivaraColumn<int>)col).RollingSum(10, 1));
             });
+    }
+
+    static void RunStreamingCancellationScenarios()
+    {
+        Run("Streaming cancel mid-stream 200k rows x 10k chunk", 3, 15,
+            () => CreateStreamingCancellationScenario(totalRows: 200_000, chunkSize: 10_000, cancelAfterChunks: 3));
     }
 
     static void RunRowScoringScenarios()
@@ -794,6 +803,45 @@ static class Program
         return () => salary.Multiply(1.1);
     }
 
+    /// <summary>
+    /// Phase 4 AC2 scenario: cancels a chunk-capable streaming run mid-stream through the
+    /// bounded-channel pipeline (<c>StreamingExecutionStrategy.ExecuteCoreAsync</c>, issue #266)
+    /// and asserts a clean <see cref="OperationCanceledException"/> — not wrapped in
+    /// <c>QueryExecutionException</c> — with prompt unwind. Issue #280 (consumer-side catch
+    /// calling <c>channel.Writer.Complete()</c> on an already-completed channel, masking the
+    /// OCE with <c>ChannelClosedException</c>) is fixed; the scenario now goes green and B/op
+    /// captures any in-flight/channel-buffered chunk frames the cancelled path must dispose.
+    /// </summary>
+    static Action CreateStreamingCancellationScenario(int totalRows, int chunkSize, int cancelAfterChunks)
+    {
+        var engine = new ExecutionEngine();
+        var operation = new PerfStreamableOperation();
+
+        return () =>
+        {
+            var source = new PerfChunkedSource(totalRows);
+            using var cts = new CancellationTokenSource();
+            var plan = new QueryPlan(source, new IQueryOperation[] { operation });
+            var context = new NivaraExecutionContext(ExecutionStrategy.Streaming)
+            {
+                CancellationToken = cts.Token,
+                ChunkSize = chunkSize,
+            };
+            source.CancelWhenChunkCountReaches(cts, cancelAfterChunks);
+
+            var task = engine.ExecuteAsync(plan, context);
+            try
+            {
+                task.GetAwaiter().GetResult();
+                throw new InvalidOperationException(
+                    "Expected OperationCanceledException, but the streaming run completed.");
+            }
+            catch (OperationCanceledException)
+            {
+            }
+        };
+    }
+
     static float[] Fill(float[] values)
     {
         for (int i = 0; i < values.Length; i++)
@@ -814,5 +862,93 @@ static class Program
             values[i] = i;
         return values;
     }
+}
+
+/// <summary>
+/// In-memory chunk-capable source used by the streaming-cancellation scenario. Cancels the
+/// run once <paramref name="cancelAfterChunks"/> chunks have been read so the token fires
+/// deterministically mid-stream.
+/// </summary>
+sealed class PerfChunkedSource : IQuerySource
+{
+    readonly int totalRowCount;
+    int chunksRead;
+    int cancelTarget = -1;
+    CancellationTokenSource? cancelCts;
+
+    public PerfChunkedSource(int totalRowCount)
+    {
+        this.totalRowCount = totalRowCount;
+    }
+
+    public Schema Schema => new(new[] { ("A", typeof(int)) });
+
+    public bool IsLazy => false;
+
+    public bool CanReadInChunks => true;
+
+    public int? EstimatedRowCount => totalRowCount;
+
+    public void CancelWhenChunkCountReaches(CancellationTokenSource cts, int targetChunk)
+    {
+        cancelCts = cts;
+        cancelTarget = targetChunk;
+    }
+
+    public IReadOnlyDictionary<string, IColumn> Execute()
+    {
+        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(BuildData(0, totalRowCount)) };
+    }
+
+    public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
+    {
+        var start = chunkIndex * chunkSize;
+        var length = Math.Min(chunkSize, totalRowCount - start);
+        if (length <= 0)
+            return new Dictionary<string, IColumn>(0);
+        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(BuildData(start, length)) };
+    }
+
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var n = Interlocked.Increment(ref chunksRead);
+        if (cancelCts != null && n >= cancelTarget)
+            cancelCts.Cancel();
+
+        await Task.Yield();
+
+        var start = chunkIndex * chunkSize;
+        var length = Math.Min(chunkSize, totalRowCount - start);
+        if (length <= 0)
+            return new Dictionary<string, IColumn>(0);
+        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<int>.Create(BuildData(start, length)) };
+    }
+
+    static int[] BuildData(int start, int count)
+    {
+        var data = new int[count];
+        for (int i = 0; i < count; i++)
+            data[i] = start + i;
+        return data;
+    }
+
+    public void Dispose()
+    {
+    }
+}
+
+/// <summary>
+/// Identity streamable operation (Filter) used by the streaming-cancellation scenario.
+/// </summary>
+sealed class PerfStreamableOperation : IQueryOperation
+{
+    public string OperationType => Nivara.Query.OperationType.Filter;
+
+    public Schema TransformSchema(Schema input) => input;
+
+    public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input) => input;
 }
 
