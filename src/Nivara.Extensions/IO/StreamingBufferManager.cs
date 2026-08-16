@@ -8,6 +8,15 @@ namespace Nivara.IO;
 /// <remarks>
 /// This class provides memory-efficient streaming capabilities for Arrow/Parquet I/O operations,
 /// ensuring that memory usage remains bounded regardless of dataset size.
+///
+/// This is the IO-layer byte-buffer budget manager used by the Arrow/Parquet streaming readers.
+/// It is intentionally NOT wired into the query streaming strategy (the
+/// <see cref="Nivara.Execution.StreamingExecutionStrategy"/>): that strategy lives in the
+/// dependency-free core assembly and works in row-chunk units controlled by
+/// <see cref="Nivara.Execution.NivaraExecutionContext.MemoryBudget"/> / explicit
+/// <see cref="Nivara.Execution.NivaraExecutionContext.ChunkSize"/> values, not in managed
+/// byte buffers. Queries that want byte-level budget control at the source should bound
+/// memory at the source reader instead (e.g. row-group selection for Parquet).
 /// </remarks>
 sealed class StreamingBufferManager : IDisposable
 {
