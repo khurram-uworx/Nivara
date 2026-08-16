@@ -104,6 +104,17 @@ All notable changes to Nivara are documented here. Released versions are publish
   next counter value. Previously a user column literally named `__window_0` was silently
   overwritten by the first materialized window.
 
+- **`JsonLazySource` chunk reads are now truly streaming (#265)** — `ReadChunk`/
+  `ReadChunkAsync` no longer slice a whole-file `JsonElement[]` produced by
+  `File.ReadAllText` + `JsonSerializer.Deserialize`. A new internal `JsonRecordStreamReader`
+  (a persistent `Utf8JsonReader` walker that resumes mid-array across `JsonReaderState`
+  reconstructions and grows its rented buffer past the 64 KB start) token-walks the file to
+  locate each chunk's `[start, end)` byte range, which is then read and parsed on demand;
+  schema inference and the `JsonEagerSource` ctor validation also read only the
+  `SchemaInferenceRecords` sample. Memory stays bounded to one chunk, the persistent file
+  handle is released once streaming reaches EOF, and backward/random chunk access reopens and
+  re-walks. Chunk-level locks serialize parallel chunk reads.
+
 ### Removed
 
 - **`MLNetInterop.ToNivaraFrame(IDataView, MLContext)` static (#233)** — removed the
