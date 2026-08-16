@@ -567,6 +567,129 @@ public sealed class MeanAggregation : AggregationFunction
 }
 
 /// <summary>
+/// Quantile aggregation function that computes the q-th quantile of numeric values in each group
+/// using linear interpolation (numpy/polars "linear", Hyndman-Fan type 7). Groups with no valid
+/// values aggregate to null, matching Mean/Min/Max.
+/// </summary>
+public sealed class QuantileAggregation : AggregationFunction
+{
+    readonly double q;
+
+    /// <summary>
+    /// Initializes a quantile aggregation with the requested quantile.
+    /// </summary>
+    /// <param name="q">The quantile to compute, in [0, 1]</param>
+    public QuantileAggregation(double q)
+    {
+        if (double.IsNaN(q) || q < 0d || q > 1d)
+            throw new ArgumentOutOfRangeException(nameof(q), "Quantile must be in the range [0, 1].");
+        this.q = q;
+    }
+
+    /// <summary>
+    /// Gets the quantile this aggregation computes.
+    /// </summary>
+    public double Q => q;
+
+    /// <inheritdoc />
+    public override string Name => $"Quantile({q})";
+
+    /// <inheritdoc />
+    public override Type GetResultType(Type inputType)
+    {
+        ValidateInputType(inputType);
+
+        // Quantile of a numeric column is a fractional value regardless of input width.
+        return typeof(double);
+    }
+
+    /// <inheritdoc />
+    public override object? Apply(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        if (column == null)
+            throw new ArgumentNullException(nameof(column));
+        if (groupIndices == null)
+            throw new ArgumentNullException(nameof(groupIndices));
+
+        ValidateInputType(column.ElementType);
+
+        var validValues = ExtractValidValues(column, groupIndices);
+        return QuantileKernel.ComputeFromBoxed(validValues, q);
+    }
+
+    /// <inheritdoc />
+    protected override void ValidateInputType(Type inputType)
+    {
+        var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
+        if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
+            throw new ArgumentException($"Quantile aggregation requires numeric type, got {inputType.Name}");
+    }
+
+    /// <summary>
+    /// Extracts valid (non-null) values from a column for the specified indices
+    /// </summary>
+    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        var validValues = new List<object>();
+        foreach (var index in groupIndices)
+        {
+            var value = column.GetValue(index);
+            if (value != null)
+                validValues.Add(value);
+        }
+        return validValues;
+    }
+}
+
+/// <summary>
+/// Median aggregation function that computes the 0.5 quantile of numeric values in each group
+/// using the same linear-interpolation definition as <see cref="QuantileAggregation"/>.
+/// </summary>
+public sealed class MedianAggregation : AggregationFunction
+{
+    /// <inheritdoc />
+    public override string Name => "Median";
+
+    /// <inheritdoc />
+    public override Type GetResultType(Type inputType)
+    {
+        ValidateInputType(inputType);
+
+        // Median of a numeric column is a fractional value regardless of input width.
+        return typeof(double);
+    }
+
+    /// <inheritdoc />
+    public override object? Apply(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        if (column == null)
+            throw new ArgumentNullException(nameof(column));
+        if (groupIndices == null)
+            throw new ArgumentNullException(nameof(groupIndices));
+
+        ValidateInputType(column.ElementType);
+
+        var validValues = new List<object>();
+        foreach (var index in groupIndices)
+        {
+            var value = column.GetValue(index);
+            if (value != null)
+                validValues.Add(value);
+        }
+
+        return QuantileKernel.ComputeFromBoxed(validValues, 0.5);
+    }
+
+    /// <inheritdoc />
+    protected override void ValidateInputType(Type inputType)
+    {
+        var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
+        if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
+            throw new ArgumentException($"Median aggregation requires numeric type, got {inputType.Name}");
+    }
+}
+
+/// <summary>
 /// Factory class for creating standard aggregation functions
 /// </summary>
 public static class AggregationFunctions
@@ -608,6 +731,19 @@ public static class AggregationFunctions
     public static MeanAggregation Mean() => new();
 
     /// <summary>
+    /// Creates a quantile aggregation function computing the q-th quantile with linear interpolation.
+    /// </summary>
+    /// <param name="q">The quantile to compute, in [0, 1]</param>
+    /// <returns>A new QuantileAggregation instance</returns>
+    public static QuantileAggregation Quantile(double q) => new(q);
+
+    /// <summary>
+    /// Creates a median aggregation function computing the 0.5 quantile.
+    /// </summary>
+    /// <returns>A new MedianAggregation instance</returns>
+    public static MedianAggregation Median() => new();
+
+    /// <summary>
     /// Gets all standard aggregation functions
     /// </summary>
     /// <returns>A collection of standard aggregation functions</returns>
@@ -619,7 +755,11 @@ public static class AggregationFunctions
             Sum(),
             Min(),
             Max(),
-            Mean()
+            Mean(),
+            Median(),
+            Quantile(0.25),
+            Quantile(0.5),
+            Quantile(0.75)
         };
     }
 }

@@ -2,6 +2,7 @@ using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
+using System.Globalization;
 using System.Linq.Expressions;
 using System.Reflection;
 
@@ -444,6 +445,16 @@ public sealed class NivaraGroupedQuery<TKey, T>
             return new GroupAggregate(new ColumnReference(keyColumnName), new RowCountAggregation());
         }
 
+        if (string.Equals(methodName, nameof(Grouping<TKey, T>.Quantile), StringComparison.Ordinal))
+        {
+            if (call.Arguments.Count != 2 || call.Arguments[0] is not LambdaExpression quantileSelector)
+                throw new UnsupportedQueryExpressionException("g.Quantile(...) requires a selector lambda and a constant quantile argument in [0, 1].");
+
+            var q = ExtractQuantileArgument(call.Arguments[1]);
+            var quantileSource = translator.Translate(quantileSelector.Body);
+            return new GroupAggregate(quantileSource, new QuantileAggregation(q));
+        }
+
         if (call.Arguments.Count != 1 || call.Arguments[0] is not LambdaExpression selector)
             throw new UnsupportedQueryExpressionException($"g.{methodName}(...) requires a single selector lambda.");
 
@@ -453,11 +464,38 @@ public sealed class NivaraGroupedQuery<TKey, T>
             nameof(Grouping<TKey, T>.Average) => new MeanAggregation(),
             nameof(Grouping<TKey, T>.Min) => new MinAggregation(),
             nameof(Grouping<TKey, T>.Max) => new MaxAggregation(),
-            _ => throw new UnsupportedQueryExpressionException($"Group aggregate '{methodName}' is not supported. Supported aggregates: Count, Sum, Average, Min, Max.")
+            nameof(Grouping<TKey, T>.Median) => new MedianAggregation(),
+            _ => throw new UnsupportedQueryExpressionException($"Group aggregate '{methodName}' is not supported. Supported aggregates: Count, Sum, Average, Min, Max, Median, Quantile.")
         };
 
         var source = translator.Translate(selector.Body);
         return new GroupAggregate(source, function);
+    }
+
+    /// <summary>
+    /// Extracts the constant quantile argument from a <c>g.Quantile(...)</c> call. Accepts a literal
+    /// constant or a side-effect-free constant-foldable expression, and validates it is in [0, 1].
+    /// </summary>
+    static double ExtractQuantileArgument(Expression argument)
+    {
+        double q;
+        try
+        {
+            var value = argument is ConstantExpression constant
+                ? constant.Value
+                : Expression.Lambda(argument).Compile().DynamicInvoke();
+
+            q = Convert.ToDouble(value, CultureInfo.InvariantCulture);
+        }
+        catch
+        {
+            throw new UnsupportedQueryExpressionException("g.Quantile(...) requires a constant quantile argument in [0, 1].");
+        }
+
+        if (double.IsNaN(q) || q < 0d || q > 1d)
+            throw new UnsupportedQueryExpressionException($"g.Quantile(...) quantile must be in [0, 1], got {q}.");
+
+        return q;
     }
 
     readonly record struct GroupAggregate(ColumnExpression Source, AggregationFunction Function);

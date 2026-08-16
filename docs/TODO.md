@@ -68,6 +68,9 @@ patterns).
 
 ## GitHub issues log
 
-- [ ] (none yet — create issues at discovery time via
+- [ ] [#277](https://github.com/khurram-uworx/Nivara/issues/277) —
+      `ColumnExpressions.Quantile` expression-node support for quantile/median aggregations
+      (deferred from 1.1; typed LINQ + series + aggregation-class paths shipped instead).
+- [ ] (create issues at discovery time via
       `gh issue create --repo khurram-uworx/Nivara` and record the number here; never hold
       deferred work in memory)

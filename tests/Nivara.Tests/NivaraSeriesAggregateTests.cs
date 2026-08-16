@@ -614,6 +614,181 @@ public class NivaraSeriesAggregateTests
 
     #endregion
 
+    #region Quantile Tests
+
+    /// <summary>
+    /// Feature: nivara-series, Property: Quantile computation
+    /// For any series of numeric values, Quantile(q) should compute the q-th quantile with linear
+    /// interpolation (numpy default / polars interpolation="linear", Hyndman-Fan type 7).
+    /// </summary>
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile computation")]
+    public void Quantile_IntegerSeries_ReturnsCorrectQuantile()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 1, 2, 3, 4 });
+
+        Assert.That(series.Quantile(0.5), Is.EqualTo(2.5).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile computation")]
+    public void Quantile_HighQuantile_InterpolatesLinearly()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 10, 20, 30, 40, 50 });
+
+        Assert.That(series.Quantile(0.9), Is.EqualTo(46.0).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile computation")]
+    public void Quantile_MinMaxQuantile_ReturnsExtremes()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 3, 9, 6 });
+
+        Assert.That(series.Quantile(0.0), Is.EqualTo(3.0));
+        Assert.That(series.Quantile(1.0), Is.EqualTo(9.0));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile with null handling")]
+    public void Quantile_WithNullValues_IgnoresNulls()
+    {
+        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        using var series = new NivaraSeries<double>(column);
+
+        Assert.That(series.Quantile(0.25), Is.EqualTo(2.5).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile error handling")]
+    public void Quantile_InvalidQuantile_ThrowsArgumentOutOfRangeException()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 1, 2, 3 });
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => series.Quantile(-0.1));
+        Assert.Throws<ArgumentOutOfRangeException>(() => series.Quantile(1.5));
+        Assert.Throws<ArgumentOutOfRangeException>(() => series.Quantile(double.NaN));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile error handling")]
+    public void Quantile_EmptySeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(Array.Empty<int>());
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Quantile(0.5));
+        Assert.That(ex.Message, Does.Contain("Cannot compute Quantile of empty series"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile error handling")]
+    public void Quantile_AllNullSeries_ThrowsInvalidOperationException()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null });
+        using var series = new NivaraSeries<int>(column);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Quantile(0.5));
+        Assert.That(ex.Message, Does.Contain("all values are null"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile on extended numeric domain")]
+    public void Quantile_ExtendedDomain_ReturnsCorrectQuantile()
+    {
+        using var halfSeries = NivaraSeries<Half>.Create(new[] { (Half)1, (Half)2, (Half)3, (Half)4 });
+        Assert.That(halfSeries.Quantile(0.5), Is.EqualTo(2.5).Within(1e-3));
+
+        using var int128Series = NivaraSeries<Int128>.Create(new Int128[] { 1, 2, 3, 4 });
+        Assert.That(int128Series.Quantile(0.5), Is.EqualTo(2.5).Within(1e-9));
+
+        using var decimalSeries = NivaraSeries<decimal>.Create(new decimal[] { 1, 2, 3, 4 });
+        Assert.That(decimalSeries.Quantile(0.5), Is.EqualTo(2.5).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Quantile type validation")]
+    public void Quantile_NonNumericSeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<string>.Create(new[] { "a", "b" });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Quantile(0.5));
+        Assert.That(ex.Message, Does.Contain("Quantile operation is not supported"));
+    }
+
+    #endregion
+
+    #region Median Tests
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Median computation")]
+    public void Median_OddLengthSeries_ReturnsMiddleValue()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 3, 1, 2 });
+
+        Assert.That(series.Median(), Is.EqualTo(2.0));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Median computation")]
+    public void Median_EvenLengthSeries_AveragesMiddleTwo()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 1, 3, 2, 4 });
+
+        Assert.That(series.Median(), Is.EqualTo(2.5).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Median computation")]
+    public void Median_SingleElementSeries_ReturnsThatElement()
+    {
+        using var series = NivaraSeries<int>.Create(new[] { 7 });
+
+        Assert.That(series.Median(), Is.EqualTo(7.0));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Median with null handling")]
+    public void Median_WithNullValues_IgnoresNulls()
+    {
+        var column = NivaraColumn.CreateFromNullable(new double?[] { 5, null, 3, 1, 4 });
+        using var series = new NivaraSeries<double>(column);
+
+        Assert.That(series.Median(), Is.EqualTo(3.5).Within(1e-9));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Median error handling")]
+    public void Median_EmptySeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<int>.Create(Array.Empty<int>());
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Median());
+        Assert.That(ex.Message, Does.Contain("Cannot compute Median of empty series"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Median error handling")]
+    public void Median_AllNullSeries_ThrowsInvalidOperationException()
+    {
+        var column = NivaraColumn.CreateFromNullable(new int?[] { null, null });
+        using var series = new NivaraSeries<int>(column);
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Median());
+        Assert.That(ex.Message, Does.Contain("all values are null"));
+    }
+
+    [Test]
+    [Category("Feature: nivara-series, Property: Median type validation")]
+    public void Median_NonNumericSeries_ThrowsInvalidOperationException()
+    {
+        using var series = NivaraSeries<string>.Create(new[] { "a", "b" });
+
+        var ex = Assert.Throws<InvalidOperationException>(() => series.Median());
+        Assert.That(ex.Message, Does.Contain("Median operation is not supported"));
+    }
+
+    #endregion
+
     #region Edge Cases and Error Handling
 
     /// <summary>

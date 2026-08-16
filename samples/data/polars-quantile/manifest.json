@@ -1,0 +1,162 @@
+[
+  {
+    "name": "quantile_linear_basic",
+    "kind": "quantile",
+    "v": [
+      2.0,
+      4.0,
+      1.0,
+      3.0
+    ],
+    "q": 0.5,
+    "quantile": 2.5
+  },
+  {
+    "name": "quantile_linear_odd",
+    "kind": "quantile",
+    "v": [
+      10.0,
+      20.0,
+      30.0,
+      40.0,
+      50.0
+    ],
+    "q": 0.9,
+    "quantile": 46.0
+  },
+  {
+    "name": "quantile_linear_p95",
+    "kind": "quantile",
+    "v": [
+      1.0,
+      2.0,
+      3.0,
+      4.0,
+      5.0,
+      6.0,
+      7.0,
+      8.0,
+      9.0,
+      10.0
+    ],
+    "q": 0.95,
+    "quantile": 9.549999999999999
+  },
+  {
+    "name": "quantile_linear_nulls",
+    "kind": "quantile",
+    "v": [
+      5.0,
+      null,
+      3.0,
+      1.0,
+      4.0
+    ],
+    "q": 0.25,
+    "quantile": 2.5
+  },
+  {
+    "name": "quantile_linear_single",
+    "kind": "quantile",
+    "v": [
+      7.0
+    ],
+    "q": 0.5,
+    "quantile": 7.0
+  },
+  {
+    "name": "quantile_linear_min",
+    "kind": "quantile",
+    "v": [
+      3.0,
+      9.0,
+      6.0
+    ],
+    "q": 0.0,
+    "quantile": 3.0
+  },
+  {
+    "name": "quantile_linear_max",
+    "kind": "quantile",
+    "v": [
+      3.0,
+      9.0,
+      6.0
+    ],
+    "q": 1.0,
+    "quantile": 9.0
+  },
+  {
+    "name": "quantile_linear_even_median",
+    "kind": "quantile",
+    "v": [
+      100.0,
+      200.0,
+      300.0,
+      400.0
+    ],
+    "q": 0.5,
+    "quantile": 250.0
+  },
+  {
+    "name": "median_global_odd",
+    "kind": "median",
+    "partition": null,
+    "v": [
+      3.0,
+      1.0,
+      2.0
+    ],
+    "median": 2.0
+  },
+  {
+    "name": "median_global_even",
+    "kind": "median",
+    "partition": null,
+    "v": [
+      1.0,
+      3.0,
+      2.0,
+      4.0
+    ],
+    "median": 2.5
+  },
+  {
+    "name": "median_global_nulls",
+    "kind": "median",
+    "partition": null,
+    "v": [
+      5.0,
+      null,
+      3.0,
+      1.0,
+      4.0
+    ],
+    "median": 3.5
+  },
+  {
+    "name": "median_partitioned",
+    "kind": "median",
+    "partition": [
+      "A",
+      "A",
+      "B",
+      "B",
+      "A",
+      "B"
+    ],
+    "v": [
+      10.0,
+      30.0,
+      2.0,
+      8.0,
+      20.0,
+      6.0
+    ],
+    "median": 9.0,
+    "groups": {
+      "A": 20.0,
+      "B": 6.0
+    }
+  }
+]

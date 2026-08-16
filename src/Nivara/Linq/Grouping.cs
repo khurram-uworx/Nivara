@@ -161,6 +161,91 @@ public sealed class Grouping<TKey, T>
     /// </summary>
     public decimal Max(Func<T, decimal> selector) => Unreachable<decimal>();
 
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>; the result is a double because the median of even-length
+    /// data is fractional.
+    /// </summary>
+    public double Median(Func<T, byte> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, short> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, int> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, long> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, float> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, double> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the median (0.5 quantile) of the selected values in the group. Translated to a
+    /// <see cref="MedianAggregation"/>.
+    /// </summary>
+    public double Median(Func<T, decimal> selector) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation; the result is a double.
+    /// </summary>
+    public double Quantile(Func<T, byte> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, short> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, int> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, long> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, float> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, double> selector, double q) => Unreachable<double>();
+
+    /// <summary>
+    /// Returns the q-th quantile of the selected values in the group. Translated to a
+    /// <see cref="QuantileAggregation"/> with linear interpolation.
+    /// </summary>
+    public double Quantile(Func<T, decimal> selector, double q) => Unreachable<double>();
+
     static TValue Unreachable<TValue>()
         => throw new NotSupportedException("Grouping<TKey, T> instances are marker types and are never invoked.");
 }

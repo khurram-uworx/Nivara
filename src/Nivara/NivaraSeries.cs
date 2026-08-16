@@ -755,6 +755,109 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
         return minMaxValue(NumericKernelDispatcher.Max);
     }
 
+    /// <summary>
+    /// Computes the q-th quantile of all valid elements in the series using linear interpolation
+    /// (numpy default / polars interpolation="linear", Hyndman-Fan type 7). Null values are
+    /// excluded from the computation.
+    /// </summary>
+    /// <param name="q">The quantile to compute, in [0, 1]</param>
+    /// <returns>The q-th quantile of all valid elements</returns>
+    /// <exception cref="ArgumentOutOfRangeException">Thrown when q is not in [0, 1]</exception>
+    /// <exception cref="InvalidOperationException">Thrown when T is not a numeric type</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public double Quantile(double q)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (double.IsNaN(q) || q < 0d || q > 1d)
+            throw new ArgumentOutOfRangeException(nameof(q), "Quantile must be in the range [0, 1].");
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Quantile of empty series. Series must contain at least one element.");
+
+        validateQuantileType("Quantile");
+
+        return quantileCore(q);
+    }
+
+    /// <summary>
+    /// Computes the median (0.5 quantile) of all valid elements in the series using linear
+    /// interpolation, so even-length series average the two middle values. Null values are
+    /// excluded from the computation.
+    /// </summary>
+    /// <returns>The median of all valid elements</returns>
+    /// <exception cref="InvalidOperationException">Thrown when T is not a numeric type</exception>
+    /// <exception cref="InvalidOperationException">Thrown when the series is empty or contains only null values</exception>
+    public double Median()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        if (Length == 0)
+            throw new InvalidOperationException("Cannot compute Median of empty series. Series must contain at least one element.");
+
+        validateQuantileType("Median");
+
+        return quantileCore(0.5);
+    }
+
+    double quantileCore(double q)
+    {
+        var validValues = getValidValues();
+        if (validValues != null)
+        {
+            if (validValues.Count == 0)
+                throw new InvalidOperationException("Cannot compute aggregate: all values are null. Series must contain at least one valid value.");
+
+            var values = new double[validValues.Count];
+            for (int i = 0; i < values.Length; i++)
+                values[i] = toDouble(validValues[i]);
+
+            values.AsSpan().Sort();
+            return QuantileKernel.Compute(values, q);
+        }
+
+        var allValues = new double[Length];
+        for (int i = 0; i < Length; i++)
+            allValues[i] = toDouble(values[i]);
+
+        allValues.AsSpan().Sort();
+        return QuantileKernel.Compute(allValues, q);
+    }
+
+    /// <summary>
+    /// Converts a typed series value to double across the full 17-type numeric domain.
+    /// </summary>
+    static double toDouble(T value)
+    {
+        return typeof(T) switch
+        {
+            Type t when t == typeof(byte) => (byte)(object)value!,
+            Type t when t == typeof(sbyte) => (sbyte)(object)value!,
+            Type t when t == typeof(short) => (short)(object)value!,
+            Type t when t == typeof(ushort) => (ushort)(object)value!,
+            Type t when t == typeof(int) => (int)(object)value!,
+            Type t when t == typeof(uint) => (uint)(object)value!,
+            Type t when t == typeof(char) => (char)(object)value!,
+            Type t when t == typeof(long) => (long)(object)value!,
+            Type t when t == typeof(ulong) => (ulong)(object)value!,
+            Type t when t == typeof(nint) => (double)(nint)(object)value!,
+            Type t when t == typeof(nuint) => (double)(nuint)(object)value!,
+            Type t when t == typeof(Int128) => (double)(Int128)(object)value!,
+            Type t when t == typeof(UInt128) => (double)(UInt128)(object)value!,
+            Type t when t == typeof(float) => (float)(object)value!,
+            Type t when t == typeof(Half) => (double)(Half)(object)value!,
+            Type t when t == typeof(double) => (double)(object)value!,
+            Type t when t == typeof(decimal) => (double)(decimal)(object)value!,
+            _ => throw new InvalidOperationException($"Cannot convert value of type {typeof(T).Name} to double for quantile computation")
+        };
+    }
+
+    void validateQuantileType(string operation)
+    {
+        if (!TypeCompatibilityValidator.GetNumericTypes().Contains(typeof(T)))
+            throw new InvalidOperationException($"{operation} operation is not supported for type {typeof(T).Name}. Only numeric types support {operation.ToLowerInvariant()} operations.");
+    }
+
     T minMaxValue(Func<ReadOnlySpan<T>, T> kernel)
     {
         var validValues = getValidValues();
