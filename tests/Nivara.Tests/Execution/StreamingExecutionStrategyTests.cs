@@ -572,7 +572,10 @@ public class StreamingExecutionStrategyTests
     {
         var strategy = new StreamingExecutionStrategy();
         var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
-        var plan = new QueryPlan(source, new IQueryOperation[] { new StubQueryOperation("GroupBy") });
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new GroupByOperation(new[] { ColumnExpressions.Col<int>("A") }),
+        });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
         using var result = strategy.Execute(plan, context);
@@ -701,7 +704,10 @@ public class StreamingExecutionStrategyTests
     {
         var strategy = new StreamingExecutionStrategy();
         var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
-        var plan = new QueryPlan(source, new IQueryOperation[] { new StubQueryOperation("Sort") });
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
         using var result = strategy.Execute(plan, context);
@@ -717,7 +723,14 @@ public class StreamingExecutionStrategyTests
     {
         var strategy = new StreamingExecutionStrategy();
         var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 100);
-        var plan = new QueryPlan(source, new IQueryOperation[] { new StubQueryOperation("Join") });
+        var joinData = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<int>.Create(Enumerable.Range(0, 100).ToArray()),
+        };
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new JoinOperation(joinData, joinData, JoinType.Inner, new[] { new JoinKey("A", "A") }),
+        });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
         using var result = strategy.Execute(plan, context);
