@@ -13,8 +13,8 @@ sealed class LazyExecutionStrategy : ExecutionStrategyBase
         var diag = context.ExecutionDiagnostics;
         context.Progress?.Report(new ExecutionProgress("Starting lazy execution", 0, 1));
         var result = diag != null
-            ? DiagnosticHelper.ExecuteWithDiagnostics(diag, "LazyExecution", () => executor.Execute(plan))
-            : executor.Execute(plan);
+            ? DiagnosticHelper.ExecuteWithDiagnostics(diag, "LazyExecution", () => executor.Execute(plan, diag))
+            : executor.Execute(plan, diag);
         context.Progress?.Report(new ExecutionProgress("Lazy execution completed", 1, 1));
         return result;
     }
@@ -50,6 +50,7 @@ sealed class LazyExecutionStrategy : ExecutionStrategyBase
         try
         {
             currentColumns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
+            context.ExecutionDiagnostics?.AddRowsRead(QueryExecutor.GetRowCount(currentColumns));
         }
         catch (OperationCanceledException)
         {

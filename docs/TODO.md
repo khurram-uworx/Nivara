@@ -44,7 +44,7 @@ Done:
 4. `Merge remote-tracking branch 'origin/main' into khurram/incident` — sync (2026-08-16)
 
 Remaining:
-5. `feat(core): public execution diagnostics on QueryFrame + row counters` (1.3)
+5. ✅ `feat(core): public execution diagnostics on QueryFrame + row counters` (1.3)
 6. `fix(extensions): Parquet chunk streaming with reused reader + async Execute` (1.4)
 7. `feat(core): NivaraQuery.ToObjectsAsync streamed row projection` (1.5)
 8. `refactor(autodiff): remove dead non-null branches (Gather, BroadcastGradient)` (2.1)

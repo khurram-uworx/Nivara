@@ -11,9 +11,10 @@ sealed class QueryExecutor
     /// Executes a query plan and returns the materialized result
     /// </summary>
     /// <param name="plan">The query plan to execute</param>
+    /// <param name="diagnostics">Optional execution diagnostics to record row counters to</param>
     /// <returns>A materialized NivaraFrame with the query results</returns>
     /// <exception cref="QueryExecutionException">Thrown when execution fails</exception>
-    public NivaraFrame Execute(QueryPlan plan)
+    public NivaraFrame Execute(QueryPlan plan, Nivara.Diagnostics.ExecutionDiagnostics? diagnostics = null)
     {
         if (plan == null)
             throw new ArgumentNullException(nameof(plan));
@@ -33,6 +34,7 @@ sealed class QueryExecutor
             try
             {
                 currentColumns = plan.Source.Execute();
+                diagnostics?.AddRowsRead(GetRowCount(currentColumns));
             }
             catch (Exception ex)
             {
@@ -179,5 +181,23 @@ sealed class QueryExecutor
         {
             return long.MaxValue;
         }
+    }
+
+    /// <summary>
+    /// Gets the number of rows in a set of materialized columns.
+    /// </summary>
+    internal static long GetRowCount(IReadOnlyDictionary<string, IColumn> columns)
+    {
+        if (columns == null || columns.Count == 0)
+            return 0;
+
+        long max = 0;
+        foreach (var column in columns.Values)
+        {
+            var length = column.Length;
+            if (length > max)
+                max = length;
+        }
+        return max;
     }
 }

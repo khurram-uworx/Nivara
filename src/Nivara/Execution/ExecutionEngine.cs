@@ -147,6 +147,8 @@ internal sealed class ExecutionEngine
 
             // Execute using the selected strategy
             var result = strategy.Execute(optimizedPlan, context);
+            diagnostics.RowsReturned = result.RowCount;
+            diagnostics.MaterializedColumns = result.ColumnCount;
 
             return result;
         }
@@ -214,7 +216,11 @@ internal sealed class ExecutionEngine
                 throw new QueryExecutionException($"Unknown execution strategy: {context.Strategy}");
 
             // Execute using the selected strategy
-            return await strategy.ExecuteAsync(optimizedPlan, context);
+            var result = await strategy.ExecuteAsync(optimizedPlan, context);
+            diagnostics.RowsReturned = result.RowCount;
+            diagnostics.MaterializedColumns = result.ColumnCount;
+
+            return result;
         }
         catch (Exception ex) when (ex is not QueryExecutionException && ex is not OperationCanceledException)
         {

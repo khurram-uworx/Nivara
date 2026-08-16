@@ -105,7 +105,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         if (!plan.Source.CanReadInChunks)
         {
-            var fullResult = executor.Execute(plan);
+            var fullResult = executor.Execute(plan, diag);
             context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
             return fullResult;
         }
@@ -130,6 +130,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             var chunkData = plan.Source.ReadChunk(chunkIndex, chunkSize);
             if (chunkData == null || chunkData.Count == 0 || chunkData.Values.All(c => c.Length == 0))
                 break;
+            diag?.AddRowsRead(QueryExecutor.GetRowCount(chunkData));
 
             var processedData = executeOperationsOnData(chunkData, segments[0].StreamableOps);
             if (chunkScope != null)
@@ -147,7 +148,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         if (chunkFrames.Count == 0)
         {
             context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
-            var fallbackResult = executor.Execute(plan);
+            var fallbackResult = executor.Execute(plan, diag);
             context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
             return fallbackResult;
         }
@@ -207,6 +208,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         if (!plan.Source.CanReadInChunks)
         {
             var columns = await plan.Source.ExecuteAsync(context.CancellationToken).ConfigureAwait(false);
+            diag?.AddRowsRead(QueryExecutor.GetRowCount(columns));
             var processed = await executeOperationsOnDataAsync(columns, plan.Operations, context.CancellationToken).ConfigureAwait(false);
             context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
             return new NivaraFrame(processed.Select(kvp => (kvp.Key, kvp.Value)));
@@ -232,6 +234,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                     .ConfigureAwait(false))
                 {
                     context.CancellationToken.ThrowIfCancellationRequested();
+                    diag?.AddRowsRead(QueryExecutor.GetRowCount(chunkData));
 
                     using var chunkScope = diag != null ? DiagnosticHelper.CreateScope(diag, $"Chunk_{chunkIndex}") : null;
 
@@ -282,7 +285,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         if (chunkFrames.Count == 0)
         {
             context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
-            var fallbackResult = executor.Execute(plan);
+            var fallbackResult = executor.Execute(plan, diag);
             context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
             return fallbackResult;
         }
@@ -353,8 +356,15 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         if (!isSuitableForStreaming(plan) || !plan.Source.CanReadInChunks)
         {
             var columns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
+            diag?.AddRowsRead(QueryExecutor.GetRowCount(columns));
             var processed = await executeOperationsOnDataAsync(columns, plan.Operations, ct).ConfigureAwait(false);
-            yield return NivaraFrame.Create(processed);
+            var frame = NivaraFrame.Create(processed);
+            if (diag != null)
+            {
+                diag.RowsReturned = frame.RowCount;
+                diag.MaterializedColumns = frame.ColumnCount;
+            }
+            yield return frame;
             yield break;
         }
 
@@ -364,11 +374,18 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             .ConfigureAwait(false))
         {
             ct.ThrowIfCancellationRequested();
+            diag?.AddRowsRead(QueryExecutor.GetRowCount(chunkData));
 
             var processedData = await executeOperationsOnDataAsync(
                 chunkData, plan.Operations, ct).ConfigureAwait(false);
 
-            yield return NivaraFrame.Create(processedData);
+            var chunkFrame = NivaraFrame.Create(processedData);
+            if (diag != null)
+            {
+                diag.RowsReturned += chunkFrame.RowCount;
+                diag.MaterializedColumns = chunkFrame.ColumnCount;
+            }
+            yield return chunkFrame;
         }
     }
 
