@@ -18,6 +18,10 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         return true;
     }
 
+    /// <summary>
+    /// Derives a default chunk size from the memory budget. This is the fallback used when
+    /// the caller did not set an explicit <see cref="NivaraExecutionContext.ChunkSize"/>.
+    /// </summary>
     static int calculateChunkSize(long memoryBudget)
     {
         const long estimatedBytesPerRow = 100;
@@ -25,6 +29,13 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var calculatedChunkSize = (int)(chunkMemory / estimatedBytesPerRow);
         return Math.Max(1000, Math.Min(calculatedChunkSize, 100000));
     }
+
+    /// <summary>
+    /// Resolves the chunk size for a context: an explicit <see cref="NivaraExecutionContext.ChunkSize"/>
+    /// wins; otherwise the value is derived from <see cref="NivaraExecutionContext.MemoryBudget"/>.
+    /// </summary>
+    static int resolveChunkSize(NivaraExecutionContext context)
+        => context.ChunkSize ?? calculateChunkSize(context.MemoryBudget);
 
     static IReadOnlyDictionary<string, IColumn> executeOperationsOnData(
         IReadOnlyDictionary<string, IColumn> data,
@@ -99,7 +110,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             return result;
         }
 
-        var chunkSize = calculateChunkSize(context.MemoryBudget);
+        var chunkSize = resolveChunkSize(context);
         var estimatedRows = plan.Source.EstimatedRowCount;
         var totalChunks = estimatedRows.HasValue
             ? (int)((estimatedRows.Value + chunkSize - 1) / chunkSize)
@@ -167,7 +178,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             return new NivaraFrame(processed.Select(kvp => (kvp.Key, kvp.Value)));
         }
 
-        var chunkSize = calculateChunkSize(context.MemoryBudget);
+        var chunkSize = resolveChunkSize(context);
         var estimatedRows = plan.Source.EstimatedRowCount;
         var totalChunks = estimatedRows.HasValue
             ? (int)((estimatedRows.Value + chunkSize - 1) / chunkSize)
@@ -298,7 +309,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             yield break;
         }
 
-        var chunkSize = calculateChunkSize(context.MemoryBudget);
+        var chunkSize = resolveChunkSize(context);
 
         await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
             .ConfigureAwait(false))
@@ -323,6 +334,9 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 return false;
 
             if (context.MemoryBudget <= 0)
+                return false;
+
+            if (context.ChunkSize is <= 0)
                 return false;
 
             return isSuitableForStreaming(plan);

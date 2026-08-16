@@ -117,7 +117,7 @@ public class LazyExecutionStrategyTests
     }
 
     [Test]
-    public async Task ExecuteAsync_WrapsSyncOnBackgroundThread()
+    public async Task ExecuteAsync_ReturnsFrame()
     {
         var strategy = new LazyExecutionStrategy();
         var plan = ExecutionTestHelpers.CreateTestPlan();
@@ -126,6 +126,30 @@ public class LazyExecutionStrategyTests
         using var result = await strategy.ExecuteAsync(plan, context);
 
         Assert.That(result, Is.Not.Null);
+        Assert.That(result.RowCount, Is.EqualTo(3));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_UsesAsyncSourceSeam()
+    {
+        var strategy = new LazyExecutionStrategy();
+        var plan = ExecutionTestHelpers.CreateTestPlan(new AsyncOnlyQuerySource());
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Lazy);
+
+        using var result = await strategy.ExecuteAsync(plan, context);
+
+        Assert.That(result.RowCount, Is.EqualTo(3));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_UsesAsyncOperationSeam()
+    {
+        var strategy = new LazyExecutionStrategy();
+        var plan = ExecutionTestHelpers.CreateTestPlan(operations: new[] { new AsyncOnlyQueryOperation() });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Lazy);
+
+        using var result = await strategy.ExecuteAsync(plan, context);
+
         Assert.That(result.RowCount, Is.EqualTo(3));
     }
 

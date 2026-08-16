@@ -43,6 +43,13 @@ internal sealed class NivaraExecutionContext
     public long MemoryBudget { get; set; }
 
     /// <summary>
+    /// Gets or sets an explicit row target for streaming chunks. When set, the streaming
+    /// strategy uses this value directly instead of deriving a chunk size from
+    /// <see cref="MemoryBudget"/>. Null means "derive from the memory budget".
+    /// </summary>
+    public int? ChunkSize { get; set; }
+
+    /// <summary>
     /// Gets or sets the cancellation token for operation cancellation
     /// </summary>
     public CancellationToken CancellationToken { get; set; }
@@ -67,6 +74,7 @@ internal sealed class NivaraExecutionContext
             Strategy = Strategy,
             MaxDegreeOfParallelism = MaxDegreeOfParallelism,
             MemoryBudget = MemoryBudget,
+            ChunkSize = ChunkSize,
             CancellationToken = CancellationToken,
             Progress = Progress,
             ExecutionDiagnostics = ExecutionDiagnostics
@@ -118,7 +126,7 @@ internal sealed class NivaraExecutionContext
     /// </summary>
     /// <returns>A formatted string describing the execution context</returns>
     public override string ToString()
-        => $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes, Diagnostics: {(ExecutionDiagnostics != null ? "Set" : "None")} }}";
+        => $"ExecutionContext {{ Strategy: {Strategy}, MaxDegreeOfParallelism: {MaxDegreeOfParallelism}, MemoryBudget: {MemoryBudget:N0} bytes, ChunkSize: {(ChunkSize.HasValue ? ChunkSize.Value.ToString("N0") : "derived")}, Diagnostics: {(ExecutionDiagnostics != null ? "Set" : "None")} }}";
 }
 
 /// <summary>
