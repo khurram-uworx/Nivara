@@ -48,6 +48,23 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`QueryFrame` disposal now releases the underlying source on both sync and async paths (#268)** —
+  `Dispose()` previously only untracked the frame and never disposed the `IQuerySource`, while
+  `DisposeAsync()` released it only when the source happened to implement `IAsyncDisposable` (none
+  do), so explicit disposal of a lazy CSV/Parquet frame could leak the persistent chunk-reader
+  file handle while GC-abandonment cleanup did release it. `Dispose()` now calls `source.Dispose()`
+  (swallowing errors, mirroring the abandoned-resource cleanup) and `DisposeAsync()` falls back to
+  `source.Dispose()` for non-`IAsyncDisposable` sources. Fluent chains share one source, so
+  disposing any node releases it — the same semantics abandoned-resource cleanup already applied.
+
+- **Sync streaming execution now streams the streamable prefix before non-streamable boundary ops (#269)** —
+  sync `ExecuteCore` re-checked `isSuitableForStreaming` and fell back entirely to Lazy for plans
+  containing Sort/GroupBy/Join/Distinct/etc., while async `ExecuteCoreAsync` streamed the prefix and
+  ran boundary ops on the materialized frame (flush-concatenate-resume). Both paths now behave
+  identically: only window-expression plans fall back to Lazy; intermediate chunk frames are
+  disposed after concatenation. Follow-up tracked in #270 (empty-source fallback double-applies
+  boundary ops, a pre-existing async edge case).
+
 - **Fused plan signatures now encode the literal runtime type (#246)** —
   `ExpressionTypeInferer.FormatValue` appends `:{value.GetType().FullName}` to each literal
   signature fragment, so two plans that differ only in literal types (e.g. `Column + (int)1`
