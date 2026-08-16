@@ -175,21 +175,71 @@ public static class NivaraParquetReader
 
     /// <summary>
     /// Internal implementation of streaming Parquet reading.
+    /// Yields one frame per row group using a single reader whose footer metadata is parsed once.
     /// </summary>
     private static IEnumerable<NivaraFrame> ReadParquetStreamingInternal(string filePath, ParquetReadOptions options, long memoryBudget)
     {
         using var bufferManager = new StreamingBufferManager(memoryBudget);
 
-        using var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        Parquet.ParquetReader reader;
+        try
+        {
+            reader = Parquet.ParquetReader.CreateAsync(fileStream, null, leaveStreamOpen: false, CancellationToken.None)
+                .GetAwaiter().GetResult();
+        }
+        catch
+        {
+            fileStream.Dispose();
+            throw;
+        }
 
-        // For now, return the entire file as a single chunk with memory management
-        // True streaming would require processing row groups individually
-        var frame = ReadParquet(fileStream, options);
+        try
+        {
+            var schema = reader.Schema;
+            var dataFields = schema.GetDataFields();
+            var clrTypeMetadata = reader.CustomMetadata;
 
-        // Force garbage collection if memory usage is high
-        bufferManager.TryCollectGarbage();
+            if (options.ValidateSchema)
+                ValidateParquetSchema(schema);
 
-        yield return frame;
+            bool yieldedAnyFrame = false;
+            for (int rg = 0; rg < reader.RowGroupCount; rg++)
+            {
+                // Force garbage collection if memory usage is high
+                bufferManager.TryCollectGarbage();
+
+                using var rowGroupReader = reader.OpenRowGroupReader(rg);
+                var columns = new List<(string Name, IColumn Column)>(dataFields.Length);
+                foreach (var field in dataFields)
+                {
+                    if (field.Name == "_empty")
+                        continue;
+
+                    var data = ReadParquetColumn(rowGroupReader, field);
+                    var column = CreateNivaraColumnFromParquetData(data, field, clrTypeMetadata);
+                    columns.Add((field.Name, column));
+                }
+
+                if (columns.Count > 0)
+                {
+                    yieldedAnyFrame = true;
+                    yield return NivaraFrame.Create(columns.ToArray());
+                }
+            }
+
+            // An empty file (no row groups, or only the dummy column) still yields one empty frame
+            // so callers can rely on at least one frame for schema discovery.
+            if (!yieldedAnyFrame)
+            {
+                var emptyColumn = NivaraColumn<int>.Create(Array.Empty<int>());
+                yield return NivaraFrame.Create(("_empty", emptyColumn));
+            }
+        }
+        finally
+        {
+            reader.DisposeAsync().AsTask().GetAwaiter().GetResult();
+        }
     }
 
     /// <summary>
