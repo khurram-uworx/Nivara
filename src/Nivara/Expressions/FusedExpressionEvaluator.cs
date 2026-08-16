@@ -440,6 +440,10 @@ sealed class FusedExpressionEvaluator
             case WindowFunctionKind.CumulativeProduct:
                 return NivaraFrameExtensions.CalculateCumulative(source, window.NullHandler, WindowFunctionHelpers.ToCumulativeKind(window.Kind));
 
+            case WindowFunctionKind.Quantile:
+            case WindowFunctionKind.Median:
+                return MaterializeBroadcastAggregate(window, source);
+
             case WindowFunctionKind.Shift:
             case WindowFunctionKind.Lead:
                 return NivaraFrameExtensions.CalculateShift(source, window.Kind == WindowFunctionKind.Lead ? -window.Periods!.Value : window.Periods!.Value, window.FillValue);
@@ -447,6 +451,34 @@ sealed class FusedExpressionEvaluator
             default:
                 throw new NotSupportedException($"Window kind {window.Kind} is not supported by the fused evaluator");
         }
+    }
+
+    /// <summary>
+    /// Computes a broadcast quantile/median aggregate over the whole source column and repeats the
+    /// scalar result into every row, routing through the same <see cref="QuantileAggregation"/> /
+    /// <see cref="MedianAggregation"/> classes used by the typed group-by path. A null result (empty
+    /// or all-null source) is broadcast as an all-null column.
+    /// </summary>
+    static IColumn MaterializeBroadcastAggregate(WindowExpression window, IColumn source)
+    {
+        AggregationFunction aggregate = window.Kind == WindowFunctionKind.Quantile
+            ? new QuantileAggregation(window.Quantile!.Value)
+            : new MedianAggregation();
+
+        var indices = new int[source.Length];
+        for (int i = 0; i < indices.Length; i++) indices[i] = i;
+
+        var value = aggregate.Apply(source, indices) as double?;
+        if (value.HasValue)
+        {
+            var values = new double[source.Length];
+            Array.Fill(values, value.Value);
+            return NivaraColumn<double>.Create(values);
+        }
+
+        var mask = new bool[source.Length];
+        Array.Fill(mask, true);
+        return NivaraColumn<double>.CreateFromSpans(new double[source.Length], mask);
     }
 
     static string SyntheticWindowPrefix => "__window_";
