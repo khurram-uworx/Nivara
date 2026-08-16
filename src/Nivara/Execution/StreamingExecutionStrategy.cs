@@ -136,18 +136,18 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         if (chunkFrames.Count == 0)
         {
             context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
-            result = executor.Execute(plan);
+            var fallbackResult = executor.Execute(plan);
+            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+            return fallbackResult;
         }
-        else
-        {
-            result = chunkFrames.Count == 1
-                ? chunkFrames[0]
-                : NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
 
-            if (chunkFrames.Count > 1)
-            {
-                foreach (var f in chunkFrames) f.Dispose();
-            }
+        result = chunkFrames.Count == 1
+            ? chunkFrames[0]
+            : NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
+
+        if (chunkFrames.Count > 1)
+        {
+            foreach (var f in chunkFrames) f.Dispose();
         }
 
         for (int segIdx = 0; segIdx < segments.Count; segIdx++)
@@ -264,18 +264,18 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         if (chunkFrames.Count == 0)
         {
             context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
-            result = executor.Execute(plan);
+            var fallbackResult = executor.Execute(plan);
+            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+            return fallbackResult;
         }
-        else
-        {
-            result = chunkFrames.Count == 1
-                ? chunkFrames[0]
-                : NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
 
-            if (chunkFrames.Count > 1)
-            {
-                foreach (var f in chunkFrames) f.Dispose();
-            }
+        result = chunkFrames.Count == 1
+            ? chunkFrames[0]
+            : NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
+
+        if (chunkFrames.Count > 1)
+        {
+            foreach (var f in chunkFrames) f.Dispose();
         }
 
         for (int segIdx = 0; segIdx < segments.Count; segIdx++)

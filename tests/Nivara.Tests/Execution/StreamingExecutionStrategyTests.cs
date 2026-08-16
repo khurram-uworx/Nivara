@@ -314,6 +314,58 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Execute_EmptyChunkedSourceWithBoundaryOp_RunsBoundaryOpOnce()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 0);
+        var boundaryCalls = 0;
+        var boundaryOp = new StubQueryOperation("Sort")
+        {
+            ExecuteFn = input =>
+            {
+                boundaryCalls++;
+                return input;
+            },
+        };
+        var plan = new QueryPlan(source, new IQueryOperation[] { boundaryOp });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(boundaryCalls, Is.EqualTo(1),
+            "The empty-source fallback already applies the full plan; boundary ops must not re-apply");
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        Assert.That(result.RowCount, Is.EqualTo(0));
+    }
+
+    [Test]
+    public async Task ExecuteAsync_EmptyChunkedSourceWithBoundaryOp_RunsBoundaryOpOnce()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 0);
+        var boundaryCalls = 0;
+        var boundaryOp = new StubQueryOperation("Sort")
+        {
+            ExecuteFn = input =>
+            {
+                boundaryCalls++;
+                return input;
+            },
+        };
+        var plan = new QueryPlan(source, new IQueryOperation[] { boundaryOp });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+
+        using var result = strategy.ExecuteAsync(plan, context).GetAwaiter().GetResult();
+
+        Assert.That(boundaryCalls, Is.EqualTo(1),
+            "The empty-source fallback already applies the full plan; boundary ops must not re-apply");
+        Assert.That(result, Is.Not.Null);
+        Assert.That(result.ColumnCount, Is.EqualTo(1));
+        Assert.That(result.RowCount, Is.EqualTo(0));
+    }
+
+    [Test]
     public void Execute_SingleRowSource_Works()
     {
         var strategy = new StreamingExecutionStrategy();
