@@ -6,6 +6,22 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **Public streaming API with explicit non-streamable boundary behavior (#264)** —
+  `QueryFrame.AsStream(chunkSize: 10000, ct)` is now public and `NivaraQuery<T>` gains an
+  `AsStream` passthrough, so chunked async processing is reachable by external consumers.
+  `AsStream` yields one `NivaraFrame` per source chunk for fully-streamable plans
+  (Filter/Select/Slice/SelectRows, no window expressions) over chunk-capable sources
+  (CSV, JSON, Parquet); any non-streamable boundary operation (Sort/SortByExpression/
+  GroupBy/Join/Distinct/Rolling/Cumulative/Shift/Rank) or window expression, or a
+  non-chunk-capable source, falls back to a single merged frame with rows identical to
+  `CollectAsync()`. `NivaraFrame.AsQueryFrame()` / `NivaraQuery<T>.AsQueryFrame()` are
+  public, and public lazy query-frame factories `Csv.ScanAsQueryFrame`,
+  `Json.ScanAsQueryFrame`, and `Parquet.ScanAsQueryFrame` open the streaming entry point
+  directly from files. `chunkSize` is honored by row-oriented sources and advisory
+  (row-group aligned) for Parquet; when unset it is derived from the memory budget
+  (`clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)`). Full contract in
+  `docs/STREAMING.md`; `QueryFrame.ToQueryPlan()` stays internal (see #275).
+
 - **`Over()` / `WindowSpec` builder for window functions (#162)** — SQL-style partitioned
   windows on both `NivaraFrame` (eager) and `QueryFrame` (lazy). `Over()` returns an immutable
   `WindowSpec` with `PartitionBy(params string[])` and three `OrderBy` overloads

@@ -11,7 +11,7 @@ namespace Nivara.Query;
 /// Represents a lazy query frame that builds query plans without immediate execution.
 /// Provides a fluent API for constructing complex queries that are executed only when Collect() is called.
 /// </summary>
-internal sealed class QueryFrame : IDisposable, IAsyncDisposable
+public sealed class QueryFrame : IDisposable, IAsyncDisposable
 {
     readonly IQuerySource source;
     readonly List<IQueryOperation> operations;
@@ -422,15 +422,41 @@ internal sealed class QueryFrame : IDisposable, IAsyncDisposable
 
     /// <summary>
     /// Streams processed chunks from the query as an async enumerable.
-    /// Each chunk is a NivaraFrame containing the source data with streamable operations applied.
-    /// Consumers can process chunks lazily without waiting for the full result.
+    /// Each chunk is a NivaraFrame containing the source data with the streamable
+    /// operations applied. Consumers can process chunks lazily without waiting for the
+    /// full result.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// When the plan is fully streamable — only streamable operations (Filter, Select,
+    /// Slice, SelectRows) and no window expressions — and the source reads in chunks,
+    /// the enumerable yields one frame per source chunk.
+    /// </para>
+    /// <para>
+    /// Non-streamable boundary: a plan containing Sort, SortByExpression, GroupBy, Join,
+    /// Distinct, Rolling, Cumulative, Shift, or Rank, or carrying a window expression,
+    /// cannot be chunked. The enumerable then falls back to a <b>single frame produced
+    /// from the full source</b> (rows identical to <see cref="CollectAsync"/>); the
+    /// one-frame-per-chunk contract does not hold. Sources that do not read in chunks
+    /// (e.g. in-memory frames) fall back the same way.
+    /// </para>
+    /// <para>
+    /// <paramref name="chunkSize"/> is the target number of rows per chunk. It is honored
+    /// by row-oriented sources (CSV, JSON); for columnar sources such as Parquet the value
+    /// is advisory and chunks are aligned to native row-group boundaries. The default is
+    /// 10,000 rows. When no explicit chunk size is supplied anywhere in the execution
+    /// context, the streaming strategy derives one from the memory budget:
+    /// <c>budget / 10 ÷ 100 estimated bytes/row</c>, clamped to the range
+    /// [1000, 100,000] rows. An explicit <paramref name="chunkSize"/> always wins over the
+    /// budget-derived default.
+    /// </para>
+    /// </remarks>
     /// <param name="chunkSize">The target number of rows per chunk. Honored by row-oriented
     /// sources (CSV, JSON); for columnar sources such as Parquet the value is advisory and
     /// chunks are aligned to native row-group boundaries.</param>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
-    internal IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
+    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -1010,7 +1036,7 @@ internal sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// Extracts the query plan for inspection or custom execution via <see cref="Execution.ExecutionEngine"/>.
     /// </summary>
     /// <returns>A QueryPlan representing this query's source and operations</returns>
-    public QueryPlan ToQueryPlan()
+    internal QueryPlan ToQueryPlan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return new QueryPlan(source, operations);

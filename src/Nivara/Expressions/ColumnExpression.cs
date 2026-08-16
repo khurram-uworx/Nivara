@@ -35,7 +35,7 @@ internal enum ComparisonOperator
 /// Base class for column expressions used in query operations.
 /// Provides the foundation for building composable query expressions.
 /// </summary>
-internal abstract class ColumnExpression
+public abstract class ColumnExpression
 {
     /// <summary>
     /// Gets the result type of this expression
@@ -762,7 +762,7 @@ internal sealed class NotExpression : ColumnExpression
 /// <summary>
 /// Global function for creating column references
 /// </summary>
-internal static class ColumnExpressions
+public static class ColumnExpressions
 {
     /// <summary>
     /// Creates a column reference expression

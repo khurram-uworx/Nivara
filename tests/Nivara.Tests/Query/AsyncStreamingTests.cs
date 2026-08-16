@@ -1,6 +1,7 @@
 using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.IO;
+using Nivara.Linq;
 using Nivara.Operations;
 using Nivara.Query;
 using NUnit.Framework;
@@ -29,6 +30,12 @@ public class AsyncStreamingTests
         public string Name { get; set; } = string.Empty;
         public int Age { get; set; }
         public double Salary { get; set; }
+    }
+
+    sealed class TestRow
+    {
+        public int X { get; set; }
+        public string Y { get; set; } = string.Empty;
     }
 
     sealed class DisposalRecordingSource : IQuerySource
@@ -676,6 +683,188 @@ public class AsyncStreamingTests
         finally
         {
             Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task AsStream_NonStreamablePlan_ReturnsSingleMergedFrame()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 1000);
+            using var queryFrame = Nivara.IO.Csv.ScanAsQueryFrame(csvPath).Sort("Age");
+
+            using var expected = queryFrame.Collect();
+
+            var chunks = new List<NivaraFrame>();
+            await foreach (var chunk in queryFrame.AsStream(chunkSize: 100))
+                chunks.Add(chunk);
+
+            try
+            {
+                Assert.That(chunks.Count, Is.EqualTo(1));
+                AssertFrameValuesEqual(chunks[0], expected);
+            }
+            finally
+            {
+                foreach (var chunk in chunks)
+                    chunk.Dispose();
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task AsStream_NonChunkCapableSource_ReturnsSingleFrame()
+    {
+        var frame = CreateTestFrame(25);
+        try
+        {
+            using var queryFrame = frame.AsQueryFrame();
+            using var expected = queryFrame.Collect();
+
+            var chunks = new List<NivaraFrame>();
+            await foreach (var chunk in queryFrame.AsStream(chunkSize: 5))
+                chunks.Add(chunk);
+
+            try
+            {
+                Assert.That(chunks.Count, Is.EqualTo(1));
+                AssertFrameValuesEqual(chunks[0], expected);
+            }
+            finally
+            {
+                foreach (var chunk in chunks)
+                    chunk.Dispose();
+            }
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ScanAsQueryFrame_CsvPublicEntryPoint_StreamsChunks()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var csvPath = CreateCsvFile(tempDir, 10000);
+            using var queryFrame = Nivara.IO.Csv.ScanAsQueryFrame(csvPath);
+
+            var chunks = new List<NivaraFrame>();
+            await foreach (var chunk in queryFrame.AsStream(chunkSize: 2000))
+                chunks.Add(chunk);
+
+            try
+            {
+                Assert.That(chunks.Count, Is.EqualTo(5));
+                Assert.That(chunks.Sum(c => c.RowCount), Is.EqualTo(10000));
+            }
+            finally
+            {
+                foreach (var chunk in chunks)
+                    chunk.Dispose();
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public async Task ScanAsQueryFrame_JsonPublicEntryPoint_MatchesCollect()
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
+        Directory.CreateDirectory(tempDir);
+        try
+        {
+            var jsonPath = Path.Combine(tempDir, "data.json");
+            var records = Enumerable.Range(0, 100)
+                .Select(i => $"{{\"Name\":\"Person{i}\",\"Age\":{20 + i},\"Salary\":{50000 + i}}}");
+            File.WriteAllText(jsonPath, "[" + string.Join(",", records) + "]");
+
+            using var queryFrame = Nivara.IO.Json.ScanAsQueryFrame(jsonPath);
+            using var expected = queryFrame.Collect();
+
+            var chunks = new List<NivaraFrame>();
+            await foreach (var chunk in queryFrame.AsStream(chunkSize: 50))
+                chunks.Add(chunk);
+
+            try
+            {
+                Assert.That(chunks.Sum(c => c.RowCount), Is.EqualTo(expected.RowCount));
+            }
+            finally
+            {
+                foreach (var chunk in chunks)
+                    chunk.Dispose();
+            }
+        }
+        finally
+        {
+            Directory.Delete(tempDir, true);
+        }
+    }
+
+    [Test]
+    public void ScanAsQueryFrame_ParquetPublicEntryPoint_CollectsCorrectRows()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var values = Enumerable.Range(0, 500).Select(i => i + 1).ToArray();
+            var frame = NivaraFrame.Create(("Num", NivaraColumn<int>.Create(values)));
+            NivaraParquetWriter.WriteParquet(frame, tempFile,
+                ParquetWriteOptions.Default.With(rowGroupSize: 200));
+            frame.Dispose();
+
+            using var queryFrame = NivaraParquetReader.ScanAsQueryFrame(tempFile);
+            using var result = queryFrame.Collect();
+
+            Assert.That(result.RowCount, Is.EqualTo(500));
+            Assert.That(result.GetColumn<int>("Num").GetValue(499), Is.EqualTo(500));
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
+    }
+
+    [Test]
+    public async Task NivaraQuery_T_AsStream_Passthrough()
+    {
+        var frame = CreateTestFrame(25);
+        try
+        {
+            var query = frame.Query<TestRow>();
+
+            var chunks = new List<NivaraFrame>();
+            await foreach (var chunk in query.AsStream(chunkSize: 5))
+                chunks.Add(chunk);
+
+            try
+            {
+                Assert.That(chunks.Sum(c => c.RowCount), Is.EqualTo(25));
+            }
+            finally
+            {
+                foreach (var chunk in chunks)
+                    chunk.Dispose();
+            }
+        }
+        finally
+        {
+            frame.Dispose();
         }
     }
 

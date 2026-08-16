@@ -324,9 +324,15 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     /// <summary>
     /// Streams processed chunks from the source as an async enumerable.
     /// Each yielded frame is a source chunk with the streamable operations applied.
-    /// Plans that are not streamable (non-streamable operations) or whose source
-    /// cannot read in chunks fall back to a single frame produced from the full source.
     /// </summary>
+    /// <remarks>
+    /// A plan is streamable when it contains only streamable operations (Filter, Select,
+    /// Slice, SelectRows) with no window expressions, and the source reads in chunks. Any
+    /// non-streamable boundary operation (Sort, SortByExpression, GroupBy, Join, Distinct,
+    /// Rolling, Cumulative, Shift, Rank) or window expression, or a source that cannot read
+    /// in chunks, falls back to a single frame produced from the full source — the rows are
+    /// identical to a whole-plan <see cref="ExecutionEngine.Execute(QueryPlan, NivaraExecutionContext)"/>.
+    /// </remarks>
     public async IAsyncEnumerable<NivaraFrame> StreamChunksAsync(
         QueryPlan plan,
         NivaraExecutionContext context,

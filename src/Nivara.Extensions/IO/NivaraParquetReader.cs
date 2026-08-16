@@ -114,6 +114,20 @@ public static class NivaraParquetReader
     }
 
     /// <summary>
+    /// Creates a lazy query frame that scans a Parquet file without immediately reading it.
+    /// The frame supports chunked streaming at row-group boundaries via
+    /// <see cref="QueryFrame.AsStream"/> and fluent query chains (Filter/Select/Sort/...).
+    /// Prefer <see cref="ScanQuery{T}"/> for typed row queries.
+    /// </summary>
+    /// <param name="filePath">The path to the Parquet file</param>
+    /// <param name="options">Optional Parquet reading options</param>
+    /// <returns>A QueryFrame that will read the Parquet file when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the file does not exist</exception>
+    public static QueryFrame ScanAsQueryFrame(string filePath, ParquetReadOptions? options = null)
+        => ScanFrame(filePath, options);
+
+    /// <summary>
     /// Creates a lazy typed query that scans a Parquet file without immediately reading it.
     /// </summary>
     /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map

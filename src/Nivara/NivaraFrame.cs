@@ -307,10 +307,12 @@ public sealed class NivaraFrame : IFrame
     }
 
     /// <summary>
-    /// Creates a QueryFrame from an existing NivaraFrame for lazy query operations
+    /// Creates a QueryFrame from an existing NivaraFrame for lazy query operations.
+    /// The returned frame is backed by a non-chunked in-memory source, so
+    /// <see cref="Query.QueryFrame.AsStream"/> yields a single frame.
     /// </summary>
     /// <returns>A QueryFrame that can be used to build query chains</returns>
-    internal QueryFrame AsQueryFrame()
+    public QueryFrame AsQueryFrame()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
