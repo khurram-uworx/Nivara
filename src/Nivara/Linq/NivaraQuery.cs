@@ -42,7 +42,7 @@ public sealed class NivaraQuery<T>
     /// <summary>
     /// Returns the underlying lazy query frame for advanced composition
     /// </summary>
-    internal QueryFrame AsQueryFrame() => frame;
+    public QueryFrame AsQueryFrame() => frame;
 
     /// <summary>
     /// Filters the rows using the given predicate
@@ -215,6 +215,19 @@ public sealed class NivaraQuery<T>
     /// <param name="ct">Cancellation token for the operation</param>
     /// <returns>A task representing the materialized NivaraFrame with the query results</returns>
     public Task<NivaraFrame> CollectAsync(CancellationToken ct = default) => frame.CollectAsync(ct);
+
+    /// <summary>
+    /// Streams processed chunks from the query as an async enumerable.
+    /// See <see cref="QueryFrame.AsStream"/> for the chunking contract, including the
+    /// single-frame fallback for non-streamable operations.
+    /// </summary>
+    /// <param name="chunkSize">The target number of rows per chunk. Honored by row-oriented
+    /// sources (CSV, JSON); for columnar sources such as Parquet the value is advisory and
+    /// chunks are aligned to native row-group boundaries.</param>
+    /// <param name="ct">Cancellation token for the operation</param>
+    /// <returns>An async enumerable of processed NivaraFrame chunks</returns>
+    public IAsyncEnumerable<NivaraFrame> AsStream(int chunkSize = 10000, CancellationToken ct = default)
+        => frame.AsStream(chunkSize, ct);
 
     /// <summary>
     /// Executes the query and materializes the result rows as objects
