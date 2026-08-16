@@ -332,6 +332,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     /// Rolling, Cumulative, Shift, Rank) or window expression, or a source that cannot read
     /// in chunks, falls back to a single frame produced from the full source — the rows are
     /// identical to a whole-plan <see cref="ExecutionEngine.Execute(QueryPlan, NivaraExecutionContext)"/>.
+    /// The caller owns every yielded frame (the pipeline never disposes them) and should
+    /// dispose each one when done with it.
     /// </remarks>
     public async IAsyncEnumerable<NivaraFrame> StreamChunksAsync(
         QueryPlan plan,

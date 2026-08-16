@@ -96,9 +96,15 @@ await using var query = Csv.ScanAsQueryFrame("telemetry.csv")
 
 await foreach (var chunk in query.AsStream(chunkSize: 50_000, ct))
 {
-    var sum = chunk.GetColumn<double>("value").Sum();
-    Report(sum, chunk.RowCount);
-    // chunk is disposed after the loop iteration moves on
+    try
+    {
+        var sum = chunk.GetColumn<double>("value").Sum();
+        Report(sum, chunk.RowCount);
+    }
+    finally
+    {
+        chunk.Dispose();
+    }
 }
 
 // Non-streamable fallback: Sort needs the whole dataset → single frame
@@ -106,7 +112,14 @@ await foreach (var frame in Csv.ScanAsQueryFrame("telemetry.csv")
                  .Sort("timestamp")
                  .AsStream())
 {
-    // frame holds ALL rows — same as CollectAsync()
+    try
+    {
+        // frame holds ALL rows — same as CollectAsync()
+    }
+    finally
+    {
+        frame.Dispose();
+    }
 }
 ```
 
@@ -114,6 +127,10 @@ await foreach (var frame in Csv.ScanAsQueryFrame("telemetry.csv")
 
 - `QueryFrame` implements `IDisposable` and `IAsyncDisposable`; wrap scan/query chains in
   `await using` where possible.
-- Chunk frames are disposed by the pipeline after the consumer moves past them.
+- **The consumer owns each yielded chunk frame.** `AsStream` yields raw `NivaraFrame`s to the
+  caller; the pipeline never disposes them (disposing the enumerator only disposes the
+  enumerator). Dispose each chunk when you are done with it — wrap the loop body in
+  `try/finally chunk.Dispose()` as shown above. This also applies to the single-frame
+  fallback.
 - Cancellation (via `ct`) propagates into the source reader and the producer loop; the
   channel is completed on normal exit and faulted on error.
