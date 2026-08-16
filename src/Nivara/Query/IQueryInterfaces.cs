@@ -26,7 +26,11 @@ internal interface IQuerySource : IDisposable
     IReadOnlyDictionary<string, IColumn> Execute();
 
     Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default)
-        => Task.Run(() => Execute(), cancellationToken);
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        try { return Task.FromResult(Execute()); }
+        catch (Exception ex) { return Task.FromException<IReadOnlyDictionary<string, IColumn>>(ex); }
+    }
 
     bool CanReadInChunks => false;
 
