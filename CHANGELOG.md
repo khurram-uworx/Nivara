@@ -72,6 +72,17 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Fixed
 
+- **`NivaraFrame.AsQueryFrame()` no longer aliases the source frame's columns (#279)** — the
+  in-memory query source shared the source frame's own column instances but behaved as their
+  owner: disposing a `QueryFrame` built from `AsQueryFrame()` disposed each column, and a
+  collected result (no-op `Collect()`, or `Select` of a bare column reference, whose evaluator
+  passes the input instance through) owned those same instances — so disposing either side
+  threw `ObjectDisposedException` from the other. `MemoryQuerySource` is now explicitly
+  non-owning: `Dispose()` only invalidates the source, and `Execute()`/`ExecuteAsync()` return
+  fresh column instances (zero-copy `Slice(0, Length)` over the same backing storage) with
+  independent disposal, so the source frame, the query frame, and each collected result are
+  safe to dispose in any order and query frames stay reusable after disposing a result.
+
 - **`QueryFrame` disposal now releases the underlying source on both sync and async paths (#268)** —
   `Dispose()` previously only untracked the frame and never disposed the `IQuerySource`, while
   `DisposeAsync()` released it only when the source happened to implement `IAsyncDisposable` (none
