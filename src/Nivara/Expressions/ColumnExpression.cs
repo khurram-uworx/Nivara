@@ -895,4 +895,23 @@ public static class ColumnExpressions
     /// </summary>
     public static ColumnExpression PercentRank(IReadOnlyList<SortExpressionKey> orderBy, IReadOnlyList<ColumnExpression>? partitionBy = null)
         => new WindowExpression(WindowFunctionKind.PercentRank, partitionBy, orderBy);
+
+    /// <summary>
+    /// Creates a broadcast quantile aggregate expression: computes the q-th quantile of the
+    /// source expression over the whole column and broadcasts the scalar result to every row.
+    /// </summary>
+    /// <param name="source">The source expression to aggregate</param>
+    /// <param name="q">The quantile to compute, in [0, 1]</param>
+    /// <returns>A window expression whose result is the q-th quantile repeated in every row</returns>
+    public static ColumnExpression Quantile(ColumnExpression source, double q)
+        => new WindowExpression(WindowFunctionKind.Quantile, source, q);
+
+    /// <summary>
+    /// Creates a broadcast median aggregate expression: computes the median of the source
+    /// expression over the whole column and broadcasts the scalar result to every row.
+    /// </summary>
+    /// <param name="source">The source expression to aggregate</param>
+    /// <returns>A window expression whose result is the median repeated in every row</returns>
+    public static ColumnExpression Median(ColumnExpression source)
+        => new WindowExpression(WindowFunctionKind.Median, source, 0.5d);
 }

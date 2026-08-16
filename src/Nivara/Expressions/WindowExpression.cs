@@ -22,7 +22,9 @@ internal enum WindowFunctionKind
     RowNumber,
     Rank,
     DenseRank,
-    PercentRank
+    PercentRank,
+    Quantile,
+    Median
 }
 
 /// <summary>
@@ -42,6 +44,13 @@ internal static class WindowFunctionHelpers
             or WindowFunctionKind.PercentRank;
 
     /// <summary>
+    /// Determines whether a window kind is a broadcast aggregate computed over the entire
+    /// source column (quantile / median), whose scalar result is repeated into every row.
+    /// </summary>
+    public static bool IsBroadcastAggregate(WindowFunctionKind kind)
+        => kind is WindowFunctionKind.Quantile or WindowFunctionKind.Median;
+
+    /// <summary>
     /// Computes the result type for a window kind given the source column type.
     /// </summary>
     public static Type GetResultType(WindowFunctionKind kind, Type sourceType)
@@ -54,6 +63,7 @@ internal static class WindowFunctionHelpers
             WindowFunctionKind.Rank => typeof(long),
             WindowFunctionKind.DenseRank => typeof(long),
             WindowFunctionKind.PercentRank => typeof(double),
+            WindowFunctionKind.Quantile or WindowFunctionKind.Median => typeof(double),
             _ => sourceType
         };
     }
@@ -198,6 +208,24 @@ internal sealed class WindowExpression : ColumnExpression
     }
 
     /// <summary>
+    /// Initializes a broadcast-aggregate expression (quantile / median) over a source expression.
+    /// The aggregate is computed over the entire source column and broadcast to every row.
+    /// </summary>
+    public WindowExpression(WindowFunctionKind kind, ColumnExpression source, double q)
+    {
+        if (!WindowFunctionHelpers.IsBroadcastAggregate(kind))
+            throw new ArgumentException($"'{kind}' is not a broadcast-aggregate kind", nameof(kind));
+
+        if (kind == WindowFunctionKind.Quantile && (double.IsNaN(q) || q < 0d || q > 1d))
+            throw new ArgumentOutOfRangeException(nameof(q), "Quantile must be in the range [0, 1].");
+
+        Kind = kind;
+        Source = source ?? throw new ArgumentNullException(nameof(source));
+        Quantile = kind == WindowFunctionKind.Quantile ? q : null;
+        ResultType = WindowFunctionHelpers.GetResultType(kind, Source.ResultType);
+    }
+
+    /// <summary>
     /// Gets the window function kind.
     /// </summary>
     public WindowFunctionKind Kind { get; }
@@ -242,6 +270,12 @@ internal sealed class WindowExpression : ColumnExpression
     /// </summary>
     public object? FillValue { get; }
 
+    /// <summary>
+    /// Gets the quantile argument for <see cref="WindowFunctionKind.Quantile"/> broadcasts,
+    /// or null for other kinds (median is <c>Quantile(0.5)</c>).
+    /// </summary>
+    public double? Quantile { get; }
+
     /// <inheritdoc />
     public override Type ResultType { get; protected set; }
 
@@ -265,6 +299,8 @@ internal sealed class WindowExpression : ColumnExpression
                     => $"{Kind}({sourceName}, {WindowSize})",
                 WindowFunctionKind.Shift or WindowFunctionKind.Lead
                     => $"{Kind}({sourceName}, {Periods})",
+                WindowFunctionKind.Quantile
+                    => $"{Kind}({sourceName}, {Quantile})",
                 _ => $"{Kind}({sourceName})"
             };
         }
