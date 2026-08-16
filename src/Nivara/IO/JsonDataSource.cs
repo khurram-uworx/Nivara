@@ -78,7 +78,7 @@ sealed class JsonLazySource : IQuerySource
     private readonly JsonOptions options;
     private readonly Lazy<Schema> lazySchema;
     private readonly DeferredErrorHandler errorHandler;
-    private readonly object chunkLock = new();
+    private readonly SemaphoreSlim chunkLock = new(1, 1);
     private JsonRecordStreamReader? chunkReader;
     private int recordsConsumed;
     private bool eofReached;
@@ -167,6 +167,24 @@ sealed class JsonLazySource : IQuerySource
         return columns;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        // Check for deferred errors first
+        errorHandler.ThrowIfHasDeferredErrors("JSON data source execution");
+
+        if (!File.Exists(filePath))
+            throw new DataSourceException($"JSON file not found: '{filePath}'");
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+            throw new DataSourceException($"{filePath}: JSON file is empty");
+
+        return await ReadAllChunksAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Reads all data by iterating through chunks and concatenating the results.
     /// </summary>
@@ -186,6 +204,65 @@ sealed class JsonLazySource : IQuerySource
         while (true)
         {
             var chunk = ReadChunk(chunkIndex, chunkSize);
+            if (chunk == null || chunk.Count == 0)
+                break;
+
+            int rowCount = chunk.Values.FirstOrDefault()?.Length ?? 0;
+            if (rowCount == 0)
+                break;
+
+            foreach (var name in columnNames)
+            {
+                var columnList = allColumns[name];
+                var column = chunk[name];
+                CopyColumnToList(column, columnList);
+            }
+
+            chunkIndex++;
+        }
+
+        if (allColumns.Values.All(l => l.Count == 0))
+        {
+            // Return empty columns based on schema
+            var emptyColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
+            {
+                var columnType = columnTypes[columnName];
+                emptyColumns[columnName] = ColumnFactory.Create(columnType, Array.Empty<object?>());
+            }
+            return emptyColumns;
+        }
+
+        var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+        {
+            var columnType = columnTypes[name];
+            var values = allColumns[name].ToArray();
+            result[name] = ColumnFactory.Create(columnType, values);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reads all data by iterating through chunks asynchronously and concatenating the results.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, IColumn>> ReadAllChunksAsync(CancellationToken cancellationToken)
+    {
+        var schema = Schema;
+        var columnNames = schema.ColumnNames;
+        var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+        var allColumns = new Dictionary<string, List<object?>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+            allColumns[name] = new List<object?>();
+
+        int chunkIndex = 0;
+        int chunkSize = 10000;
+
+        while (true)
+        {
+            var chunk = await ReadChunkAsync(chunkIndex, chunkSize, cancellationToken).ConfigureAwait(false);
             if (chunk == null || chunk.Count == 0)
                 break;
 
@@ -277,7 +354,8 @@ sealed class JsonLazySource : IQuerySource
             var columnNames = schema.ColumnNames;
             var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
 
-            lock (chunkLock)
+            chunkLock.Wait();
+            try
             {
                 if (!EnsureChunkPosition(chunkIndex, chunkSize))
                     return new Dictionary<string, IColumn>();
@@ -299,6 +377,10 @@ sealed class JsonLazySource : IQuerySource
 
                 return BuildColumns(chunkRecords, columnNames, columnTypes);
             }
+            finally
+            {
+                chunkLock.Release();
+            }
         }
         catch (JsonException ex)
         {
@@ -317,7 +399,7 @@ sealed class JsonLazySource : IQuerySource
     /// <summary>
     /// Reads a chunk of records from the JSON file asynchronously.
     /// </summary>
-    public ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(disposed, this);
 
@@ -333,7 +415,37 @@ sealed class JsonLazySource : IQuerySource
 
         try
         {
-            return new ValueTask<IReadOnlyDictionary<string, IColumn>>(ReadChunk(chunkIndex, chunkSize));
+            var schema = Schema;
+            var columnNames = schema.ColumnNames;
+            var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+            await chunkLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                if (!EnsureChunkPosition(chunkIndex, chunkSize))
+                    return new Dictionary<string, IColumn>();
+
+                var range = await chunkReader!.LocateRangeAsync((int)((long)chunkIndex * chunkSize), chunkSize, options.IsArray, cancellationToken).ConfigureAwait(false);
+                recordsConsumed = chunkReader.NextRecordIndex;
+                eofReached = range.Eof;
+
+                if (range.Rows == 0)
+                {
+                    if (eofReached)
+                        CloseChunkReader();
+                    return new Dictionary<string, IColumn>();
+                }
+
+                var chunkRecords = await ReadRangeRecordsAsync(range, cancellationToken).ConfigureAwait(false);
+                if (eofReached)
+                    CloseChunkReader();
+
+                return BuildColumns(chunkRecords, columnNames, columnTypes);
+            }
+            finally
+            {
+                chunkLock.Release();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -406,6 +518,27 @@ sealed class JsonLazySource : IQuerySource
             rented[0] = (byte)'[';
             rented[read + 1] = (byte)']';
             using var document = JsonDocument.Parse(rented.AsMemory(0, read + 2), documentOptions);
+            var records = new List<JsonElement>(range.Rows);
+            foreach (var element in document.RootElement.EnumerateArray())
+                records.Add(element.Clone());
+            return records.ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
+    }
+
+    private async Task<JsonElement[]> ReadRangeRecordsAsync(JsonRecordRange range, CancellationToken cancellationToken)
+    {
+        int length = checked((int)(range.End - range.Start));
+        var rented = ArrayPool<byte>.Shared.Rent(length + 2);
+        try
+        {
+            int read = await chunkReader!.ReadRangeAsync(range.Start, range.End, rented, cancellationToken).ConfigureAwait(false);
+            rented[0] = (byte)'[';
+            rented[read + 1] = (byte)']';
+            using var document = JsonDocument.Parse(rented.AsMemory(0, read + 2), JsonRecordStreamReader.ToJsonDocumentOptions(options.SerializerOptions));
             var records = new List<JsonElement>(range.Rows);
             foreach (var element in document.RootElement.EnumerateArray())
                 records.Add(element.Clone());
@@ -660,6 +793,7 @@ sealed class JsonLazySource : IQuerySource
         if (!disposed)
         {
             CloseChunkReader();
+            chunkLock.Dispose();
             disposed = true;
         }
     }

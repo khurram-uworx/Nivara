@@ -83,8 +83,8 @@ internal sealed class JsonRecordStreamReader : IDisposable
     public JsonRecordStreamReader(string filePath, JsonReaderOptions readerOptions)
     {
         this.readerOptions = readerOptions;
-        stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: false);
-        readStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: false);
+        stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
+        readStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, useAsync: true);
         dataEnd = stream.Length;
 
         int bomLength = DetectBomLength();
@@ -124,6 +124,58 @@ internal sealed class JsonRecordStreamReader : IDisposable
     /// and whether the walk reached the end of the document. Rows is 0 when fewer than
     /// <paramref name="startRecord"/> records exist.</returns>
     public JsonRecordRange LocateRange(int startRecord, int count, bool isArray)
+        => LocateRangeCore(startRecord, count, isArray, useAsync: false, CancellationToken.None);
+
+    /// <summary>
+    /// Asynchronous variant of <see cref="LocateRange"/>: the token walk itself stays
+    /// synchronous (it is CPU-bound lexing over an already-buffered span), but each buffer
+    /// refill is awaited via <see cref="FileStream.ReadAsync"/> so the lexer never blocks a
+    /// thread while waiting on disk IO.
+    /// </summary>
+    public async ValueTask<JsonRecordRange> LocateRangeAsync(int startRecord, int count, bool isArray, CancellationToken cancellationToken = default)
+    {
+        if (startRecord < 0)
+            throw new ArgumentOutOfRangeException(nameof(startRecord));
+        if (count <= 0)
+            throw new ArgumentOutOfRangeException(nameof(count));
+
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (scanAtEnd && startRecord >= NextRecordIndex)
+            return new JsonRecordRange(0, 0, 0, Eof: true);
+
+        if (scanAtEnd || startRecord < scanRecordIndex - 1)
+            ResetToStart();
+
+        long rangeStart = -1;
+        long rangeEnd = -1;
+        int rows = 0;
+        bool scanAtBoundary = false;
+        long rangeStartAbs = -1;
+
+        while (true)
+        {
+            var outcome = ScanBuffer(startRecord, count, isArray, ref rangeStart, ref rangeEnd, ref rows, ref scanAtBoundary, ref rangeStartAbs);
+            if (outcome != ScanOutcome.NeedRefill)
+            {
+                var result = CompleteScan(outcome, startRecord, dataEnd, ref rangeStart, ref rangeEnd, ref rows, rangeStartAbs);
+                return result;
+            }
+
+            if (!await RefillAsync(cancellationToken).ConfigureAwait(false))
+            {
+                if (scanConsumed > 0)
+                    Compact();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Shared driver for <see cref="LocateRange"/> and <see cref="LocateRangeAsync"/>.
+    /// The token walk is executed by the synchronous <see cref="ScanBuffer"/>; only the
+    /// buffer refill differs between the two variants.
+    /// </summary>
+    private JsonRecordRange LocateRangeCore(int startRecord, int count, bool isArray, bool useAsync, CancellationToken cancellationToken)
     {
         if (startRecord < 0)
             throw new ArgumentOutOfRangeException(nameof(startRecord));
@@ -140,134 +192,183 @@ internal sealed class JsonRecordStreamReader : IDisposable
         long rangeEnd = -1;
         int rows = 0;
         bool scanAtBoundary = false;
+        long rangeStartAbs = -1;
 
         while (true)
         {
-            if (scanConsumed > 0)
-                Compact();
-
-            if (bytesInBuffer == 0 && reachedEnd)
+            var outcome = ScanBuffer(startRecord, count, isArray, ref rangeStart, ref rangeEnd, ref rows, ref scanAtBoundary, ref rangeStartAbs);
+            if (outcome != ScanOutcome.NeedRefill)
             {
-                // Nothing more to lex: empty or whitespace-only input, or the document
-                // was fully consumed. The empty-buffer EOF case cannot yield more tokens.
-                scanAtEnd = true;
-                return new JsonRecordRange(0, 0, 0, Eof: true);
+                var result = CompleteScan(outcome, startRecord, dataEnd, ref rangeStart, ref rangeEnd, ref rows, rangeStartAbs);
+                return result;
             }
 
-            var reader = new Utf8JsonReader(buffer.AsSpan(0, bytesInBuffer), reachedEnd, scanState);
-
-            while (reader.Read())
+            bool refilled = useAsync ? RefillAsync(cancellationToken).GetAwaiter().GetResult() : Refill();
+            if (!refilled)
             {
-                scanConsumed = (int)reader.BytesConsumed;
-                scanState = reader.CurrentState;
-                scanSawAnyToken = true;
-
-                var token = reader.TokenType;
-                long absStart = baseOffset + reader.TokenStartIndex;
-
-                if (!scanIsArrayOpen)
-                {
-                    if (isArray)
-                    {
-                        if (token == JsonTokenType.StartArray)
-                        {
-                            scanIsArrayOpen = true;
-                            scanDepth = 1;
-                            continue;
-                        }
-                        throw new JsonException("Expected a JSON array at the start of the document");
-                    }
-
-                    // Non-array mode: the first value token is the single record.
-                    if (startRecord > 0)
-                    {
-                        scanAtEnd = true;
-                        return new JsonRecordRange(0, 0, 0, Eof: true);
-                    }
-
-                    scanRecordIndex = 1;
-                    scanRecordStart = -1;
-                    scanAtEnd = true;
-                    return new JsonRecordRange(absStart, dataEnd, 1, Eof: true);
-                }
-
-                bool isRecordStart = false;
-                switch (token)
-                {
-                    case JsonTokenType.StartObject:
-                        isRecordStart = scanDepth == 1;
-                        scanDepth++;
-                        break;
-                    case JsonTokenType.StartArray:
-                        isRecordStart = scanDepth == 1;
-                        scanDepth++;
-                        break;
-                    case JsonTokenType.EndObject:
-                        scanDepth--;
-                        break;
-                    case JsonTokenType.EndArray:
-                        scanDepth--;
-                        if (scanDepth == 0)
-                        {
-                            // End of the top-level array.
-                            var final = FinalizeRange(startRecord, absStart, ref rangeStart, ref rangeEnd, ref rows);
-                            return final.Rows == 0 ? new JsonRecordRange(0, 0, 0, Eof: true) : final;
-                        }
-                        break;
-                    case JsonTokenType.PropertyName:
-                        break;
-                    default:
-                        isRecordStart = scanDepth == 1;
-                        break;
-                }
-
-                if (isRecordStart)
-                {
-                    if (scanRecordStart >= 0)
-                    {
-                        int prevIndex = scanRecordIndex - 1;
-                        if (prevIndex >= startRecord)
-                        {
-                            if (rangeStart < 0)
-                                rangeStart = scanRecordStart;
-                            rangeEnd = absStart;
-                            rows++;
-                        }
-                    }
-                    scanRecordStart = absStart;
-                    scanRecordIndex++;
-                    if (rows == count)
-                    {
-                        // The record that just started is the first record of the next
-                        // chunk; its start closes this range. Lex it to completion so the
-                        // walker stops at a resumable position (array-element level), then
-                        // return with that record left open for the next walk.
-                        scanAtBoundary = true;
-                    }
-                }
-
-                if (scanAtBoundary && scanDepth == 1)
-                    return new JsonRecordRange(rangeStart, rangeEnd, rows, Eof: false);
-            }
-
-            if (reachedEnd)
-            {
-                var final = FinalizeRange(startRecord, dataEnd, ref rangeStart, ref rangeEnd, ref rows);
-                return final.Rows == 0 ? new JsonRecordRange(0, 0, 0, Eof: true) : final;
-            }
-
-            // The reader could not complete the next token: capture the resume point and
-            // refill the buffer, then reconstruct the reader with the captured state.
-            scanConsumed = (int)reader.BytesConsumed;
-            scanState = reader.CurrentState;
-            if (!Refill())
-            {
-                // No more bytes; reconstruct with isFinalBlock=true so a truncated JSON
-                // value at the end of the file surfaces as a JsonException.
                 if (scanConsumed > 0)
                     Compact();
             }
         }
+    }
+
+    /// <summary>
+    /// Converts a <see cref="ScanOutcome"/> into the final <see cref="JsonRecordRange"/>,
+    /// finalizing the last open record when the end of the document was reached.
+    /// </summary>
+    private JsonRecordRange CompleteScan(ScanOutcome outcome, int startRecord, long endOffset, ref long rangeStart, ref long rangeEnd, ref int rows, long rangeStartAbs)
+    {
+        switch (outcome)
+        {
+            case ScanOutcome.CompletedEmpty:
+                return new JsonRecordRange(0, 0, 0, Eof: true);
+            case ScanOutcome.CompletedSingle:
+                return new JsonRecordRange(rangeStartAbs, endOffset, 1, Eof: true);
+            case ScanOutcome.CompletedAtBoundary:
+                return new JsonRecordRange(rangeStart, rangeEnd, rows, Eof: false);
+            default:
+                var final = FinalizeRange(startRecord, endOffset, ref rangeStart, ref rangeEnd, ref rows);
+                return final.Rows == 0 ? new JsonRecordRange(0, 0, 0, Eof: true) : final;
+        }
+    }
+
+    /// <summary>
+    /// Outcome of one synchronous pass over the current lexer buffer.
+    /// </summary>
+    private enum ScanOutcome
+    {
+        NeedRefill,
+        CompletedEmpty,
+        CompletedSingle,
+        CompletedAtBoundary,
+        CompletedAtEnd
+    }
+
+    /// <summary>
+    /// Lexes the current buffer with a fresh <see cref="Utf8JsonReader"/> resumed from the
+    /// captured <see cref="scanState"/>. The walk advances the persistent scan fields and
+    /// returns when the requested range is complete, the end of the document is reached, or
+    /// the buffer needs refilling. Synchronous only — <see cref="Utf8JsonReader"/> is a ref
+    /// struct and cannot cross an await boundary.
+    /// </summary>
+    private ScanOutcome ScanBuffer(int startRecord, int count, bool isArray, ref long rangeStart, ref long rangeEnd, ref int rows, ref bool scanAtBoundary, ref long rangeStartAbs)
+    {
+        if (scanConsumed > 0)
+            Compact();
+
+        if (bytesInBuffer == 0 && reachedEnd)
+        {
+            // Nothing more to lex: empty or whitespace-only input, or the document
+            // was fully consumed. The empty-buffer EOF case cannot yield more tokens.
+            scanAtEnd = true;
+            return ScanOutcome.CompletedEmpty;
+        }
+
+        var reader = new Utf8JsonReader(buffer.AsSpan(0, bytesInBuffer), reachedEnd, scanState);
+
+        while (reader.Read())
+        {
+            scanConsumed = (int)reader.BytesConsumed;
+            scanState = reader.CurrentState;
+            scanSawAnyToken = true;
+
+            var token = reader.TokenType;
+            long absStart = baseOffset + reader.TokenStartIndex;
+
+            if (!scanIsArrayOpen)
+            {
+                if (isArray)
+                {
+                    if (token == JsonTokenType.StartArray)
+                    {
+                        scanIsArrayOpen = true;
+                        scanDepth = 1;
+                        continue;
+                    }
+                    throw new JsonException("Expected a JSON array at the start of the document");
+                }
+
+                // Non-array mode: the first value token is the single record.
+                if (startRecord > 0)
+                {
+                    scanAtEnd = true;
+                    return ScanOutcome.CompletedEmpty;
+                }
+
+                scanRecordIndex = 1;
+                scanRecordStart = -1;
+                scanAtEnd = true;
+                rangeStartAbs = absStart;
+                return ScanOutcome.CompletedSingle;
+            }
+
+            bool isRecordStart = false;
+            switch (token)
+            {
+                case JsonTokenType.StartObject:
+                    isRecordStart = scanDepth == 1;
+                    scanDepth++;
+                    break;
+                case JsonTokenType.StartArray:
+                    isRecordStart = scanDepth == 1;
+                    scanDepth++;
+                    break;
+                case JsonTokenType.EndObject:
+                    scanDepth--;
+                    break;
+                case JsonTokenType.EndArray:
+                    scanDepth--;
+                    if (scanDepth == 0)
+                    {
+                        // End of the top-level array.
+                        FinalizeRange(startRecord, absStart, ref rangeStart, ref rangeEnd, ref rows);
+                        return ScanOutcome.CompletedAtEnd;
+                    }
+                    break;
+                case JsonTokenType.PropertyName:
+                    break;
+                default:
+                    isRecordStart = scanDepth == 1;
+                    break;
+            }
+
+            if (isRecordStart)
+            {
+                if (scanRecordStart >= 0)
+                {
+                    int prevIndex = scanRecordIndex - 1;
+                    if (prevIndex >= startRecord)
+                    {
+                        if (rangeStart < 0)
+                            rangeStart = scanRecordStart;
+                        rangeEnd = absStart;
+                        rows++;
+                    }
+                }
+                scanRecordStart = absStart;
+                scanRecordIndex++;
+                if (rows == count)
+                {
+                    // The record that just started is the first record of the next
+                    // chunk; its start closes this range. Lex it to completion so the
+                    // walker stops at a resumable position (array-element level), then
+                    // return with that record left open for the next walk.
+                    scanAtBoundary = true;
+                }
+            }
+
+            if (scanAtBoundary && scanDepth == 1)
+                return ScanOutcome.CompletedAtBoundary;
+        }
+
+        if (reachedEnd)
+            return ScanOutcome.CompletedAtEnd;
+
+        // The reader could not complete the next token: capture the resume point and
+        // signal the caller to refill, then reconstruct the reader with the captured state.
+        scanConsumed = (int)reader.BytesConsumed;
+        scanState = reader.CurrentState;
+        return ScanOutcome.NeedRefill;
     }
 
     /// <summary>
@@ -317,6 +418,28 @@ internal sealed class JsonRecordStreamReader : IDisposable
     }
 
     /// <summary>
+    /// Asynchronous variant of <see cref="ReadRange"/>.
+    /// </summary>
+    public async ValueTask<int> ReadRangeAsync(long start, long end, byte[] destination, CancellationToken cancellationToken = default)
+    {
+        int length = checked((int)(end - start));
+        if (destination.Length < length + 2)
+            throw new ArgumentOutOfRangeException(nameof(destination), "Destination buffer must hold the range plus 2 wrapper bytes");
+
+        readStream.Position = start;
+        int total = 0;
+        while (total < length)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            int read = await readStream.ReadAsync(destination.AsMemory(1 + total, length - total), cancellationToken).ConfigureAwait(false);
+            if (read == 0)
+                break;
+            total += read;
+        }
+        return total;
+    }
+
+    /// <summary>
     /// Moves any unread bytes to the front of the buffer and advances the absolute
     /// <see cref="baseOffset"/> by the number of consumed bytes.
     /// </summary>
@@ -351,6 +474,36 @@ internal sealed class JsonRecordStreamReader : IDisposable
         }
 
         int read = stream.Read(buffer, bytesInBuffer, toRead);
+        if (read == 0)
+        {
+            reachedEnd = true;
+            return false;
+        }
+        bytesInBuffer += read;
+        return true;
+    }
+
+    /// <summary>
+    /// Asynchronous variant of <see cref="Refill"/>.
+    /// </summary>
+    private async ValueTask<bool> RefillAsync(CancellationToken cancellationToken)
+    {
+        Compact();
+
+        int toRead = buffer.Length - bytesInBuffer;
+        if (toRead == 0)
+        {
+            int newSize = buffer.Length * 2;
+            if (newSize > MaxBufferSize)
+                throw new JsonException($"JSON value exceeds the maximum supported size of {MaxBufferSize} bytes");
+            var newBuffer = ArrayPool<byte>.Shared.Rent(newSize);
+            Buffer.BlockCopy(buffer, 0, newBuffer, 0, bytesInBuffer);
+            ArrayPool<byte>.Shared.Return(buffer);
+            buffer = newBuffer;
+            toRead = buffer.Length - bytesInBuffer;
+        }
+
+        int read = await stream.ReadAsync(buffer.AsMemory(bytesInBuffer, toRead), cancellationToken).ConfigureAwait(false);
         if (read == 0)
         {
             reachedEnd = true;
