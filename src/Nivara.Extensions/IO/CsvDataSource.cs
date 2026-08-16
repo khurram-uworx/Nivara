@@ -232,6 +232,23 @@ sealed class CsvLazySource : IQuerySource
         return columns;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(CancellationToken cancellationToken = default)
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+
+        errorHandler.ThrowIfHasDeferredErrors("CSV data source execution");
+
+        if (!File.Exists(filePath))
+            throw new DataSourceException($"CSV file not found: '{filePath}'");
+
+        var fileInfo = new FileInfo(filePath);
+        if (fileInfo.Length == 0)
+            throw new DataSourceException($"CSV file is empty: '{filePath}'");
+
+        return await ReadAllChunksAsync(cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>
     /// Reads all data by iterating through chunks and concatenating the results.
     /// </summary>
@@ -251,6 +268,65 @@ sealed class CsvLazySource : IQuerySource
         while (true)
         {
             var chunk = ReadChunk(chunkIndex, chunkSize);
+            if (chunk == null || chunk.Count == 0)
+                break;
+
+            int rowCount = chunk.Values.FirstOrDefault()?.Length ?? 0;
+            if (rowCount == 0)
+                break;
+
+            foreach (var name in columnNames)
+            {
+                var columnList = allColumns[name];
+                var column = chunk[name];
+                CopyColumnToList(column, columnTypes[name], columnList);
+            }
+
+            chunkIndex++;
+        }
+
+        if (allColumns.Values.All(l => l.Count == 0))
+        {
+            // Return empty columns based on schema
+            var emptyColumns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+            foreach (var columnName in columnNames)
+            {
+                var columnType = columnTypes[columnName];
+                emptyColumns[columnName] = ColumnFactory.Create(columnType, Array.Empty<object?>());
+            }
+            return emptyColumns;
+        }
+
+        var result = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+        {
+            var columnType = columnTypes[name];
+            var values = allColumns[name].ToArray();
+            result[name] = ColumnFactory.Create(columnType, values);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reads all data by iterating through chunks asynchronously and concatenating the results.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, IColumn>> ReadAllChunksAsync(CancellationToken cancellationToken)
+    {
+        var schema = Schema;
+        var columnNames = schema.ColumnNames;
+        var columnTypes = columnNames.ToDictionary(name => name, schema.GetColumnType, StringComparer.OrdinalIgnoreCase);
+
+        var allColumns = new Dictionary<string, List<object?>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in columnNames)
+            allColumns[name] = new List<object?>();
+
+        int chunkIndex = 0;
+        int chunkSize = 10000;
+
+        while (true)
+        {
+            var chunk = await ReadChunkAsync(chunkIndex, chunkSize, cancellationToken).ConfigureAwait(false);
             if (chunk == null || chunk.Count == 0)
                 break;
 
@@ -420,7 +496,7 @@ sealed class CsvLazySource : IQuerySource
             while (rowsRead < chunkSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (!csv.Read())
+                if (!await csv.ReadAsync().ConfigureAwait(false))
                 {
                     eofReached = true;
                     DisposeChunkReader();
