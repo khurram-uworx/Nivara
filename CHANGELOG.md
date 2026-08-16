@@ -62,8 +62,14 @@ All notable changes to Nivara are documented here. Released versions are publish
   containing Sort/GroupBy/Join/Distinct/etc., while async `ExecuteCoreAsync` streamed the prefix and
   ran boundary ops on the materialized frame (flush-concatenate-resume). Both paths now behave
   identically: only window-expression plans fall back to Lazy; intermediate chunk frames are
-  disposed after concatenation. Follow-up tracked in #270 (empty-source fallback double-applies
-  boundary ops, a pre-existing async edge case).
+  disposed after concatenation.
+
+- **Streaming empty-source fallback no longer re-applies boundary ops (#270)** — when a chunk-capable
+  source yields zero chunks, both sync `ExecuteCore` and async `ExecuteCoreAsync` fall back to a
+  single full-plan execution; previously the flush-concatenate-resume segment loop then re-applied
+  every non-streamable boundary op on the already-processed result (a pre-existing async edge case
+  surfaced while aligning the paths in #269). Boundary ops now run exactly once on the empty-source
+  path.
 
 - **Fused plan signatures now encode the literal runtime type (#246)** —
   `ExpressionTypeInferer.FormatValue` appends `:{value.GetType().FullName}` to each literal
