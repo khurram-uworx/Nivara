@@ -50,6 +50,20 @@ public static class Csv
     }
 
     /// <summary>
+    /// Creates a lazy query frame that scans a CSV file without immediately reading it.
+    /// The frame supports chunked streaming via <see cref="QueryFrame.AsStream"/> and
+    /// fluent query chains (Filter/Select/Sort/...). Prefer <see cref="ScanQuery{T}"/> for
+    /// typed row queries.
+    /// </summary>
+    /// <param name="filePath">The path to the CSV file</param>
+    /// <param name="options">Optional CSV reading options</param>
+    /// <returns>A QueryFrame that will read the CSV when executed</returns>
+    /// <exception cref="ArgumentNullException">Thrown when filePath is null</exception>
+    /// <exception cref="FileNotFoundException">Thrown when the CSV file doesn't exist</exception>
+    public static QueryFrame ScanAsQueryFrame(string filePath, CsvOptions? options = null)
+        => ScanFrame(filePath, options);
+
+    /// <summary>
     /// Creates a lazy typed query that scans a CSV file without immediately reading it
     /// </summary>
     /// <typeparam name="T">The row type. Must be a non-primitive class whose public properties map
