@@ -87,6 +87,19 @@ capacity = clamp(memoryBudget / (chunkSize * 100 bytes-per-row), 2, 16)
 
 This bounds how many chunk frames are in flight, keeping peak memory inside the budget.
 
+### AC3 resolution (memory budget enforcement)
+
+The bounded channel *is* the memory-budget enforcement in the query pipeline: at most
+`capacity` row-chunk frames are accepted before the producer blocks on `WriteAsync`, so
+peak in-flight memory stays inside the configured budget. This is verified by
+`StreamingBackpressureTests` (formula bounds + an in-flight probe that asserts a fast
+producer never exceeds capacity against a slow consumer).
+
+`StreamingBufferManager.IsMemoryBudgetExceeded` (Nivara.Extensions) is an IO-layer-only
+helper for chunk-buffered readers (CSV/Parquet). It is **intentionally not** wired into
+`StreamingExecutionStrategy` — row-chunk frames plus a bounded channel replace byte-level
+budgets in the core query pipeline.
+
 ## Example
 
 ```csharp
