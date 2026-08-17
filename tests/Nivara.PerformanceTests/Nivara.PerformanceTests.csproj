@@ -10,6 +10,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
+    <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
+    <ProjectReference Include="..\..\samples\Nivara.Samples\Nivara.Samples.csproj" />
   </ItemGroup>
 
   <ItemGroup>
