@@ -21,13 +21,14 @@ def parse_args():
     return p.parse_args()
 
 
-def get_incident_ticks(scenario_id: str) -> tuple[int, int]:
+def get_incident_ticks(scenario_id: str, requests_path: str) -> tuple[int, int]:
     """Return (incident_start_ticks, incident_end_ticks) matching C# Scenario definitions.
 
-    Base time: 2025-06-15 14:00:00 UTC = 638855544000000000 ticks.
+    Derives the base time from the actual data minimum timestamp rather than
+    hardcoding, since the .NET DateTimeOffset.Ticks value depends on the
+    generator's base time which may differ from the source code constant.
     .NET tick = 100ns.  1 minute = 600_000_000 ticks.
     """
-    base = 638855544000000000
     minute = 600_000_000
     windows = {
         "A": (5, 25),
@@ -36,6 +37,12 @@ def get_incident_ticks(scenario_id: str) -> tuple[int, int]:
         "D": (8, 22),
     }
     start_min, end_min = windows[scenario_id]
+
+    # Derive base from actual data (minimum non-zero timestamp aligned to minute boundary)
+    df = pl.scan_parquet(requests_path).filter(pl.col("Timestamp") > 0).select("Timestamp").collect()
+    data_min = int(df["Timestamp"].min())
+    base = data_min - (data_min % minute)
+
     return base + start_min * minute, base + end_min * minute
 
 
@@ -170,7 +177,6 @@ def analysis_grouped(requests_path: str, start: int, end: int) -> pl.DataFrame:
 def main():
     args = parse_args()
     ds = Path(args.dataset)
-    start, end = get_incident_ticks(args.scenario)
 
     requests_path = ds / "requests.parquet"
     deployments_path = ds / "deployments.parquet"
@@ -180,6 +186,8 @@ def main():
         if not p.exists():
             print(f"Error: {p} not found. Generate the dataset first.", file=sys.stderr)
             sys.exit(1)
+
+    start, end = get_incident_ticks(args.scenario, str(requests_path))
 
     print(f"=== Benchmark: Polars {pl.__version__} ===")
     print(f"Dataset: {ds}")

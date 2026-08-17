@@ -211,14 +211,18 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 
 | Analysis | Nivara (C#) | Polars (Python) | Ratio |
 |----------|-------------|-----------------|-------|
-| Degradation Ordering | — | — | — |
-| Deployment Correlation | — | — | — |
-| Saturation Ordering | — | — | — |
-| Regional Partitioning | — | — | — |
-| Grouped Aggregation | — | — | — |
-| **Total** | **—** | **—** | **—** |
+| Degradation Ordering | 5556 ms | 85 ms | ~65× |
+| Deployment Correlation | 5058 ms | 105 ms | ~48× |
+| Saturation Ordering | 31 ms | 4 ms | ~8× |
+| Regional Partitioning | 4438 ms | 42 ms | ~105× |
+| Grouped Aggregation | 3574 ms | 31 ms | ~116× |
+| **Total** | **18657 ms** | **268 ms** | **~70×** |
 
-*Recorded on: (date) — Intel i5-1135G7, .NET 10 Release, Polars 1.43, 1M records, scenario A.*
+*Recorded 2026-08-18 — Intel i5-1135G7, .NET 10 Release, Polars 1.43.2, 1M records, scenario A.*
+
+Saturation Ordering shows 0 rows for both sides — the generator creates instance
+records at `baseTime` (before the incident window), so the timestamp filter
+eliminates all of them. This is a data-generation quirk, not a bug.
 
 ### Methodology
 
