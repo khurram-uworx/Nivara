@@ -2,45 +2,38 @@
 
 ## Problem
 The Incident Lab CLI was implemented in Phase 3a but is missing:
-- #289: DatasetGenerator determinism/heavy tests (should live in Nivara.PerformanceTests)
-- #290: Analysis pipeline integration tests (should live in Nivara.Tests)
+- #289: DatasetGenerator determinism/heavy tests (in Nivara.PerformanceTests console app)
+- #290: Analysis pipeline integration tests (in Nivara.Tests with NUnit)
 
 ## Branch: `khurram/issues`
 
 ---
 
-## Issue #289: DatasetGenerator tests
+## Issue #289: DatasetGenerator tests (console app scenarios)
 
-**File:** `tests/Nivara.PerformanceTests/Incident/DatasetGeneratorTests.cs`
+**File:** `tests/Nivara.PerformanceTests/IncidentLabBenchmark.cs` (extend existing)
 
-### Step 1: Add NUnit to Nivara.PerformanceTests.csproj
-- Add `IsTestProject`, `IsPackable=false`
-- Add NUnit 4.6.1, NUnit3TestAdapter 6.2.0, Microsoft.NET.Test.Sdk 18.9.0, coverlet 10.0.1
-- Keep `<OutputType>Exe</OutputType>` so benchmark runner still works
+Keep Nivara.PerformanceTests as a console app. Add a new method `RunDatasetGeneratorTests(string[] args)` invoked via `--dataset-test` switch in Program.cs.
 
-### Step 2: Create DatasetGeneratorTests.cs
-- `[OneTimeSetUp]`: generate small dataset (scale=0.001 → ~10K rows) in temp dir
-- `[OneTimeTearDown]`: delete temp dir
+Tests run as console assertions (throw on failure, print results):
 
-Tests:
-1. `Generate_SameSeed_ProducesIdenticalOutput` — byte-compare CSV files from two generations
-2. `Generate_Scale1_ProducesExpectedRowCount` — load parquet+CSV, assert 10M rows
-3. `Generate_ProducesValidFieldRanges` — StatusCode ∈ [200–503], DurationMs > 0, all 10 regions present
-4. `Generate_Parquet_MultipleRowGroups` — verify row groups via Parquet.Net API
-5. `Generate_Csv_LoadableByCsvScanAsQueryFrame` — load CSV via ScanAsQueryFrame, assert columns/rows
+1. `Determinism` — generate same scenario twice to two temp dirs, byte-compare CSV files
+2. `RowCount` — generate at scale=1, load parquet via ScanAsQueryFrame + Collect, assert 10M rows
+3. `FieldRanges` — load small dataset, assert StatusCode ∈ [200–503], DurationMs > 0, all 10 regions present
+4. `ParquetRowGroups` — with rowGroupSize=1000, verify multiple row groups via Parquet.Net API
+5. `CsvVariant` — load CSV via Csv.ScanAsQueryFrame, assert columns and row count
 
 ---
 
-## Issue #290: Analysis pipeline integration tests
+## Issue #290: Analysis pipeline integration tests (NUnit)
 
-**File:** `tests/Nivara.Tests/Incident/AnalysisTests.cs`
+**File:** `tests/Nivara.Tests/Incident/AnalysisTests.cs` (new)
 
-### Step 3: Create AnalysisTests.cs
-- `[OneTimeSetUp]`: generate small dataset (scale=0.001) for all 4 scenarios
-- `[OneTimeTearDown]`: delete temp dir
+`[OneTimeSetUp]`: generate small dataset (scale=0.001 → ~10K rows) for all 4 scenarios.
+`[OneTimeTearDown]`: delete temp dir.
 
 Tests:
-1. Non-empty results — Collect each analysis method × scenario, assert RowCount > 0
+1. Non-empty results — Collect each analysis × scenario, assert RowCount > 0
 2. Determinism — run same analysis twice, compare RowCount
 3. Diagnostics — assert GetExecutionDiagnostics() not null, RowsRead > 0, TotalExecutionTime > 0
 4. Scenario A — degradation ordering: orders → checkout → payments → gateway
@@ -53,14 +46,13 @@ Tests:
 ---
 
 ## Execution order
-1. Modify .csproj → add NUnit
-2. Create DatasetGeneratorTests.cs (#289)
-3. Create AnalysisTests.cs (#290)
-4. Build both projects
-5. Run new tests (with human confirmation)
+1. Add `--dataset-test` switch to Program.cs + `RunDatasetGeneratorTests` in IncidentLabBenchmark.cs (#289)
+2. Create AnalysisTests.cs (#290)
+3. Build both projects
+4. Run new tests (with human confirmation)
 
 ## Blast radius
-- `Nivara.PerformanceTests.csproj` — adding NUnit packages; existing Program.cs benchmark runner unchanged
+- `IncidentLabBenchmark.cs` — adding new method + Program.cs switch; existing benchmark unchanged
 - `Nivara.Tests` — new test file only; no existing tests modified
 - No changes to production code
 
