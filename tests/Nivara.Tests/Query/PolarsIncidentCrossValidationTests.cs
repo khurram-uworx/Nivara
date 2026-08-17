@@ -95,7 +95,7 @@ public class PolarsIncidentCrossValidationTests
         {
             var svcName = svcProp.Name;
             var values = svcProp.Value.EnumerateArray()
-                .Select(e => e.ValueKind == JsonValueKind.Null ? (long?)null : (long?)e.GetDouble())
+                .Select(e => e.ValueKind == JsonValueKind.Null ? (double?)null : e.GetDouble())
                 .ToArray();
 
             var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase)
@@ -106,7 +106,7 @@ public class PolarsIncidentCrossValidationTests
             var spec = new WindowSpec();
             var result = PartitionedWindowEngine.Compute(
                 columns, columns["v"], spec,
-                c => ((NivaraColumn<long>)c).RollingMean(windowSize, minSamples));
+                c => ((NivaraColumn<double>)c).RollingMean(windowSize, minSamples));
 
             var expected = expectedMeans.GetProperty(svcName).EnumerateArray()
                 .Select(e => e.ValueKind == JsonValueKind.Null ? (double?)null : e.GetDouble())
