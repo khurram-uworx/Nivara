@@ -1,6 +1,5 @@
 using Nivara;
 using Nivara.Samples.Incident;
-using Nivara.Query;
 using System.Diagnostics;
 
 var mode = args.Length > 0 ? args[0] : "";
