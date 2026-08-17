@@ -182,6 +182,11 @@ sealed class FusedExpressionEvaluator
             case NotExpression not:
                 CollectColumnReferences(not.Operand, references);
                 break;
+            case ConditionalExpression conditional:
+                CollectColumnReferences(conditional.Test, references);
+                CollectColumnReferences(conditional.TrueValue, references);
+                CollectColumnReferences(conditional.FalseValue, references);
+                break;
             case WindowExpression window:
                 if (window.Source is not null)
                     CollectColumnReferences(window.Source, references);
@@ -352,6 +357,10 @@ sealed class FusedExpressionEvaluator
                 return ContainsWindowExpression(comparison.Left) || ContainsWindowExpression(comparison.Right);
             case NotExpression not:
                 return ContainsWindowExpression(not.Operand);
+            case ConditionalExpression conditional:
+                return ContainsWindowExpression(conditional.Test)
+                    || ContainsWindowExpression(conditional.TrueValue)
+                    || ContainsWindowExpression(conditional.FalseValue);
             default:
                 return false;
         }
@@ -385,6 +394,12 @@ sealed class FusedExpressionEvaluator
 
             case NotExpression not:
                 return new NotExpression(HydrateWindows(not.Operand, input, synthetic));
+
+            case ConditionalExpression conditional:
+                return new ConditionalExpression(
+                    HydrateWindows(conditional.Test, input, synthetic),
+                    HydrateWindows(conditional.TrueValue, input, synthetic),
+                    HydrateWindows(conditional.FalseValue, input, synthetic));
 
             default:
                 return node;
@@ -856,6 +871,18 @@ sealed class FusedExpressionEvaluator
 
             case KernelOp.Not:
                 return Expression.Not(BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam));
+
+            case KernelOp.Conditional:
+                {
+                    // Lowering convention: Left=test index, Right=trueValue index, Value=falseValue index (boxed int)
+                    var testExpr = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
+                    var trueExpr = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
+                    var falseExpr = BuildCompiledNode(plan, (int)node.Value!, leafParams, indexVar, startParam);
+                    return Expression.Condition(
+                        testExpr,
+                        ConvertTo(trueExpr, node.ComputeType),
+                        ConvertTo(falseExpr, node.ComputeType));
+                }
 
             default:
                 throw new NotSupportedException($"Kernel op {node.Op} is not supported by the compiled fused target");

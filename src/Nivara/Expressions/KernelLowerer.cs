@@ -70,6 +70,17 @@ internal static class KernelLowerer
                         return nodeIndex;
                     }
 
+                case ConditionalExpression conditional:
+                    {
+                        var testIdx = LowerNode(conditional.Test);
+                        var trueIdx = LowerNode(conditional.TrueValue);
+                        var falseIdx = LowerNode(conditional.FalseValue);
+                        var nodeIndex = nodes.Count;
+                        // Left=test index, Right=trueValue index, Value=falseValue index (boxed int)
+                        nodes.Add(new KernelNode(KernelOp.Conditional, testIdx, trueIdx, falseIdx, conditional.ResultType));
+                        return nodeIndex;
+                    }
+
                 default:
                     throw new NotSupportedException($"Expression type {node.GetType().Name} is not supported by the fused evaluator");
             }

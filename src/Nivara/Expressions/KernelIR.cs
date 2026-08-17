@@ -24,7 +24,8 @@ internal enum KernelOp
     LessThanOrEqual,
     And,
     Or,
-    Not
+    Not,
+    Conditional
 }
 
 /// <summary>
@@ -70,7 +71,8 @@ internal sealed class KernelPlan
 
         IsUniformNumeric = isGenericMath
             && resultType != typeof(bool)
-            && columns.All(c => c.Column.ElementType == resultType);
+            && columns.All(c => c.Column.ElementType == resultType)
+            && !nodes.Any(n => n.Op == KernelOp.Conditional);
 
         IsTensorPrimitivesCandidate = IsUniformNumeric && IsSingleDispatachableBinary(nodes);
 
