@@ -1,9 +1,12 @@
-"""Generate Polars rank-family and rolling-window reference outputs for C# cross-validation.
+"""Generate Polars reference outputs for C# cross-validation.
 
-Saves a JSON manifest with fixed input arrays (order keys with nulls, optional
-partition labels) and the expected row_number / rank / dense_rank / percent_rank
-outputs, plus rolling sum / mean / min / max per case. Test fixtures go to
-samples/data/polars-window/.
+Produces three manifests:
+
+1. samples/data/polars-window/manifest.json     — generic rank-family and rolling-window cases
+2. samples/data/polars-quantile/manifest.json   — generic quantile and median cases
+3. samples/data/polars-moments/manifest.json    — generic stddev and variance cases
+4. samples/data/polars-incident/manifest.json   — incident-scenario fixtures (latency percentiles,
+   error-rate rolling windows, rank/percentrank by error delta, stddev per service)
 
 Semantics being pinned:
   - row_number   -> polars rank(method="ordinal")
@@ -27,7 +30,7 @@ Reproducibility:
   - All cases are hand-authored fixed arrays; no RNG, so output is stable across
     polars versions as long as the semantics above hold.
   - Regenerate after upgrading polars: run `python gen_reference.py` and commit
-    samples/data/polars-window/manifest.json as one unit.
+    the changed manifest.json files as one unit.
 
 Usage: python gen_reference.py
 """
@@ -194,6 +197,9 @@ def run():
     moments_manifest = emit_moment_fixtures(pl)
     print(f"\nTotal stddev/variance test cases: {len(moments_manifest)}")
 
+    incident_manifest = emit_incident_fixtures(pl)
+    print(f"\nTotal incident test cases: {len(incident_manifest)}")
+
 
 def emit_quantile_fixtures(pl):
     """Emit polars quantile(linear) and median fixtures to samples/data/polars-quantile/."""
@@ -248,6 +254,207 @@ def emit_quantile_fixtures(pl):
         json.dump(quantile_manifest, f, indent=2)
     print(f"\nQuantile manifest: {manifest_path}")
     return quantile_manifest
+
+
+# ---------------------------------------------------------------------------
+# Incident-specific fixtures: realistic telemetry distributions per service.
+# ---------------------------------------------------------------------------
+
+# Latency percentiles per service: (name, service_name -> values, q).
+# Values are in milliseconds; hand-authored to look like realistic service latency
+# distributions (gateway fast, payments slow, notifications bimodal).  Some nulls.
+INCIDENT_QUANTILE_CASES = [
+    ("latency_p50_per_service", {
+        "gateway":       [12.1, 8.3, 15.7, None, 11.2, 9.8, 14.3, 7.6, 13.5, 10.1, 11.9, 8.7, 16.2, None, 10.8],
+        "orders":        [45.2, 38.7, 52.1, 41.3, None, 48.6, 35.9, 55.8, 42.0, 39.4, 51.2, 44.8, None, 47.3, 37.5],
+        "checkout":      [78.4, 65.2, 92.1, 71.8, 85.3, None, 69.5, 88.7, 74.6, 81.2, 95.3, 62.8, 77.9, 83.1, None],
+        "payments":      [120.5, 98.3, 145.2, 112.7, 133.8, 105.6, None, 141.9, 118.4, 127.3, 155.1, 108.2, 136.7, 115.8, 142.6],
+        "notifications": [25.3, 18.7, None, 31.2, 22.8, 45.6, 20.1, 28.9, None, 33.4, 19.5, 42.1, 27.6, 35.8, 21.4],
+    }, 0.5),
+    ("latency_p95_per_service", {
+        "gateway":       [12.1, 8.3, 15.7, None, 11.2, 9.8, 14.3, 7.6, 13.5, 10.1, 11.9, 8.7, 16.2, None, 10.8],
+        "orders":        [45.2, 38.7, 52.1, 41.3, None, 48.6, 35.9, 55.8, 42.0, 39.4, 51.2, 44.8, None, 47.3, 37.5],
+        "checkout":      [78.4, 65.2, 92.1, 71.8, 85.3, None, 69.5, 88.7, 74.6, 81.2, 95.3, 62.8, 77.9, 83.1, None],
+        "payments":      [120.5, 98.3, 145.2, 112.7, 133.8, 105.6, None, 141.9, 118.4, 127.3, 155.1, 108.2, 136.7, 115.8, 142.6],
+        "notifications": [25.3, 18.7, None, 31.2, 22.8, 45.6, 20.1, 28.9, None, 33.4, 19.5, 42.1, 27.6, 35.8, 21.4],
+    }, 0.95),
+    ("latency_p99_per_service", {
+        "gateway":       [12.1, 8.3, 15.7, None, 11.2, 9.8, 14.3, 7.6, 13.5, 10.1, 11.9, 8.7, 16.2, None, 10.8],
+        "orders":        [45.2, 38.7, 52.1, 41.3, None, 48.6, 35.9, 55.8, 42.0, 39.4, 51.2, 44.8, None, 47.3, 37.5],
+        "checkout":      [78.4, 65.2, 92.1, 71.8, 85.3, None, 69.5, 88.7, 74.6, 81.2, 95.3, 62.8, 77.9, 83.1, None],
+        "payments":      [120.5, 98.3, 145.2, 112.7, 133.8, 105.6, None, 141.9, 118.4, 127.3, 155.1, 108.2, 136.7, 115.8, 142.6],
+        "notifications": [25.3, 18.7, None, 31.2, 22.8, 45.6, 20.1, 28.9, None, 33.4, 19.5, 42.1, 27.6, 35.8, 21.4],
+    }, 0.99),
+]
+
+# Error-rate rolling windows per service: (name, service -> values, window_size, min_samples).
+# Values are error-rate percentages per time interval; some nulls simulate missing intervals.
+INCIDENT_ROLLING_CASES = [
+    ("error_rate_rolling_window_per_service", {
+        "gateway":    [0.1, 0.3, None, 0.2, 1.8, 5.2, 12.3, 8.7, 3.1, 1.2, 0.8, 0.4],
+        "orders":     [0.5, 0.4, 0.6, 0.3, 2.1, 8.5, 15.7, 22.3, 18.1, 9.2, 4.3, 2.1],
+        "checkout":   [0.2, 0.1, 0.3, None, 1.5, 6.8, 11.4, 16.9, 12.5, 7.1, 3.8, 1.5],
+        "payments":   [1.2, 0.9, 1.1, 0.8, 3.4, 12.6, 25.8, 31.2, 28.5, 15.3, 8.7, 4.2],
+    }, 3, 1),
+]
+
+# Rank/PercentRank per service by error delta: (name, service -> error_delta).
+# Error deltas are percentage-point increases.  Null means no data for that service.
+INCIDENT_RANK_CASES = [
+    ("rank_by_error_delta", {
+        "gateway":       418,
+        "orders":        172,
+        "checkout":      91,
+        "payments":      312,
+        "notifications": None,
+        "catalog":       4,
+    }),
+    ("rank_by_error_delta_with_ties", {
+        "gateway":       150,
+        "orders":        91,
+        "checkout":      91,
+        "payments":      200,
+        "notifications": 50,
+        "catalog":       4,
+    }),
+]
+
+# StdDev per service: (name, service -> values, ddof).  Latency values in ms.
+INCIDENT_STDDEV_CASES = [
+    ("stddev_latency_per_service", {
+        "gateway":       [12.1, 8.3, 15.7, 11.2, 9.8, 14.3, 7.6, 13.5, 10.1, 11.9, 8.7, 16.2, 10.8],
+        "orders":        [45.2, 38.7, 52.1, 41.3, 48.6, 35.9, 55.8, 42.0, 39.4, 51.2, 44.8, 47.3, 37.5],
+        "checkout":      [78.4, 65.2, 92.1, 71.8, 85.3, 69.5, 88.7, 74.6, 81.2, 95.3, 62.8, 77.9, 83.1],
+        "payments":      [120.5, 98.3, 145.2, 112.7, 133.8, 105.6, 141.9, 118.4, 127.3, 155.1, 108.2, 136.7, 115.8],
+    }, 0),
+    ("stddev_sample_latency_per_service", {
+        "gateway":       [12.1, 8.3, 15.7, 11.2, 9.8, 14.3, 7.6, 13.5, 10.1, 11.9, 8.7, 16.2, 10.8],
+        "orders":        [45.2, 38.7, 52.1, 41.3, 48.6, 35.9, 55.8, 42.0, 39.4, 51.2, 44.8, 47.3, 37.5],
+        "checkout":      [78.4, 65.2, 92.1, 71.8, 85.3, 69.5, 88.7, 74.6, 81.2, 95.3, 62.8, 77.9, 83.1],
+        "payments":      [120.5, 98.3, 145.2, 112.7, 133.8, 105.6, 141.9, 118.4, 127.3, 155.1, 108.2, 136.7, 115.8],
+    }, 1),
+]
+
+
+def emit_incident_fixtures(pl):
+    """Emit incident-scenario fixtures to samples/data/polars-incident/.
+
+    These use realistic telemetry distributions (latency in ms, error rates as
+    percentages) across multiple services, exercising the same Nivara APIs as the
+    generic fixtures but on plausible production-like data.
+    """
+    incident_dir = os.path.join(REPO_ROOT, "samples", "data", "polars-incident")
+    os.makedirs(incident_dir, exist_ok=True)
+    incident_manifest = []
+
+    # --- Latency percentiles per service ---
+    for name, services, q in INCIDENT_QUANTILE_CASES:
+        expected = {}
+        for svc, values in services.items():
+            series = pl.Series("v", values, dtype=pl.Float64)
+            val = series.quantile(q, interpolation="linear")
+            expected[svc] = None if val is None else float(val)
+        case = {
+            "name": name,
+            "kind": "quantile_per_service",
+            "q": q,
+            "services": {svc: [None if v is None else float(v) for v in vals]
+                         for svc, vals in services.items()},
+            "expected": expected,
+        }
+        incident_manifest.append(case)
+        print(f"  {name}: q={q} expected={expected}")
+
+    # --- Error-rate rolling windows per service ---
+    for name, services, window_size, min_samples in INCIDENT_ROLLING_CASES:
+        expected_rolling_mean = {}
+        for svc, values in services.items():
+            df = pl.DataFrame({"g": [svc] * len(values), "v": values})
+            result = df.with_columns(
+                pl.col("v").rolling_mean(window_size=window_size, min_samples=min_samples).alias("rolling_mean")
+            )
+            means = [None if v is None else float(v)
+                     for v in result["rolling_mean"].to_list()]
+            expected_rolling_mean[svc] = means
+        case = {
+            "name": name,
+            "kind": "rolling_per_service",
+            "window_size": window_size,
+            "min_samples": min_samples,
+            "services": {svc: [None if v is None else float(v) for v in vals]
+                         for svc, vals in services.items()},
+            "expected_rolling_mean": expected_rolling_mean,
+        }
+        incident_manifest.append(case)
+        print(f"  {name}: window={window_size} min_s={min_samples} services={list(services.keys())}")
+
+    # --- Rank/PercentRank per service by error delta ---
+    for name, services in INCIDENT_RANK_CASES:
+        # Build a dataframe with non-null services for rank computation
+        svc_names = []
+        deltas = []
+        for svc, delta in services.items():
+            if delta is not None:
+                svc_names.append(svc)
+                deltas.append(delta)
+
+        df = pl.DataFrame({"service": svc_names, "delta": deltas})
+        ranked = df.with_columns([
+            pl.col("delta").rank(method="min", descending=True).alias("rank"),
+            pl.col("delta").rank(method="dense", descending=True).alias("dense_rank"),
+            ((pl.col("delta").rank(method="min", descending=True) - 1)
+             / (pl.len() - 1)).alias("percent_rank"),
+        ])
+
+        # Build expected dicts (only non-null services get ranks; null services -> null)
+        expected_rank = {}
+        expected_dense = {}
+        expected_pct = {}
+        for row in ranked.iter_rows(named=True):
+            expected_rank[row["service"]] = int(row["rank"])
+            expected_dense[row["service"]] = int(row["dense_rank"])
+            expected_pct[row["service"]] = float(row["percent_rank"])
+        for svc in services:
+            if services[svc] is None:
+                expected_rank[svc] = None
+                expected_dense[svc] = None
+                expected_pct[svc] = None
+
+        case = {
+            "name": name,
+            "kind": "rank_per_service",
+            "services": {svc: delta for svc, delta in services.items()},
+            "expected_rank": expected_rank,
+            "expected_dense_rank": expected_dense,
+            "expected_percent_rank": expected_pct,
+        }
+        incident_manifest.append(case)
+        print(f"  {name}: rank={expected_rank} dense={expected_dense} pct={expected_pct}")
+
+    # --- StdDev per service ---
+    for name, services, ddof in INCIDENT_STDDEV_CASES:
+        expected = {}
+        for svc, values in services.items():
+            series = pl.Series("v", values, dtype=pl.Float64)
+            val = series.std(ddof=ddof)
+            expected[svc] = None if val is None else float(val)
+        case = {
+            "name": name,
+            "kind": "stddev_per_service",
+            "ddof": ddof,
+            "services": {svc: [None if v is None else float(v) for v in vals]
+                         for svc, vals in services.items()},
+            "expected": expected,
+        }
+        incident_manifest.append(case)
+        print(f"  {name}: ddof={ddof} expected={expected}")
+
+    manifest_path = os.path.join(incident_dir, "manifest.json")
+    with open(manifest_path, "w") as f:
+        json.dump(incident_manifest, f, indent=2)
+    print(f"\nIncident manifest: {manifest_path}")
+    print(f"Total incident test cases: {len(incident_manifest)}")
+    return incident_manifest
 
 
 def emit_moment_fixtures(pl):
