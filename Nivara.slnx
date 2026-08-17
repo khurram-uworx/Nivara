@@ -16,6 +16,7 @@
     <Project Path="samples/NivaraInference/NivaraInference.csproj" />
     <Project Path="samples/NivaraTimeSeries/NivaraTimeSeries.csproj" />
     <Project Path="samples/NivaraVAE/NivaraVAE.csproj" />
+    <Project Path="samples/NivaraIncident.Cli/NivaraIncident.Cli.csproj" />
   </Folder>
   <Folder Name="/Solution Items/">
     <File Path=".editorconfig" />
