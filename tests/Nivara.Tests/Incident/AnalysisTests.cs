@@ -51,8 +51,7 @@ public class AnalysisTests
     {
         var dir = Path.Combine(tempDir, sid);
         var scenario = Scenarios.Get(sid);
-        using var qf = Analysis.AnalyzeDeploymentCorrelation(dir, scenario);
-        using var frame = qf.Collect();
+        using var frame = Analysis.AnalyzeDeploymentCorrelation(dir, scenario);
         Assert.That(frame.RowCount, Is.GreaterThan(0));
     }
 
@@ -61,8 +60,7 @@ public class AnalysisTests
     {
         var dir = Path.Combine(tempDir, "C");
         var scenario = Scenarios.Get("C");
-        using var qf = Analysis.AnalyzeSaturationOrdering(dir, scenario);
-        using var frame = qf.Collect();
+        using var frame = Analysis.AnalyzeSaturationOrdering(dir, scenario);
         Assert.That(frame.RowCount, Is.GreaterThan(0));
 
         var serviceCol = frame.GetColumn<string>("Service");
@@ -82,8 +80,7 @@ public class AnalysisTests
     {
         var dir = Path.Combine(tempDir, sid);
         var scenario = Scenarios.Get(sid);
-        using var qf = Analysis.AnalyzeSaturationOrdering(dir, scenario);
-        using var frame = qf.Collect();
+        using var frame = Analysis.AnalyzeSaturationOrdering(dir, scenario);
         Assert.That(frame.RowCount, Is.GreaterThan(0));
     }
 
@@ -95,8 +92,7 @@ public class AnalysisTests
     {
         var dir = Path.Combine(tempDir, sid);
         var scenario = Scenarios.Get(sid);
-        using var qf = Analysis.AnalyzeRegionalPartitioning(dir, scenario);
-        using var frame = qf.Collect();
+        using var frame = Analysis.AnalyzeRegionalPartitioning(dir, scenario);
         Assert.That(frame.RowCount, Is.GreaterThan(0));
     }
 
@@ -182,8 +178,7 @@ public class AnalysisTests
     {
         var dir = Path.Combine(tempDir, "D");
         var scenario = Scenarios.Get("D");
-        using var qf = Analysis.AnalyzeRegionalPartitioning(dir, scenario);
-        using var frame = qf.Collect();
+        using var frame = Analysis.AnalyzeRegionalPartitioning(dir, scenario);
 
         var regionCol = frame.GetColumn<string>("Region");
         var regions = new HashSet<string>();
@@ -231,6 +226,127 @@ public class AnalysisTests
             services2.Add((string)serviceCol2.GetValue(i)!);
 
         Assert.That(services2, Is.EquivalentTo(services));
+    }
+
+    [Test]
+    public void DeploymentCorrelation_B_HasDeploymentColumns()
+    {
+        var dir = Path.Combine(tempDir, "B");
+        var scenario = Scenarios.Get("B");
+        using var frame = Analysis.AnalyzeDeploymentCorrelation(dir, scenario);
+
+        Assert.That(frame.ColumnNames, Does.Contain("DeploymentVersion"));
+        Assert.That(frame.ColumnNames, Does.Contain("TimeSinceDeploySec"));
+        Assert.That(frame.ColumnNames, Does.Contain("ErrorCategory"));
+
+        var versionCol = frame.GetColumn<string>("DeploymentVersion");
+        int nonEmptyVersions = 0;
+        for (int i = 0; i < frame.RowCount; i++)
+        {
+            var v = (string)versionCol.GetValue(i)!;
+            if (!string.IsNullOrEmpty(v)) nonEmptyVersions++;
+        }
+        Assert.That(nonEmptyVersions, Is.GreaterThan(0));
+    }
+
+    [Test]
+    public void DeploymentCorrelation_B_ErrorCategoriesAreValid()
+    {
+        var dir = Path.Combine(tempDir, "B");
+        var scenario = Scenarios.Get("B");
+        using var frame = Analysis.AnalyzeDeploymentCorrelation(dir, scenario);
+
+        var categoryCol = frame.GetColumn<string>("ErrorCategory");
+        var categories = new HashSet<string>();
+        for (int i = 0; i < frame.RowCount; i++)
+            categories.Add((string)categoryCol.GetValue(i)!);
+
+        Assert.That(categories, Does.Contain("server_error"));
+        Assert.That(categories, Does.Contain("success"));
+    }
+
+    [Test]
+    public void DeploymentCorrelation_Determinism()
+    {
+        var dir = Path.Combine(tempDir, "B");
+        var scenario = Scenarios.Get("B");
+        using var frame1 = Analysis.AnalyzeDeploymentCorrelation(dir, scenario);
+        using var frame2 = Analysis.AnalyzeDeploymentCorrelation(dir, scenario);
+        Assert.That(frame2.RowCount, Is.EqualTo(frame1.RowCount));
+    }
+
+    [Test]
+    public void SaturationOrdering_C_HasQuantileColumns()
+    {
+        var dir = Path.Combine(tempDir, "C");
+        var scenario = Scenarios.Get("C");
+        using var frame = Analysis.AnalyzeSaturationOrdering(dir, scenario);
+
+        Assert.That(frame.ColumnNames, Does.Contain("P50QueueDepth"));
+        Assert.That(frame.ColumnNames, Does.Contain("P95QueueDepth"));
+        Assert.That(frame.ColumnNames, Does.Contain("P99QueueDepth"));
+        Assert.That(frame.ColumnNames, Does.Contain("StdDevQueueDepth"));
+
+        var p50Col = frame.GetColumn<double>("P50QueueDepth");
+        var p95Col = frame.GetColumn<double>("P95QueueDepth");
+        var p99Col = frame.GetColumn<double>("P99QueueDepth");
+
+        for (int i = 0; i < frame.RowCount; i++)
+        {
+            var p50 = (double)p50Col.GetValue(i)!;
+            var p95 = (double)p95Col.GetValue(i)!;
+            var p99 = (double)p99Col.GetValue(i)!;
+            Assert.That(p95, Is.GreaterThanOrEqualTo(p50),
+                $"P95 ({p95}) should be >= P50 ({p50}) at row {i}");
+            Assert.That(p99, Is.GreaterThanOrEqualTo(p95),
+                $"P99 ({p99}) should be >= P95 ({p95}) at row {i}");
+        }
+    }
+
+    [Test]
+    public void SaturationOrdering_Determinism()
+    {
+        var dir = Path.Combine(tempDir, "C");
+        var scenario = Scenarios.Get("C");
+        using var frame1 = Analysis.AnalyzeSaturationOrdering(dir, scenario);
+        using var frame2 = Analysis.AnalyzeSaturationOrdering(dir, scenario);
+        Assert.That(frame2.RowCount, Is.EqualTo(frame1.RowCount));
+    }
+
+    [Test]
+    public void RegionalPartitioning_D_HasErrorRateAndRank()
+    {
+        var dir = Path.Combine(tempDir, "D");
+        var scenario = Scenarios.Get("D");
+        using var frame = Analysis.AnalyzeRegionalPartitioning(dir, scenario);
+
+        Assert.That(frame.ColumnNames, Does.Contain("ErrorRate"));
+        Assert.That(frame.ColumnNames, Does.Contain("ErrorRank"));
+        Assert.That(frame.ColumnNames, Does.Contain("P50Duration"));
+        Assert.That(frame.ColumnNames, Does.Contain("P95Duration"));
+
+        var errorRateCol = frame.GetColumn<double>("ErrorRate");
+        var rankCol = frame.GetColumn<long>("ErrorRank");
+
+        for (int i = 0; i < frame.RowCount; i++)
+        {
+            var rate = (double)errorRateCol.GetValue(i)!;
+            Assert.That(rate, Is.GreaterThanOrEqualTo(0.0).And.LessThanOrEqualTo(1.0),
+                $"ErrorRate out of range at row {i}");
+            var rank = (long)rankCol.GetValue(i)!;
+            Assert.That(rank, Is.GreaterThan(0),
+                $"ErrorRank should be positive at row {i}");
+        }
+    }
+
+    [Test]
+    public void RegionalPartitioning_Determinism()
+    {
+        var dir = Path.Combine(tempDir, "D");
+        var scenario = Scenarios.Get("D");
+        using var frame1 = Analysis.AnalyzeRegionalPartitioning(dir, scenario);
+        using var frame2 = Analysis.AnalyzeRegionalPartitioning(dir, scenario);
+        Assert.That(frame2.RowCount, Is.EqualTo(frame1.RowCount));
     }
 
     static void GenerateSmallDataset(string dir, string scenarioId)
