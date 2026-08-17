@@ -223,8 +223,9 @@ internal static class GradOperationKernels
         T scale = sumGradX / T.CreateChecked(n * rms3);
         T invRms = T.CreateChecked(1.0 / rms);
 
-        for (int i = 0; i < n; i++)
-            result[i] = gSpan[i] * invRms - inSpan[i] * scale;
+        TensorPrimitives.Multiply(gSpan, invRms, result);
+        T negScale = -scale;
+        TensorPrimitives.MultiplyAdd(inSpan, negScale, result, result);
 
         return NivaraColumn<T>.CreateFromOwnedArray(result);
     }
@@ -238,23 +239,9 @@ internal static class GradOperationKernels
         if (scalarGrad.Length != 1)
             throw new ArgumentException($"Expected scalar gradient with length 1, got {scalarGrad.Length}");
 
-        if (scalarGrad.TryGetSpan(out var span))
-        {
-            var filled = new T[targetLength];
-            Array.Fill(filled, span[0]);
-            return NivaraColumn<T>.CreateFromOwnedArray(filled);
-        }
-
-        var gradValue = scalarGrad[0];
-        var rented = ArrayPool<T>.Shared.Rent(targetLength);
-        try
-        {
-            Array.Fill(rented, gradValue, 0, targetLength);
-            return NivaraColumn<T>.Create(rented.AsSpan(0, targetLength));
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(rented, clearArray: true);
-        }
+        scalarGrad.TryGetSpan(out var span);
+        var filled = new T[targetLength];
+        Array.Fill(filled, span[0]);
+        return NivaraColumn<T>.CreateFromOwnedArray(filled);
     }
 }

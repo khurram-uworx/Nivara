@@ -97,4 +97,20 @@ public class OperationTests
         Assert.That(output.Shape, Is.EqualTo(new[] { 4, 16 }));
         TestHelpers.AssertTensorEqual(expected, TestHelpers.ExtractOutput(output), label: "MatMulTransposedB");
     }
+
+    [Test]
+    public void Pow_MatchesPyTorch()
+    {
+        var input = TestHelpers.LoadBin("pow_input.bin");
+        var expected = TestHelpers.LoadBin("pow_output.bin");
+        var expectedGrad = TestHelpers.LoadBin("pow_grad.bin");
+
+        var inputTensor = ReverseGradTensor<float>.FromArray(input, requiresGrad: true);
+        var output = ReverseGradOperations.Pow(inputTensor, 2.0);
+
+        TestHelpers.AssertTensorEqual(expected, TestHelpers.ExtractOutput(output), label: "Pow");
+
+        ReverseGradOperations.Sum(output).Backward();
+        TestHelpers.AssertTensorEqual(expectedGrad, TestHelpers.ExtractGrad(inputTensor), label: "Pow grad");
+    }
 }

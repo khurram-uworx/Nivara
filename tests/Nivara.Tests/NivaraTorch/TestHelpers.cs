@@ -80,6 +80,15 @@ public static class TestHelpers
         return arr;
     }
 
+    internal static float[] ExtractGrad(ReverseGradTensor<float> tensor)
+    {
+        var grad = tensor.Grad ?? throw new InvalidOperationException("Tensor has no gradient");
+        var arr = new float[grad.Length];
+        for (int i = 0; i < grad.Length; i++)
+            arr[i] = grad[i];
+        return arr;
+    }
+
     internal static float ScalarOutput(ReverseGradTensor<float> tensor)
     {
         Assert.That(tensor.Length, Is.EqualTo(1), "Expected scalar tensor (length 1)");

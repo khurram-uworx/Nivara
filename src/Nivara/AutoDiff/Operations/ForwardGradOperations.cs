@@ -1345,20 +1345,19 @@ public static class ForwardGradOperations
         if (scale.Length != c)
             throw new ArgumentException($"Scale length ({scale.Length}) must match input channel dimension ({c})");
 
-        var inputData = new T[input.Length];
-        input.Data.CopyTo(inputData, T.Zero);
-        var scaleData = new T[c];
-        scale.Data.CopyTo(scaleData, T.Zero);
+        input.Data.TryGetSpan(out var inputSpan);
+        scale.Data.TryGetSpan(out var scaleSpan);
 
         int channelStride = 1;
         for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
 
         var outputData = new T[input.Length];
-        for (int idx = 0; idx < input.Length; idx++)
-        {
-            int ch = (idx / channelStride) % c;
-            outputData[idx] = inputData[idx] * scaleData[ch];
-        }
+        for (int b = 0; b < input.shape[0]; b++)
+            for (int ch = 0; ch < c; ch++)
+            {
+                int offset = (b * c + ch) * channelStride;
+                TensorPrimitives.Multiply(inputSpan.Slice(offset, channelStride), scaleSpan[ch], outputData.AsSpan(offset, channelStride));
+            }
 
         var primal = NivaraColumn<T>.CreateFromOwnedArray(outputData);
 
@@ -1369,21 +1368,23 @@ public static class ForwardGradOperations
             if (input.Tangent != null)
             {
                 input.Tangent.TryGetSpan(out var inputTanSpan);
-                for (int idx = 0; idx < input.Length; idx++)
-                {
-                    int ch = (idx / channelStride) % c;
-                    tanData[idx] = inputTanSpan[idx] * scaleData[ch];
-                }
+                for (int b = 0; b < input.shape[0]; b++)
+                    for (int ch = 0; ch < c; ch++)
+                    {
+                        int offset = (b * c + ch) * channelStride;
+                        TensorPrimitives.Multiply(inputTanSpan.Slice(offset, channelStride), scaleSpan[ch], tanData.AsSpan(offset, channelStride));
+                    }
             }
 
             if (scale.Tangent != null)
             {
                 scale.Tangent.TryGetSpan(out var scaleTanSpan);
-                for (int idx = 0; idx < input.Length; idx++)
-                {
-                    int ch = (idx / channelStride) % c;
-                    tanData[idx] += inputData[idx] * scaleTanSpan[ch];
-                }
+                for (int b = 0; b < input.shape[0]; b++)
+                    for (int ch = 0; ch < c; ch++)
+                    {
+                        int offset = (b * c + ch) * channelStride;
+                        TensorPrimitives.MultiplyAdd(inputSpan.Slice(offset, channelStride), scaleTanSpan[ch], tanData.AsSpan(offset, channelStride), tanData.AsSpan(offset, channelStride));
+                    }
             }
 
             tangent = NivaraColumn<T>.CreateFromOwnedArray(tanData);
@@ -1408,20 +1409,19 @@ public static class ForwardGradOperations
         if (bias.Length != c)
             throw new ArgumentException($"Bias length ({bias.Length}) must match input channel dimension ({c})");
 
-        var inputData = new T[input.Length];
-        input.Data.CopyTo(inputData, T.Zero);
-        var biasData = new T[c];
-        bias.Data.CopyTo(biasData, T.Zero);
+        input.Data.TryGetSpan(out var inputSpan);
+        bias.Data.TryGetSpan(out var biasSpan);
 
         int channelStride = 1;
         for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
 
         var outputData = new T[input.Length];
-        for (int idx = 0; idx < input.Length; idx++)
-        {
-            int ch = (idx / channelStride) % c;
-            outputData[idx] = inputData[idx] + biasData[ch];
-        }
+        for (int b = 0; b < input.shape[0]; b++)
+            for (int ch = 0; ch < c; ch++)
+            {
+                int offset = (b * c + ch) * channelStride;
+                TensorPrimitives.Add(inputSpan.Slice(offset, channelStride), biasSpan[ch], outputData.AsSpan(offset, channelStride));
+            }
 
         var primal = NivaraColumn<T>.CreateFromOwnedArray(outputData);
 
@@ -1436,11 +1436,12 @@ public static class ForwardGradOperations
                 aTan.TryGetSpan(out var aTanSpan);
                 bTan.TryGetSpan(out var bTanSpan);
                 var tanArr = new T[input.Length];
-                for (int idx = 0; idx < input.Length; idx++)
-                {
-                    int ch = (idx / channelStride) % c;
-                    tanArr[idx] = aTanSpan[idx] + bTanSpan[ch];
-                }
+                for (int b = 0; b < input.shape[0]; b++)
+                    for (int ch = 0; ch < c; ch++)
+                    {
+                        int offset = (b * c + ch) * channelStride;
+                        TensorPrimitives.Add(aTanSpan.Slice(offset, channelStride), bTanSpan[ch], tanArr.AsSpan(offset, channelStride));
+                    }
                 tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
             }
             else if (aTan != null)
@@ -1451,11 +1452,12 @@ public static class ForwardGradOperations
             {
                 bTan.TryGetSpan(out var bTanSpan);
                 var tanArr = new T[input.Length];
-                for (int idx = 0; idx < input.Length; idx++)
-                {
-                    int ch = (idx / channelStride) % c;
-                    tanArr[idx] = bTanSpan[ch];
-                }
+                for (int b = 0; b < input.shape[0]; b++)
+                    for (int ch = 0; ch < c; ch++)
+                    {
+                        int offset = (b * c + ch) * channelStride;
+                        Array.Fill(tanArr, bTanSpan[ch], offset, channelStride);
+                    }
                 tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
             }
         }

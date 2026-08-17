@@ -1,8 +1,9 @@
 # NivaraIncident — Implementation Plan
 
 **Status:** Phase 1 core gap-fills (1.1–1.5) are **complete**:
-1.1 ✅, 1.2 ✅, 1.3 ✅, 1.4 ✅, 1.5 ✅ (see the 1.6 completion marker below). Phase 2+ is
-**deferred** to a follow-up (issue #284) — see the "Phase 1 → Phase 2+ handoff notes" section.
+1.1 ✅, 1.2 ✅, 1.3 ✅, 1.4 ✅, 1.5 ✅ (see the 1.6 completion marker below). Phase 2
+(2.1–2.4) is **complete** on `khurram/incident-phase2` — see the "Phase 2 → Phase 3 handoff
+notes" section. Phase 3+ is **deferred** to a follow-up (issue #284).
 **Scope:** `samples/NivaraIncident/` reference application + the core-library improvements it
 drives (`src/Nivara`, `src/Nivara.Extensions`)
 **Inputs:** `samples/NivaraIncident/IDEA.md` (product spec), `samples/NivaraIncident/README.md`
@@ -132,7 +133,11 @@ step; tick each item and commit):
 
 ---
 
-## Phase 1 → Phase 2+ handoff notes
+## Phase 1 → Phase 2+ handoff notes (SUPERSEDED)
+
+> Phase 2 is now complete on `khurram/incident-phase2`. The notes below are kept for historical
+> reference; the authoritative handoff for Phase 3 is the "Phase 2 → Phase 3 handoff notes"
+> section above.
 
 Facts the Phase 2+ agents/teams need from the Phase 1 branch (`khurram/incident`):
 
@@ -168,36 +173,60 @@ Facts the Phase 2+ agents/teams need from the Phase 1 branch (`khurram/incident`
 
 ## Phase 2 — AutoDiff ADR-001 cleanup + SIMD (small, high-value, low-risk)
 
-> **Status: DEFERRED** to a follow-up (issue #284). Do these while the sample is being built;
-> each is a verified, isolated improvement.
+> **Status: COMPLETE** on `khurram/incident-phase2` (513 targeted tests green, 0 failures).
+> 2.1 ✅, 2.2 ✅, 2.3 ✅, 2.4 ✅.
 
-### 2.1 Dead branch removal inside the non-null domain
-- `Gather` (`ReverseGradOperations.cs:2423-2441`): drop the unreachable `TryGetSpan` `else`
+### 2.1 Dead branch removal inside the non-null domain ✅
+- `Gather` (`ReverseGradOperations.cs`): dropped the unreachable `TryGetSpan` `else`
   indexer fallback.
-- `BroadcastGradient` (`GradOperationKernels.cs:241-258`): drop the `TryGetSpan` + `ArrayPool`
-  fallback; keep the single `Array.Fill` path.
-- Re-run the ADR-001 audit (grep for `HasNulls|NullMask|nullMask|IsNull(|WithoutNulls|TryGetNullMask`
-  in `src/Nivara/AutoDiff/`) before and after; the domain interior must stay null-free and the
-  boundary checks (constructors, `TensorDataset`, `AsSpan`) must remain.
+- `BroadcastGradient` (`GradOperationKernels.cs`): dropped the `TryGetSpan` + `ArrayPool`
+  fallback; kept the single `Array.Fill` path.
+- ADR-001 audit clean: 7 boundary matches only, zero interior matches.
 
-### 2.2 `Pow` routed through the shared SIMD kernel
-- `ReverseGradOperations.Pow` (`:1637-1655`) is the inconsistent outlier — scalar `Math.Pow`
-  loop while forward-mode and `GradOperationKernels` use `TensorPrimitives.Pow`. Route reverse
-  `Pow` through `ApplyPow`/`ApplyPowGradient`; add a PyTorch-parity regression test (NivaraTorch
-  fixtures cover Pow — regenerate/extend).
+### 2.2 `Pow` routed through the shared SIMD kernel ✅
+- `ReverseGradOperations.Pow` now routes through `GradOperationKernels.ApplyPow`/`ApplyPowGradient`
+  (TensorPrimitives.Pow SIMD) instead of scalar `Math.Pow`. Forward-time `aArr` copy allocation removed.
+- NivaraTorch parity fixture (`pow`): forward + backward vs PyTorch `gen_reference.py`.
+- Hand-computed gradient tests: integer exponent (2.0) and fractional (0.5).
 
-### 2.3 Verify optimizer SIMD coverage (no code needed if complete)
-- Float/double/Half each dispatch to dedicated SIMD kernels in Adam (`Adam.cs:83/97/111`) and
-  AdamW (`AdamW.cs:83/85/97`); the trailing scalar loop is a defensive fallback for other
-  `IFloatingPointIeee754<T>` types (none in net10). Confirm with a quick kernel-selection check;
-  no new `double` kernel is required (earlier audit claim was incorrect).
-- **Validation:** existing optimizer tests + a `double` training parity test.
+### 2.3 Verify optimizer SIMD coverage ✅
+- Confirmed float/double/Half dispatch to dedicated SIMD kernels in Adam and AdamW.
+- New `Adam_TrainingLoop_FloatAndDouble_ProduceEquivalentTrajectories` test validates double path.
 
-### 2.4 Secondary SIMD candidates (if time permits)
-- RMSNorm grad chain (`GradOperationKernels.cs:226-227`).
-- `BroadcastMultiply`/`BroadcastAdd` per-channel-run `TensorPrimitives`
-  (`ReverseGradOperations.cs:2651-2683, 2723-2749`; `ForwardGradOperations.cs:1357-1454`).
-- SGD momentum step (`SGD.cs:20-39`).
+### 2.4 Secondary SIMD candidates ✅
+- **RMSNorm grad chain** (`GradOperationKernels.cs`): element loop replaced with
+  `TensorPrimitives.Multiply` + `TensorPrimitives.MultiplyAdd` (SIMD).
+- **Broadcast per-channel-run SIMD** (reverse + forward `BroadcastMultiply`/`BroadcastAdd`):
+  element-by-element loops replaced with per-run `TensorPrimitives.Multiply`/`Add`/`Dot`/`Sum`.
+  Scale/bias gradients use SIMD Dot/Sum per channel run.
+- **SGD momentum step** (`SGD.cs`): element loops in `stepNoMomentumInPlace` and
+  `stepWithMomentumInPlace` replaced with `TensorPrimitives.Multiply`/`Add`/`Subtract`/`MultiplyAdd`
+  (ArrayPool temp buffer for intermediates).
+
+---
+
+## Phase 2 → Phase 3 handoff notes
+
+Facts the Phase 3 agents/teams need from the Phase 2 branch (`khurram/incident-phase2`):
+
+- **2.1:** ADR-001 audit remains clean (7 boundary matches only). Dead nullable fallbacks removed
+  from `Gather` and `BroadcastGradient`; domain interior is fully null-free.
+- **2.2:** Reverse-mode `Pow` now routes through the shared `GradOperationKernels.ApplyPow`/`ApplyPowGradient`
+  (SIMD via `TensorPrimitives.Pow`). Any Phase 4 AutoDiff microbenchmark (Phase 4 item 4) should
+  use Pow to show the SIMD impact; NivaraTorch `pow` fixture (forward + backward) exists for
+  regression. The scalar `Math.Pow` path and the forward-time `aArr` copy allocation are eliminated.
+- **2.3:** Optimizer float/double/Half SIMD kernel routing confirmed — no new kernel work needed
+  for Phase 4 training microbenchmarks. The `Adam_TrainingLoop_FloatAndDouble_ProduceEquivalentTrajectories`
+  test validates cross-type training parity.
+- **2.4:** RMSNorm grad, Broadcast per-channel runs, and SGD momentum are all SIMD-accelerated.
+  Phase 4 kernel-selection visibility (% vectorized) should reflect these. The broadcast ops
+  now use per-run `TensorPrimitives.Multiply`/`Add`/`Dot`/`Sum` instead of element-by-element
+  loops; SGD uses `TensorPrimitives.Multiply`/`Add`/`Subtract`/`MultiplyAdd` with an
+  `ArrayPool`-rented temp buffer.
+- **Stale-anchor caveat:** line numbers in Phase 2 specs drifted before execution — always
+  re-grep fresh before editing any AutoDiff file (code evolves between phases).
+- **ADR-001 audit remains clean** after 2.1; run the same grep before/after any future
+  AutoDiff interior changes.
 
 ---
 
@@ -285,8 +314,8 @@ as a GitHub issue referencing the sample.
 
 ## Definition of done
 
-> **On `khurram/incident` the DoD is scoped to Phase 1 only:** the Phase 1 items below, plus the
-> 1.6 completion marker. The full DoD (replay/CLI/Web UI convergence) applies when Phase 2+ land.
+> **On `khurram/incident` the DoD is scoped to Phase 1 only; on `khurram/incident-phase2`
+> Phase 2 is also complete.** The full DoD (replay/CLI/Web UI convergence) applies when Phase 3+ land.
 
 - All README gap items marked **open** are either fixed in core, worked around in the sample with
   an escalation issue recorded, or explicitly accepted with evidence.

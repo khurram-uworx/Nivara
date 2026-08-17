@@ -1634,26 +1634,16 @@ public static class ReverseGradOperations
     {
         if (a == null) throw new ArgumentNullException(nameof(a));
 
-        var aArr = new T[a.Length];
-        a.AsSpan().CopyTo(aArr.AsSpan());
-        var resultArr = new T[a.Length];
-        for (int i = 0; i < a.Length; i++)
-            resultArr[i] = T.CreateChecked(Math.Pow(double.CreateChecked(aArr[i]), exponent));
-
-        var resultTensor = ResultTensor(resultArr, a, GradientUtils.ShouldTrackGrad(a));
+        var resultTensor = new ReverseGradTensor<T>(
+            GradOperationKernels.ApplyPow(a.Data, exponent),
+            GradientUtils.ShouldTrackGrad(a),
+            a.shape);
 
         if (GradientUtils.ShouldTrackGrad(a))
         {
             var gradFn = new OpNode<T>("Pow", [a], (typedGradOutput) =>
             {
-                var gradArr = new T[a.Length];
-                for (int i = 0; i < a.Length; i++)
-                {
-                    double x = double.CreateChecked(aArr[i]);
-                    double g = double.CreateChecked(typedGradOutput[i]);
-                    gradArr[i] = T.CreateChecked(exponent * Math.Pow(x, exponent - 1.0) * g);
-                }
-                AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
+                AccumulateGradient(a, GradOperationKernels.ApplyPowGradient(a.Data, typedGradOutput, exponent));
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
@@ -2429,16 +2419,6 @@ public static class ReverseGradOperations
                         span.Slice(srcOffset, stride).CopyTo(resultValues.AsSpan(dstOffset, stride));
                     }
                 }
-                else
-                {
-                    for (int i = 0; i < indices.Length; i++)
-                    {
-                        int srcOffset = indices[i] * stride;
-                        int dstOffset = i * stride;
-                        for (int j = 0; j < stride; j++)
-                            resultValues[dstOffset + j] = source.Data[srcOffset + j];
-                    }
-                }
 
                 var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
 
@@ -2639,20 +2619,22 @@ public static class ReverseGradOperations
         if (scale.Length != c)
             throw new ArgumentException($"Scale length ({scale.Length}) must match input channel dimension ({c})");
 
-        var inputData = new T[input.Length];
-        input.Data.CopyTo(inputData, T.Zero);
-        var scaleData = new T[c];
-        scale.Data.CopyTo(scaleData, T.Zero);
+        input.Data.TryGetSpan(out var inputSpan);
+        scale.Data.TryGetSpan(out var scaleSpan);
+
+        var inputArr = inputSpan.ToArray();
+        var scaleArr = scaleSpan.ToArray();
 
         int channelStride = 1;
         for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
 
         var outputData = new T[input.Length];
-        for (int idx = 0; idx < input.Length; idx++)
-        {
-            int ch = (idx / channelStride) % c;
-            outputData[idx] = inputData[idx] * scaleData[ch];
-        }
+        for (int b = 0; b < input.shape[0]; b++)
+            for (int ch = 0; ch < c; ch++)
+            {
+                int offset = (b * c + ch) * channelStride;
+                TensorPrimitives.Multiply(inputArr.AsSpan(offset, channelStride), scaleArr[ch], outputData.AsSpan(offset, channelStride));
+            }
 
         var result = NivaraColumn<T>.CreateFromOwnedArray(outputData);
         var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(input, scale), input.shape);
@@ -2661,27 +2643,28 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("BroadcastMultiply", [input, scale], (typedGradOutput) =>
             {
-                var gradData = new T[input.Length];
-                typedGradOutput.CopyTo(gradData, T.Zero);
+                typedGradOutput.TryGetSpan(out var gradSpan);
 
                 if (GradientUtils.ShouldTrackGrad(input))
                 {
                     var inputGrad = new T[input.Length];
-                    for (int idx = 0; idx < input.Length; idx++)
-                    {
-                        int ch = (idx / channelStride) % c;
-                        inputGrad[idx] = gradData[idx] * scaleData[ch];
-                    }
+                    for (int b = 0; b < input.shape[0]; b++)
+                        for (int ch = 0; ch < c; ch++)
+                        {
+                            int offset = (b * c + ch) * channelStride;
+                            TensorPrimitives.Multiply(gradSpan.Slice(offset, channelStride), scaleArr[ch], inputGrad.AsSpan(offset, channelStride));
+                        }
                     AccumulateGradient(input, NivaraColumn<T>.CreateFromOwnedArray(inputGrad));
                 }
                 if (scale.RequiresGrad)
                 {
                     var scaleGrad = new T[c];
-                    for (int idx = 0; idx < input.Length; idx++)
-                    {
-                        int ch = (idx / channelStride) % c;
-                        scaleGrad[ch] += gradData[idx] * inputData[idx];
-                    }
+                    for (int b = 0; b < input.shape[0]; b++)
+                        for (int ch = 0; ch < c; ch++)
+                        {
+                            int offset = (b * c + ch) * channelStride;
+                            scaleGrad[ch] += TensorPrimitives.Dot(gradSpan.Slice(offset, channelStride), inputArr.AsSpan(offset, channelStride));
+                        }
                     AccumulateGradient(scale, NivaraColumn<T>.CreateFromOwnedArray(scaleGrad));
                 }
             });
@@ -2711,20 +2694,19 @@ public static class ReverseGradOperations
         if (bias.Length != c)
             throw new ArgumentException($"Bias length ({bias.Length}) must match input channel dimension ({c})");
 
-        var inputData = new T[input.Length];
-        input.Data.CopyTo(inputData, T.Zero);
-        var biasData = new T[c];
-        bias.Data.CopyTo(biasData, T.Zero);
+        input.Data.TryGetSpan(out var inputSpan);
+        bias.Data.TryGetSpan(out var biasSpan);
 
         int channelStride = 1;
         for (int d = 2; d < input.Rank; d++) channelStride *= input.shape[d];
 
         var outputData = new T[input.Length];
-        for (int idx = 0; idx < input.Length; idx++)
-        {
-            int ch = (idx / channelStride) % c;
-            outputData[idx] = inputData[idx] + biasData[ch];
-        }
+        for (int b = 0; b < input.shape[0]; b++)
+            for (int ch = 0; ch < c; ch++)
+            {
+                int offset = (b * c + ch) * channelStride;
+                TensorPrimitives.Add(inputSpan.Slice(offset, channelStride), biasSpan[ch], outputData.AsSpan(offset, channelStride));
+            }
 
         var result = NivaraColumn<T>.CreateFromOwnedArray(outputData);
         var resultTensor = new ReverseGradTensor<T>(result, GradientUtils.ShouldTrackGrad(input, bias), input.shape);
@@ -2733,8 +2715,7 @@ public static class ReverseGradOperations
         {
             var gradFn = new OpNode<T>("BroadcastAdd", [input, bias], (typedGradOutput) =>
             {
-                var gradData = new T[input.Length];
-                typedGradOutput.CopyTo(gradData, T.Zero);
+                typedGradOutput.TryGetSpan(out var gradSpan);
 
                 if (GradientUtils.ShouldTrackGrad(input))
                 {
@@ -2743,11 +2724,12 @@ public static class ReverseGradOperations
                 if (bias.RequiresGrad)
                 {
                     var biasGrad = new T[c];
-                    for (int idx = 0; idx < input.Length; idx++)
-                    {
-                        int ch = (idx / channelStride) % c;
-                        biasGrad[ch] += gradData[idx];
-                    }
+                    for (int b = 0; b < input.shape[0]; b++)
+                        for (int ch = 0; ch < c; ch++)
+                        {
+                            int offset = (b * c + ch) * channelStride;
+                            biasGrad[ch] += TensorPrimitives.Sum(gradSpan.Slice(offset, channelStride));
+                        }
                     AccumulateGradient(bias, NivaraColumn<T>.CreateFromOwnedArray(biasGrad));
                 }
             });

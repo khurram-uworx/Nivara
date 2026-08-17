@@ -1,9 +1,11 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Nn.Initializers;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -870,6 +872,43 @@ public class OptimizerTests
     }
 
     [Test]
+    public void Adam_TrainingLoop_FloatAndDouble_ProduceEquivalentTrajectories()
+    {
+        var modelF = new Linear<float>(inFeatures: 2, outFeatures: 1, weightInitializer: new DeterministicInit<float>());
+        var adamF = new Adam<float>(0.05f);
+        adamF.AddParameterGroup(modelF.GetParameters().Values);
+
+        var modelD = new Linear<double>(inFeatures: 2, outFeatures: 1, weightInitializer: new DeterministicInit<double>());
+        var adamD = new Adam<double>(learningRate: 0.05);
+        adamD.AddParameterGroup(modelD.GetParameters().Values);
+
+        var xF = ReverseGradTensor<float>.FromArray(new float[] { 1f, 0f, 0f, 1f, 1f, 1f, -1f, 0.5f }, requiresGrad: false);
+        xF.Reshape(4, 2);
+        var xD = ReverseGradTensor<double>.FromArray(new double[] { 1.0, 0.0, 0.0, 1.0, 1.0, 1.0, -1.0, 0.5 }, requiresGrad: false);
+        xD.Reshape(4, 2);
+
+        for (int step = 0; step < 10; step++)
+        {
+            var predF = modelF.Forward(xF);
+            ReverseGradOperations.Sum(predF).Backward();
+            adamF.Step();
+            adamF.ZeroGrad();
+
+            var predD = modelD.Forward(xD);
+            ReverseGradOperations.Sum(predD).Backward();
+            adamD.Step();
+            adamD.ZeroGrad();
+
+            for (int i = 0; i < modelF.Weight!.Tensor.Length; i++)
+                Assert.That((double)modelF.Weight!.Tensor[i], Is.EqualTo(modelD.Weight!.Tensor[i]).Within(1e-5),
+                    $"weight divergence at step {step} [{i}]");
+            for (int i = 0; i < modelF.Bias!.Tensor.Length; i++)
+                Assert.That((double)modelF.Bias!.Tensor[i], Is.EqualTo(modelD.Bias!.Tensor[i]).Within(1e-5),
+                    $"bias divergence at step {step} [{i}]");
+        }
+    }
+
+    [Test]
     public void Adam_StateDict_LoadStateDict_FreshOptimizer_RestoresState()
     {
         var param = new Parameter<float>("w", new float[] { 1f, 2f, 3f }, requiresGrad: true);
@@ -965,5 +1004,18 @@ public class OptimizerTests
         var reloadedState = restored.StateDict();
         Assert.That(reloadedState.Keys, Is.EquivalentTo(state.Keys));
         Assert.That(reloadedState["velocity_0"], Is.EqualTo(state["velocity_0"]).Within(1e-6f));
+    }
+
+    sealed class DeterministicInit<T> : IInitializer<T> where T : struct, IFloatingPointIeee754<T>
+    {
+        public void Initialize(Parameter<T> parameter)
+        {
+            var tensor = parameter.Tensor;
+            var data = new T[tensor.Length];
+            for (int i = 0; i < data.Length; i++)
+                data[i] = T.CreateChecked(0.05) * T.CreateChecked(i + 1);
+            var column = NivaraColumn<T>.CreateFromOwnedArray(data);
+            parameter.Tensor = new ReverseGradTensor<T>(column, tensor.RequiresGrad, tensor.Shape);
+        }
     }
 }
