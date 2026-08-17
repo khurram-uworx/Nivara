@@ -17,10 +17,28 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         grad.TryGetSpan(out var gradSpan);
         int n = data.Length;
 
-        for (int i = 0; i < n; i++)
-            writable[i] = wd != T.Zero
-                ? dataSpan[i] - lr * (wd * dataSpan[i] + gradSpan[i])
-                : dataSpan[i] - lr * gradSpan[i];
+        if (wd != T.Zero)
+        {
+            var temp = ArrayPool<T>.Shared.Rent(n);
+            try
+            {
+                TensorPrimitives.Multiply(dataSpan, wd, temp.AsSpan(0, n));
+                TensorPrimitives.Add(temp.AsSpan(0, n), gradSpan, temp.AsSpan(0, n));
+                TensorPrimitives.Multiply(temp.AsSpan(0, n), lr, temp.AsSpan(0, n));
+                TensorPrimitives.Subtract(dataSpan, temp.AsSpan(0, n), writable);
+            }
+            finally { ArrayPool<T>.Shared.Return(temp); }
+        }
+        else
+        {
+            var temp = ArrayPool<T>.Shared.Rent(n);
+            try
+            {
+                TensorPrimitives.Multiply(gradSpan, lr, temp.AsSpan(0, n));
+                TensorPrimitives.Subtract(dataSpan, temp.AsSpan(0, n), writable);
+            }
+            finally { ArrayPool<T>.Shared.Return(temp); }
+        }
     }
 
     static void stepWithMomentumInPlace(NivaraColumn<T> data, NivaraColumn<T> grad, Span<T> writable, T[] velocity, T lr, T wd)
@@ -29,14 +47,26 @@ public sealed class SGD<T> : Optimizer<T> where T : struct, IFloatingPointIeee75
         grad.TryGetSpan(out var gradSpan);
         int n = data.Length;
         var momentumT = T.CreateChecked(0.9);
+        var velocitySpan = velocity.AsSpan(0, n);
 
-        for (int i = 0; i < n; i++)
-            velocity[i] = wd != T.Zero
-                ? momentumT * velocity[i] + lr * (wd * dataSpan[i] + gradSpan[i])
-                : momentumT * velocity[i] + lr * gradSpan[i];
+        var temp = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            if (wd != T.Zero)
+            {
+                TensorPrimitives.Multiply(dataSpan, wd, temp.AsSpan(0, n));
+                TensorPrimitives.Add(temp.AsSpan(0, n), gradSpan, temp.AsSpan(0, n));
+            }
+            else
+            {
+                gradSpan.CopyTo(temp.AsSpan(0, n));
+            }
+            TensorPrimitives.Multiply(temp.AsSpan(0, n), lr, temp.AsSpan(0, n));
+            TensorPrimitives.MultiplyAdd(velocitySpan, momentumT, temp.AsSpan(0, n), velocitySpan);
+        }
+        finally { ArrayPool<T>.Shared.Return(temp); }
 
-        for (int i = 0; i < n; i++)
-            writable[i] = dataSpan[i] - velocity[i];
+        TensorPrimitives.Subtract(dataSpan, velocitySpan, writable);
     }
 
     /// <summary>

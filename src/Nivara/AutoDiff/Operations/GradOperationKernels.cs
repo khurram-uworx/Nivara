@@ -223,8 +223,9 @@ internal static class GradOperationKernels
         T scale = sumGradX / T.CreateChecked(n * rms3);
         T invRms = T.CreateChecked(1.0 / rms);
 
-        for (int i = 0; i < n; i++)
-            result[i] = gSpan[i] * invRms - inSpan[i] * scale;
+        TensorPrimitives.Multiply(gSpan, invRms, result);
+        T negScale = -scale;
+        TensorPrimitives.MultiplyAdd(inSpan, negScale, result, result);
 
         return NivaraColumn<T>.CreateFromOwnedArray(result);
     }
