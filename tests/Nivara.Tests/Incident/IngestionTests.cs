@@ -97,13 +97,19 @@ public class IngestionTests
         int chunkCount = 0;
         const int cancelAfter = 3;
 
-        await foreach (var chunk in Ingestion.StreamChunks(
-            Path.Combine(tempDir, "requests.parquet"), RowGroupSize, cts.Token))
+        try
         {
-            chunkCount++;
-            chunk.Dispose();
-            if (chunkCount >= cancelAfter)
-                cts.Cancel();
+            await foreach (var chunk in Ingestion.StreamChunks(
+                Path.Combine(tempDir, "requests.parquet"), RowGroupSize, cts.Token))
+            {
+                chunkCount++;
+                chunk.Dispose();
+                if (chunkCount >= cancelAfter)
+                    cts.Cancel();
+            }
+        }
+        catch (OperationCanceledException)
+        {
         }
 
         Assert.That(chunkCount, Is.EqualTo(cancelAfter));
