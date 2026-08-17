@@ -73,15 +73,15 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs)
 
     Console.WriteLine();
     Console.WriteLine("=== Deployment Correlation ===");
-    PrintFrameSummary(Analysis.AnalyzeDeploymentCorrelation(dsPath, sc).Collect());
+    PrintFrameSummary(Analysis.AnalyzeDeploymentCorrelation(dsPath, sc));
 
     Console.WriteLine();
     Console.WriteLine("=== Saturation Ordering ===");
-    PrintFrameSummary(Analysis.AnalyzeSaturationOrdering(dsPath, sc).Collect());
+    PrintFrameSummary(Analysis.AnalyzeSaturationOrdering(dsPath, sc));
 
     Console.WriteLine();
     Console.WriteLine("=== Regional Partitioning ===");
-    PrintFrameSummary(Analysis.AnalyzeRegionalPartitioning(dsPath, sc).Collect());
+    PrintFrameSummary(Analysis.AnalyzeRegionalPartitioning(dsPath, sc));
 
     Console.WriteLine();
     Console.WriteLine("=== Grouped Aggregation ===");
