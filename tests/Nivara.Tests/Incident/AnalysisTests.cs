@@ -56,9 +56,27 @@ public class AnalysisTests
         Assert.That(frame.RowCount, Is.GreaterThan(0));
     }
 
+    [Test]
+    public void ScenarioC_SaturationOrdering_ShowsAffectedServices()
+    {
+        var dir = Path.Combine(tempDir, "C");
+        var scenario = Scenarios.Get("C");
+        using var qf = Analysis.AnalyzeSaturationOrdering(dir, scenario);
+        using var frame = qf.Collect();
+        Assert.That(frame.RowCount, Is.GreaterThan(0));
+
+        var serviceCol = frame.GetColumn<string>("Service");
+        var services = new HashSet<string>();
+        for (int i = 0; i < frame.RowCount; i++)
+            services.Add((string)serviceCol.GetValue(i)!);
+
+        Assert.That(services, Does.Contain("gateway"));
+        Assert.That(services, Does.Contain("orders"));
+        Assert.That(services, Does.Contain("payments"));
+    }
+
     [TestCase("A")]
     [TestCase("B")]
-    [TestCase("C")]
     [TestCase("D")]
     public void SaturationOrdering_NonEmptyResults(string sid)
     {
