@@ -480,6 +480,56 @@ public class TypedLinqTests
         public int Extra { get; set; }
     }
 
+    // ── Ternary / Conditional ──
+
+    [Test]
+    public void GroupBy_TernaryInSum_ComputesCorrectly()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .GroupBy(p => p.City)
+            .Select(g => new { g.Key, OldCount = g.Sum(p => p.Age >= 35 ? 1 : 0) })
+            .ToObjects();
+
+        var nyc = rows.Single(r => r.Key == "NYC");
+        Assert.That(nyc.OldCount, Is.EqualTo(2));  // Carol(35), Eve(50)
+
+        var la = rows.Single(r => r.Key == "LA");
+        Assert.That(la.OldCount, Is.EqualTo(1));   // Bob(40)
+    }
+
+    [Test]
+    public void GroupBy_TernaryInAverage_ComputesCorrectly()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .GroupBy(p => p.City)
+            .Select(g => new { g.Key, HighSalaryRatio = g.Average(p => p.Salary >= 100000 ? 1.0 : 0.0) })
+            .ToObjects();
+
+        var nyc = rows.Single(r => r.Key == "NYC");
+        Assert.That(nyc.HighSalaryRatio, Is.EqualTo(1.0 / 3.0).Within(1e-9));  // Eve(110k) only
+
+        var la = rows.Single(r => r.Key == "LA");
+        Assert.That(la.HighSalaryRatio, Is.EqualTo(0.5).Within(1e-9));          // Bob(120k) of 2
+    }
+
+    [Test]
+    public void Select_Ternary_ProducesCorrectValues()
+    {
+        using var frame = CreatePeopleFrame();
+
+        var rows = frame.Query<Person>()
+            .Select(p => new { p.Name, SeniorBonus = p.Age >= 30 ? 1000 : 0 })
+            .ToObjects();
+
+        Assert.That(rows[0].SeniorBonus, Is.EqualTo(0));      // Alice(25)
+        Assert.That(rows[1].SeniorBonus, Is.EqualTo(1000));    // Bob(40)
+        Assert.That(rows[4].SeniorBonus, Is.EqualTo(1000));    // Eve(50)
+    }
+
     // ── Nullability ──
 
     [Test]
