@@ -370,8 +370,16 @@ internal sealed class GroupByOperation : IQueryOperation, IParallelGroupByOperat
             {
                 foreach (var aggregation in aggregations)
                 {
-                    var sourceName = GetColumnName(aggregation.Source, input);
-                    var sourceColumn = input[sourceName];
+                    IColumn sourceColumn;
+                    if (aggregation.Source is ColumnReference sourceRef && input.TryGetValue(sourceRef.ColumnName, out var existingCol))
+                    {
+                        sourceColumn = existingCol;
+                    }
+                    else
+                    {
+                        var evaluator = new FusedExpressionEvaluator();
+                        sourceColumn = evaluator.Evaluate(aggregation.Source, input);
+                    }
                     resultColumns[aggregation.ResultColumnName] =
                         aggregation.Function.ApplyToGroups(sourceColumn, groupedData.GetAllGroups());
                 }

@@ -91,6 +91,7 @@ internal static class ExpressionTypeInferer
             ScalarExpression scalar => InferScalar(scalar, input, leaves),
             ComparisonExpression comparison => InferComparison(comparison, input, leaves),
             NotExpression not => InferNot(not, input, leaves),
+            ConditionalExpression conditional => InferConditional(conditional, input, leaves),
             _ => null
         };
     }
@@ -162,6 +163,20 @@ internal static class ExpressionTypeInferer
         return operandType == typeof(bool) ? typeof(bool) : null;
     }
 
+    static Type? InferConditional(ConditionalExpression conditional, IReadOnlyDictionary<string, IColumn> input, List<FusedColumnBinding> leaves)
+    {
+        var testType = InferNode(conditional.Test, input, leaves);
+        if (testType != typeof(bool))
+            return null;
+
+        var trueType = InferNode(conditional.TrueValue, input, leaves);
+        var falseType = InferNode(conditional.FalseValue, input, leaves);
+        if (trueType == null || falseType == null)
+            return null;
+
+        return NumericPromoter.GetPromotedType(trueType, falseType);
+    }
+
     static string BuildSignature(ColumnExpression node, IReadOnlyDictionary<string, IColumn> input)
     {
         return node switch
@@ -172,6 +187,7 @@ internal static class ExpressionTypeInferer
             ScalarExpression scalar => $"({BuildSignature(scalar.Column, input)} {scalar.Operator} {FormatValue(scalar.Scalar)})",
             ComparisonExpression comparison => $"({BuildSignature(comparison.Left, input)} {comparison.Operator} {BuildSignature(comparison.Right, input)})",
             NotExpression not => $"!({BuildSignature(not.Operand, input)})",
+            ConditionalExpression conditional => $"({BuildSignature(conditional.Test, input)} ? {BuildSignature(conditional.TrueValue, input)} : {BuildSignature(conditional.FalseValue, input)})",
             _ => node.GetType().Name
         };
     }

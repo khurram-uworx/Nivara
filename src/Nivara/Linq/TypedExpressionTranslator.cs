@@ -48,7 +48,10 @@ sealed class TypedExpressionTranslator
             MethodCallExpression _ => throw Unsupported(expression, "method calls are not supported"),
             NewExpression _ => throw Unsupported(expression, "object construction is only supported in Select projections"),
             MemberInitExpression _ => throw Unsupported(expression, "object construction is only supported in Select projections"),
-            ConditionalExpression _ => throw Unsupported(expression, "ternary (?:) expressions are not supported"),
+            System.Linq.Expressions.ConditionalExpression cond => new Nivara.Expressions.ConditionalExpression(
+                Translate(cond.Test),
+                Translate(cond.IfTrue),
+                Translate(cond.IfFalse)),
             InvocationExpression _ => throw Unsupported(expression, "invocation expressions are not supported"),
             LambdaExpression _ => throw Unsupported(expression, "nested lambdas are not supported"),
             IndexExpression _ => throw Unsupported(expression, "index access is not supported"),

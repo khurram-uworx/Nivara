@@ -760,6 +760,68 @@ internal sealed class NotExpression : ColumnExpression
 }
 
 /// <summary>
+/// Represents a conditional (ternary) expression: <c>test ? trueValue : falseValue</c>.
+/// The test must resolve to a boolean; the true and false branches must be type-compatible.
+/// </summary>
+internal sealed class ConditionalExpression : ColumnExpression
+{
+    /// <summary>
+    /// Initializes a new ConditionalExpression
+    /// </summary>
+    /// <param name="test">The boolean condition</param>
+    /// <param name="trueValue">The expression evaluated when test is true</param>
+    /// <param name="falseValue">The expression evaluated when test is false</param>
+    public ConditionalExpression(ColumnExpression test, ColumnExpression trueValue, ColumnExpression falseValue)
+    {
+        Test = test ?? throw new ArgumentNullException(nameof(test));
+        TrueValue = trueValue ?? throw new ArgumentNullException(nameof(trueValue));
+        FalseValue = falseValue ?? throw new ArgumentNullException(nameof(falseValue));
+
+        ResultType = NumericPromoter.GetPromotedType(trueValue.ResultType, falseValue.ResultType) ?? typeof(object);
+    }
+
+    /// <summary>
+    /// Gets the boolean condition expression
+    /// </summary>
+    public ColumnExpression Test { get; }
+
+    /// <summary>
+    /// Gets the expression evaluated when the test is true
+    /// </summary>
+    public ColumnExpression TrueValue { get; }
+
+    /// <summary>
+    /// Gets the expression evaluated when the test is false
+    /// </summary>
+    public ColumnExpression FalseValue { get; }
+
+    /// <inheritdoc />
+    public override Type ResultType { get; protected set; }
+
+    /// <inheritdoc />
+    public override string Name => $"({Test.Name} ? {TrueValue.Name} : {FalseValue.Name})";
+
+    /// <inheritdoc />
+    public override void Validate(Schema schema)
+    {
+        Test.Validate(schema);
+        TrueValue.Validate(schema);
+        FalseValue.Validate(schema);
+
+        if (Test.ResultType != typeof(bool))
+        {
+            throw new SchemaValidationException(
+                $"Conditional test expression must be boolean, got {Test.ResultType.Name}");
+        }
+
+        ResultType = NumericPromoter.GetPromotedType(TrueValue.ResultType, FalseValue.ResultType) ?? typeof(object);
+    }
+
+    /// <inheritdoc />
+    public override string ToString() => Name;
+}
+
+/// <summary>
 /// Global function for creating column references
 /// </summary>
 public static class ColumnExpressions
@@ -914,4 +976,14 @@ public static class ColumnExpressions
     /// <returns>A window expression whose result is the median repeated in every row</returns>
     public static ColumnExpression Median(ColumnExpression source)
         => new WindowExpression(WindowFunctionKind.Median, source, 0.5d);
+
+    /// <summary>
+    /// Creates a conditional (ternary) expression: <c>test ? trueValue : falseValue</c>
+    /// </summary>
+    /// <param name="test">The boolean condition expression</param>
+    /// <param name="trueValue">The expression evaluated when test is true</param>
+    /// <param name="falseValue">The expression evaluated when test is false</param>
+    /// <returns>A conditional expression</returns>
+    public static ColumnExpression Conditional(ColumnExpression test, ColumnExpression trueValue, ColumnExpression falseValue)
+        => new ConditionalExpression(test, trueValue, falseValue);
 }
