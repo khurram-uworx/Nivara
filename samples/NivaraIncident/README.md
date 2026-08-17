@@ -127,21 +127,6 @@ Output: requests.parquet, deployments.parquet, instances.parquet, dependencies.p
 | `NivaraFrame.Create` | Result construction | Build result frames from columns |
 | `ColumnExpressions.Col/Lit` | Expression tree | Typed expression nodes for filter/sort |
 
-## What this exercises vs. other samples
-
-| Feature | NivaraVAE | NivaraChess | **NivaraIncident** |
-|---|---|---|---|
-| **Domain** | ML (autoencoder) | Game (chess) | **Production analytics** |
-| **Data source** | Synthetic patterns | Synthetic positions | **Deterministic telemetry (10M+ rows)** |
-| **QueryFrame pipeline** | No | No | **Yes (Filter/Sort/Select/Rolling/Rank)** |
-| **Typed LINQ GroupBy** | No | No | **Yes (Count/Sum/Average)** |
-| **Chunked streaming** | No | No | **Yes (AsStream + IAsyncEnumerable)** |
-| **Parquet I/O** | No | No | **Yes (ScanAsQueryFrame)** |
-| **Window functions** | No | No | **Yes (RollingMean/RollingMax/Shift/PercentRank)** |
-| **AutoDiff / training** | Yes (manual Grad) | Yes (TrainingLoop) | **No (inference/analytics only)** |
-| **Module\<T\> / layers** | Yes | Yes | **No** |
-| **Interactive modes** | Generate, Interpolate, Walk | Eval, REPL | **Generate, Analyze (stream), Replay** |
-
 ## Files
 
 ```

@@ -1,6 +1,10 @@
 # Examples
 
-This folder contains sample projects and documentation demonstrating Nivara's capabilities in .NET-native machine learning.
+This folder contains sample projects and documentation demonstrating Nivara's capabilities including .NET-native machine learning.
+
+## [NivaraIncident/README.md](NivaraIncident/README.md) — Production Incident Replay & Investigation
+
+A reference application that models a production telemetry environment and replays/investigates incidents entirely through Nivara's columnar pipeline — typed expressions, rank family, rolling windows, partitioned windows, chunked/streaming `AsStream` execution, and execution diagnostics. Doubles as a forcing function for the core library: its gap inventory (percentile/quantile/median + stddev aggregation, public execution diagnostics, Parquet chunk streaming) is tracked in the README and planned in `Incident-PLAN.md`.
 
 ## [NivaraTorch/README.md](NivaraTorch/README.md)
 
@@ -51,7 +55,3 @@ Loads pre-trained HuggingFace models (MobileNetV2, ResNet-18, MiniLM-L6-v2) usin
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 
 A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards, corners, crosses). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.
-
-## [NivaraIncident/README.md](NivaraIncident/README.md) — Production Incident Replay & Investigation (in progress)
-
-A reference application that models a production telemetry environment and replays/investigates incidents entirely through Nivara's columnar pipeline — typed expressions, rank family, rolling windows, partitioned windows, chunked/streaming `AsStream` execution, and execution diagnostics. Doubles as a forcing function for the core library: its gap inventory (percentile/quantile/median + stddev aggregation, public execution diagnostics, Parquet chunk streaming) is tracked in the README and planned in `Incident-PLAN.md`.

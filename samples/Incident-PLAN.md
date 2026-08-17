@@ -130,7 +130,6 @@ step; tick each item and commit):
       with commit/issue references; gap 8 stays *open* (Phase 3 design-test, escalated there).
 - [x] `docs/TODO.md` removed as executed (commit: `docs: remove TODO.md — plan executed`).
 - [x] This file's Status header updated to reflect the completed Phase 1 and the deferred Phase 2+.
-- [x] Phase 2+ deferred work remains tracked only in issue #284 (never re-expanded in memory).
 
 ---
 
@@ -142,9 +141,6 @@ step; tick each item and commit):
 
 Facts the Phase 2+ agents/teams need from the Phase 1 branch (`khurram/incident`):
 
-- **Scope as executed (maintainer decision 2026-08-16):** this branch ships Phase 1 only
-  (1.1–1.5). Phase 2 (2.1–2.2), Phase 3 sample, Phase 4 bench, and web UI (3.5) are tracked in
-  issue #284 and must build on top of these fixed APIs.
 - **1.1:** Quantile/Median shipped via the aggregation classes (`AggregationFunction.cs`) and
   `NivaraSeries<T>.Quantile/Median`. The `ColumnExpressions.Quantile` expression node did
   **not** ship — deferred to issue #277. Group→aggregate→rank plans (Phase 3, README gap 8) may

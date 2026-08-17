@@ -8,9 +8,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Nivara.Samples\Nivara.Samples.csproj" />
-    <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
-    <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
+    <ProjectReference Include="..\..\Nivara.Samples\Nivara.Samples.csproj" />
+    <ProjectReference Include="..\..\..\src\Nivara\Nivara.csproj" />
+    <ProjectReference Include="..\..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
   </ItemGroup>
 
   <ItemGroup>
