@@ -3,7 +3,8 @@
 **Status:** Phase 1 core gap-fills (1.1–1.5) are **complete**:
 1.1 ✅, 1.2 ✅, 1.3 ✅, 1.4 ✅, 1.5 ✅ (see the 1.6 completion marker below). Phase 2
 (2.1–2.4) is **complete** on `khurram/incident-phase2` — see the "Phase 2 → Phase 3 handoff
-notes" section. Phase 3+ is **deferred** to a follow-up (issue #284).
+notes" section. Phase 3a (CLI) is **complete** on `khurram/incident-3` — see the
+"Phase 3a → Phase 3b handoff notes" section. Phase 3b and Phase 4 are next.
 **Scope:** `samples/NivaraIncident/` reference application + the core-library improvements it
 drives (`src/Nivara`, `src/Nivara.Extensions`)
 **Inputs:** `samples/NivaraIncident/IDEA.md` (product spec), `samples/NivaraIncident/README.md`
@@ -230,11 +231,94 @@ Facts the Phase 3 agents/teams need from the Phase 2 branch (`khurram/incident-p
 
 ---
 
+## Phase 3a → Phase 3b handoff notes
+
+Facts the Phase 3b (Web UI) and Phase 4 (benchmarks) agents need from Phase 3a (`khurram/incident-3`):
+
+### What was built
+
+| File | Purpose |
+|------|---------|
+| `samples/Nivara.Samples/Incident/Schema.cs` | 4 sealed record types: `RequestTelemetry`, `DeploymentEvent`, `ServiceDependency`, `InstanceState` |
+| `samples/Nivara.Samples/Incident/Scenarios.cs` | 4 deterministic scenarios (A–D) with event timelines and affected services |
+| `samples/Nivara.Samples/Incident/DatasetGenerator.cs` | 10M+ record generator using seeded RNG + Box-Muller latency; outputs Parquet + CSV |
+| `samples/Nivara.Samples/Incident/Ingestion.cs` | `LoadParquet`, `LoadCsv`, `StreamChunks` wrappers |
+| `samples/Nivara.Samples/Incident/Analysis.cs` | 5 analysis methods + typed LINQ group-by example |
+| `samples/NivaraIncident.Cli/Program.cs` | CLI: `generate`, `analyze` (with `--stream`), `replay` commands |
+
+### Key API findings (Gap 8 design-test)
+
+1. **`NivaraFrameExtensions.GroupBy(frame, keys, aggregations)` is a trap.** It validates
+   columns, builds `GroupByOperation` **without aggregations**, and returns only the grouped keys.
+   Its own comment says "simplified implementation". Do **not** use it for real grouped aggregation.
+
+2. **Typed LINQ works for group→aggregate.** `frame.Query<T>().GroupBy(r => r.Prop).Select(g => ...)` with
+   `Count()`, `Sum()`, `Average()` on the grouped query produces correct aggregation results.
+   Requires `class, new()` constraint on the row type — positional records must include a
+   parameterless constructor.
+
+3. **Manual aggregation after `Collect()` is the other fallback.** Collect the filtered frame, then
+   aggregate in a dictionary loop using typed `GetColumn<T>().GetValue(i)`. Works but is not
+   fused.
+
+4. **`ColumnExpression` has no `&`/`&&` operator.** Compound filters must be chained as
+   `.Filter(A).Filter(B)` instead of `.Filter(A & B)`.
+
+5. **`ColumnExpression` has no ternary operator.** No `cond ? litA : litB` — use separate columns
+   or compute the derived column after `Collect()`.
+
+6. **`QueryFrame.AsStream` requires `IAsyncEnumerable` iteration.** Use `await foreach`, not
+   `foreach`. The CLI entry point must be `async Task`.
+
+7. **No `using`/`IAsyncDisposable` on `QueryFrame` in the analysis methods.** The caller
+   disposes. `QueryFrame` implements `IAsyncDisposable`.
+
+### Test strategy
+
+- **`tests/Nivara.Tests/Incident/ScenarioTests.cs`** — fast, no data generation. Tests scenario
+  properties, determinism, case-insensitive lookup, boundary invariants.
+- **`tests/Nivara.PerformanceTests/IncidentLabBenchmark.cs`** — full dataset generation + all 5
+  analyses for all 4 scenarios. Runs as a console app, not in CI.
+- Ingestion/analysis integration tests were moved out of `Nivara.Tests` to keep CI fast (dataset
+  generation takes seconds). Re-add them in `Nivara.Tests/Incident/` if generation becomes
+  fast enough (e.g., scale=0 with tiny data).
+
+### What Phase 3b (Web UI) should build on
+
+- Reuse `Nivara.Samples/Incident/` directly — no changes needed to the library code.
+- Add `samples/NivaraIncident.Web/` project referencing `Nivara.Samples`.
+- The 5 analysis methods in `Analysis.cs` are the data source for the dashboard.
+- `QueryFrame.GetExecutionDiagnostics()` (public since Phase 1.3) is available for the
+  diagnostics/query-plan view.
+- `QueryFrame.ExplainPlan()` is available for the query-plan panel.
+- `QueryFrame.AsStream()` enables SSE streaming for live-replay views.
+
+### What Phase 4 (benchmarks) should measure
+
+- End-to-end `analyze` elapsed + row counts for each scenario at scale 1 and scale 10.
+- Streaming (`--stream`) vs eager: memory curve; does `AsStream` stay chunked or fall back?
+  (Gap 5 measurement.)
+- Dataset generator throughput: rows/second and MB/second at different scales.
+- Group-by performance: typed LINQ path vs manual aggregation path.
+- All numbers go into `samples/NivaraIncident/README.md` Performance section.
+
+### Commits
+
+| Commit | What |
+|--------|------|
+| `36c0e67` | feat(incident): add project scaffolding and telemetry schema |
+| `af66d00` | feat(incident): add deterministic dataset generator and incident scenarios |
+| `e829eae` | feat(incident): add ingestion wrappers and replay helpers |
+| `ee1cab0` | docs: plan Phase 3a Incident Lab CLI in TODO.md |
+| `fb2af76` | feat(incident): add analysis queries for the Incident Lab |
+| `fbebf87` | feat(incident): implement CLI entry point and update README |
+
+---
+
 ## Phase 3 — The Incident Lab sample itself
 
-> **Status: PLANNING** — Phase 3 split into 3a (CLI, Milestone 1) and 3b (Web UI, Milestone 2).
-> Execution order: **3a → Phase 4 → 3b** (3b deferred as a follow-up after benchmarks).
-> Detailed execution plans: `docs/PHASE3A.md` (CLI), `docs/PHASE3B.md` (Web UI, follow-up).
+> **Status: Phase 3a COMPLETE** on `khurram/incident-3`. Phase 3b (Web UI) is deferred after
+> Phase 4 (benchmarks). See "Phase 3a → Phase 3b handoff notes" below.
 
 ### Architecture decision (maintainer, 2026-08-17)
 
@@ -278,17 +362,17 @@ samples/
 └── NivaraIncident/                   # existing (IDEA.md, Python/, README.md)
 ```
 
-### 3a — CLI (Milestone 1) — see `docs/PHASE3A.md`
+### 3a — CLI (Milestone 1) — ✅ COMPLETE
 
-| Sub-step | What |
-|----------|------|
-| 3a.1 | Project scaffolding + telemetry schema |
-| 3a.2 | Deterministic dataset generator + incident scenarios (A/B/C/D) |
-| 3a.3 | Ingestion wrappers (Parquet/CSV scan, replay stream) |
-| 3a.4 | Analysis queries — the Nivara analytical pipeline (the core exercise) |
-| 3a.5 | CLI entry point with formatted output |
-| 3a.6 | Tests + Polars cross-validation |
-| 3a.7 | Wire, build, end-to-end validation |
+| Sub-step | What | Status |
+|----------|------|--------|
+| 3a.1 | Project scaffolding + telemetry schema | ✅ `NivaraIncident.Cli.csproj`, `Schema.cs` |
+| 3a.2 | Deterministic dataset generator + incident scenarios (A/B/C/D) | ✅ `DatasetGenerator.cs`, `Scenarios.cs` |
+| 3a.3 | Ingestion wrappers (Parquet/CSV scan, replay stream) | ✅ `Ingestion.cs` |
+| 3a.4 | Analysis queries — the Nivara analytical pipeline (the core exercise) | ✅ `Analysis.cs` |
+| 3a.5 | CLI entry point with formatted output | ✅ `Program.cs` (generate/analyze/replay) |
+| 3a.6 | Tests + Polars cross-validation | ✅ Fast tests in `Nivara.Tests/Incident/`, perf bench in `Nivara.PerformanceTests` |
+| 3a.7 | Wire, build, end-to-end validation | ✅ 3063 tests passing, build clean |
 
 ### 3b — Web UI (Milestone 2) — see `docs/PHASE3B.md`
 
@@ -319,15 +403,14 @@ as a GitHub issue referencing the sample.
 
 ## Definition of done
 
-> **Execution order:** Phase 3a (CLI) → Phase 4 (benchmarks) → Phase 3b (Web UI, follow-up).
+> **Execution order:** Phase 3a ✅ → Phase 4 (benchmarks, next) → Phase 3b (Web UI, follow-up).
 > The full DoD (replay/CLI/Web UI convergence) applies when all three land.
 
 - All README gap items marked **open** are either fixed in core, worked around in the sample with
   an escalation issue recorded, or explicitly accepted with evidence.
-- `dotnet build Nivara.slnx` passes; all existing tests pass (1948+ baseline grows); new tests
+- `dotnet build Nivara.slnx` passes; all existing tests pass (3063 baseline grows); new tests
   cover every core change (quantile/median/stddev, diagnostics, Parquet reader, `Pow` SIMD).
-- The CLI can generate a dataset, analyze it, and replay it streamed; the Web UI shows the
-  timeline + query plan (or is explicitly deferred to Milestone 2).
+- ✅ The CLI can generate a dataset, analyze it, and replay it streamed.
 - Replay and offline analysis converge on the same Nivara queries (the core validation).
 - Execution diagnostics are visible through a public surface (or the escalation issue is open).
 - `samples/NivaraIncident/README.md` is updated: gaps move from *open* to *resolved* with
@@ -337,8 +420,10 @@ as a GitHub issue referencing the sample.
 ## Execution notes for the next session
 
 - **Ask before running `dotnet test`** (repo rule); verify with a targeted build first.
-- Execution order: Phase 3a (CLI) → Phase 4 (benchmarks) → Phase 3b (Web UI, follow-up).
-- Start with 3a.1 (scaffolding), work through 3a.2–3a.7, then Phase 4, then 3b as a follow-up.
+- Execution order: Phase 3a ✅ → Phase 4 (benchmarks, next) → Phase 3b (Web UI, follow-up).
+- Phase 4: run `Nivara.PerformanceTests/IncidentLabBenchmark.cs` at scale 1 and 10; measure
+  streaming vs eager; record numbers in README.
+- Phase 3b: add `NivaraIncident.Web/` project; reuse `Analysis.cs` methods as data source.
 - Keep each change unit small and reviewable.
 - Use `dotnet build Nivara.slnx` after each project change.
 - When launching sub agents, include: *"Use the code-memory MCP to learn symbols/relationships and

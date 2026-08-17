@@ -5,13 +5,12 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
   <ItemGroup>
+    <ProjectReference Include="..\Nivara.Samples\Nivara.Samples.csproj" />
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
     <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
-    <ProjectReference Include="..\..\samples\Nivara.Samples\Nivara.Samples.csproj" />
   </ItemGroup>
 
   <ItemGroup>

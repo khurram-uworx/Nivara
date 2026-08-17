@@ -32,7 +32,13 @@ static class Program
 
     static int Main(string[] args)
     {
-        var (jsonPath, comparePath, runs, minOpsFraction) = ParseArgs(args);
+        var (jsonPath, comparePath, runs, minOpsFraction, datasetTest) = ParseArgs(args);
+
+        if (datasetTest)
+        {
+            IncidentLabBenchmark.RunDatasetGeneratorTests(args);
+            return 0;
+        }
 
         if (runs > 1)
         {
@@ -602,16 +608,20 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, bool DatasetTest) ParseArgs(string[] args)
     {
         string? jsonPath = null, comparePath = null;
         int runs = 1;
         double minOpsFraction = DefaultMinOpsFraction;
+        bool datasetTest = false;
 
         for (int i = 0; i < args.Length; i++)
         {
             switch (args[i])
             {
+                case "--dataset-test":
+                    datasetTest = true;
+                    break;
                 case "--json" when i + 1 < args.Length:
                     jsonPath = args[++i];
                     break;
@@ -626,13 +636,13 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction);
+        return (jsonPath, comparePath, runs, minOpsFraction, datasetTest);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)
