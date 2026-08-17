@@ -32,6 +32,9 @@ public static class DatasetGenerator
     };
 
     public static void Generate(string datasetPath, string scenarioId, int scale)
+        => GenerateFromRecordCount(datasetPath, scenarioId, 10_000_000L * scale);
+
+    public static void GenerateFromRecordCount(string datasetPath, string scenarioId, long totalRecords)
     {
         var scenario = Scenarios.Get(scenarioId);
         Directory.CreateDirectory(datasetPath);
@@ -42,7 +45,7 @@ public static class DatasetGenerator
         var incidentEnd = scenario.IncidentEnd;
         var durationMinutes = 30.0;
 
-        int totalRequests = (int)(10_000_000 * scale);
+        int totalRequests = (int)totalRecords;
         int requestsPerMinute = (int)(totalRequests / durationMinutes);
 
         var affectedRegion = scenarioId == "D" ? "ap-south-1" : null;
