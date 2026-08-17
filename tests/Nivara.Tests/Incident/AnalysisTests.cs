@@ -1,4 +1,3 @@
-using Nivara.Expressions;
 using Nivara.IO;
 using Nivara.Samples.Incident;
 using NUnit.Framework;
@@ -115,6 +114,7 @@ public class AnalysisTests
         var dir = Path.Combine(tempDir, "A");
         var scenario = Scenarios.Get("A");
         using var qf = Analysis.AnalyzeDegradationOrdering(dir, scenario);
+        using var frame = qf.Collect();
         var diag = qf.GetExecutionDiagnostics();
         Assert.That(diag, Is.Not.Null);
         Assert.That(diag!.RowsRead, Is.GreaterThan(0));
@@ -179,26 +179,14 @@ public class AnalysisTests
     public void ParquetCsvConvergence_SameAnalysisSameResults()
     {
         var dir = Path.Combine(tempDir, "A");
-        var scenario = Scenarios.Get("A");
-        var incidentStart = scenario.IncidentStart.Ticks;
-        var incidentEnd = scenario.IncidentEnd.Ticks;
 
         using var pqQf = Ingestion.LoadParquet(Path.Combine(dir, "requests.parquet"));
-        var pqFrame = pqQf
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
-            .Collect();
+        using var pqFrame = pqQf.Collect();
 
         using var csvQf = Ingestion.LoadCsv(Path.Combine(dir, "requests.csv"));
-        var csvFrame = csvQf
-            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
-            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
-            .Collect();
+        using var csvFrame = csvQf.Collect();
 
         Assert.That(csvFrame.RowCount, Is.EqualTo(pqFrame.RowCount));
-
-        pqFrame.Dispose();
-        csvFrame.Dispose();
     }
 
     [Test]
@@ -383,7 +371,11 @@ public class AnalysisTests
                     bool inIncident = scenario.AffectedServices.Contains(svc);
                     var queueBase = inIncident ? 50 : 5;
 
-                    instTimestamps[instIdx] = baseTime.Ticks;
+                    var instTime = inIncident
+                        ? scenario.IncidentStart.AddMinutes(rng.NextDouble() * (scenario.IncidentEnd - scenario.IncidentStart).TotalMinutes)
+                        : baseTime.AddMinutes(rng.NextDouble() * 30);
+
+                    instTimestamps[instIdx] = instTime.Ticks;
                     instServices[instIdx] = svc;
                     instIds[instIdx] = $"{svc}-{region}-{i:D3}";
                     instRegions[instIdx] = region;
