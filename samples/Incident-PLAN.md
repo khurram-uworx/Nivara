@@ -232,73 +232,78 @@ Facts the Phase 3 agents/teams need from the Phase 2 branch (`khurram/incident-p
 
 ## Phase 3 — The Incident Lab sample itself
 
-> **Status: DEFERRED** to a follow-up (issue #284).
+> **Status: PLANNING** — Phase 3 split into 3a (CLI, Milestone 1) and 3b (Web UI, Milestone 2).
+> Execution order: **3a → Phase 4 → 3b** (3b deferred as a follow-up after benchmarks).
+> Detailed execution plans: `docs/PHASE3A.md` (CLI), `docs/PHASE3B.md` (Web UI, follow-up).
 
-Layout (IDEA §"Architecture"): `IncidentLab.Core` / `IncidentLab.Analysis` / `IncidentLab.Ingestion`
-/ `IncidentLab.App` / `IncidentLab.Cli` / `IncidentLab.Web` / `IncidentLab.Tests`, or a slimmer
-project set if the modular split is overkill — decide during execution (the IDEA prefers a modular
-monolith; the complexity must be in the data and workload, not infra ceremony). Add projects to
-`Nivara.slnx`.
+### Architecture decision (maintainer, 2026-08-17)
 
-### 3.1 Dataset generator + incident scenarios (`Core`)
-- Deterministic seeded RNG (`Random` with fixed seed, no randomness in scenarios).
-- Schema modeled on the IDEA telemetry records: `Timestamp`, `Service`, `Endpoint`, `DurationMs`,
-  `StatusCode`, `Region`, `TraceId`, plus `Dependency` edges and `Deployment` events.
-- 10M+ requests, 50+ endpoints, 10 regions, 100+ instances, configurable scale.
-- Scenarios A (db degradation), B (bad deploy), C (traffic spike), D (regional failure).
-- Write Parquet with small row groups (exercises 1.4) + CSV variant for streaming tests.
-- Use `TensorPrimitives`/spans for bulk value generation (vectorize where types allow).
+The IDEA's 7-project layout (`IncidentLab.Core` / `.Analysis` / `.Ingestion` / `.App` /
+`.Cli` / `.Web` / `.Tests`) is overkill for a reference sample. The guiding principle says
+*complexity should be in the data and workload, not infra ceremony*. After review:
 
-### 3.2 Ingestion + replay stream (`Ingestion`)
-- `Parquet.ScanAsQueryFrame` / `Csv.ScanAsQueryFrame` entry points.
-- Replay: `IAsyncEnumerable<Chunk>` driven by `QueryFrame.AsStream(chunkSize, ct)` with
-  `await using`; measure backpressure (bounded channel in flight), cancellation end-to-end,
-  peak memory vs budget (exercise gap 6 and report honestly).
-- **Design-test:** historical Parquet path vs replay path should converge on the same Nivara
-  analytical queries. If they require radically different APIs, that is the core feedback the
-  sample exists to produce.
+1. **All analytical code lives in `samples/Nivara.Samples/Incident/`** (folder in the existing
+   class library). This includes schema, generator, scenarios, ingestion, and analysis queries.
+   `Nivara.Samples` already references `Nivara` and `Nivara.Extensions` — no new dependencies
+   needed.
+2. **One thin CLI executable:** `samples/NivaraIncident.Cli/` — `OutputType=Exe`, project-references
+   `Nivara.Samples`. The CLI does arg parsing and formatted output; all logic is in the library.
+3. **Tests in the existing test project:** `tests/Nivara.Tests/Incident/` — no new test project.
+4. **No third-party CLI library** — follows repo convention (raw `args[]`, `switch` on `args[0]`,
+   hand-rolled `--flag` parsing; see `NivaraChat/Program.cs`, `NivaraVAE/Program.cs`).
+5. **Phase 3a (CLI) and Phase 3b (Web) are separate phases.** Web adds one more project
+   (`NivaraIncident.Web`) that references the same `Nivara.Samples/Incident/` code.
 
-### 3.3 Analysis queries (`Analysis`) — the "library API" surface
-Implement, as plain Nivara query code, the incident answers:
-- **A:** degradation ordering — rolling error-rate windows per service, `Shift` deltas, first
-  service whose delta crossed a threshold; propagation delay = time between successive service
-  crossings; retry amplification = retry volume / initial error count.
-- **B:** deployment correlation — rank services by error-rate delta (`PercentRank`/`Rank`),
-  correlate with `Deployment` events; time-to-customer-impact; affected endpoint/error-type
-  breakdown (group→aggregate→rank→filter).
-- **C:** saturation ordering — per-service latency P50/P95/P99 (needs 1.1), z-scores (needs 1.2),
-  queue-depth rolling windows, recovery ordering via `Lead` deltas.
-- **D:** regional partitioning — GroupBy region + per-region rank/rolling/percentile analysis.
-- Top-k impacted services: error-rate Δ + `TopKDescending` (already on `NivaraSeries<T>`).
-- Computed ordering: sort by calculated score (`Select` a score expression, `Sort` by it).
-- **Design-test:** group→aggregate→rank→filter plan representability (README gap 8) — record
-  findings and escalate to core (e.g. `Aggregate`/`Having`/`Where` alias) with evidence.
+**Resulting project count: 1 new exe project for 3a, +1 more for 3b (2 total).** Not 7.
 
-### 3.4 CLI (`Cli`)
-- `dotnet run -- incident generate|analyze|replay <dataset>`; `--stream` mode using 3.2.
-- Output: top impacted services (rank table), correlated event, execution summary
-  (operators, fused kernels, peak memory, elapsed, rows read/returned — from 1.3).
+### Resulting layout
 
-### 3.5 Web UI (`Web`) — Milestone 2
-- ASP.NET Core minimal API + static client (Server-Sent Events or `IAsyncEnumerable<Chunk>`
-  response for live replay).
-- Views: Timeline, Services, Endpoints, Regions, Dependencies, Errors, Deployments, Query Plan.
-- Query-plan view renders `ExplainPlan()` / `GetDiagnosticInfo(mode)` / new public diagnostics
-  (1.3) as the "Logical plan → Physical kernels → Diagnostics" visual.
+```
+samples/
+├── Nivara.Samples/Incident/          # shared library code (class library, no new .csproj)
+│   ├── Schema.cs
+│   ├── Scenarios.cs
+│   ├── DatasetGenerator.cs
+│   ├── Ingestion.cs
+│   └── Analysis.cs
+│
+├── NivaraIncident.Cli/               # Phase 3a — thin CLI executable
+│   ├── NivaraIncident.Cli.csproj
+│   └── Program.cs
+│
+├── NivaraIncident.Web/               # Phase 3b — ASP.NET Core (deferred)
+│   ├── NivaraIncident.Web.csproj
+│   └── Program.cs
+│
+└── NivaraIncident/                   # existing (IDEA.md, Python/, README.md)
+```
 
-### 3.6 Tests
-- NUnit project; name `Method_Scenario_ExpectedBehavior`.
-- Cross-validation fixtures (Polars for rank/rolling/quantile/stddev; numpy where applicable).
-- Parity test: replay analysis == offline analysis on the same snapshot (the convergence claim).
-- Streaming property tests over chunk sizes (following `StreamingExecutionStrategyTests` patterns).
+### 3a — CLI (Milestone 1) — see `docs/PHASE3A.md`
+
+| Sub-step | What |
+|----------|------|
+| 3a.1 | Project scaffolding + telemetry schema |
+| 3a.2 | Deterministic dataset generator + incident scenarios (A/B/C/D) |
+| 3a.3 | Ingestion wrappers (Parquet/CSV scan, replay stream) |
+| 3a.4 | Analysis queries — the Nivara analytical pipeline (the core exercise) |
+| 3a.5 | CLI entry point with formatted output |
+| 3a.6 | Tests + Polars cross-validation |
+| 3a.7 | Wire, build, end-to-end validation |
+
+### 3b — Web UI (Milestone 2) — see `docs/PHASE3B.md`
+
+**Deferred as a follow-up after Phase 4.** Adds ASP.NET Core minimal API, SSE streaming,
+and 8 dashboard views. Every number computed by Nivara. Not a prerequisite for benchmarking.
 
 ---
 
 ## Phase 4 — Performance assessment
 
-> **Status: DEFERRED** to a follow-up (issue #284).
+> **Status: FOLLOWS 3a** — execution begins after Phase 3a (CLI) is complete.
+> Produces benchmark report + core gap evidence before Phase 3b (Web UI) starts.
+> Detailed execution plan: `docs/PHASE4.md`.
 
-Produce a small benchmark/report (CLI `--bench` or a `Nivara.PerformanceTests`-style harness):
+Produce a benchmark report with real numbers (see `docs/PHASE4.md` for detailed sub-steps):
 
 1. End-to-end analyze of the full dataset: elapsed, rows read/returned, peak memory vs budget.
 2. Streaming vs eager: memory curve for a window-heavy query; does `AsStream` stay chunked or
@@ -314,8 +319,8 @@ as a GitHub issue referencing the sample.
 
 ## Definition of done
 
-> **On `khurram/incident` the DoD is scoped to Phase 1 only; on `khurram/incident-phase2`
-> Phase 2 is also complete.** The full DoD (replay/CLI/Web UI convergence) applies when Phase 3+ land.
+> **Execution order:** Phase 3a (CLI) → Phase 4 (benchmarks) → Phase 3b (Web UI, follow-up).
+> The full DoD (replay/CLI/Web UI convergence) applies when all three land.
 
 - All README gap items marked **open** are either fixed in core, worked around in the sample with
   an escalation issue recorded, or explicitly accepted with evidence.
@@ -332,8 +337,9 @@ as a GitHub issue referencing the sample.
 ## Execution notes for the next session
 
 - **Ask before running `dotnet test`** (repo rule); verify with a targeted build first.
-- Start with Phase 1.1/1.2 (blocking for the sample), then 1.3 and 2.x (small, isolated), then the
-  sample milestones. Keep each change unit small and reviewable.
+- Execution order: Phase 3a (CLI) → Phase 4 (benchmarks) → Phase 3b (Web UI, follow-up).
+- Start with 3a.1 (scaffolding), work through 3a.2–3a.7, then Phase 4, then 3b as a follow-up.
+- Keep each change unit small and reviewable.
 - Use `dotnet build Nivara.slnx` after each project change.
 - When launching sub agents, include: *"Use the code-memory MCP to learn symbols/relationships and
   the microsoft-learn MCP for official API documentation where relevant."*
