@@ -35,12 +35,14 @@ dataset generator:
 | **C — Traffic spike** | traffic ×8 → queue depth ↑ → latency ↑ → timeouts ↑ | which services saturated first, which recovered first |
 | **D — Regional failure** | us-east/eu-west healthy, ap-south degraded | partitioning, grouping, ranking by region |
 
-Three surfaces are planned:
+Three surfaces:
 
-1. **CLI** — `dotnet run -- incident analyze ./data/incident-421` for engineers and benchmarks,
-   printing top impacted services, correlated events, and execution diagnostics.
-2. **Web UI** — ASP.NET Core dashboard (timeline, services, endpoints, regions, dependencies,
-   errors, deployments, query plan). Every important number shown is calculated by Nivara.
+1. **CLI** — `dotnet run --project samples/NivaraIncident.Cli generate|analyze|replay` for
+   engineers and benchmarks. `generate` produces deterministic Parquet/CSV datasets; `analyze`
+   runs all five analyses (degradation ordering, deployment correlation, saturation ordering,
+   regional partitioning, grouped aggregation) with optional chunked streaming; `replay`
+   replays Parquet row groups with chunk-by-chunk progress.
+2. **Web UI** — ASP.NET Core dashboard (planned, Milestone 2).
 3. **Library API** — the underlying analyses stay visible as normal Nivara query code so the
    sample teaches the API rather than hiding it.
 
@@ -50,60 +52,64 @@ bounded buffers → CollectAsync).
 
 ## Nivara capabilities exercised
 
-The IDEA deliberately avoids hiding the library behind LINQ-to-objects. The sample is written to
-exercise, in cooperation, one real-world workload:
+The sample is written to exercise real Nivara capabilities, not hide behind LINQ-to-objects:
 
-- **Typed expression execution** — `Where`/`Select` over typed `r["Column"]` expressions,
-  fused into a single kernel pass (ADR-004 fused expression engine).
-- **Computed ordering** — sort by a calculated score instead of a raw column.
-- **Rolling / cumulative windows** — service-health error-rate views with `minPeriods` gating and
-  explicit null semantics.
-- **Shift / lead** — "delta since previous interval" analyses (error-rate deltas, latency deltas).
-- **Rank family** — `RowNumber`, `Rank`, `DenseRank`, `PercentRank`, partitioned and ordered,
-  cross-validated against Polars.
-- **Partitioning** — GroupBy + per-group windows and ranks; regional incident D leans on this.
-- **Percentiles / distributions** — incident analysis requires latency percentiles (P50/P95/P99)
-  and median; this is a **known missing capability** (see Gaps below).
-- **Chunked / streaming execution** — `AsStream()` over Parquet row groups with bounded-channel
-  backpressure and end-to-end cancellation.
-- **Execution diagnostics & query-plan visibility** — the UI exposes the logical plan, physical
-  kernel chain, and per-run diagnostics (rows, kernels, peak memory, elapsed).
+- **Typed expression execution** — `Filter`/`Select`/`Sort` via `ColumnExpressions.Col`/`Lit`,
+  fused into kernel passes by the ADR-004 expression engine.
+- **Rolling windows** — `RollingMean` for error-rate computation, `RollingMax` for queue-depth
+  saturation tracking.
+- **Shift / lead** — `Shift` for delta-since-previous-interval analyses (error-rate deltas).
+- **Rank family** — `PercentRank` partitioned by region for regional incident analysis.
+- **Typed LINQ GroupBy** — `NivaraQuery<T>.GroupBy().Select()` with `Count()`, `Sum()`,
+  `Average()` for grouped aggregation.
+- **Chunked / streaming execution** — `AsStream()` over Parquet row groups with
+  `IAsyncEnumerable` and `IAsyncDisposable` for bounded replay.
+- **Parquet / CSV ingestion** — `Parquet.ScanAsQueryFrame` and `Csv.ScanAsQueryFrame` for
+  chunk-capable data sources.
+- **`IAsyncDisposable`** — proper resource cleanup on `QueryFrame` instances.
 
-## Nivara APIs demonstrated (planned surface)
+## Nivara APIs demonstrated
 
-| API | Where | Purpose |
-|-----|-------|---------|
-| `QueryFrame.Filter/Select/GroupBy` | Analysis layer | Typed, fused query chains |
-| `ColumnExpressions.Rank/DenseRank/PercentRank/RowNumber` | Analysis layer | Rank endpoints/services by error delta |
-| `ColumnExpressions.Rolling*` / `Shift` / `Lead` | Analysis layer | Service health windows, deltas |
-| `WindowSpec` (`Over()`/`PartitionBy`/`OrderBy`) | Analysis layer | Reusable partitioned/ordered window specs |
-| `QueryFrame.AsStream(int chunkSize, CancellationToken)` | Replay engine | Chunked, backpressured streaming replay |
-| `CollectAsync` / `IAsyncDisposable` | Replay engine | Async entry points, resource cleanup |
-| `Parquet.ScanAsQueryFrame` | Ingestion | Chunk-capable Parquet source (row groups) |
-| `Csv.ScanAsQueryFrame` | Ingestion | Row-based chunked CSV source |
-| `NivaraColumn<T>.Diagnostics` / `DiagnosticsTracker` | Diagnostics | Kernel-selection visibility |
-| `QueryFrame.ExplainPlan()` / `GetDiagnosticInfo(mode)` | Query-plan view | Logical-plan string rendering |
-| `TensorPrimitives` | Dataset generator / kernels | SIMD-accelerated synthetic data and aggregates |
+| API | Where | Status |
+|-----|-------|--------|
+| `QueryFrame.Filter/Select/Sort` | Analysis layer | ✅ exercised |
+| `QueryFrame.RollingMean/RollingMax` | Analysis layer | ✅ exercised |
+| `QueryFrame.Shift` | Analysis layer | ✅ exercised |
+| `QueryFrame.PercentRank` | Analysis layer | ✅ exercised |
+| `QueryFrame.Collect` | Analysis / replay | ✅ exercised |
+| `NivaraQuery<T>.GroupBy/Select/Count/Sum/Average` | Grouped aggregation | ✅ exercised |
+| `QueryFrame.AsStream(int chunkSize, CancellationToken)` | Replay engine | ✅ exercised |
+| `IAsyncDisposable` | Replay engine | ✅ exercised |
+| `Parquet.ScanAsQueryFrame` | Ingestion | ✅ exercised |
+| `Csv.ScanAsQueryFrame` | Ingestion | ✅ exercised |
+| `NivaraFrame.Create` | Result construction | ✅ exercised |
+| `ColumnExpressions.Col/Lit` | Expression tree | ✅ exercised |
+| `WindowSpec` (`Over()`/`PartitionBy`/`OrderBy`) | Analysis layer | available, not yet used |
+| `ColumnExpressions.Rolling*/Rank/DenseRank` | Analysis layer | available, not yet used |
+| `NivaraColumn<T>.Diagnostics` / `DiagnosticsTracker` | Diagnostics | available, not yet used |
+| `QueryFrame.ExplainPlan()` / `GetExecutionDiagnostics()` | Query-plan view | available, not yet used |
 
-## Architecture (planned)
+## Architecture (implemented)
 
-The IDEA's suggested modular-monolith layout is `samples/NivaraIncident/` (folder already exists;
-`IDEA.md` and the Polars reference generator are committed):
+The Phase 3a implementation uses a flat library + thin CLI layout:
 
 ```
-samples/NivaraIncident/
-├── IDEA.md                      # Full product spec (committed)
-├── README.md                    # This file
-├── IncidentLab.Core/            # Dataset generator, incident scenarios, telemetry schema
-├── IncidentLab.Analysis/        # The Nivara analytical queries (the "library API" surface)
-├── IncidentLab.Ingestion/       # Parquet/CSV readers + replay stream (IAsyncEnumerable<Chunk>)
-├── IncidentLab.App/             # Shared entry orchestration (generation + analysis + replay)
-├── IncidentLab.Cli/             # dotnet run -- incident analyze ... (also hosts benchmarks)
-├── IncidentLab.Web/             # ASP.NET Core dashboard + Incident API (Milestone 2)
-├── IncidentLab.Tests/           # NUnit tests incl. Polars cross-validation fixtures
-└── Python/
-    ├── gen_reference.py         # Polars rank/rolling reference fixtures (committed)
-    └── requirements.txt
+samples/
+├── Nivara.Samples/Incident/
+│   ├── Schema.cs             # Telemetry record types (RequestTelemetry, DeploymentEvent, etc.)
+│   ├── Scenarios.cs           # 4 deterministic incident scenarios (A–D)
+│   ├── DatasetGenerator.cs    # 10M+ record generator (Parquet + CSV output)
+│   ├── Ingestion.cs           # Parquet/CSV loading wrappers + async streaming
+│   └── Analysis.cs            # 5 analysis methods using QueryFrame pipeline
+├── NivaraIncident.Cli/
+│   ├── NivaraIncident.Cli.csproj
+│   └── Program.cs             # CLI: generate | analyze | replay
+└── NivaraIncident/
+    ├── IDEA.md                # Full product spec
+    ├── README.md              # This file
+    └── Python/
+        ├── gen_reference.py   # Polars rank/rolling reference fixtures
+        └── requirements.txt
 ```
 
 Core principle: **Every important number shown in the UI should be calculated by Nivara.**
@@ -112,8 +118,15 @@ database, no Kafka, no cloud account.
 
 ## Files
 
-The sample is planned; the folder currently holds only `IDEA.md` and `Python/gen_reference.py`.
-Project layout above maps to the implementation plan in `../Incident-PLAN.md`.
+| File | Purpose |
+|------|---------|
+| `samples/Nivara.Samples/Incident/Schema.cs` | Telemetry record types (request, deployment, dependency, instance) |
+| `samples/Nivara.Samples/Incident/Scenarios.cs` | 4 deterministic incident scenarios with event timelines |
+| `samples/Nivara.Samples/Incident/DatasetGenerator.cs` | Deterministic 10M+ record generator with Box-Muller latency |
+| `samples/Nivara.Samples/Incident/Ingestion.cs` | Parquet/CSV loading wrappers and async streaming helper |
+| `samples/Nivara.Samples/Incident/Analysis.cs` | 5 analysis methods exercising QueryFrame pipeline |
+| `samples/NivaraIncident.Cli/Program.cs` | CLI entry point (generate/analyze/replay) |
+| `samples/NivaraIncident/Python/gen_reference.py` | Polars rank/rolling cross-validation fixtures |
 
 ## Requirements
 
@@ -170,9 +183,7 @@ verified as genuinely missing on `main` by the pre-implementation audit.
 
 #### 5. Window semantics across chunk boundaries (non-streamable fallback) — **DEFERRED to issue #284 (Phase 3 measurement)**
 
-The IDEA's flagged gap #1 stands: window expressions (`ColumnExpressions.RowNumber/.Rank/...`),
-
-The IDEA's flagged gap #1 stands: window expressions (`ColumnExpressions.RowNumber/.Rank/...`),
+Window expressions (`ColumnExpressions.RowNumber/.Rank/...`),
 `Rolling`, `Cumulative`, `Shift`, `Rank`, `Sort`, `GroupBy`, `Join`, `Distinct` are
 **non-streamable** (`StreamingExecutionStrategy.NonStreamableOperations`, `:10`). `AsStream` is
 all-or-nothing (any boundary op → single merged frame, `docs/STREAMING.md:36-55`); `CollectAsync`
@@ -188,17 +199,16 @@ in-flight chunks, but there is no byte-level enforcement on the query path. `Str
 into** the query strategy (its only caller is the stub `ReadParquetStreamingInternal`). The sample
 should stress this with a large replay and report peak memory vs budget.
 
-#### 8. Query API ergonomics for group→aggregate→rank→filter — **DEFERRED to issue #284 (Phase 3 design-test)**
+#### 8. Query API ergonomics for group→aggregate→rank→filter — **EXERCISED in Phase 3a, gap confirmed**
 
 `QueryFrame` has `GroupBy` but no `Aggregate`/`Having`/`Where` alias (`Filter` is the only
 predicate, `QueryFrame.cs:108`). The eager `NivaraFrameExtensions.GroupBy(frame, string[],
 Dictionary<string, AggregationFunction>)` overload (`NivaraFrameExtensions.cs:1123-1156`) is a
 trap: it validates columns, builds `GroupByOperation` **without aggregations**, and returns only
-the keys — its own comment calls it a "simplified implementation". The typed
-`NivaraGroupedQuery<TKey,T>` (`NivaraQuery.cs:300`) and `GroupByOperation` +
-`GroupedAggregation` do support real aggregations, so group→aggregate is expressible, but the
-plan-representability of "group → aggregate → rank → filter" should be exercised and reported
-(the IDEA's design-test principle) before deciding whether the core needs a cleaner fluent path.
+the keys — its own comment calls it a "simplified implementation". The sample works around this
+two ways: (a) typed LINQ `frame.Query<T>().GroupBy().Select()` with `Count()`/`Sum()`/`Average()`
+for real aggregations, and (b) manual dictionary aggregation after `Collect()`. A cleaner fluent
+path would improve ergonomics significantly.
 
 #### 9. ADR-001 residual cleanup (dead branches inside the non-null domain) — **DEFERRED to issue #284 (Phase 2)**
 
@@ -243,24 +253,27 @@ The important properties are **bounded memory** during replay (channel backpress
 
 ## Limitations
 
-- **Not yet implemented** — this README documents the audited gap inventory and the planned
-  surface; the implementation plan lives in `../Incident-PLAN.md`. All "planned surface" items
-  above are targets, not delivered code. Phase 1 core gap-fills (gaps 1, 2, 3, 4, 7) are resolved
-  on `khurram/incident`; the sample itself is still to be built (Phase 3, issue #284).
+- Phase 3a implements CLI, dataset generation, ingestion, and analysis queries. Web UI and
+  Polars cross-validation tests are planned for future milestones.
+- `NivaraFrameExtensions.GroupBy(frame, keys, aggregations)` is a **trap** — it returns only
+  grouped keys, not aggregation results. The sample uses typed LINQ `GroupBy().Select()` and
+  manual aggregation as workarounds (see Gap 8 below).
 - `AsStream` window-heavy queries fall back to single-frame materialization (Gap 5) — the replay
   demo may not be truly chunked for window-heavy analyses until this is measured and addressed.
 
 ## Future work
 
-1. **Milestone 2 (Web UI)** — timeline, service health, endpoint/regional analysis, dependency
-   view, query-plan view; every number computed by Nivara.
-2. **Milestone 3 (Replay)** — `IAsyncEnumerable<Chunk>` live dashboard driven by the same
-   analytical pipeline as historical Parquet analysis.
-3. **Milestone 4 (Generated schema)** — Roslyn source generator for typed telemetry accessors
+1. **Phase 3b (Tests)** — NUnit tests covering scenario determinism, dataset generator output
+   shape, ingestion round-trips, analysis query correctness, CLI end-to-end, and streaming.
+2. **Milestone 2 (Web UI)** — ASP.NET Core dashboard (timeline, service health, endpoint/regional
+   analysis, dependency view, query-plan view); every number computed by Nivara.
+3. **Milestone 3 (Replay dashboard)** — `IAsyncEnumerable<Chunk>` live dashboard driven by the
+   same analytical pipeline as historical Parquet analysis.
+4. **Milestone 4 (Generated schema)** — Roslyn source generator for typed telemetry accessors
    (Phase 5 roadmap), demonstrating `C# schema → generator → typed Nivara accessors → fused/SIMD`.
-4. **Milestone 5 (Deployment)** — `dotnet run` and `docker run -p 8080:8080` parity on a
+5. **Milestone 5 (Deployment)** — `dotnet run` and `docker run -p 8080:8080` parity on a
    developer laptop.
-5. **Cloud-oriented follow-up** — optional deployment showing the same engine consuming real
+6. **Cloud-oriented follow-up** — optional deployment showing the same engine consuming real
    OpenTelemetry streams.
 
 ---
