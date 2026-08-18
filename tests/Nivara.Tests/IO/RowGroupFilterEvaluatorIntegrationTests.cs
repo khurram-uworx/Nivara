@@ -30,10 +30,13 @@ public class RowGroupFilterEvaluatorIntegrationTests
 
             source.ApplyFilterPredicate(filter, schema);
 
+            // Pushdown only eliminates row groups, not individual rows.
+            // Row group 2 [2000-2999] is the only group that could contain values > 2500.
             var result = source.Execute();
             var column = result["Value"];
-            Assert.That(column.Length, Is.EqualTo(499));
-            Assert.That(column.GetValue(0), Is.EqualTo(2501));
+            Assert.That(column.Length, Is.EqualTo(1000),
+                "Pushdown should keep the entire row group [2000-2999] that may contain matching rows");
+            Assert.That(column.GetValue(0), Is.EqualTo(2000));
             source.Dispose();
         }
         finally
@@ -100,10 +103,12 @@ public class RowGroupFilterEvaluatorIntegrationTests
 
             source.ApplyFilterPredicate(filter, schema);
 
+            // Pushdown only eliminates row groups, not individual rows.
+            // Row group 0 [0-999] is the only group that could contain value 500.
             var result = source.Execute();
             var column = result["Value"];
-            Assert.That(column.Length, Is.EqualTo(1));
-            Assert.That(column.GetValue(0), Is.EqualTo(500));
+            Assert.That(column.Length, Is.EqualTo(1000),
+                "Pushdown should keep the entire row group [0-999] that may contain the matching value");
             source.Dispose();
         }
         finally
@@ -140,11 +145,12 @@ public class RowGroupFilterEvaluatorIntegrationTests
 
             source.ApplyFilterPredicate(filter, schema);
 
+            // Pushdown only eliminates row groups, not individual rows.
+            // AND(>= 1200, < 1800): only row group 1 [1000-1999] satisfies both conditions.
             var result = source.Execute();
             var column = result["Value"];
-            Assert.That(column.Length, Is.EqualTo(600));
-            Assert.That(column.GetValue(0), Is.EqualTo(1200));
-            Assert.That(column.GetValue(599), Is.EqualTo(1799));
+            Assert.That(column.Length, Is.EqualTo(1000),
+                "Pushdown should keep the entire row group [1000-1999] that may contain matching rows");
             source.Dispose();
         }
         finally
