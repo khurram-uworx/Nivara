@@ -73,10 +73,10 @@ internal static class RowGroupFilterEvaluator
 
             return cmp.Operator switch
             {
-                ComparisonOperator.GreaterThan => stats.MinValue != null && CompareValues(literalValue, stats.MinValue, underlyingType) < 0,
-                ComparisonOperator.GreaterThanOrEqual => stats.MinValue != null && CompareValues(literalValue, stats.MinValue, underlyingType) <= 0,
-                ComparisonOperator.LessThan => stats.MaxValue != null && CompareValues(literalValue, stats.MaxValue, underlyingType) > 0,
-                ComparisonOperator.LessThanOrEqual => stats.MaxValue != null && CompareValues(literalValue, stats.MaxValue, underlyingType) >= 0,
+                ComparisonOperator.GreaterThan => stats.MaxValue != null && CompareValues(literalValue, stats.MaxValue, underlyingType) < 0,
+                ComparisonOperator.GreaterThanOrEqual => stats.MaxValue != null && CompareValues(literalValue, stats.MaxValue, underlyingType) <= 0,
+                ComparisonOperator.LessThan => stats.MinValue != null && CompareValues(literalValue, stats.MinValue, underlyingType) > 0,
+                ComparisonOperator.LessThanOrEqual => stats.MinValue != null && CompareValues(literalValue, stats.MinValue, underlyingType) >= 0,
                 ComparisonOperator.Equal => stats.MinValue != null && stats.MaxValue != null
                     && CompareValues(literalValue, stats.MinValue, underlyingType) >= 0
                     && CompareValues(literalValue, stats.MaxValue, underlyingType) <= 0,
