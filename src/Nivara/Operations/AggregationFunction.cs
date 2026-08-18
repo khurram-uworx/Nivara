@@ -613,8 +613,7 @@ public sealed class QuantileAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        var validValues = ExtractValidValues(column, groupIndices);
-        return QuantileKernel.ComputeFromBoxed(validValues, q);
+        return QuantileKernel.ComputeFromColumn(column, groupIndices, q);
     }
 
     /// <inheritdoc />
@@ -623,21 +622,6 @@ public sealed class QuantileAggregation : AggregationFunction
         var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
         if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
             throw new ArgumentException($"Quantile aggregation requires numeric type, got {inputType.Name}");
-    }
-
-    /// <summary>
-    /// Extracts valid (non-null) values from a column for the specified indices
-    /// </summary>
-    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
-    {
-        var validValues = new List<object>();
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-        return validValues;
     }
 }
 
@@ -669,15 +653,7 @@ public sealed class MedianAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        var validValues = new List<object>();
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-
-        return QuantileKernel.ComputeFromBoxed(validValues, 0.5);
+        return QuantileKernel.ComputeFromColumn(column, groupIndices, 0.5);
     }
 
     /// <inheritdoc />
