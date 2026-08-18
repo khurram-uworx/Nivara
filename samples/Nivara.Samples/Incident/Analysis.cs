@@ -16,6 +16,7 @@ public sealed class RequestRow
     public string Region { get; set; } = "";
     public string TraceId { get; set; } = "";
     public bool IsRetry { get; set; }
+    public double DurationPercentRank { get; set; }
 }
 
 public sealed class DeploymentRow
@@ -34,6 +35,7 @@ public sealed class InstanceRow
     public string Region { get; set; } = "";
     public int ActiveRequests { get; set; }
     public int QueueDepth { get; set; }
+    public int PeakQueueDepth { get; set; }
 }
 
 public static class Analysis
@@ -153,6 +155,7 @@ public static class Analysis
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
             .Sort("Timestamp", SortDirection.Ascending)
+            .RollingMax("QueueDepth", "PeakQueueDepth", 10, new WindowSpec().PartitionBy("Service"))
             .Collect();
 
         var typedQuery = instances.Query<InstanceRow>();
@@ -162,6 +165,7 @@ public static class Analysis
             {
                 Service = g.Key,
                 InstanceCount = g.Count(),
+                PeakQueueDepth = g.Max(r => r.PeakQueueDepth),
                 P50QueueDepth = g.Quantile(r => r.QueueDepth, 0.50),
                 P95QueueDepth = g.Quantile(r => r.QueueDepth, 0.95),
                 P99QueueDepth = g.Quantile(r => r.QueueDepth, 0.99),
@@ -180,6 +184,9 @@ public static class Analysis
         using var requests = requestsQf
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd))
+            .PercentRank("DurationPercentRank",
+                [new SortKey("DurationMs", SortDirection.Ascending)],
+                "Region")
             .Collect();
 
         var typedQuery = requests.Query<RequestRow>();
@@ -193,6 +200,7 @@ public static class Analysis
                 ErrorRate = g.Average(r => r.StatusCode >= 500 ? 1.0 : 0.0),
                 P50Duration = g.Quantile(r => r.DurationMs, 0.50),
                 P95Duration = g.Quantile(r => r.DurationMs, 0.95),
+                MaxDurationPercentRank = g.Max(r => r.DurationPercentRank),
             });
 
         var result = grouped.Collect();
