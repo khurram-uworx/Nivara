@@ -193,4 +193,76 @@ public class RowGroupFilterEvaluatorIntegrationTests
                 File.Delete(tempFile);
         }
     }
+
+    [Test]
+    public void ApplyFilterPredicate_AllRowGroupsSkipped_ReturnsEmptyColumnsWithSchema()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var values = Enumerable.Range(0, 3000).Select(i => i).ToArray();
+            var frame = NivaraFrame.Create(("Value", NivaraColumn<int>.Create(values)));
+            NivaraParquetWriter.WriteParquet(frame, tempFile,
+                ParquetWriteOptions.Default.With(rowGroupSize: 1000));
+            frame.Dispose();
+
+            using var source = new ParquetLazySource(tempFile);
+            Assert.That(source.RowGroupCount, Is.EqualTo(3));
+
+            var schema = new Schema(new[] { ("Value", typeof(int)) });
+            var filter = new ComparisonExpression(
+                ComparisonOperator.GreaterThan,
+                new ColumnReference("Value"),
+                new LiteralExpression(99999));
+
+            source.ApplyFilterPredicate(filter, schema);
+
+            var result = source.Execute();
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result.Count, Is.EqualTo(1), "Schema columns must be preserved even when all row groups are skipped");
+            Assert.That(result.ContainsKey("Value"), Is.True);
+            Assert.That(result["Value"].Length, Is.EqualTo(0),
+                "All row groups were skipped, so the result must have zero rows");
+            source.Dispose();
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
+    }
+
+    [Test]
+    public async Task ApplyFilterPredicate_AllRowGroupsSkipped_EndToEndQueryDoesNotThrow()
+    {
+        var tempFile = Path.GetTempFileName();
+        try
+        {
+            var values = Enumerable.Range(0, 3000).Select(i => i).ToArray();
+            var frame = NivaraFrame.Create(
+                ("Value", NivaraColumn<int>.Create(values)),
+                ("Name", NivaraColumn<string>.Create(values.Select(i => $"item{i}").ToArray())));
+            NivaraParquetWriter.WriteParquet(frame, tempFile,
+                ParquetWriteOptions.Default.With(rowGroupSize: 1000));
+            frame.Dispose();
+
+            using var qf = NivaraParquetReader.ScanAsQueryFrame(tempFile);
+
+            var result = qf
+                .Filter(ColumnExpressions.Col("Value") >= ColumnExpressions.Lit(99999))
+                .Collect();
+
+            Assert.That(result, Is.Not.Null);
+            Assert.That(result.RowCount, Is.EqualTo(0),
+                "Filter eliminates all rows, result must be empty");
+            Assert.That(result.ColumnNames, Has.Count.EqualTo(2),
+                "Schema must be preserved even when all rows are filtered out");
+            result.Dispose();
+        }
+        finally
+        {
+            if (File.Exists(tempFile))
+                File.Delete(tempFile);
+        }
+    }
 }

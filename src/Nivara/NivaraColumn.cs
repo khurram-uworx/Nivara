@@ -346,6 +346,33 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
         return new NivaraColumn<T>(storage);
     }
 
+    /// <summary>
+    /// Creates a column from caller-owned arrays without copying.
+    /// Use this in hot paths (window functions, kernels) where the caller already
+    /// allocated the arrays and does not need them afterwards.
+    /// </summary>
+    internal static NivaraColumn<T> CreateFromOwnedArrays(T[] values, bool[] nullMask)
+    {
+        bool hasNulls = false;
+        foreach (var b in nullMask)
+        {
+            if (b)
+            {
+                hasNulls = true;
+                break;
+            }
+        }
+
+        if (!hasNulls)
+        {
+            var storage = new ColumnStorage<T>(values);
+            return new NivaraColumn<T>(storage);
+        }
+
+        var memStorage = new ColumnStorage<T>(values, new ReadOnlyMemory<bool>(nullMask));
+        return new NivaraColumn<T>(memStorage);
+    }
+
     readonly IColumnStorage<T> storage;
     bool disposed;
 
