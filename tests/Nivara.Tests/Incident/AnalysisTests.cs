@@ -276,26 +276,31 @@ public class AnalysisTests
     }
 
     [Test]
-    public void SaturationOrdering_C_HasQuantileColumns()
+    public void SaturationOrdering_C_HasQuantileAndPeakColumns()
     {
         var dir = Path.Combine(tempDir, "C");
         var scenario = Scenarios.Get("C");
         using var frame = Analysis.AnalyzeSaturationOrdering(dir, scenario);
 
+        Assert.That(frame.ColumnNames, Does.Contain("PeakQueueDepth"));
         Assert.That(frame.ColumnNames, Does.Contain("P50QueueDepth"));
         Assert.That(frame.ColumnNames, Does.Contain("P95QueueDepth"));
         Assert.That(frame.ColumnNames, Does.Contain("P99QueueDepth"));
         Assert.That(frame.ColumnNames, Does.Contain("StdDevQueueDepth"));
 
+        var peakCol = frame.GetColumn<int>("PeakQueueDepth");
         var p50Col = frame.GetColumn<double>("P50QueueDepth");
         var p95Col = frame.GetColumn<double>("P95QueueDepth");
         var p99Col = frame.GetColumn<double>("P99QueueDepth");
 
         for (int i = 0; i < frame.RowCount; i++)
         {
+            var peak = (int)peakCol.GetValue(i)!;
             var p50 = (double)p50Col.GetValue(i)!;
             var p95 = (double)p95Col.GetValue(i)!;
             var p99 = (double)p99Col.GetValue(i)!;
+            Assert.That(peak, Is.GreaterThanOrEqualTo(0),
+                $"PeakQueueDepth ({peak}) should be >= 0 at row {i}");
             Assert.That(p95, Is.GreaterThanOrEqualTo(p50),
                 $"P95 ({p95}) should be >= P50 ({p50}) at row {i}");
             Assert.That(p99, Is.GreaterThanOrEqualTo(p95),
@@ -314,7 +319,7 @@ public class AnalysisTests
     }
 
     [Test]
-    public void RegionalPartitioning_D_HasErrorRateAndRank()
+    public void RegionalPartitioning_D_HasErrorRateRankAndPercentRank()
     {
         var dir = Path.Combine(tempDir, "D");
         var scenario = Scenarios.Get("D");
@@ -322,11 +327,13 @@ public class AnalysisTests
 
         Assert.That(frame.ColumnNames, Does.Contain("ErrorRate"));
         Assert.That(frame.ColumnNames, Does.Contain("ErrorRank"));
+        Assert.That(frame.ColumnNames, Does.Contain("MaxDurationPercentRank"));
         Assert.That(frame.ColumnNames, Does.Contain("P50Duration"));
         Assert.That(frame.ColumnNames, Does.Contain("P95Duration"));
 
         var errorRateCol = frame.GetColumn<double>("ErrorRate");
         var rankCol = frame.GetColumn<long>("ErrorRank");
+        var pctRankCol = frame.GetColumn<double>("MaxDurationPercentRank");
 
         for (int i = 0; i < frame.RowCount; i++)
         {
@@ -336,6 +343,9 @@ public class AnalysisTests
             var rank = (long)rankCol.GetValue(i)!;
             Assert.That(rank, Is.GreaterThan(0),
                 $"ErrorRank should be positive at row {i}");
+            var pctRank = (double)pctRankCol.GetValue(i)!;
+            Assert.That(pctRank, Is.GreaterThanOrEqualTo(0.0).And.LessThanOrEqualTo(1.0),
+                $"MaxDurationPercentRank out of range at row {i}");
         }
     }
 

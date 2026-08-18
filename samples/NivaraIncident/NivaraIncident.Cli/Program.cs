@@ -1,4 +1,8 @@
 using Nivara;
+using Nivara.Diagnostics;
+using Nivara.Expressions;
+using Nivara.Linq;
+using Nivara.Operations;
 using Nivara.Samples.Incident;
 using System.Diagnostics;
 
@@ -10,6 +14,7 @@ long records = 0;
 int chunkSize = 100_000;
 bool stream = false;
 bool benchmark = false;
+int iterations = 5;
 
 for (int i = 1; i < args.Length; i++)
 {
@@ -18,22 +23,36 @@ for (int i = 1; i < args.Length; i++)
     else if (args[i] == "--scale" && i + 1 < args.Length) scale = int.Parse(args[++i]);
     else if (args[i] == "--records" && i + 1 < args.Length) records = long.Parse(args[++i]);
     else if (args[i] == "--chunk-size" && i + 1 < args.Length) chunkSize = int.Parse(args[++i]);
+    else if (args[i] == "--iterations" && i + 1 < args.Length) iterations = int.Parse(args[++i]);
     else if (args[i] == "--stream") stream = true;
     else if (args[i] == "--benchmark") benchmark = true;
 }
 
-var scenario = Scenarios.Get(scenarioId);
+var scenarioIds = scenarioId.Equals("all", StringComparison.OrdinalIgnoreCase)
+    ? new[] { "A", "B", "C", "D" }
+    : new[] { scenarioId };
 
 switch (mode)
 {
     case "generate":
-        Generate(datasetPath, scenarioId, scale, records);
+        foreach (var sid in scenarioIds)
+            Generate(datasetPath, sid, scale, records);
         break;
     case "analyze":
-        await Analyze(datasetPath, scenario, stream, chunkSize, benchmark);
+        foreach (var sid in scenarioIds)
+            await Analyze(datasetPath, Scenarios.Get(sid), stream, chunkSize, benchmark, iterations);
+        break;
+    case "bench-stream":
+        foreach (var sid in scenarioIds)
+            BenchStream(datasetPath, Scenarios.Get(sid));
+        break;
+    case "bench-kernels":
+        foreach (var sid in scenarioIds)
+            BenchKernels(datasetPath, Scenarios.Get(sid));
         break;
     case "replay":
-        await Replay(datasetPath, scenario, chunkSize);
+        foreach (var sid in scenarioIds)
+            await Replay(datasetPath, Scenarios.Get(sid), chunkSize);
         break;
     default:
         PrintUsage();
@@ -57,7 +76,7 @@ void Generate(string dsPath, string sid, int sc, long rec)
     Console.WriteLine($"Output: {dsPath}");
 }
 
-async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bool doBenchmark)
+async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bool doBenchmark, int iters)
 {
     Console.WriteLine($"Scenario: {sc.Id} — {sc.Name}");
     Console.WriteLine($"Dataset: {dsPath}");
@@ -65,42 +84,56 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
 
     if (doBenchmark)
     {
-        Console.WriteLine("=== Benchmark: Nivara ===");
+        Console.WriteLine($"=== Benchmark: Nivara ({iters} iterations, median) ===");
         Console.WriteLine();
 
-        var sw1 = Stopwatch.StartNew();
-        var degradation = Analysis.AnalyzeDegradationOrdering(dsPath, sc).Collect();
-        sw1.Stop();
-        Console.WriteLine($"  Degradation Ordering:   {sw1.ElapsedMilliseconds} ms  ({degradation.RowCount:N0} rows)");
+        int warmup = 1;
+        int totalRuns = warmup + iters;
 
-        var sw2 = Stopwatch.StartNew();
-        var deployment = Analysis.AnalyzeDeploymentCorrelation(dsPath, sc);
-        sw2.Stop();
-        Console.WriteLine($"  Deployment Correlation: {sw2.ElapsedMilliseconds} ms  ({deployment.RowCount:N0} rows)");
+        // Analysis A: returns QueryFrame — full diagnostics available
+        var degradationTimes = new double[iters];
+        long degradationRows = 0;
+        for (int run = 0; run < totalRuns; run++)
+        {
+            GC.Collect(2, GCCollectionMode.Forced, true);
+            var memBefore = GC.GetTotalMemory(true);
+            var iterSw = Stopwatch.StartNew();
+            using var qf = Analysis.AnalyzeDegradationOrdering(dsPath, sc);
+            using var frame = qf.Collect();
+            iterSw.Stop();
+            var memAfter = GC.GetTotalMemory(false);
+            degradationRows = frame.RowCount;
 
-        var sw3 = Stopwatch.StartNew();
-        var saturation = Analysis.AnalyzeSaturationOrdering(dsPath, sc);
-        sw3.Stop();
-        Console.WriteLine($"  Saturation Ordering:    {sw3.ElapsedMilliseconds} ms  ({saturation.RowCount:N0} rows)");
-
-        var sw4 = Stopwatch.StartNew();
-        var regional = Analysis.AnalyzeRegionalPartitioning(dsPath, sc);
-        sw4.Stop();
-        Console.WriteLine($"  Regional Partitioning:  {sw4.ElapsedMilliseconds} ms  ({regional.RowCount:N0} rows)");
-
-        var sw5 = Stopwatch.StartNew();
-        var grouped = Analysis.AnalyzeGroupedAggregation(dsPath, sc);
-        sw5.Stop();
-        Console.WriteLine($"  Grouped Aggregation:    {sw5.ElapsedMilliseconds} ms  ({grouped.RowCount:N0} rows)");
-
-        var totalMs = sw1.ElapsedMilliseconds + sw2.ElapsedMilliseconds + sw3.ElapsedMilliseconds + sw4.ElapsedMilliseconds + sw5.ElapsedMilliseconds;
+            if (run >= warmup)
+            {
+                degradationTimes[run - warmup] = iterSw.Elapsed.TotalMilliseconds;
+                var diag = qf.GetExecutionDiagnostics();
+                if (run == warmup)
+                {
+                    Console.WriteLine($"  Degradation Ordering:");
+                    Console.WriteLine($"    Rows: {frame.RowCount:N0} returned");
+                    if (diag != null)
+                        Console.WriteLine($"    Diagnostics: {diag.RowsRead:N0} read, {diag.MaterializedColumns} cols, {diag.TotalExecutionTime.TotalMilliseconds:F1}ms exec, {diag.MemoryAllocated / 1024.0 / 1024.0:F2} MB allocated");
+                    Console.WriteLine($"    GC peak: {(memAfter - memBefore) / 1024.0 / 1024.0:F2} MB");
+                }
+            }
+        }
+        Console.WriteLine($"    Median: {Median(degradationTimes):F1} ms  ({degradationRows:N0} rows)");
         Console.WriteLine();
-        Console.WriteLine($"  Total:                  {totalMs} ms ({totalMs / 1000.0:F2}s)");
 
-        deployment.Dispose();
-        saturation.Dispose();
-        regional.Dispose();
-        grouped.Dispose();
+        // Analyses B-E: return NivaraFrame — report elapsed/rows only
+        RunBenchmarkIteration("Deployment Correlation", iters, warmup,
+            () => Analysis.AnalyzeDeploymentCorrelation(dsPath, sc));
+
+        RunBenchmarkIteration("Saturation Ordering", iters, warmup,
+            () => Analysis.AnalyzeSaturationOrdering(dsPath, sc));
+
+        RunBenchmarkIteration("Regional Partitioning", iters, warmup,
+            () => Analysis.AnalyzeRegionalPartitioning(dsPath, sc));
+
+        RunBenchmarkIteration("Grouped Aggregation", iters, warmup,
+            () => Analysis.AnalyzeGroupedAggregation(dsPath, sc));
+
         return;
     }
 
@@ -144,6 +177,195 @@ async Task Analyze(string dsPath, IncidentScenario sc, bool doStream, int cs, bo
     Console.WriteLine($"Total analysis time: {sw.Elapsed.TotalSeconds:F1}s");
 }
 
+void BenchStream(string dsPath, IncidentScenario sc)
+{
+    Console.WriteLine($"=== Streaming vs Eager Benchmark: {sc.Id} — {sc.Name} ===");
+    Console.WriteLine($"Dataset: {dsPath}");
+    Console.WriteLine();
+
+    var chunkSizes = new[] { 10_000, 50_000, 100_000, 500_000 };
+
+    // Window-heavy analysis (Sort + RollingMean + Shift + RollingMax)
+    Console.WriteLine("  Degradation Ordering (window ops: Sort + RollingMean + Shift):");
+    Console.WriteLine("  ChunkSize    Chunks    Elapsed      PeakMem       Rows");
+
+    foreach (var cs in chunkSizes)
+    {
+        GC.Collect(2, GCCollectionMode.Forced, true);
+        long peakMem = 0;
+        int chunkCount = 0;
+        long totalRows = 0;
+
+        var sw = Stopwatch.StartNew();
+        var qf = Analysis.AnalyzeDegradationOrdering(dsPath, sc);
+        var stream = qf.AsStream(cs);
+
+        // Synchronously enumerate to measure
+        var enumerator = stream.GetAsyncEnumerator();
+        try
+        {
+            while (true)
+            {
+                bool moved;
+                try { moved = enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult(); }
+                catch { break; }
+                if (!moved) break;
+                chunkCount++;
+                totalRows += enumerator.Current.RowCount;
+                long mem = GC.GetTotalMemory(false);
+                if (mem > peakMem) peakMem = mem;
+            }
+        }
+        finally { enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        sw.Stop();
+
+        string fallback = chunkCount <= 1 ? " (FALLBACK)" : "";
+        Console.WriteLine("  " + cs.ToString().PadRight(12) + chunkCount.ToString().PadLeft(8) + sw.ElapsedMilliseconds.ToString().PadLeft(8) + " ms " + (peakMem / 1024.0 / 1024.0).ToString("F2").PadLeft(10) + " MB " + totalRows.ToString("N0").PadLeft(10) + fallback);
+        qf.Dispose();
+    }
+
+    // Filter-only prefix (no window ops) for contrast
+    Console.WriteLine();
+    Console.WriteLine("  Filter-only (no window ops):");
+    Console.WriteLine("  ChunkSize    Chunks    Elapsed      PeakMem       Rows");
+
+    var scenario = sc;
+    foreach (var cs in chunkSizes)
+    {
+        GC.Collect(2, GCCollectionMode.Forced, true);
+        long peakMem = 0;
+        int chunkCount = 0;
+        long totalRows = 0;
+
+        var sw = Stopwatch.StartNew();
+        var qf = Ingestion.LoadParquet(Path.Combine(dsPath, "requests.parquet"))
+            .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(scenario.IncidentStart.Ticks))
+            .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(scenario.IncidentEnd.Ticks));
+        var stream = qf.AsStream(cs);
+
+        var enumerator = stream.GetAsyncEnumerator();
+        try
+        {
+            while (true)
+            {
+                bool moved;
+                try { moved = enumerator.MoveNextAsync().AsTask().GetAwaiter().GetResult(); }
+                catch { break; }
+                if (!moved) break;
+                chunkCount++;
+                totalRows += enumerator.Current.RowCount;
+                long mem = GC.GetTotalMemory(false);
+                if (mem > peakMem) peakMem = mem;
+            }
+        }
+        finally { enumerator.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+        sw.Stop();
+
+        Console.WriteLine("  " + cs.ToString().PadRight(12) + chunkCount.ToString().PadLeft(8) + sw.ElapsedMilliseconds.ToString().PadLeft(8) + " ms " + (peakMem / 1024.0 / 1024.0).ToString("F2").PadLeft(10) + " MB " + totalRows.ToString("N0").PadLeft(10));
+        qf.Dispose();
+    }
+
+    Console.WriteLine();
+}
+
+void BenchKernels(string dsPath, IncidentScenario sc)
+{
+    Console.WriteLine($"=== Kernel Vectorization Report: {sc.Id} — {sc.Name} ===");
+    Console.WriteLine($"Dataset: {dsPath}");
+    Console.WriteLine();
+
+    DiagnosticsTracker.IsEnabled = true;
+
+    // Analysis A: Degradation Ordering (QueryFrame pipeline — full kernel path)
+    DiagnosticsTracker.ClearRecordedOperations();
+    GC.Collect(2, GCCollectionMode.Forced, true);
+    var sw = Stopwatch.StartNew();
+    using (var qf = Analysis.AnalyzeDegradationOrdering(dsPath, sc))
+    using (var frame = qf.Collect()) { }
+    sw.Stop();
+    var summaryA = DiagnosticsTracker.GetSummary();
+    Console.WriteLine($"  Degradation Ordering ({sw.ElapsedMilliseconds}ms):");
+    Console.WriteLine($"    Operations: {summaryA.TotalOperations} total, {summaryA.VectorizedOperations} vectorized, {summaryA.ScalarOperations} scalar");
+    Console.WriteLine($"    Vectorization rate: {summaryA.VectorizationRate:F1}%");
+    PrintTopOps(summaryA);
+
+    // Analysis C: Saturation Ordering (Filter + Sort + RollingMax + Collect + typed LINQ GroupBy)
+    DiagnosticsTracker.ClearRecordedOperations();
+    GC.Collect(2, GCCollectionMode.Forced, true);
+    sw.Restart();
+    using (var satFrame = Analysis.AnalyzeSaturationOrdering(dsPath, sc)) { }
+    sw.Stop();
+    var summaryC = DiagnosticsTracker.GetSummary();
+    Console.WriteLine($"  Saturation Ordering ({sw.ElapsedMilliseconds}ms):");
+    Console.WriteLine($"    Operations: {summaryC.TotalOperations} total, {summaryC.VectorizedOperations} vectorized, {summaryC.ScalarOperations} scalar");
+    Console.WriteLine($"    Vectorization rate: {summaryC.VectorizationRate:F1}%");
+    PrintTopOps(summaryC);
+
+    // Analysis D: Regional Partitioning (Filter + PercentRank + Collect + typed LINQ GroupBy)
+    DiagnosticsTracker.ClearRecordedOperations();
+    GC.Collect(2, GCCollectionMode.Forced, true);
+    sw.Restart();
+    using (var regFrame = Analysis.AnalyzeRegionalPartitioning(dsPath, sc)) { }
+    sw.Stop();
+    var summaryD = DiagnosticsTracker.GetSummary();
+    Console.WriteLine($"  Regional Partitioning ({sw.ElapsedMilliseconds}ms):");
+    Console.WriteLine($"    Operations: {summaryD.TotalOperations} total, {summaryD.VectorizedOperations} vectorized, {summaryD.ScalarOperations} scalar");
+    Console.WriteLine($"    Vectorization rate: {summaryD.VectorizationRate:F1}%");
+    PrintTopOps(summaryD);
+
+    DiagnosticsTracker.IsEnabled = false;
+    DiagnosticsTracker.ClearRecordedOperations();
+
+    Console.WriteLine();
+    Console.WriteLine("  Note: rank/quantile scalar fallback is expected. Hand-rolled C# loops");
+    Console.WriteLine("  (Analyses B, E) run outside Nivara kernels and are not measured here.");
+}
+
+void PrintTopOps(OperationSummary summary)
+{
+    if (summary.KernelTypes.Count > 0)
+    {
+        Console.WriteLine("    Kernel types:");
+        foreach (var kvp in summary.KernelTypes.OrderByDescending(kv => kv.Value).Take(5))
+            Console.WriteLine($"      {kvp.Key}: {kvp.Value}");
+    }
+    if (summary.OperationTypes.Count > 0)
+    {
+        Console.WriteLine("    Operation types:");
+        foreach (var kvp in summary.OperationTypes.OrderByDescending(kv => kv.Value).Take(5))
+            Console.WriteLine($"      {kvp.Key}: {kvp.Value}");
+    }
+    Console.WriteLine();
+}
+
+void RunBenchmarkIteration(string name, int iters, int warmup, Func<NivaraFrame> run)
+{
+    var times = new double[iters];
+    long rowCount = 0;
+    int totalRuns = warmup + iters;
+    for (int i = 0; i < totalRuns; i++)
+    {
+        GC.Collect(2, GCCollectionMode.Forced, true);
+        var sw = Stopwatch.StartNew();
+        using var frame = run();
+        sw.Stop();
+        rowCount = frame.RowCount;
+        if (i >= warmup)
+            times[i - warmup] = sw.Elapsed.TotalMilliseconds;
+    }
+    Console.WriteLine("  " + name.PadRight(24) + Median(times).ToString("F1").PadLeft(8) + " ms  (" + rowCount.ToString("N0") + " rows)");
+}
+
+static double Median(double[] values)
+{
+    var sorted = (double[])values.Clone();
+    Array.Sort(sorted);
+    int mid = sorted.Length / 2;
+    return sorted.Length % 2 == 0
+        ? (sorted[mid - 1] + sorted[mid]) / 2.0
+        : sorted[mid];
+}
+
 async Task Replay(string dsPath, IncidentScenario sc, int cs)
 {
     Console.WriteLine($"Replaying scenario {sc.Id} — {sc.Name}");
@@ -183,7 +405,9 @@ void PrintUsage()
     Console.WriteLine("Nivara Incident Lab");
     Console.WriteLine();
     Console.WriteLine("Usage:");
-    Console.WriteLine("  NivaraIncident.Cli generate  --dataset <path> --scenario <A|B|C|D> [--scale <N>] [--records <N>]");
-    Console.WriteLine("  NivaraIncident.Cli analyze   --dataset <path> --scenario <A|B|C|D> [--stream] [--chunk-size <N>] [--benchmark]");
-    Console.WriteLine("  NivaraIncident.Cli replay    --dataset <path> --scenario <A|B|C|D> --chunk-size <N>");
+    Console.WriteLine("  NivaraIncident.Cli generate      --dataset <path> --scenario <A|B|C|D|all> [--scale <N>] [--records <N>]");
+    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>]");
+    Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
+    Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
+    Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
 }

@@ -4,7 +4,8 @@
 1.1 ✅, 1.2 ✅, 1.3 ✅, 1.4 ✅, 1.5 ✅ (see the 1.6 completion marker below). Phase 2
 (2.1–2.4) is **complete** on `khurram/incident-phase2` — see the "Phase 2 → Phase 3 handoff
 notes" section. Phase 3a (CLI) is **complete** on `khurram/incident-3` — see the
-"Phase 3a → Phase 3b handoff notes" section. Phase 3b and Phase 4 are next.
+"Phase 3a → Phase 3b handoff notes" section. Phase 4 (benchmarks) is **complete** on
+`khurram/phase4` — see the "Phase 4 completion" section below. Phase 3b (Web UI) is next.
 **Scope:** `samples/NivaraIncident/` reference application + the core-library improvements it
 drives (`src/Nivara`, `src/Nivara.Extensions`)
 **Inputs:** `samples/NivaraIncident/IDEA.md` (product spec), `samples/NivaraIncident/README.md`
@@ -379,8 +380,9 @@ and 8 dashboard views. Every number computed by Nivara. Not a prerequisite for b
 
 ## Phase 4 — Performance assessment
 
-> **Status: FOLLOWS 3a** — execution begins after Phase 3a (CLI) is complete.
-> Produces benchmark report + core gap evidence before Phase 3b (Web UI) starts.
+> **Status: COMPLETE** on `khurram/phase4`.
+> Produced benchmark report with real numbers, streaming vs eager measurements,
+> kernel vectorization visibility, and AutoDiff SIMD microbenchmarks.
 > Detailed execution plan: `docs/PHASE4.md`.
 
 Produce a benchmark report with real numbers (see `docs/PHASE4.md` for detailed sub-steps):
@@ -395,11 +397,21 @@ Produce a benchmark report with real numbers (see `docs/PHASE4.md` for detailed 
 Record results in the sample README's Performance section. Escalate any core limitation found
 as a GitHub issue referencing the sample.
 
+### Phase 4 completion marker
+
+- [x] `--benchmark` mode produces reproducible per-analysis timing (all 4 scenarios A–D, 5 iterations, median).
+- [x] Streaming vs eager measurement (`bench-stream`): chunk count == 1 for window-heavy queries confirms fallback (Gap 5 measured).
+- [x] Kernel vectorization visibility (`bench-kernels`): `DiagnosticsTracker` reports vectorization rate per scenario.
+- [x] AutoDiff SIMD microbenchmarks: Pow and RMSNorm forward+backward at 1M elements with scalar baselines.
+- [x] `samples/NivaraIncident/README.md` updated: real performance numbers, gap table updated with measured results, stale Saturation Ordering note removed (generator fix in 2a57ce9).
+- [x] `docs/PHASE4.md` checkboxes ticked.
+- [x] `samples/Incident-PLAN.md` Phase 4 status updated to COMPLETE.
+
 ---
 
 ## Definition of done
 
-> **Execution order:** Phase 3a ✅ → Phase 4 (benchmarks, next) → Phase 3b (Web UI, follow-up).
+> **Execution order:** Phase 3a ✅ → Phase 4 ✅ → Phase 3b (Web UI, next).
 > The full DoD (replay/CLI/Web UI convergence) applies when all three land.
 
 - All README gap items marked **open** are either fixed in core, worked around in the sample with
@@ -416,9 +428,7 @@ as a GitHub issue referencing the sample.
 ## Execution notes for the next session
 
 - **Ask before running `dotnet test`** (repo rule); verify with a targeted build first.
-- Execution order: Phase 3a ✅ → Phase 4 (benchmarks, next) → Phase 3b (Web UI, follow-up).
-- Phase 4: run `Nivara.PerformanceTests/IncidentLabBenchmark.cs` at scale 1 and 10; measure
-  streaming vs eager; record numbers in README.
+- Execution order: Phase 3a ✅ → Phase 4 ✅ → Phase 3b (Web UI, next).
 - Phase 3b: add `NivaraIncident.Web/` project; reuse `Analysis.cs` methods as data source.
 - Keep each change unit small and reviewable.
 - Use `dotnet build Nivara.slnx` after each project change.

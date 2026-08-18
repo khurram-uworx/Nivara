@@ -283,6 +283,7 @@ static class Program
         RunRowScoringScenarios();
         RunWindowAllocationScenarios();
         RunStreamingCancellationScenarios();
+        RunAutoDiffSimdScenarios();
     }
 
     static void RunWindowAllocationScenarios()
@@ -360,6 +361,80 @@ static class Program
     {
         Run("Streaming cancel mid-stream 200k rows x 10k chunk", 3, 15,
             () => CreateStreamingCancellationScenario(totalRows: 200_000, chunkSize: 10_000, cancelAfterChunks: 3));
+    }
+
+    static void RunAutoDiffSimdScenarios()
+    {
+        const int n = 1_000_000;
+
+        Run("AutoDiff Pow(2.5) fwd+bwd 1M x float", 5, 20,
+            () =>
+            {
+                var data = NivaraColumn<float>.Create(Fill(new float[n]));
+                var gradOnesCol = NivaraColumn<float>.Create(Fill(new float[n]));
+                return () =>
+                {
+                    using (GradientUtils.Grad())
+                    {
+                        var input = new ReverseGradTensor<float>(data, requiresGrad: true);
+                        var output = ReverseGradOperations.Pow(input, 2.5);
+                        var gradOnes = new ReverseGradTensor<float>(gradOnesCol);
+                        output.Backward(gradOnes);
+                    }
+                };
+            });
+
+        Run("AutoDiff Pow(2.5) scalar baseline 1M x float", 5, 20,
+            () =>
+            {
+                var data = Fill(new float[n]);
+                var grad = new float[n];
+                return () =>
+                {
+                    for (int i = 0; i < n; i++)
+                    {
+                        var val = data[i];
+                        var powVal = (float)Math.Pow(val, 2.5);
+                        grad[i] = powVal * 2.5f / (val + 1e-7f);
+                    }
+                };
+            });
+
+        Run("AutoDiff RMSNorm fwd+bwd 1M x float", 5, 20,
+            () =>
+            {
+                var data = NivaraColumn<float>.Create(Fill(new float[n]));
+                var gradOnesCol = NivaraColumn<float>.Create(Fill(new float[n]));
+                return () =>
+                {
+                    using (GradientUtils.Grad())
+                    {
+                        var input = new ReverseGradTensor<float>(data, requiresGrad: true);
+                        var output = ReverseGradOperations.RMSNorm(input);
+                        var gradOnes = new ReverseGradTensor<float>(gradOnesCol);
+                        output.Backward(gradOnes);
+                    }
+                };
+            });
+
+        Run("AutoDiff RMSNorm scalar baseline 1M x float", 5, 20,
+            () =>
+            {
+                var data = Fill(new float[n]);
+                var grad = new float[n];
+                return () =>
+                {
+                    float sumSq = 0;
+                    for (int i = 0; i < n; i++)
+                        sumSq += data[i] * data[i];
+                    float rms = MathF.Sqrt(sumSq / n + 1e-5f);
+                    for (int i = 0; i < n; i++)
+                    {
+                        var normed = data[i] / rms;
+                        grad[i] = (1.0f / rms) * (1.0f - normed * normed / n);
+                    }
+                };
+            });
     }
 
     static void RunRowScoringScenarios()

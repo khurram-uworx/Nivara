@@ -121,9 +121,16 @@ def analysis_saturation(instances_path: str, start: int, end: int) -> pl.DataFra
         pl.scan_parquet(instances_path)
         .filter(pl.col("Timestamp").is_between(start, end))
         .sort("Timestamp")
+        .with_columns(
+            pl.col("QueueDepth")
+            .rolling_max(window_size=10)
+            .over("Service")
+            .alias("PeakQueueDepth")
+        )
         .group_by("Service")
         .agg([
             pl.len().alias("InstanceCount"),
+            pl.col("PeakQueueDepth").max().alias("PeakQueueDepth"),
             pl.col("QueueDepth").quantile(0.50).alias("P50QueueDepth"),
             pl.col("QueueDepth").quantile(0.95).alias("P95QueueDepth"),
             pl.col("QueueDepth").quantile(0.99).alias("P99QueueDepth"),
@@ -138,6 +145,18 @@ def analysis_regional(requests_path: str, start: int, end: int) -> pl.DataFrame:
     grouped = (
         pl.scan_parquet(requests_path)
         .filter(pl.col("Timestamp").is_between(start, end))
+        .with_columns([
+            pl.col("DurationMs")
+            .rank("ordinal", descending=False)
+            .over("Region")
+            .alias("_rank"),
+            pl.len().over("Region").alias("_count"),
+        ])
+        .with_columns(
+            ((pl.col("_rank") - 1) / (pl.col("_count") - 1).clip(lower_bound=1))
+            .alias("DurationPercentRank")
+        )
+        .drop(["_rank", "_count"])
         .group_by("Region")
         .agg([
             pl.len().alias("TotalRequests"),
@@ -145,6 +164,7 @@ def analysis_regional(requests_path: str, start: int, end: int) -> pl.DataFrame:
             (pl.col("StatusCode") >= 500).cast(pl.Float64).mean().alias("ErrorRate"),
             pl.col("DurationMs").quantile(0.50).alias("P50Duration"),
             pl.col("DurationMs").quantile(0.95).alias("P95Duration"),
+            pl.col("DurationPercentRank").max().alias("MaxDurationPercentRank"),
         ])
         .sort("ErrorRate", descending=True, nulls_last=True)
         .with_columns(

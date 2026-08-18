@@ -181,10 +181,11 @@ public static class DatasetGenerator
             }
         }
 
-        int instanceCount = 0;
+        int instanceBaseCount = 0;
         foreach (var svc in Services)
-            instanceCount += servicesPerInstance[svc] * Regions.Length;
+            instanceBaseCount += servicesPerInstance[svc] * Regions.Length;
 
+        int instanceCount = instanceBaseCount * (int)durationMinutes;
         var instTimestamps = new long[instanceCount];
         var instServices = new string[instanceCount];
         var instIds = new string[instanceCount];
@@ -193,23 +194,30 @@ public static class DatasetGenerator
         var instQueueDepth = new int[instanceCount];
 
         int instIdx = 0;
-        foreach (var svc in Services)
+        for (int minute = 0; minute < (int)durationMinutes; minute++)
         {
-            int perRegion = servicesPerInstance[svc];
-            foreach (var region in Regions)
-            {
-                for (int i = 0; i < perRegion; i++)
-                {
-                    bool inIncident = baseTime.AddMinutes(10) >= incidentStart;
-                    var queueBase = inIncident && scenario.AffectedServices.Contains(svc) ? 50 : 5;
+            var snapshotTime = baseTime.AddMinutes(minute);
+            bool minuteInIncident = snapshotTime >= incidentStart && snapshotTime < incidentEnd;
 
-                    instTimestamps[instIdx] = baseTime.Ticks;
-                    instServices[instIdx] = svc;
-                    instIds[instIdx] = $"{svc}-{region}-{i:D3}";
-                    instRegions[instIdx] = region;
-                    instActiveReqs[instIdx] = rng.Next(10, 200);
-                    instQueueDepth[instIdx] = (int)BoxMuller(rng, queueBase, queueBase * 0.3);
-                    instIdx++;
+            foreach (var svc in Services)
+            {
+                int perRegion = servicesPerInstance[svc];
+                bool svcAffected = minuteInIncident && scenario.AffectedServices.Contains(svc);
+
+                foreach (var region in Regions)
+                {
+                    for (int i = 0; i < perRegion; i++)
+                    {
+                        var queueBase = svcAffected ? 50 : 5;
+
+                        instTimestamps[instIdx] = snapshotTime.Ticks;
+                        instServices[instIdx] = svc;
+                        instIds[instIdx] = $"{svc}-{region}-{i:D3}";
+                        instRegions[instIdx] = region;
+                        instActiveReqs[instIdx] = rng.Next(10, 200);
+                        instQueueDepth[instIdx] = (int)BoxMuller(rng, queueBase, queueBase * 0.3);
+                        instIdx++;
+                    }
                 }
             }
         }

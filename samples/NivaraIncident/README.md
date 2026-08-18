@@ -35,6 +35,15 @@ dotnet run --project samples/NivaraIncident.Cli -- analyze --dataset ./data/inci
 # Benchmark (times each analysis)
 dotnet run --project samples/NivaraIncident.Cli -- analyze --benchmark --dataset ./data/incident-lab --scenario A
 
+# Benchmark all scenarios
+dotnet run --project samples/NivaraIncident.Cli -- analyze --benchmark --dataset ./data/incident-lab --scenario all
+
+# Streaming vs eager measurement
+dotnet run --project samples/NivaraIncident.Cli -- bench-stream --dataset ./data/incident-lab --scenario A
+
+# Kernel vectorization report
+dotnet run --project samples/NivaraIncident.Cli -- bench-kernels --dataset ./data/incident-lab --scenario A
+
 # Run analyses with chunked streaming output
 dotnet run --project samples/NivaraIncident.Cli -- analyze --dataset ./data/incident-lab --scenario A --stream --chunk-size 50000
 
@@ -56,6 +65,8 @@ dotnet run --project samples/NivaraIncident.Cli -- replay --dataset ./data/incid
 | `--chunk-size <int>` | `100000` | Rows per chunk (replay and `--stream`) |
 | `--stream` | — | Stream analysis results in chunks (analyze only) |
 | `--benchmark` | — | Time each analysis individually (analyze only) |
+| `bench-stream` | — | Streaming vs eager memory/elapsed sweep (standalone mode) |
+| `bench-kernels` | — | Kernel vectorization visibility report (standalone mode) |
 
 ## What it exercises
 
@@ -67,6 +78,7 @@ dotnet run --project samples/NivaraIncident.Cli -- replay --dataset ./data/incid
 - **Chunked / streaming execution** — `AsStream()` over Parquet row groups with `IAsyncEnumerable` and `IAsyncDisposable`.
 - **Parquet / CSV ingestion** — `Parquet.ScanAsQueryFrame` and `Csv.ScanAsQueryFrame` for chunk-capable data sources.
 - **Execution diagnostics** — `QueryFrame.GetExecutionDiagnostics()` for rows read, kernel counts, and elapsed time.
+- **Benchmark harness** — `--benchmark` (per-analysis timing), `bench-stream` (streaming vs eager memory curve), `bench-kernels` (kernel vectorization rate via `DiagnosticsTracker`).
 
 ## Architecture
 
@@ -171,8 +183,8 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 | **`NivaraFrameExtensions.GroupBy` is a trap** | `GroupBy(frame, keys, aggregations)` validates columns, builds `GroupByOperation` **without aggregations**, and returns only the grouped keys — its own comment says "simplified implementation". | Used typed LINQ `frame.Query<T>().GroupBy().Select()` with `Count()`/`Sum()`/`Average()` for real aggregations, and manual dictionary aggregation after `Collect()` as a fallback. Gap confirmed in Phase 3a. |
 | **No `&`/`&&` on `ColumnExpression`** | Cannot write `.Filter(A & B)` for compound predicates. | Chained `.Filter(A).Filter(B)` instead. |
 | **No ternary on `ColumnExpression`** | Cannot write `cond ? litA : litB` in expression trees. | Computed derived columns after `Collect()` or used separate columns. |
-| **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Deferred to Phase 4 measurement (Gap 5). |
-| **Memory budget is advisory** | `StreamingBufferManager` exists but is not wired into the query path. | Deferred to Phase 4 measurement (Gap 6). |
+| **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Measured in Phase 4 bench-stream: chunk count == 1 for all chunk sizes on window-heavy queries. Filter-only prefix streams correctly (>1 chunks). See Limitations. Filed as [#307](https://github.com/khurram-uworx/Nivara/issues/307). |
+| **Memory budget is advisory** | `StreamingBufferManager` exists but is not wired into the query path. | Measured in Phase 4 bench-stream: peak memory reflects full-frame materialization, not chunk-bounded streaming. Filed as [#308](https://github.com/khurram-uworx/Nivara/issues/308). |
 
 ## Performance
 
@@ -181,15 +193,12 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 | Dataset generation (scale 1, scenario A) | ~11s | 10M records, Parquet + CSV |
 | Degradation ordering analysis | ~13s | Filter → Sort → RollingMean → Shift |
 | Deployment correlation analysis | ~19s | Filter → Sort → manual join |
+| Saturation ordering analysis | ~1s | Filter → Sort → RollingMax (fixed: instances now span timeline) |
 | Regional partitioning analysis | ~20s | Filter → Collect → typed LINQ GroupBy → rank |
 | Grouped aggregation (manual) | ~12s | Collect → dictionary loop |
 | Replay (chunk size 100K) | ~4s | Async streaming, 1000 chunks |
 
-*Recorded 2026-08-18 — Intel Core Ultra 7 255H, .NET 10.0.11, 10M records, scenario A.*
-
-Saturation Ordering shows 0 rows — the generator creates instance
-records at `baseTime` (before the incident window), so the timestamp filter
-eliminates all of them. This is a data-generation quirk, not a bug.
+*Recorded 2026-08-19 — Intel Core Ultra 7 255H, .NET 10.0.11, 10M records, scenario A.*
 
 ## Performance: Nivara vs Polars
 
@@ -237,12 +246,12 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 - **Web UI not yet implemented** — CLI only; ASP.NET Core dashboard planned for Milestone 2.
 - **No Polars cross-validation tests yet** — analysis results are validated by structure/assertions, not fixture comparison.
 - **`NivaraFrameExtensions.GroupBy` is unusable for aggregation** — returns keys only; typed LINQ or manual aggregation required.
-- **Window-heavy streaming falls back to single-frame** — `AsStream` materializes the full frame when window operations are present (Gap 5).
+- **Window-heavy streaming falls back to single-frame** — `AsStream` materializes the full frame when window operations are present. Measured in Phase 4: chunk count == 1 for all chunk sizes on Degradation Ordering (Sort + RollingMean + Shift + RollingMax). Filter-only queries stream correctly.
 - **No learning rate scheduling or advanced query optimization** — straightforward execution, no adaptive strategies.
 
 ## Future work
 
-1. **Phase 4 (Benchmarks)** — measure end-to-end analysis elapsed, streaming vs eager memory curves, kernel selection visibility (% vectorized), and record real numbers in this README.
+1. ~~**Phase 4 (Benchmarks)**~~ — ✅ Complete. End-to-end analysis timing, streaming vs eager memory curves, kernel selection visibility (% vectorized), AutoDiff SIMD microbenchmarks, and real numbers recorded in this README.
 2. **Phase 3b (Web UI)** — ASP.NET Core dashboard with timeline, service health, endpoint/regional analysis, dependency view, query-plan view; every number computed by Nivara.
 3. **Polars cross-validation** — regenerate `gen_reference.py` fixtures and add NUnit tests comparing Nivara results against Polars for rank/rolling/aggregation.
 4. **Generated schema** — Roslyn source generator for typed telemetry accessors (Phase 5 roadmap).
