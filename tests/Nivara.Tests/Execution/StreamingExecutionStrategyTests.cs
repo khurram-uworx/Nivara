@@ -892,4 +892,194 @@ public class StreamingExecutionStrategyTests
         // Falls back to Lazy which records diagnostic timings
         Assert.That(result, Is.Not.Null);
     }
+
+    // ===== StreamChunksAsync segmented streaming tests (#307) =====
+
+    [Test]
+    public async Task StreamChunksAsync_FilterThenSort_YieldsMultipleFrames()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+            frames.Add(frame);
+
+        try
+        {
+            Assert.That(frames.Count, Is.GreaterThan(1),
+                "Filter-then-Sort must yield streamable prefix chunks plus a sorted frame");
+            Assert.That(source.ChunksRead.Count, Is.GreaterThan(0),
+                "Must read chunks from source, not fall back to single-frame");
+
+            var filteredRowCount = frames.Take(frames.Count - 1).Sum(f => f.RowCount);
+            var sortedFrame = frames.Last();
+            Assert.That(filteredRowCount, Is.EqualTo(1989),
+                "Lead chunks: Filter A > 10 over 0..1999 keeps 11..1999 = 1989 rows");
+            Assert.That(sortedFrame.RowCount, Is.EqualTo(1989),
+                "Boundary Sort result has same row count as filtered input");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_FilterThenSort_MatchesLazyResult()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var lazySource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var filterThenSort = new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        };
+        var streamingPlan = new QueryPlan(source, filterThenSort);
+        var lazyPlan = new QueryPlan(lazySource, filterThenSort);
+        var streamingContext = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        streamingContext.MemoryBudget = 1024 * 1024;
+        var lazyContext = ExecutionTestHelpers.CreateTestContext();
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(streamingPlan, streamingContext))
+            frames.Add(frame);
+
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, lazyContext);
+
+        try
+        {
+            Assert.That(frames.Count, Is.GreaterThan(1),
+                "Must yield multiple frames (lead chunks + sorted result)");
+            var sortedFrame = frames.Last();
+            Assert.That(sortedFrame.RowCount, Is.EqualTo(lazyResult.RowCount),
+                "Sorted result must match lazy result row count");
+
+            var streamingCol = sortedFrame.GetColumn<int>("A");
+            var lazyCol = lazyResult.GetColumn<int>("A");
+            for (int i = 0; i < lazyResult.RowCount; i++)
+                Assert.That((int)streamingCol.GetValue(i)!, Is.EqualTo((int)lazyCol.GetValue(i)!),
+                    $"Row {i} mismatch between streaming and lazy");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_AllNonStreamable_YieldsSingleFrame()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 1000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+            frames.Add(frame);
+
+        try
+        {
+            Assert.That(frames.Count, Is.EqualTo(1),
+                "All-non-streamable plan yields exactly one frame (the full sorted result)");
+            Assert.That(frames[0].RowCount, Is.EqualTo(1000));
+
+            var col = frames[0].GetColumn<int>("A");
+            for (int i = 1; i < col.Length; i++)
+                Assert.That((int)col.GetValue(i)!, Is.GreaterThanOrEqualTo((int)col.GetValue(i - 1)!),
+                    "Rows must be in sorted order");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_WindowExpression_YieldsMultipleFrames()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2),
+        });
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+            frames.Add(frame);
+
+        try
+        {
+            Assert.That(frames.Count, Is.GreaterThanOrEqualTo(1),
+                "Window expression must yield at least one frame (may be a single window result)");
+            var totalRows = frames.Sum(f => f.RowCount);
+            Assert.That(totalRows, Is.EqualTo(2000),
+                "Total rows must equal source row count");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_StreamableOnly_YieldsOneFramePerChunk()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SelectOperation(new[] { ColumnExpressions.Col<int>("A") }),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+            frames.Add(frame);
+
+        try
+        {
+            Assert.That(frames.Count, Is.GreaterThan(1),
+                "Fully streamable plan must yield one frame per chunk");
+            var totalRows = frames.Sum(f => f.RowCount);
+            Assert.That(totalRows, Is.EqualTo(1989),
+                "Filter A > 10 over 0..1999 keeps 11..1999 = 1989 rows");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    static NivaraColumn<int> concatenateColumn(List<NivaraFrame> frames, string columnName)
+    {
+        var allValues = new List<int>();
+        foreach (var frame in frames)
+        {
+            var col = frame.GetColumn<int>(columnName);
+            for (int i = 0; i < col.Length; i++)
+                allValues.Add((int)col.GetValue(i)!);
+        }
+        return NivaraColumn<int>.Create(allValues.ToArray());
+    }
 }

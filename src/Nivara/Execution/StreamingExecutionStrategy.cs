@@ -341,14 +341,13 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     /// Each yielded frame is a source chunk with the streamable operations applied.
     /// </summary>
     /// <remarks>
-    /// A plan is streamable when it contains only streamable operations (Filter, Select,
-    /// Slice, SelectRows) with no window expressions, and the source reads in chunks. Any
-    /// non-streamable boundary operation (Sort, SortByExpression, GroupBy, Join, Distinct,
-    /// Rolling, Cumulative, Shift, Rank) or window expression, or a source that cannot read
-    /// in chunks, falls back to a single frame produced from the full source — the rows are
-    /// identical to a whole-plan <see cref="ExecutionEngine.Execute(QueryPlan, NivaraExecutionContext)"/>.
-    /// The caller owns every yielded frame (the pipeline never disposes them) and should
-    /// dispose each one when done with it.
+    /// A fully streamable plan (only Filter, Select, Slice, SelectRows; no window expressions)
+    /// over a chunk-capable source yields one frame per source chunk. A mixed plan partitions
+    /// at non-streamable boundary operations (Sort, GroupBy, Join, Distinct, Rolling, etc.):
+    /// leading streamable ops run per chunk (yielded immediately), boundary ops run once over
+    /// the concatenated chunks (yielded as one frame), and trailing streamable ops resume per
+    /// chunk. A source that cannot read in chunks falls back to a single frame.
+    /// The caller owns every yielded frame (the pipeline never disposes them).
     /// </remarks>
     public async IAsyncEnumerable<NivaraFrame> StreamChunksAsync(
         QueryPlan plan,
@@ -358,7 +357,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var diag = context.ExecutionDiagnostics;
         using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "StreamChunksAsync") : null;
 
-        if (!isSuitableForStreaming(plan) || !plan.Source.CanReadInChunks)
+        if (!plan.Source.CanReadInChunks)
         {
             var columns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
             diag?.AddRowsRead(QueryExecutor.GetRowCount(columns));
@@ -374,6 +373,36 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         }
 
         var chunkSize = resolveChunkSize(context);
+        var segments = PartitionAtNonStreamableOps(plan.Operations);
+        var firstSegment = segments[0];
+        var hasAnyBoundary = segments.Any(s => s.BoundaryOp != null);
+
+        if (!hasAnyBoundary && firstSegment.StreamableOps.Count == plan.Operations.Count)
+        {
+            await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
+                .ConfigureAwait(false))
+            {
+                ct.ThrowIfCancellationRequested();
+                diag?.AddRowsRead(QueryExecutor.GetRowCount(chunkData));
+
+                var processedData = await executeOperationsOnDataAsync(
+                    chunkData, firstSegment.StreamableOps, ct).ConfigureAwait(false);
+
+                var chunkFrame = NivaraFrame.Create(processedData);
+                if (diag != null)
+                {
+                    diag.RowsReturned += chunkFrame.RowCount;
+                    diag.MaterializedColumns = chunkFrame.ColumnCount;
+                }
+                yield return chunkFrame;
+            }
+            yield break;
+        }
+
+        var chunkFrames = new List<NivaraFrame>();
+        const long estimatedBytesPerRow = 100;
+        long accumulatedRows = 0;
+        var budgetWarned = false;
 
         await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
             .ConfigureAwait(false))
@@ -382,16 +411,86 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             diag?.AddRowsRead(QueryExecutor.GetRowCount(chunkData));
 
             var processedData = await executeOperationsOnDataAsync(
-                chunkData, plan.Operations, ct).ConfigureAwait(false);
+                chunkData, firstSegment.StreamableOps, ct).ConfigureAwait(false);
 
             var chunkFrame = NivaraFrame.Create(processedData);
+            chunkFrames.Add(chunkFrame);
+            accumulatedRows += chunkFrame.RowCount;
+
+            if (!budgetWarned && diag != null && context.MemoryBudget > 0
+                && accumulatedRows * estimatedBytesPerRow > context.MemoryBudget)
+            {
+                diag.RecordWarning(new PerformanceWarning(
+                    PerformanceWarningSeverity.Warning,
+                    $"Streaming memory budget exceeded: accumulated {accumulatedRows} rows (~{accumulatedRows * estimatedBytesPerRow:N0} bytes) exceeds budget of {context.MemoryBudget:N0} bytes",
+                    "Consider increasing MemoryBudget or reducing chunk count"));
+                budgetWarned = true;
+            }
+        }
+
+        if (chunkFrames.Count == 0)
+        {
+            var columns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
+            var processed = await executeOperationsOnDataAsync(columns, plan.Operations, ct).ConfigureAwait(false);
+            var frame = NivaraFrame.Create(processed);
             if (diag != null)
             {
-                diag.RowsReturned += chunkFrame.RowCount;
-                diag.MaterializedColumns = chunkFrame.ColumnCount;
+                diag.RowsReturned = frame.RowCount;
+                diag.MaterializedColumns = frame.ColumnCount;
             }
-            yield return chunkFrame;
+            yield return frame;
+            yield break;
         }
+
+        foreach (var chunk in chunkFrames)
+        {
+            if (firstSegment.StreamableOps.Count > 0)
+            {
+                if (diag != null)
+                {
+                    diag.RowsReturned += chunk.RowCount;
+                    diag.MaterializedColumns = chunk.ColumnCount;
+                }
+                yield return chunk;
+            }
+        }
+
+        var result = chunkFrames.Count == 1
+            ? chunkFrames[0]
+            : NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
+
+        for (int segIdx = 0; segIdx < segments.Count; segIdx++)
+        {
+            var segment = segments[segIdx];
+
+            if (segment.BoundaryOp != null)
+            {
+                var columns = result.ColumnNames.ToDictionary(
+                    name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+                var processed = segment.BoundaryOp.Execute(columns);
+                var newResult = NivaraFrame.Create(processed);
+                result.Dispose();
+                result = newResult;
+            }
+
+            if (segIdx > 0 && segment.StreamableOps.Count > 0)
+            {
+                var columns = result.ColumnNames.ToDictionary(
+                    name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+                var processed = await executeOperationsOnDataAsync(
+                    columns, segment.StreamableOps, ct).ConfigureAwait(false);
+                var newResult = NivaraFrame.Create(processed);
+                result.Dispose();
+                result = newResult;
+            }
+        }
+
+        if (diag != null)
+        {
+            diag.RowsReturned += result.RowCount;
+            diag.MaterializedColumns = result.ColumnCount;
+        }
+        yield return result;
     }
 
     public override bool ValidatePlan(QueryPlan plan, NivaraExecutionContext context)
