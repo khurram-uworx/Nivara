@@ -115,8 +115,8 @@ internal static class RankKernel
         }
 
         return kind == RankKind.PercentRank
-            ? NivaraColumn<double>.CreateFromSpans(percentResult, mask)
-            : NivaraColumn<long>.CreateFromSpans(rankResult, mask);
+            ? NivaraColumn<double>.CreateFromOwnedArrays(percentResult, mask)
+            : NivaraColumn<long>.CreateFromOwnedArrays(rankResult, mask);
 
         void ProcessPartition(int[] rows, int count)
         {

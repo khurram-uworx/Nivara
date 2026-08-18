@@ -91,7 +91,7 @@ public static class WindowFunctions
             }
         }
 
-        return NivaraColumn<long>.CreateFromSpans(result, resultMask);
+        return NivaraColumn<long>.CreateFromOwnedArrays(result, resultMask);
     }
 
     // ── Rolling ──
@@ -156,7 +156,7 @@ public static class WindowFunctions
             }
         }
 
-        return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
     }
 
     /// <summary>
@@ -219,7 +219,7 @@ public static class WindowFunctions
             }
         }
 
-        return NivaraColumn<double>.CreateFromSpans(result, resultMask);
+        return NivaraColumn<double>.CreateFromOwnedArrays(result, resultMask);
     }
 
     /// <summary>
@@ -416,7 +416,7 @@ public static class WindowFunctions
                         : T.Min(accumulator, span[i]);
             }
 
-            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+            return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
         }
 
         var (effective, valid) = buildEffective(column, nullHandler);
@@ -456,7 +456,7 @@ public static class WindowFunctions
                 result[i] = T.CreateChecked(accumulator);
             }
 
-            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+            return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
         }
 
         bool hasTAccumulator = false;
@@ -486,7 +486,7 @@ public static class WindowFunctions
             result[i] = tAccumulator;
         }
 
-        return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
     }
 
     static (long[] PrefixSum, int[] PrefixCount) buildWidenedPrefix<T>(T[] effective, bool[] valid)
@@ -591,7 +591,7 @@ public static class WindowFunctions
                     resultMask[i] = true;
             }
 
-            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+            return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
         }
         finally
         {
@@ -620,7 +620,7 @@ public static class WindowFunctions
                     resultMask[i] = true;
             }
 
-            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+            return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
         }
         finally
         {
@@ -649,7 +649,7 @@ public static class WindowFunctions
                     resultMask[i] = true;
             }
 
-            return NivaraColumn<double>.CreateFromSpans(result, resultMask);
+            return NivaraColumn<double>.CreateFromOwnedArrays(result, resultMask);
         }
         finally
         {
@@ -678,7 +678,7 @@ public static class WindowFunctions
                     resultMask[i] = true;
             }
 
-            return NivaraColumn<double>.CreateFromSpans(result, resultMask);
+            return NivaraColumn<double>.CreateFromOwnedArrays(result, resultMask);
         }
         finally
         {
@@ -719,7 +719,7 @@ public static class WindowFunctions
                     resultMask[i] = true;
             }
 
-            return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+            return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
         }
         finally
         {
@@ -768,7 +768,7 @@ public static class WindowFunctions
             }
         }
 
-        return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
     }
 
     static NivaraColumn<T> shiftCore<T>(NivaraColumn<T> column, int periods, T fill, bool hasFill)
@@ -820,6 +820,6 @@ public static class WindowFunctions
             }
         }
 
-        return NivaraColumn<T>.CreateFromSpans(result, resultMask);
+        return NivaraColumn<T>.CreateFromOwnedArrays(result, resultMask);
     }
 }
