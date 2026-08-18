@@ -1,7 +1,6 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Query;
-using Parquet.Data;
 using Parquet.Schema;
 
 namespace Nivara.IO;

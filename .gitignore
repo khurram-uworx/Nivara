@@ -356,4 +356,5 @@ samples/data/distilbert_sst/
 
 # Benchmark output
 samples/NivaraFineTuning/benchmark_results.txt
-/samples/data/benchmark-1m
+samples/data/benchmark-1m
+samples/data/perf-scale1
