@@ -183,8 +183,8 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 | **`NivaraFrameExtensions.GroupBy` is a trap** | `GroupBy(frame, keys, aggregations)` validates columns, builds `GroupByOperation` **without aggregations**, and returns only the grouped keys — its own comment says "simplified implementation". | Used typed LINQ `frame.Query<T>().GroupBy().Select()` with `Count()`/`Sum()`/`Average()` for real aggregations, and manual dictionary aggregation after `Collect()` as a fallback. Gap confirmed in Phase 3a. |
 | **No `&`/`&&` on `ColumnExpression`** | Cannot write `.Filter(A & B)` for compound predicates. | Chained `.Filter(A).Filter(B)` instead. |
 | **No ternary on `ColumnExpression`** | Cannot write `cond ? litA : litB` in expression trees. | Computed derived columns after `Collect()` or used separate columns. |
-| **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Measured in Phase 4 bench-stream: chunk count == 1 for all chunk sizes on window-heavy queries. Filter-only prefix streams correctly (>1 chunks). See Limitations. |
-| **Memory budget is advisory** | `StreamingBufferManager` exists but is not wired into the query path. | Measured in Phase 4 bench-stream: peak memory reflects full-frame materialization, not chunk-bounded streaming. |
+| **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Measured in Phase 4 bench-stream: chunk count == 1 for all chunk sizes on window-heavy queries. Filter-only prefix streams correctly (>1 chunks). See Limitations. Filed as [#307](https://github.com/khurram-uworx/Nivara/issues/307). |
+| **Memory budget is advisory** | `StreamingBufferManager` exists but is not wired into the query path. | Measured in Phase 4 bench-stream: peak memory reflects full-frame materialization, not chunk-bounded streaming. Filed as [#308](https://github.com/khurram-uworx/Nivara/issues/308). |
 
 ## Performance
 

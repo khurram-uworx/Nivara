@@ -40,3 +40,5 @@ Fix: per-minute snapshots across the 30-minute timeline, per-row incident check,
 
 - [ ] #305 — GroupBy(keys, aggregations) silently drops aggregations
 - [ ] #306 — Post-aggregation ranking not expressible in QueryFrame DSL
+- [ ] #307 — Streaming falls back to single-frame for window-heavy queries (measured)
+- [ ] #308 — StreamingBufferManager not wired into query execution path (measured)
