@@ -207,30 +207,25 @@ sealed class SortOperation : IQueryOperation, IParallelSortOperation
     }
 
     /// <summary>
-    /// Computes the sort indices for reordering rows
+    /// Computes the sort indices for reordering rows.
+    /// Fast path: pre-captures all column references once via delegates,
+    /// eliminating per-comparison dictionary lookup and type-switch dispatch.
     /// </summary>
-    /// <param name="input">The input columns</param>
-    /// <param name="rowCount">The number of rows</param>
-    /// <returns>An array of indices representing the sort order</returns>
     private int[] ComputeSortIndices(IReadOnlyDictionary<string, IColumn> input, int rowCount)
     {
-        // Create an array of indices to sort
         var indices = Enumerable.Range(0, rowCount).ToArray();
 
-        // Create a comparer that uses all sort keys
-        var comparer = new MultiColumnComparer(input, sortKeys);
-
-        // Sort the indices using the comparer
-        if (stable)
+        if (SortKeyComparerFactory.TryCreatePreCapturedComparer(input, sortKeys, out var comparer))
         {
-            // Use stable sort (Array.Sort is not stable, so we use OrderBy which is stable)
-            indices = indices.OrderBy(i => i, comparer).ToArray();
-        }
-        else
-        {
-            // Use unstable sort for potentially better performance
             Array.Sort(indices, comparer);
+            return indices;
         }
+
+        var fallback = new MultiColumnComparer(input, sortKeys);
+        if (stable)
+            indices = indices.OrderBy(i => i, fallback).ToArray();
+        else
+            Array.Sort(indices, fallback);
 
         return indices;
     }
