@@ -396,4 +396,84 @@ public class RowGroupFilterEvaluatorTests
 
         Assert.That(result, Is.False);
     }
+
+    [Test]
+    public void EvaluateRowGroup_GreaterThan_LiteralBetweenMinMax_KeepsRowGroup()
+    {
+        var schema = new Schema(new[] { ("Age", typeof(int)) });
+        var expr = new ComparisonExpression(
+            ComparisonOperator.GreaterThan,
+            new ColumnReference("Age"),
+            new LiteralExpression(15));
+
+        var stats = new RowGroupFilterEvaluator.RowGroupColumnStats { MinValue = 10, MaxValue = 20 };
+
+        bool result = RowGroupFilterEvaluator.EvaluateRowGroup(
+            expr,
+            _ => stats,
+            schema);
+
+        Assert.That(result, Is.True,
+            "Row group [10,20] contains values > 15, so it must be kept");
+    }
+
+    [Test]
+    public void EvaluateRowGroup_GreaterThanOrEqual_LiteralBetweenMinMax_KeepsRowGroup()
+    {
+        var schema = new Schema(new[] { ("Age", typeof(int)) });
+        var expr = new ComparisonExpression(
+            ComparisonOperator.GreaterThanOrEqual,
+            new ColumnReference("Age"),
+            new LiteralExpression(15));
+
+        var stats = new RowGroupFilterEvaluator.RowGroupColumnStats { MinValue = 10, MaxValue = 20 };
+
+        bool result = RowGroupFilterEvaluator.EvaluateRowGroup(
+            expr,
+            _ => stats,
+            schema);
+
+        Assert.That(result, Is.True,
+            "Row group [10,20] contains values >= 15, so it must be kept");
+    }
+
+    [Test]
+    public void EvaluateRowGroup_LessThan_LiteralBetweenMinMax_KeepsRowGroup()
+    {
+        var schema = new Schema(new[] { ("Age", typeof(int)) });
+        var expr = new ComparisonExpression(
+            ComparisonOperator.LessThan,
+            new ColumnReference("Age"),
+            new LiteralExpression(15));
+
+        var stats = new RowGroupFilterEvaluator.RowGroupColumnStats { MinValue = 10, MaxValue = 20 };
+
+        bool result = RowGroupFilterEvaluator.EvaluateRowGroup(
+            expr,
+            _ => stats,
+            schema);
+
+        Assert.That(result, Is.True,
+            "Row group [10,20] contains values < 15, so it must be kept");
+    }
+
+    [Test]
+    public void EvaluateRowGroup_LessThanOrEqual_LiteralBetweenMinMax_KeepsRowGroup()
+    {
+        var schema = new Schema(new[] { ("Age", typeof(int)) });
+        var expr = new ComparisonExpression(
+            ComparisonOperator.LessThanOrEqual,
+            new ColumnReference("Age"),
+            new LiteralExpression(15));
+
+        var stats = new RowGroupFilterEvaluator.RowGroupColumnStats { MinValue = 10, MaxValue = 20 };
+
+        bool result = RowGroupFilterEvaluator.EvaluateRowGroup(
+            expr,
+            _ => stats,
+            schema);
+
+        Assert.That(result, Is.True,
+            "Row group [10,20] contains values <= 15, so it must be kept");
+    }
 }
