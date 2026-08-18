@@ -330,4 +330,111 @@ public class SortOperationTests
         Assert.That(result, Contains.Substring("Column1"));
         Assert.That(result, Contains.Substring("Column2"));
     }
+
+    [Test]
+    public void Execute_SingleColumnNoNulls_FastPath_SortCorrectly()
+    {
+        var numbers = NivaraColumn<int>.Create(new[] { 5, 3, 1, 4, 2 });
+        var names = NivaraColumn<string>.Create(new[] { "e", "c", "a", "d", "b" });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["Numbers"] = numbers,
+            ["Names"] = names
+        };
+        var operation = new SortOperation("Numbers", SortDirection.Ascending);
+
+        var result = operation.Execute(input);
+
+        var sortedNumbers = (NivaraColumn<int>)result["Numbers"];
+        var sortedNames = (NivaraColumn<string>)result["Names"];
+        Assert.That(sortedNumbers.ToArray(), Is.EqualTo(new[] { 1, 2, 3, 4, 5 }));
+        Assert.That(sortedNames.ToArray(), Is.EqualTo(new[] { "a", "b", "c", "d", "e" }));
+    }
+
+    [Test]
+    public void Execute_SingleColumnNoNulls_Descending_FastPath()
+    {
+        var numbers = NivaraColumn<int>.Create(new[] { 5, 3, 1, 4, 2 });
+        var names = NivaraColumn<string>.Create(new[] { "e", "c", "a", "d", "b" });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["Numbers"] = numbers,
+            ["Names"] = names
+        };
+        var operation = new SortOperation("Numbers", SortDirection.Descending);
+
+        var result = operation.Execute(input);
+
+        var sortedNumbers = (NivaraColumn<int>)result["Numbers"];
+        Assert.That(sortedNumbers.ToArray(), Is.EqualTo(new[] { 5, 4, 3, 2, 1 }));
+    }
+
+    [Test]
+    public void Execute_MultiColumnNoNulls_FastPath()
+    {
+        var category = NivaraColumn<string>.Create(new[] { "B", "A", "B", "A" });
+        var priority = NivaraColumn<int>.Create(new[] { 1, 2, 2, 1 });
+        var names = NivaraColumn<string>.Create(new[] { "d", "b", "c", "a" });
+        var input = new Dictionary<string, IColumn>
+        {
+            ["Category"] = category,
+            ["Priority"] = priority,
+            ["Names"] = names
+        };
+        var sortKeys = new[]
+        {
+            new SortKey("Category", SortDirection.Ascending),
+            new SortKey("Priority", SortDirection.Ascending)
+        };
+        var operation = new SortOperation(sortKeys);
+
+        var result = operation.Execute(input);
+
+        var sortedCategory = (NivaraColumn<string>)result["Category"];
+        var sortedPriority = (NivaraColumn<int>)result["Priority"];
+        Assert.That(sortedCategory.ToArray(), Is.EqualTo(new[] { "A", "A", "B", "B" }));
+        Assert.That(sortedPriority.ToArray(), Is.EqualTo(new[] { 1, 2, 1, 2 }));
+    }
+
+    [Test]
+    public void Execute_LargeDataset_FastPath_PreservesStability()
+    {
+        var rng = new Random(42);
+        var size = 10000;
+        var values = Enumerable.Range(0, size / 10).SelectMany(v => Enumerable.Repeat(v, 10)).ToArray();
+        var shuffled = values.ToArray();
+        for (int i = shuffled.Length - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (shuffled[i], shuffled[j]) = (shuffled[j], shuffled[i]);
+        }
+
+        var col = NivaraColumn<int>.Create(shuffled);
+        var originalIndices = NivaraColumn<int>.Create(Enumerable.Range(0, size).ToArray());
+        var input = new Dictionary<string, IColumn>
+        {
+            ["Value"] = col,
+            ["OriginalIndex"] = originalIndices
+        };
+        var operation = new SortOperation("Value", SortDirection.Ascending, NullOrdering.NullsLast, stable: true);
+
+        var result = operation.Execute(input);
+
+        var sortedValues = ((NivaraColumn<int>)result["Value"]).ToArray();
+        var sortedOrigIndices = ((NivaraColumn<int>)result["OriginalIndex"]).ToArray();
+
+        for (int i = 1; i < sortedValues.Length; i++)
+        {
+            if (sortedValues[i - 1] == sortedValues[i])
+            {
+                Assert.That(sortedOrigIndices[i - 1], Is.LessThan(sortedOrigIndices[i]),
+                    $"Stability violated at position {i}: equal values {sortedValues[i]} " +
+                    $"have original indices {sortedOrigIndices[i - 1]} then {sortedOrigIndices[i]}");
+            }
+            else
+            {
+                Assert.That(sortedValues[i - 1], Is.LessThanOrEqualTo(sortedValues[i]));
+            }
+        }
+    }
 }
