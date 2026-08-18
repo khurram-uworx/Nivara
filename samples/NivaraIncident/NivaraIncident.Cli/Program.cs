@@ -1,6 +1,7 @@
 using Nivara;
 using Nivara.Diagnostics;
 using Nivara.Expressions;
+using Nivara.Linq;
 using Nivara.Operations;
 using Nivara.Samples.Incident;
 using System.Diagnostics;
@@ -44,6 +45,10 @@ switch (mode)
     case "bench-stream":
         foreach (var sid in scenarioIds)
             BenchStream(datasetPath, Scenarios.Get(sid));
+        break;
+    case "bench-kernels":
+        foreach (var sid in scenarioIds)
+            BenchKernels(datasetPath, Scenarios.Get(sid));
         break;
     case "replay":
         foreach (var sid in scenarioIds)
@@ -263,6 +268,76 @@ void BenchStream(string dsPath, IncidentScenario sc)
     Console.WriteLine();
 }
 
+void BenchKernels(string dsPath, IncidentScenario sc)
+{
+    Console.WriteLine($"=== Kernel Vectorization Report: {sc.Id} — {sc.Name} ===");
+    Console.WriteLine($"Dataset: {dsPath}");
+    Console.WriteLine();
+
+    DiagnosticsTracker.IsEnabled = true;
+
+    // Analysis A: Degradation Ordering (QueryFrame pipeline — full kernel path)
+    DiagnosticsTracker.ClearRecordedOperations();
+    GC.Collect(2, GCCollectionMode.Forced, true);
+    var sw = Stopwatch.StartNew();
+    using (var qf = Analysis.AnalyzeDegradationOrdering(dsPath, sc))
+    using (var frame = qf.Collect()) { }
+    sw.Stop();
+    var summaryA = DiagnosticsTracker.GetSummary();
+    Console.WriteLine($"  Degradation Ordering ({sw.ElapsedMilliseconds}ms):");
+    Console.WriteLine($"    Operations: {summaryA.TotalOperations} total, {summaryA.VectorizedOperations} vectorized, {summaryA.ScalarOperations} scalar");
+    Console.WriteLine($"    Vectorization rate: {summaryA.VectorizationRate:F1}%");
+    PrintTopOps(summaryA);
+
+    // Analysis C: Saturation Ordering (Filter + Sort + RollingMax + Collect + typed LINQ GroupBy)
+    DiagnosticsTracker.ClearRecordedOperations();
+    GC.Collect(2, GCCollectionMode.Forced, true);
+    sw.Restart();
+    using (var satFrame = Analysis.AnalyzeSaturationOrdering(dsPath, sc)) { }
+    sw.Stop();
+    var summaryC = DiagnosticsTracker.GetSummary();
+    Console.WriteLine($"  Saturation Ordering ({sw.ElapsedMilliseconds}ms):");
+    Console.WriteLine($"    Operations: {summaryC.TotalOperations} total, {summaryC.VectorizedOperations} vectorized, {summaryC.ScalarOperations} scalar");
+    Console.WriteLine($"    Vectorization rate: {summaryC.VectorizationRate:F1}%");
+    PrintTopOps(summaryC);
+
+    // Analysis D: Regional Partitioning (Filter + PercentRank + Collect + typed LINQ GroupBy)
+    DiagnosticsTracker.ClearRecordedOperations();
+    GC.Collect(2, GCCollectionMode.Forced, true);
+    sw.Restart();
+    using (var regFrame = Analysis.AnalyzeRegionalPartitioning(dsPath, sc)) { }
+    sw.Stop();
+    var summaryD = DiagnosticsTracker.GetSummary();
+    Console.WriteLine($"  Regional Partitioning ({sw.ElapsedMilliseconds}ms):");
+    Console.WriteLine($"    Operations: {summaryD.TotalOperations} total, {summaryD.VectorizedOperations} vectorized, {summaryD.ScalarOperations} scalar");
+    Console.WriteLine($"    Vectorization rate: {summaryD.VectorizationRate:F1}%");
+    PrintTopOps(summaryD);
+
+    DiagnosticsTracker.IsEnabled = false;
+    DiagnosticsTracker.ClearRecordedOperations();
+
+    Console.WriteLine();
+    Console.WriteLine("  Note: rank/quantile scalar fallback is expected. Hand-rolled C# loops");
+    Console.WriteLine("  (Analyses B, E) run outside Nivara kernels and are not measured here.");
+}
+
+void PrintTopOps(OperationSummary summary)
+{
+    if (summary.KernelTypes.Count > 0)
+    {
+        Console.WriteLine("    Kernel types:");
+        foreach (var kvp in summary.KernelTypes.OrderByDescending(kv => kv.Value).Take(5))
+            Console.WriteLine($"      {kvp.Key}: {kvp.Value}");
+    }
+    if (summary.OperationTypes.Count > 0)
+    {
+        Console.WriteLine("    Operation types:");
+        foreach (var kvp in summary.OperationTypes.OrderByDescending(kv => kv.Value).Take(5))
+            Console.WriteLine($"      {kvp.Key}: {kvp.Value}");
+    }
+    Console.WriteLine();
+}
+
 void RunBenchmarkIteration(string name, int iters, int warmup, Func<NivaraFrame> run)
 {
     var times = new double[iters];
@@ -330,8 +405,9 @@ void PrintUsage()
     Console.WriteLine("Nivara Incident Lab");
     Console.WriteLine();
     Console.WriteLine("Usage:");
-    Console.WriteLine("  NivaraIncident.Cli generate     --dataset <path> --scenario <A|B|C|D|all> [--scale <N>] [--records <N>]");
-    Console.WriteLine("  NivaraIncident.Cli analyze      --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>]");
-    Console.WriteLine("  NivaraIncident.Cli bench-stream --dataset <path> --scenario <A|B|C|D|all>");
-    Console.WriteLine("  NivaraIncident.Cli replay       --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
+    Console.WriteLine("  NivaraIncident.Cli generate      --dataset <path> --scenario <A|B|C|D|all> [--scale <N>] [--records <N>]");
+    Console.WriteLine("  NivaraIncident.Cli analyze       --dataset <path> --scenario <A|B|C|D|all> [--stream] [--chunk-size <N>] [--benchmark] [--iterations <N>]");
+    Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
+    Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
+    Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
 }
