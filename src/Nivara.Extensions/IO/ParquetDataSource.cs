@@ -148,7 +148,7 @@ sealed class ParquetLazySource : IQuerySource, IPredicatePushdownSource
             var reader = lazyReader.Value;
             var rowGroupCount = reader.RowGroupCount;
             if (rowGroupCount == 0)
-                return new Dictionary<string, IColumn>();
+                return ToColumnsFromSchema(lazySchema.Value);
 
             var frames = new List<NivaraFrame>(rowGroupCount);
             for (int rg = 0; rg < rowGroupCount; rg++)
@@ -158,7 +158,7 @@ sealed class ParquetLazySource : IQuerySource, IPredicatePushdownSource
                 frames.Add(ReadRowGroup(rg));
             }
 
-            return ToColumns(frames);
+            return frames.Count > 0 ? ToColumns(frames) : ToColumnsFromSchema(lazySchema.Value);
         }
         catch (DataSourceException)
         {
@@ -180,7 +180,7 @@ sealed class ParquetLazySource : IQuerySource, IPredicatePushdownSource
             var reader = lazyReader.Value;
             var rowGroupCount = reader.RowGroupCount;
             if (rowGroupCount == 0)
-                return new Dictionary<string, IColumn>();
+                return ToColumnsFromSchema(lazySchema.Value);
 
             var frames = new List<NivaraFrame>(rowGroupCount);
             for (int rg = 0; rg < rowGroupCount; rg++)
@@ -191,7 +191,7 @@ sealed class ParquetLazySource : IQuerySource, IPredicatePushdownSource
                 frames.Add(await ReadRowGroupAsync(rg, cancellationToken).ConfigureAwait(false));
             }
 
-            return ToColumns(frames);
+            return frames.Count > 0 ? ToColumns(frames) : ToColumnsFromSchema(lazySchema.Value);
         }
         catch (DataSourceException)
         {
@@ -359,6 +359,30 @@ sealed class ParquetLazySource : IQuerySource, IPredicatePushdownSource
 
         var merged = NivaraParquetWriter.ConcatenateFrames(frames);
         return ToColumns(merged);
+    }
+
+    private static IReadOnlyDictionary<string, IColumn> ToColumnsFromSchema(Schema schema)
+    {
+        var columns = new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
+        foreach (var name in schema.ColumnNames)
+            columns[name] = CreateZeroLengthColumn(schema.GetColumnType(name));
+        return columns;
+    }
+
+    static IColumn CreateZeroLengthColumn(Type type)
+    {
+        if (type == typeof(int)) return NivaraColumn<int>.Create(Array.Empty<int>());
+        if (type == typeof(long)) return NivaraColumn<long>.Create(Array.Empty<long>());
+        if (type == typeof(float)) return NivaraColumn<float>.Create(Array.Empty<float>());
+        if (type == typeof(double)) return NivaraColumn<double>.Create(Array.Empty<double>());
+        if (type == typeof(string)) return NivaraColumn<string>.Create(Array.Empty<string>());
+        if (type == typeof(bool)) return NivaraColumn<bool>.Create(Array.Empty<bool>());
+        if (type == typeof(short)) return NivaraColumn<short>.Create(Array.Empty<short>());
+        if (type == typeof(byte)) return NivaraColumn<byte>.Create(Array.Empty<byte>());
+        if (type == typeof(decimal)) return NivaraColumn<decimal>.Create(Array.Empty<decimal>());
+        if (type == typeof(DateTime)) return NivaraColumn<DateTime>.Create(Array.Empty<DateTime>());
+        if (type == typeof(Guid)) return NivaraColumn<Guid>.Create(Array.Empty<Guid>());
+        return NivaraColumn<int>.Create(Array.Empty<int>());
     }
 
     private Parquet.ParquetReader CreateReader()
