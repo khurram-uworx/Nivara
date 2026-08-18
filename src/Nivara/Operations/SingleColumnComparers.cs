@@ -25,7 +25,7 @@ internal sealed class PreCapturedMultiColumnComparer : IComparer<int>
             if (cmp != 0)
                 return cmp;
         }
-        return 0;
+        return x.CompareTo(y);
     }
 }
 
@@ -79,7 +79,7 @@ internal static class SortKeyComparerFactory
                 {
                     int cmp = data[x].CompareTo(data[y]);
                     if (cmp != 0) return desc ? -cmp : cmp;
-                    return x.CompareTo(y);
+                    return 0;
                 };
             }
             else
@@ -89,12 +89,12 @@ internal static class SortKeyComparerFactory
                 {
                     bool xNull = c.IsNull(x);
                     bool yNull = c.IsNull(y);
-                    if (xNull && yNull) return x.CompareTo(y);
+                    if (xNull && yNull) return 0;
                     if (xNull) return nullOrd == NullOrdering.NullsFirst ? -1 : 1;
                     if (yNull) return nullOrd == NullOrdering.NullsFirst ? 1 : -1;
                     int cmp = c[x].CompareTo(c[y]);
                     if (cmp != 0) return desc ? -cmp : cmp;
-                    return x.CompareTo(y);
+                    return 0;
                 };
             }
         }
