@@ -245,14 +245,14 @@ core issues.
 
 ## Definition of done (Phase 4)
 
-- [ ] `--bench` mode (or benchmark runner) produces reproducible numbers.
-- [ ] End-to-end timing + memory for all 4 scenarios (eager + streaming).
-- [ ] Streaming vs eager comparison with fallback determination (gap 5 measured).
-- [ ] Kernel selection visibility report with real vectorization rate.
-- [ ] AutoDiff SIMD before/after for Pow and RMSNorm-grad.
-- [ ] `samples/NivaraIncident/README.md` updated with Performance section (real numbers).
-- [ ] Core gaps (if any) escalated as GitHub issues with evidence.
-- [ ] All existing tests still pass; no regressions.
+- [x] `--bench` mode (or benchmark runner) produces reproducible numbers.
+- [x] End-to-end timing + memory for all 4 scenarios (eager + streaming).
+- [x] Streaming vs eager comparison with fallback determination (gap 5 measured).
+- [x] Kernel selection visibility report with real vectorization rate.
+- [x] AutoDiff SIMD before/after for Pow and RMSNorm-grad.
+- [x] `samples/NivaraIncident/README.md` updated with Performance section (real numbers).
+- [x] Core gaps (if any) escalated as GitHub issues with evidence.
+- [ ] All existing tests still pass; no regressions. *(awaiting final test run)*
 
 ---
 
