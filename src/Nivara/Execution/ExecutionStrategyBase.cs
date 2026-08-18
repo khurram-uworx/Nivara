@@ -1,4 +1,7 @@
+using Nivara.Diagnostics;
 using Nivara.Exceptions;
+using Nivara.Expressions;
+using Nivara.Operations;
 using Nivara.Query;
 
 namespace Nivara.Execution;
@@ -16,6 +19,7 @@ abstract class ExecutionStrategyBase : IExecutionStrategy
     {
         ValidateArgs(plan, context);
         context.CancellationToken.ThrowIfCancellationRequested();
+        TryExtractPredicatePushdown(plan, context);
         try { return ExecuteCore(plan, context); }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex) when (ex is not QueryExecutionException)
@@ -28,6 +32,7 @@ abstract class ExecutionStrategyBase : IExecutionStrategy
     {
         ValidateArgs(plan, context);
         context.CancellationToken.ThrowIfCancellationRequested();
+        TryExtractPredicatePushdown(plan, context);
         try
         {
             return await ExecuteCoreAsync(plan, context).ConfigureAwait(false);
@@ -54,5 +59,29 @@ abstract class ExecutionStrategyBase : IExecutionStrategy
     {
         if (plan == null) throw new ArgumentNullException(nameof(plan));
         if (context == null) throw new ArgumentNullException(nameof(context));
+    }
+
+    static void TryExtractPredicatePushdown(QueryPlan plan, NivaraExecutionContext context)
+    {
+        if (plan.Operations.Count == 0)
+            return;
+
+        if (plan.Operations[0] is not FilterOperation filter)
+            return;
+
+        if (plan.Source is not IPredicatePushdownSource pushdownSource)
+            return;
+
+        if (filter.Condition is not ComparisonExpression comparison)
+            return;
+
+        if (!pushdownSource.CanPushdownFilter(comparison, plan.ResultSchema))
+            return;
+
+        context.ExecutionDiagnostics?.RecordOptimization(
+            new OptimizationApplied(
+                "RowGroupPredicatePushdown",
+                $"Pushed filter '{comparison}' to source for row-group statistics pruning"));
+        pushdownSource.ApplyFilterPredicate(comparison, plan.ResultSchema);
     }
 }

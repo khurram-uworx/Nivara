@@ -1,5 +1,7 @@
 using Nivara.Exceptions;
+using Nivara.Expressions;
 using Nivara.Query;
+using Parquet.Data;
 using Parquet.Schema;
 
 namespace Nivara.IO;
@@ -18,7 +20,7 @@ namespace Nivara.IO;
 /// readers are not thread-safe and <see cref="Nivara.Execution.ParallelExecutionStrategy"/>
 /// issues concurrent <see cref="ReadChunkAsync"/> calls.
 /// </remarks>
-sealed class ParquetLazySource : IQuerySource
+sealed class ParquetLazySource : IQuerySource, IPredicatePushdownSource
 {
     private readonly string filePath;
     private readonly ParquetReadOptions options;
@@ -27,6 +29,7 @@ sealed class ParquetLazySource : IQuerySource
     private readonly Lazy<int> lazyRowGroupCount;
     private readonly Lazy<int> lazyTotalRowCount;
     private readonly SemaphoreSlim gate = new(1, 1);
+    private HashSet<int>? skippedRowGroups;
     private bool disposed;
 
     /// <summary>
@@ -72,6 +75,70 @@ sealed class ParquetLazySource : IQuerySource
     public int RowGroupCount => lazyRowGroupCount.Value;
 
     /// <inheritdoc />
+    public bool CanPushdownFilter(ColumnExpression condition, Schema sourceSchema)
+        => RowGroupFilterEvaluator.CanEvaluate(condition, sourceSchema);
+
+    /// <inheritdoc />
+    public void ApplyFilterPredicate(ColumnExpression condition, Schema sourceSchema)
+    {
+        var reader = lazyReader.Value;
+        var rowGroupCount = reader.RowGroupCount;
+        if (rowGroupCount == 0)
+            return;
+
+        gate.Wait();
+        try
+        {
+            var skipSet = new HashSet<int>();
+            var fields = reader.Schema.GetDataFields();
+
+            for (int rg = 0; rg < rowGroupCount; rg++)
+            {
+                using var rowGroupReader = reader.OpenRowGroupReader(rg);
+                bool keep = RowGroupFilterEvaluator.EvaluateRowGroup(
+                    condition,
+                    columnName => GetColumnStatsForRowGroup(rowGroupReader, columnName, fields),
+                    sourceSchema);
+
+                if (!keep)
+                    skipSet.Add(rg);
+            }
+
+            skippedRowGroups = skipSet.Count > 0 ? skipSet : null;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    static RowGroupFilterEvaluator.RowGroupColumnStats? GetColumnStatsForRowGroup(
+        Parquet.ParquetRowGroupReader rowGroupReader,
+        string columnName,
+        DataField[] allFields)
+    {
+        for (int i = 0; i < allFields.Length; i++)
+        {
+            if (string.Equals(allFields[i].Name, columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                var stats = rowGroupReader.GetStatistics(allFields[i]);
+                if (stats == null)
+                    return null;
+
+                return new RowGroupFilterEvaluator.RowGroupColumnStats
+                {
+                    MinValue = stats.MinValue,
+                    MaxValue = stats.MaxValue
+                };
+            }
+        }
+        return null;
+    }
+
+    bool IsSkipped(int rowGroupIndex)
+        => skippedRowGroups != null && skippedRowGroups.Contains(rowGroupIndex);
+
+    /// <inheritdoc />
     public IReadOnlyDictionary<string, IColumn> Execute()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
@@ -85,7 +152,11 @@ sealed class ParquetLazySource : IQuerySource
 
             var frames = new List<NivaraFrame>(rowGroupCount);
             for (int rg = 0; rg < rowGroupCount; rg++)
+            {
+                if (IsSkipped(rg))
+                    continue;
                 frames.Add(ReadRowGroup(rg));
+            }
 
             return ToColumns(frames);
         }
@@ -114,6 +185,8 @@ sealed class ParquetLazySource : IQuerySource
             var frames = new List<NivaraFrame>(rowGroupCount);
             for (int rg = 0; rg < rowGroupCount; rg++)
             {
+                if (IsSkipped(rg))
+                    continue;
                 cancellationToken.ThrowIfCancellationRequested();
                 frames.Add(await ReadRowGroupAsync(rg, cancellationToken).ConfigureAwait(false));
             }
@@ -147,6 +220,9 @@ sealed class ParquetLazySource : IQuerySource
             if (chunkIndex >= reader.RowGroupCount)
                 return new Dictionary<string, IColumn>();
 
+            if (IsSkipped(chunkIndex))
+                return new Dictionary<string, IColumn>();
+
             return ToColumns(ReadRowGroup(chunkIndex));
         }
         catch (DataSourceException)
@@ -176,6 +252,9 @@ sealed class ParquetLazySource : IQuerySource
         {
             var reader = lazyReader.Value;
             if (chunkIndex >= reader.RowGroupCount)
+                return new Dictionary<string, IColumn>();
+
+            if (IsSkipped(chunkIndex))
                 return new Dictionary<string, IColumn>();
 
             var frame = await ReadRowGroupAsync(chunkIndex, cancellationToken).ConfigureAwait(false);
