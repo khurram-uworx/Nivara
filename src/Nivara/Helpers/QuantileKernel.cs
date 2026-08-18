@@ -28,6 +28,75 @@ internal static class QuantileKernel
     }
 
     /// <summary>
+    /// Computes the q-th quantile from a typed column and group indices, extracting values
+    /// directly via the typed <see cref="IColumn{T}"/> indexer to avoid boxing.
+    /// </summary>
+    /// <returns>The quantile, or null when the group has no valid values</returns>
+    public static double? ComputeFromColumn(IColumn column, IReadOnlyList<int> groupIndices, double q)
+    {
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+
+        return elementType switch
+        {
+            Type t when t == typeof(double) => TypedQuantile<double>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(float) => TypedQuantile<float>(column, groupIndices, q, static v => (double)v),
+            Type t when t == typeof(int) => TypedQuantile<int>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(long) => TypedQuantile<long>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(decimal) => TypedQuantile<decimal>(column, groupIndices, q, static v => (double)v),
+            Type t when t == typeof(short) => TypedQuantile<short>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(ushort) => TypedQuantile<ushort>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(byte) => TypedQuantile<byte>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(sbyte) => TypedQuantile<sbyte>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(uint) => TypedQuantile<uint>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(ulong) => TypedQuantile<ulong>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(char) => TypedQuantile<char>(column, groupIndices, q, static v => v),
+            Type t when t == typeof(bool) => TypedQuantile<bool>(column, groupIndices, q, static v => v ? 1d : 0d),
+            Type t when t == typeof(nint) => TypedQuantile<nint>(column, groupIndices, q, static v => (double)v),
+            Type t when t == typeof(nuint) => TypedQuantile<nuint>(column, groupIndices, q, static v => (double)v),
+            Type t when t == typeof(Int128) => TypedQuantile<Int128>(column, groupIndices, q, static v => (double)v),
+            Type t when t == typeof(UInt128) => TypedQuantile<UInt128>(column, groupIndices, q, static v => (double)v),
+            Type t when t == typeof(Half) => TypedQuantile<Half>(column, groupIndices, q, static v => (double)v),
+            _ => ComputeFromBoxed(ExtractBoxedValues(column, groupIndices), q)
+        };
+    }
+
+    static double? TypedQuantile<T>(IColumn column, IReadOnlyList<int> groupIndices, double q, Func<T, double> toDouble)
+        where T : struct
+    {
+        var typed = (IColumn<T>)column;
+
+        int count = 0;
+        foreach (var idx in groupIndices)
+            if (!column.IsNull(idx)) count++;
+
+        if (count == 0)
+            return null;
+
+        var values = new double[count];
+        int pos = 0;
+        foreach (var idx in groupIndices)
+        {
+            if (!column.IsNull(idx))
+                values[pos++] = toDouble(typed[idx]);
+        }
+
+        values.AsSpan().Sort();
+        return Compute(values, q);
+    }
+
+    static List<object> ExtractBoxedValues(IColumn column, IReadOnlyList<int> groupIndices)
+    {
+        var validValues = new List<object>();
+        foreach (var index in groupIndices)
+        {
+            var value = column.GetValue(index);
+            if (value != null)
+                validValues.Add(value);
+        }
+        return validValues;
+    }
+
+    /// <summary>
     /// Computes the q-th quantile from boxed valid values, converting each across the full
     /// 17-type numeric aggregation domain to double before sorting.
     /// </summary>

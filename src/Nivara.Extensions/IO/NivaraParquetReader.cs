@@ -494,67 +494,32 @@ public static class NivaraParquetReader
     }
 
     /// <summary>
-    /// Creates a NivaraColumn for struct types from Parquet data with buffer reuse.
+    /// Creates a NivaraColumn for struct types from Parquet data.
+    /// Fast-paths when the array is already the correct typed array (no boxing).
+    /// Falls back to the unboxed loop only for widened types where Parquet.Net
+    /// returns the base CLR type (e.g. float for Half, long for nint).
     /// </summary>
     private static NivaraColumn<T> CreateNivaraColumn<T>(Array columnData) where T : struct
     {
+        if (columnData is T?[] nullableArray)
+            return NivaraColumn.CreateFromNullable(nullableArray);
+
+        if (columnData is T[] typedArray)
+            return NivaraColumn<T>.Create(typedArray);
+
         var length = columnData.Length;
+        nullableArray = new T?[length];
 
-        // Use buffer pool for large arrays to reduce allocations
-        T?[] nullableArray;
-        if (length > 1024)
+        for (int i = 0; i < length; i++)
         {
-            // For large arrays, try to reuse buffers
-            var buffer = BufferPool.RentIntBuffer(length);
-            try
+            var value = columnData.GetValue(i);
+            if (value != null)
             {
-                nullableArray = new T?[length];
-
-                for (int i = 0; i < length; i++)
+                try
                 {
-                    var value = columnData.GetValue(i);
-                    if (value != null)
-                    {
-                        try
-                        {
-                            nullableArray[i] = (T)Convert.ChangeType(value, typeof(T))!;
-                        }
-                        catch
-                        {
-                            nullableArray[i] = null;
-                        }
-                    }
-                    else
-                    {
-                        nullableArray[i] = null;
-                    }
+                    nullableArray[i] = (T)Convert.ChangeType(value, typeof(T))!;
                 }
-            }
-            finally
-            {
-                BufferPool.ReturnIntBuffer(buffer);
-            }
-        }
-        else
-        {
-            // For small arrays, use direct allocation
-            nullableArray = new T?[length];
-
-            for (int i = 0; i < length; i++)
-            {
-                var value = columnData.GetValue(i);
-                if (value != null)
-                {
-                    try
-                    {
-                        nullableArray[i] = (T)Convert.ChangeType(value, typeof(T))!;
-                    }
-                    catch
-                    {
-                        nullableArray[i] = null;
-                    }
-                }
-                else
+                catch
                 {
                     nullableArray[i] = null;
                 }
@@ -565,51 +530,21 @@ public static class NivaraParquetReader
     }
 
     /// <summary>
-    /// Creates a string column from Parquet data with memory optimization.
+    /// Creates a string column from Parquet data.
+    /// Fast-paths when the array is already string[] (no boxing).
     /// </summary>
     private static NivaraColumn<string> CreateStringColumn(Array columnData)
     {
+        if (columnData is string[] stringArray)
+            return NivaraColumn<string>.CreateForReferenceType(stringArray);
+
         var length = columnData.Length;
         var values = new string[length];
 
-        // Use buffer pool for processing large string columns
-        if (length > 1024)
+        for (int i = 0; i < length; i++)
         {
-            var buffer = BufferPool.RentByteBuffer(length * 32); // Estimate for string processing
-            try
-            {
-                for (int i = 0; i < length; i++)
-                {
-                    var value = columnData.GetValue(i);
-                    if (value != null)
-                    {
-                        values[i] = value.ToString()!;
-                    }
-                    else
-                    {
-                        values[i] = null!; // Use null for missing values
-                    }
-                }
-            }
-            finally
-            {
-                BufferPool.ReturnByteBuffer(buffer);
-            }
-        }
-        else
-        {
-            for (int i = 0; i < length; i++)
-            {
-                var value = columnData.GetValue(i);
-                if (value != null)
-                {
-                    values[i] = value.ToString()!;
-                }
-                else
-                {
-                    values[i] = null!; // Use null for missing values
-                }
-            }
+            var value = columnData.GetValue(i);
+            values[i] = value?.ToString()!;
         }
 
         return NivaraColumn<string>.CreateForReferenceType(values);
