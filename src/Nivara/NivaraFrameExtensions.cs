@@ -1144,14 +1144,17 @@ public static partial class NivaraFrameExtensions
         // Convert frame to column dictionary
         var columns = frame.ColumnNames.ToDictionary(name => name, name => frame.GetColumn(name), StringComparer.OrdinalIgnoreCase);
 
-        // Create and execute group by operation
-        var groupByOperation = new GroupByOperation(columnExpressions);
-        var resultColumns = groupByOperation.Execute(columns);
+        // Convert AggregationFunction dictionary to GroupedAggregation list
+        var groupedAggregations = aggregations
+            .Select(kvp => new GroupedAggregation(
+                ResultColumnName: kvp.Key,
+                Source: ColumnExpressions.Col(kvp.Key),
+                Function: kvp.Value))
+            .ToList();
 
-        // Apply aggregations to the grouped data
-        // Note: This is a simplified implementation. In a full implementation,
-        // we would need to modify GroupByOperation to support aggregations directly
-        // For now, we just return the grouped keys
+        // Create and execute group by operation with aggregations
+        var groupByOperation = new GroupByOperation(columnExpressions, null, groupedAggregations);
+        var resultColumns = groupByOperation.Execute(columns);
 
         // Convert result back to NivaraFrame
         var namedColumns = resultColumns.Select(kvp => (kvp.Key, kvp.Value));
