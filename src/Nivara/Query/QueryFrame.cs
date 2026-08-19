@@ -1085,7 +1085,7 @@ public sealed class QueryFrame : IDisposable, IAsyncDisposable
     /// Extracts the query plan for inspection or custom execution via <see cref="Execution.ExecutionEngine"/>.
     /// </summary>
     /// <returns>A QueryPlan representing this query's source and operations</returns>
-    internal QueryPlan ToQueryPlan()
+    public QueryPlan ToQueryPlan()
     {
         ObjectDisposedException.ThrowIf(disposed, this);
         return new QueryPlan(source, operations);
