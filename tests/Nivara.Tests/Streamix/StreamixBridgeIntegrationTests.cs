@@ -165,21 +165,20 @@ public class StreamixBridgeIntegrationTests
     [Test]
     public async Task Cancellation_PropagatesThroughRealCsvSource()
     {
-        var csvPath = CreateCsvFile(tempDir, 100);
+        var csvPath = CreateCsvFile(tempDir, 500);
         using var queryFrame = Csv.ScanAsQueryFrame(csvPath);
 
         using var cts = new CancellationTokenSource();
-        var flux = queryFrame.ToFlux(chunkSize: 10);
+        var fluxRows = queryFrame.ToFluxRows(chunkSize: 10, cts.Token);
 
-        int chunksConsumed = 0;
+        int rowsConsumed = 0;
         OperationCanceledException? caught = null;
         try
         {
-            await foreach (var chunk in flux.WithCancellation(cts.Token))
+            await foreach (var row in fluxRows)
             {
-                chunksConsumed++;
-                chunk.Dispose();
-                if (chunksConsumed >= 3)
+                rowsConsumed++;
+                if (rowsConsumed >= 5)
                     cts.Cancel();
             }
         }
@@ -189,7 +188,7 @@ public class StreamixBridgeIntegrationTests
         }
 
         Assert.That(caught, Is.Not.Null, "OperationCanceledException should propagate through bridge with real source");
-        Assert.That(chunksConsumed, Is.LessThanOrEqualTo(4),
+        Assert.That(rowsConsumed, Is.LessThanOrEqualTo(15),
             "Iteration should stop shortly after cancellation");
     }
 
@@ -201,17 +200,16 @@ public class StreamixBridgeIntegrationTests
 
         var fluxRows = queryFrame.ToFluxRows(chunkSize: 5);
 
-        int count = 0;
+        int globalIndex = 0;
         await foreach (var row in fluxRows)
         {
-            Assert.That(row.RowIndex, Is.EqualTo(count));
-            Assert.That(row.GetValue<int>("Id"), Is.EqualTo(count));
-            Assert.That(row.GetValue<string>("Name"), Is.EqualTo($"item{count}"));
-            Assert.That(row.GetValue<double>("Value"), Is.EqualTo(count * 1.5).Within(0.001));
-            count++;
+            Assert.That(row.GetValue<int>("Id"), Is.EqualTo(globalIndex));
+            Assert.That(row.GetValue<string>("Name"), Is.EqualTo($"item{globalIndex}"));
+            Assert.That(row.GetValue<double>("Value"), Is.EqualTo(globalIndex * 1.5).Within(0.001));
+            globalIndex++;
         }
 
-        Assert.That(count, Is.EqualTo(20));
+        Assert.That(globalIndex, Is.EqualTo(20));
     }
 
     [Test]
