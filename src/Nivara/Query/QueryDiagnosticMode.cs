@@ -37,7 +37,7 @@ public enum QueryDiagnosticMode
 /// Provides diagnostic information and analysis for queries.
 /// Supports different levels of detail based on the diagnostic mode.
 /// </summary>
-internal static class QueryDiagnostics
+public static class QueryDiagnostics
 {
     /// <summary>
     /// Gets or sets the global diagnostic mode for all queries

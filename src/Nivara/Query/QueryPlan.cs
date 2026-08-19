@@ -160,7 +160,7 @@ public sealed class QueryPlan
 /// <summary>
 /// Provides methods for analyzing and explaining query plans
 /// </summary>
-internal static class QueryPlanAnalyzer
+public static class QueryPlanAnalyzer
 {
     /// <summary>
     /// Generates a detailed explanation of a query plan
