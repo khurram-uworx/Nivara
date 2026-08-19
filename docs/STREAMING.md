@@ -142,3 +142,94 @@ await foreach (var frame in Csv.ScanAsQueryFrame("telemetry.csv")
   fallback.
 - Cancellation (via `ct`) propagates into the source reader and the producer loop; the
   channel is completed on normal exit and faulted on error.
+
+## Streamix bridge (`NivaraFlux`)
+
+The `Nivara.Streamix` namespace (in `Nivara.Extensions`) bridges `QueryFrame` async streaming
+to [Streamix](https://www.nuget.org/packages/Streamix)'s `IFlux<T>` ecosystem. Once wrapped in
+a `Flux`, Nivara chunks gain Streamix operators: retries, backpressure, structured concurrency,
+time-based windowing, observability, and ASP.NET Core streaming.
+
+**Composition rule:** Streamix orchestrates item flow; Nivara computes inside each chunk.
+
+### Bridge API
+
+| Method | Signature | Description |
+|--------|-----------|-------------|
+| `QueryFrame.ToFlux(...)` | `→ IFlux<NivaraFrame>` | Wraps `AsStream` in `Flux.From`; optional `PipeThroughChannel` for backpressure |
+| `NivaraFrame.ToFlux(...)` | `→ IFlux<NivaraFrame>` | One-shot single-chunk stream (useful for mixing with live data) |
+| `QueryFrame.ToFluxRows(...)` | `→ IFlux<NivaraRow>` | Row-level bridge for live/event-oriented sources |
+| `IFlux<NivaraFrame>.ToNivaraFrameAsync(...)` | `→ Task<NivaraFrame>` | Reverse terminal via `ConcatenateVertical` |
+
+All methods are in `src/Nivara.Extensions/Streamix/NivaraFlux.cs`.
+
+### When to use the bridge vs raw `AsStream`
+
+Use `AsStream` (raw `IAsyncEnumerable`) when:
+- you control the consumption loop (`await foreach`) and don't need Streamix operators
+- you want minimal dependencies (no Streamix reference)
+
+Use `ToFlux` (Streamix bridge) when you need:
+- **Backpressure** — `PipeThroughChannel(capacity, mode)` with `Wait`, `DropNewest`, `DropOldest`, `LatestOnly`, or `Fail`
+- **Retries** — `.Retry(3, (attempt, ex) => delay)` for flaky sources
+- **Structured concurrency** — `Flux.ScopedAsync` with fail-fast supervision
+- **Time-based windowing** — `.WindowByTime(duration, slide, outOfOrderness)` for event-time processing
+- **Hot-stream fan-out** — `.Publish()` / `.Replay()` / `.RefCount()` for multi-consumer scenarios
+- **Observability** — `.Checkpoint()`, `.Named()`, `.Trace()`, `.Log()`
+- **ASP.NET Core SSE** — `Streamix.AspNetCore` for streaming results to browsers
+
+### Examples
+
+**Streaming chunks with retries:**
+
+```csharp
+await Csv.ScanAsQueryFrame("telemetry.parquet")
+    .Filter(ColumnExpressions.Col("cpu") > 80)
+    .ToFlux(chunkSize: 50_000)
+    .Named("cpu-spike-scan")
+    .Retry(3, (attempt, ex) => TimeSpan.FromMilliseconds(100 * attempt))
+    .Checkpoint("chunk")
+    .ForEachAsync(chunk => sink.WriteAsync(chunk));
+```
+
+**Row-level bridge for event-time windowing:**
+
+```csharp
+await liveMetricsStream
+    .ToFluxRows(chunkSize: 1000)
+    .MapWithTimestamp(s => s.ObservedAt)
+    .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(30))
+    .Map(window => window.ToNivaraFrame())
+    .Map(frame => frame.RollingMean("cpu", "cpu_avg", windowSize: 10))
+    .Filter(f => f["cpu_avg"].Max() > 90)
+    .ForEachAsync(anomaly => pager.Ping(anomaly));
+```
+
+**Reverse terminal (collect a Flux back to a frame):**
+
+```csharp
+var flux = queryFrame.ToFlux(chunkSize: 10_000);
+using var result = await flux.ToNivaraFrameAsync();
+// result is the concatenated NivaraFrame, same as CollectAsync()
+```
+
+### Backpressure modes
+
+| Mode | Behavior |
+|------|----------|
+| `Wait` (default) | Producer blocks when channel is full |
+| `DropNewest` | Newest item is discarded when channel is full |
+| `DropOldest` | Oldest buffered item is discarded when channel is full |
+| `LatestOnly` | Channel keeps only the most recent item |
+| `Fail` | Throws `BackpressureException` when channel is full |
+
+### Known limitations
+
+- **In-memory frames yield a single chunk.** `MemoryQuerySource.CanReadInChunks` is `false`,
+  so `ToFlux()` on an in-memory frame produces a one-item stream. Use CSV/Parquet sources
+  for actual multi-chunk streaming.
+- **`Flux.From(IEnumerable<T>)` backpressure.** Streamix issue
+  [#155](https://github.com/khurram-uworx/Streamix/issues/155) — `PipeThroughChannel` with
+  `Fail` mode silently swallows `BackpressureException` when the source is
+  `AsyncEnumerable.FromEnumerable`. The bridge uses `Flux.From(IAsyncEnumerable<T>)` from
+  `AsStream()`, so the primary path is unaffected.

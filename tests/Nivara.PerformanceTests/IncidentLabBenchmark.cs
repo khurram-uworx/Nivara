@@ -1,6 +1,5 @@
 using Nivara.IO;
 using Nivara.Samples.Incident;
-using System.Diagnostics;
 
 namespace Nivara.PerformanceTests;
 

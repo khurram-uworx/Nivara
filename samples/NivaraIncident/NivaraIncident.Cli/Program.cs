@@ -1,8 +1,6 @@
 using Nivara;
 using Nivara.Diagnostics;
 using Nivara.Expressions;
-using Nivara.Linq;
-using Nivara.Operations;
 using Nivara.Samples.Incident;
 using System.Diagnostics;
 
