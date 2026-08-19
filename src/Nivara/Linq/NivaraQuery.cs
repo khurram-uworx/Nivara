@@ -3,10 +3,10 @@ using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
 using System.Globalization;
-using SortKey = Nivara.Operations.SortKey;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
+using SortKey = Nivara.Operations.SortKey;
 
 namespace Nivara.Linq;
 

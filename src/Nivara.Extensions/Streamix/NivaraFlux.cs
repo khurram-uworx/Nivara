@@ -1,6 +1,6 @@
-using System.Runtime.CompilerServices;
 using Nivara.Query;
 using Streamix;
+using System.Runtime.CompilerServices;
 
 namespace Nivara.Streamix;
 

@@ -1,5 +1,4 @@
 using Nivara.Expressions;
-using Nivara.Query;
 using Nivara.Streamix;
 using NUnit.Framework;
 using Streamix;
