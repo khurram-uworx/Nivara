@@ -1,6 +1,6 @@
 # Phase 4.5 — Streamix Bridge
 
-**Status:** planning · **Scope:** Nivara↔Streamix async streaming bridge (`src/Nivara.Extensions`) · **Dependencies:** Phase 4 (async streaming foundation) · **Related:** [Issue #171](https://github.com/khurram-uworx/Nivara/issues/171)
+**Status:** implemented · **Scope:** Nivara↔Streamix async streaming bridge (`src/Nivara.Extensions`) · **Dependencies:** Phase 4 (async streaming foundation) · **Related:** [Issue #171](https://github.com/khurram-uworx/Nivara/issues/171)
 
 ---
 
