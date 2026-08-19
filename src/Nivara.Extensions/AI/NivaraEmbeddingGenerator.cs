@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace Nivara.Extensions.AI;
+namespace Nivara.AI;
 
 public sealed class NivaraEmbeddingGenerator<TInput> : IEmbeddingGenerator<TInput, Embedding<float>>
 {

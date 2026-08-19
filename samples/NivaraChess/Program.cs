@@ -1,8 +1,8 @@
+using Nivara.AI;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Serialization;
 using Nivara.AutoDiff.Training;
-using Nivara.Extensions.AI;
 using NivaraChess;
 using System.Globalization;
 using System.Numerics.Tensors;
