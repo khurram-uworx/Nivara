@@ -8,7 +8,7 @@ namespace Nivara.Query;
 /// Represents a complete query execution plan with a data source and sequence of operations.
 /// Provides the foundation for query optimization and execution.
 /// </summary>
-internal sealed class QueryPlan
+public sealed class QueryPlan
 {
     /// <summary>
     /// Initializes a new instance of QueryPlan

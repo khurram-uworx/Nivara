@@ -2,12 +2,12 @@ using System.Runtime.CompilerServices;
 
 namespace Nivara.Query;
 
-internal interface IQueryOperation<T>
+public interface IQueryOperation<T>
 {
     QueryPlan Plan { get; }
 }
 
-internal interface IQueryOperation
+public interface IQueryOperation
 {
     string OperationType { get; }
     Schema TransformSchema(Schema inputSchema);
@@ -19,7 +19,7 @@ internal interface IQueryOperation
         => new(Execute(input));
 }
 
-internal interface IQuerySource : IDisposable
+public interface IQuerySource : IDisposable
 {
     Schema Schema { get; }
     bool IsLazy { get; }
