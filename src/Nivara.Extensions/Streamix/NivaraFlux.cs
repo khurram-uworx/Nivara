@@ -24,12 +24,7 @@ public static class NivaraFlux
     }
 
     public static IFlux<NivaraFrame> ToFlux(this NivaraFrame frame, string? name = null)
-    {
-        ArgumentNullException.ThrowIfNull(frame);
-
-        var flux = Flux.From<NivaraFrame>(new[] { frame });
-        return name is not null ? flux.Named(name) : flux;
-    }
+        => frame.AsQueryFrame().ToFlux(channelCapacity: 0, name: name);
 
     public static IFlux<NivaraRow> ToFluxRows(
         this QueryFrame queryFrame,
