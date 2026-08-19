@@ -5,7 +5,7 @@ namespace Nivara.Execution;
 /// <summary>
 /// Provides execution context and configuration for query operations
 /// </summary>
-internal sealed class NivaraExecutionContext
+public sealed class NivaraExecutionContext
 {
     /// <summary>
     /// Initializes a new instance of ExecutionContext with default settings
@@ -132,7 +132,7 @@ internal sealed class NivaraExecutionContext
 /// <summary>
 /// Represents progress information for long-running operations
 /// </summary>
-internal sealed class ExecutionProgress
+public sealed class ExecutionProgress
 {
     /// <summary>
     /// Initializes a new instance of ExecutionProgress
