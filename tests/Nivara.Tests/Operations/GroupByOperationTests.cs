@@ -261,4 +261,130 @@ public class GroupByOperationTests
         // Assert
         Assert.That(result, Is.EqualTo("GroupBy(Name, Department)"));
     }
+
+    [Test]
+    public void Execute_WithAggregation_ReturnsKeyAndAggregatedColumns()
+    {
+        var names = new[] { "Alice", "Bob", "Alice", "Charlie", "Bob" };
+        var salaries = new[] { 100.0, 200.0, 150.0, 300.0, 250.0 };
+
+        var nameColumn = NivaraColumn<string>.Create(names);
+        var salaryColumn = NivaraColumn<double>.Create(salaries);
+
+        var input = new Dictionary<string, IColumn>
+        {
+            ["Name"] = nameColumn,
+            ["Salary"] = salaryColumn
+        };
+
+        var aggregations = new List<GroupedAggregation>
+        {
+            new("TotalSalary", ColumnExpressions.Col("Salary"), AggregationFunctions.Sum())
+        };
+
+        var operation = new GroupByOperation(
+            new[] { ColumnExpressions.Col("Name") },
+            null,
+            aggregations);
+
+        var result = operation.Execute(input);
+
+        Assert.That(result, Has.Count.EqualTo(2));
+        Assert.That(result.ContainsKey("Name"), Is.True);
+        Assert.That(result.ContainsKey("TotalSalary"), Is.True);
+
+        var nameResult = result["Name"];
+        var salaryResult = result["TotalSalary"];
+        Assert.That(nameResult.Length, Is.EqualTo(3));
+        Assert.That(salaryResult.Length, Is.EqualTo(3));
+    }
+
+    [Test]
+    public void Execute_WithMultipleAggregations_ComputesAll()
+    {
+        var groups = new[] { "A", "B", "A", "B", "A" };
+        var values = new[] { 10, 20, 30, 40, 50 };
+
+        var groupColumn = NivaraColumn<string>.Create(groups);
+        var valueColumn = NivaraColumn<int>.Create(values);
+
+        var input = new Dictionary<string, IColumn>
+        {
+            ["Group"] = groupColumn,
+            ["Value"] = valueColumn
+        };
+
+        var aggregations = new List<GroupedAggregation>
+        {
+            new("SumVal", ColumnExpressions.Col("Value"), AggregationFunctions.Sum()),
+            new("MaxVal", ColumnExpressions.Col("Value"), AggregationFunctions.Max()),
+            new("MeanVal", ColumnExpressions.Col("Value"), AggregationFunctions.Mean())
+        };
+
+        var operation = new GroupByOperation(
+            new[] { ColumnExpressions.Col("Group") },
+            null,
+            aggregations);
+
+        var result = operation.Execute(input);
+
+        Assert.That(result, Has.Count.EqualTo(4));
+        Assert.That(result.ContainsKey("Group"), Is.True);
+        Assert.That(result.ContainsKey("SumVal"), Is.True);
+        Assert.That(result.ContainsKey("MaxVal"), Is.True);
+        Assert.That(result.ContainsKey("MeanVal"), Is.True);
+    }
+
+    [Test]
+    public void GroupByExtension_WithAggregations_IncludesAggregatedColumns()
+    {
+        var frame = NivaraFrame.Create(
+            ("City", NivaraColumn<string>.Create(new[] { "NYC", "LA", "NYC", "LA", "NYC" })),
+            ("Pop", NivaraColumn<int>.Create(new[] { 100, 200, 150, 250, 300 }))
+        );
+
+        var aggregations = new Dictionary<string, AggregationFunction>
+        {
+            ["Pop"] = AggregationFunctions.Sum()
+        };
+
+        var result = frame.GroupBy(["City"], aggregations);
+
+        Assert.That(result.ColumnNames, Contains.Item("City"));
+        Assert.That(result.ColumnNames, Contains.Item("Pop"));
+        Assert.That(result.GetColumn("City").Length, Is.EqualTo(2));
+        Assert.That(result.GetColumn("Pop").Length, Is.EqualTo(2));
+    }
+
+    [Test]
+    public void GroupByExtension_WithAggregations_ResultValuesCorrect()
+    {
+        var frame = NivaraFrame.Create(
+            ("Dept", NivaraColumn<string>.Create(new[] { "Eng", "HR", "Eng", "HR", "Eng" })),
+            ("Salary", NivaraColumn<int>.Create(new[] { 100, 200, 150, 250, 300 }))
+        );
+
+        var aggregations = new Dictionary<string, AggregationFunction>
+        {
+            ["Salary"] = AggregationFunctions.Sum()
+        };
+
+        var result = frame.GroupBy(["Dept"], aggregations);
+
+        var deptCol = result.GetColumn("Dept");
+        var totalCol = result.GetColumn("Salary");
+
+        var engIdx = -1;
+        var hrIdx = -1;
+        for (int i = 0; i < deptCol.Length; i++)
+        {
+            if ((string)deptCol.GetValue(i)! == "Eng") engIdx = i;
+            if ((string)deptCol.GetValue(i)! == "HR") hrIdx = i;
+        }
+
+        Assert.That(engIdx, Is.GreaterThanOrEqualTo(0));
+        Assert.That(hrIdx, Is.GreaterThanOrEqualTo(0));
+        Assert.That(totalCol.GetValue(engIdx), Is.EqualTo(550L)); // 100+150+300
+        Assert.That(totalCol.GetValue(hrIdx), Is.EqualTo(450L)); // 200+250
+    }
 }

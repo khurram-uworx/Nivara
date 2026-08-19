@@ -203,25 +203,13 @@ public static class Analysis
                 MaxDurationPercentRank = g.Max(r => r.DurationPercentRank),
             });
 
-        var result = grouped.Collect();
-
-        var regionCol = result.GetColumn<string>("Region");
-        var errorRateCol = result.GetColumn<double>("ErrorRate");
-        int rowCount = result.RowCount;
-
-        var ranks = new long[rowCount];
-        var sortedIndices = Enumerable.Range(0, rowCount)
-            .OrderByDescending(i => (double)errorRateCol.GetValue(i)!)
-            .ThenBy(i => (string)regionCol.GetValue(i)!)
-            .ToArray();
-        for (int rank = 0; rank < rowCount; rank++)
-            ranks[sortedIndices[rank]] = rank + 1;
-
-        var columns = new (string Name, IColumn Column)[result.ColumnNames.Count + 1];
-        for (int c = 0; c < result.ColumnNames.Count; c++)
-            columns[c] = (result.ColumnNames[c], result.GetColumn(result.ColumnNames[c]));
-        columns[result.ColumnNames.Count] = ("ErrorRank", NivaraColumn<long>.Create(ranks));
-        return NivaraFrame.Create(columns);
+        return grouped
+            .DenseRank("ErrorRank",
+            [
+                new SortKey("ErrorRate", SortDirection.Descending),
+                new SortKey("Region", SortDirection.Ascending),
+            ])
+            .Collect();
     }
 
     public static NivaraFrame AnalyzeGroupedAggregation(string datasetPath, IncidentScenario scenario)

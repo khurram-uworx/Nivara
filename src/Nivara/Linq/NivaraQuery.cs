@@ -3,6 +3,7 @@ using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
 using System.Globalization;
+using SortKey = Nivara.Operations.SortKey;
 using System.Linq.Expressions;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -204,6 +205,84 @@ public sealed class NivaraQuery<T>
     /// Applies a skip-and-take window to the rows
     /// </summary>
     public NivaraQuery<T> Slice(int skip, int take) => new(frame.Slice(skip, take));
+
+    // ── Window functions (rank / row-number) ──
+
+    /// <summary>
+    /// Appends a dense-rank column (no gaps on ties) ordered by the given keys.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="orderBy">The order keys (at least one is required)</param>
+    /// <param name="partitionBy">The partition key column names</param>
+    /// <returns>A new query with the dense-rank column appended</returns>
+    public NivaraQuery<T> DenseRank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => new(frame.DenseRank(resultColumn, orderBy, partitionBy));
+
+    /// <summary>
+    /// Appends a dense-rank column (no gaps on ties) from a window specification.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="spec">The window specification (partition and order keys)</param>
+    /// <returns>A new query with the dense-rank column appended</returns>
+    public NivaraQuery<T> DenseRank(string resultColumn, WindowSpec spec)
+        => new(frame.DenseRank(resultColumn, spec));
+
+    /// <summary>
+    /// Appends a standard-rank column (gaps on ties) ordered by the given keys.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="orderBy">The order keys (at least one is required)</param>
+    /// <param name="partitionBy">The partition key column names</param>
+    /// <returns>A new query with the rank column appended</returns>
+    public NivaraQuery<T> Rank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => new(frame.Rank(resultColumn, orderBy, partitionBy));
+
+    /// <summary>
+    /// Appends a standard-rank column (gaps on ties) from a window specification.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="spec">The window specification (partition and order keys)</param>
+    /// <returns>A new query with the rank column appended</returns>
+    public NivaraQuery<T> Rank(string resultColumn, WindowSpec spec)
+        => new(frame.Rank(resultColumn, spec));
+
+    /// <summary>
+    /// Appends a row-number column ordered by the given keys.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="partitionBy">The partition key column names</param>
+    /// <param name="orderBy">The order keys</param>
+    /// <returns>A new query with the row-number column appended</returns>
+    public NivaraQuery<T> RowNumber(string resultColumn, string[]? partitionBy = null, IReadOnlyList<SortKey>? orderBy = null)
+        => new(frame.RowNumber(resultColumn, partitionBy, orderBy));
+
+    /// <summary>
+    /// Appends a row-number column from a window specification.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="spec">The window specification (partition and order keys)</param>
+    /// <returns>A new query with the row-number column appended</returns>
+    public NivaraQuery<T> RowNumber(string resultColumn, WindowSpec spec)
+        => new(frame.RowNumber(resultColumn, spec));
+
+    /// <summary>
+    /// Appends a percent-rank column (rank-1)/(partitionSize-1) ordered by the given keys.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="orderBy">The order keys (at least one is required)</param>
+    /// <param name="partitionBy">The partition key column names</param>
+    /// <returns>A new query with the percent-rank column appended</returns>
+    public NivaraQuery<T> PercentRank(string resultColumn, IReadOnlyList<SortKey> orderBy, params string[] partitionBy)
+        => new(frame.PercentRank(resultColumn, orderBy, partitionBy));
+
+    /// <summary>
+    /// Appends a percent-rank column from a window specification.
+    /// </summary>
+    /// <param name="resultColumn">The name of the appended result column</param>
+    /// <param name="spec">The window specification (partition and order keys)</param>
+    /// <returns>A new query with the percent-rank column appended</returns>
+    public NivaraQuery<T> PercentRank(string resultColumn, WindowSpec spec)
+        => new(frame.PercentRank(resultColumn, spec));
 
     /// <summary>
     /// Executes the query and returns a materialized frame
