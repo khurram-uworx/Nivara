@@ -205,23 +205,17 @@ await Csv.ScanAsQueryFrame("telemetry.parquet")
 // String-based overload (column must be DateTimeOffset)
 await Csv.ScanAsQueryFrame("telemetry.csv")
     .ToFluxWithTimestamp("observed_at", chunkSize: 1000)
-    .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(30))
-    .FlatMap(async window => await window.ToNivaraFrameAsync())
-    .Map(frame => frame.RollingMean("cpu", "cpu_avg", windowSize: 10))
-    .Filter(f => f["cpu_avg"].Max() > 90)
-    .ForEachAsync(anomaly => pager.Ping(anomaly));
-
-// Lambda overload (any column type convertible to DateTimeOffset)
-await Csv.ScanAsQueryFrame("telemetry.csv")
-    .ToFluxWithTimestamp(row => row.GetValue<DateTimeOffset>("observed_at"), chunkSize: 1000)
     .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1))
     .FlatMap(async window =>
     {
         var frame = await window.ToNivaraFrameAsync();
-        var avgCpu = frame.GetColumn<double>("cpu").Average();
-        return (Frame: frame, AvgCpu: avgCpu);
+        using var result = frame.AsQueryFrame()
+            .RollingMean("cpu", "cpu_avg", windowSize: 10, minPeriods: 1)
+            .Collect();
+        var lastAvg = result.GetColumn<double>("cpu_avg").Last();
+        return (Frame: result, LastRollingAvg: lastAvg);
     })
-    .Where(result => result.AvgCpu > 90)
+    .Where(result => result.LastRollingAvg > 90)
     .ForEachAsync(result => pager.Ping(result.Frame));
 ```
 
