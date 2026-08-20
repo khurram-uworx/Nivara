@@ -304,8 +304,13 @@ replayed.Connect();
 
 ### ASP.NET Core SSE streaming
 
-`Streamix.AspNetCore` provides `ToSseAsync` and `FluxResult<T>` for streaming Nivara
-query results as Server-Sent Events. Since `ToFlux` returns `IFlux<T>`, it plugs in directly:
+`Streamix.AspNetCore` provides `ToSseAsync` (extension on `IFlux<T>`) and
+`FluxResult<T>` (`IActionResult`) for streaming Nivara query results as Server-Sent Events.
+Since `ToFlux` returns `IFlux<T>`, it plugs in directly.
+
+Requires the `Streamix.AspNetCore` NuGet package in your web project.
+
+**Controller pattern (`FluxResult<T>`):**
 
 ```csharp
 using Nivara.Streamix;
@@ -317,14 +322,32 @@ public class TelemetryController : ControllerBase
 {
     [HttpGet("stream")]
     public IActionResult StreamTelemetry()
-        => Csv.ScanAsQueryFrame("telemetry.csv")
+    {
+        var flux = Csv.ScanAsQueryFrame("telemetry.csv")
             .Filter(ColumnExpressions.Col("host") == "prod-01")
-            .ToFlux(chunkSize: 1000)
-            .ToSseResult();  // from Streamix.AspNetCore
+            .ToFlux(chunkSize: 1000);
+        return new FluxResult<NivaraFrame>(flux);
+    }
 }
 ```
 
-Requires the `Streamix.AspNetCore` NuGet package in your web project.
+**Minimal API pattern (`ToSseAsync`):**
+
+```csharp
+using Nivara.Streamix;
+using Streamix.AspNetCore;
+
+app.MapGet("/api/telemetry/stream", async (HttpResponse response) =>
+{
+    await Csv.ScanAsQueryFrame("telemetry.csv")
+        .Filter(ColumnExpressions.Col("host") == "prod-01")
+        .ToFlux(chunkSize: 1000)
+        .ToSseAsync(response);
+});
+```
+
+> **Note:** Phase 3b of the Incident Lab (`samples/NivaraIncident/PHASE3B.md`) will use
+> `Streamix.AspNetCore` for the SSE replay endpoint streaming live chunk results to the browser.
 
 ### Pipeline observability
 
