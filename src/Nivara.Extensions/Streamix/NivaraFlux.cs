@@ -37,6 +37,12 @@ public static class NivaraFlux
         return Flux.From(EnumerateRows(queryFrame, chunkSize, ct));
     }
 
+    public static IFlux<NivaraRow> ToFluxRows(
+        this NivaraFrame frame,
+        int chunkSize = 65536,
+        CancellationToken ct = default)
+        => frame.AsQueryFrame().ToFluxRows(chunkSize, ct);
+
     public static async Task<NivaraFrame> ToNivaraFrameAsync(
         this IFlux<NivaraFrame> stream,
         CancellationToken ct = default)
