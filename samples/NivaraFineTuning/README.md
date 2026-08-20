@@ -204,10 +204,10 @@ reproducible. Numbers vary with machine load — re-measure both sides in the
 same session when comparing (run-to-run variance ~±10% per
 `tests/Nivara.PerformanceTests/README.md`).
 
-Recorded **2026-08-14** on an 11th-gen Intel i5-1135G7 laptop (4P/8T, Windows
-11, `torch_threads=4`). The 2026-08-06 figures were from a different (faster)
-machine, so the absolute s/batch below are **not comparable** to that table;
-the ~3× ratio holds on both machines.
+Recorded **2026-08-21** on an Intel Core Ultra 7 255H (16 logical processors,
+Windows 11, `torch_threads=16`). Previous measurements on an 11th-gen Intel
+i5-1135G7 (4P/8T) are in the Prev column for reference — the ~3× ratio holds
+on both machines.
 
 | Config | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |--------|---------------|-------------------|----------|

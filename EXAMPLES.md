@@ -364,7 +364,7 @@ var byCity = employees.Query<Employee>()
 
 Notes:
 - `Query<T>()` requires `T : class, new()`. `Collect()`/`ToList()` return a `NivaraFrame`; `ToObjects()`/`ToRows()` return `IReadOnlyList<TResult>`.
-- Supported: property access, literals, `+ - * /`, comparisons, `&&`/`||`/`!`. Method calls, captured variables/closures, nested property access, and ternary throw `UnsupportedQueryExpressionException` at translation time.
+- Supported: property access, literals, `+ - * / %`, comparisons, `&&`/`||`/`!`, and conditional expressions (ternary `?:`). Method calls, captured variables/closures, and nested property access throw `UnsupportedQueryExpressionException` at translation time.
 - `GroupBy` accepts an aggregate `Select` (`g.Key` + `g.Average`/`Sum`/`Count`/`Min`/`Max`) or a bare `Collect` of distinct keys; anything else after `GroupBy` fails fast.
 
 ---

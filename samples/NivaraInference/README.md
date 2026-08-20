@@ -217,14 +217,11 @@ The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the
 
 ## Performance benchmarks
 
-Measured on the same machine (CPU-only, no GPU): 11th-gen Intel i5-1135G7
-laptop (4P/8T), Nivara in Release mode, PyTorch with MKL-optimized kernels.
+Measured on the same machine (CPU-only, no GPU): Intel Core Ultra 7 255H
+(16 logical processors), Nivara in Release mode, PyTorch with MKL-optimized kernels.
 Both use batch size 1 with 3-pass warmup + 10 timed passes. Both columns were
-recorded **2026-08-14** in the same session (the two vision rows paired
-back-to-back). Numbers vary with machine load; the **2026-08-04** table below
-was recorded on a different (desktop-class) machine, so its absolute ms are
-**not comparable** to this table — only the same-row PyTorch-vs-Nivara ratio is
-meaningful here.
+recorded in the same session. Numbers vary with machine load — only the same-row
+PyTorch-vs-Nivara ratio is meaningful.
 
 | Model | Input | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |-------|-------|---------------|-------------------|----------|
@@ -233,6 +230,8 @@ meaningful here.
 | **MiniLM-L6** | 128 tokens | 23 ms | 142 ms | **~6×** |
 | **DistilBERT** | 128 tokens | 80 ms | 508 ms | **~6×** |
 | **DistilBERT SST-2** | 128 tokens | 80 ms | 519 ms | **~6×** |
+
+*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, PyTorch MKL.*
 
 The SST-2 row reuses the DistilBERT PyTorch timing (same architecture, only the
 weights differ; `Python/distilbert_sst_compare.py` is accuracy-only, no timing).

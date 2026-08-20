@@ -78,10 +78,12 @@ var adults = frame.Query<Person>()
 - Explicit null handling using validity masks (no NaN semantics)
 
 ### Query Engine
-- Typed object LINQ — `frame.Query<T>()` maps a POCO to the frame schema and compiles typed lambdas into query plans (predicates, projections, `OrderBy`/`ThenBy` with per-key `SortDirection`/`NullOrdering`, `Distinct`/`DistinctBy`, `SelectRows`, `Skip`/`Take`, `GroupBy` with `g.Key` + `Average`/`Sum`/`Count`/`Min`/`Max` aggregates), materializing to a `NivaraFrame` or `IReadOnlyList<TResult>`
+- Typed object LINQ — `frame.Query<T>()` maps a POCO to the frame schema and compiles typed lambdas into query plans (predicates, projections, conditional expressions, `OrderBy`/`ThenBy` with per-key `SortDirection`/`NullOrdering`, `Distinct`/`DistinctBy`, `SelectRows`, `Skip`/`Take`, `GroupBy` with `g.Key` + `Average`/`Sum`/`Count`/`Min`/`Max`/`Quantile`/`Median`/`StdDev`/`Variance` aggregates), materializing to a `NivaraFrame` or `IReadOnlyList<TResult>`
+- **Window functions** — `Over()` / `WindowSpec` builder for SQL-style partitioned windows: rolling (`Sum`/`Mean`/`Min`/`Max`), cumulative (`Sum`/`Max`/`Min`/`Product`/`Count`), `Shift`/`Lead`, and rank family (`RowNumber`/`Rank`/`DenseRank`/`PercentRank`), on both eager `NivaraFrame` and lazy `QueryFrame`
+- **Chunked streaming** — `QueryFrame.AsStream(chunkSize)` and `NivaraQuery<T>.AsStream` yield one `NivaraFrame` per source chunk for async processing; `ScanAsQueryFrame` factories open streaming directly from CSV/JSON/Parquet files
 - Lazy typed file-source queries — `Json.ScanQuery<T>()` (core) and `Csv.ScanQuery<T>()` (Extensions) defer I/O until execution; `ReadFrame`/`ScanFrame` cover eager/lazy frame loading
-- Automatic query optimization (predicate pushdown, projection pushdown, operation fusion)
-- Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with integrated performance diagnostics
+- Automatic query optimization (predicate pushdown, projection pushdown, operation fusion with fused expression kernel IR)
+- Multiple execution strategies (lazy, eager, streaming, parallel) — all fully implemented with genuinely-async `CollectAsync`/`ToListAsync` and integrated performance diagnostics
 
 ### Tensor, AI, and AutoDiff Interop
 - Convert columns, series, and frames to `Tensor<T>` for platform math APIs
@@ -107,13 +109,14 @@ var adults = frame.Query<Person>()
 - **Concatenation**: Vertical and horizontal DataFrame combination
 
 ### Data Sources and I/O
-- CSV and JSON lazy data sources with schema inference
-- Parquet file I/O with compression support (via `Nivara.Extensions`)
+- CSV and JSON lazy data sources with schema inference; `ScanAsQueryFrame` for lazy streaming entry points
+- Parquet file I/O with compression support, row-group predicate pushdown, and row-group chunking (via `Nivara.Extensions`)
 - Apache Arrow interoperability (via `Nivara.Extensions`)
+- Async-native I/O — `CollectAsync`/`ToListAsync` run genuinely asynchronously with cancellation support
 
 ### Developer Experience
 - Comprehensive error handling with structured exceptions
-- Performance diagnostics and query plan inspection
+- Performance diagnostics, query plan inspection, and execution progress (`QueryPlan`, `QueryPlanAnalyzer`, `QueryDiagnostics`, `ExecutionEngine`, `ExecutionProgress` — all public)
 - Fluent API with method chaining
 - Early error detection through schema validation
 
