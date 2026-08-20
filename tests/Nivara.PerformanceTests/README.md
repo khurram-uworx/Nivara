@@ -165,3 +165,22 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 10.0.11 (Rele
   185,889).
 - **ops/s are load-sensitive.** Treat ops/s as order-of-magnitude; B/op and
   gen0/op are the reliable signals.
+
+## Release Benchmark
+
+Run this during release prep (step 5 of `RELEASING.md`). No external dependencies
+beyond the .NET SDK.
+
+```powershell
+dotnet run --project tests/Nivara.PerformanceTests -c Release -- --json <path> --runs 3
+```
+
+Save the JSON output (e.g., `baseline-vX.Y.Z.json`) and reference it in the PR.
+
+**Update the Results table:**
+1. Shift existing **ops/s** values to the **Prev** column.
+2. Place fresh measurements in the **Current** column.
+3. Add **Ratio** (`Current / Prev`) and **Δ%** (`((Current − Prev) / Prev) × 100`).
+4. Keep **B/op** and **gen0/op** as-is (stability indicators).
+5. New scenarios with no prior reading: leave Prev/Ratio/Δ% blank.
+6. Update the machine line and recording date at the top of the table.

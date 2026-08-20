@@ -284,3 +284,39 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 - **Generated schema** — Roslyn source generator for typed telemetry accessors (Phase 5 roadmap).
 - **Cloud deployment** — `dotnet run` and `docker run -p 8080:8080` parity on a developer laptop.
 
+## Release Benchmark
+
+Run this during release prep (step 5 of `RELEASING.md`). Requires the incident
+dataset (generate first: `dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -- generate --dataset ./data/incident-lab --scenario A --scale 1`).
+
+**Nivara-only analysis timings:**
+
+```powershell
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
+  -- analyze --benchmark --dataset ./data/incident-lab --scenario A
+```
+
+**Nivara vs Polars** (requires Python + Polars — see `Python/` subdirectory):
+
+```powershell
+# Generate 1M-record benchmark dataset
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
+  -- generate --records 1000000 --dataset samples/data/benchmark-1m --scenario A
+
+# Nivara benchmark
+dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
+  -- analyze --benchmark --dataset samples/data/benchmark-1m --scenario A
+
+# Polars benchmark (same Parquet files)
+cd samples/NivaraIncident/Python
+pip install -r requirements.txt
+python benchmark.py --dataset ../../../samples/data/benchmark-1m
+```
+
+**Update the tables:**
+1. **Nivara-only table:** shift existing timing to **Prev**, place new timings in
+   **Current**, add **Ratio** and **Δ%** columns.
+2. **Polars comparison table:** keep Nivara/Polars/Ratio structure; update numbers.
+   Add a **Prev** column only if there is a prior same-machine measurement.
+3. Update the machine line and recording date in both tables.
+

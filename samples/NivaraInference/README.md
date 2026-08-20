@@ -306,3 +306,30 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `GradientUtils.Grad()`-free inference | Leaf logits, no computation graph overhead |
 | `MiniLMTokenizer.Encode` + `Microsoft.ML.Tokenizers.BertTokenizer` | WordPiece tokenization with `[CLS]`/`[SEP]` |
 | Softmax + argmax via tensor span | Sentiment label + confidence |
+
+## Release Benchmark
+
+Run this during release prep (step 5 of `RELEASING.md`). Requires Python, PyTorch,
+and HuggingFace model weights (see Quick start for `hf download` commands).
+
+Run both sides in the same session for fair comparison:
+
+```powershell
+# Nivara (C#) — one pass per model
+dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
+dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
+
+# PyTorch (Python) — run immediately after on the same machine
+cd samples/NivaraInference/Python
+python benchmark.py
+```
+
+**Update the Performance benchmarks table:**
+1. Shift existing timing columns to **Prev (PyTorch)** / **Prev (Nivara)**.
+2. Place fresh measurements in **Current (PyTorch)** / **Current (Nivara)**.
+3. Add **Prev Slowdown** (old ratio) and **Current Slowdown** (new ratio).
+   Alternatively, keep single columns and add a **Δ%** column for Nivara only.
+4. Update the machine line, recording date, and prose referencing ratios.

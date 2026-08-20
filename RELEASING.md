@@ -77,104 +77,22 @@ but unused, etc.).
 > Do NOT update recording dates, machine info, or table values without first running
 > the corresponding benchmark command and capturing its output.** If a benchmark cannot
 > be run (missing Python, missing model weights, etc.), note it explicitly in the PR
-> description and leave the existing numbers in place with a comment — do not fake or
-> carry forward stale numbers as if they were fresh.
+> description and leave the existing numbers in place — do not fake or carry forward
+> stale numbers as if they were fresh.
 
-There are four benchmark documents. Each must be updated with fresh measurements. The
-table format uses a rolling Prev/Current history: the previous reading moves to **Prev**
-and the fresh measurement becomes **Current**, with **Ratio** (`Current / Prev`) and
-**Δ%** (`((Current − Prev) / Prev) × 100`). When there is no prior reading on the same
-machine, Current is the first entry and Prev/Ratio/Δ% are left blank.
+Each benchmark has a `## Release Benchmark` section in its README with exact commands,
+prerequisites, and table-update instructions. Run them in order:
 
-#### 5a. Core performance harness (pure .NET, no external deps)
+| # | Benchmark | README | Prerequisites |
+|---|-----------|--------|---------------|
+| 1 | Core perf harness | `tests/Nivara.PerformanceTests/README.md` | .NET SDK only |
+| 2 | NivaraIncident | `samples/NivaraIncident/README.md` | Generated dataset (see Prerequisites) |
+| 3 | NivaraInference | `samples/NivaraInference/README.md` | Python + PyTorch + model weights |
+| 4 | NivaraFineTuning | `samples/NivaraFineTuning/README.md` | Python + PyTorch + model weights |
 
-```powershell
-dotnet run --project tests/Nivara.PerformanceTests -c Release -- --json <path> --runs 3
-```
-
-This produces JSON with per-scenario `ops/s`, `B/op`, `gen0/op` (medians of 3
-independent child processes). Update `tests/Nivara.PerformanceTests/README.md`:
-
-- Shift the existing **ops/s** column to a new **Prev** column.
-- Place the fresh measurements in the **Current** column.
-- Add a **Ratio** column (`Current / Prev`) and a **Δ%** column.
-- Keep **B/op** and **gen0/op** as-is (stability indicators, not throughput metrics).
-- If a scenario is new (no prior reading), leave Prev/Ratio/Δ% blank for that row.
-- Update the machine line and recording date.
-- Replace the old "point A" policy language with "rolling Prev/Current history".
-
-**Gate:** The JSON file must exist on disk with valid numbers before proceeding. Save it
-to a known path (e.g., `tests/Nivara.PerformanceTests/baseline-vX.Y.Z.json`) so it can
-be referenced in the PR.
-
-#### 5b. NivaraIncident benchmarks (pure .NET, needs generated dataset)
-
-Requires the incident dataset (see Prerequisites). Run:
-
-```powershell
-# Nivara-only analysis timings
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
-  -- analyze --benchmark --dataset ./data/incident-lab --scenario A
-
-# Nivara vs Polars (requires Python + Polars — see samples/NivaraIncident/Python/)
-dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -c Release \
-  -- analyze --benchmark --dataset samples/data/benchmark-1m --scenario A --records 1000000
-```
-
-Update `samples/NivaraIncident/README.md`:
-
-- **Nivara-only table:** shift existing timing to **Prev**, place new timings in
-  **Current**, add **Ratio** and **Δ%** columns.
-- **Polars comparison table:** keep the Nivara/Polars/Ratio structure; update numbers
-  and recording line. Add a **Prev** column only if there is a prior same-machine
-  measurement.
-- Update the machine line and recording date in both tables.
-
-#### 5c. NivaraInference benchmarks (requires Python + PyTorch + model weights)
-
-Requires Python, PyTorch, and HuggingFace model weights (see Prerequisites). Run both
-sides in the same session for fair comparison:
-
-```powershell
-# Nivara (C#)
-dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
-dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
-dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
-dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
-dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
-
-# PyTorch (Python) — run immediately after Nivara on the same machine
-cd samples/NivaraInference/Python
-python benchmark.py  # or the equivalent per-model script
-```
-
-Update `samples/NivaraInference/README.md`:
-
-- Shift existing timing columns to **Prev (PyTorch)** / **Prev (Nivara)**.
-- Place fresh measurements in **Current (PyTorch)** / **Current (Nivara)**.
-- Add **Prev Slowdown** (old ratio) and **Current Slowdown** (new ratio) columns.
-  Alternatively, if the table is too narrow, keep single PyTorch/Nivara columns and
-  add a **Δ%** column for Nivara only.
-- Update the machine line, recording date, and prose referencing ratios.
-
-#### 5d. NivaraFineTuning benchmarks (requires Python + PyTorch + model weights)
-
-Requires Python, PyTorch, and DistilBERT SST-2 weights (see Prerequisites). Run:
-
-```powershell
-# Nivara fine-tuning (runs both sides via benchmark_timing.cmd)
-cd samples/NivaraFineTuning
-.\benchmark_timing.cmd
-```
-
-The script runs Nivara (Release, Server GC + Tiered PGO) and PyTorch
-(`torch_threads = nproc`) side by side and writes results to `benchmark_results.txt`.
-
-Update `samples/NivaraFineTuning/README.md`:
-
-- Apply the same Prev/Current/Ratio/Δ% pattern for the Nivara timings.
-- Update the Slowdown column and extrapolated full-run estimates.
-- Update the recording line with machine info and date.
+For each benchmark: **open the README → follow the `## Release Benchmark` section →
+run the commands → update the tables with fresh Prev/Current numbers.** Do not skip
+any benchmark — if one cannot be run, say so in the PR with the reason.
 
 ### Step 6 — Commit, PR, merge
 

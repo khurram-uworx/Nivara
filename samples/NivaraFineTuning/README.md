@@ -346,3 +346,22 @@ Uses identical hyperparameters (lr=2e-5, epochs=3, batch_size=4, max_len=128) wi
 - **DistilBertConfig JSON parser**: Maps HuggingFace `snake_case` config keys to PascalCase C# properties via reflection-based parsing
 - **Shared model promotion**: `DistilBertForSequenceClassification<T>` + `DistilBertConfig` now live in `Nivara.Samples` and are shared by this sample and the `distilbert_sst` inference showcase (`samples/NivaraInference`)
 - **No token-type embeddings**: the classifier constructs its encoder with `includeTokenTypeEmbedding: false` (DistilBERT never feeds segment ids); the previous default added a random token-type embedding that degraded frozen-encoder parity
+
+## Release Benchmark
+
+Run this during release prep (step 5 of `RELEASING.md`). Requires Python, PyTorch,
+and DistilBERT SST-2 weights (see Setup section).
+
+```powershell
+cd samples/NivaraFineTuning
+.\benchmark_timing.cmd
+```
+
+The script runs both Nivara (Release, Server GC + Tiered PGO) and PyTorch
+(`torch_threads = nproc`) side by side and writes results to `benchmark_results.txt`.
+
+**Update the Performance benchmarks table:**
+1. Apply Prev/Current/Ratio/Δ% pattern for the Nivara timings.
+2. Update the **Slowdown** column (PyTorch / Nivara ratio).
+3. Update extrapolated full-run estimates if timings changed significantly.
+4. Update the recording line with machine info and date.
