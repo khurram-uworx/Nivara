@@ -245,6 +245,84 @@ public class StreamixBridgeTests
         Assert.Pass("Iteration stopped after cancellation");
     }
 
+    [Test]
+    public async Task Backpressure_FailMode_BridgePath_PropagatesException()
+    {
+        var slowFrames = SlowAsyncFrames(100);
+        var flux = Flux.From(slowFrames)
+            .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
+
+        Exception? caught = null;
+        int itemCount = 0;
+        try
+        {
+            await foreach (var chunk in flux)
+            {
+                itemCount++;
+                await Task.Delay(10);
+            }
+        }
+        catch (Exception ex)
+        {
+            caught = ex;
+        }
+
+        TestContext.Out.WriteLine($"Chunks consumed: {itemCount}, Exception: {caught?.GetType().Name ?? "none"}");
+        Assert.That(caught, Is.Not.Null,
+            "BackpressureException should propagate through Flux.From(IAsyncEnumerable).PipeThroughChannel — regression canary for #315");
+        Assert.That(caught, Is.InstanceOf<BackpressureException>());
+    }
+
+    [Test]
+    public async Task Backpressure_FailMode_AsyncEnumerablePath_PropagatesException()
+    {
+        var asyncEnumerable = SlowAsyncEnumerable(100);
+        var flux = Flux.From(asyncEnumerable)
+            .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
+
+        Exception? caught = null;
+        int itemCount = 0;
+        try
+        {
+            await foreach (var item in flux)
+            {
+                itemCount++;
+                await Task.Delay(10);
+            }
+        }
+        catch (Exception ex)
+        {
+            caught = ex;
+        }
+
+        TestContext.Out.WriteLine($"Items consumed: {itemCount}, Exception: {caught?.GetType().Name ?? "none"}");
+        Assert.That(caught, Is.Not.Null,
+            "BackpressureException should propagate through Flux.From(IAsyncEnumerable<T>).PipeThroughChannel (Streamix regression canary for #315)");
+        Assert.That(caught, Is.InstanceOf<BackpressureException>());
+    }
+
+    static async IAsyncEnumerable<NivaraFrame> SlowAsyncFrames(int count)
+    {
+        var x = new int[] { 1 };
+        var y = new string[] { "a" };
+        for (int i = 0; i < count; i++)
+        {
+            await Task.Delay(1);
+            yield return NivaraFrame.Create(
+                ("X", NivaraColumn<int>.Create(x)),
+                ("Y", NivaraColumn<string>.Create(y)));
+        }
+    }
+
+    static async IAsyncEnumerable<int> SlowAsyncEnumerable(int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            await Task.Yield();
+            yield return i;
+        }
+    }
+
     static async IAsyncEnumerable<NivaraFrame> DelayedFrames(
         int count,
         [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
