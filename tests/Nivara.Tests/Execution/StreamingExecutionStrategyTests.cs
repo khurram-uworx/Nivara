@@ -1112,6 +1112,172 @@ public class StreamingExecutionStrategyTests
         }
     }
 
+    [Test]
+    public void Execute_OverlapWindow_MatchesLazyExecution()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 5),
+        });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var lazySource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        using var result = strategy.Execute(plan, context);
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        assertIntColumnEqual(lazyResult, result, "RollingSum(A, 5)");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_OverlapWindow_MatchesLazyExecution()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 5),
+        });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var lazySource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        using var result = await strategy.ExecuteAsync(plan, context).ConfigureAwait(false);
+        using var lazyResult = await lazyStrategy.ExecuteAsync(lazyPlan, ExecutionTestHelpers.CreateTestContext()).ConfigureAwait(false);
+
+        assertIntColumnEqual(lazyResult, result, "RollingSum(A, 5)");
+    }
+
+    [Test]
+    public void Execute_OverlapWindow_FilterThenRolling_MatchesLazyExecution()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var ops = new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SelectOperation(new[]
+            {
+                ColumnExpressions.Col<int>("A"),
+                ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 3),
+            }),
+        };
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var lazySource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, ops);
+        var lazyPlan = new QueryPlan(lazySource, ops);
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        using var result = strategy.Execute(plan, context);
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        assertIntColumnEqual(lazyResult, result, "RollingSum(A, 3)");
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_OverlapWindow_YieldsPerChunkAndMatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 3),
+        });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var lazySource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+            frames.Add(frame);
+
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        try
+        {
+            Assert.That(frames.Count, Is.GreaterThan(1),
+                "Overlap window must yield per-chunk frames");
+            var totalRows = frames.Sum(f => f.RowCount);
+            Assert.That(totalRows, Is.EqualTo(lazyResult.RowCount),
+                "Per-chunk total must match lazy row count");
+
+            var allRollingValues = new List<int>();
+            foreach (var f in frames)
+            {
+                var col = f.GetColumn<int>("RollingSum(A, 3)");
+                for (int i = 0; i < col.Length; i++)
+                    allRollingValues.Add((int)col.GetValue(i)!);
+            }
+            var lazyCol = lazyResult.GetColumn<int>("RollingSum(A, 3)");
+            for (int i = 0; i < lazyCol.Length; i++)
+                Assert.That(allRollingValues[i], Is.EqualTo((int)lazyCol.GetValue(i)!),
+                    $"Row {i} RollingSum mismatch between streaming and lazy");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_OverlapWindow_WithTrailingBoundary_YieldsCorrectResult()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var ops = new IQueryOperation[]
+        {
+            new SelectOperation(new[]
+            {
+                ColumnExpressions.Col<int>("A"),
+                ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 3),
+            }),
+            new SortOperation("RollingSum(A, 3)"),
+        };
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 500);
+        var lazySource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 500);
+        var plan = new QueryPlan(source, ops);
+        var lazyPlan = new QueryPlan(lazySource, ops);
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+            frames.Add(frame);
+
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        try
+        {
+            Assert.That(frames.Count, Is.GreaterThanOrEqualTo(1));
+            var lastFrame = frames.Last();
+            Assert.That(lastFrame.RowCount, Is.EqualTo(lazyResult.RowCount),
+                "Window + Sort result must match lazy row count");
+            var lazyRollingCol = lazyResult.GetColumn<int>("RollingSum(A, 3)");
+            var resultRollingCol = lastFrame.GetColumn<int>("RollingSum(A, 3)");
+            Assert.That(resultRollingCol.Length, Is.EqualTo(lazyRollingCol.Length));
+            for (int i = 0; i < lazyRollingCol.Length; i++)
+                Assert.That((int)resultRollingCol.GetValue(i)!, Is.EqualTo((int)lazyRollingCol.GetValue(i)!),
+                    $"Row {i} RollingSum mismatch after Sort");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
     static NivaraColumn<int> concatenateColumn(List<NivaraFrame> frames, string columnName)
     {
         var allValues = new List<int>();
