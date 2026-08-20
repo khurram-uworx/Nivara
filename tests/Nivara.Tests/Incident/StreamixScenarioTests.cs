@@ -48,6 +48,7 @@ public class StreamixScenarioTests
         Assert.That(summary.Windows, Is.Not.Empty);
         Assert.That(summary.Windows[0].WindowStart, Is.Not.EqualTo(default(DateTimeOffset)));
         Assert.That(summary.Windows[0].AverageDurationMs, Is.GreaterThanOrEqualTo(0));
+        Assert.That(summary.Windows[0].RollingAvgDurationMs, Is.GreaterThanOrEqualTo(0));
     }
 
     [Test]

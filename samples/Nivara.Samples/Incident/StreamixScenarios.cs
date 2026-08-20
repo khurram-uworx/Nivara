@@ -56,7 +56,8 @@ public static class StreamixScenarios
 
     /// <summary>
     /// Scenario 2: Event-time windowed analytics using ToFluxWithTimestamp + WindowByTime.
-    /// Demonstrates timestamped streaming with event-time windowing and per-window aggregation.
+    /// Demonstrates timestamped streaming with event-time windowing, Nivara columnar analytics
+    /// (RollingMean) inside each window, and per-window aggregation.
     /// </summary>
     public static async Task<WindowedAnalyticsSummary> RunWindowedAnalytics(
         string datasetPath,
@@ -82,25 +83,30 @@ public static class StreamixScenarios
             .FlatMap(async window =>
             {
                 var frame = await window.ToNivaraFrameAsync(ct);
-                var durations = frame.GetColumn<double>("DurationMs");
-                var statusCodes = frame.GetColumn<int>("StatusCode");
-                var timestamps = frame.GetColumn<long>("Timestamp");
+                if (frame.RowCount == 0)
+                    return WindowResult.Empty;
 
-                double avgDuration = durations.Length > 0 ? durations.Average() : 0;
+                using var result = frame.AsQueryFrame()
+                    .RollingMean("DurationMs", "RollingAvgDuration", windowSize: 10, minPeriods: 1)
+                    .Collect();
+
+                var durations = result.GetColumn<double>("DurationMs");
+                var rollingAvg = result.GetColumn<double>("RollingAvgDuration");
+                var statusCodes = result.GetColumn<int>("StatusCode");
+                var timestamps = result.GetColumn<long>("Timestamp");
+
+                double avgDuration = durations.Average();
+                double lastRollingAvg = rollingAvg[rollingAvg.Length - 1];
                 int errorCount = 0;
                 for (int i = 0; i < statusCodes.Length; i++)
                     if (statusCodes[i] >= 500) errorCount++;
-                double errorRate = statusCodes.Length > 0 ? (double)errorCount / statusCodes.Length : 0;
+                double errorRate = (double)errorCount / statusCodes.Length;
 
-                var windowStart = timestamps.Length > 0
-                    ? new DateTimeOffset(timestamps[0], TimeSpan.Zero)
-                    : default;
-                var windowEnd = timestamps.Length > 0
-                    ? new DateTimeOffset(timestamps[timestamps.Length - 1], TimeSpan.Zero)
-                    : default;
+                var windowStart = new DateTimeOffset(timestamps[0], TimeSpan.Zero);
+                var windowEnd = new DateTimeOffset(timestamps[timestamps.Length - 1], TimeSpan.Zero);
 
-                Interlocked.Add(ref totalRows, frame.RowCount);
-                return new WindowResult(windowStart, windowEnd, frame.RowCount, avgDuration, errorRate);
+                Interlocked.Add(ref totalRows, result.RowCount);
+                return new WindowResult(windowStart, windowEnd, result.RowCount, avgDuration, lastRollingAvg, errorRate);
             })
             .ForEachAsync(result =>
             {
@@ -189,7 +195,11 @@ public static class StreamixScenarios
         DateTimeOffset WindowEnd,
         int RowCount,
         double AverageDurationMs,
-        double ErrorRate);
+        double RollingAvgDurationMs,
+        double ErrorRate)
+    {
+        public static readonly WindowResult Empty = new(default, default, 0, 0, 0, 0);
+    }
 
     public sealed record WindowedAnalyticsSummary(int TotalRows, IReadOnlyList<WindowResult> Windows);
 

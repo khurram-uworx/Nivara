@@ -425,8 +425,9 @@ async Task RunStreamixScenarios(string dsPath, IncidentScenario sc, int cs)
     if (summary2.Windows.Count > 0)
     {
         var avgDuration = summary2.Windows.Average(w => w.AverageDurationMs);
+        var avgRolling = summary2.Windows.Average(w => w.RollingAvgDurationMs);
         var avgErrorRate = summary2.Windows.Average(w => w.ErrorRate);
-        Console.WriteLine($"  Avg duration: {avgDuration:F1}ms  Avg error rate: {avgErrorRate:P1}");
+        Console.WriteLine($"  Avg duration: {avgDuration:F1}ms  Rolling avg: {avgRolling:F1}ms  Avg error rate: {avgErrorRate:P1}");
     }
     Console.WriteLine();
 
