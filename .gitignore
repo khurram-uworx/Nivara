@@ -358,3 +358,4 @@ samples/data/distilbert_sst/
 samples/NivaraFineTuning/benchmark_results.txt
 samples/data/benchmark-1m
 samples/data/perf-scale1
+/data/incident-lab/*
