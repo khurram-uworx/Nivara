@@ -369,23 +369,21 @@ public class StreamixBridgeTests
     }
 
     [Test]
-    public async Task ToNivaraFrameAsync_EmptyStream_ReturnsEmptyFrame()
+    public async Task ToNivaraFrameAsync_EmptyStream_ThrowsInvalidOperation()
     {
-        var emptyFrame = NivaraFrame.Create(
-            ("X", NivaraColumn<int>.Create([])),
-            ("Y", NivaraColumn<string>.Create([])));
+        var emptyFlux = Flux.Empty<NivaraRow>();
+        InvalidOperationException? caught = null;
         try
         {
-            var fluxRows = emptyFrame.ToFluxRows(chunkSize: 5);
-            using var result = await fluxRows.ToNivaraFrameAsync();
-
-            Assert.That(result.RowCount, Is.EqualTo(0));
-            Assert.That(result.ColumnNames, Is.EquivalentTo(["X", "Y"]));
+            await emptyFlux.ToNivaraFrameAsync();
         }
-        finally
+        catch (InvalidOperationException ex)
         {
-            emptyFrame.Dispose();
+            caught = ex;
         }
+
+        Assert.That(caught, Is.Not.Null);
+        Assert.That(caught!.Message, Does.Contain("empty"));
     }
 
     [Test]

@@ -112,7 +112,7 @@ public static class NivaraFlux
     internal static NivaraFrame RowsToFrame(IList<NivaraRow> rows)
     {
         if (rows.Count == 0)
-            return NivaraFrame.Create();
+            throw new InvalidOperationException("Cannot convert an empty row collection to a NivaraFrame: no schema to infer from.");
 
         var columnsArray = rows[0].Columns;
         var columnNames = rows[0].ColumnNames;
