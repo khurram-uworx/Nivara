@@ -1,3 +1,4 @@
+using Nivara.Helpers;
 using Nivara.Query;
 using Streamix;
 using System.Runtime.CompilerServices;
@@ -36,6 +37,12 @@ public static class NivaraFlux
         return Flux.From(EnumerateRows(queryFrame, chunkSize, ct));
     }
 
+    public static IFlux<NivaraRow> ToFluxRows(
+        this NivaraFrame frame,
+        int chunkSize = 65536,
+        CancellationToken ct = default)
+        => frame.AsQueryFrame().ToFluxRows(chunkSize, ct);
+
     public static async Task<NivaraFrame> ToNivaraFrameAsync(
         this IFlux<NivaraFrame> stream,
         CancellationToken ct = default)
@@ -45,6 +52,138 @@ public static class NivaraFlux
         var frames = await stream.ToListAsync(ct);
         return NivaraFrameExtensions.ConcatenateVertical(frames);
     }
+
+    public static async Task<NivaraFrame> ToNivaraFrameAsync(
+        this IFlux<NivaraRow> stream,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        var rows = await stream.ToListAsync(ct);
+        return RowsToFrame(rows);
+    }
+
+    public static IFlux<Timestamped<NivaraRow>> ToFluxWithTimestamp(
+        this QueryFrame queryFrame,
+        Func<NivaraRow, DateTimeOffset> timestampSelector,
+        int chunkSize = 65536,
+        string? name = null)
+    {
+        ArgumentNullException.ThrowIfNull(queryFrame);
+        ArgumentNullException.ThrowIfNull(timestampSelector);
+
+        var rows = queryFrame.ToFluxRows(chunkSize);
+        var timestamped = rows.Map(row => Timestamped.Create(row, timestampSelector(row)));
+        return name is not null ? timestamped.Named(name) : timestamped;
+    }
+
+    public static IFlux<Timestamped<NivaraRow>> ToFluxWithTimestamp(
+        this NivaraFrame frame,
+        Func<NivaraRow, DateTimeOffset> timestampSelector,
+        string? name = null)
+        => frame.AsQueryFrame().ToFluxWithTimestamp(timestampSelector, name: name);
+
+    public static IFlux<IList<NivaraRow>> BufferByCount(
+        this IFlux<NivaraRow> stream,
+        int count,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count), "Batch size must be greater than 0.");
+
+        return stream.Buffer(count);
+    }
+
+    public static IFlux<NivaraFrame> BufferFrames(
+        this IFlux<NivaraRow> stream,
+        int batchSize,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+        if (batchSize <= 0) throw new ArgumentOutOfRangeException(nameof(batchSize), "Batch size must be greater than 0.");
+
+        return stream.Buffer(batchSize).MapAwait(async rowList =>
+        {
+            var frame = await RowsToFrameAsync(rowList, ct);
+            return frame;
+        });
+    }
+
+    internal static NivaraFrame RowsToFrame(IList<NivaraRow> rows)
+    {
+        if (rows.Count == 0)
+            throw new InvalidOperationException("Cannot convert an empty row collection to a NivaraFrame: no schema to infer from.");
+
+        var columnsArray = rows[0].Columns;
+        var columnNames = rows[0].ColumnNames;
+        var namedColumns = new (string Name, IColumn Column)[columnNames.Length];
+
+        for (int colIdx = 0; colIdx < columnNames.Length; colIdx++)
+        {
+            var col = columnsArray[colIdx];
+            var elementType = col.ElementType;
+            var count = rows.Count;
+
+            namedColumns[colIdx] = (columnNames[colIdx], elementType switch
+            {
+                Type t when t == typeof(int) => ReadColumnFast<int>(rows, colIdx, count),
+                Type t when t == typeof(double) => ReadColumnFast<double>(rows, colIdx, count),
+                Type t when t == typeof(float) => ReadColumnFast<float>(rows, colIdx, count),
+                Type t when t == typeof(long) => ReadColumnFast<long>(rows, colIdx, count),
+                Type t when t == typeof(bool) => ReadColumnFast<bool>(rows, colIdx, count),
+                Type t when t == typeof(short) => ReadColumnFast<short>(rows, colIdx, count),
+                Type t when t == typeof(byte) => ReadColumnFast<byte>(rows, colIdx, count),
+                Type t when t == typeof(string) => ReadColumnFastRef<string>(rows, colIdx, count),
+                _ => ReadColumnBoxed(rows, colIdx, count, elementType),
+            });
+        }
+
+        return NivaraFrame.Create(namedColumns);
+    }
+
+    static NivaraColumn<T> ReadColumnFast<T>(IList<NivaraRow> rows, int colIdx, int count) where T : struct
+    {
+        var values = new T?[count];
+        bool hasNulls = false;
+        for (int i = 0; i < count; i++)
+        {
+            if (rows[i].Columns[colIdx].IsNull(rows[i].RowIndex))
+            {
+                hasNulls = true;
+            }
+            else
+            {
+                values[i] = ((IColumn<T>)rows[i].Columns[colIdx])[rows[i].RowIndex];
+            }
+        }
+        if (!hasNulls)
+        {
+            var data = new T[count];
+            for (int i = 0; i < count; i++)
+                data[i] = values[i]!.Value;
+            return new NivaraColumn<T>(new Storage.ColumnStorage<T>(new ReadOnlyMemory<T>(data)));
+        }
+        return NivaraColumn.CreateFromNullable(values);
+    }
+
+    static NivaraColumn<T> ReadColumnFastRef<T>(IList<NivaraRow> rows, int colIdx, int count) where T : class
+    {
+        var values = new T[count];
+        for (int i = 0; i < count; i++)
+            values[i] = ((IColumn<T>)rows[i].Columns[colIdx])[rows[i].RowIndex];
+        return NivaraColumn<T>.CreateForReferenceType(values);
+    }
+
+    static IColumn ReadColumnBoxed(IList<NivaraRow> rows, int colIdx, int count, Type elementType)
+    {
+        var values = new object?[count];
+        for (int i = 0; i < count; i++)
+            values[i] = rows[i].Columns[colIdx].GetValue(rows[i].RowIndex);
+        return ColumnFactory.Create(elementType, values);
+    }
+
+    static Task<NivaraFrame> RowsToFrameAsync(IList<NivaraRow> rows, CancellationToken ct)
+        => Task.FromResult(RowsToFrame(rows));
 
     static async IAsyncEnumerable<NivaraRow> EnumerateRows(
         QueryFrame queryFrame,

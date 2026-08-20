@@ -29,6 +29,15 @@ public readonly struct NivaraRow
     /// </summary>
     public int RowIndex => rowIndex;
 
+    internal IColumn[] Columns => columns;
+
+    /// <summary>
+    /// Gets the column names for this row's source frame
+    /// </summary>
+    public string[] ColumnNames => map is not null
+        ? [.. map.Keys]
+        : [];
+
     /// <summary>
     /// Gets the value at the specified column as an object, or <c>null</c> for a null cell
     /// </summary>

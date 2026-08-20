@@ -338,4 +338,197 @@ public class StreamixBridgeTests
                 ("Y", NivaraColumn<string>.Create(y)));
         }
     }
+
+    [Test]
+    public async Task ToNivaraFrameAsync_FromRows_MatchesCollect()
+    {
+        var frame = CreateTestFrame(30);
+        try
+        {
+            var queryFrame = frame.AsQueryFrame()
+                .Filter(ColumnExpressions.Col("X") > 50);
+
+            using var expected = await queryFrame.CollectAsync();
+
+            var fluxRows = queryFrame.ToFluxRows(chunkSize: 7);
+            using var result = await fluxRows.ToNivaraFrameAsync();
+
+            Assert.That(result.RowCount, Is.EqualTo(expected.RowCount));
+            Assert.That(result.ColumnNames, Is.EquivalentTo(expected.ColumnNames));
+
+            for (int i = 0; i < expected.RowCount; i++)
+            {
+                Assert.That(result.GetColumn<int>("X")[i], Is.EqualTo(expected.GetColumn<int>("X")[i]));
+                Assert.That(result.GetColumn<string>("Y")[i], Is.EqualTo(expected.GetColumn<string>("Y")[i]));
+            }
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ToNivaraFrameAsync_EmptyStream_ThrowsInvalidOperation()
+    {
+        var emptyFlux = Flux.Empty<NivaraRow>();
+        InvalidOperationException? caught = null;
+        try
+        {
+            await emptyFlux.ToNivaraFrameAsync();
+        }
+        catch (InvalidOperationException ex)
+        {
+            caught = ex;
+        }
+
+        Assert.That(caught, Is.Not.Null);
+        Assert.That(caught!.Message, Does.Contain("empty"));
+    }
+
+    [Test]
+    public async Task ToFluxWithTimestamp_AttachesTimestamp()
+    {
+        var frame = CreateTestFrame(10);
+        try
+        {
+            var baseTime = new DateTimeOffset(2025, 1, 1, 0, 0, 0, TimeSpan.Zero);
+            var fluxTimestamped = frame.ToFluxWithTimestamp(
+                row => baseTime.AddSeconds(row.GetValue<int>("X")));
+
+            var items = new List<Timestamped<NivaraRow>>();
+            await foreach (var item in fluxTimestamped)
+                items.Add(item);
+
+            Assert.That(items, Has.Count.EqualTo(10));
+
+            for (int i = 0; i < 10; i++)
+            {
+                Assert.That(items[i].Value.GetValue<int>("X"), Is.EqualTo(i * 10));
+                Assert.That(items[i].Timestamp, Is.EqualTo(baseTime.AddSeconds(i * 10)));
+            }
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ToFluxWithTimestamp_WithName_PreservesName()
+    {
+        var frame = CreateTestFrame(5);
+        try
+        {
+            var baseTime = DateTimeOffset.UtcNow;
+            var flux = frame.ToFluxWithTimestamp(
+                row => baseTime,
+                name: "timed-stream");
+
+            Assert.That(flux.Name, Is.EqualTo("timed-stream"));
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task BufferByCount_ProducesCorrectBatches()
+    {
+        var frame = CreateTestFrame(10);
+        try
+        {
+            var fluxRows = frame.ToFluxRows(chunkSize: 10);
+            var buffered = fluxRows.BufferByCount(3);
+
+            var batches = new List<IList<NivaraRow>>();
+            await foreach (var batch in buffered)
+                batches.Add(batch);
+
+            Assert.That(batches, Has.Count.EqualTo(4));
+            Assert.That(batches[0].Count, Is.EqualTo(3));
+            Assert.That(batches[1].Count, Is.EqualTo(3));
+            Assert.That(batches[2].Count, Is.EqualTo(3));
+            Assert.That(batches[3].Count, Is.EqualTo(1));
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task BufferByCount_InvalidCount_Throws()
+    {
+        var frame = CreateTestFrame(5);
+        try
+        {
+            var fluxRows = frame.ToFluxRows(chunkSize: 5);
+            Assert.Throws<ArgumentOutOfRangeException>(() => fluxRows.BufferByCount(0));
+            Assert.Throws<ArgumentOutOfRangeException>(() => fluxRows.BufferByCount(-1));
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task BufferFrames_ProducesNivaraFrames()
+    {
+        var frame = CreateTestFrame(10);
+        try
+        {
+            var fluxRows = frame.ToFluxRows(chunkSize: 10);
+            var batched = fluxRows.BufferFrames(batchSize: 4);
+
+            var frames = new List<NivaraFrame>();
+            await foreach (var f in batched)
+                frames.Add(f);
+
+            try
+            {
+                Assert.That(frames, Has.Count.EqualTo(3));
+                Assert.That(frames[0].RowCount, Is.EqualTo(4));
+                Assert.That(frames[1].RowCount, Is.EqualTo(4));
+                Assert.That(frames[2].RowCount, Is.EqualTo(2));
+
+                int globalIdx = 0;
+                foreach (var f in frames)
+                {
+                    for (int i = 0; i < f.RowCount; i++)
+                    {
+                        Assert.That(f.GetColumn<int>("X")[i], Is.EqualTo(globalIdx * 10));
+                        Assert.That(f.GetColumn<string>("Y")[i], Is.EqualTo($"val{globalIdx}"));
+                        globalIdx++;
+                    }
+                }
+            }
+            finally
+            {
+                foreach (var f in frames)
+                    f.Dispose();
+            }
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task BufferFrames_InvalidBatchSize_Throws()
+    {
+        var frame = CreateTestFrame(5);
+        try
+        {
+            var fluxRows = frame.ToFluxRows(chunkSize: 5);
+            Assert.Throws<ArgumentOutOfRangeException>(() => fluxRows.BufferFrames(batchSize: 0));
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
 }

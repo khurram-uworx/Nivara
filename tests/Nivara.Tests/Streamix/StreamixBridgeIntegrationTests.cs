@@ -265,4 +265,55 @@ public class StreamixBridgeIntegrationTests
         }
         return path;
     }
+
+    [Test]
+    public async Task ToFluxRows_ToNivaraFrameAsync_CsvRoundTrips()
+    {
+        var csvPath = CreateCsvFile(tempDir, 20);
+        using var expected = Csv.ScanAsQueryFrame(csvPath).Collect();
+
+        using var queryFrame = Csv.ScanAsQueryFrame(csvPath);
+        var fluxRows = queryFrame.ToFluxRows(chunkSize: 5);
+        using var result = await fluxRows.ToNivaraFrameAsync();
+
+        Assert.That(result.RowCount, Is.EqualTo(expected.RowCount));
+        Assert.That(result.ColumnNames, Is.EquivalentTo(expected.ColumnNames));
+
+        for (int i = 0; i < expected.RowCount; i++)
+        {
+            Assert.That(result.GetColumn<int>("Id")[i], Is.EqualTo(expected.GetColumn<int>("Id")[i]));
+            Assert.That(result.GetColumn<string>("Name")[i], Is.EqualTo(expected.GetColumn<string>("Name")[i]));
+            Assert.That(result.GetColumn<double>("Value")[i], Is.EqualTo(expected.GetColumn<double>("Value")[i]).Within(0.001));
+        }
+    }
+
+    [Test]
+    public async Task BufferFrames_CsvSource_ProducesCorrectBatches()
+    {
+        var csvPath = CreateCsvFile(tempDir, 25);
+        using var queryFrame = Csv.ScanAsQueryFrame(csvPath);
+
+        var fluxRows = queryFrame.ToFluxRows(chunkSize: 5);
+        var batched = fluxRows.BufferFrames(batchSize: 10);
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var f in batched)
+            frames.Add(f);
+
+        try
+        {
+            Assert.That(frames, Has.Count.EqualTo(3));
+            Assert.That(frames[0].RowCount, Is.EqualTo(10));
+            Assert.That(frames[1].RowCount, Is.EqualTo(10));
+            Assert.That(frames[2].RowCount, Is.EqualTo(5));
+
+            int totalRows = frames.Sum(f => f.RowCount);
+            Assert.That(totalRows, Is.EqualTo(25));
+        }
+        finally
+        {
+            foreach (var f in frames)
+                f.Dispose();
+        }
+    }
 }
