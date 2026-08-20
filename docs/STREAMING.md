@@ -160,10 +160,11 @@ time-based windowing, observability, and ASP.NET Core streaming.
 | `NivaraFrame.ToFlux(...)` | `→ IFlux<NivaraFrame>` | One-shot single-chunk stream (useful for mixing with live data) |
 | `QueryFrame.ToFluxRows(...)` | `→ IFlux<NivaraRow>` | Row-level bridge for live/event-oriented sources |
 | `NivaraFrame.ToFluxRows(...)` | `→ IFlux<NivaraRow>` | Row-level bridge from an in-memory frame |
-| `QueryFrame.ToFluxWithTimestamp(...)` | `→ IFlux<Timestamped<NivaraRow>>` | Event-time bridge for `WindowByTime` operators |
-| `NivaraFrame.ToFluxWithTimestamp(...)` | `→ IFlux<Timestamped<NivaraRow>>` | Event-time bridge from an in-memory frame |
+| `QueryFrame.ToFluxWithTimestamp(...)` | `→ IFlux<Timestamped<NivaraRow>>` | Event-time bridge for `WindowByTime` operators (lambda or column-name overload) |
+| `NivaraFrame.ToFluxWithTimestamp(...)` | `→ IFlux<Timestamped<NivaraRow>>` | Event-time bridge from an in-memory frame (lambda or column-name overload) |
 | `IFlux<NivaraFrame>.ToNivaraFrameAsync(...)` | `→ Task<NivaraFrame>` | Reverse terminal (frame-level) via `ConcatenateVertical` |
 | `IFlux<NivaraRow>.ToNivaraFrameAsync(...)` | `→ Task<NivaraFrame>` | Reverse terminal (row-level) via schema inference |
+| `IFlux<Timestamped<NivaraRow>>.ToNivaraFrameAsync(...)` | `→ Task<NivaraFrame>` | Reverse terminal for timestamped streams (collects window items into a frame) |
 | `IFlux<NivaraRow>.BufferByCount(...)` | `→ IFlux<IList<NivaraRow>>` | Batch rows into fixed-size lists |
 | `IFlux<NivaraRow>.BufferFrames(...)` | `→ IFlux<NivaraFrame>` | Batch rows into `NivaraFrame` instances |
 
@@ -201,36 +202,58 @@ await Csv.ScanAsQueryFrame("telemetry.parquet")
 **Event-time windowing with `ToFluxWithTimestamp`:**
 
 ```csharp
+// String-based overload (column must be DateTimeOffset)
 await Csv.ScanAsQueryFrame("telemetry.csv")
-    .ToFluxWithTimestamp(row => row.GetValue<DateTimeOffset>("observed_at"), chunkSize: 1000)
+    .ToFluxWithTimestamp("observed_at", chunkSize: 1000)
     .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(30))
-    .Map(window => window.ToNivaraFrame())
+    .FlatMap(async window => await window.ToNivaraFrameAsync())
     .Map(frame => frame.RollingMean("cpu", "cpu_avg", windowSize: 10))
     .Filter(f => f["cpu_avg"].Max() > 90)
     .ForEachAsync(anomaly => pager.Ping(anomaly));
+
+// Lambda overload (any column type convertible to DateTimeOffset)
+await Csv.ScanAsQueryFrame("telemetry.csv")
+    .ToFluxWithTimestamp(row => row.GetValue<DateTimeOffset>("observed_at"), chunkSize: 1000)
+    .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1))
+    .FlatMap(async window =>
+    {
+        var frame = await window.ToNivaraFrameAsync();
+        var avgCpu = frame.GetColumn<double>("cpu").Average();
+        return (Frame: frame, AvgCpu: avgCpu);
+    })
+    .Where(result => result.AvgCpu > 90)
+    .ForEachAsync(result => pager.Ping(result.Frame));
 ```
 
 **Mini-batch framing for online learning:**
 
 ```csharp
-await liveFeatures
-    .ToFluxRows(chunkSize: 1000)
+var model = new Linear<float>(featureCount, 1);
+var optimizer = new Adam<float>((float)1e-3);
+optimizer.AddParameterGroup(model.GetParameters().Values);
+var lossFn = new MSELoss<float>(Reduction.Mean);
+
+await query
+    .ToFluxRows(chunkSize: 10_000)
     .BufferFrames(batchSize: 128)
-    .Map(async batch =>
+    .Map(batch =>
     {
-        var dataset = new TensorDataset<float>(batch, featureColumns, "target");
+        var features = batch.GetColumn<float>("feature").ToArray();
+        var targets = batch.GetColumn<float>("target").ToArray();
+
         using (GradientUtils.Grad())
         {
-            var b = dataset.GetBatch(Enumerable.Range(0, dataset.Count).ToArray());
-            var pred = model.Forward(b.Features);
-            var loss = new MSELoss<float>().Forward(pred, b.Labels, reduceToMean: true);
+            var input = ReverseGradTensor<float>.FromMatrix(features, features.Length, 1);
+            var pred = model.Forward(input);
+            var target = ReverseGradTensor<float>.FromMatrix(targets, targets.Length, 1);
+            var loss = lossFn.Forward(pred, target);
             loss.Backward();
             optimizer.Step();
             optimizer.ZeroGrad();
+            return loss[0];
         }
-        return model.StateDict();
     })
-    .ForEachAsync(state => ModelSerializer.Save(model, checkpointPath));
+    .ForEachAsync(lossValue => Console.WriteLine($"Loss: {lossValue:F4}"));
 ```
 
 **Row-level reverse terminal (collect a row stream back to a frame):**

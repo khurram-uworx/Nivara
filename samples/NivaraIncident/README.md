@@ -49,6 +49,9 @@ dotnet run --project samples/NivaraIncident.Cli -- analyze --dataset ./data/inci
 
 # Replay Parquet row groups with chunk-by-chunk progress
 dotnet run --project samples/NivaraIncident.Cli -- replay --dataset ./data/incident-lab --scenario A --chunk-size 100000
+
+# Run Streamix streaming scenarios (fault-tolerant, windowed analytics, online AutoDiff learning)
+dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./data/incident-lab --scenario A
 ```
 
 ## CLI options
@@ -67,6 +70,7 @@ dotnet run --project samples/NivaraIncident.Cli -- replay --dataset ./data/incid
 | `--benchmark` | — | Time each analysis individually (analyze only) |
 | `bench-stream` | — | Streaming vs eager memory/elapsed sweep (standalone mode) |
 | `bench-kernels` | — | Kernel vectorization visibility report (standalone mode) |
+| `streamix` | — | Run Streamix streaming scenarios (fault-tolerant, windowed, AutoDiff) |
 
 ## What it exercises
 
@@ -79,6 +83,8 @@ dotnet run --project samples/NivaraIncident.Cli -- replay --dataset ./data/incid
 - **Parquet / CSV ingestion** — `Parquet.ScanAsQueryFrame` and `Csv.ScanAsQueryFrame` for chunk-capable data sources.
 - **Execution diagnostics** — `QueryFrame.GetExecutionDiagnostics()` for rows read, kernel counts, and elapsed time.
 - **Benchmark harness** — `--benchmark` (per-analysis timing), `bench-stream` (streaming vs eager memory curve), `bench-kernels` (kernel vectorization rate via `DiagnosticsTracker`).
+- **Streamix bridge** — `ToFlux`, `ToFluxWithTimestamp`, `ToFluxRows`, `BufferFrames` for event-driven streaming pipelines.
+- **Online AutoDiff learning** — `GradientUtils.Grad()` + `Linear` + `Adam` + `MSELoss` over Streamix mini-batches for streaming ML training.
 
 ## Architecture
 
@@ -107,7 +113,11 @@ Ingestion.LoadParquet()  →  QueryFrame
     ├── AnalyzeDeploymentCorrelation: Filter → Sort → Select
     ├── AnalyzeSaturationOrdering:    Filter → Sort → RollingMax → Select
     ├── AnalyzeRegionalPartitioning:  Filter → Sort → PercentRank → Select
-    └── AnalyzeGroupedAggregation:    Filter → Collect → manual group-by (or typed LINQ)
+    ├── AnalyzeGroupedAggregation:    Filter → Collect → manual group-by (or typed LINQ)
+    │
+    ├── Streamix: Fault-tolerant streaming (ToFlux → Retry → Checkpoint → ForEachAsync)
+    ├── Streamix: Event-time windowing  (ToFluxWithTimestamp → WindowByTime → FlatMap → per-window analytics)
+    └── Streamix: Online AutoDiff       (ToFluxRows → BufferFrames → Grad → Linear → Adam)
     │
     ▼
 Results (NivaraFrame)  →  CLI output or streaming chunks
@@ -127,6 +137,22 @@ Output: requests.parquet, deployments.parquet, instances.parquet, dependencies.p
         + CSV equivalents
 ```
 
+### Streamix streaming scenarios
+
+The `streamix` CLI command runs three scenarios demonstrating the Nivara × Streamix bridge:
+
+| Scenario | Pattern | What it demonstrates |
+|----------|---------|---------------------|
+| **Fault-tolerant streaming** | `ToFlux` → `.Retry(3)` → `.Checkpoint()` → `.ForEachAsync()` | Resilience operators, chunk-level processing with automatic retry on failure |
+| **Event-time windowed analytics** | `ToFluxWithTimestamp` → `.WindowByTime(5min, 1min)` → `.FlatMap(ToNivaraFrameAsync)` → per-window aggregation | Timestamp bridge, event-time windowing, collecting window items into NivaraFrames for columnar analytics |
+| **Online AutoDiff learning** | `ToFluxRows` → `.BufferFrames(128)` → `Grad()` + `Linear` + `Adam` + `MSELoss` | Streaming ML training — bridge between Streamix event flow and Nivara AutoDiff |
+
+These scenarios are implemented in `StreamixScenarios.cs` and can be run via:
+
+```bash
+dotnet run --project samples/NivaraIncident.Cli -- streamix --dataset ./data/incident-lab --scenario A
+```
+
 ## Nivara APIs demonstrated
 
 | API | Where | Purpose |
@@ -143,6 +169,12 @@ Output: requests.parquet, deployments.parquet, instances.parquet, dependencies.p
 | `Csv.ScanAsQueryFrame` | Ingestion | Chunk-capable CSV source |
 | `NivaraFrame.Create` | Result construction | Build result frames from columns |
 | `ColumnExpressions.Col/Lit` | Expression tree | Typed expression nodes for filter/sort |
+| `NivaraFlux.ToFlux` | StreamixScenarios | Flux bridge for chunk-level streaming |
+| `NivaraFlux.ToFluxWithTimestamp` | StreamixScenarios | Event-time bridge for WindowByTime |
+| `NivaraFlux.ToFluxRows` | StreamixScenarios | Row-level bridge for mini-batch training |
+| `NivaraFlux.BufferFrames` | StreamixScenarios | Batch rows into NivaraFrame for AutoDiff |
+| `GradientUtils.Grad()` | StreamixScenarios | Reverse-mode autograd scope |
+| `Linear<T>` / `Adam<T>` / `MSELoss<T>` | StreamixScenarios | NN module, optimizer, and loss for online learning |
 
 ## Files
 
@@ -152,11 +184,12 @@ samples/Nivara.Samples/Incident/
 ├── Scenarios.cs          # 4 scenarios (A–D) with event timelines and affected services
 ├── DatasetGenerator.cs   # Deterministic 10M+ record generator with seeded RNG
 ├── Ingestion.cs          # LoadParquet, LoadCsv, StreamChunks wrappers
-└── Analysis.cs           # 5 analysis methods + typed LINQ group-by example
+├── Analysis.cs           # 5 analysis methods + typed LINQ group-by example
+└── StreamixScenarios.cs  # 3 Streamix scenarios (fault-tolerant, windowed, online AutoDiff)
 
 samples/NivaraIncident.Cli/
 ├── NivaraIncident.Cli.csproj
-└── Program.cs            # CLI entry point (generate/analyze/replay)
+└── Program.cs            # CLI entry point (generate/analyze/replay/streamix)
 
 samples/NivaraIncident/
 ├── IDEA.md               # Full product spec
