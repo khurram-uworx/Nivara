@@ -52,6 +52,10 @@ switch (mode)
         foreach (var sid in scenarioIds)
             await Replay(datasetPath, Scenarios.Get(sid), chunkSize);
         break;
+    case "streamix":
+        foreach (var sid in scenarioIds)
+            await RunStreamixScenarios(datasetPath, Scenarios.Get(sid), chunkSize);
+        break;
     default:
         PrintUsage();
         break;
@@ -398,6 +402,44 @@ void PrintFrameSummary(NivaraFrame frame)
     }
 }
 
+async Task RunStreamixScenarios(string dsPath, IncidentScenario sc, int cs)
+{
+    Console.WriteLine($"=== Streamix Scenarios: {sc.Id} — {sc.Name} ===");
+    Console.WriteLine($"Dataset: {dsPath}");
+    Console.WriteLine();
+
+    Console.WriteLine("--- Scenario 1: Fault-Tolerant Streaming (Retry + Checkpoint) ---");
+    var sw1 = Stopwatch.StartNew();
+    var summary1 = await StreamixScenarios.RunFaultTolerantStreaming(dsPath, sc, cs);
+    sw1.Stop();
+    Console.WriteLine($"  Rows processed: {summary1.TotalRows:N0}  ({summary1.ChunksProcessed} chunks)");
+    Console.WriteLine($"  Time: {sw1.Elapsed.TotalSeconds:F1}s");
+    Console.WriteLine();
+
+    Console.WriteLine("--- Scenario 2: Event-Time Windowed Analytics ---");
+    var sw2 = Stopwatch.StartNew();
+    var summary2 = await StreamixScenarios.RunWindowedAnalytics(dsPath, sc, cs);
+    sw2.Stop();
+    Console.WriteLine($"  Total rows: {summary2.TotalRows:N0}  ({summary2.Windows.Count} windows)");
+    Console.WriteLine($"  Time: {sw2.Elapsed.TotalSeconds:F1}s");
+    if (summary2.Windows.Count > 0)
+    {
+        var avgDuration = summary2.Windows.Average(w => w.AverageDurationMs);
+        var avgRolling = summary2.Windows.Average(w => w.RollingAvgDurationMs);
+        var avgErrorRate = summary2.Windows.Average(w => w.ErrorRate);
+        Console.WriteLine($"  Avg duration: {avgDuration:F1}ms  Rolling avg: {avgRolling:F1}ms  Avg error rate: {avgErrorRate:P1}");
+    }
+    Console.WriteLine();
+
+    Console.WriteLine("--- Scenario 3: Online AutoDiff Learning ---");
+    var sw3 = Stopwatch.StartNew();
+    var summary3 = await StreamixScenarios.RunOnlineAutoDiffLearning(dsPath, sc, batchSize: 128, epochs: 3);
+    sw3.Stop();
+    Console.WriteLine($"  Training batches: {summary3.TrainingBatches:N0}  Final loss: {summary3.FinalLoss:F4}");
+    Console.WriteLine($"  Time: {sw3.Elapsed.TotalSeconds:F1}s");
+    Console.WriteLine();
+}
+
 void PrintUsage()
 {
     Console.WriteLine("Nivara Incident Lab");
@@ -408,4 +450,5 @@ void PrintUsage()
     Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
+    Console.WriteLine("  NivaraIncident.Cli streamix      --dataset <path> --scenario <A|B|C|D|all> [--chunk-size <N>]");
 }
