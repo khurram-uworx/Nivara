@@ -63,6 +63,18 @@ public static class NivaraFlux
         return RowsToFrame(rows);
     }
 
+    public static async Task<NivaraFrame> ToNivaraFrameAsync(
+        this IFlux<Timestamped<NivaraRow>> stream,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(stream);
+
+        var rows = new List<NivaraRow>();
+        await foreach (var timestamped in stream.WithCancellation(ct))
+            rows.Add(timestamped.Value);
+        return RowsToFrame(rows);
+    }
+
     public static IFlux<Timestamped<NivaraRow>> ToFluxWithTimestamp(
         this QueryFrame queryFrame,
         Func<NivaraRow, DateTimeOffset> timestampSelector,

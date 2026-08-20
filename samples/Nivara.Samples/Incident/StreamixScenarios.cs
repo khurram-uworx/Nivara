@@ -55,8 +55,8 @@ public static class StreamixScenarios
     }
 
     /// <summary>
-    /// Scenario 2: Event-time windowed analytics using ToFluxWithTimestamp.
-    /// Demonstrates timestamped streaming with per-chunk aggregation via Buffer.
+    /// Scenario 2: Event-time windowed analytics using ToFluxWithTimestamp + WindowByTime.
+    /// Demonstrates timestamped streaming with event-time windowing and per-window aggregation.
     /// </summary>
     public static async Task<WindowedAnalyticsSummary> RunWindowedAnalytics(
         string datasetPath,
@@ -78,28 +78,35 @@ public static class StreamixScenarios
             .ToFluxWithTimestamp(
                 row => new DateTimeOffset(row.GetValue<long>("Timestamp"), TimeSpan.Zero),
                 chunkSize: chunkSize)
-            .Map(timestamped =>
+            .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1))
+            .FlatMap(async window =>
             {
-                var row = timestamped.Value;
-                return new ChunkStats
-                {
-                    Timestamp = timestamped.Timestamp,
-                    DurationMs = row.GetValue<double>("DurationMs"),
-                    StatusCode = row.GetValue<int>("StatusCode"),
-                    Service = row.GetValue<string>("Service") ?? ""
-                };
+                var frame = await window.ToNivaraFrameAsync(ct);
+                var durations = frame.GetColumn<double>("DurationMs");
+                var statusCodes = frame.GetColumn<int>("StatusCode");
+                var timestamps = frame.GetColumn<long>("Timestamp");
+
+                double avgDuration = durations.Length > 0 ? durations.Average() : 0;
+                int errorCount = 0;
+                for (int i = 0; i < statusCodes.Length; i++)
+                    if (statusCodes[i] >= 500) errorCount++;
+                double errorRate = statusCodes.Length > 0 ? (double)errorCount / statusCodes.Length : 0;
+
+                var windowStart = timestamps.Length > 0
+                    ? new DateTimeOffset(timestamps[0], TimeSpan.Zero)
+                    : default;
+                var windowEnd = timestamps.Length > 0
+                    ? new DateTimeOffset(timestamps[timestamps.Length - 1], TimeSpan.Zero)
+                    : default;
+
+                Interlocked.Add(ref totalRows, frame.RowCount);
+                return new WindowResult(windowStart, windowEnd, frame.RowCount, avgDuration, errorRate);
             })
-            .Buffer(100)
-            .ForEachAsync(batch =>
+            .ForEachAsync(result =>
             {
-                Interlocked.Add(ref totalRows, batch.Count);
-                var avgDuration = batch.Average(b => b.DurationMs);
-                var errorRate = batch.Count(b => b.StatusCode >= 500) / (double)batch.Count;
-                var windowStart = batch.Min(b => b.Timestamp);
-                var windowEnd = batch.Max(b => b.Timestamp);
                 lock (windowResults)
                 {
-                    windowResults.Add(new WindowResult(windowStart, windowEnd, batch.Count, avgDuration, errorRate));
+                    windowResults.Add(result);
                 }
             }, ct);
 
@@ -187,12 +194,4 @@ public static class StreamixScenarios
     public sealed record WindowedAnalyticsSummary(int TotalRows, IReadOnlyList<WindowResult> Windows);
 
     public sealed record AutoDiffSummary(int TrainingBatches, float FinalLoss, Linear<float> Model);
-
-    public sealed class ChunkStats
-    {
-        public DateTimeOffset Timestamp { get; init; }
-        public double DurationMs { get; init; }
-        public int StatusCode { get; init; }
-        public string Service { get; init; } = "";
-    }
 }
