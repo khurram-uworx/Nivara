@@ -225,13 +225,13 @@ PyTorch-vs-Nivara ratio is meaningful.
 
 | Model | Input | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |-------|-------|---------------|-------------------|----------|
-| **MobileNetV2** | 1×3×224×224 | 49 ms | 895 ms | **~18×** |
-| **ResNet-18** | 1×3×224×224 | 34 ms | 405 ms | **~12×** |
-| **MiniLM-L6** | 128 tokens | 23 ms | 142 ms | **~6×** |
-| **DistilBERT** | 128 tokens | 80 ms | 508 ms | **~6×** |
-| **DistilBERT SST-2** | 128 tokens | 80 ms | 519 ms | **~6×** |
+| **MobileNetV2** | 1×3×224×224 | 22 ms | 665 ms | **~30×** |
+| **ResNet-18** | 1×3×224×224 | 14 ms | 251 ms | **~18×** |
+| **MiniLM-L6** | 128 tokens | 11 ms | 64 ms | **~6×** |
+| **DistilBERT** | 128 tokens | 35 ms | 185 ms | **~5×** |
+| **DistilBERT SST-2** | 128 tokens | 35 ms | 184 ms | **~5×** |
 
-*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, PyTorch MKL.*
+*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, PyTorch 2.13.0+cpu, Polars 1.43.2.*
 
 The SST-2 row reuses the DistilBERT PyTorch timing (same architecture, only the
 weights differ; `Python/distilbert_sst_compare.py` is accuracy-only, no timing).

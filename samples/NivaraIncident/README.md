@@ -223,12 +223,12 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 
 | Metric | Value | Notes |
 |--------|-------|-------|
-| Dataset generation (scale 1, scenario A) | ~11s | 10M records, Parquet + CSV |
-| Degradation ordering analysis | ~13s | Filter → Sort → RollingMean → Shift |
-| Deployment correlation analysis | ~19s | Filter → Sort → manual join |
-| Saturation ordering analysis | ~1s | Filter → Sort → RollingMax (fixed: instances now span timeline) |
-| Regional partitioning analysis | ~20s | Filter → Collect → typed LINQ GroupBy → rank |
-| Grouped aggregation (manual) | ~12s | Collect → dictionary loop |
+| Dataset generation (scale 1, scenario A) | ~12.5s | 10M records, Parquet + CSV |
+| Degradation ordering analysis | 11.9s | Filter → Sort → RollingMean → Shift |
+| Deployment correlation analysis | 18.2s | Filter → Sort → manual join |
+| Saturation ordering analysis | 0.1s | Filter → Sort → RollingMax (fixed: instances now span timeline) |
+| Regional partitioning analysis | 24.4s | Filter → Collect → typed LINQ GroupBy → rank |
+| Grouped aggregation (manual) | 8.6s | Collect → dictionary loop |
 | Replay (chunk size 100K) | ~4s | Async streaming, 1000 chunks |
 
 *Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, 10M records, scenario A.*
@@ -258,12 +258,12 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 
 | Analysis | Nivara (C#) | Polars (Python) | Ratio |
 |----------|-------------|-----------------|-------|
-| Degradation Ordering | 1788 ms | 40 ms | ~45× |
-| Deployment Correlation | 1289 ms | 66 ms | ~20× |
-| Saturation Ordering | 11 ms | 3 ms | ~3× |
-| Regional Partitioning | 1170 ms | 20 ms | ~60× |
-| Grouped Aggregation | 739 ms | 17 ms | ~44× |
-| **Total** | **4997 ms** | **146 ms** | **~34×** |
+| Degradation Ordering | 1061 ms | 38 ms | ~28× |
+| Deployment Correlation | 1078 ms | 73 ms | ~15× |
+| Saturation Ordering | 1 ms | 4 ms | ~0.3× |
+| Regional Partitioning | 2113 ms | 48 ms | ~44× |
+| Grouped Aggregation | 798 ms | 16 ms | ~50× |
+| **Total** | **5051 ms** | **178 ms** | **~28×** |
 
 *Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11, Polars 1.43.2, 1M records, scenario A.*
 
