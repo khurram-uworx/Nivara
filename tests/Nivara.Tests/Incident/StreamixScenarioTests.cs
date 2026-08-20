@@ -20,7 +20,10 @@ public class StreamixScenarioTests
     public void OneTimeTearDown()
     {
         if (Directory.Exists(tempDir))
-            Directory.Delete(tempDir, true);
+        {
+            try { Directory.Delete(tempDir, true); }
+            catch (IOException) { /* file lock from Parquet reader — acceptable */ }
+        }
     }
 
     [Test]
