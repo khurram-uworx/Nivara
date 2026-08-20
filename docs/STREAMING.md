@@ -159,7 +159,13 @@ time-based windowing, observability, and ASP.NET Core streaming.
 | `QueryFrame.ToFlux(...)` | `→ IFlux<NivaraFrame>` | Wraps `AsStream` in `Flux.From`; optional `PipeThroughChannel` for backpressure |
 | `NivaraFrame.ToFlux(...)` | `→ IFlux<NivaraFrame>` | One-shot single-chunk stream (useful for mixing with live data) |
 | `QueryFrame.ToFluxRows(...)` | `→ IFlux<NivaraRow>` | Row-level bridge for live/event-oriented sources |
-| `IFlux<NivaraFrame>.ToNivaraFrameAsync(...)` | `→ Task<NivaraFrame>` | Reverse terminal via `ConcatenateVertical` |
+| `NivaraFrame.ToFluxRows(...)` | `→ IFlux<NivaraRow>` | Row-level bridge from an in-memory frame |
+| `QueryFrame.ToFluxWithTimestamp(...)` | `→ IFlux<Timestamped<NivaraRow>>` | Event-time bridge for `WindowByTime` operators |
+| `NivaraFrame.ToFluxWithTimestamp(...)` | `→ IFlux<Timestamped<NivaraRow>>` | Event-time bridge from an in-memory frame |
+| `IFlux<NivaraFrame>.ToNivaraFrameAsync(...)` | `→ Task<NivaraFrame>` | Reverse terminal (frame-level) via `ConcatenateVertical` |
+| `IFlux<NivaraRow>.ToNivaraFrameAsync(...)` | `→ Task<NivaraFrame>` | Reverse terminal (row-level) via schema inference |
+| `IFlux<NivaraRow>.BufferByCount(...)` | `→ IFlux<IList<NivaraRow>>` | Batch rows into fixed-size lists |
+| `IFlux<NivaraRow>.BufferFrames(...)` | `→ IFlux<NivaraFrame>` | Batch rows into `NivaraFrame` instances |
 
 All methods are in `src/Nivara.Extensions/Streamix/NivaraFlux.cs`.
 
@@ -192,12 +198,11 @@ await Csv.ScanAsQueryFrame("telemetry.parquet")
     .ForEachAsync(chunk => sink.WriteAsync(chunk));
 ```
 
-**Row-level bridge for event-time windowing:**
+**Event-time windowing with `ToFluxWithTimestamp`:**
 
 ```csharp
-await liveMetricsStream
-    .ToFluxRows(chunkSize: 1000)
-    .MapWithTimestamp(s => s.ObservedAt)
+await Csv.ScanAsQueryFrame("telemetry.csv")
+    .ToFluxWithTimestamp(row => row.GetValue<DateTimeOffset>("observed_at"), chunkSize: 1000)
     .WindowByTime(TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(1), TimeSpan.FromSeconds(30))
     .Map(window => window.ToNivaraFrame())
     .Map(frame => frame.RollingMean("cpu", "cpu_avg", windowSize: 10))
@@ -205,7 +210,40 @@ await liveMetricsStream
     .ForEachAsync(anomaly => pager.Ping(anomaly));
 ```
 
-**Reverse terminal (collect a Flux back to a frame):**
+**Mini-batch framing for online learning:**
+
+```csharp
+await liveFeatures
+    .ToFluxRows(chunkSize: 1000)
+    .BufferFrames(batchSize: 128)
+    .Map(async batch =>
+    {
+        var dataset = new TensorDataset<float>(batch, featureColumns, "target");
+        using (GradientUtils.Grad())
+        {
+            var b = dataset.GetBatch(Enumerable.Range(0, dataset.Count).ToArray());
+            var pred = model.Forward(b.Features);
+            var loss = new MSELoss<float>().Forward(pred, b.Labels, reduceToMean: true);
+            loss.Backward();
+            optimizer.Step();
+            optimizer.ZeroGrad();
+        }
+        return model.StateDict();
+    })
+    .ForEachAsync(state => ModelSerializer.Save(model, checkpointPath));
+```
+
+**Row-level reverse terminal (collect a row stream back to a frame):**
+
+```csharp
+var fluxRows = Csv.ScanAsQueryFrame("events.csv")
+    .ToFluxRows(chunkSize: 5000);
+
+using var result = await fluxRows.ToNivaraFrameAsync();
+// result is the full NivaraFrame, same as CollectAsync()
+```
+
+**Reverse terminal (collect a frame stream back to a frame):**
 
 ```csharp
 var flux = queryFrame.ToFlux(chunkSize: 10_000);
@@ -222,6 +260,74 @@ using var result = await flux.ToNivaraFrameAsync();
 | `DropOldest` | Oldest buffered item is discarded when channel is full |
 | `LatestOnly` | Channel keeps only the most recent item |
 | `Fail` | Throws `BackpressureException` when channel is full |
+
+### Hot-stream fan-out with `Publish` / `Replay`
+
+Streamix's `Publish()` and `Replay()` let a single Nivara query fan out to multiple
+consumers without re-executing the source:
+
+```csharp
+var shared = Csv.ScanAsQueryFrame("metrics.parquet")
+    .Filter(ColumnExpressions.Col("status") == "active")
+    .ToFlux(chunkSize: 50_000)
+    .Publish();
+
+shared.Subscribe(chunk => dashboard.Update(chunk));   // consumer 1
+shared.Subscribe(chunk => archival.Write(chunk));      // consumer 2
+shared.Connect();                                      // start the shared subscription
+```
+
+`Replay(bufferSize)` additionally replays the last N items to late subscribers:
+
+```csharp
+var replayed = query.ToFlux(chunkSize: 10_000).Replay(bufferSize: 3);
+replayed.Subscribe(chunk => liveUI.Push(chunk));  // gets last 3 immediately
+replayed.Connect();
+```
+
+### ASP.NET Core SSE streaming
+
+`Streamix.AspNetCore` provides `ToSseAsync` and `FluxResult<T>` for streaming Nivara
+query results as Server-Sent Events. Since `ToFlux` returns `IFlux<T>`, it plugs in directly:
+
+```csharp
+using Nivara.Streamix;
+using Streamix.AspNetCore;
+
+[ApiController]
+[Route("api/[controller]")]
+public class TelemetryController : ControllerBase
+{
+    [HttpGet("stream")]
+    public IActionResult StreamTelemetry()
+        => Csv.ScanAsQueryFrame("telemetry.csv")
+            .Filter(ColumnExpressions.Col("host") == "prod-01")
+            .ToFlux(chunkSize: 1000)
+            .ToSseResult();  // from Streamix.AspNetCore
+}
+```
+
+Requires the `Streamix.AspNetCore` NuGet package in your web project.
+
+### Pipeline observability
+
+Streamix's diagnostic operators compose directly with Nivara `IFlux<T>` streams.
+Use them for visibility into chunk flow, latency, and pipeline health:
+
+```csharp
+await Csv.ScanAsQueryFrame("telemetry.parquet")
+    .ToFlux(chunkSize: 50_000)
+    .Named("telemetry-pipeline")       // appears in logs and diagnostics
+    .Checkpoint("after-scan")          // logs item count + elapsed time
+    .Trace("chunk-flow")               // logs OnNext/OnError/OnComplete lifecycle
+    .Log()                             // logs each item's summary
+    .Filter(chunk => chunk.RowCount > 0)
+    .ForEachAsync(chunk => sink.WriteAsync(chunk));
+```
+
+`Checkpoint` and `Trace` use `Microsoft.Extensions.Logging.ILogger` when available,
+falling back to `Console.WriteLine`. All operators are zero-cost when not subscribed
+(no allocations until the pipeline is consumed).
 
 ### Known limitations
 
