@@ -175,7 +175,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                     name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
                 var newResult = new NivaraFrame(processed.Select(kvp => (kvp.Key, kvp.Value)));
-                result.Dispose();
                 result = newResult;
             }
 
@@ -308,7 +307,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                     name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
                 var newResult = new NivaraFrame(processed.Select(kvp => (kvp.Key, kvp.Value)));
-                result.Dispose();
                 result = newResult;
             }
 
@@ -463,7 +461,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                     name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
                 var newResult = NivaraFrame.Create(processed);
-                result.Dispose();
                 result = newResult;
             }
 

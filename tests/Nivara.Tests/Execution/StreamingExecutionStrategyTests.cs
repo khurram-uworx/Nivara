@@ -466,7 +466,7 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void ValidatePlan_SelectWithWindowExpression_ReturnsFalse()
+    public void ValidatePlan_SelectWithWindowExpression_ReturnsTrue()
     {
         var strategy = new StreamingExecutionStrategy();
         var select = new SelectOperation(new[]
@@ -478,7 +478,7 @@ public class StreamingExecutionStrategyTests
             operations: new IQueryOperation[] { select });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
-        Assert.That(strategy.ValidatePlan(plan, context), Is.False);
+        Assert.That(strategy.ValidatePlan(plan, context), Is.True);
     }
 
     [Test]
@@ -618,7 +618,7 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void Property_StreamingVsLazy_WindowSelectFallsBackToLazy_ValuesAndMasksMatchAcrossChunkSizes()
+    public void Property_StreamingVsLazy_WindowSelectHandlesAsBoundary_ValuesAndMasksMatchAcrossChunkSizes()
     {
         var strategy = new StreamingExecutionStrategy();
         var lazyStrategy = new LazyExecutionStrategy();
@@ -630,15 +630,15 @@ public class StreamingExecutionStrategyTests
         foreach (var memoryBudget in chunkEquivalenceBudgets)
         {
             var source = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 2000);
+            var lazySource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 2000);
             var plan = new QueryPlan(source, new IQueryOperation[] { select });
+            var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[] { select });
             var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
             context.MemoryBudget = memoryBudget;
 
             using var result = strategy.Execute(plan, context);
-            using var lazyResult = lazyStrategy.Execute(plan, ExecutionTestHelpers.CreateTestContext());
+            using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
 
-            Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
-                "Window-bearing select must fall back to whole-column execution, not read chunks");
             ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
         }
     }
