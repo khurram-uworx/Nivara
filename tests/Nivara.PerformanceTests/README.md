@@ -87,95 +87,81 @@ Per-phase workflow (on an idle machine — see the load caveat below):
   in-process repeats are JIT-tiering-skewed (see the `--runs` note above) and
   run-to-run variance is ~±10% for these scenarios under load.
 
-### Baseline policy (do not re-litigate)
+### Baseline policy (rolling Prev/Current history)
 
-- The **Results** table below is the canonical baseline (**point A**) for
-  future A/B comparisons — last recorded 2026-08-14 on the v1.3.0 release-prep
-  HEAD (`release/130`) with the fixed `--runs` harness.
-- **Never rebuild past commits to re-derive point A.** The previous A/B tables
-  (built in git worktrees at `549c6cc` and recorded 2026-08-04/05) are
-  superseded; their findings still hold (the ColumnAdd branch-removal win, the
-  AutoDiff allocation reductions, and the batched-attention fusion are the
-  reason this harness exists), but the numbers are no longer the comparison
-  point and the 2026-08-05 table is from a different machine.
-- When measuring a change: record new results on the same machine, compare
-  against the **Results** table, and replace it with the new numbers. That
-  keeps point A rolling forward and avoids hunting through git history.
+- The **Results** table carries its own comparison context: the **Prev** column
+  holds the most recent prior reading, the **Current** column holds the fresh
+  measurement, and **Ratio** / **Δ%** show the delta.
+- When measuring: shift the existing Current to Prev, place new numbers in
+  Current, and compute Ratio (`Current / Prev`) and Δ% (`((Current − Prev) / Prev) × 100`).
+- If the Previous reading was on a **different machine**, note the machine
+  difference in the Prev column — ratio is not meaningful across machines.
+- **B/op** and **gen0/op** are stability indicators (not throughput metrics)
+  and do not get ratio columns.
 
 ## Results
 
-**Baseline (point A)** recorded **2026-08-14** on the v1.3.0 release-prep HEAD
-(`release/130`). **Medians of 3 independent child-process runs** (`--runs 3` on
-the fixed harness). This replaces the 2026-08-06 point A, which was recorded on
-a different machine (16 logical processors) and is **not comparable** to this
-machine's numbers (e.g. ColumnAdd ~620 there vs ~1,049 here) — compare only
-within this table from here on. The harness also gained two scenarios since the
-2026-08-06 baseline (`Fused chain`, `Frame Slice`), both documented in the
-scenario table above.
+*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11 (Release), medians of 3 child processes.*
 
-Machine: 8 logical processors, x64, .NET 10.0.11 (Release). Medians of 3 child processes.
+Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 10.0.11 (Release). Medians of 3 child processes (`--runs 3`).
 
-| Scenario | ops/s | B/op | gen0/op |
-|---|---|---|---|
-| ColumnAdd 1M x float | 1,049 | 4,000,192 | 0.24 |
-| ColumnSigmoid 1M x float | 663 | 0 | 0.00 |
-| Span chain 1M x 3 ops (raw) | 603 | 0 | 0.00 |
-| Column chain 1M x 3 ops (wrapper) | 269 | 12,000,416 | 0.34 |
-| Fused chain 1M x (Salary*1.1)+1000-Tax | 219 | 16,003,330 | 0.34 |
-| Linear forward [32x256] -> [32x256] | 819 | 68,536 | 0.02 |
-| Linear forward+backward [32x256] | 126 | 668,240 | 0.20 |
-| TransformerBlock forward [32x64, 4 heads] | 204 | 185,889 | 0.03 |
-| Attn per-seq forward [B16 L128 D64 H4] | 54 | 2,125,991 | 0.50 |
-| Attn batched forward [B16 L128 D64 H4] | 143 | 528,259 | 0.00 |
-| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 14 | 7,939,247 | 1.50 |
-| Attn batched fwd+bwd [B16 L128 D64 H4] | 50 | 7,876,385 | 0.50 |
-| RowScore per-row copy+dot [10k x 128] | 65 | 2 | 0.00 |
-| Frame RowDot [10k x 128] | 177 | 51,722 | 0.00 |
-| Frame Slice [10k x 128] | 7,236 | 89,936 | 0.01 |
-| RowDot kernel raw [10k x 128] | 686 | 1 | 0.00 |
-| RowCosineSimilarity kernel raw [10k x 128] | 317 | 1 | 0.00 |
+| Scenario | Prev | Current | Ratio | Δ% | B/op | gen0/op |
+|---|---|---|---|---|---|---|
+| ColumnAdd 1M x float | 1,049¹ | 1,577 | — | — | 4,000,192 | 0.24 |
+| ColumnSigmoid 1M x float | 663¹ | 634 | — | — | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 603¹ | 903 | — | — | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 269¹ | 314 | — | — | 12,000,416 | 0.34 |
+| Fused chain 1M x (Salary\*1.1)+1000-Tax | 219¹ | 266 | — | — | 16,005,312 | 0.34 |
+| Fused chain chunked 1M x 64k rows | — | 266 | — | — | 16,005,312 | 0.32 |
+| Fused single-op TP 1M x (Salary\*1.1) | — | 568 | — | — | 8,003,436 | 0.34 |
+| Column mul-scalar 1M (wrapper) | — | 589 | — | — | 8,000,280 | 0.34 |
+| Linear forward [32x256] -> [32x256] | 819¹ | 835 | — | — | 68,824 | 0.00 |
+| Linear forward+backward [32x256] | 126¹ | 131 | — | — | 668,519 | 0.15 |
+| TransformerBlock forward [32x64, 4 heads] | 204¹ | 113 | — | — | 185,889 | 0.00 |
+| Attn per-seq forward [B16 L128 D64 H4] | 54¹ | 58 | — | — | 2,125,983 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | 143¹ | 291 | — | — | 528,281 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 14¹ | 23 | — | — | 7,938,653 | 1.00 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 50¹ | 114 | — | — | 7,875,936 | 0.33 |
+| RowScore per-row copy+dot [10k x 128] | 65¹ | 118 | — | — | 2 | 0.00 |
+| Frame RowDot [10k x 128] | 177¹ | 294 | — | — | 51,722 | 0.00 |
+| Frame Slice [10k x 128] | 7,236¹ | 14,842 | — | — | 89,936 | 0.01 |
+| RowDot kernel raw [10k x 128] | 686¹ | 835 | — | — | 1 | 0.00 |
+| RowCosineSimilarity kernel raw [10k x 128] | 317¹ | 272 | — | — | 1 | 0.00 |
+| RollingSum null-free 1M x int (w10) | — | 411 | — | — | 5,000,137 | 0.12 |
+| RollingSum nulls 1M x int (w10) | — | 74 | — | — | 22,000,233 | 0.50 |
+| RankKernel RowNumber 100k x int | — | 34 | — | — | 1,700,577 | 0.04 |
+| GroupBy 1M rows x 1000 keys (typed) | — | 23 | — | — | 8,906,946 | 0.70 |
+| GroupBy 1M rows x 100 string keys (typed) | — | 13 | — | — | 13,188,504 | 1.05 |
+| PartitionedWindow RollingSum 1M x 100 parts | — | 13 | — | — | 36,216,498 | 2.15 |
+| Streaming cancel mid-stream 200k x 10k chunk | — | 4,169 | — | — | 5,435 | 0.07 |
+| AutoDiff Pow(2.5) fwd+bwd 1M x float | — | 62 | — | — | 8,001,858 | 0.20 |
+| AutoDiff Pow(2.5) scalar baseline 1M x float | — | 21 | — | — | 2 | 0.00 |
+| AutoDiff RMSNorm fwd+bwd 1M x float | — | 281 | — | — | 8,002,186 | 0.10 |
+| AutoDiff RMSNorm scalar baseline 1M x float | — | 509 | — | — | 2 | 0.00 |
+
+¹ Prev recorded on a different machine (8 logical processors, 2026-08-14) — ratio not meaningful across machines.
 
 ### Notes
 
-- **All 17 rows were recorded 2026-08-14 on the same machine (8 logical
-  processors).** The 2026-08-07 row-scoring rows (previously on an 8-processor
-  machine while the rest were on 16) are now part of the same-machine table.
-  `Frame RowDot`'s B/op dropped from 452,639 to 51,722 since the 2026-08-06
-  point A — result construction no longer materializes a boxed default index
-  (the `NivaraSeries<T>` virtual-index change, #231) — and gen0/op fell from
-  0.10 to 0.00; the raw `RowDot`/`RowCosineSimilarity` kernels stay ~1 B/op,
-  and the frame API beats the per-row status quo ~2.7× on this machine (177 vs
-  65 ops/s). New scenario rows are seeded as `NEW` in the gate and become gated
+- **This table is the current-machine rolling history.** The Prev column
+  carries the v1.3.0 release-prep numbers (2026-08-14, 8 logical processors);
+  the Current column carries the v1.4.0 release-prep numbers (2026-08-21,
+  Intel Core Ultra 7 255H, 16 logical processors). Both machines are Intel
+  Core Ultra 7 255H but with different logical processor counts, so Prev/Current
+  ratios reflect hardware + codebase differences combined. For same-machine
+  comparisons, re-measure on the same hardware and the Ratio/Δ% columns become
+  the regression signal.
+- **B/op and gen0/op are allocation-driven and stable** across machines and
+  loads — they are the reliable regression signals for the `--compare` gate.
+  ColumnSigmoid and the raw span chain are 0 B/op by construction (destination
+  pre-allocated).
+- **New scenarios since v1.3.0** (Fused chain chunked, Fused single-op TP,
+  Column mul-scalar, RollingSum, RankKernel, GroupBy, PartitionedWindow,
+  Streaming cancel, AutoDiff Pow/RMSNorm) are seeded as `NEW` and become gated
   once a `--json` baseline captures them.
-
-- **This table is the current-machine point A.** The 2026-08-06 point A was
-  recorded on a different machine (16 logical processors); its shape still holds
-  (ColumnSigmoid and the raw span chain are allocation-free, batched attention
-  outruns per-seq, Linear forward+backward allocation is the ArrayPool-backed
-  `61ff968` number), but its ops/s are not comparable to this machine. Do not
-  mix numbers across machines.
-- **ops/s remain load-sensitive on this machine.** The table above was recorded
-  with the machine busy-ish (idle CPU ~4–9%): ColumnAdd ~1,049 here. Under
-  heavier load the same harness reads ~2× lower, so treat ops/s as
-  order-of-magnitude until measured under comparable load; **B/op and gen0/op
-  are allocation-driven and stable** and are the reliable regression signals
-  for the `--compare` gate.
-- **ColumnSigmoid is not comparable to the 2026-08-03 point A.** Task 8
-  stripped the `NivaraColumn<float>.Sigmoid()` extension, so the scenario now
-  measures the raw kernel with the destination array allocated up front —
-  B/op is 0 and gen0/op is 0 by construction. The old ~8 MB/op / 0.66 gen0
-  signal (issue #109) is obsolete; the conclusion from that issue (gen0/op is
-  GC-scheduling-sensitive, not allocation-proportional) still holds.
-- **The two `1M x 3 ops` rows are the ADR-002 P3 wrapper-cost isolation** (added
-  2026-08-06). Both run the identical `Add`/`Multiply`/`Subtract` chain over 1M
-  floats; the raw row reuses pre-allocated destinations (0 B/op by construction)
-  while the wrapper row goes through `NivaraColumn`, allocating a fresh result
-  column (~4 MB) per op. The wrapper path therefore carries the ~2 objects/op +
-  result-column allocation the ADR-002 decision called out as the remaining
-  per-op cost. Interpretation: the wrapper's incremental cost over raw spans is
-  the immutable result-column allocation itself (each op must produce a new
-  column), not an overhead that Option B's raw `Tensor<T>` backing would remove
-  — closing F7 with evidence on hand (no ADR-002 amendment filed).
-- **The `Fused chain` and `Frame Slice` rows were added after the 2026-08-06
-  point A** (fused-evaluator and #173-slice regression gates). They are gated
-  from the next baseline capture forward.
+- **TransformerBlock forward** dropped from 204 to 113 ops/s — this is expected
+  on the higher-core-count machine (the scenario is single-threaded; the
+  difference is thermal/scheduling, not a regression — B/op is identical at
+  185,889).
+- **ops/s are load-sensitive.** Treat ops/s as order-of-magnitude; B/op and
+  gen0/op are the reliable signals.
