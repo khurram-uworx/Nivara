@@ -434,6 +434,49 @@ public class StreamixBridgeTests
     }
 
     [Test]
+    public async Task ToFluxWithTimestamp_StringColumn_AttachesTimestamp()
+    {
+        var baseTime = new DateTimeOffset(2025, 6, 1, 12, 0, 0, TimeSpan.Zero);
+        var timestamps = Enumerable.Range(0, 5).Select(i => baseTime.AddMinutes(i)).ToArray();
+        var x = new int[] { 10, 20, 30, 40, 50 };
+        var frame = NivaraFrame.Create(
+            ("X", NivaraColumn<int>.Create(x)),
+            ("Timestamp", NivaraColumn<DateTimeOffset>.Create(timestamps)));
+        try
+        {
+            var flux = frame.ToFluxWithTimestamp("Timestamp");
+            var items = new List<Timestamped<NivaraRow>>();
+            await foreach (var item in flux)
+                items.Add(item);
+
+            Assert.That(items, Has.Count.EqualTo(5));
+            for (int i = 0; i < 5; i++)
+            {
+                Assert.That(items[i].Value.GetValue<int>("X"), Is.EqualTo(x[i]));
+                Assert.That(items[i].Timestamp, Is.EqualTo(timestamps[i]));
+            }
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ToFluxWithTimestamp_StringColumn_ThrowsOnEmptyName()
+    {
+        var frame = CreateTestFrame(3);
+        try
+        {
+            Assert.Throws<ArgumentException>(() => frame.ToFluxWithTimestamp(""));
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
     public async Task BufferByCount_ProducesCorrectBatches()
     {
         var frame = CreateTestFrame(10);
