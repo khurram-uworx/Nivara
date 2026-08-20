@@ -466,7 +466,7 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void ValidatePlan_SelectWithWindowExpression_ReturnsFalse()
+    public void ValidatePlan_SelectWithWindowExpression_ReturnsTrue()
     {
         var strategy = new StreamingExecutionStrategy();
         var select = new SelectOperation(new[]
@@ -478,11 +478,11 @@ public class StreamingExecutionStrategyTests
             operations: new IQueryOperation[] { select });
         var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
 
-        Assert.That(strategy.ValidatePlan(plan, context), Is.False);
+        Assert.That(strategy.ValidatePlan(plan, context), Is.True);
     }
 
     [Test]
-    public void Execute_SelectWithWindowExpression_FallsBackToLazy_ProducesWholeColumnResult()
+    public void Execute_SelectWithWindowExpression_HandlesAsBoundary_ProducesCorrectResult()
     {
         var strategy = new StreamingExecutionStrategy();
         var lazyStrategy = new LazyExecutionStrategy();
@@ -497,8 +497,6 @@ public class StreamingExecutionStrategyTests
         using var result = strategy.Execute(plan, context);
         using var lazyResult = lazyStrategy.Execute(plan, ExecutionTestHelpers.CreateTestContext());
 
-        Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
-            "Window-bearing select must fall back to whole-column execution, not read chunks");
         assertIntColumnEqual(lazyResult, result, "RollingSum(A, 2)");
     }
 
@@ -512,7 +510,7 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void ExecuteAsync_SelectWithWindowExpression_FallsBackToLazy_ProducesWholeColumnResult()
+    public void ExecuteAsync_SelectWithWindowExpression_HandlesAsBoundary_ProducesCorrectResult()
     {
         var strategy = new StreamingExecutionStrategy();
         var lazyStrategy = new LazyExecutionStrategy();
@@ -527,8 +525,6 @@ public class StreamingExecutionStrategyTests
         using var result = strategy.ExecuteAsync(plan, context).GetAwaiter().GetResult();
         using var lazyResult = lazyStrategy.ExecuteAsync(plan, ExecutionTestHelpers.CreateTestContext()).GetAwaiter().GetResult();
 
-        Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
-            "Window-bearing select must fall back to whole-column execution, not read chunks");
         assertIntColumnEqual(lazyResult, result, "RollingSum(A, 2)");
     }
 
@@ -622,7 +618,7 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
-    public void Property_StreamingVsLazy_WindowSelectFallsBackToLazy_ValuesAndMasksMatchAcrossChunkSizes()
+    public void Property_StreamingVsLazy_WindowSelectHandlesAsBoundary_ValuesAndMasksMatchAcrossChunkSizes()
     {
         var strategy = new StreamingExecutionStrategy();
         var lazyStrategy = new LazyExecutionStrategy();
@@ -634,15 +630,15 @@ public class StreamingExecutionStrategyTests
         foreach (var memoryBudget in chunkEquivalenceBudgets)
         {
             var source = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 2000);
+            var lazySource = ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 2000);
             var plan = new QueryPlan(source, new IQueryOperation[] { select });
+            var lazyPlan = new QueryPlan(lazySource, new IQueryOperation[] { select });
             var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
             context.MemoryBudget = memoryBudget;
 
             using var result = strategy.Execute(plan, context);
-            using var lazyResult = lazyStrategy.Execute(plan, ExecutionTestHelpers.CreateTestContext());
+            using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
 
-            Assert.That(source.ChunksRead.Count, Is.EqualTo(0),
-                "Window-bearing select must fall back to whole-column execution, not read chunks");
             ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
         }
     }
@@ -1029,10 +1025,55 @@ public class StreamingExecutionStrategyTests
         try
         {
             Assert.That(frames.Count, Is.GreaterThanOrEqualTo(1),
-                "Window expression must yield at least one frame (may be a single window result)");
+                "Window expression must yield at least one frame");
             var totalRows = frames.Sum(f => f.RowCount);
             Assert.That(totalRows, Is.EqualTo(2000),
                 "Total rows must equal source row count");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_FilterThenWindow_YieldsMultipleFramesAndMatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var lazySource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var filterThenRolling = new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SelectOperation(new[]
+            {
+                ColumnExpressions.Col<int>("A"),
+                ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 2),
+            }),
+        };
+        var streamingPlan = new QueryPlan(source, filterThenRolling);
+        var lazyPlan = new QueryPlan(lazySource, filterThenRolling);
+        var streamingContext = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        streamingContext.MemoryBudget = 1024 * 1024;
+        var lazyContext = ExecutionTestHelpers.CreateTestContext();
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(streamingPlan, streamingContext))
+            frames.Add(frame);
+
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, lazyContext);
+
+        try
+        {
+            Assert.That(frames.Count, Is.GreaterThan(1),
+                "Filter-then-Window must yield streamable prefix chunks plus a window result frame");
+            Assert.That(source.ChunksRead.Count, Is.GreaterThan(0),
+                "Must read chunks from source");
+
+            var sortedFrame = frames.Last();
+            Assert.That(sortedFrame.RowCount, Is.EqualTo(lazyResult.RowCount),
+                "Window result must have same row count as lazy execution");
         }
         finally
         {
