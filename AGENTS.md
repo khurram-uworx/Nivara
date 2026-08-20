@@ -12,7 +12,11 @@
 
 This environment has GNU coreutils at `C:\Program Files\coreutils\bin\` on PATH. Most Linux commands work directly (`grep`, `find`, `touch`, `sort`, `head`, `tail`, `wc`, `cat`, `ls`, `rm`, `mv`, `cp`). PowerShell aliases map `rm`/`mv`/`cp`/`cat`/`ls` to their PowerShell cmdlet equivalents, which behave similarly for basic file operations. Use normal command syntax — avoid verbose PowerShell idioms like `Remove-Item -LiteralPath`.
 
-**PowerShell string escaping gotcha:** PowerShell interprets backslash sequences in double-quoted strings (e.g. `\t` becomes a tab, `\n` becomes a newline). This breaks multi-line strings passed to CLI tools like `gh pr create --body "..."`. When the PR body or any CLI argument contains backticks or backslashes (common in markdown code references like `\`src/Foo.cs\``), write the content to a temp file first and use `--body-file` / `--description-file` instead of inline `--body` / `--description`.
+**GitHub CLI body gotcha:** Always write issue/PR bodies to a temp file and use `--body-file` instead of inline `--body`. PowerShell interprets backslash sequences in double-quoted strings (e.g. `\t` → tab, `\n` → newline), and special characters (backticks, quotes, backslashes) silently break or truncate `gh` inline bodies. This applies to `gh issue create`, `gh issue comment`, `gh pr create`, and `gh pr edit`. Pattern:
+```
+write the body to a temp file → gh issue comment N --repo ... --body-file /path/to/file.md
+```
+Do NOT rely on inline `--body "..."` for anything beyond trivial one-liners.
 
 **Solution file:** This repo uses `.slnx` (XML-based solution format), not `.sln`. Build with `dotnet build Nivara.slnx`.
 
