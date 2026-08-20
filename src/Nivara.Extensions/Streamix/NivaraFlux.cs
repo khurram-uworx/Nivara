@@ -120,15 +120,66 @@ public static class NivaraFlux
 
         for (int colIdx = 0; colIdx < columnNames.Length; colIdx++)
         {
-            var elementType = columnsArray[colIdx].ElementType;
-            var values = new object?[rows.Count];
-            for (int i = 0; i < rows.Count; i++)
-                values[i] = rows[i].Columns[colIdx].GetValue(rows[i].RowIndex);
+            var col = columnsArray[colIdx];
+            var elementType = col.ElementType;
+            var count = rows.Count;
 
-            namedColumns[colIdx] = (columnNames[colIdx], ColumnFactory.Create(elementType, values));
+            namedColumns[colIdx] = (columnNames[colIdx], elementType switch
+            {
+                Type t when t == typeof(int) => ReadColumnFast<int>(rows, colIdx, count),
+                Type t when t == typeof(double) => ReadColumnFast<double>(rows, colIdx, count),
+                Type t when t == typeof(float) => ReadColumnFast<float>(rows, colIdx, count),
+                Type t when t == typeof(long) => ReadColumnFast<long>(rows, colIdx, count),
+                Type t when t == typeof(bool) => ReadColumnFast<bool>(rows, colIdx, count),
+                Type t when t == typeof(short) => ReadColumnFast<short>(rows, colIdx, count),
+                Type t when t == typeof(byte) => ReadColumnFast<byte>(rows, colIdx, count),
+                Type t when t == typeof(string) => ReadColumnFastRef<string>(rows, colIdx, count),
+                _ => ReadColumnBoxed(rows, colIdx, count, elementType),
+            });
         }
 
         return NivaraFrame.Create(namedColumns);
+    }
+
+    static NivaraColumn<T> ReadColumnFast<T>(IList<NivaraRow> rows, int colIdx, int count) where T : struct
+    {
+        var values = new T?[count];
+        bool hasNulls = false;
+        for (int i = 0; i < count; i++)
+        {
+            if (rows[i].Columns[colIdx].IsNull(rows[i].RowIndex))
+            {
+                hasNulls = true;
+            }
+            else
+            {
+                values[i] = ((IColumn<T>)rows[i].Columns[colIdx])[rows[i].RowIndex];
+            }
+        }
+        if (!hasNulls)
+        {
+            var data = new T[count];
+            for (int i = 0; i < count; i++)
+                data[i] = values[i]!.Value;
+            return new NivaraColumn<T>(new Storage.ColumnStorage<T>(new ReadOnlyMemory<T>(data)));
+        }
+        return NivaraColumn.CreateFromNullable(values);
+    }
+
+    static NivaraColumn<T> ReadColumnFastRef<T>(IList<NivaraRow> rows, int colIdx, int count) where T : class
+    {
+        var values = new T[count];
+        for (int i = 0; i < count; i++)
+            values[i] = ((IColumn<T>)rows[i].Columns[colIdx])[rows[i].RowIndex];
+        return NivaraColumn<T>.CreateForReferenceType(values);
+    }
+
+    static IColumn ReadColumnBoxed(IList<NivaraRow> rows, int colIdx, int count, Type elementType)
+    {
+        var values = new object?[count];
+        for (int i = 0; i < count; i++)
+            values[i] = rows[i].Columns[colIdx].GetValue(rows[i].RowIndex);
+        return ColumnFactory.Create(elementType, values);
     }
 
     static Task<NivaraFrame> RowsToFrameAsync(IList<NivaraRow> rows, CancellationToken ct)
