@@ -242,7 +242,7 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 
 ## Limitations
 
-- **Window-heavy streaming falls back to single-frame** — `AsStream` materializes the full frame when window expressions (Rolling, Rank, Cumulative, Shift) are present. Non-streamable operations (Sort, GroupBy) now benefit from hybrid streaming (stream prefix, concatenate at boundary, resume). Filter-only queries stream correctly.
+- **Window operations materialize at boundary** — `AsStream` streams leading operations (Filter, Select) per-chunk, then materializes the full concatenated frame at window boundaries (Rolling, Rank, Cumulative, Shift) before resuming. The window operation runs on the full column for correctness. Queries with Sort before windows also materialize at the Sort boundary.
 - **`NivaraFrameExtensions.GroupBy` simple overload is key-only** — the parameterless `GroupBy(frame, keyColumns)` returns grouped keys only; use the two-argument `GroupBy(frame, keys, aggregations)` overload or typed LINQ for real aggregations.
 - **No learning rate scheduling or advanced query optimization** — straightforward execution, no adaptive strategies.
 
