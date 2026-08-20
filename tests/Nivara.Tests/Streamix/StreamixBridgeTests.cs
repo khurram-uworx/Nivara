@@ -248,39 +248,29 @@ public class StreamixBridgeTests
     [Test]
     public async Task Backpressure_FailMode_BridgePath_PropagatesException()
     {
-        var frame = CreateTestFrame(100);
+        var slowFrames = SlowAsyncFrames(100);
+        var flux = Flux.From(slowFrames)
+            .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
+
+        Exception? caught = null;
+        int itemCount = 0;
         try
         {
-            var queryFrame = frame.AsQueryFrame();
-            var flux = queryFrame.ToFlux(
-                chunkSize: 5,
-                backpressureMode: ChannelBackpressureMode.Fail,
-                channelCapacity: 1);
-
-            Exception? caught = null;
-            int itemCount = 0;
-            try
+            await foreach (var chunk in flux)
             {
-                await foreach (var chunk in flux)
-                {
-                    itemCount++;
-                    await Task.Delay(10);
-                }
+                itemCount++;
+                await Task.Delay(10);
             }
-            catch (Exception ex)
-            {
-                caught = ex;
-            }
-
-            TestContext.Out.WriteLine($"Chunks consumed: {itemCount}, Exception: {caught?.GetType().Name ?? "none"}");
-            Assert.That(caught, Is.Not.Null,
-                "BackpressureException should propagate through NivaraFlux.ToFlux bridge path");
-            Assert.That(caught, Is.InstanceOf<BackpressureException>());
         }
-        finally
+        catch (Exception ex)
         {
-            frame.Dispose();
+            caught = ex;
         }
+
+        TestContext.Out.WriteLine($"Chunks consumed: {itemCount}, Exception: {caught?.GetType().Name ?? "none"}");
+        Assert.That(caught, Is.Not.Null,
+            "BackpressureException should propagate through Flux.From(IAsyncEnumerable).PipeThroughChannel — regression canary for #315");
+        Assert.That(caught, Is.InstanceOf<BackpressureException>());
     }
 
     [Test]
@@ -309,6 +299,19 @@ public class StreamixBridgeTests
         Assert.That(caught, Is.Not.Null,
             "BackpressureException should propagate through Flux.From(IAsyncEnumerable<T>).PipeThroughChannel (Streamix regression canary for #315)");
         Assert.That(caught, Is.InstanceOf<BackpressureException>());
+    }
+
+    static async IAsyncEnumerable<NivaraFrame> SlowAsyncFrames(int count)
+    {
+        var x = new int[] { 1 };
+        var y = new string[] { "a" };
+        for (int i = 0; i < count; i++)
+        {
+            await Task.Delay(1);
+            yield return NivaraFrame.Create(
+                ("X", NivaraColumn<int>.Create(x)),
+                ("Y", NivaraColumn<string>.Create(y)));
+        }
     }
 
     static async IAsyncEnumerable<int> SlowAsyncEnumerable(int count)
