@@ -7,6 +7,7 @@
 - Nivara AutoDiff product direction updated: inference is the default/common path; reverse-mode training is opt-in via using (GradientUtils.Grad()). Do not implement NoGrad as the primary API. Built-in training loops should enter Grad() internally, while manual training examples/docs should wrap forward/loss/backward/optimizer code in Grad(). <!-- id=46e6ece9693740e49c42877dcc92abab entity=default type=fact ts=2026-06-14T14:10:17.7172876+00:00 v=1 tags=Nivara,AutoDiff,GradScope,inference-default -->
 - Nivara AutoDiff ADR-001 (non-nullable domain) is fully implemented: null-mask infrastructure removed from AutoDiff ops/hot paths; Debug.Assert guards on ReverseGradTensor constructors and ComputationGraph.AddNode enforce the boundary. Type constraint relaxed from INumber<T> to IFloatingPointIeee754<T>, which passes Half/F16 through runtime validation alongside float/double (System.Numerics.BFloat16 is net11-only; BFloat16 kernels are deferred — see the Known Issues note). All AutoDiff ops are span-ified (no NivaraColumn.Data access; Span<T> + TensorPrimitives). <!-- id=3fec03ab399d47b7a6e7450785292834 entity=default type=fact ts=2026-06-14T13:51:53.8257787+00:00 v=3 tags=Nivara,AutoDiff,refactor,planning -->
 - Key BCL .NET 10 tensor patterns found via MS Learn: TensorPrimitives now generic (200+ overloads for any INumber/IRootFunctions T), ReadOnlyTensorSpan<T> with TryGetSpan, implicit conversion from T[] to ReadOnlyTensorSpan<T>, Tensor<T> stable in .NET 10. Spans are the currency. <!-- id=8e2b4e3243a847899af3c2d8ce7acceb entity=default type=research ts=2026-06-08T05:58:48.7959337+00:00 v=1 tags=MSLearn,BCL,tensor,patterns -->
+- Nivara v1.4.0 shipped: public streaming API (`QueryFrame.AsStream`, `ScanAsQueryFrame` factories), `Over()`/`WindowSpec` window functions, fused expression engine (`FusedExpressionEvaluator` with SIMD backend + flat IR fallback), genuinely async `CollectAsync`, conditional expressions (`?:` in LINQ DSL), new aggregations (Quantile, Median, StdDev, Variance), public QueryPlan/ExecutionEngine/IExecutionStrategy/QueryDiagnostics/ExecutionProgress. <!-- id=v140-shipped entity=default type=fact ts=2026-08-21T00:00:00Z v=1 tags=Nivara,v1.4.0,streaming,windows,expressions,async -->
 
 ## Shell environment (Windows with GNU coreutils)
 
@@ -62,8 +63,18 @@ Where to look (implementation map)
 - Operation type constants
   - `src/Nivara/Query/OperationType.cs` — `OperationType.Filter`, `.Select`, `.Sort`, `.GroupBy`, `.Join`, etc.
 
+- Window functions
+  - `src/Nivara/Operations/WindowSpec.cs` — immutable `WindowSpec` with `PartitionBy` / `OrderBy` builders.
+  - `src/Nivara/Tensors/PartitionedWindowEngine.cs` — shared partition → sort → compute → scatter engine for all window functions.
+  - Window function overloads on `NivaraFrame` (eager) and `QueryFrame` (lazy) accept `WindowSpec`.
+
+- Fused expression engine
+  - `src/Nivara/Expressions/FusedExpressionEvaluator.cs` — lowers `ColumnExpression` AST to single-pass kernel (SIMD delegate path + `FusedKernel` fallback).
+
 - Frame-level row-major interop
-  - `src/Nivara/NivaraFrame.cs` — `ToTensors`, `TryGetRowMajorSpan`, `CopyToRowMajor` (frame tensor-axis math `Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms` was removed in the AutoDiff refactor — use `TensorPrimitives` on column/row spans directly).
+  - `src/Nivara/NivaraFrame.cs` — `ToTensors`, `TryGetRowMajorSpan`, `CopyToRowMajor`, `AsQueryFrame()` (frame tensor-axis math `Dot`/`CosineSimilarity`/`ColumnNorms`/`RowNorms` was removed in the AutoDiff refactor — use `TensorPrimitives` on column/row spans directly).
+  - `src/Nivara/Query/QueryFrame.cs` — `AsStream(chunkSize, ct)` yields per-chunk `NivaraFrame` via `IAsyncEnumerable<T>`; `CollectAsync`/`ToListAsync` are genuinely async (no `Task.Run` hop).
+  - Lazy query-frame factories: `Csv.ScanAsQueryFrame`, `Json.ScanAsQueryFrame`, `Parquet.ScanAsQueryFrame`.
 
 - AutoDiff subsystem
   - `docs/AUTODIFF.md` — canonical reference for all AutoDiff operations, modules, optimizers, forward-mode AD, and DataFrame integration
@@ -293,7 +304,9 @@ public void Property_ArithmeticCompatibility_ValidatesCorrectly()
 
 - **Buffer pooling threshold**: rent arrays >1024 elements from `BufferPool` (in Extensions).
 - **Default memory budget for streaming**: 256 MB (configurable).
+- **Streaming chunk size**: derived from memory budget when unset (`clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)`); row-group aligned for Parquet. Full contract in `docs/STREAMING.md`.
 - **Vectorization overhead threshold**: prefer only when `Length >= vectorSize * 4` (heuristic).
+- **Fused expression engine**: primary path compiles `ColumnExpression` AST to cached delegates (SIMD auto-vectorized). `FusedKernel` fallback for non-compilable expressions. No boxed fallback — non-fusible expressions throw.
 - **FlattenTo**: cache flattened tensor data if multiple accesses needed; use single `FlattenTo` for one-time access.
 - **StreamingBufferManager**: use bounded buffer manager (in Extensions) for large datasets with memory budgets and GC triggers.
 - **Vectorization checks**: verify `Vector.IsHardwareAccelerated` and type vectorizability before using SIMD kernels.

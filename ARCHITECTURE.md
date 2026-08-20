@@ -34,8 +34,9 @@ At a high level, Nivara consists of:
 - **Columnar storage abstractions** (`Nivara.Storage.ColumnStorage<T>` — a single unified storage class for all element types)
 - **Schema-aware frames** (`NivaraFrame`, `Nivara.Query.QueryFrame`)
 - **A lazy query layer** with optimization engine (`Nivara.Query`, `Nivara.Optimization`)
+- **Fused expression engine** (SIMD-accelerated `FusedExpressionEvaluator` with `TensorPrimitives` backend, flat IR fallback, chunked streaming execution)
 - **Execution strategies** (`Nivara.Execution` - lazy, eager, streaming, parallel)
-- **Operation implementations** (`Nivara.Operations` - joins, aggregations, filtering, sorting)
+- **Operation implementations** (`Nivara.Operations` - joins, aggregations, filtering, sorting, window functions)
 - **Diagnostics and planning infrastructure** (`Nivara.Diagnostics`)
 - **Interop boundaries** (`Nivara.Tensors`, Arrow/Parquet/CSV/JSON extensions)
 
@@ -269,6 +270,16 @@ Expression responsibilities:
 
 Expressions are **pure** and side-effect free.
 
+### Fused Expression Engine
+
+The `FusedExpressionEvaluator` (`src/Nivara/Expressions/FusedExpressionEvaluator.cs`) lowers a validated `ColumnExpression` AST into a single-pass kernel over the whole column with no intermediate columns and no per-element `object?` boxing:
+
+- **SIMD backend** (primary path): Compiles the expression tree with `System.Linq.Expressions` into a cached delegate over typed leaf arrays. The JIT-emitted straight-line loop body auto-vectorizes for numeric leaves. No intermediate columns, no boxing.
+- **Flat IR span interpreter** (fallback): A generic node-tree kernel (`FusedKernel`) handles expressions that cannot be compiled to delegates (e.g., null-bearing columns where masks must be OR'd from leaf masks in a separate pass).
+- **Chunked streaming**: Expressions are evaluated per-chunk in streaming mode, keeping memory bounded.
+- **Ternary `?:`** is supported alongside arithmetic and comparisons — compiled to conditional branches in the delegate path.
+- Expressions that cannot be fused at all throw (no boxed fallback). Comparisons produce masked-false at nulls (SQL-like semantics).
+
 ---
 
 ## Lazy Query Engine
@@ -305,6 +316,7 @@ Nivara supports multiple execution strategies via the `Nivara.Execution.Executio
 - Automatic chunk size calculation
 - Suitable for datasets larger than available memory
 - Falls back to lazy for operations requiring full data (Sort, GroupBy, Join)
+- **Public API**: `QueryFrame.AsStream(chunkSize, ct)` yields one `NivaraFrame` per source chunk via `IAsyncEnumerable<T>`; `NivaraQuery<T>.AsStream` passthrough. Lazy query-frame factories (`Csv.ScanAsQueryFrame`, `Json.ScanAsQueryFrame`, `Parquet.ScanAsQueryFrame`) open streaming directly from files.
 
 #### 4. Parallel
 - Uses multiple threads for CPU-intensive operations
@@ -335,6 +347,17 @@ Nivara supports multiple execution strategies via the `Nivara.Execution.Executio
    - Progress reporting and cancellation support
 
 Execution begins only when `Collect()` or similar materialization methods are invoked.
+
+### Public Streaming API
+
+`QueryFrame.AsStream(chunkSize, ct)` yields one `NivaraFrame` per source chunk via `IAsyncEnumerable<T>`. Fully-streamable plans (Filter, Select, Slice, SelectRows) process each chunk independently; non-streamable boundaries (Sort, GroupBy, Join, Rolling, Cumulative, Shift, Rank) or window expressions fall back to a single merged frame identical to `CollectAsync()`.
+
+Lazy query-frame factories open streaming directly from files:
+- `Csv.ScanAsQueryFrame(path, chunkSize)`
+- `Json.ScanAsQueryFrame(path, chunkSize)`
+- `Parquet.ScanAsQueryFrame(path, chunkSize)`
+
+`chunkSize` is honored by row-oriented sources and advisory (row-group aligned) for Parquet; when unset it is derived from the memory budget (`clamp(budget/10 ÷ 100 bytes/row, 1000, 100000)`). Full contract in `docs/STREAMING.md`.
 
 ## Query Optimization Engine
 
@@ -430,9 +453,20 @@ public interface IQueryOperation
 - **ConcatenationOperation**: Vertical and horizontal DataFrame combination (`Nivara.Operations.ConcatenationOperation`)
 
 #### Aggregation Operations
-- **AggregationFunction**: Base class for Sum, Count, Mean, Min, Max, etc. (`Nivara.Operations.AggregationFunction`)
+- **AggregationFunction**: Base class for Sum, Count, Mean, Min, Max, Quantile, Median, StdDev, Variance (`Nivara.Operations.AggregationFunction`)
 - **Vectorized aggregations**: Automatic SIMD acceleration for numeric types
 - **Null-aware processing**: Proper null handling in all aggregation functions
+
+#### Window Functions
+- **`Over()` / `WindowSpec` builder** (#162): SQL-style partitioned windows on both `NivaraFrame` (eager) and `QueryFrame` (lazy). `Over()` returns an immutable `WindowSpec` with `PartitionBy(params string[])` and `OrderBy` overloads (ascending / NULLS LAST by default).
+- **Rolling windows**: `Sum`, `Mean`, `Min`, `Max` with configurable window size
+- **Cumulative windows**: `Sum`, `Max`, `Min`, `Product`, `Count`
+- **Shift / Lead**: Look ahead or behind within partitions
+- **Rank family**: `RowNumber`, `Rank`, `DenseRank`, `PercentRank` — preserving existing null-order-key semantics
+- **Execution**: Partition → sort → compute → scatter via the shared `PartitionedWindowEngine` (`src/Nivara/Tensors/PartitionedWindowEngine.cs`); partition and order keys are validated up front.
+
+#### Conditional Expressions
+- **Ternary `?:` support** in the LINQ expression DSL: `frame.Where(row => row.GetValue<int>("x") > 0 ? row.GetValue<double>("a") : row.GetValue<double>("b"))`. The fused expression engine compiles ternaries into straight-line JIT code alongside arithmetic and comparisons.
 
 ### Operation Integration
 
@@ -980,7 +1014,24 @@ This appendix summarizes key architecture decisions in concise form. See the rel
 - **Joins**: Hash-based with composite keys, exclude nulls from matching, coalesce join keys for outer joins.
 - **Sorting**: Sort indices first, then reorder columns; explicit null ordering (`NullsFirst`/`NullsLast`).
 - **Grouping**: Dedicated composite key class with proper equality/hashing; handle nulls explicitly.
+- **Window functions**: `Over()` / `WindowSpec` builder for SQL-style partitioned windows. Immutable spec with `PartitionBy` / `OrderBy`. Execution via `PartitionedWindowEngine`: partition → sort → compute → scatter. Supports rolling, cumulative, shift/lead, and rank family.
+- **Conditional expressions**: Ternary `?:` in the LINQ DSL, compiled alongside arithmetic and comparisons by the fused expression engine.
 - **Fluent API**: Extension methods over core operations. `Where()` predicates receive a typed `NivaraRow` (readonly struct with `GetValue<T>`/`TryGetValue<T>`/`IsNull` accessors). Clear execution semantics: immediate on DataFrame, lazy via `AsQueryFrame()`.
+
+### Streaming API
+
+- **Public API**: `QueryFrame.AsStream(chunkSize, ct)` yields one `NivaraFrame` per source chunk via `IAsyncEnumerable<T>`. `NivaraQuery<T>.AsStream` passthrough.
+- **Lazy factories**: `Csv.ScanAsQueryFrame`, `Json.ScanAsQueryFrame`, `Parquet.ScanAsQueryFrame` open streaming directly from files.
+- **Streamable plans**: Filter, Select, Slice, SelectRows process each chunk independently. Non-streamable boundaries (Sort, GroupBy, Join, windows) fall back to merged frame.
+- **Chunk size**: Honored by row-oriented sources; advisory (row-group aligned) for Parquet. Derived from memory budget when unset.
+- **Contract**: Full details in `docs/STREAMING.md`.
+
+### Fused Expression Engine
+
+- **SIMD backend**: `FusedExpressionEvaluator` compiles `ColumnExpression` AST to cached delegates over typed leaf arrays — no intermediate columns, no boxing. JIT auto-vectorizes for numeric leaves.
+- **Null handling**: Null masks OR'd from leaf masks in a separate pass; comparisons produce masked-false at nulls.
+- **Fallback**: `FusedKernel` node-tree interpreter for expressions that cannot compile to delegates. No boxed fallback — non-fusible expressions throw.
+- **Chunked evaluation**: Per-chunk in streaming mode for memory-bounded execution.
 
 ### Execution & Error Handling
 
