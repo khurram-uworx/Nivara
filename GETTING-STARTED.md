@@ -302,7 +302,7 @@ var byDept = people.Query<Person>()
 
 Notes:
 - `Query<T>()` requires `T : class, new()`. `Collect()`/`ToList()` return a `NivaraFrame`; `ToObjects()`/`ToRows()` return `IReadOnlyList<TResult>`.
-- Supported: property access, literals, `+ - * /`, comparisons, `&&`/`||`/`!`. Method calls, captured variables/closures, nested property access, and ternary fail fast with `UnsupportedQueryExpressionException` at translation time.
+- Supported: property access, literals, `+ - * / %`, comparisons, `&&`/`||`/`!`, and conditional expressions (ternary `?:`). Method calls, captured variables/closures, and nested property access fail fast with `UnsupportedQueryExpressionException` at translation time.
 - `GroupBy` accepts an aggregate `Select` or a bare `Collect` of distinct keys; any other operation after `GroupBy` fails fast.
 - See the full typed-query example in [EXAMPLES.md](EXAMPLES.md#5c-typed-object-linq--framequeryt).
 
