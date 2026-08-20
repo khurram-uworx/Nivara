@@ -515,6 +515,12 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 }
             }
 
+            if (!hasTrailingBoundaries)
+            {
+                budgetTracker.RecordWarningIfExceeded(diag);
+                yield break;
+            }
+
             budgetTracker.RecordWarningIfExceeded(diag);
 
             if (chunkFrames.Count == 0)

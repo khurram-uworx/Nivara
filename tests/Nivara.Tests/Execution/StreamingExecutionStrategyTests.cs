@@ -1067,13 +1067,13 @@ public class StreamingExecutionStrategyTests
         try
         {
             Assert.That(frames.Count, Is.GreaterThan(1),
-                "Filter-then-Window must yield streamable prefix chunks plus a window result frame");
+                "Filter-then-Window must yield per-chunk window frames");
             Assert.That(source.ChunksRead.Count, Is.GreaterThan(0),
                 "Must read chunks from source");
 
-            var sortedFrame = frames.Last();
-            Assert.That(sortedFrame.RowCount, Is.EqualTo(lazyResult.RowCount),
-                "Window result must have same row count as lazy execution");
+            var totalRows = frames.Sum(f => f.RowCount);
+            Assert.That(totalRows, Is.EqualTo(lazyResult.RowCount),
+                "Per-chunk window totals must match lazy row count");
         }
         finally
         {
@@ -1214,17 +1214,20 @@ public class StreamingExecutionStrategyTests
             Assert.That(totalRows, Is.EqualTo(lazyResult.RowCount),
                 "Per-chunk total must match lazy row count");
 
-            var allRollingValues = new List<int>();
+            var allRollingValues = new List<int?>();
             foreach (var f in frames)
             {
                 var col = f.GetColumn<int>("RollingSum(A, 3)");
                 for (int i = 0; i < col.Length; i++)
-                    allRollingValues.Add((int)col.GetValue(i)!);
+                    allRollingValues.Add(col.IsNull(i) ? null : (int)col.GetValue(i)!);
             }
             var lazyCol = lazyResult.GetColumn<int>("RollingSum(A, 3)");
             for (int i = 0; i < lazyCol.Length; i++)
-                Assert.That(allRollingValues[i], Is.EqualTo((int)lazyCol.GetValue(i)!),
+            {
+                var expected = lazyCol.IsNull(i) ? (int?)null : (int)lazyCol.GetValue(i)!;
+                Assert.That(allRollingValues[i], Is.EqualTo(expected),
                     $"Row {i} RollingSum mismatch between streaming and lazy");
+            }
         }
         finally
         {
@@ -1269,8 +1272,12 @@ public class StreamingExecutionStrategyTests
             var resultRollingCol = lastFrame.GetColumn<int>("RollingSum(A, 3)");
             Assert.That(resultRollingCol.Length, Is.EqualTo(lazyRollingCol.Length));
             for (int i = 0; i < lazyRollingCol.Length; i++)
-                Assert.That((int)resultRollingCol.GetValue(i)!, Is.EqualTo((int)lazyRollingCol.GetValue(i)!),
+            {
+                var expected = lazyRollingCol.IsNull(i) ? (int?)null : (int)lazyRollingCol.GetValue(i)!;
+                var actual = resultRollingCol.IsNull(i) ? (int?)null : (int)resultRollingCol.GetValue(i)!;
+                Assert.That(actual, Is.EqualTo(expected),
                     $"Row {i} RollingSum mismatch after Sort");
+            }
         }
         finally
         {
