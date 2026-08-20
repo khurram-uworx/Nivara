@@ -410,29 +410,32 @@ async Task RunStreamixScenarios(string dsPath, IncidentScenario sc, int cs)
 
     Console.WriteLine("--- Scenario 1: Fault-Tolerant Streaming (Retry + Checkpoint) ---");
     var sw1 = Stopwatch.StartNew();
-    int rows1 = await StreamixScenarios.RunFaultTolerantStreaming(dsPath, sc, cs);
+    var summary1 = await StreamixScenarios.RunFaultTolerantStreaming(dsPath, sc, cs);
     sw1.Stop();
-    Console.WriteLine($"  Rows processed: {rows1:N0}  ({sw1.Elapsed.TotalSeconds:F1}s)");
+    Console.WriteLine($"  Rows processed: {summary1.TotalRows:N0}  ({summary1.ChunksProcessed} chunks)");
+    Console.WriteLine($"  Time: {sw1.Elapsed.TotalSeconds:F1}s");
     Console.WriteLine();
 
-    Console.WriteLine("--- Scenario 2: Event-Time Timestamped Analytics ---");
+    Console.WriteLine("--- Scenario 2: Event-Time Windowed Analytics ---");
     var sw2 = Stopwatch.StartNew();
-    var stats = await StreamixScenarios.RunTimestampedAnalytics(dsPath, sc, cs);
+    var summary2 = await StreamixScenarios.RunWindowedAnalytics(dsPath, sc, cs);
     sw2.Stop();
-    Console.WriteLine($"  Stats collected: {stats.Count:N0}  ({sw2.Elapsed.TotalSeconds:F1}s)");
-    if (stats.Count > 0)
+    Console.WriteLine($"  Total rows: {summary2.TotalRows:N0}  ({summary2.Windows.Count} windows)");
+    Console.WriteLine($"  Time: {sw2.Elapsed.TotalSeconds:F1}s");
+    if (summary2.Windows.Count > 0)
     {
-        double avgDur = stats.Average(s => s.DurationMs);
-        int errorCount = stats.Count(s => s.StatusCode >= 500);
-        Console.WriteLine($"  Avg DurationMs: {avgDur:F1}  Errors: {errorCount} ({100.0 * errorCount / stats.Count:F1}%)");
+        var avgDuration = summary2.Windows.Average(w => w.AverageDurationMs);
+        var avgErrorRate = summary2.Windows.Average(w => w.ErrorRate);
+        Console.WriteLine($"  Avg duration: {avgDuration:F1}ms  Avg error rate: {avgErrorRate:P1}");
     }
     Console.WriteLine();
 
     Console.WriteLine("--- Scenario 3: Online AutoDiff Learning ---");
     var sw3 = Stopwatch.StartNew();
-    int batches = await StreamixScenarios.RunOnlineAutoDiffLearning(dsPath, sc, batchSize: 128, epochs: 3);
+    var summary3 = await StreamixScenarios.RunOnlineAutoDiffLearning(dsPath, sc, batchSize: 128, epochs: 3);
     sw3.Stop();
-    Console.WriteLine($"  Training batches: {batches:N0}  ({sw3.Elapsed.TotalSeconds:F1}s)");
+    Console.WriteLine($"  Training batches: {summary3.TrainingBatches:N0}  Final loss: {summary3.FinalLoss:F4}");
+    Console.WriteLine($"  Time: {sw3.Elapsed.TotalSeconds:F1}s");
     Console.WriteLine();
 }
 

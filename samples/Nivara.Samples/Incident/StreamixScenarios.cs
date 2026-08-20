@@ -12,28 +12,26 @@ using Streamix;
 namespace Nivara.Samples.Incident;
 
 /// <summary>
-/// Three streaming scenarios demonstrating the Nivara × Streamix bridge:
-/// 1. Fault-tolerant streaming with retries and checkpointing
-/// 2. Event-time timestamped streaming with per-chunk analytics
-/// 3. Online AutoDiff learning over streaming mini-batches
+/// Streamix integration scenarios for the Nivara Incident Lab.
+/// Demonstrates fault-tolerant streaming, event-time windowed analytics,
+/// and online AutoDiff learning using the Nivara × Streamix bridge.
 /// </summary>
 public static class StreamixScenarios
 {
     /// <summary>
     /// Scenario 1: Fault-tolerant streaming with retries and checkpointing.
-    /// Wraps a Parquet source in a Flux with retry logic and checkpoint logging,
-    /// then processes each chunk via ForEachAsync.
+    /// Streams incident data through a Flux pipeline with retry and checkpoint operators.
     /// </summary>
-    public static async Task<int> RunFaultTolerantStreaming(
+    public static async Task<StreamingSummary> RunFaultTolerantStreaming(
         string datasetPath,
         IncidentScenario scenario,
-        int chunkSize = 10_000,
+        int chunkSize = 10000,
         CancellationToken ct = default)
     {
         var incidentStart = scenario.IncidentStart.Ticks;
         var incidentEnd = scenario.IncidentEnd.Ticks;
 
-        int totalRows = 0;
+        int rowCount = 0;
         int chunkCount = 0;
 
         var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
@@ -46,30 +44,31 @@ public static class StreamixScenarios
                 Console.WriteLine($"  [retry] attempt {attempt}: {ex.Message}");
                 return TimeSpan.FromMilliseconds(100 * attempt);
             })
-            .Checkpoint("incident-chunk")
+            .Checkpoint("incident-stream")
             .ForEachAsync(chunk =>
             {
-                Interlocked.Add(ref totalRows, chunk.RowCount);
+                Interlocked.Add(ref rowCount, chunk.RowCount);
                 Interlocked.Increment(ref chunkCount);
             }, ct);
 
-        return totalRows;
+        return new StreamingSummary(rowCount, chunkCount);
     }
 
     /// <summary>
-    /// Scenario 2: Event-time timestamped streaming.
-    /// Attaches a DateTimeOffset to each row, then computes per-chunk
-    /// statistics (min/max timestamp, average DurationMs) via Map.
+    /// Scenario 2: Event-time windowed analytics using ToFluxWithTimestamp.
+    /// Demonstrates timestamped streaming with per-chunk aggregation via Buffer.
     /// </summary>
-    public static async Task<List<ChunkStats>> RunTimestampedAnalytics(
+    public static async Task<WindowedAnalyticsSummary> RunWindowedAnalytics(
         string datasetPath,
         IncidentScenario scenario,
-        int chunkSize = 10_000,
+        int chunkSize = 10000,
         CancellationToken ct = default)
     {
         var incidentStart = scenario.IncidentStart.Ticks;
         var incidentEnd = scenario.IncidentEnd.Ticks;
-        var results = new System.Collections.Concurrent.ConcurrentBag<ChunkStats>();
+
+        var windowResults = new List<WindowResult>();
+        int totalRows = 0;
 
         var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
@@ -90,20 +89,29 @@ public static class StreamixScenarios
                     Service = row.GetValue<string>("Service") ?? ""
                 };
             })
-            .ForEachAsync(stats =>
+            .Buffer(100)
+            .ForEachAsync(batch =>
             {
-                results.Add(stats);
+                Interlocked.Add(ref totalRows, batch.Count);
+                var avgDuration = batch.Average(b => b.DurationMs);
+                var errorRate = batch.Count(b => b.StatusCode >= 500) / (double)batch.Count;
+                var windowStart = batch.Min(b => b.Timestamp);
+                var windowEnd = batch.Max(b => b.Timestamp);
+                lock (windowResults)
+                {
+                    windowResults.Add(new WindowResult(windowStart, windowEnd, batch.Count, avgDuration, errorRate));
+                }
             }, ct);
 
-        return results.ToList();
+        return new WindowedAnalyticsSummary(totalRows, windowResults);
     }
 
     /// <summary>
     /// Scenario 3: Online AutoDiff learning over streaming mini-batches.
-    /// Trains a simple Linear model to predict error probability (StatusCode >= 500)
-    /// from normalized DurationMs, processing one mini-batch at a time through a Flux stream.
+    /// Demonstrates the bridge between Streamix streaming and Nivara AutoDiff
+    /// by training a simple linear model on streamed incident data.
     /// </summary>
-    public static async Task<int> RunOnlineAutoDiffLearning(
+    public static async Task<AutoDiffSummary> RunOnlineAutoDiffLearning(
         string datasetPath,
         IncidentScenario scenario,
         int batchSize = 128,
@@ -113,61 +121,72 @@ public static class StreamixScenarios
         var incidentStart = scenario.IncidentStart.Ticks;
         var incidentEnd = scenario.IncidentEnd.Ticks;
 
+        var model = new Linear<float>(1, 1);
+        var optimizer = new Adam<float>((float)1e-3);
+        optimizer.AddParameterGroup(model.GetParameters().Values);
+        var lossFn = new MSELoss<float>(Reduction.Mean);
+
+        int totalBatches = 0;
+        float lastLoss = 0f;
+
         var query = Ingestion.LoadParquet(Path.Combine(datasetPath, "requests.parquet"))
             .Filter(ColumnExpressions.Col("Timestamp") >= ColumnExpressions.Lit(incidentStart))
             .Filter(ColumnExpressions.Col("Timestamp") <= ColumnExpressions.Lit(incidentEnd));
 
-        var model = new Linear<float>(1, 1);
-        var optimizer = new Adam<float>((float)1e-3);
-        optimizer.AddParameterGroup(model.GetParameters().Values, (float)1e-3);
-        var lossFn = new MSELoss<float>(Reduction.Mean);
-
-        int totalBatches = 0;
-
         for (int epoch = 0; epoch < epochs; epoch++)
         {
+            if (ct.IsCancellationRequested) break;
+
             await query
-                .ToFluxRows(chunkSize: 10_000)
+                .ToFluxRows(chunkSize: 10000)
                 .BufferFrames(batchSize)
-                .Map(async frame =>
+                .Map(frame =>
                 {
                     var durations = frame.GetColumn<double>("DurationMs").ToArray();
                     var statusCodes = frame.GetColumn<int>("StatusCode").ToArray();
-
-                    double maxDur = 0;
-                    foreach (var d in durations)
-                        if (d > maxDur) maxDur = d;
-                    if (maxDur == 0) maxDur = 1.0;
 
                     var inputs = new float[durations.Length];
                     var targets = new float[statusCodes.Length];
                     for (int i = 0; i < durations.Length; i++)
                     {
-                        inputs[i] = (float)(durations[i] / maxDur);
-                        targets[i] = statusCodes[i] >= 500 ? 1.0f : 0.0f;
+                        inputs[i] = (float)(durations[i] / 1000.0);
+                        targets[i] = statusCodes[i] >= 500 ? 1f : 0f;
                     }
 
-                    ReverseGradTensor<float> loss;
                     using (GradientUtils.Grad())
                     {
-                        var inputTensor = ReverseGradTensor<float>.FromArray(inputs);
+                        var inputTensor = ReverseGradTensor<float>.FromMatrix(inputs, inputs.Length, 1);
                         var pred = model.Forward(inputTensor);
-                        var targetTensor = ReverseGradTensor<float>.FromArray(targets, requiresGrad: false);
-                        loss = lossFn.Forward(pred, targetTensor);
+                        var targetTensor = ReverseGradTensor<float>.FromMatrix(targets, targets.Length, 1);
+                        var loss = lossFn.Forward(pred, targetTensor);
+                        loss.Backward();
+                        optimizer.Step();
+                        optimizer.ZeroGrad();
+                        Interlocked.Increment(ref totalBatches);
+                        return loss[0];
                     }
-
-                    loss.Backward();
-                    optimizer.Step();
-                    optimizer.ZeroGrad();
-
-                    Interlocked.Increment(ref totalBatches);
-                    return loss[0];
                 })
-                .ForEachAsync(_ => { }, ct);
+                .ForEachAsync(lossValue =>
+                {
+                    lastLoss = lossValue;
+                }, ct);
         }
 
-        return totalBatches;
+        return new AutoDiffSummary(totalBatches, lastLoss, model);
     }
+
+    public sealed record StreamingSummary(int TotalRows, int ChunksProcessed);
+
+    public sealed record WindowResult(
+        DateTimeOffset WindowStart,
+        DateTimeOffset WindowEnd,
+        int RowCount,
+        double AverageDurationMs,
+        double ErrorRate);
+
+    public sealed record WindowedAnalyticsSummary(int TotalRows, IReadOnlyList<WindowResult> Windows);
+
+    public sealed record AutoDiffSummary(int TrainingBatches, float FinalLoss, Linear<float> Model);
 
     public sealed class ChunkStats
     {
