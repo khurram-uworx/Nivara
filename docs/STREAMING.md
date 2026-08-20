@@ -334,8 +334,3 @@ falling back to `Console.WriteLine`. All operators are zero-cost when not subscr
 - **In-memory frames yield a single chunk.** `MemoryQuerySource.CanReadInChunks` is `false`,
   so `ToFlux()` on an in-memory frame produces a one-item stream. Use CSV/Parquet sources
   for actual multi-chunk streaming.
-- **`Flux.From(IEnumerable<T>)` backpressure.** Streamix issue
-  [#155](https://github.com/khurram-uworx/Streamix/issues/155) — `PipeThroughChannel` with
-  `Fail` mode silently swallows `BackpressureException` when the source is
-  `AsyncEnumerable.FromEnumerable`. The bridge uses `Flux.From(IAsyncEnumerable<T>)` from
-  `AsStream()`, so the primary path is unaffected.

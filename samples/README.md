@@ -4,54 +4,44 @@ This folder contains sample projects and documentation demonstrating Nivara's ca
 
 ## [NivaraIncident/README.md](NivaraIncident/README.md) — Production Incident Replay & Investigation
 
-A reference application that models a production telemetry environment and replays/investigates incidents entirely through Nivara's columnar pipeline — typed expressions, rank family, rolling windows, partitioned windows, chunked/streaming `AsStream` execution, and execution diagnostics. Doubles as a forcing function for the core library: its gap inventory (percentile/quantile/median + stddev aggregation, public execution diagnostics, Parquet chunk streaming) is tracked in the README and planned in `Incident-PLAN.md`.
+Models a production telemetry environment and replays/investigates incidents entirely through Nivara's columnar pipeline — typed expressions, rolling windows, rank family, chunked streaming, and execution diagnostics. Ships four deterministic incident scenarios as a forcing function for core library gaps.
 
-## [NivaraTorch/README.md](NivaraTorch/README.md)
+## [NivaraTorch/README.md](NivaraTorch/README.md) — Cross-Framework Parity: PyTorch ↔ Nivara
 
-### Cross-Framework Parity: PyTorch ↔ Nivara
-
-Nivara provides .NET developers correct autograd without leaving the ecosystem — no Python runtime, no large PyTorch install, no GPU required. These parity examples prove that for CPU-based training, inference, and gradient computation, Nivara's forward and backward autograd produce effectively identical results to PyTorch.
-
-The examples include:
-- **Backward-mode (MLP FraudNet)**: Trains an identical 3-layer MLP in both frameworks and compares loss curves, validating reverse-mode autograd, optimizers, and training loop correctness.
-- **Forward-mode (JVP Parity)**: Computes Jacobian-vector products for 6 canonical operations and compares, validating forward-mode autograd.
-
-### Per-Layer PyTorch ↔ Nivara Comparison
-
-Formal A/B validation of every NN layer type. PyTorch generates reference tensors via `gen_reference.py`; Nivara reproduces them to machine precision across all supported layer types, activations, loss functions, and full-model logits.
+Proves Nivara's autograd produces effectively identical results to PyTorch for CPU-based training, inference, and gradient computation — no Python runtime, no GPU required. Covers backward-mode, forward-mode, and per-layer validation across 21+ NN layer types.
 
 ## [MicroGpt/README.md](MicroGpt/README.md) — Character-level Transformer on Nivara AutoDiff
 
-A faithful per-position port of Andrej Karpathy's microgpt.py that trains a miniature GPT language model on the makemore names dataset. This is the first Nivara showcase example, proving that Nivara's AutoDiff engine can train a real transformer — not just MLPs — with correct gradients and no external dependencies beyond the Nivara core library.
+A faithful per-position port of Karpathy's microgpt.py. The first Nivara showcase example — proves the AutoDiff engine can train a real transformer with correct gradients and no external dependencies.
 
 ## [NivaraGpt/README.md](NivaraGpt/README.md) — Character-level Transformer (Nivara-Native)
 
-A miniature GPT language model built the **Nivara way** — using `Module<T>`, `TransformerBlock<T>`, `CrossEntropyLoss<T>`, `Sampler<T>`, and batched causal attention. Same task as MicroGpt, but built on Nivara's high-level APIs with significantly higher throughput due to batched MatMul and SIMD-accelerated kernels.
+Same task as MicroGpt, but built on Nivara's high-level APIs — `Module<T>`, `TransformerBlock<T>`, `CrossEntropyLoss<T>`, batched causal attention, and model serialization. Demonstrates the idiomatic way to compose Nivara's NN building blocks.
 
 ## [NivaraClassifier/README.md](NivaraClassifier/README.md) — Word-Level Text Classifier
 
-A word-level text classifier that trains a sentiment model (positive/negative) using learned embeddings and an MLP head. Exercises the full autograd training pipeline with sequence data: synthetic data generation → tokenization → embedding → mean pool → MLP → cross-entropy loss → training → inference.
+Trains a sentiment classifier using learned embeddings and an MLP head (or a multi-branch TextCNN). Exercises the full autograd training pipeline: synthetic data generation → tokenization → embedding → pooling → classification loss → training → inference.
 
 ## [NivaraFineTuning/README.md](NivaraFineTuning/README.md) — DistilBERT Fine-Tuning on GLUE SST-2
 
-Fine-tunes a pre-trained DistilBERT model for binary sentiment classification on the GLUE SST-2 dataset — entirely in C#, no Python runtime required for inference.
+Fine-tunes a pre-trained DistilBERT model for binary sentiment classification on GLUE SST-2 — entirely in C#, no Python runtime. Demonstrates transfer learning with SafeTensors weight loading, AdamW optimization, and model persistence.
 
 ## [NivaraChess/README.md](NivaraChess/README.md) — Neural Chess Position Evaluator
 
-Trains a neural network to evaluate chess positions using Nivara's autograd engine. Demonstrates non-NLP use of the library: sparse embeddings (`SparseEmbedding<T>` for NNUE halfKP features), Stockfish knowledge distillation via UCI, and `IEmbeddingGenerator<T>` integration.
+Trains a neural network to approximate Stockfish's position evaluation via knowledge distillation. Demonstrates non-NLP use of the library: sparse embeddings, Stockfish UCI integration, and position embedding generation.
 
 ## [NivaraChat/README.md](NivaraChat/README.md) — Hybrid Agent Workflow
 
-Demonstrates Nivara-trained domain-specific models as first-class participants in `Microsoft.Agents.AI.Workflows` graphs, mixed with an Ollama-backed `ChatClientAgent` node. Also hosts the batched TinyShakespeare transformer (`--tinyshakespeare` mode) served as an `IChatClient` via DI — the single home for all Microsoft.Extensions.AI / Agent Framework integration.
+Demonstrates Nivara-trained domain-specific models as first-class participants in `Microsoft.Agents.AI.Workflows` graphs, mixed with Ollama-backed LLM agents. Includes confidence-based handoff, tool calling, writer-critic loops, RAG pipelines, online learning, and a batched TinyShakespeare transformer served as `IChatClient`.
 
 ## [NivaraTimeSeries/README.md](NivaraTimeSeries/README.md) — Server Monitoring Anomaly Detection
 
-Trains a Conv1d-based Variational Autoencoder on synthetic server monitoring metrics (CPU, memory, disk I/O, network traffic), then detects anomalies by measuring reconstruction error against learned normal patterns.
+Trains a Conv1d-based Variational Autoencoder on synthetic server monitoring metrics, then detects anomalies by measuring reconstruction error against learned normal patterns. Demonstrates temporal feature extraction with `BatchNorm1d` on 3D input.
 
-## [NivaraInference/README.md](NivaraInference/README.md) — HuggingFace Vision Model Inference
+## [NivaraInference/README.md](NivaraInference/README.md) — HuggingFace Model Inference
 
-Loads pre-trained HuggingFace models (MobileNetV2, ResNet-18, MiniLM-L6-v2) using a custom zero-dependency SafeTensors reader and runs forward inference entirely within Nivara's AutoDiff engine. No third-party ML framework dependencies.
+Loads pre-trained HuggingFace models and runs forward inference entirely within Nivara's AutoDiff engine — no Python runtime, no CUDA, no third-party ML framework. Covers both vision models (MobileNetV2, ResNet-18) and text/NLP models (MiniLM, DistilBERT, DistilBERT SST-2). Includes a custom zero-dependency SafeTensors reader and PyTorch reference comparisons.
 
 ## [NivaraVAE/README.md](NivaraVAE/README.md) — Variational Autoencoder for Synthetic Pattern Generation
 
-A variational autoencoder that learns latent representations of synthetic 2D patterns (circles, stripes, blobs, checkerboards, corners, crosses). Demonstrates encoder–decoder architecture, reparameterization trick, and latent space exploration — all powered by Nivara's autograd engine.
+Trains a VAE to learn latent representations of synthetic 2D patterns. Supports both MLP and convolutional (`Conv2d`/`ConvTranspose2d`) architectures. Demonstrates encoder–decoder design, reparameterization trick, and latent space exploration (generation, interpolation, per-dimension walks).

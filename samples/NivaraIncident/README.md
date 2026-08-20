@@ -180,7 +180,7 @@ The Incident Lab is deliberately a **forcing function**: when the sample require
 
 | Gap | Problem | Resolution |
 |-----|---------|------------|
-| **`NivaraFrameExtensions.GroupBy` is a trap** | `GroupBy(frame, keys, aggregations)` validates columns, builds `GroupByOperation` **without aggregations**, and returns only the grouped keys — its own comment says "simplified implementation". | Used typed LINQ `frame.Query<T>().GroupBy().Select()` with `Count()`/`Sum()`/`Average()` for real aggregations, and manual dictionary aggregation after `Collect()` as a fallback. Gap confirmed in Phase 3a. |
+| **`NivaraFrameExtensions.GroupBy` simple overload is key-only** | `GroupBy(frame, keyColumns)` (no aggregations parameter) validates columns, builds `GroupByOperation` **without aggregations**, and returns only the grouped keys. The two-argument overload `GroupBy(frame, keys, aggregations)` works correctly. | Used typed LINQ `frame.Query<T>().GroupBy().Select()` with `Count()`/`Sum()`/`Average()` for real aggregations, and manual dictionary aggregation after `Collect()` as a fallback. |
 | **No `&`/`&&` on `ColumnExpression`** | Cannot write `.Filter(A & B)` for compound predicates. | Chained `.Filter(A).Filter(B)` instead. |
 | **No ternary on `ColumnExpression`** | Cannot write `cond ? litA : litB` in expression trees. | Computed derived columns after `Collect()` or used separate columns. |
 | **Window-heavy queries defeat streaming** | `Rolling`, `Rank`, `Sort`, `GroupBy` are non-streamable — `AsStream` falls back to single-frame materialization. | Measured in Phase 4 bench-stream: chunk count == 1 for all chunk sizes on window-heavy queries. Filter-only prefix streams correctly (>1 chunks). See Limitations. Filed as [#307](https://github.com/khurram-uworx/Nivara/issues/307). |
@@ -239,24 +239,15 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 - Nivara uses `Stopwatch`; Polars uses `time.perf_counter()`.
 - Polars uses idiomatic operations (`rolling_mean`, `group_by`, `join_asof`) rather than porting Nivara's exact algorithm.
 - No warmup passes — each analysis reads fresh from disk/cache.
-- Optimizations applied since previous run: row-group predicate pushdown (#298), pre-captured column comparer for sort (#300), boxing elimination in Parquet reader (#297).
 
 ## Limitations
 
-- **Web UI not yet implemented** — CLI only; ASP.NET Core dashboard planned for Milestone 2.
-- **No Polars cross-validation tests yet** — analysis results are validated by structure/assertions, not fixture comparison.
-- **`NivaraFrameExtensions.GroupBy` is unusable for aggregation** — returns keys only; typed LINQ or manual aggregation required.
-- **Window-heavy streaming falls back to single-frame** — `AsStream` materializes the full frame when window operations are present. Measured in Phase 4: chunk count == 1 for all chunk sizes on Degradation Ordering (Sort + RollingMean + Shift + RollingMax). Filter-only queries stream correctly.
+- **Window-heavy streaming falls back to single-frame** — `AsStream` materializes the full frame when window expressions (Rolling, Rank, Cumulative, Shift) are present. Non-streamable operations (Sort, GroupBy) now benefit from hybrid streaming (stream prefix, concatenate at boundary, resume). Filter-only queries stream correctly.
+- **`NivaraFrameExtensions.GroupBy` simple overload is key-only** — the parameterless `GroupBy(frame, keyColumns)` returns grouped keys only; use the two-argument `GroupBy(frame, keys, aggregations)` overload or typed LINQ for real aggregations.
 - **No learning rate scheduling or advanced query optimization** — straightforward execution, no adaptive strategies.
 
 ## Future work
 
-1. ~~**Phase 4 (Benchmarks)**~~ — ✅ Complete. End-to-end analysis timing, streaming vs eager memory curves, kernel selection visibility (% vectorized), AutoDiff SIMD microbenchmarks, and real numbers recorded in this README.
-2. **Phase 3b (Web UI)** — ASP.NET Core dashboard with timeline, service health, endpoint/regional analysis, dependency view, query-plan view; every number computed by Nivara.
-3. **Polars cross-validation** — regenerate `gen_reference.py` fixtures and add NUnit tests comparing Nivara results against Polars for rank/rolling/aggregation.
-4. **Generated schema** — Roslyn source generator for typed telemetry accessors (Phase 5 roadmap).
-5. **Cloud deployment** — `dotnet run` and `docker run -p 8080:8080` parity on a developer laptop.
+- **Generated schema** — Roslyn source generator for typed telemetry accessors (Phase 5 roadmap).
+- **Cloud deployment** — `dotnet run` and `docker run -p 8080:8080` parity on a developer laptop.
 
----
-
-For the implementation plan and engineering-rule escalation path, see **`../Incident-PLAN.md`**.
