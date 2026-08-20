@@ -205,18 +205,18 @@ same session when comparing (run-to-run variance ~±10% per
 `tests/Nivara.PerformanceTests/README.md`).
 
 Recorded **2026-08-21** on an Intel Core Ultra 7 255H (16 logical processors,
-Windows 11, `torch_threads=16`). Previous measurements on an 11th-gen Intel
-i5-1135G7 (4P/8T) are in the Prev column for reference — the ~3× ratio holds
-on both machines.
+Windows 11, Python 3.12.9, PyTorch 2.13.0+cpu, `torch_threads=16`). Both sides
+fine-tuned DistilBERT-base (67M params) on 100 SST-2 examples at
+`--batch-size 2 --max-len 128`.
 
 | Config | PyTorch (CPU) | Nivara (.NET 10) | Slowdown |
 |--------|---------------|-------------------|----------|
-| Fine-tune B=2, L=128, 25 examples | 1.16 s/batch | 3.4 s/batch | **~3×** |
+| Fine-tune B=2, L=128, 100 examples | 499 ms/batch | 1540 ms/batch | **~3×** |
 
-The gap is far smaller than a naive port suggests: at batch size 2 the per-batch
-cost is dominated by 38 small Linear matmuls and the backward pass through 67M
-params, not by BLAS peak throughput, so the CPU SIMD kernels and memory
-management keep Nivara within ~3× of PyTorch's MKL on this configuration.
+The ~3× gap is consistent with prior measurements on different hardware: at batch
+size 2 the per-batch cost is dominated by 38 small Linear matmuls and the backward
+pass through 67M params, not by BLAS peak throughput, so the CPU SIMD kernels and
+memory management keep Nivara within ~3× of PyTorch's MKL.
 
 ### Estimated full-run wall-clock (approximate)
 
@@ -228,10 +228,10 @@ management keep Nivara within ~3× of PyTorch's MKL on this configuration.
 
 | Config | Framework | 1 epoch (est.) | 3 epochs (est.) |
 |--------|-----------|----------------|-----------------|
-| B=2, L=128 | PyTorch (CPU) | ~11 h | ~32 h |
-| B=2, L=128 | Nivara (.NET 10) | ~32 h | ~96 h |
-| B=4, L=128 | PyTorch (CPU) | ~10 h | ~31 h |
-| B=4, L=128 | Nivara (.NET 10) | ~30 h | ~90 h |
+| B=2, L=128 | PyTorch (CPU) | ~46 h | ~138 h |
+| B=2, L=128 | Nivara (.NET 10) | ~142 h | ~427 h |
+| B=4, L=128 | PyTorch (CPU) | ~42 h | ~127 h |
+| B=4, L=128 | Nivara (.NET 10) | ~131 h | ~394 h |
 
 B=4 figures are not benchmarked end-to-end — they're derived from the measured
 B=2 throughput. Batch cost grows sub-linearly in B (better kernel utilization),
