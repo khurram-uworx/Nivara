@@ -121,6 +121,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         var segments = PartitionAtNonStreamableOps(plan.Operations);
 
+        using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
         var chunkFrames = new List<NivaraFrame>();
         int chunkIndex = 0;
 
@@ -139,6 +140,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             if (chunkScope != null)
                 chunkScope.SetRowCount(processedData.Values.FirstOrDefault()?.Length ?? 0);
             var chunkFrame = NivaraFrame.Create(processedData);
+            budgetTracker.RecordFrame(chunkFrame);
             chunkFrames.Add(chunkFrame);
 
             chunkIndex++;
@@ -146,6 +148,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
             context.Progress?.Report(new ExecutionProgress($"Processing chunk {chunkIndex}", completedWork, totalWork));
         }
+
+        budgetTracker.RecordWarningIfExceeded(diag);
 
         NivaraFrame result;
         if (chunkFrames.Count == 0)
@@ -259,12 +263,14 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             }
         }, context.CancellationToken);
 
+        using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
         var chunkFrames = new List<NivaraFrame>();
         try
         {
             await foreach (var chunkFrame in channel.Reader.ReadAllAsync(context.CancellationToken)
                 .ConfigureAwait(false))
             {
+                budgetTracker.RecordFrame(chunkFrame);
                 chunkFrames.Add(chunkFrame);
             }
             await producer.ConfigureAwait(false);
@@ -278,6 +284,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             try { await producer.ConfigureAwait(false); } catch { }
             throw;
         }
+
+        budgetTracker.RecordWarningIfExceeded(diag);
 
         NivaraFrame result;
         if (chunkFrames.Count == 0)
@@ -369,6 +377,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var firstSegment = segments[0];
         var hasAnyBoundary = segments.Any(s => s.BoundaryOp != null);
 
+        using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
+
         if (!hasAnyBoundary && firstSegment.StreamableOps.Count == plan.Operations.Count)
         {
             await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
@@ -392,9 +402,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         }
 
         var chunkFrames = new List<NivaraFrame>();
-        const long estimatedBytesPerRow = 100;
-        long accumulatedRows = 0;
-        var budgetWarned = false;
 
         await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
             .ConfigureAwait(false))
@@ -406,19 +413,11 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 chunkData, firstSegment.StreamableOps, ct).ConfigureAwait(false);
 
             var chunkFrame = NivaraFrame.Create(processedData);
+            budgetTracker.RecordFrame(chunkFrame);
             chunkFrames.Add(chunkFrame);
-            accumulatedRows += chunkFrame.RowCount;
-
-            if (!budgetWarned && diag != null && context.MemoryBudget > 0
-                && accumulatedRows * estimatedBytesPerRow > context.MemoryBudget)
-            {
-                diag.RecordWarning(new PerformanceWarning(
-                    PerformanceWarningSeverity.Warning,
-                    $"Streaming memory budget exceeded: accumulated {accumulatedRows} rows (~{accumulatedRows * estimatedBytesPerRow:N0} bytes) exceeds budget of {context.MemoryBudget:N0} bytes",
-                    "Consider increasing MemoryBudget or reducing chunk count"));
-                budgetWarned = true;
-            }
         }
+
+        budgetTracker.RecordWarningIfExceeded(diag);
 
         if (chunkFrames.Count == 0)
         {
