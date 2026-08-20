@@ -12,8 +12,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
     static bool isSuitableForStreaming(QueryPlan plan)
     {
         foreach (var operation in plan.Operations)
-            if (NonStreamableOperations.Contains(operation.OperationType)
-                || WindowExpressionInspector.HasWindowExpression(operation))
+            if (NonStreamableOperations.Contains(operation.OperationType))
                 return false;
         return true;
     }
@@ -69,7 +68,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var current = new List<IQueryOperation>();
         foreach (var op in operations)
         {
-            if (NonStreamableOperations.Contains(op.OperationType))
+            if (NonStreamableOperations.Contains(op.OperationType)
+                || WindowExpressionInspector.HasWindowExpression(op))
             {
                 segments.Add(new(current, op));
                 current = new();
@@ -105,9 +105,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var diag = context.ExecutionDiagnostics;
         using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "StreamingExecution") : null;
         context.Progress?.Report(new ExecutionProgress("Starting streaming execution", 0, 1));
-
-        if (plan.Operations.Any(op => WindowExpressionInspector.HasWindowExpression(op)))
-            return new LazyExecutionStrategy().Execute(plan, context);
 
         if (!plan.Source.CanReadInChunks)
         {
@@ -207,9 +204,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var diag = context.ExecutionDiagnostics;
         using var overallScope = diag != null ? DiagnosticHelper.CreateScope(diag, "StreamingExecutionAsync") : null;
         context.Progress?.Report(new ExecutionProgress("Starting streaming execution", 0, 1));
-
-        if (plan.Operations.Any(op => WindowExpressionInspector.HasWindowExpression(op)))
-            return await new LazyExecutionStrategy().ExecuteAsync(plan, context).ConfigureAwait(false);
 
         if (!plan.Source.CanReadInChunks)
         {
