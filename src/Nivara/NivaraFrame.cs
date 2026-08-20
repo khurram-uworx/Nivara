@@ -22,7 +22,7 @@ public sealed class NivaraFrame : IFrame
     /// </summary>
     /// <param name="column">The column to estimate</param>
     /// <returns>Estimated memory usage in bytes</returns>
-    static long estimateColumnMemoryUsage(IColumn column)
+    internal static long estimateColumnMemoryUsage(IColumn column)
     {
         if (column == null) return 0;
 
@@ -296,7 +296,7 @@ public sealed class NivaraFrame : IFrame
     /// Estimates the total memory usage of this frame
     /// </summary>
     /// <returns>Estimated memory usage in bytes</returns>
-    long estimateFrameMemoryUsage()
+    internal long estimateFrameMemoryUsage()
     {
         long totalSize = 0;
         foreach (var column in columns.Values)
