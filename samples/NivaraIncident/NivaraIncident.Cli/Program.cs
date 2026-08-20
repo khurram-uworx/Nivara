@@ -52,6 +52,10 @@ switch (mode)
         foreach (var sid in scenarioIds)
             await Replay(datasetPath, Scenarios.Get(sid), chunkSize);
         break;
+    case "streamix":
+        foreach (var sid in scenarioIds)
+            await RunStreamixScenarios(datasetPath, Scenarios.Get(sid), chunkSize);
+        break;
     default:
         PrintUsage();
         break;
@@ -398,6 +402,40 @@ void PrintFrameSummary(NivaraFrame frame)
     }
 }
 
+async Task RunStreamixScenarios(string dsPath, IncidentScenario sc, int cs)
+{
+    Console.WriteLine($"=== Streamix Scenarios: {sc.Id} — {sc.Name} ===");
+    Console.WriteLine($"Dataset: {dsPath}");
+    Console.WriteLine();
+
+    Console.WriteLine("--- Scenario 1: Fault-Tolerant Streaming (Retry + Checkpoint) ---");
+    var sw1 = Stopwatch.StartNew();
+    int rows1 = await StreamixScenarios.RunFaultTolerantStreaming(dsPath, sc, cs);
+    sw1.Stop();
+    Console.WriteLine($"  Rows processed: {rows1:N0}  ({sw1.Elapsed.TotalSeconds:F1}s)");
+    Console.WriteLine();
+
+    Console.WriteLine("--- Scenario 2: Event-Time Timestamped Analytics ---");
+    var sw2 = Stopwatch.StartNew();
+    var stats = await StreamixScenarios.RunTimestampedAnalytics(dsPath, sc, cs);
+    sw2.Stop();
+    Console.WriteLine($"  Stats collected: {stats.Count:N0}  ({sw2.Elapsed.TotalSeconds:F1}s)");
+    if (stats.Count > 0)
+    {
+        double avgDur = stats.Average(s => s.DurationMs);
+        int errorCount = stats.Count(s => s.StatusCode >= 500);
+        Console.WriteLine($"  Avg DurationMs: {avgDur:F1}  Errors: {errorCount} ({100.0 * errorCount / stats.Count:F1}%)");
+    }
+    Console.WriteLine();
+
+    Console.WriteLine("--- Scenario 3: Online AutoDiff Learning ---");
+    var sw3 = Stopwatch.StartNew();
+    int batches = await StreamixScenarios.RunOnlineAutoDiffLearning(dsPath, sc, batchSize: 128, epochs: 3);
+    sw3.Stop();
+    Console.WriteLine($"  Training batches: {batches:N0}  ({sw3.Elapsed.TotalSeconds:F1}s)");
+    Console.WriteLine();
+}
+
 void PrintUsage()
 {
     Console.WriteLine("Nivara Incident Lab");
@@ -408,4 +446,5 @@ void PrintUsage()
     Console.WriteLine("  NivaraIncident.Cli bench-stream  --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli bench-kernels --dataset <path> --scenario <A|B|C|D|all>");
     Console.WriteLine("  NivaraIncident.Cli replay        --dataset <path> --scenario <A|B|C|D|all> --chunk-size <N>");
+    Console.WriteLine("  NivaraIncident.Cli streamix      --dataset <path> --scenario <A|B|C|D|all> [--chunk-size <N>]");
 }
