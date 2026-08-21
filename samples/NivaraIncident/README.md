@@ -275,7 +275,7 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 
 ## Limitations
 
-- **Window operations materialize at boundary** — `AsStream` streams leading operations (Filter, Select) per-chunk, then materializes the full concatenated frame at window boundaries (Rolling, Rank, Cumulative, Shift) before resuming. The window operation runs on the full column for correctness. Queries with Sort before windows also materialize at the Sort boundary.
+- **Window operations stream in tiers** — unpartitioned rolling/cumulative/lag windows now stream per-chunk with bounded cross-chunk state, and partitioned standalone windows pipeline per-partition and flush at drain. What still materializes at the boundary: `Sort`/`GroupBy`/`Join`/`Distinct`, rank-family windows (`RowNumber`, `Rank`), broadcast aggregates (`Quantile`, `Median`), and lead/negative-shift windows (delayed-emission streaming tracked in [#331](https://github.com/khurram-uworx/Nivara/issues/331)). Materializations are visible via `ExecutionDiagnostics.StreamMaterializationCount` / `RowsMaterializedAtBoundaries`; the incident benchmark's Sort-before-window queries still materialize at the Sort boundary. See `docs/STREAMING.md` for the full tiered contract (#307).
 - **`NivaraFrameExtensions.GroupBy` simple overload is key-only** — the parameterless `GroupBy(frame, keyColumns)` returns grouped keys only; use the two-argument `GroupBy(frame, keys, aggregations)` overload or typed LINQ for real aggregations.
 - **No learning rate scheduling or advanced query optimization** — straightforward execution, no adaptive strategies.
 

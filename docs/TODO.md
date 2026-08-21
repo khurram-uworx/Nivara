@@ -196,6 +196,13 @@ Commit: `docs: update streaming contract and incident sample limitations for win
   need delayed-emission streaming; until then `TryCreate` refuses them (they materialize
   correctly, with a Phase 1 diagnostic). The pre-Phase-2 path computed them per-chunk
   with overlap=0 — silently wrong at chunk boundaries.
+- Phase 3 scope notes: no standalone `RankOperation` class exists (rank windows are
+  select-expression-only), so rank stays a tier-3 materialization. The plan's
+  O(largest-partition) memory claim was revised during implementation: zero-copy slices
+  pin parent chunk columns, so input is retained until drain either way; the actual wins
+  are skipping the full-frame ConcatenateVertical pass before the boundary executes,
+  hashing partitions incrementally instead of re-hashing the concatenated frame, and a
+  largest-partition-only working set during window computation itself.
 
 ## GitHub issues log
 
