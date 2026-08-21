@@ -1666,6 +1666,145 @@ public class StreamingExecutionStrategyTests
         ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
     }
 
+    [Test]
+    public void Execute_PartitionedRollingOperation_MatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var op = new RollingOperation(
+            "A", "Roll", 3,
+            new WindowSpec().PartitionBy("K").OrderBy("A"));
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+
+        var lazyPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 500),
+            new IQueryOperation[] { op });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingSource = new PartitionedChunkedSource(totalRowCount: 500);
+        var streamingPlan = new QueryPlan(streamingSource, new IQueryOperation[] { op });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 137;
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(streamingPlan, context);
+
+        Assert.That(streamingSource.ChunksRead.Count, Is.GreaterThan(1),
+            "Partitioned window plan should stream multiple chunks");
+        Assert.That(diagnostics.StreamMaterializationCount, Is.Zero,
+            "Partitioned windows must be pipelined per-partition, not materialized");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_PartitionedCumulativeOperation_YieldsSingleFrameAndMatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var op = new CumulativeOperation(
+            "A", "Cum", new WindowSpec().PartitionBy("K").OrderBy("A"));
+
+        var lazyPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 500),
+            new IQueryOperation[] { op });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 500),
+            new IQueryOperation[] { op });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 137;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(streamingPlan, context))
+            frames.Add(frame);
+
+        try
+        {
+            Assert.That(frames.Count, Is.EqualTo(1),
+                "Partitioned window results are only known at drain and yield a single frame");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, frames[0]);
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public async Task ExecuteAsync_PartitionedShiftOperation_MatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var op = new ShiftOperation(
+            "A", "Lag", 2, new WindowSpec().PartitionBy("K").OrderBy(new[] { "A" }));
+
+        var lazyPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 500),
+            new IQueryOperation[] { op });
+        using var lazyResult = await lazyStrategy.ExecuteAsync(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 500),
+            new IQueryOperation[] { op });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 137;
+
+        using var result = await strategy.ExecuteAsync(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Execute_PartitionedWindow_NullPartitionKeys_MatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var op = new RollingOperation(
+            "A", "Roll", 2,
+            new WindowSpec().PartitionBy("K").OrderBy("A"));
+
+        var lazyPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 400, nullableKeys: true),
+            new IQueryOperation[] { op });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 400, nullableKeys: true),
+            new IQueryOperation[] { op });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 97;
+
+        using var result = strategy.Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Execute_HighCardinalityPartitions_MatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var op = new RollingOperation(
+            "A", "Roll", 2,
+            new WindowSpec().PartitionBy("K").OrderBy("A"));
+
+        var lazyPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 300, cardinality: 1),
+            new IQueryOperation[] { op });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            new PartitionedChunkedSource(totalRowCount: 300, cardinality: 1),
+            new IQueryOperation[] { op });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 71;
+
+        using var result = strategy.Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
     static void assertNullableIntColumnsMatch(List<NivaraFrame> frames, NivaraFrame lazyResult, string columnName)
     {
         var totalRows = frames.Sum(f => f.RowCount);
@@ -1744,6 +1883,74 @@ sealed class DoubleChunkedSource : IQuerySource
         await Task.Yield();
         return ReadChunk(chunkIndex, chunkSize);
     }
+
+    public void Dispose() { }
+}
+
+sealed class PartitionedChunkedSource : IQuerySource
+{
+    readonly int totalRowCount;
+    readonly int cardinality;
+    readonly bool nullableKeys;
+
+    public PartitionedChunkedSource(int totalRowCount, int cardinality = 3, bool nullableKeys = false)
+    {
+        this.totalRowCount = totalRowCount;
+        this.cardinality = cardinality;
+        this.nullableKeys = nullableKeys;
+    }
+
+    public Schema Schema => new(new[] { ("A", typeof(int)), ("K", typeof(int)) });
+    public bool IsLazy => false;
+    public bool CanReadInChunks => true;
+    public int? EstimatedRowCount => totalRowCount;
+    public System.Collections.Concurrent.ConcurrentBag<int> ChunksRead { get; } = new();
+
+    static int KeyAt(int globalIndex, int cardinality) => globalIndex % cardinality;
+
+    IColumn buildKeyColumn(int start, int count)
+    {
+        if (!nullableKeys)
+        {
+            var keys = new int[count];
+            for (int i = 0; i < count; i++) keys[i] = KeyAt(start + i, cardinality);
+            return NivaraColumn<int>.Create(keys);
+        }
+
+        var nullableKeys_ = new int?[count];
+        for (int i = 0; i < count; i++)
+        {
+            var global = start + i;
+            nullableKeys_[i] = global % 7 == 0 ? null : KeyAt(global, cardinality);
+        }
+        return NivaraColumn.CreateFromNullable(nullableKeys_);
+    }
+
+    IReadOnlyDictionary<string, IColumn> Build(int start, int count)
+    {
+        var data = new int[count];
+        for (int i = 0; i < count; i++) data[i] = start + i;
+        return new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<int>.Create(data),
+            ["K"] = buildKeyColumn(start, count),
+        };
+    }
+
+    public IReadOnlyDictionary<string, IColumn> Execute() => Build(0, totalRowCount);
+
+    public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
+    {
+        ChunksRead.Add(chunkIndex);
+        var start = chunkIndex * chunkSize;
+        if (start >= totalRowCount)
+            return new Dictionary<string, IColumn>();
+        return Build(start, Math.Min(chunkSize, totalRowCount - start));
+    }
+
+    public ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult(ReadChunk(chunkIndex, chunkSize));
 
     public void Dispose() { }
 }

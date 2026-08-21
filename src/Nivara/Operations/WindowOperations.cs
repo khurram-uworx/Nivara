@@ -183,6 +183,13 @@ abstract class WindowOperationBase : IQueryOperation
     /// <returns>The computed result column</returns>
     protected abstract IColumn Compute(IColumn sourceColumn);
 
+    /// <summary>
+    /// Internal accessor for the raw per-partition kernel, used by the streaming
+    /// <see cref="Execution.PartitionedWindowStreamer"/> which performs its own
+    /// partitioning across chunks.
+    /// </summary>
+    internal IColumn ComputeForPartition(IColumn sourceColumn) => Compute(sourceColumn);
+
     /// <inheritdoc />
     public override string ToString()
     {
