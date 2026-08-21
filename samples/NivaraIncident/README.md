@@ -275,7 +275,7 @@ python benchmark.py --dataset ../../../samples/data/benchmark-1m
 
 ## Limitations
 
-- **Window operations materialize at boundary** — `AsStream` streams leading operations (Filter, Select) per-chunk, then materializes the full concatenated frame at window boundaries (Rolling, Rank, Cumulative, Shift) before resuming. The window operation runs on the full column for correctness. Queries with Sort before windows also materialize at the Sort boundary.
+- **Boundary operations still materialize** — `Sort`, `GroupBy`, `Join`, `Distinct`, rank-family windows, and broadcast aggregates execute once over concatenated data, so the incident benchmark's Sort-before-window analyses yield a single chunk regardless of `--stream`. Visible via `ExecutionDiagnostics.StreamMaterializationCount`; see `docs/STREAMING.md`.
 - **`NivaraFrameExtensions.GroupBy` simple overload is key-only** — the parameterless `GroupBy(frame, keyColumns)` returns grouped keys only; use the two-argument `GroupBy(frame, keys, aggregations)` overload or typed LINQ for real aggregations.
 - **No learning rate scheduling or advanced query optimization** — straightforward execution, no adaptive strategies.
 

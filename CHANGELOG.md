@@ -2,6 +2,28 @@
 
 All notable changes to Nivara are documented here. Released versions are published to NuGet via the tag-triggered CD workflow (`v*` tags on `main`).
 
+## [Unreleased]
+
+### Changed
+
+- **Lead / negative-shift windows stream via delayed emission (#331)** —
+  `StreamingWindowProcessor` now covers lookahead windows: `Lead` expressions,
+  negative-period `Shift` window expressions, and standalone `ShiftOperation` with
+  `Periods < 0` stream per chunk instead of forcing full boundary materialization. Each
+  round executes the boundary over one contiguous run — the last `lookback + lead`
+  input rows plus the fresh chunk — and emits only the rows whose entire lookahead is
+  satisfied by data seen so far; the held-back tail is re-computed once the next chunk
+  arrives and finalized at drain with the operation's natural end-of-data semantics
+  (nulls or `fillValue`). Cross-chunk memory stays bounded by
+  `max(rolling lookback, lag periods) + max(lead periods)` rather than frame size, and
+  mixed selects (lead alongside rolling/lag/cumulative windows) no longer materialize;
+  cumulative columns defer computed values through a per-slot FIFO so they stay aligned
+  with the delayed emission without replaying rows into the running aggregate.
+  Cadence note for `AsStream`: plans containing lookahead windows yield one frame per
+  chunk delayed by a single chunk plus a final flush frame carrying exactly the held-back
+  rows (empty prefixes are suppressed). `StreamMaterializationCount` reports zero for
+  such plans.
+
 ## [1.4.0] - 2026-08-21
 
 ### Added

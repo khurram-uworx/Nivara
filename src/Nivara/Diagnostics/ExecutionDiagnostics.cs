@@ -160,12 +160,41 @@ public sealed class ExecutionDiagnostics
     public int MaterializedColumns { get; internal set; }
 
     /// <summary>
+    /// Gets the number of times streaming execution materialized rows at a boundary
+    /// operation (Sort, GroupBy, Join, window, ...) instead of streaming per-chunk.
+    /// Overlap- or carry-streamed window boundaries do not count.
+    /// </summary>
+    public int StreamMaterializationCount { get; internal set; }
+
+    /// <summary>
+    /// Gets the total number of rows that passed through boundary materializations
+    /// during streaming execution.
+    /// </summary>
+    public long RowsMaterializedAtBoundaries { get; internal set; }
+
+    /// <summary>
     /// Accumulates the number of rows read from the data source (chunk-safe).
     /// </summary>
     internal void AddRowsRead(long count)
     {
         if (count > 0)
             RowsRead += count;
+    }
+
+    /// <summary>
+    /// Records a boundary materialization: streaming executed
+    /// <paramref name="boundaryOperation"/> over <paramref name="rowCount"/> concatenated
+    /// rows instead of streaming per-chunk.
+    /// </summary>
+    internal void AddBoundaryMaterialization(string boundaryOperation, long rowCount)
+    {
+        StreamMaterializationCount++;
+        if (rowCount > 0)
+            RowsMaterializedAtBoundaries += rowCount;
+        RecordWarning(new PerformanceWarning(
+            PerformanceWarningSeverity.Info,
+            $"Streaming materialized {rowCount:N0} rows at boundary '{boundaryOperation}'",
+            "Restructure the query so streamable operations precede the boundary, or partition the window with WindowSpec to enable per-partition streaming."));
     }
 
     /// <summary>

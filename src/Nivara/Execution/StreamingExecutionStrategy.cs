@@ -46,6 +46,14 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         return current;
     }
 
+    static void recordMaterialization(NivaraExecutionContext context, IQueryOperation boundaryOp, long rowCount)
+    {
+        var description = boundaryOp.ToString() ?? boundaryOp.GetType().Name;
+        context.ExecutionDiagnostics?.AddBoundaryMaterialization(description, rowCount);
+        context.Progress?.Report(new ExecutionProgress(
+            $"Materializing boundary '{description}' over {rowCount:N0} rows", 0, 1));
+    }
+
     static async ValueTask<IReadOnlyDictionary<string, IColumn>> executeOperationsOnDataAsync(
         IReadOnlyDictionary<string, IColumn> data,
         IReadOnlyList<IQueryOperation> operations,
@@ -121,17 +129,10 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         var segments = PartitionAtNonStreamableOps(plan.Operations);
 
-        WindowOverlapBuffer? overlapBuffer = null;
-        int overlapBoundarySegIdx = -1;
-        if (segments.Count > 0 && segments[0].BoundaryOp != null)
-        {
-            var overlapSize = WindowOverlapBuffer.DetermineOverlapSize(segments[0].BoundaryOp);
-            if (overlapSize > 0)
-            {
-                overlapBuffer = new WindowOverlapBuffer(overlapSize);
-                overlapBoundarySegIdx = 0;
-            }
-        }
+        var firstBoundary = segments.Count > 0 ? segments[0].BoundaryOp : null;
+        var windowProcessor = StreamingWindowProcessor.TryCreate(firstBoundary);
+        var partitionStreamer = windowProcessor == null ? PartitionedWindowStreamer.TryCreate(firstBoundary) : null;
+        bool streamedFirstBoundary = windowProcessor != null || partitionStreamer != null;
 
         using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
         var chunkFrames = new List<NivaraFrame>();
@@ -150,62 +151,83 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             var processedData = executeOperationsOnData(chunkData, segments[0].StreamableOps);
 
-            NivaraFrame chunkFrame;
-            if (overlapBuffer != null)
+            chunkIndex++;
+            var completedWork = chunkIndex;
+            var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
+            context.Progress?.Report(new ExecutionProgress($"Processing chunk {chunkIndex}", completedWork, totalWork));
+
+            if (partitionStreamer != null)
             {
-                var windowResult = overlapBuffer.HasData
-                    ? segments[0].BoundaryOp!.Execute(overlapBuffer.PrependToChunk(processedData))
-                    : segments[0].BoundaryOp!.Execute(processedData);
-                var finalData = overlapBuffer.HasData
-                    ? WindowOverlapBuffer.TrimFirstN(windowResult, overlapBuffer.OverlapSize)
-                    : windowResult;
-                chunkFrame = NivaraFrame.Create(finalData);
-                overlapBuffer.UpdateFromChunk(processedData);
+                partitionStreamer.ProcessChunk(processedData);
+                continue;
             }
-            else
+
+            var chunkFrame = windowProcessor != null
+                ? NivaraFrame.Create(windowProcessor.ProcessChunk(processedData))
+                : NivaraFrame.Create(processedData);
+
+            if (windowProcessor != null && chunkFrame.RowCount == 0)
             {
-                chunkFrame = NivaraFrame.Create(processedData);
+                // Delayed emission legitimately yields empty prefixes until the lead
+                // distance is satisfied by incoming data.
+                chunkFrame.Dispose();
+                continue;
             }
 
             if (chunkScope != null)
                 chunkScope.SetRowCount(chunkFrame.RowCount);
             budgetTracker.RecordFrame(chunkFrame);
             chunkFrames.Add(chunkFrame);
+        }
 
-            chunkIndex++;
-            var completedWork = chunkIndex;
-            var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
-            context.Progress?.Report(new ExecutionProgress($"Processing chunk {chunkIndex}", completedWork, totalWork));
+        if (windowProcessor != null)
+        {
+            var flushed = windowProcessor.Flush();
+            if (flushed != null)
+            {
+                var flushFrame = NivaraFrame.Create(flushed);
+                budgetTracker.RecordFrame(flushFrame);
+                chunkFrames.Add(flushFrame);
+            }
         }
 
         budgetTracker.RecordWarningIfExceeded(diag);
 
         NivaraFrame result;
-        if (chunkFrames.Count == 0)
+        if (partitionStreamer != null && chunkIndex > 0)
         {
-            context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
-            var fallbackResult = executor.Execute(plan, diag);
-            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
-            return fallbackResult;
+            result = NivaraFrame.Create(partitionStreamer.Flush());
+            budgetTracker.RecordFrame(result);
         }
-
-        result = chunkFrames.Count == 1
-            ? chunkFrames[0]
-            : NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
-
-        if (chunkFrames.Count > 1)
+        else
         {
-            foreach (var f in chunkFrames) f.Dispose();
+            if (chunkFrames.Count == 0)
+            {
+                context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
+                var fallbackResult = executor.Execute(plan, diag);
+                context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+                return fallbackResult;
+            }
+
+            result = chunkFrames.Count == 1
+                ? chunkFrames[0]
+                : NivaraFrameExtensions.ConcatenateVertical(chunkFrames);
+
+            if (chunkFrames.Count > 1)
+            {
+                foreach (var f in chunkFrames) f.Dispose();
+            }
         }
 
         for (int segIdx = 0; segIdx < segments.Count; segIdx++)
         {
-            if (segIdx == overlapBoundarySegIdx) continue;
+            if (segIdx == 0 && streamedFirstBoundary) continue;
 
             var segment = segments[segIdx];
 
             if (segment.BoundaryOp != null)
             {
+                recordMaterialization(context, segment.BoundaryOp, result.RowCount);
                 var columns = result.ColumnNames.ToDictionary(
                     name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
@@ -256,16 +278,76 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         var segments = PartitionAtNonStreamableOps(plan.Operations);
 
-        WindowOverlapBuffer? overlapBuffer = null;
-        int overlapBoundarySegIdx = -1;
-        if (segments.Count > 0 && segments[0].BoundaryOp != null)
+        var firstBoundary = segments.Count > 0 ? segments[0].BoundaryOp : null;
+        var windowProcessor = StreamingWindowProcessor.TryCreate(firstBoundary);
+        var partitionStreamer = windowProcessor == null ? PartitionedWindowStreamer.TryCreate(firstBoundary) : null;
+        bool streamedFirstBoundary = windowProcessor != null || partitionStreamer != null;
+
+        using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
+
+        if (partitionStreamer != null)
         {
-            var overlapSize = WindowOverlapBuffer.DetermineOverlapSize(segments[0].BoundaryOp);
-            if (overlapSize > 0)
+            var chunkIndexPipelined = 0;
+            await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, context.CancellationToken)
+                .ConfigureAwait(false))
             {
-                overlapBuffer = new WindowOverlapBuffer(overlapSize);
-                overlapBoundarySegIdx = 0;
+                context.CancellationToken.ThrowIfCancellationRequested();
+                diag?.AddRowsRead(QueryExecutor.GetRowCount(chunkData));
+
+                var processedData = await executeOperationsOnDataAsync(
+                    chunkData, segments[0].StreamableOps, context.CancellationToken).ConfigureAwait(false);
+
+                partitionStreamer.ProcessChunk(processedData);
+
+                chunkIndexPipelined++;
+                var totalWork = totalChunks > 0 ? totalChunks : chunkIndexPipelined;
+                context.Progress?.Report(new ExecutionProgress(
+                    $"Processing chunk {chunkIndexPipelined}", chunkIndexPipelined, totalWork));
             }
+
+            budgetTracker.RecordWarningIfExceeded(diag);
+
+            NivaraFrame pipelinedResult;
+            if (chunkIndexPipelined == 0)
+            {
+                context.Progress?.Report(new ExecutionProgress("No data from chunks, falling back to full execution", 0, 1));
+                pipelinedResult = executor.Execute(plan, diag);
+            }
+            else
+            {
+                pipelinedResult = NivaraFrame.Create(partitionStreamer.Flush());
+                budgetTracker.RecordFrame(pipelinedResult);
+            }
+
+            for (int segIdx = 1; segIdx < segments.Count; segIdx++)
+            {
+                var segment = segments[segIdx];
+
+                if (segment.BoundaryOp != null)
+                {
+                    recordMaterialization(context, segment.BoundaryOp, pipelinedResult.RowCount);
+                    var columns = pipelinedResult.ColumnNames.ToDictionary(
+                        name => name, name => pipelinedResult.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+                    var processed = segment.BoundaryOp.Execute(columns);
+                    var newResult = new NivaraFrame(processed.Select(kvp => (kvp.Key, kvp.Value)));
+                    pipelinedResult.Dispose();
+                    pipelinedResult = newResult;
+                }
+
+                if (segment.StreamableOps.Count > 0)
+                {
+                    var columns = pipelinedResult.ColumnNames.ToDictionary(
+                        name => name, name => pipelinedResult.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+                    var processed = await executeOperationsOnDataAsync(
+                        columns, segment.StreamableOps, context.CancellationToken).ConfigureAwait(false);
+                    var newResult = new NivaraFrame(processed.Select(kvp => (kvp.Key, kvp.Value)));
+                    pipelinedResult.Dispose();
+                    pipelinedResult = newResult;
+                }
+            }
+
+            context.Progress?.Report(new ExecutionProgress("Streaming execution completed", 1, 1));
+            return pipelinedResult;
         }
 
         var channel = CreateBoundChannel(context.MemoryBudget, chunkSize);
@@ -287,33 +369,35 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                     var processedData = await executeOperationsOnDataAsync(
                         chunkData, segments[0].StreamableOps, context.CancellationToken).ConfigureAwait(false);
 
-                    NivaraFrame chunkFrame;
-                    if (overlapBuffer != null)
+                    var chunkFrame = windowProcessor != null
+                        ? NivaraFrame.Create(windowProcessor.ProcessChunk(processedData))
+                        : NivaraFrame.Create(processedData);
+
+                    if (windowProcessor != null && chunkFrame.RowCount == 0)
                     {
-                        var windowResult = overlapBuffer.HasData
-                            ? segments[0].BoundaryOp!.Execute(overlapBuffer.PrependToChunk(processedData))
-                            : segments[0].BoundaryOp!.Execute(processedData);
-                        var finalData = overlapBuffer.HasData
-                            ? WindowOverlapBuffer.TrimFirstN(windowResult, overlapBuffer.OverlapSize)
-                            : windowResult;
-                        chunkFrame = NivaraFrame.Create(finalData);
-                        overlapBuffer.UpdateFromChunk(processedData);
+                        chunkFrame.Dispose();
                     }
                     else
                     {
-                        chunkFrame = NivaraFrame.Create(processedData);
+                        if (chunkScope != null)
+                            chunkScope.SetRowCount(chunkFrame.RowCount);
+
+                        inFlight = chunkFrame;
+                        await channel.Writer.WriteAsync(chunkFrame, context.CancellationToken).ConfigureAwait(false);
+                        inFlight = null;
                     }
-
-                    if (chunkScope != null)
-                        chunkScope.SetRowCount(chunkFrame.RowCount);
-
-                    inFlight = chunkFrame;
-                    await channel.Writer.WriteAsync(chunkFrame, context.CancellationToken).ConfigureAwait(false);
-                    inFlight = null;
 
                     chunkIndex++;
                     var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
                     context.Progress?.Report(new ExecutionProgress($"Processing chunk {chunkIndex}", chunkIndex, totalWork));
+                }
+
+                if (windowProcessor != null)
+                {
+                    var flushed = windowProcessor.Flush();
+                    if (flushed != null)
+                        await channel.Writer.WriteAsync(NivaraFrame.Create(flushed), context.CancellationToken)
+                            .ConfigureAwait(false);
                 }
             }
             finally
@@ -323,7 +407,6 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             }
         }, context.CancellationToken);
 
-        using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
         var chunkFrames = new List<NivaraFrame>();
         try
         {
@@ -367,12 +450,13 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         for (int segIdx = 0; segIdx < segments.Count; segIdx++)
         {
-            if (segIdx == overlapBoundarySegIdx) continue;
+            if (segIdx == 0 && streamedFirstBoundary) continue;
 
             var segment = segments[segIdx];
 
             if (segment.BoundaryOp != null)
             {
+                recordMaterialization(context, segment.BoundaryOp, result.RowCount);
                 var columns = result.ColumnNames.ToDictionary(
                     name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
@@ -439,17 +523,10 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var firstSegment = segments[0];
         var hasAnyBoundary = segments.Any(s => s.BoundaryOp != null);
 
-        WindowOverlapBuffer? overlapBuffer = null;
-        int overlapBoundarySegIdx = -1;
-        if (segments.Count > 0 && segments[0].BoundaryOp != null)
-        {
-            var overlapSize = WindowOverlapBuffer.DetermineOverlapSize(segments[0].BoundaryOp);
-            if (overlapSize > 0)
-            {
-                overlapBuffer = new WindowOverlapBuffer(overlapSize);
-                overlapBoundarySegIdx = 0;
-            }
-        }
+        var windowProcessor = StreamingWindowProcessor.TryCreate(hasAnyBoundary ? firstSegment.BoundaryOp : null);
+        var partitionStreamer = windowProcessor == null
+            ? PartitionedWindowStreamer.TryCreate(hasAnyBoundary ? firstSegment.BoundaryOp : null)
+            : null;
 
         using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
 
@@ -475,7 +552,78 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             yield break;
         }
 
-        if (overlapBuffer != null)
+        if (partitionStreamer != null)
+        {
+            var chunkCount = 0;
+            await foreach (var chunkData in plan.Source.ToAsyncEnumerable(chunkSize, ct)
+                .ConfigureAwait(false))
+            {
+                ct.ThrowIfCancellationRequested();
+                diag?.AddRowsRead(QueryExecutor.GetRowCount(chunkData));
+
+                var processedData = await executeOperationsOnDataAsync(
+                    chunkData, firstSegment.StreamableOps, ct).ConfigureAwait(false);
+
+                partitionStreamer.ProcessChunk(processedData);
+                chunkCount++;
+            }
+
+            budgetTracker.RecordWarningIfExceeded(diag);
+
+            if (chunkCount == 0)
+            {
+                var columns = await plan.Source.ExecuteAsync(ct).ConfigureAwait(false);
+                var processed = await executeOperationsOnDataAsync(columns, plan.Operations, ct).ConfigureAwait(false);
+                var frame = NivaraFrame.Create(processed);
+                if (diag != null)
+                {
+                    diag.RowsReturned = frame.RowCount;
+                    diag.MaterializedColumns = frame.ColumnCount;
+                }
+                yield return frame;
+                yield break;
+            }
+
+            var resultFrame = NivaraFrame.Create(partitionStreamer.Flush());
+            budgetTracker.RecordFrame(resultFrame);
+
+            for (int segIdx = 1; segIdx < segments.Count; segIdx++)
+            {
+                var segment = segments[segIdx];
+
+                if (segment.BoundaryOp != null)
+                {
+                    recordMaterialization(context, segment.BoundaryOp, resultFrame.RowCount);
+                    var columns = resultFrame.ColumnNames.ToDictionary(
+                        name => name, name => resultFrame.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+                    var processed = segment.BoundaryOp.Execute(columns);
+                    var newResult = NivaraFrame.Create(processed);
+                    resultFrame.Dispose();
+                    resultFrame = newResult;
+                }
+
+                if (segment.StreamableOps.Count > 0)
+                {
+                    var columns = resultFrame.ColumnNames.ToDictionary(
+                        name => name, name => resultFrame.GetColumn(name), StringComparer.OrdinalIgnoreCase);
+                    var processed = await executeOperationsOnDataAsync(
+                        columns, segment.StreamableOps, ct).ConfigureAwait(false);
+                    var newResult = NivaraFrame.Create(processed);
+                    resultFrame.Dispose();
+                    resultFrame = newResult;
+                }
+            }
+
+            if (diag != null)
+            {
+                diag.RowsReturned = resultFrame.RowCount;
+                diag.MaterializedColumns = resultFrame.ColumnCount;
+            }
+            yield return resultFrame;
+            yield break;
+        }
+
+        if (windowProcessor != null)
         {
             var chunkFrames = new List<NivaraFrame>();
             var hasTrailingBoundaries = segments.Count > 1 && segments.Skip(1).Any(s => s.BoundaryOp != null);
@@ -489,15 +637,17 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 var processedData = await executeOperationsOnDataAsync(
                     chunkData, firstSegment.StreamableOps, ct).ConfigureAwait(false);
 
-                var windowResult = overlapBuffer.HasData
-                    ? firstSegment.BoundaryOp!.Execute(overlapBuffer.PrependToChunk(processedData))
-                    : firstSegment.BoundaryOp!.Execute(processedData);
-                var finalData = overlapBuffer.HasData
-                    ? WindowOverlapBuffer.TrimFirstN(windowResult, overlapBuffer.OverlapSize)
-                    : windowResult;
-                overlapBuffer.UpdateFromChunk(processedData);
+                var finalData = windowProcessor.ProcessChunk(processedData);
 
                 var chunkFrame = NivaraFrame.Create(finalData);
+                if (chunkFrame.RowCount == 0)
+                {
+                    // Delayed emission legitimately yields empty prefixes until the lead
+                    // distance is satisfied by incoming data.
+                    chunkFrame.Dispose();
+                    continue;
+                }
+
                 budgetTracker.RecordFrame(chunkFrame);
 
                 if (!hasTrailingBoundaries)
@@ -512,6 +662,27 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 else
                 {
                     chunkFrames.Add(chunkFrame);
+                }
+            }
+
+            var flushedData = windowProcessor.Flush();
+            if (flushedData != null)
+            {
+                var flushFrame = NivaraFrame.Create(flushedData);
+                budgetTracker.RecordFrame(flushFrame);
+
+                if (!hasTrailingBoundaries)
+                {
+                    if (diag != null)
+                    {
+                        diag.RowsReturned += flushFrame.RowCount;
+                        diag.MaterializedColumns = flushFrame.ColumnCount;
+                    }
+                    yield return flushFrame;
+                }
+                else
+                {
+                    chunkFrames.Add(flushFrame);
                 }
             }
 
@@ -548,12 +719,13 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             for (int segIdx = 0; segIdx < segments.Count; segIdx++)
             {
-                if (segIdx == overlapBoundarySegIdx) continue;
+                if (segIdx == 0) continue;
 
                 var segment = segments[segIdx];
 
                 if (segment.BoundaryOp != null)
                 {
+                    recordMaterialization(context, segment.BoundaryOp, result.RowCount);
                     var columns = result.ColumnNames.ToDictionary(
                         name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                     var processed = segment.BoundaryOp.Execute(columns);
@@ -637,6 +809,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             if (segment.BoundaryOp != null)
             {
+                recordMaterialization(context, segment.BoundaryOp, legacyResult.RowCount);
                 var columns = legacyResult.ColumnNames.ToDictionary(
                     name => name, name => legacyResult.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);

@@ -23,36 +23,64 @@ full-result frame — see the boundary contract below.
 
 ## The streaming contract
 
-`AsStream` yields **one `NivaraFrame` per source chunk** only when **both** hold:
+`AsStream` yields **one `NivaraFrame` per source chunk** when **both** hold:
 
 1. **Fully streamable plan** — the plan contains only streamable operations
-   (`Filter`, `Select`, `Slice`, `SelectRows`) and **no window expressions**.
+   (`Filter`, `Select`, `Slice`, `SelectRows`) and no window expressions.
 2. **Chunk-capable source** — the source reports `CanReadInChunks == true`
    (CSV, JSON, Parquet lazy sources do; in-memory frames and other in-memory sources do not).
 
-Otherwise `AsStream` yields a **single frame produced from the full source** whose rows are
-identical to `CollectAsync()`. The one-frame-per-chunk contract does **not** hold.
+Unpartitioned rolling, cumulative, and lag window boundaries keep this per-chunk
+contract too (tier 1 below). Other plans degrade as described there: partitioned
+windows yield a single drained frame; remaining boundaries yield a single frame whose
+rows are identical to `CollectAsync()`.
 
-### Non-streamable boundary operations
+### Boundary operations: tiered streaming
 
-A plan containing any of the following falls into the single-frame fallback:
+When a plan hits a boundary operation, streaming degrades in tiers rather than falling
+back wholesale:
 
-```
-Sort, SortByExpression, GroupBy, Join, Distinct, Rolling, Cumulative, Shift, Rank
-```
+1. **Per-chunk windows** — unpartitioned rolling aggregates, cumulative aggregates, lag
+   (`Shift` with non-negative periods), and lookahead windows (`Lead`, negative-period
+   `Shift`) stream per chunk. Cross-chunk state is bounded: each round re-runs the
+   boundary over one contiguous run of the last `max(rolling lookback, lag periods) +
+   max(lead periods)` input rows plus the fresh chunk, and emits only the rows whose
+   window contexts are fully satisfied by data seen so far (delayed emission for the
+   lookahead kinds). The final held-back rows are flushed at drain with the operation's
+   natural end-of-data semantics (nulls or fill values). Applies to window expressions
+   inside `SelectOperation` as well as standalone `RollingOperation`,
+   `CumulativeOperation`, and `ShiftOperation` boundaries.
+2. **Partitioned windows pipelined at drain** — standalone window operations with a
+   `WindowSpec` buffer their rows into per-partition lists while chunks flow, compute
+   each partition once when the source drains (stable per-partition ordering by the
+   spec's order keys), and restore original row order. Results arrive as a single
+   frame, because partition results are only final once the source has drained.
+3. **Full materialization** — everything else executes once over the concatenated data,
+   exactly as before: `Sort`, `SortByExpression`, `GroupBy`, `Join`, `Distinct`,
+   rank-family window expressions (`RowNumber`, `.Rank`, `.DenseRank`, `.PercentRank`),
+   and broadcast aggregates (`Quantile`, `Median`).
 
-Window expressions (e.g. `ColumnExpressions.RowNumber`, `.Rank`, `.DenseRank`,
-`.PercentRank`) are also non-streamable and trigger the same fallback.
+Tiers 2 and 3 yield one frame from `AsStream`; tier 1 preserves a one-frame-per-chunk
+cadence, except that plans containing lookahead windows run one chunk behind (each
+yielded frame is only final once the next chunk has been read) and add one final flush
+frame carrying exactly the held-back tail rows.
+
+### Materialization diagnostics
+
+Tier-3 boundaries are observable on `NivaraExecutionContext.ExecutionDiagnostics`:
+`StreamMaterializationCount` counts how many boundary operations materialized, and
+`RowsMaterializedAtBoundaries` counts the rows fed through them. Fully streamed plans
+report zero materializations.
 
 ### Note: Collect vs AsStream
 
 The `Collect`/`CollectAsync` path uses **segmented flush-concatenate-resume**: leading
-streamable operations still run per chunk, the boundary operation runs once over the
-concatenated result, and trailing streamable operations resume. `AsStream` is
-**all-or-nothing**: the plan must be entirely streamable to chunk; otherwise it falls back
-to a single merged frame. This asymmetry is deliberate — chunked `AsStream` output must
-be independently processable, so any boundary operation (which needs the whole dataset)
-defeats chunking.
+streamable operations still run per chunk, tier-1 window boundaries run per chunk,
+partitioned windows flush at drain, and remaining boundary operations run once over the
+concatenated result before trailing streamable operations resume. `AsStream` follows
+the same tiers: tier-1 plans chunk, others fall back to fewer/one merged frames. This
+asymmetry is deliberate — chunked `AsStream` output must be independently processable,
+so any boundary needing the whole dataset defeats chunking.
 
 ## chunkSize semantics
 
