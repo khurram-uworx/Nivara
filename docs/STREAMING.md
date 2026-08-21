@@ -40,12 +40,16 @@ rows are identical to `CollectAsync()`.
 When a plan hits a boundary operation, streaming degrades in tiers rather than falling
 back wholesale:
 
-1. **Per-chunk windows** — unpartitioned rolling aggregates, cumulative aggregates, and
-   lag (`Shift` with non-negative periods) windows stream one frame per chunk.
-   Cross-chunk state is bounded: the last `windowSize - 1` input rows (rolling),
-   `periods` rows (lag), or one running aggregate per column (cumulative). Applies to
-   window expressions inside `SelectOperation` as well as standalone `RollingOperation`,
-   `CumulativeOperation`, and lag `ShiftOperation` boundaries.
+1. **Per-chunk windows** — unpartitioned rolling aggregates, cumulative aggregates, lag
+   (`Shift` with non-negative periods), and lookahead windows (`Lead`, negative-period
+   `Shift`) stream per chunk. Cross-chunk state is bounded: each round re-runs the
+   boundary over one contiguous run of the last `max(rolling lookback, lag periods) +
+   max(lead periods)` input rows plus the fresh chunk, and emits only the rows whose
+   window contexts are fully satisfied by data seen so far (delayed emission for the
+   lookahead kinds). The final held-back rows are flushed at drain with the operation's
+   natural end-of-data semantics (nulls or fill values). Applies to window expressions
+   inside `SelectOperation` as well as standalone `RollingOperation`,
+   `CumulativeOperation`, and `ShiftOperation` boundaries.
 2. **Partitioned windows pipelined at drain** — standalone window operations with a
    `WindowSpec` buffer their rows into per-partition lists while chunks flow, compute
    each partition once when the source drains (stable per-partition ordering by the
@@ -54,11 +58,12 @@ back wholesale:
 3. **Full materialization** — everything else executes once over the concatenated data,
    exactly as before: `Sort`, `SortByExpression`, `GroupBy`, `Join`, `Distinct`,
    rank-family window expressions (`RowNumber`, `.Rank`, `.DenseRank`, `.PercentRank`),
-   broadcast aggregates (`Quantile`, `Median`), and lead / negative-shift windows
-   (delayed-emission streaming for those is tracked in issue #331).
+   and broadcast aggregates (`Quantile`, `Median`).
 
-Tiers 2 and 3 yield one frame from `AsStream`; tier 1 preserves the
-one-frame-per-chunk contract.
+Tiers 2 and 3 yield one frame from `AsStream`; tier 1 preserves a one-frame-per-chunk
+cadence, except that plans containing lookahead windows run one chunk behind (each
+yielded frame is only final once the next chunk has been read) and add one final flush
+frame carrying exactly the held-back tail rows.
 
 ### Materialization diagnostics
 

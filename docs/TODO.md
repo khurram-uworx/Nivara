@@ -18,74 +18,54 @@ Scope confirmed with human: **full support** for mixed selects containing lead/n
 alongside rolling/lag **and cumulative** windows (cumulative needs a small per-slot FIFO of
 computed-but-unemitted values).
 
-## Design
+## Design (as built)
 
-### StreamingWindowProcessor (src/Nivara/Execution/StreamingWindowProcessor.cs)
-
-New state:
-
-- `int leadDistance` — max lookahead over Lead expressions / negative Shift periods (0 when none).
-- `Dictionary<string, IColumn>? pendingRows` — last ≤ `leadDistance` pre-boundary input rows not yet emitted.
-- Per-`CarrySlot` pending FIFO (`Queue<object?>`) + `Queue<bool>` null flags of computed-but-unemitted cumulative values.
-
-ProcessChunk becomes delayed-emission:
+The first cut used two cross-chunk buffers (lookback overlap + pending lookahead rows).
+Branch testing exposed row duplication between them — both cover the tail of the
+previous chunk — so the shipped design uses **one sliding context run** instead:
 
 ```
-combined   = pendingRows == null ? chunk : Concatenate(pendingRows, chunk)
-extended   = overlapBuffer?.PrependToChunk(combined) ?? combined      // unchanged lookback
-result     = boundaryOp.Execute(extended)
-final      = overlapBuffer != null ? TrimFirstN(result, overlapSize) : result
-E          = max(0, combined.Length - leadDistance)                   // emit prefix only
+contextSize = max(rolling lookback, lag periods) + max(lead periods)
 
-per column of final:
-    emitted[col] = final[col].Slice(0, E)                             // drop last P rows (premature boundaries)
+run        = last min(contextSize, seen) input rows ++ fresh chunk      // contiguous
+result     = boundaryOp.Execute(run)                                    // no trimming
+finalEnd   = min(seen + chunkLen - leadDistance, runEnd)
+emitted    = result[emittedCount - runStart .. finalEnd - runStart]     // global range
 
-carry slots: compute over FRESH chunk only (never replay held rows);
-    state advances over all fresh values; values append to slot FIFO;
-    emitted cumulative column = drain FIFO oldest-first to fill E rows
-    (when FIFO short — first rounds with L < P — pad by deferring: emit what is available
-     once combined length exceeds P; counts always reconcile because
-     available = previouslyHeld + fresh = L and E = max(0, L - P))
+carry slots: cumulative recomputed over FRESH chunk only, seeded with state;
+    values append to a per-slot FIFO; drain exactly emitCount oldest values.
+    (leadDistance == 0 keeps the direct kernel column — no boxing.)
 
-overlapBuffer.UpdateFromChunk(combined)                               // context includes held rows
-pendingRows = last min(P, combined.Length) rows of combined           // zero-copy Slice
-return emitted (empty columns via ColumnFilterHelper.CreateEmptyColumn when E == 0)
+tail       = last contextSize input rows of run
+lastRun    = result retained for Flush()
 ```
 
-New `Flush()`:
-
-- No-op when `pendingRows == null` (returns null).
-- Otherwise run boundary op over `overlap prepend(pendingRows)` + trim; tail rows get true
-  boundary nulls/fill naturally since nothing follows. Drain cumulative FIFOs into those columns.
-- When `leadDistance == 0` the whole mechanism is inert: ProcessChunk emits everything as today.
+Flush(): slices the premature-boundary rows of the last run — their null/fill tails are
+exact once no further data exists — and drains remaining FIFO values. No re-execution.
 
 Gates:
 
 - `isStreamableNode`: `Lead => true`; `Shift => true` for any periods.
-- `TryCreate`: standalone branch accepts `shift.Periods < 0` with `leadDistance = -Periods`, overlap 0.
-
-### Lead-distance helper
-
-Static traversal mirroring `WindowOverlapBuffer.getMaxOverlapFromExpression` — walks ColumnExpression
-nodes collecting max `|Periods|` for `WindowFunctionKind.Lead` and negative-period `Shift`.
-Placement: private static in StreamingWindowProcessor or a sibling internal static class near
-WindowOverlapBuffer.
+- `TryCreate`: standalone branch accepts `shift.Periods < 0` with
+  `leadDistance = -Periods`, overlap 0.
 
 ### StreamingExecutionStrategy call sites (3)
 
 After each read loop where `windowProcessor != null`: call `Flush()`, wrap non-empty results in a
-frame, feed budget tracker/diagnostics, append to `chunkFrames` (sync path ~line 173, async producer
-before `channel.Writer.TryComplete()` ~line 367) or yield (StreamChunksAsync windowProcessor branch
-~line 624, skipping zero-row flush frames).
+frame, feed budget tracker/diagnostics, append to `chunkFrames` (sync path, async producer
+before `channel.Writer.TryComplete()`) or yield (`StreamChunksAsync` windowProcessor branch,
+skipping zero-row flush frames). Zero-row delayed-emission prefixes are suppressed.
 
 Cadence note: with lead present, AsStream frames lag one chunk plus a final flush frame.
 
 ### Docs
 
-- docs/STREAMING.md: move lead/negative-shift from tier 3 to tier 1; document bounded memory
-  (`max(leadPeriods)`), delayed-emission cadence, partitioned lead stays tier 2.
-- WindowOverlapBuffer.cs remarks (`Lead => 0` comment) reference delay mechanism.
-- CHANGELOG entry.
+- docs/STREAMING.md: lead/negative-shift moved from tier 3 to tier 1; bounded memory
+  (`max(rolling lookback, lag periods) + max(lead periods)`); delayed-emission cadence;
+  partitioned lead stays tier 2. DONE.
+- CHANGELOG [Unreleased] entry. DONE.
+- WindowOverlapBuffer.cs remarks reference delay mechanism; instance buffering API
+  removed (superseded), class reduced to static overlap-size determination. DONE.
 
 ## Blast radius
 
