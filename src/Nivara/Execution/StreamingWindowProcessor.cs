@@ -12,21 +12,23 @@ namespace Nivara.Execution;
 /// across the streaming strategy's sync, async, and chunk-enumeration paths.
 /// </summary>
 /// <remarks>
-/// Three streaming mechanisms are combined, keyed by window kind:
+/// Every round executes the boundary operation over one contiguous run:
+/// the last <c>contextSize</c> input rows (the sum of the largest lookback and lookahead
+/// distances, so re-run rows keep both their history and their future) followed by the
+/// fresh chunk. Re-running over carried context means every window kind sees correct
+/// history:
 /// <list type="bullet">
-/// <item>Bounded-lookback kinds (rolling aggregates, lag shift) prepend the last
-/// <c>N</c> input rows from the previous chunk via <see cref="WindowOverlapBuffer"/>
-/// and trim the overlap prefix from the result.</item>
-/// <item>Cumulative kinds (sum/max/min/product/count) carry a single running-aggregate
-/// value across chunks. Each chunk's column is recomputed from the fresh chunk input and
-/// seeded with the carried aggregate, so results are exact for any chunk size.</item>
-/// <item>Lookahead kinds (lead, negative-period shift) stream via delayed emission:
-/// each round emits only the rows whose lookahead distance is satisfied by data seen so
-/// far and holds the last <c>leadDistance</c> pre-boundary input rows back; held rows are
-/// recomputed once the next chunk arrives. <see cref="Flush"/> finalizes whatever remains
-/// after the source drains, letting the boundary op apply its natural tail semantics
-/// (nulls or fill values). Memory stays bounded by <c>max(leadPeriods)</c> plus the
-/// overlap window rather than frame size.</item>
+/// <item>Bounded-lookback kinds (rolling aggregates, lag shift) read their history from
+/// the prepended context rows.</item>
+/// <item>Cumulative kinds (sum/max/min/product/count) ignore re-run rows: their columns
+/// are recomputed per round from the fresh chunk only, seeded with a carried
+/// running-aggregate value.</item>
+/// <item>Lookahead kinds (lead, negative-period shift) rely on delayed emission: only the
+/// rows farther than <c>leadDistance</c> from the end of seen data are final and emitted;
+/// the rest are re-computed in later runs. <see cref="Flush"/> finalizes whatever remains
+/// after the source drains by emitting the premature-boundary rows of the last run, which
+/// become exact once no further data exists. Memory stays bounded by
+/// <c>max(lookback, leadPeriods)</c> rather than frame size.</item>
 /// </list>
 /// Rank-family and broadcast windows do not stream here and remain boundary
 /// materializations.
@@ -55,21 +57,24 @@ internal sealed class StreamingWindowProcessor
     }
 
     readonly IQueryOperation boundaryOp;
-    readonly SelectOperation? boundarySelect;
-    readonly WindowOverlapBuffer? overlapBuffer;
-    readonly int overlapSize;
+    readonly int contextSize;
     readonly int leadDistance;
     readonly List<CarrySlot> carrySlots = [];
     readonly FusedExpressionEvaluator expressionEvaluator = new();
-    Dictionary<string, IColumn>? pendingRows;
 
-    StreamingWindowProcessor(IQueryOperation boundaryOp, SelectOperation? boundarySelect, CumulativeOperation? cumulative, int overlapSize, int leadDistance = 0)
+    Dictionary<string, IColumn>? lastRunInput;
+    IReadOnlyDictionary<string, IColumn>? lastRunResult;
+    long lastRunStart;
+    long totalRowsSeen;
+    long emittedCount;
+
+    StreamingWindowProcessor(IQueryOperation boundaryOp, SelectOperation? boundarySelect, CumulativeOperation? cumulative, int overlapSize, int leadDistance)
     {
         this.boundaryOp = boundaryOp;
-        this.boundarySelect = boundarySelect;
-        this.overlapSize = overlapSize;
-        this.leadDistance = Math.Max(0, leadDistance);
-        overlapBuffer = overlapSize > 0 ? new WindowOverlapBuffer(overlapSize) : null;
+        // Re-run rows need their own lookback history behind them AND their lookahead
+        // ahead of them, so the carried tail must span the sum of both distances.
+        this.contextSize = Math.Max(0, overlapSize) + Math.Max(0, leadDistance);
+        this.leadDistance = leadDistance;
         if (boundarySelect != null)
             CollectCarrySlots(boundarySelect);
         else if (cumulative != null)
@@ -77,10 +82,10 @@ internal sealed class StreamingWindowProcessor
     }
 
     /// <summary>
-    /// Gets the number of overlap rows prepended to each chunk (0 when only carry-state
-    /// windows are present).
+    /// Gets the number of context rows carried across chunks (the sum of the largest
+    /// lookback and lookahead distances).
     /// </summary>
-    public int OverlapSize => overlapSize;
+    public int OverlapSize => contextSize;
 
     /// <summary>
     /// Creates a processor for a boundary operation containing window expressions, or
@@ -97,117 +102,105 @@ internal sealed class StreamingWindowProcessor
             if (!hasOnlyStreamableWindows(select))
                 return null;
 
-            var overlap = WindowOverlapBuffer.DetermineOverlapSize(select);
+            var lookback = WindowOverlapBuffer.DetermineOverlapSize(select);
             var lead = determineLeadDistance(select);
-            return new StreamingWindowProcessor(select, select, null, overlap, lead);
+            return new StreamingWindowProcessor(select, select, null, lookback, lead);
         }
 
         if (boundaryOp is RollingOperation rolling && rolling.Spec is null or { IsEmpty: true })
-            return new StreamingWindowProcessor(rolling, null, null, Math.Max(0, rolling.WindowSize - 1));
+            return new StreamingWindowProcessor(rolling, null, null, Math.Max(0, rolling.WindowSize - 1), 0);
 
         if (boundaryOp is ShiftOperation shift && shift.Spec is null or { IsEmpty: true })
         {
             return shift.Periods >= 0
-                ? new StreamingWindowProcessor(shift, null, null, shift.Periods)
+                ? new StreamingWindowProcessor(shift, null, null, shift.Periods, 0)
                 : new StreamingWindowProcessor(shift, null, null, 0, -shift.Periods);
         }
 
         if (boundaryOp is CumulativeOperation cumulative && cumulative.Spec is null or { IsEmpty: true })
-            return new StreamingWindowProcessor(cumulative, null, cumulative, 0);
+            return new StreamingWindowProcessor(cumulative, null, cumulative, 0, 0);
 
         return null;
     }
 
     /// <summary>
-    /// Processes one chunk of pre-boundary data: runs the boundary window operation with
-    /// overlap context when needed, corrects cumulative columns with carried state, and
-    /// updates the cross-chunk buffers. With lookahead windows present, only the prefix
-    /// whose lead distance is satisfied by data seen so far is returned; call
-    /// <see cref="Flush"/> after the source drains to obtain the remaining rows.
+    /// Processes one chunk of pre-boundary data: runs the boundary window operation over
+    /// the carried context plus the fresh chunk, emits the rows whose window contexts are
+    /// fully satisfied by data seen so far, and updates the cross-chunk buffers. With
+    /// lookahead windows present, call <see cref="Flush"/> after the source drains to
+    /// obtain the remaining rows.
     /// </summary>
     public IReadOnlyDictionary<string, IColumn> ProcessChunk(IReadOnlyDictionary<string, IColumn> processedChunk)
     {
-        if (leadDistance == 0)
-            return processChunkImmediate(processedChunk);
+        var chunkLength = getRowLength(processedChunk);
+        var contextLength = lastRunInput != null && lastRunInput.Count > 0 ? getRowLength(lastRunInput) : 0;
 
-        IReadOnlyDictionary<string, IColumn> combined;
-        if (pendingRows != null && pendingRows.Count > 0)
+        IReadOnlyDictionary<string, IColumn> run;
+        if (contextLength > 0)
         {
-            // Contiguous run: held rows from previous rounds directly precede this chunk.
-            var concatenated = new Dictionary<string, IColumn>(pendingRows.Count, StringComparer.OrdinalIgnoreCase);
-            foreach (var kvp in pendingRows)
+            var concatenated = new Dictionary<string, IColumn>(lastRunInput!.Count, StringComparer.OrdinalIgnoreCase);
+            foreach (var kvp in lastRunInput)
                 concatenated[kvp.Key] = ColumnFilterHelper.ConcatenateColumns([kvp.Value, processedChunk[kvp.Key]]);
-            combined = concatenated;
+            run = concatenated;
         }
         else
-            combined = processedChunk;
-        var combinedLength = getRowLength(combined);
-        var emitCount = Math.Max(0, combinedLength - leadDistance);
+            run = processedChunk;
 
-        var hasOverlapContext = overlapBuffer is { HasData: true };
-        var extended = hasOverlapContext ? overlapBuffer!.PrependToChunk(combined) : combined;
-        var result = boundaryOp.Execute(extended);
-        var final = hasOverlapContext ? WindowOverlapBuffer.TrimFirstN(result, overlapSize) : result;
+        var runLength = contextLength + chunkLength;
+        var runStart = totalRowsSeen - contextLength;
 
-        var emitted = new Dictionary<string, IColumn>(final.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var kvp in final)
-            emitted[kvp.Key] = slicePrefix(kvp.Value, emitCount);
+        var result = boundaryOp.Execute(run);
+
+        // Rows farther than leadDistance from the newest row have their entire lookahead
+        // inside this run and are final; the tail rows are re-computed in a later run.
+        var finalEnd = Math.Min(totalRowsSeen + chunkLength - leadDistance, runStart + runLength);
+        var from = (int)Math.Max(0, emittedCount - runStart);
+        var to = (int)Math.Max(from, finalEnd - runStart);
+        var emitCount = to - from;
+
+        var emitted = new Dictionary<string, IColumn>(result.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in result)
+            emitted[kvp.Key] = sliceRange(kvp.Value, from, emitCount);
 
         foreach (var slot in carrySlots)
-            emitted[slot.OutputName] = computeDeferredCarryColumn(slot, processedChunk, emitCount);
+            emitted[slot.OutputName] = carryColumnForEmission(slot, processedChunk, emitCount);
 
-        // Lookback context for the next round must include the held rows.
-        overlapBuffer?.UpdateFromChunk(combined);
-        var holdCount = Math.Min(leadDistance, combinedLength);
-        setPendingRows(combined, holdCount);
+        lastRunResult = result;
+        lastRunStart = runStart;
+        lastRunInput = contextSize > 0 ? takeLastRows(run, contextSize) : null;
+        totalRowsSeen += chunkLength;
+        emittedCount += emitCount;
 
         return emitted;
     }
 
     /// <summary>
-    /// Finalizes rows still held back by delayed emission after the source drained. The
-    /// boundary operation runs over the pending rows alone, so their tail positions
-    /// receive the operation's natural end-of-data semantics (nulls or fill values).
-    /// Returns null when nothing is pending.
+    /// Finalizes rows still held back by delayed emission after the source drained. Their
+    /// values come from the last executed run, where positions beyond the run's end
+    /// already received the operation's end-of-data semantics (nulls or fill values),
+    /// which are exact once no further data exists. Returns null when nothing is pending.
     /// </summary>
     public IReadOnlyDictionary<string, IColumn>? Flush()
     {
-        if (pendingRows == null || pendingRows.Count == 0)
+        if (lastRunResult == null || emittedCount >= totalRowsSeen)
             return null;
 
-        var hasOverlapContext = overlapBuffer is { HasData: true };
-        var extended = hasOverlapContext ? overlapBuffer!.PrependToChunk(pendingRows) : pendingRows;
-        var result = boundaryOp.Execute(extended);
-        var final = hasOverlapContext ? WindowOverlapBuffer.TrimFirstN(result, overlapSize) : result;
+        var from = (int)(emittedCount - lastRunStart);
+        var runLength = getRowLength(lastRunResult);
+        var flushCount = runLength - from;
 
-        if (carrySlots.Count > 0)
-        {
-            var mutable = new Dictionary<string, IColumn>(final, StringComparer.OrdinalIgnoreCase);
-            foreach (var slot in carrySlots)
-                mutable[slot.OutputName] = buildDeferredColumn(slot);
-            return mutable;
-        }
+        var flushed = new Dictionary<string, IColumn>(lastRunResult.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in lastRunResult)
+            flushed[kvp.Key] = sliceRange(kvp.Value, from, flushCount);
 
-        return final;
-    }
+        foreach (var slot in carrySlots)
+            flushed[slot.OutputName] = buildDeferredColumn(slot);
 
-    IReadOnlyDictionary<string, IColumn> processChunkImmediate(IReadOnlyDictionary<string, IColumn> processedChunk)
-    {
-        var hasOverlapContext = overlapBuffer is { HasData: true };
-        var extended = hasOverlapContext ? overlapBuffer!.PrependToChunk(processedChunk) : processedChunk;
-        var result = boundaryOp.Execute(extended);
-        var final = hasOverlapContext ? WindowOverlapBuffer.TrimFirstN(result, overlapSize) : result;
+        emittedCount = totalRowsSeen;
+        lastRunResult = null;
+        lastRunInput = null;
 
-        if (carrySlots.Count > 0)
-        {
-            var mutable = new Dictionary<string, IColumn>(final, StringComparer.OrdinalIgnoreCase);
-            foreach (var slot in carrySlots)
-                mutable[slot.OutputName] = ComputeCarryColumn(slot, processedChunk);
-            final = mutable;
-        }
-
-        overlapBuffer?.UpdateFromChunk(processedChunk);
-        return final;
+        return flushed;
     }
 
     static bool hasOnlyStreamableWindows(SelectOperation select)
@@ -235,8 +228,8 @@ internal sealed class StreamingWindowProcessor
                 WindowFunctionKind.Shift => true,
                 WindowFunctionKind.Lead => true,
 
-                // Rank family and broadcast aggregates need data beyond the lookback/
-                // lookahead context and must materialize.
+                // Rank family and broadcast aggregates need data beyond the carried
+                // context and must materialize.
                 _ => false
             },
             ScalarExpression scalar => isStreamableNode(scalar.Column),
@@ -287,33 +280,18 @@ internal sealed class StreamingWindowProcessor
         };
     }
 
-    void setPendingRows(IReadOnlyDictionary<string, IColumn> combined, int holdCount)
+    IColumn carryColumnForEmission(CarrySlot slot, IReadOnlyDictionary<string, IColumn> freshChunk, int emitCount)
     {
-        if (holdCount <= 0)
-        {
-            pendingRows = null;
-            return;
-        }
+        var corrected = ComputeCarryColumn(slot, freshChunk);
+        if (leadDistance == 0)
+            return corrected;
 
-        var tail = new Dictionary<string, IColumn>(combined.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var kvp in combined)
-        {
-            var length = kvp.Value.Length;
-            var start = Math.Max(0, length - holdCount);
-            tail[kvp.Key] = length - start > 0 ? kvp.Value.Slice(start, length - start) : kvp.Value;
-        }
-        pendingRows = tail;
-    }
-
-    IColumn computeDeferredCarryColumn(CarrySlot slot, IReadOnlyDictionary<string, IColumn> freshChunk, int emitCount)
-    {
-        // Cumulative values are computed over the fresh rows only: held rows were already
-        // counted into the carried state when they were fresh. Values wait in the slot's
-        // queue until their row enters the emitted prefix.
-        var computed = ComputeCarryColumn(slot, freshChunk);
-        slot.ElementType ??= computed.ElementType;
-        for (var i = 0; i < computed.Length; i++)
-            slot.PendingValues.Enqueue(computed.IsNull(i) ? null : computed.GetValue(i));
+        // Cumulative values are computed over the fresh rows only: re-run context rows
+        // were already counted into the carried state when they were fresh. Values wait in
+        // the slot's queue until their row enters the emitted range.
+        slot.ElementType ??= corrected.ElementType;
+        for (var i = 0; i < corrected.Length; i++)
+            slot.PendingValues.Enqueue(corrected.IsNull(i) ? null : corrected.GetValue(i));
 
         return buildDeferredPrefix(slot, emitCount);
     }
@@ -336,13 +314,25 @@ internal sealed class StreamingWindowProcessor
         return ColumnFactory.Create(slot.ElementType ?? typeof(long), values);
     }
 
-    static IColumn slicePrefix(IColumn column, int count)
+    static IColumn sliceRange(IColumn column, int start, int count)
     {
         if (count <= 0)
             return ColumnFilterHelper.CreateEmptyColumn(column.ElementType);
-        if (count < column.Length)
-            return column.Slice(0, count);
-        return column;
+        if (start == 0 && count == column.Length)
+            return column;
+        return column.Slice(start, count);
+    }
+
+    static Dictionary<string, IColumn> takeLastRows(IReadOnlyDictionary<string, IColumn> data, int count)
+    {
+        var tail = new Dictionary<string, IColumn>(data.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var kvp in data)
+        {
+            var length = kvp.Value.Length;
+            var start = Math.Max(0, length - count);
+            tail[kvp.Key] = length - start > 0 ? kvp.Value.Slice(start, length - start) : kvp.Value;
+        }
+        return tail;
     }
 
     static int getRowLength(IReadOnlyDictionary<string, IColumn> data)
