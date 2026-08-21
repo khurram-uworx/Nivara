@@ -68,8 +68,7 @@ before merging. Do not merge with `--admin` until CI passes."
 
 ### 5. Cross-machine Prev/Current is misleading
 
-We carried forward i5-1135G7 numbers as "Prev" on an Ultra 7 255H. The
-Ratio/Δ% columns are meaningless across machines (Nivara improved but
+The Ratio/Δ% columns are meaningless across machines (Nivara improved but
 PyTorch improved more due to more cores). This makes the table look like a
 regression when it's actually an improvement on both sides.
 
