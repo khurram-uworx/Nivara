@@ -13,9 +13,11 @@ namespace Nivara.Execution;
 /// to remove the overlap prefix, yielding correct per-chunk windowed results.
 /// </summary>
 /// <remarks>
-/// This enables true per-chunk streaming for Rolling, Shift, and Cumulative window ops
-/// without modifying any window kernels — the boundary op sees a slightly longer column
-/// and produces correct results because the overlap provides the necessary lookback context.
+/// This enables true per-chunk streaming for bounded-lookback window ops (rolling
+/// aggregates, lag shift) without modifying any window kernels — the boundary op sees a
+/// slightly longer column and produces correct results because the overlap provides the
+/// necessary lookback context. Cumulative kinds require full running history and are
+/// streamed by <see cref="StreamingWindowProcessor"/> carry state instead.
 /// </remarks>
 internal sealed class WindowOverlapBuffer
 {
@@ -158,11 +160,9 @@ internal sealed class WindowOverlapBuffer
             WindowFunctionKind.Shift => Math.Max(0, window.Periods ?? 0),
             WindowFunctionKind.Lead => 0,
 
-            WindowFunctionKind.CumulativeSum or WindowFunctionKind.CumulativeMax
-                or WindowFunctionKind.CumulativeMin or WindowFunctionKind.CumulativeProduct
-                or WindowFunctionKind.CumulativeCount
-                => 1,
-
+            // Cumulative kinds stream via StreamingWindowProcessor carry state instead:
+            // an overlap prefix cannot reproduce a running aggregate (all prior history
+            // is required, not just the last N rows).
             _ => 0
         };
     }
