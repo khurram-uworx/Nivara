@@ -166,10 +166,29 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 ? NivaraFrame.Create(windowProcessor.ProcessChunk(processedData))
                 : NivaraFrame.Create(processedData);
 
+            if (windowProcessor != null && chunkFrame.RowCount == 0)
+            {
+                // Delayed emission legitimately yields empty prefixes until the lead
+                // distance is satisfied by incoming data.
+                chunkFrame.Dispose();
+                continue;
+            }
+
             if (chunkScope != null)
                 chunkScope.SetRowCount(chunkFrame.RowCount);
             budgetTracker.RecordFrame(chunkFrame);
             chunkFrames.Add(chunkFrame);
+        }
+
+        if (windowProcessor != null)
+        {
+            var flushed = windowProcessor.Flush();
+            if (flushed != null)
+            {
+                var flushFrame = NivaraFrame.Create(flushed);
+                budgetTracker.RecordFrame(flushFrame);
+                chunkFrames.Add(flushFrame);
+            }
         }
 
         budgetTracker.RecordWarningIfExceeded(diag);
@@ -354,16 +373,31 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                         ? NivaraFrame.Create(windowProcessor.ProcessChunk(processedData))
                         : NivaraFrame.Create(processedData);
 
-                    if (chunkScope != null)
-                        chunkScope.SetRowCount(chunkFrame.RowCount);
+                    if (windowProcessor != null && chunkFrame.RowCount == 0)
+                    {
+                        chunkFrame.Dispose();
+                    }
+                    else
+                    {
+                        if (chunkScope != null)
+                            chunkScope.SetRowCount(chunkFrame.RowCount);
 
-                    inFlight = chunkFrame;
-                    await channel.Writer.WriteAsync(chunkFrame, context.CancellationToken).ConfigureAwait(false);
-                    inFlight = null;
+                        inFlight = chunkFrame;
+                        await channel.Writer.WriteAsync(chunkFrame, context.CancellationToken).ConfigureAwait(false);
+                        inFlight = null;
+                    }
 
                     chunkIndex++;
                     var totalWork = totalChunks > 0 ? totalChunks : chunkIndex;
                     context.Progress?.Report(new ExecutionProgress($"Processing chunk {chunkIndex}", chunkIndex, totalWork));
+                }
+
+                if (windowProcessor != null)
+                {
+                    var flushed = windowProcessor.Flush();
+                    if (flushed != null)
+                        await channel.Writer.WriteAsync(NivaraFrame.Create(flushed), context.CancellationToken)
+                            .ConfigureAwait(false);
                 }
             }
             finally
@@ -606,6 +640,14 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 var finalData = windowProcessor.ProcessChunk(processedData);
 
                 var chunkFrame = NivaraFrame.Create(finalData);
+                if (chunkFrame.RowCount == 0)
+                {
+                    // Delayed emission legitimately yields empty prefixes until the lead
+                    // distance is satisfied by incoming data.
+                    chunkFrame.Dispose();
+                    continue;
+                }
+
                 budgetTracker.RecordFrame(chunkFrame);
 
                 if (!hasTrailingBoundaries)
@@ -620,6 +662,27 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 else
                 {
                     chunkFrames.Add(chunkFrame);
+                }
+            }
+
+            var flushedData = windowProcessor.Flush();
+            if (flushedData != null)
+            {
+                var flushFrame = NivaraFrame.Create(flushedData);
+                budgetTracker.RecordFrame(flushFrame);
+
+                if (!hasTrailingBoundaries)
+                {
+                    if (diag != null)
+                    {
+                        diag.RowsReturned += flushFrame.RowCount;
+                        diag.MaterializedColumns = flushFrame.ColumnCount;
+                    }
+                    yield return flushFrame;
+                }
+                else
+                {
+                    chunkFrames.Add(flushFrame);
                 }
             }
 
