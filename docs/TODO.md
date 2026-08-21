@@ -187,10 +187,21 @@ Commit: `docs: update streaming contract and incident sample limitations for win
 6. Phase 4 docs commit
 7. `git rm docs/TODO.md` → `docs: remove TODO.md — plan executed`
 
+## Execution deviations from the plan
+
+- Phases 2a and 2b landed as a single commit (`e9e1719`): `StreamingWindowProcessor.TryCreate`
+  unifies select-window and standalone-op admission, so splitting them would have staged
+  interdependent hunks artificially.
+- Discovered during implementation and filed as issue #331: lead/negative-shift windows
+  need delayed-emission streaming; until then `TryCreate` refuses them (they materialize
+  correctly, with a Phase 1 diagnostic). The pre-Phase-2 path computed them per-chunk
+  with overlap=0 — silently wrong at chunk boundaries.
+
 ## GitHub issues log
 
 As each task executes, if deferred work or an out-of-plan concern is found, create an
 issue immediately (`gh issue create --repo khurram-uworx/Nivara`) and record it here —
 do not rely on memory; compaction can lose it.
 
-- [ ] (none yet)
+- [x] #331 — Streaming: support lead/negative-shift windows via delayed emission
+      (filed during Phase 2; guard added in `StreamingWindowProcessor.hasOnlyStreamableWindows`)
