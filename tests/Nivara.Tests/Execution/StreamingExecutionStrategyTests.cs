@@ -1285,6 +1285,130 @@ public class StreamingExecutionStrategyTests
         }
     }
 
+    // ===== Boundary materialization diagnostics =====
+
+    [Test]
+    public void Execute_MaterializationAtSortBoundary_RecordsDiagnostics()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.StreamMaterializationCount, Is.EqualTo(1),
+            "Filter-then-Sort must materialize exactly once at the Sort boundary");
+        Assert.That(diagnostics.RowsMaterializedAtBoundaries, Is.EqualTo(1989),
+            "Materialized row count must equal the filtered row count");
+        Assert.That(diagnostics.Warnings.Any(w => w.Message.Contains("materialized 1,989 rows")),
+            Is.True, "A materialization warning must be recorded");
+    }
+
+    [Test]
+    public async Task ExecuteAsync_MaterializationAtSortBoundary_RecordsDiagnostics()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = await strategy.ExecuteAsync(plan, context).ConfigureAwait(false);
+
+        Assert.That(diagnostics.StreamMaterializationCount, Is.EqualTo(1));
+        Assert.That(diagnostics.RowsMaterializedAtBoundaries, Is.EqualTo(1989));
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_MaterializationAtSortBoundary_RecordsDiagnostics()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+            new SortOperation(new List<SortKey> { new SortKey("A") }),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+        context.ExecutionDiagnostics = diagnostics;
+
+        var frames = new List<NivaraFrame>();
+        try
+        {
+            await foreach (var frame in strategy.StreamChunksAsync(plan, context))
+                frames.Add(frame);
+
+            Assert.That(frames.Count, Is.GreaterThan(1));
+            Assert.That(diagnostics.StreamMaterializationCount, Is.EqualTo(1),
+                "Chunked streaming must report the Sort-boundary materialization");
+            Assert.That(diagnostics.RowsMaterializedAtBoundaries, Is.EqualTo(1989));
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
+    [Test]
+    public void Execute_FullyStreamablePlan_RecordsNoMaterializations()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[]
+        {
+            new FilterOperation(ColumnExpressions.Col<int>("A") > 10),
+        });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.StreamMaterializationCount, Is.Zero,
+            "Fully streamable plans never materialize at a boundary");
+        Assert.That(diagnostics.RowsMaterializedAtBoundaries, Is.Zero);
+    }
+
+    [Test]
+    public void Execute_OverlapWindowBoundary_RecordsNoMaterializations()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 3),
+        });
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.MemoryBudget = 1024 * 1024;
+        context.ExecutionDiagnostics = diagnostics;
+
+        using var result = strategy.Execute(plan, context);
+
+        Assert.That(diagnostics.StreamMaterializationCount, Is.Zero,
+            "Overlap-streamed window boundaries are not materializations");
+        Assert.That(diagnostics.RowsMaterializedAtBoundaries, Is.Zero);
+    }
+
     static NivaraColumn<int> concatenateColumn(List<NivaraFrame> frames, string columnName)
     {
         var allValues = new List<int>();
