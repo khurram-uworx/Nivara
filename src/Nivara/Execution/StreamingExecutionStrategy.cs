@@ -46,6 +46,14 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         return current;
     }
 
+    static void recordMaterialization(NivaraExecutionContext context, IQueryOperation boundaryOp, long rowCount)
+    {
+        var description = boundaryOp.ToString() ?? boundaryOp.GetType().Name;
+        context.ExecutionDiagnostics?.AddBoundaryMaterialization(description, rowCount);
+        context.Progress?.Report(new ExecutionProgress(
+            $"Materializing boundary '{description}' over {rowCount:N0} rows", 0, 1));
+    }
+
     static async ValueTask<IReadOnlyDictionary<string, IColumn>> executeOperationsOnDataAsync(
         IReadOnlyDictionary<string, IColumn> data,
         IReadOnlyList<IQueryOperation> operations,
@@ -206,6 +214,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             if (segment.BoundaryOp != null)
             {
+                recordMaterialization(context, segment.BoundaryOp, result.RowCount);
                 var columns = result.ColumnNames.ToDictionary(
                     name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
@@ -373,6 +382,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             if (segment.BoundaryOp != null)
             {
+                recordMaterialization(context, segment.BoundaryOp, result.RowCount);
                 var columns = result.ColumnNames.ToDictionary(
                     name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
@@ -554,6 +564,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
                 if (segment.BoundaryOp != null)
                 {
+                    recordMaterialization(context, segment.BoundaryOp, result.RowCount);
                     var columns = result.ColumnNames.ToDictionary(
                         name => name, name => result.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                     var processed = segment.BoundaryOp.Execute(columns);
@@ -637,6 +648,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             if (segment.BoundaryOp != null)
             {
+                recordMaterialization(context, segment.BoundaryOp, legacyResult.RowCount);
                 var columns = legacyResult.ColumnNames.ToDictionary(
                     name => name, name => legacyResult.GetColumn(name), StringComparer.OrdinalIgnoreCase);
                 var processed = segment.BoundaryOp.Execute(columns);
