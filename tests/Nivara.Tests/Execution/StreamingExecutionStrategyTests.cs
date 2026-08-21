@@ -1636,6 +1636,290 @@ public class StreamingExecutionStrategyTests
         }
     }
 
+    // ===== Delayed-emission streaming (lead / negative shift) =====
+
+    [Test]
+    public void Property_StreamingVsLazy_LeadSelect_MatchesAcrossChunkSizes()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 3),
+        });
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        foreach (var memoryBudget in chunkEquivalenceBudgets)
+        {
+            var streamingSource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+            var plan = new QueryPlan(streamingSource, new IQueryOperation[] { select });
+            var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+            context.MemoryBudget = memoryBudget;
+            context.ExecutionDiagnostics = diagnostics;
+
+            using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+            Assert.That(streamingSource.ChunksRead.Count, Is.GreaterThan(1),
+                $"Budget {memoryBudget} should stream multiple chunks");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+        }
+
+        Assert.That(diagnostics.StreamMaterializationCount, Is.Zero,
+            "Lead windows must stream via delayed emission without materializing");
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_Lead_NullableSource_MatchesWithMasks()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("B"),
+            ColumnExpressions.Lead(ColumnExpressions.Col("B"), 2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 3000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 3000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 512;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_NegativeShiftSelect_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.Shift(ColumnExpressions.Col("A"), -2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 256;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_LeadWithFillValue_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 3, -7),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 300;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_LeadWithRollingAndLag_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.RollingSum(ColumnExpressions.Col("A"), 3),
+            ColumnExpressions.Shift(ColumnExpressions.Col("A"), 2),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 3),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_LeadWithCumulativeSum_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.CumulativeSum(ColumnExpressions.Col("A")),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 271;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Execute_LeadSelect_TinyChunksSmallerThanLeadDistance_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 5),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 500),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 500),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 7;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Execute_LeadSelect_SingleRowSource_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 3),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 1),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 1),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 100;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+        Assert.That(result.RowCount, Is.EqualTo(1));
+    }
+
+    [Test]
+    public void Execute_StandaloneNegativeShiftOperation_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var op = new ShiftOperation(ColumnExpressions.Col("A"), "Lead", periods: -2);
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { op });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { op });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 400;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public async Task StreamChunksAsync_LeadSelect_YieldsPerChunkFramesPlusFlush_AndMatchesLazy()
+    {
+        var strategy = new StreamingExecutionStrategy();
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 3),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 400;
+
+        var frames = new List<NivaraFrame>();
+        await foreach (var frame in strategy.StreamChunksAsync(streamingPlan, context))
+            frames.Add(frame);
+
+        try
+        {
+            // 5 full chunks minus the held lead prefix, plus one final flush frame.
+            Assert.That(frames.Count, Is.EqualTo(6), "Each chunk yields one frame, plus a final delayed flush frame");
+            Assert.That(frames.Last().RowCount, Is.EqualTo(3), "The flush frame carries exactly the held-back tail rows");
+
+            using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+            assertNullableIntColumnsMatch(frames, lazyResult, "Lead(A, 3)");
+        }
+        finally
+        {
+            foreach (var f in frames) f.Dispose();
+        }
+    }
+
     [Test]
     public void Execute_RankWindowSelect_StillMaterializes_AndMatchesLazy()
     {
