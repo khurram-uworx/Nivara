@@ -129,17 +129,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         var segments = PartitionAtNonStreamableOps(plan.Operations);
 
-        WindowOverlapBuffer? overlapBuffer = null;
-        int overlapBoundarySegIdx = -1;
-        if (segments.Count > 0 && segments[0].BoundaryOp != null)
-        {
-            var overlapSize = WindowOverlapBuffer.DetermineOverlapSize(segments[0].BoundaryOp);
-            if (overlapSize > 0)
-            {
-                overlapBuffer = new WindowOverlapBuffer(overlapSize);
-                overlapBoundarySegIdx = 0;
-            }
-        }
+        var windowProcessor = StreamingWindowProcessor.TryCreate(segments.Count > 0 ? segments[0].BoundaryOp : null);
+        int overlapBoundarySegIdx = windowProcessor != null ? 0 : -1;
 
         using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
         var chunkFrames = new List<NivaraFrame>();
@@ -158,22 +149,9 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             var processedData = executeOperationsOnData(chunkData, segments[0].StreamableOps);
 
-            NivaraFrame chunkFrame;
-            if (overlapBuffer != null)
-            {
-                var windowResult = overlapBuffer.HasData
-                    ? segments[0].BoundaryOp!.Execute(overlapBuffer.PrependToChunk(processedData))
-                    : segments[0].BoundaryOp!.Execute(processedData);
-                var finalData = overlapBuffer.HasData
-                    ? WindowOverlapBuffer.TrimFirstN(windowResult, overlapBuffer.OverlapSize)
-                    : windowResult;
-                chunkFrame = NivaraFrame.Create(finalData);
-                overlapBuffer.UpdateFromChunk(processedData);
-            }
-            else
-            {
-                chunkFrame = NivaraFrame.Create(processedData);
-            }
+            var chunkFrame = windowProcessor != null
+                ? NivaraFrame.Create(windowProcessor.ProcessChunk(processedData))
+                : NivaraFrame.Create(processedData);
 
             if (chunkScope != null)
                 chunkScope.SetRowCount(chunkFrame.RowCount);
@@ -265,17 +243,8 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
         var segments = PartitionAtNonStreamableOps(plan.Operations);
 
-        WindowOverlapBuffer? overlapBuffer = null;
-        int overlapBoundarySegIdx = -1;
-        if (segments.Count > 0 && segments[0].BoundaryOp != null)
-        {
-            var overlapSize = WindowOverlapBuffer.DetermineOverlapSize(segments[0].BoundaryOp);
-            if (overlapSize > 0)
-            {
-                overlapBuffer = new WindowOverlapBuffer(overlapSize);
-                overlapBoundarySegIdx = 0;
-            }
-        }
+        var windowProcessor = StreamingWindowProcessor.TryCreate(segments.Count > 0 ? segments[0].BoundaryOp : null);
+        int overlapBoundarySegIdx = windowProcessor != null ? 0 : -1;
 
         var channel = CreateBoundChannel(context.MemoryBudget, chunkSize);
         var chunkIndex = 0;
@@ -296,22 +265,9 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                     var processedData = await executeOperationsOnDataAsync(
                         chunkData, segments[0].StreamableOps, context.CancellationToken).ConfigureAwait(false);
 
-                    NivaraFrame chunkFrame;
-                    if (overlapBuffer != null)
-                    {
-                        var windowResult = overlapBuffer.HasData
-                            ? segments[0].BoundaryOp!.Execute(overlapBuffer.PrependToChunk(processedData))
-                            : segments[0].BoundaryOp!.Execute(processedData);
-                        var finalData = overlapBuffer.HasData
-                            ? WindowOverlapBuffer.TrimFirstN(windowResult, overlapBuffer.OverlapSize)
-                            : windowResult;
-                        chunkFrame = NivaraFrame.Create(finalData);
-                        overlapBuffer.UpdateFromChunk(processedData);
-                    }
-                    else
-                    {
-                        chunkFrame = NivaraFrame.Create(processedData);
-                    }
+                    var chunkFrame = windowProcessor != null
+                        ? NivaraFrame.Create(windowProcessor.ProcessChunk(processedData))
+                        : NivaraFrame.Create(processedData);
 
                     if (chunkScope != null)
                         chunkScope.SetRowCount(chunkFrame.RowCount);
@@ -449,17 +405,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
         var firstSegment = segments[0];
         var hasAnyBoundary = segments.Any(s => s.BoundaryOp != null);
 
-        WindowOverlapBuffer? overlapBuffer = null;
-        int overlapBoundarySegIdx = -1;
-        if (segments.Count > 0 && segments[0].BoundaryOp != null)
-        {
-            var overlapSize = WindowOverlapBuffer.DetermineOverlapSize(segments[0].BoundaryOp);
-            if (overlapSize > 0)
-            {
-                overlapBuffer = new WindowOverlapBuffer(overlapSize);
-                overlapBoundarySegIdx = 0;
-            }
-        }
+        var windowProcessor = StreamingWindowProcessor.TryCreate(hasAnyBoundary ? firstSegment.BoundaryOp : null);
 
         using var budgetTracker = new StreamingBudgetTracker(context.MemoryBudget);
 
@@ -485,7 +431,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
             yield break;
         }
 
-        if (overlapBuffer != null)
+        if (windowProcessor != null)
         {
             var chunkFrames = new List<NivaraFrame>();
             var hasTrailingBoundaries = segments.Count > 1 && segments.Skip(1).Any(s => s.BoundaryOp != null);
@@ -499,13 +445,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
                 var processedData = await executeOperationsOnDataAsync(
                     chunkData, firstSegment.StreamableOps, ct).ConfigureAwait(false);
 
-                var windowResult = overlapBuffer.HasData
-                    ? firstSegment.BoundaryOp!.Execute(overlapBuffer.PrependToChunk(processedData))
-                    : firstSegment.BoundaryOp!.Execute(processedData);
-                var finalData = overlapBuffer.HasData
-                    ? WindowOverlapBuffer.TrimFirstN(windowResult, overlapBuffer.OverlapSize)
-                    : windowResult;
-                overlapBuffer.UpdateFromChunk(processedData);
+                var finalData = windowProcessor.ProcessChunk(processedData);
 
                 var chunkFrame = NivaraFrame.Create(finalData);
                 budgetTracker.RecordFrame(chunkFrame);
@@ -558,7 +498,7 @@ sealed class StreamingExecutionStrategy : ExecutionStrategyBase
 
             for (int segIdx = 0; segIdx < segments.Count; segIdx++)
             {
-                if (segIdx == overlapBoundarySegIdx) continue;
+                if (segIdx == 0) continue;
 
                 var segment = segments[segIdx];
 
