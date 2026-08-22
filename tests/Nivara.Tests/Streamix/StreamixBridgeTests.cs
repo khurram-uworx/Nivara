@@ -248,66 +248,58 @@ public class StreamixBridgeTests
     [Test]
     public async Task Backpressure_FailMode_BridgePath_PropagatesException()
     {
-        var slowFrames = SlowAsyncFrames(100);
-        var flux = Flux.From(slowFrames)
+        // The producer must flood without pacing delays: Task.Delay-based producer
+        // pacing quantizes to roughly the consumer's cadence on Windows (~15.6ms
+        // timer granularity), so the capacity-1 boundary never fills and Fail mode
+        // never fires — mirroring Streamix's own PipeThroughChannel_Fail_ThrowsWhenBoundaryIsFull_FromEnumerable.
+        var flux = Flux.From(FloodFrames(100))
             .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
 
-        Exception? caught = null;
-        int itemCount = 0;
-        try
+        int count = 0;
+        var ex = Assert.ThrowsAsync<BackpressureException>(async () =>
         {
             await foreach (var chunk in flux)
             {
-                itemCount++;
+                count++;
                 await Task.Delay(10);
             }
-        }
-        catch (Exception ex)
-        {
-            caught = ex;
-        }
+        });
 
-        TestContext.Out.WriteLine($"Chunks consumed: {itemCount}, Exception: {caught?.GetType().Name ?? "none"}");
-        Assert.That(caught, Is.Not.Null,
-            "BackpressureException should propagate through Flux.From(IAsyncEnumerable).PipeThroughChannel — regression canary for #315");
-        Assert.That(caught, Is.InstanceOf<BackpressureException>());
+        TestContext.Out.WriteLine($"Chunks consumed: {count}, Exception: {ex.GetType().Name}");
+        Assert.That(ex.Message, Does.Contain("Channel boundary is full"));
+        Assert.That(count, Is.LessThan(100),
+            "Iteration must terminate early when the boundary faults");
     }
 
     [Test]
     public async Task Backpressure_FailMode_AsyncEnumerablePath_PropagatesException()
     {
-        var asyncEnumerable = SlowAsyncEnumerable(100);
-        var flux = Flux.From(asyncEnumerable)
+        var flux = Flux.From(SlowAsyncEnumerable(100))
             .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
 
-        Exception? caught = null;
-        int itemCount = 0;
-        try
+        int count = 0;
+        var ex = Assert.ThrowsAsync<BackpressureException>(async () =>
         {
             await foreach (var item in flux)
             {
-                itemCount++;
+                count++;
                 await Task.Delay(10);
             }
-        }
-        catch (Exception ex)
-        {
-            caught = ex;
-        }
+        });
 
-        TestContext.Out.WriteLine($"Items consumed: {itemCount}, Exception: {caught?.GetType().Name ?? "none"}");
-        Assert.That(caught, Is.Not.Null,
-            "BackpressureException should propagate through Flux.From(IAsyncEnumerable<T>).PipeThroughChannel (Streamix regression canary for #315)");
-        Assert.That(caught, Is.InstanceOf<BackpressureException>());
+        TestContext.Out.WriteLine($"Items consumed: {count}, Exception: {ex.GetType().Name}");
+        Assert.That(ex.Message, Does.Contain("Channel boundary is full"));
+        Assert.That(count, Is.LessThan(100),
+            "Iteration must terminate early when the boundary faults");
     }
 
-    static async IAsyncEnumerable<NivaraFrame> SlowAsyncFrames(int count)
+    static async IAsyncEnumerable<NivaraFrame> FloodFrames(int count)
     {
         var x = new int[] { 1 };
         var y = new string[] { "a" };
         for (int i = 0; i < count; i++)
         {
-            await Task.Delay(1);
+            await Task.Yield();
             yield return NivaraFrame.Create(
                 ("X", NivaraColumn<int>.Create(x)),
                 ("Y", NivaraColumn<string>.Create(y)));
