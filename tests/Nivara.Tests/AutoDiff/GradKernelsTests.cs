@@ -737,12 +737,21 @@ public class GradKernelsTests
     }
 
     [Test]
-    public void MatMul_Half_Unsupported_ThrowsNotSupported()
+    public void MatMul_Half_ComputesKnownValues()
     {
         var a = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f }, x => (Half)x);
         var b = Array.ConvertAll(new[] { 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f }, x => (Half)x);
         var actual = new Half[4];
-        Assert.Throws<NotSupportedException>(() => GradKernels.MatMul<Half>(a, b, actual, 2, 3, 2));
+        GradKernels.MatMul<Half>(a, b, actual, 2, 3, 2);
+
+        for (int i = 0; i < 2; i++)
+            for (int j = 0; j < 2; j++)
+            {
+                float expected = 0f;
+                for (int k = 0; k < 3; k++)
+                    expected += (float)a[i * 3 + k] * (float)b[k * 2 + j];
+                Assert.That((float)actual[i * 2 + j], Is.EqualTo(expected).Within(1e-2), $"Index {i},{j}");
+            }
     }
 
     // ══════════════════════════════════════════════════════════════════════
@@ -991,12 +1000,21 @@ public class GradKernelsTests
     }
 
     [Test]
-    public void MatMulTransposedB_Half_Unsupported_ThrowsNotSupported()
+    public void MatMulTransposedB_Half_ComputesKnownValues()
     {
         var a = Array.ConvertAll(new[] { 1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f }, x => (Half)x);
         var b = Array.ConvertAll(new[] { 7.0f, 8.0f, 9.0f, 10.0f, 11.0f, 12.0f }, x => (Half)x);
         var actual = new Half[4];
-        Assert.Throws<NotSupportedException>(() => GradKernels.MatMulTransposedB<Half>(a, b, actual, 2, 3, 2));
+        GradKernels.MatMulTransposedB<Half>(a, b, actual, 2, 3, 2);
+
+        for (int i = 0; i < 2; i++)
+            for (int j = 0; j < 2; j++)
+            {
+                float expected = 0f;
+                for (int k = 0; k < 3; k++)
+                    expected += (float)a[i * 3 + k] * (float)b[j * 3 + k];
+                Assert.That((float)actual[i * 2 + j], Is.EqualTo(expected).Within(1e-2), $"Index {i},{j}");
+            }
     }
 
     // ══════════════════════════════════════════════════════════════════════
