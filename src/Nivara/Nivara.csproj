@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>
@@ -7,7 +7,7 @@
     <LangVersion>latest</LangVersion>
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
     <PackageId>Nivara</PackageId>
-    <PackageVersion>1.4.0</PackageVersion>
+    <PackageVersion>2.0.0-preview</PackageVersion>
     <Description>High-performance columnar DataFrame library for .NET</Description>
     <PackageReleaseNotes>v1.4.0: Public streaming API (QueryFrame.AsStream, NivaraQuery&lt;T&gt;.AsStream, ScanAsQueryFrame factories for CSV/JSON/Parquet) with chunked async processing; Over()/WindowSpec builder for SQL-style partitioned window functions (rolling/cumulative/shift/lead/rank); fused expression engine kernel IR with TensorPrimitives SIMD and span/chunked backends; genuinely async CollectAsync/ToListAsync (no Task.Run); conditional expressions (ternary ?:) in the LINQ DSL; Quantile/Median/StdDev/Variance built-in aggregations; public API promotions (QueryPlan, ExecutionEngine, IExecutionStrategy, NivaraExecutionContext, ExecutionProgress, QueryPlanAnalyzer, QueryDiagnostics, QueryFrame.ToQueryPlan); Parquet row-group predicate pushdown; streaming budget tracker and window overlap buffer for chunked streaming; window-bearing operations run whole-column in streaming/parallel; int-family window accumulator overflow protection; various streaming/execution bug fixes. Core columnar engine: LINQ-like query engine, tensor-accelerated arithmetic and comparisons, lazy/eager/streaming/parallel execution strategies, explicit null mask semantics, schema-aware query planning with predicate pushdown and operation fusion, performance diagnostics, buffer pooling.</PackageReleaseNotes>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
@@ -27,11 +27,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Numerics.Tensors" Version="10.0.11" />
+    <PackageReference Include="System.Numerics.Tensors" Version="11.0.0-preview.7.26381.103" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="10.0.400" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-preview.7.26381.103" />
   </ItemGroup>
 
   <ItemGroup>
