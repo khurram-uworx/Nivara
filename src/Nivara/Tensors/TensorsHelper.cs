@@ -100,11 +100,12 @@ static class TensorsHelper
     /// <c>Tensor.MatrixMultiply</c> — proposed but unshipped as of
     /// 11.0.0-preview.7 (dotnet/runtime#95863, BLAS epic #93286).
     /// float/double use a transposed-B row kernel with
-    /// <see cref="TensorPrimitives.Dot"/> inner accumulation (BCL-tuned SIMD);
-    /// other vectorizable <c>INumber</c> types use a generic
-    /// <see cref="Vector{T}"/> path; the rest fall back to
-    /// <see cref="TensorPrimitives.Dot"/> scalar accumulation. Row parallelism is
-    /// gated by <see cref="ShouldParallelize"/> to avoid small-matmul overhead.
+    /// <see cref="TensorPrimitives.Dot"/> inner accumulation (BCL-tuned SIMD).
+    /// All other <c>INumber</c> types (e.g. Half, BFloat16, Int128) use the same
+    /// <see cref="TensorPrimitives.Dot"/> row-dot accumulation, so every type —
+    /// including those the runtime does not back with hardware vectors — takes the
+    /// BCL path instead of a hand-rolled <see cref="Vector{T}"/> SIMD kernel. Row
+    /// parallelism is gated by <see cref="ShouldParallelize"/> to avoid small-matmul overhead.
     /// </summary>
     internal static void MultiplyCore<T>(ReadOnlySpan<T> a, ReadOnlySpan<T> b, T[] result,
         int aRows, int aCols, int bCols, bool bTransposed = false)
