@@ -181,7 +181,7 @@ Nivara's approach is unique: reconstruct the model architecture using Nivara's m
 | **Now** | .NET 10 | None | Target F32 models only; reject BF16 with helpful error |
 | **Phase 2** | .NET 10 | Manual | Add manual BF16→F32 conversion (reinterpret bits, ~20 lines) for testing |
 | **Phase 3** | .NET 11 | Native | Migrate to `System.Numerics.BFloat16`; auto-convert BF16→F32 at load time |
-| **Phase 4** | .NET 11 | Native | Add `BFloat16` to `TypeValidator`, `ColumnStorageFactory`, `ColumnStorage<BFloat16>` |
+| **Phase 4** | .NET 11 | Native | Add `BFloat16` to `TypeValidator`, `ColumnStorageFactory`, `ColumnStorage<BFloat16>` — **DONE** (AutoDiff admission in `TypeValidator`; `SafeTensorsLoader.ConvertBF16<BFloat16>` reads natively; see issue #137) |
 
 **Why BF16 matters:** Most modern HuggingFace models (LLaMA, Mistral, Gemma, Bloom) ship weights in BF16. F32-only limits us to smaller/older models initially. Native BF16 on .NET 11 unlocks the entire HuggingFace model catalog.
 

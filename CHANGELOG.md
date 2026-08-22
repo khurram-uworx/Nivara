@@ -16,6 +16,15 @@ All notable changes to Nivara are documented here. Released versions are publish
   new parity + performance regression gates in `TensorsHelperTests` fail if the BCL
   view-materialization route ever beats the tiled transpose.
 
+- **BFloat16 joined the AutoDiff supported type set (#137)** — on .NET 11
+  `System.Numerics.BFloat16` implements `IBinaryFloatingPointIeee754<BFloat16>`, so it
+  natively satisfies the `IFloatingPointIeee754<T>` constraint. `TypeValidator` now admits it
+  (and `ToReverseGradTensorsAuto` converts BFloat16 frame columns); new `BFloat16Tests`
+  verify forward/backward parity with float references, `Linear` training under SGD/Adam, and the
+  inference-default graph guard. The generic `TensorsHelper.MultiplyCoreGeneric` matmul dropped
+  its hand-rolled `Vector<T>` SIMD branch (which threw `NotSupportedException` for `BFloat16`)
+  in favor of the BCL `TensorPrimitives.Dot` row dot product, so Half matmul now computes too.
+
 - **Lead / negative-shift windows stream via delayed emission (#331)** —
   `StreamingWindowProcessor` now covers lookahead windows: `Lead` expressions,
   negative-period `Shift` window expressions, and standalone `ShiftOperation` with
