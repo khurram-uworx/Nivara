@@ -88,47 +88,6 @@ static class TensorsHelper
     }
 
     /// <summary>
-    /// PRIMARY — Tensor&lt;T&gt; level matmul. Swap target for Tensor.MatrixMultiply.
-    /// </summary>
-    internal static Tensor<T> Multiply<T>(Tensor<T> a, Tensor<T> b,
-        int aRows, int aCols, int bCols)
-        where T : unmanaged, INumber<T>
-    {
-        int aLen = (int)a.FlattenedLength;
-        int bLen = (int)b.FlattenedLength;
-        int resLen = aRows * bCols;
-
-        var result = new T[resLen];
-        Multiply(a, b, result, aRows, aCols, bCols);
-        return Tensor.Create(result, new ReadOnlySpan<nint>([aRows, bCols]));
-    }
-
-    /// <summary>
-    /// Dense (no-null) matmul on Tensor&lt;T&gt; inputs, writing raw T[] result.
-    /// This overload's body is the swap target when Tensor.MatrixMultiply ships.
-    /// </summary>
-    internal static void Multiply<T>(Tensor<T> a, Tensor<T> b, T[] result,
-        int aRows, int aCols, int bCols)
-        where T : unmanaged, INumber<T>
-    {
-        int aLen = (int)a.FlattenedLength;
-        int bLen = (int)b.FlattenedLength;
-        var aFlat = ArrayPool<T>.Shared.Rent(aLen);
-        var bFlat = ArrayPool<T>.Shared.Rent(bLen);
-        try
-        {
-            a.FlattenTo(aFlat.AsSpan(0, aLen));
-            b.FlattenTo(bFlat.AsSpan(0, bLen));
-            MultiplyCore(aFlat.AsSpan(0, aLen), bFlat.AsSpan(0, bLen), result, aRows, aCols, bCols);
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(aFlat, clearArray: true);
-            ArrayPool<T>.Shared.Return(bFlat, clearArray: true);
-        }
-    }
-
-    /// <summary>
     /// Core dense matmul on flat row-major spans. Swap target for
     /// <c>Tensor.MatrixMultiply</c>.
     /// float/double use a transposed-B row kernel with
