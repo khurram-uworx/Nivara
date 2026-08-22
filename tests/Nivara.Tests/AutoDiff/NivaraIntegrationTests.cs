@@ -3,6 +3,7 @@ using Nivara.AutoDiff.Extensions;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -518,10 +519,11 @@ public class NivaraIntegrationTests
 
         // Assert
         Assert.That(supportedTypes, Is.Not.Null);
-        Assert.That(supportedTypes.Length, Is.EqualTo(3));
+        Assert.That(supportedTypes.Length, Is.EqualTo(4));
         Assert.That(supportedTypes, Does.Contain(typeof(float)));
         Assert.That(supportedTypes, Does.Contain(typeof(double)));
         Assert.That(supportedTypes, Does.Contain(typeof(Half)));
+        Assert.That(supportedTypes, Does.Contain(typeof(BFloat16)));
     }
 
 }
