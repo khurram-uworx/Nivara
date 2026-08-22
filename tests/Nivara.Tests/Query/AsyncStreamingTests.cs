@@ -146,7 +146,7 @@ public class AsyncStreamingTests
     }
 
     [Test]
-    public void CollectAsync_Cancellation_ThrowsOperationCanceledException()
+    public async Task CollectAsync_Cancellation_ThrowsOperationCanceledException()
     {
         var frame = CreateTestFrame(5);
         try
@@ -157,7 +157,7 @@ public class AsyncStreamingTests
             using var ct = new CancellationTokenSource();
             ct.Cancel();
 
-            Assert.ThrowsAsync<OperationCanceledException>(() => queryFrame.CollectAsync(ct.Token));
+            await Assert.ThrowsAsync<OperationCanceledException>(() => queryFrame.CollectAsync(ct.Token));
         }
         finally
         {
@@ -618,7 +618,7 @@ public class AsyncStreamingTests
     }
 
     [Test]
-    public void CsvLazySource_ReadChunkAsync_CancelledToken_ThrowsOperationCanceledException()
+    public async Task CsvLazySource_ReadChunkAsync_CancelledToken_ThrowsOperationCanceledException()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(tempDir);
@@ -629,7 +629,7 @@ public class AsyncStreamingTests
             using var cts = new CancellationTokenSource();
             cts.Cancel();
 
-            Assert.ThrowsAsync<OperationCanceledException>(() => source.ReadChunkAsync(0, 10, cts.Token).AsTask());
+            await Assert.ThrowsAsync<OperationCanceledException>(() => source.ReadChunkAsync(0, 10, cts.Token).AsTask());
         }
         finally
         {
@@ -638,7 +638,7 @@ public class AsyncStreamingTests
     }
 
     [Test]
-    public void JsonLazySource_ReadChunkAsync_CancelledToken_ThrowsOperationCanceledException()
+    public async Task JsonLazySource_ReadChunkAsync_CancelledToken_ThrowsOperationCanceledException()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "NivaraAsyncTests", Guid.NewGuid().ToString());
         Directory.CreateDirectory(tempDir);
@@ -653,7 +653,7 @@ public class AsyncStreamingTests
             using var cts = new CancellationTokenSource();
             cts.Cancel();
 
-            Assert.ThrowsAsync<OperationCanceledException>(() => source.ReadChunkAsync(0, 10, cts.Token).AsTask());
+            await Assert.ThrowsAsync<OperationCanceledException>(() => source.ReadChunkAsync(0, 10, cts.Token).AsTask());
         }
         finally
         {

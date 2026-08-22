@@ -256,7 +256,7 @@ public class StreamixBridgeTests
             .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
 
         int count = 0;
-        var ex = Assert.ThrowsAsync<BackpressureException>(async () =>
+        var ex = await Assert.ThrowsAsync<BackpressureException>(async () =>
         {
             await foreach (var chunk in flux)
             {
@@ -278,7 +278,7 @@ public class StreamixBridgeTests
             .PipeThroughChannel(1, ChannelBackpressureMode.Fail);
 
         int count = 0;
-        var ex = Assert.ThrowsAsync<BackpressureException>(async () =>
+        var ex = await Assert.ThrowsAsync<BackpressureException>(async () =>
         {
             await foreach (var item in flux)
             {
