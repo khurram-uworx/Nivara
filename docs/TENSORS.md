@@ -168,11 +168,21 @@ Facts grounded in the official docs ([what's new in .NET 10][2]):
 ### BCL swap targets
 
 `TensorsHelper` is the shared internal kernel store (MatMul, Transpose) with **BCL swap-target
-annotations** (see [ADR-002][3] and [ADR-003][4]). `Tensor.Transpose<T>` and
-`Tensor.MatrixMultiply<T>` are net-11-preview APIs; when they ship, they replace the handwritten
-kernels. `GradKernels` is the AutoDiff facade over span-in/span-out kernels. These are internal —
-no permanent public tensor API is added on top of a stopgap kernel while the BCL matmul story is
-still in flux.
+annotations** (see [ADR-002][3] and [ADR-003][4]). `GradKernels` is the AutoDiff facade over
+span-in/span-out kernels. These are internal — no permanent public tensor API is added on top of a
+stopgap kernel while the BCL matmul story is still in flux.
+
+Status verified against `System.Numerics.Tensors` 11.0.0-preview.7 (#136):
+
+- **`Tensor.Transpose<T>` ships** but returns a zero-copy strided *view* over the source array —
+  it does not materialize contiguous row-major output. Nivara consumers feed contiguous spans to
+  `TensorPrimitives.Dot` and friends, so `TensorsHelper.Transpose` stays as the physical
+  materializer. Parity + performance regression gates in `TensorsHelperTests` fail if the BCL
+  view-materialization route ever beats the tiled kernel, signalling a re-evaluation.
+- **`Tensor.MatrixMultiply<T>` does not exist** yet — open api-suggestion
+  [dotnet/runtime#95863](https://github.com/dotnet/runtime/issues/95863) inside the BLAS epic
+  [dotnet/runtime#93286](https://github.com/dotnet/runtime/issues/93286). The handwritten matmul
+  kernels remain until it lands.
 
 ### AutoDiff keeps the span boundary
 
