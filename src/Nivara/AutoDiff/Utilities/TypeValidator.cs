@@ -37,7 +37,7 @@ public static class TypeValidator
     /// <returns>True if the type is supported; otherwise, false</returns>
     public static bool IsSupportedType(Type type)
     {
-        return type == typeof(float) || type == typeof(double) || type == typeof(Half);
+        return type == typeof(float) || type == typeof(double) || type == typeof(Half) || type == typeof(BFloat16);
     }
 
     /// <summary>
@@ -46,7 +46,7 @@ public static class TypeValidator
     /// <returns>An array of supported types</returns>
     public static Type[] GetSupportedTypes()
     {
-        return new[] { typeof(float), typeof(double), typeof(Half) };
+        return new[] { typeof(float), typeof(double), typeof(Half), typeof(BFloat16) };
     }
 
     /// <summary>

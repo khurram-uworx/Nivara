@@ -192,9 +192,13 @@ ops/modules via internal loops, not by adding general rank-N primitive ops.
 
 ### Type support note
 
-AutoDiff is constrained to `IFloatingPointIeee754<T>` (float, double, Half). `BFloat16` is
-net11-only (not testable at the net10.0 TFM); today's BFloat16 support is load-time BF16→F32
-widening in `SafeTensorsLoader`. Kernel tests for BFloat16 are deferred to the net11 migration.
+AutoDiff is constrained to `IFloatingPointIeee754<T>` (float, double, Half, **BFloat16**). On
+.NET 11, `System.Numerics.BFloat16` implements `IBinaryFloatingPointIeee754<BFloat16>`, so it
+natively satisfies the constraint and is admitted at runtime in `TypeValidator` (see issue #137).
+`SafeTensorsLoader` still performs BF16→F32 widening as the default for float/double pipelines;
+`ConvertBF16<BFloat16>` is available for native BFloat16 reads (BF16→F32→BF16 is lossless).
+BFloat16 matmul runs through the BCL `TensorPrimitives.Dot` path (no hand-rolled SIMD), so it is
+correct but not hardware-accelerated.
 
 ### Data-prep numeric surface
 

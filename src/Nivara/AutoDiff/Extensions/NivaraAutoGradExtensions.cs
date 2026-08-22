@@ -87,7 +87,7 @@ public static class NivaraAutoGradExtensions
 
     /// <summary>
     /// Converts all numeric columns from a NivaraFrame to ReverseGradTensors.
-    /// Only columns with IFloatingPointIeee754 types (float, double, Half) are converted.
+    /// Only columns with IFloatingPointIeee754 types (float, double, Half, BFloat16) are converted.
     /// </summary>
     public static Dictionary<string, object> ToReverseGradTensorsAuto(
         this NivaraFrame frame,
@@ -116,6 +116,11 @@ public static class NivaraAutoGradExtensions
             else if (columnType == typeof(Half))
             {
                 var typedColumn = frame.GetColumn<Half>(columnName);
+                result[columnName] = typedColumn.ToReverseGradTensor(requiresGrad);
+            }
+            else if (columnType == typeof(BFloat16))
+            {
+                var typedColumn = frame.GetColumn<BFloat16>(columnName);
                 result[columnName] = typedColumn.ToReverseGradTensor(requiresGrad);
             }
         }

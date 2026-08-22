@@ -3,6 +3,7 @@ using Nivara.AutoDiff.Exceptions;
 using Nivara.AutoDiff.Extensions;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.AutoDiff;
 
@@ -89,10 +90,11 @@ public class TypeSafetyTests
         var supportedTypes = TypeValidator.GetSupportedTypes();
 
         // Assert
-        Assert.That(supportedTypes, Has.Length.EqualTo(3));
+        Assert.That(supportedTypes, Has.Length.EqualTo(4));
         Assert.That(supportedTypes, Does.Contain(typeof(float)));
         Assert.That(supportedTypes, Does.Contain(typeof(double)));
         Assert.That(supportedTypes, Does.Contain(typeof(Half)));
+        Assert.That(supportedTypes, Does.Contain(typeof(BFloat16)));
     }
 
     [Test]
@@ -315,10 +317,11 @@ public class TypeSafetyTests
         var types = NivaraAutoGradExtensions.GetSupportedAutoGradTypes();
 
         // Assert
-        Assert.That(types, Has.Length.EqualTo(3));
+        Assert.That(types, Has.Length.EqualTo(4));
         Assert.That(types, Does.Contain(typeof(float)));
         Assert.That(types, Does.Contain(typeof(double)));
         Assert.That(types, Does.Contain(typeof(Half)));
+        Assert.That(types, Does.Contain(typeof(BFloat16)));
     }
 
     [Test]

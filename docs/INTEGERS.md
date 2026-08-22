@@ -23,7 +23,7 @@ This excludes all non-floating-point types at compile time:
 | float  | Yes                                | Yes                         |
 | double | Yes                                | Yes                         |
 | Half   | Yes                                | Yes                         |
-| BFloat16 | No (NET 10). Planned for NET 11  | No (until NET 11)           |
+| BFloat16 | Yes (NET 11)                     | Yes (admitted in AutoDiff via issue #137) |
 | int    | No                                 | No                          |
 | long   | No                                 | No                          |
 | short  | No                                 | No                          |
@@ -188,8 +188,7 @@ dynamic range than `Half` for integer widening.
 - Lower precision loss for large I64→BF16 than I64→Half
 
 **Cons**:
-- Not available in .NET 10
-- No `IFloatingPointIeee754<BFloat16>` (planned for NET 11)
+- Was not available in .NET 10; shipped in .NET 11 and now implements `IFloatingPointIeee754<BFloat16>`
 - Half is sufficient for current model weight ranges
 
 **Verdict**: Track via GitHub issue (#76). Do not block on this.
