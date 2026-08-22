@@ -52,3 +52,35 @@ runtime gates, testing it, and documenting the decision.
 
 - [ ] #137 — parent issue: BFloat16 AutoDiff kernels (this plan executes it)
 - *(create follow-ups here as they are discovered during execution)*
+
+---
+
+## Deferred ledger — CodeMemory MCP issues (external filing)
+
+**Do NOT act on this during the #137 plan.** After the plan executes, file these
+experienced problems as one GitHub issue at https://github.com/khurram-uworx/CodeMemory,
+then delete this section together with TODO.md. Recorded verbatim from the session
+(2026-08-22, Nivara repo, v0.6.0+12f28b5c31f841e23383551e925b8ab979b):
+
+1. **`find_related_code` silently returns `[]` for valid method symbol paths.**
+   Call: `find_related_code({ symbolPath: "Nivara.AutoDiff.Utilities.TypeValidator.IsSupportedType", relationType: "references" })` → `[]`.
+   The same class-level lookup (`get_edit_context` on `Nivara.AutoDiff.Utilities.TypeValidator`)
+   *did* return caller/test relationships, so the data exists. Expected either results or a
+   "symbol not found (+ suggestions)" diagnostic instead of a silent empty array.
+2. **SQL parser fails on LIKE patterns containing `/`.**
+   - `WHERE FilePath LIKE '%Optimizer/SGD.cs%' AND Kind='Method'` → `Parse error: Expected a SQL statement, found SymbolRecord, Line: 1, Col: 22`
+   - `WHERE FilePath LIKE '%Nn/Module.cs%' AND Kind='Method'` → `Parse error: Expected Expected an expression, found: Identifier { Ident = FROM }`
+   Nearly identical queries *without* `/` (e.g. `LIKE '%ReverseGradOperations.cs%'`) parse fine,
+   so the slash inside the string literal seems to break the tokenizer/parser.
+3. **`COUNT(*)` aggregates unsupported, with cryptic errors.**
+   `SELECT COUNT(*) AS tpCalls FROM SymbolRecord WHERE FullName LIKE '%TensorPrimitives%'`
+   → `Parse error: Expected (, found EOF`. Either support aggregates or return a clear
+   "aggregates are not supported" message.
+4. **Parser error messages are internal dumps** (`Expected Expected an expression, found:
+   Identifier { Ident = FROM }`) — duplicated "Expected", no position context relative to the
+   query text. Hard to self-correct a query from these.
+5. **Improvement idea (semantic search):** searches for implementation code
+   ("BFloat16 widening SafeTensorsLoader") returned mostly .md docs (TENSORS/AUTODIFF/
+   CHANGELOG/AGENTS) and sample files; the actual kernel (`SafeTensorsLoader.ConvertBF16<T>`)
+   only surfaced via SQL. A `codeOnly` filter or doc-downweighting would help agent workflows.
+
