@@ -14,13 +14,21 @@ namespace Nivara.Tensors;
 static class TensorsHelper
 {
     // ═══════════════════════════════════════════════════════════════
-    //  MatMul / Transpose
-    //  .NET future: Tensor.MatrixMultiply&lt;T&gt;
+    //  MatMul / Transpose (#136, verified against 11.0.0-preview.7)
+    //  Tensor.Transpose<T> shipped as a zero-copy strided view — it does
+    //  not materialize contiguous output, so this tiled kernel stays as
+    //  its physical materializer for span-based consumers.
+    //  Tensor.MatrixMultiply has NOT shipped: tracked upstream in
+    //  dotnet/runtime#95863 (BLAS epic dotnet/runtime#93286). Swap when
+    //  it lands.
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
     /// Transpose a row-major matrix using a cache-friendly tiled loop.
-    /// .NET 11: Tensor.Transpose&lt;T&gt;(tensor)
+    /// The net11 BCL <c>Tensor.Transpose&lt;T&gt;</c> returns a strided view over
+    /// the source array; consumers here need contiguous row-major output
+    /// (e.g. <see cref="TensorPrimitives.Dot"/> inner kernels), so this
+    /// physical copy remains. Parity and perf gates live in TensorsHelperTests.
     /// </summary>
     internal static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
         where T : struct, INumber<T>
@@ -88,49 +96,9 @@ static class TensorsHelper
     }
 
     /// <summary>
-    /// PRIMARY — Tensor&lt;T&gt; level matmul. Swap target for Tensor.MatrixMultiply.
-    /// </summary>
-    internal static Tensor<T> Multiply<T>(Tensor<T> a, Tensor<T> b,
-        int aRows, int aCols, int bCols)
-        where T : unmanaged, INumber<T>
-    {
-        int aLen = (int)a.FlattenedLength;
-        int bLen = (int)b.FlattenedLength;
-        int resLen = aRows * bCols;
-
-        var result = new T[resLen];
-        Multiply(a, b, result, aRows, aCols, bCols);
-        return Tensor.Create(result, new ReadOnlySpan<nint>([aRows, bCols]));
-    }
-
-    /// <summary>
-    /// Dense (no-null) matmul on Tensor&lt;T&gt; inputs, writing raw T[] result.
-    /// This overload's body is the swap target when Tensor.MatrixMultiply ships.
-    /// </summary>
-    internal static void Multiply<T>(Tensor<T> a, Tensor<T> b, T[] result,
-        int aRows, int aCols, int bCols)
-        where T : unmanaged, INumber<T>
-    {
-        int aLen = (int)a.FlattenedLength;
-        int bLen = (int)b.FlattenedLength;
-        var aFlat = ArrayPool<T>.Shared.Rent(aLen);
-        var bFlat = ArrayPool<T>.Shared.Rent(bLen);
-        try
-        {
-            a.FlattenTo(aFlat.AsSpan(0, aLen));
-            b.FlattenTo(bFlat.AsSpan(0, bLen));
-            MultiplyCore(aFlat.AsSpan(0, aLen), bFlat.AsSpan(0, bLen), result, aRows, aCols, bCols);
-        }
-        finally
-        {
-            ArrayPool<T>.Shared.Return(aFlat, clearArray: true);
-            ArrayPool<T>.Shared.Return(bFlat, clearArray: true);
-        }
-    }
-
-    /// <summary>
     /// Core dense matmul on flat row-major spans. Swap target for
-    /// <c>Tensor.MatrixMultiply</c>.
+    /// <c>Tensor.MatrixMultiply</c> — proposed but unshipped as of
+    /// 11.0.0-preview.7 (dotnet/runtime#95863, BLAS epic #93286).
     /// float/double use a transposed-B row kernel with
     /// <see cref="TensorPrimitives.Dot"/> inner accumulation (BCL-tuned SIMD);
     /// other vectorizable <c>INumber</c> types use a generic

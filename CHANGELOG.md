@@ -6,6 +6,16 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **net11 BCL tensor swap targets verified (#136)** — `TensorsHelper` MatMul/Transpose
+  annotations now reflect the verified state of `System.Numerics.Tensors`
+  11.0.0-preview.7: `Tensor.Transpose<T>` ships as a zero-copy strided view, so the
+  cache-tiled kernel remains the physical materializer for contiguous-span consumers
+  (`TensorPrimitives.Dot` paths); `Tensor.MatrixMultiply<T>` is unshipped
+  (dotnet/runtime#95863, BLAS epic #93286), so handwritten matmul kernels stay with the
+  swap-target annotation intact. The dead Tensor-level `Multiply` overloads were removed;
+  new parity + performance regression gates in `TensorsHelperTests` fail if the BCL
+  view-materialization route ever beats the tiled transpose.
+
 - **Lead / negative-shift windows stream via delayed emission (#331)** —
   `StreamingWindowProcessor` now covers lookahead windows: `Lead` expressions,
   negative-period `Shift` window expressions, and standalone `ShiftOperation` with

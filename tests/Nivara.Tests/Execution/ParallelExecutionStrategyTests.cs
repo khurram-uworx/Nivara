@@ -138,7 +138,7 @@ public class ParallelExecutionStrategyTests
     }
 
     [Test]
-    public void ExecuteAsync_Cancellation_ThrowsOperationCanceledException()
+    public async Task ExecuteAsync_Cancellation_ThrowsOperationCanceledException()
     {
         var strategy = new ParallelExecutionStrategy();
         using var cts = new CancellationTokenSource();
@@ -148,7 +148,7 @@ public class ParallelExecutionStrategyTests
 
         cts.Cancel();
 
-        Assert.ThrowsAsync<OperationCanceledException>(
+        await Assert.ThrowsAsync<OperationCanceledException>(
             async () => await strategy.ExecuteAsync(plan, context));
     }
 
