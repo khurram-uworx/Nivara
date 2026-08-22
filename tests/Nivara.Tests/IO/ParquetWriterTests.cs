@@ -54,7 +54,7 @@ public class ParquetWriterTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrowAsync(async () => await NivaraParquetWriter.WriteParquetAsync(frame, tempFile));
+            await Assert.DoesNotThrowAsync(async () => await NivaraParquetWriter.WriteParquetAsync(frame, tempFile));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);

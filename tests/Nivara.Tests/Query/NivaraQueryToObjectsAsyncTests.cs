@@ -110,12 +110,12 @@ public class NivaraQueryToObjectsAsyncTests
     }
 
     [Test]
-    public void ToObjectsAsync_InvalidChunkSize_ThrowsArgumentOutOfRangeException()
+    public async Task ToObjectsAsync_InvalidChunkSize_ThrowsArgumentOutOfRangeException()
     {
         using var frame = CreatePeopleFrame(3);
         var query = frame.Query<Person>();
 
-        var ex = Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+        var ex = await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
         {
             await foreach (var _ in query.ToObjectsAsync(chunkSize: 0))
             {
@@ -148,7 +148,7 @@ public class NivaraQueryToObjectsAsyncTests
                     }
                 }
 
-                Assert.ThrowsAsync<OperationCanceledException>(Enumerate);
+                await Assert.ThrowsAsync<OperationCanceledException>(Enumerate);
             }
             finally
             {

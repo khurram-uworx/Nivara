@@ -39,7 +39,7 @@ public class NivaraFrameExtensionsTests
         try
         {
             // Act & Assert - should not throw
-            Assert.DoesNotThrowAsync(async () => await frame.ToParquetAsync(tempFile));
+            await Assert.DoesNotThrowAsync(async () => await frame.ToParquetAsync(tempFile));
 
             // Verify file was created
             Assert.That(File.Exists(tempFile), Is.True);
@@ -73,7 +73,7 @@ public class NivaraFrameExtensionsTests
         using var stream = new MemoryStream();
 
         // Act & Assert - should not throw
-        Assert.DoesNotThrowAsync(async () => await frame.ToParquetStreamAsync(stream));
+        await Assert.DoesNotThrowAsync(async () => await frame.ToParquetStreamAsync(stream));
 
         // Verify data was written
         Assert.That(stream.Length, Is.GreaterThan(0));
@@ -87,10 +87,10 @@ public class NivaraFrameExtensionsTests
     }
 
     [Test]
-    public void LoadParquetAsync_WithNullPath_ShouldThrowArgumentNullException()
+    public async Task LoadParquetAsync_WithNullPath_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameIOExtensions.LoadParquetAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameIOExtensions.LoadParquetAsync(null!));
     }
 
     [Test]
@@ -101,10 +101,10 @@ public class NivaraFrameExtensionsTests
     }
 
     [Test]
-    public void LoadParquetFromStreamAsync_WithNullStream_ShouldThrowArgumentNullException()
+    public async Task LoadParquetFromStreamAsync_WithNullStream_ShouldThrowArgumentNullException()
     {
         // Act & Assert
-        Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameIOExtensions.LoadParquetFromStreamAsync(null!));
+        await Assert.ThrowsAsync<ArgumentNullException>(async () => await NivaraFrameIOExtensions.LoadParquetFromStreamAsync(null!));
     }
 
     [Test]
@@ -156,7 +156,7 @@ public class NivaraFrameExtensionsTests
     }
 
     [Test]
-    public void ExtensionMethods_ShouldProvideAsyncVariants()
+    public async Task ExtensionMethods_ShouldProvideAsyncVariants()
     {
         // Arrange
         var frame = CreateTestFrame();
@@ -166,10 +166,10 @@ public class NivaraFrameExtensionsTests
         {
             // Act & Assert - both sync and async variants should be available
             Assert.DoesNotThrow(() => frame.ToParquet(tempFile));
-            Assert.DoesNotThrowAsync(async () => await frame.ToParquetAsync(tempFile));
+            await Assert.DoesNotThrowAsync(async () => await frame.ToParquetAsync(tempFile));
 
             Assert.DoesNotThrow(() => NivaraFrameIOExtensions.LoadParquet(tempFile));
-            Assert.DoesNotThrowAsync(async () => await NivaraFrameIOExtensions.LoadParquetAsync(tempFile));
+            await Assert.DoesNotThrowAsync(async () => await NivaraFrameIOExtensions.LoadParquetAsync(tempFile));
         }
         finally
         {
