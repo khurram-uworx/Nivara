@@ -138,8 +138,6 @@ static class TensorsHelper
     static bool ShouldParallelize(int aRows, int aCols, int bCols)
         => aRows >= 4 && (long)aRows * aCols * bCols >= 2 << 20;
 
-    const int MultiplyRowTile = 8;
-
     static void MultiplyCoreFloat<T>(ReadOnlySpan<float> a, ReadOnlySpan<float> b, T[] result,
         int aRows, int aCols, int bCols, bool bTransposed)
         where T : struct, INumber<T>
@@ -223,28 +221,15 @@ static class TensorsHelper
             else
                 Transpose(b, bT.AsSpan(0, bLen), aCols, bCols);
 
-            int vec = Vector<T>.Count;
-            bool vectorized = Vector.IsHardwareAccelerated && vec > 1 && aCols >= vec;
             bool parallel = ShouldParallelize(aRows, aCols, bCols);
             T[]? aCopy = parallel ? RentCopy(a) : null;
             try
             {
-                if (vectorized)
-                {
-                    if (parallel)
-                        Parallel.For(0, aRows, i => MultiplyRowVectorizedGeneric(aCopy!, bT, result, i, aCols, bCols, vec));
-                    else
-                        for (int i = 0; i < aRows; i++)
-                            MultiplyRowVectorizedGeneric(a, bT, result, i, aCols, bCols, vec);
-                }
+                if (parallel)
+                    Parallel.For(0, aRows, i => MultiplyRowScalar(aCopy!, bT, result, i, aCols, bCols));
                 else
-                {
-                    if (parallel)
-                        Parallel.For(0, aRows, i => MultiplyRowScalar(aCopy!, bT, result, i, aCols, bCols));
-                    else
-                        for (int i = 0; i < aRows; i++)
-                            MultiplyRowScalar(a, bT, result, i, aCols, bCols);
-                }
+                    for (int i = 0; i < aRows; i++)
+                        MultiplyRowScalar(a, bT, result, i, aCols, bCols);
             }
             finally
             {
@@ -295,50 +280,6 @@ static class TensorsHelper
         int outOff = i * bCols;
         for (int j = 0; j < bCols; j++)
             result[outOff + j] = TensorPrimitives.Dot(a.Slice(aOff, aCols), bT.AsSpan(j * aCols, aCols));
-    }
-
-    static void MultiplyRowVectorizedGeneric<T>(ReadOnlySpan<T> a, T[] bT, T[] result,
-        int i, int aCols, int bCols, int vec)
-        where T : struct, INumber<T>
-    {
-        int aOff = i * aCols;
-        int outOff = i * bCols;
-        int kVecEnd = aCols - (aCols % vec);
-        ref T aRef = ref MemoryMarshal.GetReference(a.Slice(aOff, aCols));
-
-        Span<Vector<T>> accs = stackalloc Vector<T>[MultiplyRowTile];
-        int j = 0;
-        for (; j + MultiplyRowTile <= bCols; j += MultiplyRowTile)
-        {
-            accs.Clear();
-            int k = 0;
-            for (; k < kVecEnd; k += vec)
-            {
-                var av = Vector.LoadUnsafe(ref Unsafe.Add(ref aRef, k));
-                for (int t = 0; t < MultiplyRowTile; t++)
-                    accs[t] = Vector.Add(accs[t], Vector.Multiply(av, Vector.LoadUnsafe(ref bT[(j + t) * aCols + k])));
-            }
-            for (int t = 0; t < MultiplyRowTile; t++)
-                result[outOff + j + t] = Vector.Sum(accs[t]) + TailGeneric(a, bT, aOff, j + t, k, aCols);
-        }
-        for (; j < bCols; j++)
-        {
-            var acc = Vector<T>.Zero;
-            int k = 0;
-            for (; k < kVecEnd; k += vec)
-                acc = Vector.Add(acc, Vector.Multiply(Vector.LoadUnsafe(ref Unsafe.Add(ref aRef, k)), Vector.LoadUnsafe(ref bT[j * aCols + k])));
-            result[outOff + j] = Vector.Sum(acc) + TailGeneric(a, bT, aOff, j, k, aCols);
-        }
-    }
-
-    static T TailGeneric<T>(ReadOnlySpan<T> a, T[] bT, int aOff, int j, int k, int aCols)
-        where T : struct, INumber<T>
-    {
-        T sum = T.Zero;
-        int bOff = j * aCols;
-        for (; k < aCols; k++)
-            sum += a[aOff + k] * bT[bOff + k];
-        return sum;
     }
 
     /// <summary>
