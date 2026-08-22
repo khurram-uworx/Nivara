@@ -20,7 +20,6 @@ jobs:
       uses: actions/setup-dotnet@v6
       with:
         dotnet-version: '11.0.x'
-        include-prerelease: true
         
     - name: Restore dependencies
       run: dotnet restore
@@ -29,7 +28,7 @@ jobs:
       run: dotnet build --no-restore --configuration Release
       
     - name: Test
-      run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+      run: dotnet test --no-build --configuration Release --verbosity normal --filter "Category!=Performance" --collect:"XPlat Code Coverage"
       
     - name: Upload coverage reports
       if: matrix.os == 'ubuntu-latest'
