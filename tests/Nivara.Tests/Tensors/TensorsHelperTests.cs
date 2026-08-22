@@ -287,6 +287,53 @@ public class TensorsHelperTests
         Assert.That(dest[1], Is.EqualTo(3f)); // src[1,0]=3 is not null
     }
 
+    [Test]
+    public void Transpose_MatchesBclViewMaterialization_AcrossShapes()
+    {
+        (int Rows, int Cols)[] shapes = [(2, 3), (3, 2), (128, 256), (333, 129), (512, 512)];
+        foreach (var (rows, cols) in shapes)
+        {
+            var src = FillRowMajor(rows, cols, seed: rows * 31 + cols);
+
+            var tiled = new float[rows * cols];
+            TensorsHelper.Transpose(src.AsSpan(), tiled.AsSpan(), rows, cols);
+            var bcl = TransposeViaBcl(src, rows, cols);
+
+            Assert.That(bcl, Is.EqualTo(tiled), $"shape {rows}x{cols}");
+        }
+    }
+
+    [Test]
+    [Category("Performance")]
+    public void Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization()
+    {
+        // #136 gate: the BCL Tensor.Transpose<T> net11 API returns a strided view,
+        // so the swap route must pay Tensor construction + FlattenTo materialization
+        // per call to stay comparable with the span-based tiled kernel.
+        const int rows = 1024, cols = 1024;
+        var src = FillRowMajor(rows, cols, seed: 42);
+        var tiled = new float[rows * cols];
+        var bcl = new float[rows * cols];
+
+        var tiledTicks = MeasureBestOfFive(() =>
+            TensorsHelper.Transpose(src.AsSpan(), tiled.AsSpan(), rows, cols));
+        var bclTicks = MeasureBestOfFive(() => bcl = TransposeViaBcl(src, rows, cols));
+
+        TestContext.Out.WriteLine($"Transpose {rows}x{cols} ticks: tiled={tiledTicks}, bclView+flatten={bclTicks}");
+        Assert.That(bcl, Is.EqualTo(tiled));
+        Assert.That(tiledTicks, Is.LessThan(bclTicks),
+            "Tiled transpose lost to the BCL view-materialization route - re-evaluate the #136 kernel swap.");
+    }
+
+    static T[] TransposeViaBcl<T>(T[] src, int rows, int cols)
+    {
+        var tensor = Tensor.Create(src, new ReadOnlySpan<nint>([rows, cols]));
+        var view = Tensor.Transpose(tensor);
+        var dst = new T[rows * cols];
+        view.FlattenTo(dst.AsSpan());
+        return dst;
+    }
+
     #endregion
 
     #region Row-slice scoring kernels
