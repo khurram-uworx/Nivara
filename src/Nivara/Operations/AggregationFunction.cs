@@ -192,6 +192,7 @@ public sealed class SumAggregation : AggregationFunction
             Type t when t == typeof(UInt128) => typeof(UInt128),
             Type t when t == typeof(float) => typeof(double),
             Type t when t == typeof(Half) => typeof(double),
+            Type t when t == typeof(BFloat16) => typeof(double),
             Type t when t == typeof(double) => typeof(double),
             Type t when t == typeof(decimal) => typeof(decimal),
             _ => throw new ArgumentException($"Sum aggregation not supported for type {inputType.Name}")
@@ -234,6 +235,7 @@ public sealed class SumAggregation : AggregationFunction
             Type t when t == typeof(UInt128) => SumVectorized<UInt128, UInt128>(validValues),
             Type t when t == typeof(float) => SumVectorized<float, double>(validValues),
             Type t when t == typeof(Half) => SumVectorized<Half, double>(validValues),
+            Type t when t == typeof(BFloat16) => SumVectorized<BFloat16, double>(validValues),
             Type t when t == typeof(double) => SumVectorized<double, double>(validValues),
             Type t when t == typeof(decimal) => SumScalarDecimal(validValues),
             _ => throw new ArgumentException($"Sum aggregation not supported for type {column.ElementType.Name}")

@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara.Helpers;
 
 /// <summary>
@@ -56,6 +58,7 @@ internal static class QuantileKernel
             Type t when t == typeof(Int128) => TypedQuantile<Int128>(column, groupIndices, q, static v => (double)v),
             Type t when t == typeof(UInt128) => TypedQuantile<UInt128>(column, groupIndices, q, static v => (double)v),
             Type t when t == typeof(Half) => TypedQuantile<Half>(column, groupIndices, q, static v => (double)v),
+            Type t when t == typeof(BFloat16) => TypedQuantile<BFloat16>(column, groupIndices, q, static v => (double)v),
             _ => ComputeFromBoxed(ExtractBoxedValues(column, groupIndices), q)
         };
     }
@@ -138,6 +141,7 @@ internal static class QuantileKernel
             UInt128 v => (double)v,
             float v => v,
             Half v => (double)v,
+            BFloat16 v => (double)v,
             double v => v,
             decimal v => (double)v,
             _ => throw new ArgumentException($"Cannot convert value of type '{value.GetType().Name}' to double for quantile computation")
