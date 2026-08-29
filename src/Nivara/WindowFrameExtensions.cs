@@ -297,6 +297,7 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<Int128> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
             NivaraColumn<UInt128> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
             NivaraColumn<Half> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
+            NivaraColumn<BFloat16> c => rolling(c, windowSize, minPeriods, nullHandler, kind),
             _ => throw new NotSupportedException($"Rolling window requires a numeric column, but {column.ElementType.Name} is not supported")
         };
 
@@ -320,6 +321,7 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<Int128> c => cumulative(c, nullHandler, kind),
             NivaraColumn<UInt128> c => cumulative(c, nullHandler, kind),
             NivaraColumn<Half> c => cumulative(c, nullHandler, kind),
+            NivaraColumn<BFloat16> c => cumulative(c, nullHandler, kind),
             _ => throw new NotSupportedException($"Cumulative requires a numeric column, but {column.ElementType.Name} is not supported")
         };
 
@@ -343,6 +345,7 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<Int128> c => c.CumulativeCount(),
             NivaraColumn<UInt128> c => c.CumulativeCount(),
             NivaraColumn<Half> c => c.CumulativeCount(),
+            NivaraColumn<BFloat16> c => c.CumulativeCount(),
             NivaraColumn<string> c => c.CumulativeCount(),
             NivaraColumn<bool> c => c.CumulativeCount(),
             _ => throw new NotSupportedException($"CumulativeCount does not support column type {column.ElementType.Name}")
@@ -368,6 +371,7 @@ public static partial class NivaraFrameExtensions
             NivaraColumn<Int128> c => shift(c, periods, fillValue),
             NivaraColumn<UInt128> c => shift(c, periods, fillValue),
             NivaraColumn<Half> c => shift(c, periods, fillValue),
+            NivaraColumn<BFloat16> c => shift(c, periods, fillValue),
             NivaraColumn<string> c => shift(c, periods, fillValue),
             NivaraColumn<bool> c => shift(c, periods, fillValue),
             _ => throw new NotSupportedException($"Shift does not support column type {column.ElementType.Name}")
