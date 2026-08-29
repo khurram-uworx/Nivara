@@ -105,6 +105,47 @@ public abstract class AggregationFunction
 
     /// <inheritdoc />
     public override string ToString() => Name;
+
+    /// <summary>
+    /// Reads the non-null values of a typed column via the generic <see cref="IColumn{T}"/> indexer
+    /// (no per-element boxing) into a compact array, skipping null positions. Nullable-element columns
+    /// (e.g. <c>NivaraColumn&lt;int?&gt;</c>, which implement <see cref="IColumn{T?}"/> rather than
+    /// <see cref="IColumn{T}"/>) are read through <see cref="IColumn{T?}"/> so the cast never fails.
+    /// </summary>
+    protected internal static T[] ExtractValidTyped<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : struct
+    {
+        // Nullable-element columns expose IColumn<T?> (not IColumn<T>), so read through that view
+        // and rely on the nullable indexer's HasValue rather than the null mask.
+        if (column.ElementType == typeof(T?) && column is IColumn<T?> nullableTyped)
+        {
+            int nullableCount = 0;
+            foreach (var idx in groupIndices)
+                if (nullableTyped[idx].HasValue)
+                    nullableCount++;
+            var nullableValues = new T[nullableCount];
+            int nullablePos = 0;
+            foreach (var idx in groupIndices)
+            {
+                var value = nullableTyped[idx];
+                if (value.HasValue)
+                    nullableValues[nullablePos++] = value.GetValueOrDefault();
+            }
+            return nullableValues;
+        }
+
+        var typed = (IColumn<T>)column;
+        int count = 0;
+        foreach (var idx in groupIndices)
+            if (!column.IsNull(idx))
+                count++;
+        var values = new T[count];
+        int pos = 0;
+        foreach (var idx in groupIndices)
+            if (!column.IsNull(idx))
+                values[pos++] = typed[idx];
+        return values;
+    }
 }
 
 /// <summary>
@@ -128,7 +169,7 @@ public sealed class CountAggregation : AggregationFunction
 
         long count = 0;
         foreach (var index in groupIndices)
-            if (column.GetValue(index) != null)
+            if (!column.IsNull(index))
                 count++;
 
         return count;
@@ -209,35 +250,30 @@ public sealed class SumAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        // Extract valid values for this group
-        var validValues = ExtractValidValues(column, groupIndices);
-        if (validValues.Count == 0)
-            return GetZeroValue(GetResultType(column.ElementType));
-
         // Handle nullable types by checking the underlying type
         var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
 
         return elementType switch
         {
-            Type t when t == typeof(int) => SumVectorized<int, long>(validValues),
-            Type t when t == typeof(byte) => SumVectorized<byte, long>(validValues),
-            Type t when t == typeof(sbyte) => SumVectorized<sbyte, long>(validValues),
-            Type t when t == typeof(short) => SumVectorized<short, long>(validValues),
-            Type t when t == typeof(ushort) => SumVectorized<ushort, long>(validValues),
-            Type t when t == typeof(uint) => SumVectorized<uint, long>(validValues),
-            Type t when t == typeof(char) => SumVectorized<char, long>(validValues),
-            Type t when t == typeof(bool) => SumVectorizedBool<long>(validValues),
-            Type t when t == typeof(long) => SumVectorized<long, long>(validValues),
-            Type t when t == typeof(ulong) => SumVectorized<ulong, ulong>(validValues),
-            Type t when t == typeof(nint) => SumVectorized<nint, Int128>(validValues),
-            Type t when t == typeof(nuint) => SumVectorized<nuint, UInt128>(validValues),
-            Type t when t == typeof(Int128) => SumVectorized<Int128, Int128>(validValues),
-            Type t when t == typeof(UInt128) => SumVectorized<UInt128, UInt128>(validValues),
-            Type t when t == typeof(float) => SumVectorized<float, double>(validValues),
-            Type t when t == typeof(Half) => SumVectorized<Half, double>(validValues),
-            Type t when t == typeof(BFloat16) => SumVectorized<BFloat16, double>(validValues),
-            Type t when t == typeof(double) => SumVectorized<double, double>(validValues),
-            Type t when t == typeof(decimal) => SumScalarDecimal(validValues),
+            Type t when t == typeof(int) => SumVectorized<int, long>(column, groupIndices),
+            Type t when t == typeof(byte) => SumVectorized<byte, long>(column, groupIndices),
+            Type t when t == typeof(sbyte) => SumVectorized<sbyte, long>(column, groupIndices),
+            Type t when t == typeof(short) => SumVectorized<short, long>(column, groupIndices),
+            Type t when t == typeof(ushort) => SumVectorized<ushort, long>(column, groupIndices),
+            Type t when t == typeof(uint) => SumVectorized<uint, long>(column, groupIndices),
+            Type t when t == typeof(char) => SumVectorized<char, long>(column, groupIndices),
+            Type t when t == typeof(bool) => SumVectorizedBool<long>(column, groupIndices),
+            Type t when t == typeof(long) => SumVectorized<long, long>(column, groupIndices),
+            Type t when t == typeof(ulong) => SumVectorized<ulong, ulong>(column, groupIndices),
+            Type t when t == typeof(nint) => SumVectorized<nint, Int128>(column, groupIndices),
+            Type t when t == typeof(nuint) => SumVectorized<nuint, UInt128>(column, groupIndices),
+            Type t when t == typeof(Int128) => SumVectorized<Int128, Int128>(column, groupIndices),
+            Type t when t == typeof(UInt128) => SumVectorized<UInt128, UInt128>(column, groupIndices),
+            Type t when t == typeof(float) => SumVectorized<float, double>(column, groupIndices),
+            Type t when t == typeof(Half) => SumVectorized<Half, double>(column, groupIndices),
+            Type t when t == typeof(BFloat16) => SumVectorized<BFloat16, double>(column, groupIndices),
+            Type t when t == typeof(double) => SumVectorized<double, double>(column, groupIndices),
+            Type t when t == typeof(decimal) => SumScalarDecimal(column, groupIndices),
             _ => throw new ArgumentException($"Sum aggregation not supported for type {column.ElementType.Name}")
         };
     }
@@ -252,33 +288,20 @@ public sealed class SumAggregation : AggregationFunction
     }
 
     /// <summary>
-    /// Extracts valid (non-null) values from a column for the specified indices
+    /// Performs vectorized sum for numeric values using generic TensorPrimitives after widening
+    /// each value into the promoted result type via typed CreateChecked conversion
+    /// (byte/sbyte/short/ushort/int/uint/char → long, nint → Int128, nuint → UInt128,
+    /// float/Half → double), preserving the documented result-type promotion rules. Values are
+    /// read through the typed IColumn&lt;TSource&gt; indexer so there is no per-element boxing.
     /// </summary>
-    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
-    {
-        var validValues = new List<object>();
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-        return validValues;
-    }
-
-    /// <summary>
-    /// Performs vectorized sum for numeric values using generic TensorPrimitives after
-    /// widening each boxed value into the promoted result type via typed CreateChecked
-    /// conversion (byte/sbyte/short/ushort/int/uint/char → long, nint → Int128, nuint →
-    /// UInt128, float/Half → double), preserving the documented result-type promotion rules.
-    /// </summary>
-    static object SumVectorized<TSource, TResult>(List<object> validValues)
-        where TSource : INumberBase<TSource>
+    static object SumVectorized<TSource, TResult>(IColumn column, IReadOnlyList<int> groupIndices)
+        where TSource : struct, INumberBase<TSource>
         where TResult : unmanaged, INumber<TResult>
     {
-        var widened = new TResult[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            widened[i] = TResult.CreateChecked((TSource)validValues[i]);
+        var values = ExtractValidTyped<TSource>(column, groupIndices);
+        var widened = new TResult[values.Length];
+        for (int i = 0; i < values.Length; i++)
+            widened[i] = TResult.CreateChecked(values[i]);
 
         return TensorPrimitives.Sum(widened.AsSpan());
     }
@@ -286,44 +309,31 @@ public sealed class SumAggregation : AggregationFunction
     /// <summary>
     /// Performs vectorized sum of boolean values, counting true values as ones (bool is not an
     /// INumberBase type, so it is converted explicitly before widening into the result type).
+    /// Values are read through the typed IColumn&lt;bool&gt; indexer so there is no per-element boxing.
     /// </summary>
-    static object SumVectorizedBool<TResult>(List<object> validValues)
+    static object SumVectorizedBool<TResult>(IColumn column, IReadOnlyList<int> groupIndices)
         where TResult : unmanaged, INumber<TResult>
     {
-        var widened = new TResult[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            widened[i] = TResult.CreateChecked((bool)validValues[i] ? 1 : 0);
+        var values = ExtractValidTyped<bool>(column, groupIndices);
+        var widened = new TResult[values.Length];
+        for (int i = 0; i < values.Length; i++)
+            widened[i] = TResult.CreateChecked(values[i] ? 1 : 0);
 
         return TensorPrimitives.Sum(widened.AsSpan());
     }
 
     /// <summary>
-    /// Performs scalar decimal sum aggregation (decimal is not a supported TensorPrimitives element type)
+    /// Performs scalar decimal sum aggregation (decimal is not a supported TensorPrimitives element
+    /// type). Values are read through the typed IColumn&lt;decimal&gt; indexer so there is no per-element boxing.
     /// </summary>
-    static object SumScalarDecimal(List<object> validValues)
+    static object SumScalarDecimal(IColumn column, IReadOnlyList<int> groupIndices)
     {
+        var values = ExtractValidTyped<decimal>(column, groupIndices);
         decimal sum = 0m;
-        foreach (var value in validValues)
-            sum += (decimal)value;
+        foreach (var value in values)
+            sum += value;
 
         return sum;
-    }
-
-    /// <summary>
-    /// Gets the zero value for a given type
-    /// </summary>
-    static object GetZeroValue(Type type)
-    {
-        return type switch
-        {
-            Type t when t == typeof(long) => 0L,
-            Type t when t == typeof(ulong) => 0UL,
-            Type t when t == typeof(Int128) => Int128.Zero,
-            Type t when t == typeof(UInt128) => UInt128.Zero,
-            Type t when t == typeof(double) => 0.0,
-            Type t when t == typeof(decimal) => 0m,
-            _ => Activator.CreateInstance(type)!
-        };
     }
 }
 
@@ -346,7 +356,75 @@ public sealed class MinAggregation : AggregationFunction
         if (groupIndices == null)
             throw new ArgumentNullException(nameof(groupIndices));
 
-        // Extract valid values for this group
+        // Handle nullable types by checking the underlying type
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+
+        // Vectorized for INumber<T> types; typed scalar for char/bool; boxed fallback for
+        // genuinely non-numeric element types (string/DateTime/custom structs).
+        return elementType switch
+        {
+            Type t when t == typeof(float) => MinVectorized<float>(column, groupIndices),
+            Type t when t == typeof(double) => MinVectorized<double>(column, groupIndices),
+            Type t when t == typeof(int) => MinVectorized<int>(column, groupIndices),
+            Type t when t == typeof(long) => MinVectorized<long>(column, groupIndices),
+            Type t when t == typeof(short) => MinVectorized<short>(column, groupIndices),
+            Type t when t == typeof(ushort) => MinVectorized<ushort>(column, groupIndices),
+            Type t when t == typeof(uint) => MinVectorized<uint>(column, groupIndices),
+            Type t when t == typeof(ulong) => MinVectorized<ulong>(column, groupIndices),
+            Type t when t == typeof(byte) => MinVectorized<byte>(column, groupIndices),
+            Type t when t == typeof(sbyte) => MinVectorized<sbyte>(column, groupIndices),
+            Type t when t == typeof(decimal) => MinVectorized<decimal>(column, groupIndices),
+            Type t when t == typeof(nint) => MinVectorized<nint>(column, groupIndices),
+            Type t when t == typeof(nuint) => MinVectorized<nuint>(column, groupIndices),
+            Type t when t == typeof(Int128) => MinVectorized<Int128>(column, groupIndices),
+            Type t when t == typeof(UInt128) => MinVectorized<UInt128>(column, groupIndices),
+            Type t when t == typeof(Half) => MinVectorized<Half>(column, groupIndices),
+            Type t when t == typeof(BFloat16) => MinVectorized<BFloat16>(column, groupIndices),
+            Type t when t == typeof(char) => MinScalar<char>(column, groupIndices),
+            Type t when t == typeof(bool) => MinScalar<bool>(column, groupIndices),
+            _ => MinScalarBoxed(column, groupIndices)
+        };
+    }
+
+    /// <summary>
+    /// Performs vectorized min for numeric values using generic TensorPrimitives. Values are read
+    /// through the typed IColumn&lt;T&gt; indexer so there is no per-element boxing.
+    /// </summary>
+    static object? MinVectorized<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : unmanaged, INumber<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        return TensorPrimitives.Min(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs typed scalar min for char/bool via Comparer&lt;T&gt;.Default (no per-element boxing).
+    /// </summary>
+    static object? MinScalar<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : struct, IComparable<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        var comparer = Comparer<T>.Default;
+        T min = values[0];
+        for (int i = 1; i < values.Length; i++)
+            if (comparer.Compare(values[i], min) < 0)
+                min = values[i];
+
+        return min;
+    }
+
+    /// <summary>
+    /// Boxed scalar fallback for genuinely non-numeric element types (string/DateTime/custom
+    /// structs), preserving the prior Comparer&lt;object&gt; behavior.
+    /// </summary>
+    static object? MinScalarBoxed(IColumn column, IReadOnlyList<int> groupIndices)
+    {
         var validValues = new List<object>();
         foreach (var index in groupIndices)
         {
@@ -358,48 +436,8 @@ public sealed class MinAggregation : AggregationFunction
         if (validValues.Count == 0)
             return null;
 
-        // Handle nullable types by checking the underlying type
-        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
-
-        // Use vectorized operations for supported types
-        return elementType switch
-        {
-            Type t when t == typeof(float) => MinVectorized<float>(validValues),
-            Type t when t == typeof(double) => MinVectorized<double>(validValues),
-            Type t when t == typeof(int) => MinVectorized<int>(validValues),
-            Type t when t == typeof(long) => MinVectorized<long>(validValues),
-            Type t when t == typeof(short) => MinVectorized<short>(validValues),
-            Type t when t == typeof(ushort) => MinVectorized<ushort>(validValues),
-            Type t when t == typeof(uint) => MinVectorized<uint>(validValues),
-            Type t when t == typeof(ulong) => MinVectorized<ulong>(validValues),
-            Type t when t == typeof(byte) => MinVectorized<byte>(validValues),
-            Type t when t == typeof(sbyte) => MinVectorized<sbyte>(validValues),
-            Type t when t == typeof(decimal) => MinVectorized<decimal>(validValues),
-            _ => MinScalar(validValues)
-        };
-    }
-
-    /// <summary>
-    /// Performs vectorized min for numeric values using generic TensorPrimitives
-    /// </summary>
-    static object MinVectorized<T>(List<object> validValues)
-        where T : unmanaged, INumber<T>
-    {
-        var typedValues = new T[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            typedValues[i] = (T)validValues[i];
-
-        return TensorPrimitives.Min(typedValues.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs scalar min for non-vectorizable types
-    /// </summary>
-    static object MinScalar(List<object> validValues)
-    {
         object min = validValues[0];
         var comparer = Comparer<object>.Default;
-
         for (int i = 1; i < validValues.Count; i++)
             if (comparer.Compare(validValues[i], min) < 0)
                 min = validValues[i];
@@ -427,7 +465,75 @@ public sealed class MaxAggregation : AggregationFunction
         if (groupIndices == null)
             throw new ArgumentNullException(nameof(groupIndices));
 
-        // Extract valid values for this group
+        // Handle nullable types by checking the underlying type
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+
+        // Vectorized for INumber<T> types; typed scalar for char/bool; boxed fallback for
+        // genuinely non-numeric element types (string/DateTime/custom structs).
+        return elementType switch
+        {
+            Type t when t == typeof(float) => MaxVectorized<float>(column, groupIndices),
+            Type t when t == typeof(double) => MaxVectorized<double>(column, groupIndices),
+            Type t when t == typeof(int) => MaxVectorized<int>(column, groupIndices),
+            Type t when t == typeof(long) => MaxVectorized<long>(column, groupIndices),
+            Type t when t == typeof(short) => MaxVectorized<short>(column, groupIndices),
+            Type t when t == typeof(ushort) => MaxVectorized<ushort>(column, groupIndices),
+            Type t when t == typeof(uint) => MaxVectorized<uint>(column, groupIndices),
+            Type t when t == typeof(ulong) => MaxVectorized<ulong>(column, groupIndices),
+            Type t when t == typeof(byte) => MaxVectorized<byte>(column, groupIndices),
+            Type t when t == typeof(sbyte) => MaxVectorized<sbyte>(column, groupIndices),
+            Type t when t == typeof(decimal) => MaxVectorized<decimal>(column, groupIndices),
+            Type t when t == typeof(nint) => MaxVectorized<nint>(column, groupIndices),
+            Type t when t == typeof(nuint) => MaxVectorized<nuint>(column, groupIndices),
+            Type t when t == typeof(Int128) => MaxVectorized<Int128>(column, groupIndices),
+            Type t when t == typeof(UInt128) => MaxVectorized<UInt128>(column, groupIndices),
+            Type t when t == typeof(Half) => MaxVectorized<Half>(column, groupIndices),
+            Type t when t == typeof(BFloat16) => MaxVectorized<BFloat16>(column, groupIndices),
+            Type t when t == typeof(char) => MaxScalar<char>(column, groupIndices),
+            Type t when t == typeof(bool) => MaxScalar<bool>(column, groupIndices),
+            _ => MaxScalarBoxed(column, groupIndices)
+        };
+    }
+
+    /// <summary>
+    /// Performs vectorized max for numeric values using generic TensorPrimitives. Values are read
+    /// through the typed IColumn&lt;T&gt; indexer so there is no per-element boxing.
+    /// </summary>
+    static object? MaxVectorized<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : unmanaged, INumber<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        return TensorPrimitives.Max(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs typed scalar max for char/bool via Comparer&lt;T&gt;.Default (no per-element boxing).
+    /// </summary>
+    static object? MaxScalar<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : struct, IComparable<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        var comparer = Comparer<T>.Default;
+        T max = values[0];
+        for (int i = 1; i < values.Length; i++)
+            if (comparer.Compare(values[i], max) > 0)
+                max = values[i];
+
+        return max;
+    }
+
+    /// <summary>
+    /// Boxed scalar fallback for genuinely non-numeric element types (string/DateTime/custom
+    /// structs), preserving the prior Comparer&lt;object&gt; behavior.
+    /// </summary>
+    static object? MaxScalarBoxed(IColumn column, IReadOnlyList<int> groupIndices)
+    {
         var validValues = new List<object>();
         foreach (var index in groupIndices)
         {
@@ -439,48 +545,8 @@ public sealed class MaxAggregation : AggregationFunction
         if (validValues.Count == 0)
             return null;
 
-        // Handle nullable types by checking the underlying type
-        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
-
-        // Use vectorized operations for supported types
-        return elementType switch
-        {
-            Type t when t == typeof(float) => MaxVectorized<float>(validValues),
-            Type t when t == typeof(double) => MaxVectorized<double>(validValues),
-            Type t when t == typeof(int) => MaxVectorized<int>(validValues),
-            Type t when t == typeof(long) => MaxVectorized<long>(validValues),
-            Type t when t == typeof(short) => MaxVectorized<short>(validValues),
-            Type t when t == typeof(ushort) => MaxVectorized<ushort>(validValues),
-            Type t when t == typeof(uint) => MaxVectorized<uint>(validValues),
-            Type t when t == typeof(ulong) => MaxVectorized<ulong>(validValues),
-            Type t when t == typeof(byte) => MaxVectorized<byte>(validValues),
-            Type t when t == typeof(sbyte) => MaxVectorized<sbyte>(validValues),
-            Type t when t == typeof(decimal) => MaxVectorized<decimal>(validValues),
-            _ => MaxScalar(validValues)
-        };
-    }
-
-    /// <summary>
-    /// Performs vectorized max for numeric values using generic TensorPrimitives
-    /// </summary>
-    static object MaxVectorized<T>(List<object> validValues)
-        where T : unmanaged, INumber<T>
-    {
-        var typedValues = new T[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            typedValues[i] = (T)validValues[i];
-
-        return TensorPrimitives.Max(typedValues.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs scalar max for non-vectorizable types
-    /// </summary>
-    static object MaxScalar(List<object> validValues)
-    {
         object max = validValues[0];
         var comparer = Comparer<object>.Default;
-
         for (int i = 1; i < validValues.Count; i++)
             if (comparer.Compare(validValues[i], max) > 0)
                 max = validValues[i];
@@ -516,28 +582,20 @@ public sealed class MeanAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        // Extract valid values for this group
-        var validValues = new List<object>();
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
+        int validCount = 0;
+        foreach (var idx in groupIndices)
+            if (!column.IsNull(idx))
+                validCount++;
 
-        if (validValues.Count == 0)
+        if (validCount == 0)
             return null;
 
-        // Calculate sum and divide by count
-        var sumAggregation = new SumAggregation();
-        var sum = sumAggregation.Apply(column, groupIndices);
-
+        // Reuse the box-free Sum aggregation for the widened sum, then divide by the count.
+        var sum = new SumAggregation().Apply(column, groupIndices);
         if (sum == null)
             return null;
 
-        // Convert sum to double and divide by count
-        var doubleSum = ToDouble(sum);
-        return doubleSum / validValues.Count;
+        return ToDouble(sum) / validCount;
     }
 
     /// <summary>
@@ -714,7 +772,7 @@ public sealed class StdDevAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        return MomentsKernel.ComputeStdDevFromBoxed(ExtractValidValues(column, groupIndices), ddof);
+        return MomentsKernel.ComputeFromColumn(column, groupIndices, ddof, variance: false);
     }
 
     /// <inheritdoc />
@@ -723,18 +781,6 @@ public sealed class StdDevAggregation : AggregationFunction
         var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
         if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
             throw new ArgumentException($"StdDev aggregation requires numeric type, got {inputType.Name}");
-    }
-
-    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
-    {
-        var validValues = new List<object>(groupIndices.Count);
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-        return validValues;
     }
 }
 
@@ -785,7 +831,7 @@ public sealed class VarianceAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        return MomentsKernel.ComputeVarianceFromBoxed(ExtractValidValues(column, groupIndices), ddof);
+        return MomentsKernel.ComputeFromColumn(column, groupIndices, ddof, variance: true);
     }
 
     /// <inheritdoc />
@@ -794,18 +840,6 @@ public sealed class VarianceAggregation : AggregationFunction
         var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
         if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
             throw new ArgumentException($"Variance aggregation requires numeric type, got {inputType.Name}");
-    }
-
-    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
-    {
-        var validValues = new List<object>(groupIndices.Count);
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-        return validValues;
     }
 }
 

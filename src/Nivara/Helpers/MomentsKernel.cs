@@ -1,3 +1,5 @@
+using System;
+using System.Numerics;
 using System.Numerics.Tensors;
 
 namespace Nivara.Helpers;
@@ -41,35 +43,51 @@ internal static class MomentsKernel
         => Math.Sqrt(Variance(values, ddof));
 
     /// <summary>
-    /// Computes the variance from boxed valid values, converting each across the full 17-type
-    /// numeric aggregation domain to double first.
+    /// Computes the variance or standard deviation of a typed column over the group indices,
+    /// reading values through the typed IColumn&lt;T&gt; indexer (no per-element boxing) and
+    /// converting each to double across the full numeric aggregation domain.
     /// </summary>
-    /// <returns>The variance, or null when <paramref name="validValues"/> is empty</returns>
-    public static double? ComputeVarianceFromBoxed(IReadOnlyList<object> validValues, int ddof)
+    /// <returns>The moment, or null when the group has no valid values</returns>
+    public static double? ComputeFromColumn(IColumn column, IReadOnlyList<int> groupIndices, int ddof, bool variance)
     {
-        if (validValues.Count == 0)
-            return null;
-
-        var values = new double[validValues.Count];
-        for (int i = 0; i < values.Length; i++)
-            values[i] = QuantileKernel.ToDouble(validValues[i]);
-
-        return Variance(values, ddof);
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+        return elementType switch
+        {
+            Type t when t == typeof(double) => Compute<double>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(float) => Compute<float>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(int) => Compute<int>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(long) => Compute<long>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(decimal) => Compute<decimal>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(short) => Compute<short>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(ushort) => Compute<ushort>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(byte) => Compute<byte>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(sbyte) => Compute<sbyte>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(uint) => Compute<uint>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(ulong) => Compute<ulong>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(char) => Compute<char>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(nint) => Compute<nint>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(nuint) => Compute<nuint>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(Int128) => Compute<Int128>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(UInt128) => Compute<UInt128>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(Half) => Compute<Half>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            Type t when t == typeof(BFloat16) => Compute<BFloat16>(column, groupIndices, ddof, variance, static v => double.CreateChecked(v)),
+            _ => throw new ArgumentException($"Cannot compute standard deviation/variance for type '{elementType.Name}'")
+        };
     }
 
-    /// <summary>
-    /// Computes the standard deviation from boxed valid values.
-    /// </summary>
-    /// <returns>The standard deviation, or null when <paramref name="validValues"/> is empty</returns>
-    public static double? ComputeStdDevFromBoxed(IReadOnlyList<object> validValues, int ddof)
+    static double? Compute<T>(IColumn column, IReadOnlyList<int> groupIndices, int ddof, bool variance, Func<T, double> toDouble)
+        where T : struct, INumberBase<T>
     {
-        if (validValues.Count == 0)
+        // Reuse the nullable-aware typed extraction so NivaraColumn<T?> (which implements
+        // IColumn<T?>, not IColumn<T>) is handled without a per-element boxing cast.
+        var values = AggregationFunction.ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
             return null;
 
-        var values = new double[validValues.Count];
+        var doubles = new double[values.Length];
         for (int i = 0; i < values.Length; i++)
-            values[i] = QuantileKernel.ToDouble(validValues[i]);
+            doubles[i] = toDouble(values[i]);
 
-        return StdDev(values, ddof);
+        return variance ? Variance(doubles, ddof) : StdDev(doubles, ddof);
     }
 }

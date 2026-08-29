@@ -1325,7 +1325,15 @@ public sealed class NivaraColumn<T> : IColumn<T>, IEnumerable<T>, IDisposable
             throw new IndexOutOfRangeException($"Index {index} is out of range for column of length {Length}");
 
         var nullMask = storage.NullMask;
-        return nullMask.Length > 0 && nullMask[index];
+        if (nullMask.Length > 0)
+            return nullMask[index];
+
+        // Nullable-element columns (e.g. NivaraColumn<int?>) store nulls inside the values rather
+        // than a separate null mask, so a position is null when its value equals the default (null).
+        if (Nullable.GetUnderlyingType(typeof(T)) != null)
+            return EqualityComparer<T>.Default.Equals(storage[index], default);
+
+        return false;
     }
 
     /// <summary>
