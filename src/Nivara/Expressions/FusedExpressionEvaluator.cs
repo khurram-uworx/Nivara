@@ -658,12 +658,6 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Snaps each leaf column to a typed array the compiled delegate can index, reading zero-copy
-    /// when the leaf's backing array is contiguous at offset 0. Null positions hold <c>default(T)</c>
-    /// in the backing data, so a zero-copy view is always value-correct; the null mask is computed
-    /// separately. Only sliced columns (offset &gt; 0) require a snapshot copy.
-    /// </summary>
-    /// <summary>
     /// Zero-copy view of a leaf column's backing data: the underlying array (which may begin before the
     /// logical column start for a sliced column) plus the base offset the compiled loop adds to each
     /// read index. Returned as a non-generic carrier so <see cref="SnapshotLeaves"/> can read it without
@@ -675,6 +669,12 @@ sealed class FusedExpressionEvaluator
         public int Offset;
     }
 
+    /// <summary>
+    /// Returns the underlying backing arrays of every leaf (zero-copy, including sliced columns) plus a
+    /// parallel array of base offsets the compiled loop adds to each read index. This lets the compiled
+    /// target address a sliced column's backing array directly without a whole-column snapshot copy
+    /// (issue #155).
+    /// </summary>
     static object[] SnapshotLeaves(FusedExpressionPlan plan, out int[] baseOffsets)
     {
         var leafArrays = new object[plan.Columns.Count];
