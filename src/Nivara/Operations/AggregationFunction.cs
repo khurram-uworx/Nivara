@@ -335,7 +335,75 @@ public sealed class MinAggregation : AggregationFunction
         if (groupIndices == null)
             throw new ArgumentNullException(nameof(groupIndices));
 
-        // Extract valid values for this group
+        // Handle nullable types by checking the underlying type
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+
+        // Vectorized for INumber<T> types; typed scalar for char/bool; boxed fallback for
+        // genuinely non-numeric element types (string/DateTime/custom structs).
+        return elementType switch
+        {
+            Type t when t == typeof(float) => MinVectorized<float>(column, groupIndices),
+            Type t when t == typeof(double) => MinVectorized<double>(column, groupIndices),
+            Type t when t == typeof(int) => MinVectorized<int>(column, groupIndices),
+            Type t when t == typeof(long) => MinVectorized<long>(column, groupIndices),
+            Type t when t == typeof(short) => MinVectorized<short>(column, groupIndices),
+            Type t when t == typeof(ushort) => MinVectorized<ushort>(column, groupIndices),
+            Type t when t == typeof(uint) => MinVectorized<uint>(column, groupIndices),
+            Type t when t == typeof(ulong) => MinVectorized<ulong>(column, groupIndices),
+            Type t when t == typeof(byte) => MinVectorized<byte>(column, groupIndices),
+            Type t when t == typeof(sbyte) => MinVectorized<sbyte>(column, groupIndices),
+            Type t when t == typeof(decimal) => MinVectorized<decimal>(column, groupIndices),
+            Type t when t == typeof(nint) => MinVectorized<nint>(column, groupIndices),
+            Type t when t == typeof(nuint) => MinVectorized<nuint>(column, groupIndices),
+            Type t when t == typeof(Int128) => MinVectorized<Int128>(column, groupIndices),
+            Type t when t == typeof(UInt128) => MinVectorized<UInt128>(column, groupIndices),
+            Type t when t == typeof(Half) => MinVectorized<Half>(column, groupIndices),
+            Type t when t == typeof(BFloat16) => MinVectorized<BFloat16>(column, groupIndices),
+            Type t when t == typeof(char) => MinScalar<char>(column, groupIndices),
+            Type t when t == typeof(bool) => MinScalar<bool>(column, groupIndices),
+            _ => MinScalarBoxed(column, groupIndices)
+        };
+    }
+
+    /// <summary>
+    /// Performs vectorized min for numeric values using generic TensorPrimitives. Values are read
+    /// through the typed IColumn&lt;T&gt; indexer so there is no per-element boxing.
+    /// </summary>
+    static object? MinVectorized<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : unmanaged, INumber<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        return TensorPrimitives.Min(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs typed scalar min for char/bool via Comparer&lt;T&gt;.Default (no per-element boxing).
+    /// </summary>
+    static object? MinScalar<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : struct, IComparable<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        var comparer = Comparer<T>.Default;
+        T min = values[0];
+        for (int i = 1; i < values.Length; i++)
+            if (comparer.Compare(values[i], min) < 0)
+                min = values[i];
+
+        return min;
+    }
+
+    /// <summary>
+    /// Boxed scalar fallback for genuinely non-numeric element types (string/DateTime/custom
+    /// structs), preserving the prior Comparer&lt;object&gt; behavior.
+    /// </summary>
+    static object? MinScalarBoxed(IColumn column, IReadOnlyList<int> groupIndices)
+    {
         var validValues = new List<object>();
         foreach (var index in groupIndices)
         {
@@ -347,48 +415,8 @@ public sealed class MinAggregation : AggregationFunction
         if (validValues.Count == 0)
             return null;
 
-        // Handle nullable types by checking the underlying type
-        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
-
-        // Use vectorized operations for supported types
-        return elementType switch
-        {
-            Type t when t == typeof(float) => MinVectorized<float>(validValues),
-            Type t when t == typeof(double) => MinVectorized<double>(validValues),
-            Type t when t == typeof(int) => MinVectorized<int>(validValues),
-            Type t when t == typeof(long) => MinVectorized<long>(validValues),
-            Type t when t == typeof(short) => MinVectorized<short>(validValues),
-            Type t when t == typeof(ushort) => MinVectorized<ushort>(validValues),
-            Type t when t == typeof(uint) => MinVectorized<uint>(validValues),
-            Type t when t == typeof(ulong) => MinVectorized<ulong>(validValues),
-            Type t when t == typeof(byte) => MinVectorized<byte>(validValues),
-            Type t when t == typeof(sbyte) => MinVectorized<sbyte>(validValues),
-            Type t when t == typeof(decimal) => MinVectorized<decimal>(validValues),
-            _ => MinScalar(validValues)
-        };
-    }
-
-    /// <summary>
-    /// Performs vectorized min for numeric values using generic TensorPrimitives
-    /// </summary>
-    static object MinVectorized<T>(List<object> validValues)
-        where T : unmanaged, INumber<T>
-    {
-        var typedValues = new T[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            typedValues[i] = (T)validValues[i];
-
-        return TensorPrimitives.Min(typedValues.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs scalar min for non-vectorizable types
-    /// </summary>
-    static object MinScalar(List<object> validValues)
-    {
         object min = validValues[0];
         var comparer = Comparer<object>.Default;
-
         for (int i = 1; i < validValues.Count; i++)
             if (comparer.Compare(validValues[i], min) < 0)
                 min = validValues[i];
@@ -416,7 +444,75 @@ public sealed class MaxAggregation : AggregationFunction
         if (groupIndices == null)
             throw new ArgumentNullException(nameof(groupIndices));
 
-        // Extract valid values for this group
+        // Handle nullable types by checking the underlying type
+        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
+
+        // Vectorized for INumber<T> types; typed scalar for char/bool; boxed fallback for
+        // genuinely non-numeric element types (string/DateTime/custom structs).
+        return elementType switch
+        {
+            Type t when t == typeof(float) => MaxVectorized<float>(column, groupIndices),
+            Type t when t == typeof(double) => MaxVectorized<double>(column, groupIndices),
+            Type t when t == typeof(int) => MaxVectorized<int>(column, groupIndices),
+            Type t when t == typeof(long) => MaxVectorized<long>(column, groupIndices),
+            Type t when t == typeof(short) => MaxVectorized<short>(column, groupIndices),
+            Type t when t == typeof(ushort) => MaxVectorized<ushort>(column, groupIndices),
+            Type t when t == typeof(uint) => MaxVectorized<uint>(column, groupIndices),
+            Type t when t == typeof(ulong) => MaxVectorized<ulong>(column, groupIndices),
+            Type t when t == typeof(byte) => MaxVectorized<byte>(column, groupIndices),
+            Type t when t == typeof(sbyte) => MaxVectorized<sbyte>(column, groupIndices),
+            Type t when t == typeof(decimal) => MaxVectorized<decimal>(column, groupIndices),
+            Type t when t == typeof(nint) => MaxVectorized<nint>(column, groupIndices),
+            Type t when t == typeof(nuint) => MaxVectorized<nuint>(column, groupIndices),
+            Type t when t == typeof(Int128) => MaxVectorized<Int128>(column, groupIndices),
+            Type t when t == typeof(UInt128) => MaxVectorized<UInt128>(column, groupIndices),
+            Type t when t == typeof(Half) => MaxVectorized<Half>(column, groupIndices),
+            Type t when t == typeof(BFloat16) => MaxVectorized<BFloat16>(column, groupIndices),
+            Type t when t == typeof(char) => MaxScalar<char>(column, groupIndices),
+            Type t when t == typeof(bool) => MaxScalar<bool>(column, groupIndices),
+            _ => MaxScalarBoxed(column, groupIndices)
+        };
+    }
+
+    /// <summary>
+    /// Performs vectorized max for numeric values using generic TensorPrimitives. Values are read
+    /// through the typed IColumn&lt;T&gt; indexer so there is no per-element boxing.
+    /// </summary>
+    static object? MaxVectorized<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : unmanaged, INumber<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        return TensorPrimitives.Max(values.AsSpan());
+    }
+
+    /// <summary>
+    /// Performs typed scalar max for char/bool via Comparer&lt;T&gt;.Default (no per-element boxing).
+    /// </summary>
+    static object? MaxScalar<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : struct, IComparable<T>
+    {
+        var values = ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
+            return null;
+
+        var comparer = Comparer<T>.Default;
+        T max = values[0];
+        for (int i = 1; i < values.Length; i++)
+            if (comparer.Compare(values[i], max) > 0)
+                max = values[i];
+
+        return max;
+    }
+
+    /// <summary>
+    /// Boxed scalar fallback for genuinely non-numeric element types (string/DateTime/custom
+    /// structs), preserving the prior Comparer&lt;object&gt; behavior.
+    /// </summary>
+    static object? MaxScalarBoxed(IColumn column, IReadOnlyList<int> groupIndices)
+    {
         var validValues = new List<object>();
         foreach (var index in groupIndices)
         {
@@ -428,48 +524,8 @@ public sealed class MaxAggregation : AggregationFunction
         if (validValues.Count == 0)
             return null;
 
-        // Handle nullable types by checking the underlying type
-        var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
-
-        // Use vectorized operations for supported types
-        return elementType switch
-        {
-            Type t when t == typeof(float) => MaxVectorized<float>(validValues),
-            Type t when t == typeof(double) => MaxVectorized<double>(validValues),
-            Type t when t == typeof(int) => MaxVectorized<int>(validValues),
-            Type t when t == typeof(long) => MaxVectorized<long>(validValues),
-            Type t when t == typeof(short) => MaxVectorized<short>(validValues),
-            Type t when t == typeof(ushort) => MaxVectorized<ushort>(validValues),
-            Type t when t == typeof(uint) => MaxVectorized<uint>(validValues),
-            Type t when t == typeof(ulong) => MaxVectorized<ulong>(validValues),
-            Type t when t == typeof(byte) => MaxVectorized<byte>(validValues),
-            Type t when t == typeof(sbyte) => MaxVectorized<sbyte>(validValues),
-            Type t when t == typeof(decimal) => MaxVectorized<decimal>(validValues),
-            _ => MaxScalar(validValues)
-        };
-    }
-
-    /// <summary>
-    /// Performs vectorized max for numeric values using generic TensorPrimitives
-    /// </summary>
-    static object MaxVectorized<T>(List<object> validValues)
-        where T : unmanaged, INumber<T>
-    {
-        var typedValues = new T[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            typedValues[i] = (T)validValues[i];
-
-        return TensorPrimitives.Max(typedValues.AsSpan());
-    }
-
-    /// <summary>
-    /// Performs scalar max for non-vectorizable types
-    /// </summary>
-    static object MaxScalar(List<object> validValues)
-    {
         object max = validValues[0];
         var comparer = Comparer<object>.Default;
-
         for (int i = 1; i < validValues.Count; i++)
             if (comparer.Compare(validValues[i], max) > 0)
                 max = validValues[i];
