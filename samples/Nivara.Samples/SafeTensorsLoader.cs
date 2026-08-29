@@ -104,7 +104,9 @@ public static class SafeTensorsLoader
             "I32" => ConvertI32<T>(tensorBytes),
             "I64" => ConvertI64<T>(tensorBytes),
             "F16" => ConvertF16<T>(tensorBytes),
-            "BF16" => ConvertBF16<T>(tensorBytes),
+            "BF16" => typeof(T) == typeof(BFloat16)
+                ? (T[])(object)ConvertBF16ToBFloat16(tensorBytes)
+                : ConvertBF16<T>(tensorBytes),
             _ => throw new NotSupportedException($"Tensor '{name}' has unsupported dtype '{dtype}'. " +
                 "Supported dtypes: F32, I32, I64, F16, BF16.")
         };
@@ -160,6 +162,18 @@ public static class SafeTensorsLoader
             float f = Unsafe.As<uint, float>(ref bits);
             result[i] = T.CreateChecked(f);
         }
+        return result;
+    }
+
+    // Zero-hop path for the native BF16 read: when the on-disk dtype is BF16 and
+    // the target is BFloat16, the raw 16-bit patterns already *are* the BFloat16
+    // memory layout, so reinterpret the bytes directly. This avoids the generic
+    // ConvertBF16<T> BF16 -> F32 -> BF16 round-trip (lossless, but redundant work).
+    static BFloat16[] ConvertBF16ToBFloat16(ReadOnlySpan<byte> bytes)
+    {
+        var src = MemoryMarshal.Cast<byte, BFloat16>(bytes);
+        var result = new BFloat16[src.Length];
+        src.CopyTo(result);
         return result;
     }
 }

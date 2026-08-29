@@ -27,7 +27,6 @@ dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
-```
 
 # BFloat16 inference (half weight memory; see "BFloat16 inference" below)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
@@ -226,7 +225,7 @@ dotnet run --project samples/NivaraInference -c Release -- minilm bf16
 ```
 
 **What the `bf16` mode does**
-- Loads the on-disk **F32** weights as `BFloat16` via `SafeTensorsLoader.Read<BFloat16>` — the weights are truncated to 7-bit-mantissa BF16 at load time (the checkpoint stays F32 on disk, exactly as HuggingFace does when exporting to `torch.bfloat16`).
+- Loads the on-disk **F32** weights as `BFloat16` via `SafeTensorsLoader.Read<BFloat16>` — the loader truncates each `float` to 7-bit-mantissa BF16 at load time (analogous to PyTorch loading an F32 checkpoint into a `torch.bfloat16` model; the file on disk stays F32).
 - Builds the `<BFloat16>` model via the generic `LoadWeights<BFloat16>` and runs the full forward pass in BFloat16.
 - Diffs the output against the same PyTorch reference fixtures used by `compare` (logits for SST-2; normalized embeddings / L2 norms for MiniLM and DistilBERT).
 
@@ -254,7 +253,7 @@ The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the
 
 - **Memory-mapped header parsing** via `System.Text.Json` — reads the JSON header from the first 8 bytes + offset table
 - **Zero-copy tensor extraction** using `MemoryMarshal.Cast<byte, float>` — the weight data is reinterpret-cast directly from the memory-mapped file buffer
-- **Dtype support** — loads **F32** (native), **F16** (`System.Numerics.Half`), and **BF16** (`System.Numerics.BFloat16`) tensors. F16/BF16 are widened to the target `T` via `T.CreateChecked`; the `bf16` run mode (below) demonstrates genuine BFloat16 inference by widening the on-disk F32 weights to `BFloat16` at load time. Any other dtype raises `NotSupportedException` with guidance.
+- **Dtype support** — loads **F32** (native `float`), **F16** (`System.Numerics.Half`), and **BF16** (`System.Numerics.BFloat16`) tensors, converting each to the requested result type `T` via `T.CreateChecked`. Narrow on-disk dtypes are widened when `T` is wider (e.g. a BF16 checkpoint read as `float[]` widens losslessly), and a wider on-disk dtype is narrowed when `T` is `BFloat16` (e.g. the `bf16` run mode reads the on-disk F32 weights as `BFloat16`, truncating to genuine 7-bit mantissa). Any other dtype raises `NotSupportedException` with guidance.
 
 ## Performance benchmarks
 

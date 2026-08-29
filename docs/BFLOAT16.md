@@ -9,19 +9,16 @@ exposes `BFloat16` arithmetic overloads.
 
 Nivara supports `BFloat16` in **two layers**:
 
-1. **The AutoDiff domain** — admitted in issue **#137** (merged to `main` after
-   `v1.4.0`). `BFloat16` is a first-class gradient type: it flows through every
-   op, optimizer, and module.
-2. **The column / query-analytics layer** — wired in **POLARS-ROADMAP Phase 2**
-   (branch `khurram/bfloat16`). `BFloat16` is now a first-class numeric column
+1. **The column / query-analytics layer** — `BFloat16` is now a first-class numeric column
    type: vectorized arithmetic, window functions, sorting, aggregation, and
    fused query expressions.
+2. **The AutoDiff domain** — `BFloat16` is a first-class gradient type: it flows through every
+   op, optimizer, and module.
 
 This document covers both. Related references:
 [`AUTODIFF.md`](AUTODIFF.md),
 [`TENSORS.md`](TENSORS.md) (type-support note),
-[`INTEGERS.md`](INTEGERS.md),
-[`plan/POLARS-ROADMAP.md`](plan/POLARS-ROADMAP.md).
+[`INTEGERS.md`](INTEGERS.md)
 
 ---
 
@@ -38,89 +35,7 @@ This document covers both. Related references:
 
 ---
 
-## 1. AutoDiff domain (issue #137)
-
-### What works
-
-`BFloat16` is admitted into `TypeValidator`'s supported set, so it is treated
-exactly like `float`/`double`/`Half` across the autograd engine:
-
-- **All operations** — element-wise, `MatMul` (runs through the BCL
-  `TensorPrimitives.Dot` row dot-product; the old hand-rolled `Vector<T>` SIMD
-  branch that threw `NotSupportedException` for `BFloat16` was removed),
-  reductions, normalization, activations, attention, convolutions, VAE/Transformer
-  modules.
-- **Optimizers** — `SGD<BFloat16>`, `Adam<BFloat16>`, `AdamW<BFloat16>` with
-  their `TensorPrimitives`-based state buffers.
-- **Modules** — `Linear<BFloat16>`, `Sequential<BFloat16>`, `Embedding`,
-  `Conv1d/2d`, `BatchNorm`, `LayerNorm`, `TransformerBlock`, `VAE`, etc., since
-  they are all generic over `T : struct, IFloatingPointIeee754<T>`.
-- **Transformer token-ID correctness** — `Embedding<T>` (and `BertEncoder<T>`,
-  `MiniLMDistilled<T>`, `DistilBertForSequenceClassification<T>`) take token IDs
-  as **exact `int[]`** via `Forward(int[] tokenIds, ...)` overloads. BFloat16 (and
-  `Half`) cannot represent vocabulary indices (~30k) exactly — only integers up to
-  256 — so passing token IDs as a `T` tensor before the embedding lookup corrupts
-  them (e.g. `30522 → 30512`) and produces garbage output (~7 logit diff vs the
-  F32 reference). Keeping the indices as `int` (independent of the compute dtype)
-  makes BFloat16/Half transformer inference correct; the existing
-  `ReverseGradTensor<T>` overloads remain for F32/F64. End-to-end,
-  `DistilBertForSequenceClassification<BFloat16>` matches the F32 HuggingFace
-  reference at **8/8 argmax** with a **~0.33 max logit diff**.
-- **Frame → tensor batch** — `ToReverseGradTensorsAuto` now converts `BFloat16`
-  frame columns (it previously skipped them).
-- **Model serialization** — state dicts persist `BFloat16` weights via
-  base64-encoded binaries.
-
-### SafeTensors
-
-`SafeTensorsLoader` still performs **BF16 → F32 widening as the default** for
-`float`/`double` pipelines (lossless for inference), while `Read<BFloat16>`
-performs **F32 → BF16 truncation** (genuine 7-bit-mantissa weights) so callers
-can run inference in BFloat16. `ConvertBF16<BFloat16>` is available for native
-`BFloat16` reads (BF16 → F32 → BF16 is lossless).
-
-### Example — train a `BFloat16` linear model
-
-```csharp
-using System.Numerics;
-using Nivara;
-using Nivara.AutoDiff;
-using Nivara.AutoDiff.Nn;
-using Nivara.AutoDiff.Operations;
-using Nivara.AutoDiff.Utilities;
-
-// BFloat16 is a supported AutoDiff type
-TypeValidator.IsSupportedType(typeof(BFloat16));   // true
-NivaraAutoGradExtensions.IsAutoGradSupported<BFloat16>(); // true
-
-// Trainable weights in BFloat16
-var w = new ReverseGradTensor<BFloat16>(
-    NivaraColumn<BFloat16>.Create(new BFloat16[] { (BFloat16)0.5f, (BFloat16)0.5f }),
-    requiresGrad: true);
-
-var x = ReverseGradTensor<BFloat16>.FromArray(new BFloat16[] { (BFloat16)1.0f, (BFloat16)2.0f });
-var y = ReverseGradTensor<BFloat16>.FromArray(new BFloat16[] { (BFloat16)3.0f, (BFloat16)5.0f });
-
-using (GradientUtils.Grad())
-{
-    var pred = ReverseGradOperations.Multiply(x, w);            // [0.5, 1.0]
-    var diff = pred - y;                                        // [-2.5, -4.0]
-    var loss = ReverseGradOperations.Mean(ReverseGradOperations.Multiply(diff, diff));
-    loss.Backward();                                            // fills w.Grad
-}
-// w.Grad now holds BFloat16 gradients
-```
-
-The `BFloat16Tests` suite verifies forward/backward parity with `float`
-references, `Linear<BFloat16>` training under `SGD`/`Adam`, and the
-inference-default graph guard.
-
----
-
-## 2. Column / query-analytics layer (POLARS-ROADMAP Phase 2)
-
-> Delivered on branch `khurram/bfloat16` (this branch). Mirrors the existing
-> `Half` path one-for-one.
+## Column / query-analytics layer
 
 ### Typed columns
 
@@ -206,17 +121,126 @@ series works as well.
 
 ---
 
+## AutoDiff domain
+
+### What works
+
+`BFloat16` is admitted into `TypeValidator`'s supported set, so it is treated
+exactly like `float`/`double`/`Half` across the autograd engine:
+
+- **All operations** — element-wise, `MatMul` (runs through the BCL
+  `TensorPrimitives.Dot` row dot-product; the old hand-rolled `Vector<T>` SIMD
+  branch that threw `NotSupportedException` for `BFloat16` was removed),
+  reductions, normalization, activations, attention, convolutions, VAE/Transformer
+  modules.
+- **Optimizers** — `SGD<BFloat16>`, `Adam<BFloat16>`, `AdamW<BFloat16>` with
+  their `TensorPrimitives`-based state buffers.
+- **Modules** — `Linear<BFloat16>`, `Sequential<BFloat16>`, `Embedding`,
+  `Conv1d/2d`, `BatchNorm`, `LayerNorm`, `TransformerBlock`, `VAE`, etc., since
+  they are all generic over `T : struct, IFloatingPointIeee754<T>`.
+- **Transformer token-ID correctness** — `Embedding<T>` (and `BertEncoder<T>`,
+  `MiniLMDistilled<T>`, `DistilBertForSequenceClassification<T>`) take token IDs
+  as **exact `int[]`** via `Forward(int[] tokenIds, ...)` overloads. BFloat16 (and
+  `Half`) cannot represent vocabulary indices (~30k) exactly — only integers up to
+  256 — so passing token IDs as a `T` tensor before the embedding lookup corrupts
+  them (e.g. `30522 → 30512`) and produces garbage output (~7 logit diff vs the
+  F32 reference). Keeping the indices as `int` (independent of the compute dtype)
+  makes BFloat16/Half transformer inference correct; the existing
+  `ReverseGradTensor<T>` overloads remain for F32/F64. End-to-end,
+  `DistilBertForSequenceClassification<BFloat16>` matches the F32 HuggingFace
+  reference at **8/8 argmax** with a **~0.33 max logit diff**.
+- **Frame → tensor batch** — `ToReverseGradTensorsAuto` now converts `BFloat16`
+  frame columns (it previously skipped them).
+- **Model serialization** — state dicts persist `BFloat16` weights via
+  base64-encoded binaries.
+
+### SafeTensors
+
+`SafeTensorsLoader` is **dtype-aware**: it reads each tensor's `dtype` from the
+header and converts to the requested result type `T` (via `T.CreateChecked`).
+The non-generic `Read()` returns `float[]` and feeds the `Module<float>`
+pipeline directly. What actually happens depends on the *on-disk* dtype:
+
+| On-disk `dtype` | Default `Read()` → `float[]` | `Read<BFloat16>()` → `BFloat16[]` |
+|---|---|---|
+| `F32` | no-op reinterpret (`ConvertF32<float>`) | **F32 → BF16 truncation** (23-bit → 7-bit mantissa) — the `bf16` mode |
+| `BF16` | **BF16 → F32 widening** (lossless — BF16 *is* the top 16 bits of float32) | **lossless, zero-hop** — raw bytes reinterpreted via `MemoryMarshal.Cast<byte, BFloat16>` (no F32 intermediate) |
+| `F16` (`Half`) | **F16 → F32 widening** (lossless) | F16 → F32 → BF16 (two conversions) |
+
+- **BF16 checkpoint + default `Read()`** → `ConvertBF16<float>` widens each
+  `BFloat16` to `float` by placing its 16 bits in the high half of a `float32`
+  (lossless — BF16 *is* the top 16 bits of float32).
+- **F32 checkpoint + default `Read()`** → `ConvertF32<float>` is a no-op
+  reinterpret (no widening at all).
+- **`Read<BFloat16>()` on a BF16 checkpoint** → the raw bytes are reinterpreted
+  directly as `BFloat16` via `MemoryMarshal.Cast<byte, BFloat16>` (the
+  `ConvertBF16ToBFloat16` fast path). No F32 hop is needed because the on-disk
+  16-bit pattern already *is* the `BFloat16` memory layout — bit-for-bit
+  identical to the old BF16 → F32 → BF16 route, but without the redundant
+  shift/reinterpret/`CreateChecked` per element.
+- **`Read<BFloat16>()` on an F32 checkpoint** → `ConvertF32<BFloat16>` performs
+  genuine **F32 → BF16 truncation** (23-bit → 7-bit mantissa) — exactly what the
+  `NivaraInference` sample's `bf16` mode does to run real BFloat16 inference.
+
+Why the F32 default: float32 is a strict superset of BF16's value set (same
+8-bit exponent), so widening never loses information and feeds full-precision
+F32 compute. This is a **deliberate precision/compatibility default, not a
+workaround** — on .NET 11 `BFloat16` is a native type with `TensorPrimitives`
+support, so the non-widening path (`Read<BFloat16>` + `Module<BFloat16>`) is
+fully available and exercised by the sample's `bf16` mode. Flipping the default
+to track the on-disk dtype would break the `float[]` API contract the F32 model
+builders depend on.
+
+### Example — train a `BFloat16` linear model
+
+```csharp
+using System.Numerics;
+using Nivara;
+using Nivara.AutoDiff;
+using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
+
+// BFloat16 is a supported AutoDiff type
+TypeValidator.IsSupportedType(typeof(BFloat16));   // true
+NivaraAutoGradExtensions.IsAutoGradSupported<BFloat16>(); // true
+
+// Trainable weights in BFloat16
+var w = new ReverseGradTensor<BFloat16>(
+    NivaraColumn<BFloat16>.Create(new BFloat16[] { (BFloat16)0.5f, (BFloat16)0.5f }),
+    requiresGrad: true);
+
+var x = ReverseGradTensor<BFloat16>.FromArray(new BFloat16[] { (BFloat16)1.0f, (BFloat16)2.0f });
+var y = ReverseGradTensor<BFloat16>.FromArray(new BFloat16[] { (BFloat16)3.0f, (BFloat16)5.0f });
+
+using (GradientUtils.Grad())
+{
+    var pred = ReverseGradOperations.Multiply(x, w);            // [0.5, 1.0]
+    var diff = pred - y;                                        // [-2.5, -4.0]
+    var loss = ReverseGradOperations.Mean(ReverseGradOperations.Multiply(diff, diff));
+    loss.Backward();                                            // fills w.Grad
+}
+// w.Grad now holds BFloat16 gradients
+```
+
+The `BFloat16Tests` suite verifies forward/backward parity with `float`
+references, `Linear<BFloat16>` training under `SGD`/`Adam`, and the
+inference-default graph guard.
+
+---
+
+
 ## What you could not do before
 
-- **AutoDiff (pre-#137):** every `BFloat16` autograd operation threw
-  `NotSupportedException`. The hand-rolled `Vector<T>` matmul SIMD branch
-  rejected `BFloat16`, and `TypeValidator` excluded it. Now it is admitted at
-  runtime and exercises the BCL `TensorPrimitives.Dot` path.
-- **Column / query (pre-Phase 2):** `NivaraColumn<BFloat16>` arithmetic threw
+- **Column / query:** `NivaraColumn<BFloat16>` arithmetic threw
   `NotSupportedException` (it was absent from `NumericKernelDispatcher.arithmeticDomain`);
   `ExpressionTypeInferer` excluded `BFloat16` from the fused evaluator; and
   aggregation, quantile, window functions, and sorting had no `BFloat16` arm.
   All of those are now wired (mirroring `Half`).
+- **AutoDiff:** every `BFloat16` autograd operation threw
+  `NotSupportedException`. The hand-rolled `Vector<T>` matmul SIMD branch
+  rejected `BFloat16`, and `TypeValidator` excluded it. Now it is admitted at
+  runtime and exercises the BCL `TensorPrimitives.Dot` path.
 
 ---
 
@@ -234,13 +258,3 @@ series works as well.
   tensor.
 
 ---
-
-## Provenance
-
-- **AutoDiff (`#137`)** — commits `eb50279` … `595704f` (merged to `main` after
-  `v1.4.0` via PR #339). `CHANGELOG.md` "Unreleased" records the admission;
-  `TENSORS.md` carries the type-support note.
-- **Column / query (Phase 2)** — branch `khurram/bfloat16`; see
-  `POLARS-ROADMAP.md` Phase 2 "Scope (remaining)". The Step-0 probe confirmed
-  the active net11 BCL `TensorPrimitives` exposes `BFloat16` arithmetic
-  overloads, so the generic SIMD path applies with no scalar fallback.
