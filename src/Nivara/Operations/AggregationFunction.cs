@@ -751,7 +751,7 @@ public sealed class StdDevAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        return MomentsKernel.ComputeStdDevFromBoxed(ExtractValidValues(column, groupIndices), ddof);
+        return MomentsKernel.ComputeFromColumn(column, groupIndices, ddof, variance: false);
     }
 
     /// <inheritdoc />
@@ -760,18 +760,6 @@ public sealed class StdDevAggregation : AggregationFunction
         var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
         if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
             throw new ArgumentException($"StdDev aggregation requires numeric type, got {inputType.Name}");
-    }
-
-    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
-    {
-        var validValues = new List<object>(groupIndices.Count);
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-        return validValues;
     }
 }
 
@@ -822,7 +810,7 @@ public sealed class VarianceAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        return MomentsKernel.ComputeVarianceFromBoxed(ExtractValidValues(column, groupIndices), ddof);
+        return MomentsKernel.ComputeFromColumn(column, groupIndices, ddof, variance: true);
     }
 
     /// <inheritdoc />
@@ -831,18 +819,6 @@ public sealed class VarianceAggregation : AggregationFunction
         var underlying = Nullable.GetUnderlyingType(inputType) ?? inputType;
         if (!TypeCompatibilityValidator.GetNumericTypes().Contains(underlying))
             throw new ArgumentException($"Variance aggregation requires numeric type, got {inputType.Name}");
-    }
-
-    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
-    {
-        var validValues = new List<object>(groupIndices.Count);
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-        return validValues;
     }
 }
 
