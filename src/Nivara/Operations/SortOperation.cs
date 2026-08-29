@@ -2,6 +2,7 @@ using Nivara.Exceptions;
 using Nivara.Execution;
 using Nivara.Helpers;
 using Nivara.Query;
+using System.Numerics;
 
 namespace Nivara.Operations;
 
@@ -305,6 +306,7 @@ internal sealed class MultiColumnComparer : IComparer<int>
             NivaraColumn<float> c => compareTyped(c, indexX, indexY, sortKey),
             NivaraColumn<double> c => compareTyped(c, indexX, indexY, sortKey),
             NivaraColumn<Half> c => compareTyped(c, indexX, indexY, sortKey),
+            NivaraColumn<BFloat16> c => compareTyped(c, indexX, indexY, sortKey),
             NivaraColumn<decimal> c => compareTyped(c, indexX, indexY, sortKey),
             NivaraColumn<string> c => compareTyped(c, indexX, indexY, sortKey),
             NivaraColumn<Guid> c => compareTyped(c, indexX, indexY, sortKey),

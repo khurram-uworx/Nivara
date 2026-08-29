@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara.Operations;
 
 /// <summary>
@@ -54,6 +56,7 @@ internal static class SortKeyComparerFactory
             NivaraColumn<float> c => Create(c, sortKey),
             NivaraColumn<double> c => Create(c, sortKey),
             NivaraColumn<Half> c => Create(c, sortKey),
+            NivaraColumn<BFloat16> c => Create(c, sortKey),
             NivaraColumn<decimal> c => Create(c, sortKey),
             NivaraColumn<string> c => Create(c, sortKey),
             NivaraColumn<Guid> c => Create(c, sortKey),
