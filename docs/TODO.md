@@ -34,7 +34,17 @@ Branch on result:
   `TensorPrimitives` for arithmetic → add a `BFloat16`-specific scalar `INumber<T>` fallback
   kernel set (operator loops, like existing `SubtractFrom`/`DivideBy`). Correct, no SIMD.
 
-Per the build state, Branch B is expected, but Step 0 must confirm before any code change.
+**RESOLVED — Branch A (Step 0, 2026-08-29):** a throwaway net11.0-preview.7 console app
+referencing `System.Numerics.Tensors` 11.0.0-preview.7 compiled and ran
+`TensorPrimitives.Add/Subtract/Multiply/Divide/Sum/Min/Max` over `BFloat16` spans, and
+`typeof(BFloat16).IsAssignableTo(typeof(IFloatingPointIeee754<BFloat16>))` is `true`. The
+active SDK therefore has usable `BFloat16` (the net11 stack #137 targeted); no scalar
+fallback needed. The earlier assumption that BFloat16 was unavailable was incorrect.
+
+**Implementation note:** mirror `Half` exactly. `Half` is in `arithmeticDomain` (SIMD path)
+but NOT in `comparisonDomain` (comparisons fall back to `Comparer<T>.Default` scalar loops in
+`NivaraColumn`). Add `BFloat16` to `arithmeticDomain` only; comparisons work via the same
+fallback.
 
 ## Changes (per detailed plan doc)
 
