@@ -105,6 +105,26 @@ public abstract class AggregationFunction
 
     /// <inheritdoc />
     public override string ToString() => Name;
+
+    /// <summary>
+    /// Reads the non-null values of a typed column via the generic <see cref="IColumn{T}"/> indexer
+    /// (no per-element boxing) into a compact array, skipping null positions.
+    /// </summary>
+    protected static T[] ExtractValidTyped<T>(IColumn column, IReadOnlyList<int> groupIndices)
+        where T : struct
+    {
+        var typed = (IColumn<T>)column;
+        int count = 0;
+        foreach (var idx in groupIndices)
+            if (!column.IsNull(idx))
+                count++;
+        var values = new T[count];
+        int pos = 0;
+        foreach (var idx in groupIndices)
+            if (!column.IsNull(idx))
+                values[pos++] = typed[idx];
+        return values;
+    }
 }
 
 /// <summary>
@@ -209,35 +229,30 @@ public sealed class SumAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        // Extract valid values for this group
-        var validValues = ExtractValidValues(column, groupIndices);
-        if (validValues.Count == 0)
-            return GetZeroValue(GetResultType(column.ElementType));
-
         // Handle nullable types by checking the underlying type
         var elementType = Nullable.GetUnderlyingType(column.ElementType) ?? column.ElementType;
 
         return elementType switch
         {
-            Type t when t == typeof(int) => SumVectorized<int, long>(validValues),
-            Type t when t == typeof(byte) => SumVectorized<byte, long>(validValues),
-            Type t when t == typeof(sbyte) => SumVectorized<sbyte, long>(validValues),
-            Type t when t == typeof(short) => SumVectorized<short, long>(validValues),
-            Type t when t == typeof(ushort) => SumVectorized<ushort, long>(validValues),
-            Type t when t == typeof(uint) => SumVectorized<uint, long>(validValues),
-            Type t when t == typeof(char) => SumVectorized<char, long>(validValues),
-            Type t when t == typeof(bool) => SumVectorizedBool<long>(validValues),
-            Type t when t == typeof(long) => SumVectorized<long, long>(validValues),
-            Type t when t == typeof(ulong) => SumVectorized<ulong, ulong>(validValues),
-            Type t when t == typeof(nint) => SumVectorized<nint, Int128>(validValues),
-            Type t when t == typeof(nuint) => SumVectorized<nuint, UInt128>(validValues),
-            Type t when t == typeof(Int128) => SumVectorized<Int128, Int128>(validValues),
-            Type t when t == typeof(UInt128) => SumVectorized<UInt128, UInt128>(validValues),
-            Type t when t == typeof(float) => SumVectorized<float, double>(validValues),
-            Type t when t == typeof(Half) => SumVectorized<Half, double>(validValues),
-            Type t when t == typeof(BFloat16) => SumVectorized<BFloat16, double>(validValues),
-            Type t when t == typeof(double) => SumVectorized<double, double>(validValues),
-            Type t when t == typeof(decimal) => SumScalarDecimal(validValues),
+            Type t when t == typeof(int) => SumVectorized<int, long>(column, groupIndices),
+            Type t when t == typeof(byte) => SumVectorized<byte, long>(column, groupIndices),
+            Type t when t == typeof(sbyte) => SumVectorized<sbyte, long>(column, groupIndices),
+            Type t when t == typeof(short) => SumVectorized<short, long>(column, groupIndices),
+            Type t when t == typeof(ushort) => SumVectorized<ushort, long>(column, groupIndices),
+            Type t when t == typeof(uint) => SumVectorized<uint, long>(column, groupIndices),
+            Type t when t == typeof(char) => SumVectorized<char, long>(column, groupIndices),
+            Type t when t == typeof(bool) => SumVectorizedBool<long>(column, groupIndices),
+            Type t when t == typeof(long) => SumVectorized<long, long>(column, groupIndices),
+            Type t when t == typeof(ulong) => SumVectorized<ulong, ulong>(column, groupIndices),
+            Type t when t == typeof(nint) => SumVectorized<nint, Int128>(column, groupIndices),
+            Type t when t == typeof(nuint) => SumVectorized<nuint, UInt128>(column, groupIndices),
+            Type t when t == typeof(Int128) => SumVectorized<Int128, Int128>(column, groupIndices),
+            Type t when t == typeof(UInt128) => SumVectorized<UInt128, UInt128>(column, groupIndices),
+            Type t when t == typeof(float) => SumVectorized<float, double>(column, groupIndices),
+            Type t when t == typeof(Half) => SumVectorized<Half, double>(column, groupIndices),
+            Type t when t == typeof(BFloat16) => SumVectorized<BFloat16, double>(column, groupIndices),
+            Type t when t == typeof(double) => SumVectorized<double, double>(column, groupIndices),
+            Type t when t == typeof(decimal) => SumScalarDecimal(column, groupIndices),
             _ => throw new ArgumentException($"Sum aggregation not supported for type {column.ElementType.Name}")
         };
     }
@@ -252,33 +267,20 @@ public sealed class SumAggregation : AggregationFunction
     }
 
     /// <summary>
-    /// Extracts valid (non-null) values from a column for the specified indices
+    /// Performs vectorized sum for numeric values using generic TensorPrimitives after widening
+    /// each value into the promoted result type via typed CreateChecked conversion
+    /// (byte/sbyte/short/ushort/int/uint/char → long, nint → Int128, nuint → UInt128,
+    /// float/Half → double), preserving the documented result-type promotion rules. Values are
+    /// read through the typed IColumn&lt;TSource&gt; indexer so there is no per-element boxing.
     /// </summary>
-    static List<object> ExtractValidValues(IColumn column, IReadOnlyList<int> groupIndices)
-    {
-        var validValues = new List<object>();
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
-        return validValues;
-    }
-
-    /// <summary>
-    /// Performs vectorized sum for numeric values using generic TensorPrimitives after
-    /// widening each boxed value into the promoted result type via typed CreateChecked
-    /// conversion (byte/sbyte/short/ushort/int/uint/char → long, nint → Int128, nuint →
-    /// UInt128, float/Half → double), preserving the documented result-type promotion rules.
-    /// </summary>
-    static object SumVectorized<TSource, TResult>(List<object> validValues)
-        where TSource : INumberBase<TSource>
+    static object SumVectorized<TSource, TResult>(IColumn column, IReadOnlyList<int> groupIndices)
+        where TSource : struct, INumberBase<TSource>
         where TResult : unmanaged, INumber<TResult>
     {
-        var widened = new TResult[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            widened[i] = TResult.CreateChecked((TSource)validValues[i]);
+        var values = ExtractValidTyped<TSource>(column, groupIndices);
+        var widened = new TResult[values.Length];
+        for (int i = 0; i < values.Length; i++)
+            widened[i] = TResult.CreateChecked(values[i]);
 
         return TensorPrimitives.Sum(widened.AsSpan());
     }
@@ -286,44 +288,31 @@ public sealed class SumAggregation : AggregationFunction
     /// <summary>
     /// Performs vectorized sum of boolean values, counting true values as ones (bool is not an
     /// INumberBase type, so it is converted explicitly before widening into the result type).
+    /// Values are read through the typed IColumn&lt;bool&gt; indexer so there is no per-element boxing.
     /// </summary>
-    static object SumVectorizedBool<TResult>(List<object> validValues)
+    static object SumVectorizedBool<TResult>(IColumn column, IReadOnlyList<int> groupIndices)
         where TResult : unmanaged, INumber<TResult>
     {
-        var widened = new TResult[validValues.Count];
-        for (int i = 0; i < validValues.Count; i++)
-            widened[i] = TResult.CreateChecked((bool)validValues[i] ? 1 : 0);
+        var values = ExtractValidTyped<bool>(column, groupIndices);
+        var widened = new TResult[values.Length];
+        for (int i = 0; i < values.Length; i++)
+            widened[i] = TResult.CreateChecked(values[i] ? 1 : 0);
 
         return TensorPrimitives.Sum(widened.AsSpan());
     }
 
     /// <summary>
-    /// Performs scalar decimal sum aggregation (decimal is not a supported TensorPrimitives element type)
+    /// Performs scalar decimal sum aggregation (decimal is not a supported TensorPrimitives element
+    /// type). Values are read through the typed IColumn&lt;decimal&gt; indexer so there is no per-element boxing.
     /// </summary>
-    static object SumScalarDecimal(List<object> validValues)
+    static object SumScalarDecimal(IColumn column, IReadOnlyList<int> groupIndices)
     {
+        var values = ExtractValidTyped<decimal>(column, groupIndices);
         decimal sum = 0m;
-        foreach (var value in validValues)
-            sum += (decimal)value;
+        foreach (var value in values)
+            sum += value;
 
         return sum;
-    }
-
-    /// <summary>
-    /// Gets the zero value for a given type
-    /// </summary>
-    static object GetZeroValue(Type type)
-    {
-        return type switch
-        {
-            Type t when t == typeof(long) => 0L,
-            Type t when t == typeof(ulong) => 0UL,
-            Type t when t == typeof(Int128) => Int128.Zero,
-            Type t when t == typeof(UInt128) => UInt128.Zero,
-            Type t when t == typeof(double) => 0.0,
-            Type t when t == typeof(decimal) => 0m,
-            _ => Activator.CreateInstance(type)!
-        };
     }
 }
 
