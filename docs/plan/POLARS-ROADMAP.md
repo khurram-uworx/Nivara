@@ -75,7 +75,9 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 - **OrderBy computed keys:** teach the sort layer to accept an evaluated key column (remove the `NotSupportedException` in `NivaraLinqExtensions.OrderBy`), routing complex expressions through the fused evaluator.
 - **Generic-math collapse:** replace the explicit `float`/`double` branches in `NivaraColumn<T>` arithmetic (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`, and operator overloads) with `INumber<T>` generic paths, keeping `TensorPrimitives` on the vectorizable fast path.
 
-**Scope (remaining):** `BFloat16`-typed kernels stay deferred to the net11 migration (#137); the compiled `Expression.Compile` delegate target still runs over `T[]` arrays, but the IR interpreter and chunked execution deliver the span-capable, memory-budgeted target (#167); remaining span work tracked as #155.
+**Scope (remaining):**
+- **BFloat16 in the column/query-expression path.** Issue #137 admitted `BFloat16` to the **AutoDiff** domain only (`TypeValidator`/optimizers/kernels on net11). The columnar layer still excludes it: `NumericKernelDispatcher.arithmeticDomain` omits `BFloat16` (so `NivaraColumn<T>` arithmetic throws `NotSupportedException` for it), and `ExpressionTypeInferer` intentionally excludes it from the fused evaluator. `Half` IS wired through the full column path. Detailed plan: `docs/plan/POLARS-PHASE2-BFLOAT16.md`. Blocker: this hinges on whether the active BCL `TensorPrimitives` exposes `BFloat16` overloads (net11) — `NumericTensorKernels<T>` calls `TensorPrimitives.Add/Multiply/...` directly, so without those overloads the generic kernel won't compile for `BFloat16`.
+- **#155 — remaining span work.** The compiled `Expression.Compile` delegate target still runs over `T[]` arrays; the span-capable, memory-budgeted path already ships via the IR interpreter + `EvaluateChunked` (#167). #155 tracks the residual polish (true `Span<T>` compiled target).
 
 **Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/Expressions/KernelIR.cs`, `src/Nivara/Expressions/KernelLowerer.cs`, `src/Nivara/Expressions/FusedKernel.cs`, `src/Nivara/Expressions/TensorPrimitivesKernel.cs`, `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraLinqExtensions.cs`, `src/Nivara/KernelSelector.cs`.
 
@@ -97,9 +99,9 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 
 **Status (core set + rank family delivered, #135/#156):** Rolling min/max/mean/sum over fixed windows, cumulative sum/max/min/product/count, `Shift`/`Lead`, and the rank family (`RowNumber`/`Rank`/`DenseRank`/`PercentRank` over partitions with `SortKey` ordering) now ship on `NivaraColumn<T>` (`src/Nivara/Tensors/WindowFunctions.cs`, `src/Nivara/Tensors/RankKernel.cs`), eager `NivaraFrame` extensions (`src/Nivara/WindowFrameExtensions.cs`), and the lazy `QueryFrame` pipeline (`src/Nivara/Operations/WindowOperations.cs` and `src/Nivara/Operations/RankOperations.cs`, `OperationType.Rolling`/`.Cumulative`/`.Shift`/`.Rank`). Semantics: nulls ignored by default with output gated on `minPeriods` (default full window); cumulative ops skip nulls with carry-forward; `Shift`/`Lead` boundary positions are null or `fillValue`; an optional `nullHandler` replaces nulls so every position satisfies the window; a null rank order key yields null output and is excluded from numbering/denominator for `Rank`/`DenseRank`/`PercentRank`, while `RowNumber` numbers every row with null-key rows placed per the order keys' `NullOrdering` (issue #254, SQL-faithful). Documented in `docs/LINQ.md`; covered by `tests/Nivara.Tests/Tensors/WindowFunctionsTests.cs`, `tests/Nivara.Tests/Tensors/RankFunctionsTests.cs`, `tests/Nivara.Tests/Query/WindowOperationTests.cs`, and `tests/Nivara.Tests/Query/RankOperationTests.cs`.
 
-**Scope (remaining):**
-- Null-aware windowing consistent with the project's explicit null-mask model (ADR-001 boundary, no NaN semantics).
-- Built on the Phase 2 fused expression engine so window expressions compose with ordinary expressions.
+**Scope (remaining) — resolved:** Both residual bullets are satisfied in code:
+- Null-aware windowing is consistent with the explicit null-mask model (ADR-001): nulls are ignored by default with output gated on `minPeriods`, cumulative ops carry-forward skipping nulls, `Shift`/`Lead` boundary positions are null or `fillValue`, and a null rank order key yields null output (issue #254, SQL-faithful) — all documented in `docs/LINQ.md` and covered by the window/rank test suites.
+- Window expressions already compose with the Phase 2 fused engine: `WindowOperations.cs` evaluates its source expression through `new FusedExpressionEvaluator().Evaluate(SourceExpression, input)` (line 149), so `Over(...)`/rolling/cumulative/rank windows accept arbitrary fused expressions, not just bare columns.
 
 **Key files:** new `src/Nivara/Operations/` window operators, `src/Nivara/Query/OperationType.cs`, `src/Nivara/Expressions/` (window expression nodes), plan schema propagation.
 
@@ -118,7 +120,9 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 
 **Motivation:** The async seams already exist on `IQuerySource` (`ReadChunkAsync`, `ToAsyncEnumerable` in `src/Nivara/Query/IQueryInterfaces.cs:34-52`), and strategies are implemented — but the pipeline is a synchronous chunk puller with async wrappers. Native design is async-native, with cancellation and bounded memory as first-class properties.
 
-**Scope:**
+**Status (delivered, v1.4.0 + #331):** The streaming path is genuinely `IAsyncEnumerable`-driven end to end. `QueryFrame.CollectAsync`/`AsStream` are real async (no `Task.Run` hop); every operator exposes `ExecuteAsync` (`IQueryOperation.ExecuteAsync`, `IQuerySource.ExecuteAsync`) and the strategies route through them (`LazyExecutionStrategy`, `StreamingExecutionStrategy`, `ParallelExecutionStrategy`). Channel-style buffering and bounded memory use `StreamingBudgetTracker` + `StreamingWindowProcessor`; lookahead windows (`Lead`/negative `Shift`) stream via delayed emission (#331). `Collect()` remains a thin blocking wrapper over `CollectAsync`. The three acceptance criteria are met and covered by the streaming/property test suites.
+
+**Scope (delivered):**
 - Make the streaming path genuinely `IAsyncEnumerable`-driven end to end (lazy sources → operators → `CollectAsync`), with `CancellationToken` threading.
 - Channel-based buffering with the existing memory-budget machinery in `StreamingExecutionStrategy` / `StreamingBufferManager` (Extensions).
 - Add `CollectAsync`/`ToListAsync` style public entry points; keep synchronous `Collect()` as a thin blocking wrapper.
@@ -181,7 +185,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 | Fused kernel IR + span/chunked execution (Phase 2, #167) | High | ✅ Delivered |
 | Window functions, core set (Phase 3) | High | ✅ Delivered (#135) |
 | `Over`/`Rank`/`DenseRank` (Phase 3 remainder) | High | ✅ Delivered (#156) |
-| Async-native streaming (Phase 4) | Medium | Phase 4 |
+| Async-native streaming (Phase 4) | Medium | ✅ Delivered (v1.4.0 + #331) |
 | Source generators (Phase 5) | High, splittable | Phase 5 |
 
 **What we leverage, not reinvent:** `TensorsHelper` (SIMD kernels), `KernelSelector.DetermineKernelType()`, the `OptimizationEngine` rule set, AutoDiff's proven `IFloatingPointIeee754<T>` + span + `ArrayPool` techniques, `BufferPool`, `docs/LINQ.md` (plan-layer spec), and `docs/AUTODIFF.md` (kernel patterns).
