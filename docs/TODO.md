@@ -83,11 +83,23 @@ Add a `bf16` run mode for the three text models that:
     models, measured precision (max-abs-diff / argmax agreement) + memory, and a
     cross-link to `docs/BFLOAT16.md`.
 
-## Blast radius
+## Blast radius — UPDATED during execution
 
-Sample-only. **No changes to `src/Nivara` or `src/Nivara.Samples`.** Depends on the
-already-shipped generic BFloat16 support. The three new run methods mirror existing
-float run/compare methods; diff logic reuses `DistilBertSst.PrintCompareDiff`.
+Sample changes as planned, **plus one engine change** that the demo exposed:
+
+- **Engine fix (committed):** BFloat16/Half transformer inference was actually
+  *broken* — `Embedding<T>.Forward(ReverseGradTensor<T>)` recovered token IDs via
+  `int.CreateChecked(input.Data[i])`, but BF16 cannot represent vocab indices
+  (~30k) exactly (exact only to 256), so the embedding lookup fetched wrong rows
+  and output diverged catastrophically from F32 (DistilBERT SST-2 max logit diff
+  ~7.4 vs F32's ~1e-6). Fixed by adding exact-`int[]` `Forward(int[])` overloads to
+  `Embedding<T>`, `BertEncoder<T>`, `MiniLMDistilled<T>` and
+  `DistilBertForSequenceClassification<T>`; the existing `ReverseGradTensor<T>`
+  overloads are retained (F32/F64 unaffected), so it is non-breaking.
+  Commits: `baac328` (fix), `301e5ef` (regression test).
+- **Sample:** `DistilBertSst.cs` + `Program.cs` `bf16` mode now passes token IDs as
+  exact `int[]` (not `BFloat16` tensors); the attention mask stays a `BFloat16`
+  tensor (its 0/1 values round-trip exactly).
 
 ## Verification
 
@@ -108,4 +120,6 @@ float run/compare methods; diff logic reuses `DistilBertSst.PrintCompareDiff`.
 
 ## GitHub issues log
 
-- (none yet)
+- Engine bug found & fixed in-branch (no separate issue needed): BFloat16/Half
+  transformer token-ID corruption in `Embedding<T>` embedding lookups.
+  Commits `baac328` (fix) + `301e5ef` (regression test `EmbeddingBFloat16Tests`).

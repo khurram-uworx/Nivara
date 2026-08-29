@@ -55,6 +55,17 @@ exactly like `float`/`double`/`Half` across the autograd engine:
 - **Modules** — `Linear<BFloat16>`, `Sequential<BFloat16>`, `Embedding`,
   `Conv1d/2d`, `BatchNorm`, `LayerNorm`, `TransformerBlock`, `VAE`, etc., since
   they are all generic over `T : struct, IFloatingPointIeee754<T>`.
+- **Transformer token-ID correctness** — `Embedding<T>` (and `BertEncoder<T>`,
+  `MiniLMDistilled<T>`, `DistilBertForSequenceClassification<T>`) take token IDs
+  as **exact `int[]`** via `Forward(int[] tokenIds, ...)` overloads. BFloat16 (and
+  `Half`) cannot represent vocabulary indices (~30k) exactly — only integers up to
+  256 — so passing token IDs as a `T` tensor before the embedding lookup corrupts
+  them (e.g. `30522 → 30512`) and produces garbage output (~7 logit diff vs the
+  F32 reference). Keeping the indices as `int` (independent of the compute dtype)
+  makes BFloat16/Half transformer inference correct; the existing
+  `ReverseGradTensor<T>` overloads remain for F32/F64. End-to-end,
+  `DistilBertForSequenceClassification<BFloat16>` matches the F32 HuggingFace
+  reference at **8/8 argmax** with a **~0.33 max logit diff**.
 - **Frame → tensor batch** — `ToReverseGradTensorsAuto` now converts `BFloat16`
   frame columns (it previously skipped them).
 - **Model serialization** — state dicts persist `BFloat16` weights via
@@ -63,8 +74,10 @@ exactly like `float`/`double`/`Half` across the autograd engine:
 ### SafeTensors
 
 `SafeTensorsLoader` still performs **BF16 → F32 widening as the default** for
-`float`/`double` pipelines (lossless for inference). `ConvertBF16<BFloat16>` is
-available for native `BFloat16` reads (BF16 → F32 → BF16 is lossless).
+`float`/`double` pipelines (lossless for inference), while `Read<BFloat16>`
+performs **F32 → BF16 truncation** (genuine 7-bit-mantissa weights) so callers
+can run inference in BFloat16. `ConvertBF16<BFloat16>` is available for native
+`BFloat16` reads (BF16 → F32 → BF16 is lossless).
 
 ### Example — train a `BFloat16` linear model
 

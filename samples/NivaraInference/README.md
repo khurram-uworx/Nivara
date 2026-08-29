@@ -29,6 +29,12 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
 ```
 
+# BFloat16 inference (half weight memory; see "BFloat16 inference" below)
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
+dotnet run --project samples/NivaraInference -c Release -- distilbert bf16
+dotnet run --project samples/NivaraInference -c Release -- minilm bf16
+```
+
 ## Supported models
 
 | Model | Type | Weight size | Tensors | Parameters | Output |
@@ -192,8 +198,8 @@ The fine-tuned sequence-classification showcase: the base encoder plus a classif
 - **Head**: `pre_classifier` (768→768) → **ReLU** → `classifier` (768→2). The HF architecture applies `nn.ReLU()` after `pre_classifier`; a naive port using `GeluExact` on the head produced logits off by ~0.05, so the head uses `ReverseGradOperations.Relu`
 - **Softmax + argmax** for the sentiment label and confidence
 - **Inference-default path**: `PredictLogits` runs outside any `Grad()` scope, producing leaf logits with no computation-graph overhead
-- **Padded-input contract**: `BertEncoder.ForwardBatched` requires input/attention-mask tensors of length `batchSize * seqLen`; `PredictLogits` passes the padded `[maxLen]` token ids (not the real token count)
-- **Verification**: `compare` matches HuggingFace to `max abs logit diff 9.5e-7`, `argmax agreement 8/8`
+- **Padded-input contract**: `BertEncoder.ForwardBatched` requires attention-mask tensors of length `batchSize * seqLen`; token IDs are passed as exact `int[]` (see the BFloat16 note) so they survive narrow-precision dtypes, and `PredictLogits` passes the padded `[maxLen]` token ids
+- **Verification**: `compare` matches HuggingFace to `max abs logit diff 9.5e-7`, `argmax agreement 8/8`; the `bf16` mode matches the same reference at `8/8` argmax with a `max abs logit diff ~0.33` (genuine BFloat16 precision)
 
 Nivara modules used: `DistilBertForSequenceClassification<T>` (shared from `Nivara.Samples`), `Embedding<T>`, `LayerNorm<T>`, `Linear<T>`, `BertSelfAttention<T>`, `ReverseGradOperations.GeluExact` (encoder FFN), `ReverseGradOperations.Relu` (head), `ReverseGradOperations.Softmax`, `ReverseGradOperations.MatMul`.
 
@@ -207,13 +213,48 @@ Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor
 - **DistilBERT**: 105 tensors mapped via `DistilBertLoader.LoadEncoderWeights` from `distilbert.embeddings.*` and `distilbert.transformer.layer.{0-5}.*` keys
 - **DistilBERT SST-2**: 104 tensors — 102 encoder tensors via `DistilBertLoader.LoadEncoderWeights` + `pre_classifier.{weight,bias}` and `classifier.{weight,bias}` loaded via `DistilBertForSequenceClassification<T>.LoadWeights`
 
+## BFloat16 inference
+
+Every transformer model in this sample is generic over the compute dtype
+`T : IFloatingPointIeee754<T>`, so it runs in F32, F16, or BFloat16. A `bf16`
+run mode demonstrates **genuine BFloat16 inference** end-to-end:
+
+```bash
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
+dotnet run --project samples/NivaraInference -c Release -- distilbert bf16
+dotnet run --project samples/NivaraInference -c Release -- minilm bf16
+```
+
+**What the `bf16` mode does**
+- Loads the on-disk **F32** weights as `BFloat16` via `SafeTensorsLoader.Read<BFloat16>` — the weights are truncated to 7-bit-mantissa BF16 at load time (the checkpoint stays F32 on disk, exactly as HuggingFace does when exporting to `torch.bfloat16`).
+- Builds the `<BFloat16>` model via the generic `LoadWeights<BFloat16>` and runs the full forward pass in BFloat16.
+- Diffs the output against the same PyTorch reference fixtures used by `compare` (logits for SST-2; normalized embeddings / L2 norms for MiniLM and DistilBERT).
+
+**Token-ID correctness (the subtle bit)** — BFloat16 represents integers *exactly* only up to 256, but transformer vocabularies reach ~30k. Converting token IDs to a BF16 tensor before the embedding lookup corrupts them (e.g. `30522 → 30512`), sending the lookup to the wrong row and producing garbage (we measured a ~7.4 logit diff vs the F32 reference before the fix). The fix keeps token IDs as **exact `int`**: `Embedding<T>`, `BertEncoder<T>`, `MiniLMDistilled<T>` and `DistilBertForSequenceClassification<T>` all expose `Forward(int[] tokenIds, ...)` overloads that look up embeddings by exact integer index, independent of the compute dtype. Only the attention mask stays a BF16 tensor (its `0`/`1` values round-trip exactly). See `docs/BFLOAT16.md` for the engine-level details.
+
+**Results** (against the F32 HuggingFace reference, CPU):
+
+| Model | Metric | F32 vs Ref | BFloat16 vs Ref |
+|---|---|---|---|
+| `distilbert_sst` | argmax agreement | 8/8 | **8/8** |
+| `distilbert_sst` | max abs logit diff | ~1e-6 | **~0.33** |
+
+The base `distilbert` and `minilm` `bf16` modes run correctly (unit-length
+embeddings, sensible cosine similarities — e.g. 0.90 between "I love programming"
+and "I love coding"). Quantitative base/minilm cosine-vs-reference requires
+generating the reference fixtures via `samples/NivaraInference/Python/distilbert_compare.py`
+and `minilm_compare.py` (they are not checked into the repo). BFloat16 halves
+weight memory (2 vs 4 bytes/param) for a negligible precision cost, and preserves
+every prediction on the SST-2 set. The column/tensor engine's BFloat16 path is
+documented in `docs/BFLOAT16.md`.
+
 ## SafeTensors loader
 
 The sample includes a custom zero-dependency `SafeTensorsLoader` that parses the HuggingFace SafeTensors binary format directly:
 
 - **Memory-mapped header parsing** via `System.Text.Json` — reads the JSON header from the first 8 bytes + offset table
 - **Zero-copy tensor extraction** using `MemoryMarshal.Cast<byte, float>` — the weight data is reinterpret-cast directly from the memory-mapped file buffer
-- **Format validation** — throws `NotSupportedException` for non-F32 tensors (F16, BF16) with clear guidance to the user
+- **Dtype support** — loads **F32** (native), **F16** (`System.Numerics.Half`), and **BF16** (`System.Numerics.BFloat16`) tensors. F16/BF16 are widened to the target `T` via `T.CreateChecked`; the `bf16` run mode (below) demonstrates genuine BFloat16 inference by widening the on-disk F32 weights to `BFloat16` at load time. Any other dtype raises `NotSupportedException` with guidance.
 
 ## Performance benchmarks
 
