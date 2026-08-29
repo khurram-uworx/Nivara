@@ -38,6 +38,25 @@ public sealed class DistilBertForSequenceClassification<T> : Module<T> where T :
         return logits;
     }
 
+    /// <summary>
+    /// Exact-integer-index variant of <see cref="Forward(ReverseGradTensor{T}, ReverseGradTensor{T}, int, int)"/>.
+    /// Token IDs are passed as <see cref="int"/> so they survive narrow-precision compute
+    /// dtypes (BFloat16 / Half) that cannot represent typical vocabularies.
+    /// </summary>
+    public ReverseGradTensor<T> Forward(
+        int[] inputIds,
+        ReverseGradTensor<T> attentionMask,
+        int batchSize,
+        int seqLen)
+    {
+        var encoded = encoder.ForwardBatched(inputIds, attentionMask, batchSize, seqLen);
+        var clsTokens = ExtractClsTokens(encoded, batchSize, seqLen);
+        var h = preClassifier.Forward(clsTokens);
+        h = ReverseGradOperations.Relu(h);
+        var logits = classifier.Forward(h);
+        return logits;
+    }
+
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
         => throw new NotImplementedException("Use Forward(inputIds, attentionMask, batchSize, seqLen).");
 

@@ -159,7 +159,7 @@ Checkpoint<T>                         ← Epoch + loss + optimizer state + model
 Utilities
 ─────────
 GradientUtils                         ← ZeroGrad, Detach, ClipGradValue/Norm, creators, diagnostics
-TypeValidator                         ← Runtime type checking (only float/double)
+TypeValidator                         ← Runtime type checking (float/double/Half/BFloat16)
 TypeConverter                         ← Cross-type tensor conversion (float ↔ double)
 
 NivaraAutoGradExtensions              ← NivaraColumn/NivaraSeries/NivaraFrame ↔ ReverseGradTensor
@@ -169,7 +169,7 @@ NivaraAutoGradExtensions              ← NivaraColumn/NivaraSeries/NivaraFrame 
 
 ## Key Design Principles
 
-- **`IFloatingPointIeee754<T>` type constraint** — `float`, `double`, and `Half` are supported, enforced at compile time by the generic constraint (and at runtime by `TypeValidator.IsSupportedType`). Other numeric types (int, long, etc.) do not satisfy the constraint.
+- **`IFloatingPointIeee754<T>` type constraint** — `float`, `double`, `Half`, and `BFloat16` are supported, enforced at compile time by the generic constraint (and at runtime by `TypeValidator.IsSupportedType`). Other numeric types (int, long, etc.) do not satisfy the constraint. For the full BFloat16 capability matrix (AutoDiff **and** the column/query layer), see [`BFLOAT16.md`](BFLOAT16.md).
 - **1D storage, shape metadata** — data is always stored as a flat `NivaraColumn<T>`. Shape is metadata (`int[] shape`) with `Reshape()` validation. Default shape is `[Length]`.
 - **Inference is the default** — normal `Forward` and `ReverseGradOperations` calls compute values without building a computation graph. `ComputationGraph.AddNode()` asserts graph construction only occurs inside `GradientUtils.Grad()` scope.
 - **Training is explicit** — wrap manual training code in `using (GradientUtils.Grad())`; inside that scope, operations check trainable inputs (`requiresGrad`) and attach `OpNode` history to results.
@@ -1212,7 +1212,7 @@ null participation, and operation-specific notes such as shape metadata.
 
 ### Supported Types
 
-**float**, **double**, and **Half** are supported for autograd. Enforcement happens at two levels:
+**float**, **double**, **Half**, and **BFloat16** are supported for autograd. Enforcement happens at two levels:
 
 1. **Generic constraint**: `where T : struct, IFloatingPointIeee754<T>` — a precise bound matching the supported numeric types exactly
 2. **Runtime check**: `TypeValidator.IsSupportedType(typeof(T))` returns true for `float`, `double`, and `Half`; the legacy `ValidateNumericType<T>()` gatekeeper was removed since the constraint now enforces the boundary at compile time
@@ -1252,7 +1252,7 @@ var tensors = frame.ToReverseGradTensors<float>(
 
 // Auto-detect numeric columns
 var tensors = frame.ToReverseGradTensorsAuto(requiresGrad: false);
-// Returns Dictionary<string, object> — only float/double columns
+// Returns Dictionary<string, object> — float, double, Half, and BFloat16 columns are converted
 ```
 
 ### Tensor batch → Frame
@@ -1274,7 +1274,7 @@ tensors.BatchZeroGrad();        // Calls ZeroGrad() on all tensors
 
 ```csharp
 NivaraAutoGradExtensions.IsAutoGradSupported<T>();
-NivaraAutoGradExtensions.GetSupportedAutoGradTypes();  // [typeof(float), typeof(double), typeof(Half)]
+NivaraAutoGradExtensions.GetSupportedAutoGradTypes();  // [typeof(float), typeof(double), typeof(Half), typeof(BFloat16)]
 ```
 
 ---

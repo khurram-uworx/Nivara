@@ -927,8 +927,9 @@ sealed class FusedExpressionEvaluator
         }
         catch (InvalidOperationException)
         {
-            // Extended numeric domain: nint/nuint/Int128/UInt128/Half/decimal have no built-in CLR
-            // conversion to the promoted compute type (e.g. nint -> double, UInt128 -> double). Fall
+            // Extended numeric domain: nint/nuint/Int128/UInt128/Half/BFloat16/decimal have no
+            // built-in CLR conversion to the promoted compute type (e.g. nint -> double,
+            // UInt128 -> double). Fall
             // back to a typed INumber<T>.CreateChecked dispatch matching C# promotion (issue #250).
             var source = expression.Type;
             var convert = numericConvertKernelCache.GetOrAdd((source, target), static pair =>

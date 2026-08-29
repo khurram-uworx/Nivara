@@ -308,6 +308,7 @@ internal static class FusedKernel
             Int128 v => T.CreateChecked(v),
             UInt128 v => T.CreateChecked(v),
             Half v => T.CreateChecked(v),
+            BFloat16 v => T.CreateChecked(v),
             float v => T.CreateChecked(v),
             double v => T.CreateChecked(v),
             decimal v => T.CreateChecked(v),

@@ -1051,7 +1051,7 @@ Nivara provides automatic differentiation (AutoDiff) on DataFrames, enabling gra
 
 Inference is the default. A normal `model.Forward(input)` or tensor operation computes values without building a training graph. When you are writing a manual training step, wrap the forward/loss/backward/update code in `using (GradientUtils.Grad())`. Built-in training loops enter that scope for you.
 
-Supported numeric types are constrained to `IFloatingPointIeee754<T>` — `float`, `double`, and `Half`. AutoDiff is a non-nullable domain per [ADR-001](docs/adr/001-autodiff-nonnullable-domain.md): convert nullable columns with `FillNull`/`DropNulls` before crossing the AutoDiff boundary.
+Supported numeric types are constrained to `IFloatingPointIeee754<T>` — `float`, `double`, `Half`, and `BFloat16`. AutoDiff is a non-nullable domain per [ADR-001](docs/adr/001-autodiff-nonnullable-domain.md): convert nullable columns with `FillNull`/`DropNulls` before crossing the AutoDiff boundary. For a full BFloat16 capability matrix (AutoDiff domain **and** the column/query layer), see [BFLOAT16.md](docs/BFLOAT16.md).
 
 ### Converting to Gradient Tensors
 
@@ -1439,3 +1439,12 @@ var result = query.Collect();
 ---
 
 This guide covers the essential patterns for working with Nivara. For more advanced scenarios and architectural details, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+## Related documentation
+
+- [BFLOAT16.md](docs/BFLOAT16.md) — full BFloat16 capability matrix: AutoDiff domain (issue #137) and the column/query layer (typed columns, vectorized arithmetic, window functions, sorting, aggregation, fused expressions)
+- [AUTODIFF.md](docs/AUTODIFF.md) — automatic differentiation subsystem reference
+- [TENSORS.md](docs/TENSORS.md) — tensor interop and AutoDiff type-support notes
+- [INTEGERS.md](docs/INTEGERS.md) — extended numeric domain (incl. `Half`/`BFloat16`/`Int128`/etc.)

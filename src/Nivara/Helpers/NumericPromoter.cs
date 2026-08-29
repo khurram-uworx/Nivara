@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara.Helpers;
 
 /// <summary>
@@ -35,6 +37,16 @@ internal static class NumericPromoter
         {
             var other = left == typeof(Half) ? right : left;
             return other == typeof(float) || other == typeof(double) ? other : typeof(double);
+        }
+
+        // BFloat16 mirrors Half: implicitly converts to float/double only, with no implicit
+        // conversion to/from integrals, decimal, or Half, so promote non-float pairs to double.
+        if (left == typeof(BFloat16) || right == typeof(BFloat16))
+        {
+            var other = left == typeof(BFloat16) ? right : left;
+            return other == typeof(float) ? typeof(float)
+                : other == typeof(double) ? typeof(double)
+                : typeof(double);
         }
 
         // C# rule 1: decimal wins over integrals. float/double has no implicit

@@ -157,6 +157,7 @@ Nivara currently supports:
 - **ML.NET Integration**: ML.NET conversion helpers for machine learning workflows (via `Nivara.Extensions`)
 - **Performance Optimization**: Buffer pooling, memory management, query optimization engine, async I/O operations, and integrated execution diagnostics (plan inspection via `ExplainPlan()`, per-operation timings)
 - **Automatic Differentiation**: Reverse-mode autodiff with inference by default, explicit manual training via `GradientUtils.Grad()`. Type constraint broadened to `IFloatingPointIeee754<T>` — `Half`/F16 and BFloat16 supported alongside `float`/`double`. Full training stack: module system (`Linear`, `Sequential`, `Embedding`, `SparseEmbedding`, `Conv1d` (im2col + Dot, PyTorch-compatible layout), `Conv2d` (grouped conv, 1×1 fast path, PatchLocation, InputGrad specializations), `ConvTranspose2d`, `BatchNorm1d`/`2d` (fused span-kernel, 3D input support), `LayerNorm` (SIMD `TensorPrimitives.Dot`), `DepthwiseSeparableConv2d`, `TransformerBlock` (RMSNorm/LayerNorm + GELU), `MultiheadAttention`, `ConvVAE`, `VAE` (optional conditioning), `MaxPool2d`, `AdaptiveAvgPool2d`), NLP utilities (`TextTokenizer`, `Sampler`), activations (`GELU`), operations (`MeanPool`, `TransposeAxes`, `SparseEmbeddingBag`, `Gather` with zero-copy forward, `Softmax`, `LogSoftmax`, `Dropout`), optimizers (`SGD`, `Adam`, `AdamW`) with SIMD-accelerated kernels, training loops, data-parallel training, model serialization, and 55 PyTorch-validated functional tests
+- **BFloat16 columns**: `BFloat16` is a first-class numeric column type (mirroring `Half`) — vectorized arithmetic with null-mask preservation, window functions, sorting, aggregation (`Sum`/`Mean`/`Quantile` → `double`), and fused query expressions (`BFloat16 + int` promotes to `double`). It is also a first-class AutoDiff type; see [BFLOAT16.md](docs/BFLOAT16.md)
 
 ---
 
@@ -165,6 +166,7 @@ Nivara currently supports:
 - [**GETTING-STARTED**](https://github.com/khurram-uworx/nivara/blob/main/GETTING-STARTED.md) — tutorials, examples, and step-by-step guides
 - [**ARCHITECTURE**](https://github.com/khurram-uworx/nivara/blob/main/ARCHITECTURE.md) — design and internal architecture
 - [**AUTODIFF**](https://github.com/khurram-uworx/nivara/blob/main/docs/AUTODIFF.md) — automatic differentiation subsystem (operations, modules, optimizers, forward-mode AD, training)
+- [**BFLOAT16**](https://github.com/khurram-uworx/nivara/blob/main/docs/BFLOAT16.md) — BFloat16 support across the AutoDiff and column/query layers
 - [**CONTRIBUTING**](https://github.com/khurram-uworx/nivara/blob/main/CONTRIBUTING.md) — how to contribute to the project
 - [**GUIDELINES**](https://github.com/khurram-uworx/nivara/blob/main/GUIDELINES.md) — architectural rationale, lessons learned, and known gotchas
 - [**CHANGELOG**](https://github.com/khurram-uworx/nivara/blob/main/CHANGELOG.md) — Notable changes and release history

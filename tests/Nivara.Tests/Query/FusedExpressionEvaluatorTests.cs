@@ -1,5 +1,6 @@
 using Nivara.Expressions;
 using NUnit.Framework;
+using System.Numerics;
 using System.Reflection;
 using System.Runtime.ExceptionServices;
 
@@ -169,6 +170,21 @@ public class FusedExpressionEvaluatorTests
         Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
         Assert.That(result.ElementType, Is.EqualTo(typeof(Half)));
         Assert.That((float)(Half)result.GetValue(0)!, Is.EqualTo(3.0f));
+    }
+
+    [Test]
+    public void Evaluate_BFloat16SameType_RunsThroughFusedPath()
+    {
+        var column = NivaraColumn<BFloat16>.Create(new[] { (BFloat16)1.5f, (BFloat16)2.5f, (BFloat16)3.5f });
+        var input = new Dictionary<string, IColumn> { ["A"] = column };
+        var expression = ColumnExpressions.Col("A") + ColumnExpressions.Col("A");
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(result.ElementType, Is.EqualTo(typeof(BFloat16)));
+        Assert.That((float)(BFloat16)result.GetValue(0)!, Is.EqualTo(3.0f));
     }
 
     [Test]
@@ -715,6 +731,21 @@ public class FusedExpressionEvaluatorTests
         var result = fused.Evaluate(ColumnExpressions.Col("A") + 1, input);
 
         Assert.That(result, Is.InstanceOf<NivaraColumn<double>>(), "Half + int is a C# error pair -> safe superset double");
+        AssertColumn(result, new double?[] { 2, 3, 4 });
+    }
+
+    [Test]
+    public void Evaluate_BFloat16ColumnPlusIntScalar_PromotesToDouble()
+    {
+        var input = new Dictionary<string, IColumn>
+        {
+            ["A"] = NivaraColumn<BFloat16>.Create(new BFloat16[] { (BFloat16)1, (BFloat16)2, (BFloat16)3 })
+        };
+        var fused = new FusedExpressionEvaluator();
+
+        var result = fused.Evaluate(ColumnExpressions.Col("A") + 1, input);
+
+        Assert.That(result, Is.InstanceOf<NivaraColumn<double>>(), "BFloat16 + int is a C# error pair -> safe superset double");
         AssertColumn(result, new double?[] { 2, 3, 4 });
     }
 

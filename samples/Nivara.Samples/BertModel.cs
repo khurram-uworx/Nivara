@@ -310,6 +310,87 @@ public sealed class BertEncoder<T> : Module<T> where T : struct, IFloatingPointI
 
         return hidden;
     }
+
+    /// <summary>
+    /// Exact-integer-index variant of <see cref="Forward(ReverseGradTensor{T})"/>. Token IDs
+    /// are supplied as <see cref="int"/> and never round-tripped through the compute dtype
+    /// <typeparamref name="T"/>, so this is the correct overload for narrow-precision dtypes
+    /// (BFloat16 / Half) whose integer range cannot represent typical vocabularies.
+    /// </summary>
+    public ReverseGradTensor<T> Forward(int[] inputIds)
+    {
+        int seqLen = inputIds.Length;
+
+        var posIds = new T[seqLen];
+        for (int i = 0; i < seqLen; i++) posIds[i] = T.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        posEmbInput.Reshape(seqLen);
+
+        var wordEmb = wordEmbed.Forward(inputIds);
+        var posEmb = posEmbed.Forward(posEmbInput);
+        var hidden = _includeTokenTypeEmbedding
+            ? ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, TokenTypeEmb(seqLen)))
+            : ReverseGradOperations.Add(wordEmb, posEmb);
+        hidden = embedLn.Forward(hidden);
+
+        for (int i = 0; i < layers.Length; i++)
+            hidden = layers[i].Forward(hidden);
+
+        return hidden;
+    }
+
+    /// <summary>
+    /// Exact-integer-index variant of <see cref="ForwardWithMask(ReverseGradTensor{T}, ReverseGradTensor{T}?)"/>.
+    /// See <see cref="Forward(int[])"/> for why token IDs are passed as <see cref="int"/>.
+    /// </summary>
+    public ReverseGradTensor<T> ForwardWithMask(int[] inputIds, ReverseGradTensor<T>? paddingMask)
+    {
+        int seqLen = inputIds.Length;
+
+        var posIds = new T[seqLen];
+        for (int i = 0; i < seqLen; i++) posIds[i] = T.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        posEmbInput.Reshape(seqLen);
+
+        var wordEmb = wordEmbed.Forward(inputIds);
+        var posEmb = posEmbed.Forward(posEmbInput);
+        var hidden = _includeTokenTypeEmbedding
+            ? ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, TokenTypeEmb(seqLen)))
+            : ReverseGradOperations.Add(wordEmb, posEmb);
+        hidden = embedLn.Forward(hidden);
+
+        foreach (var layer in layers)
+            hidden = layer.ForwardWithMask(hidden, paddingMask);
+
+        return hidden;
+    }
+
+    /// <summary>
+    /// Exact-integer-index variant of
+    /// <see cref="ForwardBatched(ReverseGradTensor{T}, ReverseGradTensor{T}, int, int)"/>.
+    /// See <see cref="Forward(int[])"/> for why token IDs are passed as <see cref="int"/>.
+    /// </summary>
+    public ReverseGradTensor<T> ForwardBatched(int[] inputIds, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        var posIds = new T[batchSize * seqLen];
+        for (int b = 0; b < batchSize; b++)
+            for (int i = 0; i < seqLen; i++)
+                posIds[b * seqLen + i] = T.CreateChecked(i);
+        var posEmbInput = ReverseGradTensor<T>.FromArray(posIds, requiresGrad: false);
+        posEmbInput.Reshape(batchSize * seqLen);
+
+        var wordEmb = wordEmbed.Forward(inputIds);
+        var posEmb = posEmbed.Forward(posEmbInput);
+        var hidden = _includeTokenTypeEmbedding
+            ? ReverseGradOperations.Add(wordEmb, ReverseGradOperations.Add(posEmb, TokenTypeEmb(batchSize * seqLen)))
+            : ReverseGradOperations.Add(wordEmb, posEmb);
+        hidden = embedLn.Forward(hidden);
+
+        foreach (var layer in layers)
+            hidden = layer.ForwardBatched(hidden, attentionMask, batchSize, seqLen);
+
+        return hidden;
+    }
 }
 
 public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
@@ -342,6 +423,36 @@ public sealed class MiniLMDistilled<T> : Module<T> where T : struct, IFloatingPo
         ReverseGradTensor<T> input, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
     {
         return encoder.ForwardBatched(input, attentionMask, batchSize, seqLen);
+    }
+
+    /// <summary>
+    /// Exact-integer-index variant of <see cref="Forward(ReverseGradTensor{T})"/>. Token IDs
+    /// are passed as <see cref="int"/> (see <see cref="BertEncoder{T}.Forward(int[])"/>).
+    /// </summary>
+    public ReverseGradTensor<T> Forward(int[] inputIds)
+    {
+        var hidden = encoder.Forward(inputIds);
+        var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
+        return L2Normalize(clsToken, config.HiddenSize);
+    }
+
+    /// <summary>
+    /// Exact-integer-index variant of <see cref="ForwardWithMask(ReverseGradTensor{T}, ReverseGradTensor{T}?)"/>.
+    /// </summary>
+    public ReverseGradTensor<T> ForwardWithMask(int[] inputIds, ReverseGradTensor<T>? paddingMask)
+    {
+        var hidden = encoder.ForwardWithMask(inputIds, paddingMask);
+        var clsToken = ExtractRow(hidden, 0, config.HiddenSize);
+        return L2Normalize(clsToken, config.HiddenSize);
+    }
+
+    /// <summary>
+    /// Exact-integer-index variant of
+    /// <see cref="ForwardBatched(ReverseGradTensor{T}, ReverseGradTensor{T}, int, int)"/>.
+    /// </summary>
+    public ReverseGradTensor<T> ForwardBatched(int[] inputIds, ReverseGradTensor<T> attentionMask, int batchSize, int seqLen)
+    {
+        return encoder.ForwardBatched(inputIds, attentionMask, batchSize, seqLen);
     }
 
     static ReverseGradTensor<T> ExtractRow(ReverseGradTensor<T> matrix, int row, int cols)
