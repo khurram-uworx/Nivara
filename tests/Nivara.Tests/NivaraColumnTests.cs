@@ -742,6 +742,43 @@ public class NivaraColumnTests
     }
 
     /// <summary>
+    /// Scalar and column arithmetic on BFloat16 columns (generic TensorPrimitives path,
+    /// mirroring the Half coverage for the Phase 2 BFloat16 work).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnBFloat16Column_ShouldExecuteScalarAndColumnOps()
+    {
+        var column = NivaraColumn<BFloat16>.Create(new[] { (BFloat16)1.5f, (BFloat16)2.5f, (BFloat16)3.5f });
+
+        Assert.That(column.Multiply((BFloat16)2.0f)[0], Is.EqualTo((BFloat16)3.0f));
+        Assert.That(column.Multiply((BFloat16)2.0f)[2], Is.EqualTo((BFloat16)7.0f));
+        Assert.That(column.Divide((BFloat16)2.0f)[0], Is.EqualTo((BFloat16)0.75f));
+        Assert.That(column.Divide((BFloat16)2.0f)[2], Is.EqualTo((BFloat16)1.75f));
+
+        var other = NivaraColumn<BFloat16>.Create(new[] { (BFloat16)0.5f, (BFloat16)1.0f, (BFloat16)2.0f });
+        Assert.That(column.Add(other)[0], Is.EqualTo((BFloat16)2.0f));
+        Assert.That(column.Subtract(other)[0], Is.EqualTo((BFloat16)1.0f));
+        Assert.That(column.Multiply(other)[2], Is.EqualTo((BFloat16)7.0f));
+        Assert.That(column.Divide(other)[0], Is.EqualTo((BFloat16)3.0f));
+    }
+
+    /// <summary>
+    /// Null masks must survive BFloat16 arithmetic (ADR-001 boundary, no NaN semantics).
+    /// </summary>
+    [Test]
+    public void ArithmeticOperations_OnBFloat16Column_PreservesNullMask()
+    {
+        var values = new BFloat16?[] { (BFloat16)1.5f, null, (BFloat16)3.5f };
+        var column = NivaraColumn.CreateFromNullable(values);
+
+        var result = column.Multiply((BFloat16)2.0f);
+        for (int i = 0; i < values.Length; i++)
+            Assert.That(result.IsNull(i), Is.EqualTo(values[i] == null));
+        Assert.That(result[0], Is.EqualTo((BFloat16)3.0f));
+        Assert.That(result[2], Is.EqualTo((BFloat16)7.0f));
+    }
+
+    /// <summary>
     /// Scalar and column arithmetic on nint columns (SIMD-capable via generic TensorPrimitives).
     /// </summary>
     [Test]

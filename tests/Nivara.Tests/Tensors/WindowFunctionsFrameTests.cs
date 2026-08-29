@@ -1,6 +1,7 @@
 using Nivara.Exceptions;
 using Nivara.Operations;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.Tensors;
 
@@ -172,6 +173,17 @@ public class WindowFunctionsFrameTests
 
         var sum = result.GetColumn<Half>("sum");
         Assert.That(sum[2], Is.EqualTo((Half)6));
+    }
+
+    [Test]
+    public void RollingSum_BFloat16Column_ProducesTypedColumn()
+    {
+        var frame = FrameWith(("v", NivaraColumn<BFloat16>.Create(new BFloat16[] { (BFloat16)1, (BFloat16)2, (BFloat16)3 })));
+
+        var result = frame.RollingSum("v", "sum", 3);
+
+        var sum = result.GetColumn<BFloat16>("sum");
+        Assert.That(sum[2], Is.EqualTo((BFloat16)6));
     }
 
     [Test]
