@@ -1,5 +1,6 @@
 using Nivara.Helpers;
 using System.Collections;
+using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.CompilerServices;
 
@@ -922,6 +923,7 @@ public sealed class NivaraSeries<T> : IEnumerable<T>, IDisposable
             Type t when t == typeof(UInt128) => (double)(UInt128)(object)value!,
             Type t when t == typeof(float) => (float)(object)value!,
             Type t when t == typeof(Half) => (double)(Half)(object)value!,
+            Type t when t == typeof(BFloat16) => (double)(BFloat16)(object)value!,
             Type t when t == typeof(double) => (double)(object)value!,
             Type t when t == typeof(decimal) => (double)(decimal)(object)value!,
             _ => throw new InvalidOperationException($"Cannot convert value of type {typeof(T).Name} to double for quantile computation")
