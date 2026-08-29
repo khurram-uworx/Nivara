@@ -88,4 +88,5 @@ static T[] ExtractValidTyped<T>(IColumn column, IReadOnlyList<int> groupIndices)
 
 ## GitHub issues log
 
-- [ ] #___ — Min/Max still use a per-element boxed fallback for non-numeric element types (string/DateTime/custom structs) by design; numeric/char/bool are box-free.
+- [x] #343 — StreamingWindowProcessor.AddConstant boxes every element on the streaming lookahead-window (Lead / negative Shift) correction branch. Genuine stray per-element boxing on a window path, outside the aggregation-family scope; tracked for a follow-up typed dispatch.
+- Min/Max keep a per-element boxed fallback **by design** for genuinely non-numeric element types (string/DateTime/custom structs); numeric/char/bool are box-free. Not filed as an issue — intentional.
