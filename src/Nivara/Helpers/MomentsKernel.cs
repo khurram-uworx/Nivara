@@ -78,20 +78,16 @@ internal static class MomentsKernel
     static double? Compute<T>(IColumn column, IReadOnlyList<int> groupIndices, int ddof, bool variance, Func<T, double> toDouble)
         where T : struct, INumberBase<T>
     {
-        var typed = (IColumn<T>)column;
-        int count = 0;
-        foreach (var idx in groupIndices)
-            if (!column.IsNull(idx))
-                count++;
-        if (count == 0)
+        // Reuse the nullable-aware typed extraction so NivaraColumn<T?> (which implements
+        // IColumn<T?>, not IColumn<T>) is handled without a per-element boxing cast.
+        var values = AggregationFunction.ExtractValidTyped<T>(column, groupIndices);
+        if (values.Length == 0)
             return null;
 
-        var values = new double[count];
-        int pos = 0;
-        foreach (var idx in groupIndices)
-            if (!column.IsNull(idx))
-                values[pos++] = toDouble(typed[idx]);
+        var doubles = new double[values.Length];
+        for (int i = 0; i < values.Length; i++)
+            doubles[i] = toDouble(values[i]);
 
-        return variance ? Variance(values, ddof) : StdDev(values, ddof);
+        return variance ? Variance(doubles, ddof) : StdDev(doubles, ddof);
     }
 }

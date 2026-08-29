@@ -66,6 +66,30 @@ internal static class QuantileKernel
     static double? TypedQuantile<T>(IColumn column, IReadOnlyList<int> groupIndices, double q, Func<T, double> toDouble)
         where T : struct
     {
+        // Nullable-element columns (NivaraColumn<T?>) implement IColumn<T?>, not IColumn<T>, so
+        // read through that view and rely on the nullable indexer's HasValue.
+        if (column.ElementType == typeof(T?) && column is IColumn<T?> nullableTyped)
+        {
+            int nullableCount = 0;
+            foreach (var idx in groupIndices)
+                if (nullableTyped[idx].HasValue)
+                    nullableCount++;
+            if (nullableCount == 0)
+                return null;
+
+            var nullableValues = new double[nullableCount];
+            int nullablePos = 0;
+            foreach (var idx in groupIndices)
+            {
+                var v = nullableTyped[idx];
+                if (v.HasValue)
+                    nullableValues[nullablePos++] = toDouble(v.GetValueOrDefault());
+            }
+
+            nullableValues.AsSpan().Sort();
+            return Compute(nullableValues, q);
+        }
+
         var typed = (IColumn<T>)column;
 
         int count = 0;

@@ -108,11 +108,32 @@ public abstract class AggregationFunction
 
     /// <summary>
     /// Reads the non-null values of a typed column via the generic <see cref="IColumn{T}"/> indexer
-    /// (no per-element boxing) into a compact array, skipping null positions.
+    /// (no per-element boxing) into a compact array, skipping null positions. Nullable-element columns
+    /// (e.g. <c>NivaraColumn&lt;int?&gt;</c>, which implement <see cref="IColumn{T?}"/> rather than
+    /// <see cref="IColumn{T}"/>) are read through <see cref="IColumn{T?}"/> so the cast never fails.
     /// </summary>
-    protected static T[] ExtractValidTyped<T>(IColumn column, IReadOnlyList<int> groupIndices)
+    protected internal static T[] ExtractValidTyped<T>(IColumn column, IReadOnlyList<int> groupIndices)
         where T : struct
     {
+        // Nullable-element columns expose IColumn<T?> (not IColumn<T>), so read through that view
+        // and rely on the nullable indexer's HasValue rather than the null mask.
+        if (column.ElementType == typeof(T?) && column is IColumn<T?> nullableTyped)
+        {
+            int nullableCount = 0;
+            foreach (var idx in groupIndices)
+                if (nullableTyped[idx].HasValue)
+                    nullableCount++;
+            var nullableValues = new T[nullableCount];
+            int nullablePos = 0;
+            foreach (var idx in groupIndices)
+            {
+                var value = nullableTyped[idx];
+                if (value.HasValue)
+                    nullableValues[nullablePos++] = value.GetValueOrDefault();
+            }
+            return nullableValues;
+        }
+
         var typed = (IColumn<T>)column;
         int count = 0;
         foreach (var idx in groupIndices)
