@@ -1,3 +1,5 @@
+using System.Numerics;
+
 namespace Nivara.Extensions;
 
 static class TypeExtensions
@@ -22,6 +24,7 @@ static class TypeExtensions
             underlying == typeof(decimal) ||
             underlying == typeof(bool) ||
             underlying == typeof(Half) ||
+            underlying == typeof(BFloat16) ||
             underlying == typeof(nint) ||
             underlying == typeof(nuint) ||
             underlying == typeof(Int128) ||

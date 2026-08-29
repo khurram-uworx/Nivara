@@ -43,7 +43,7 @@ static class NumericKernelDispatcher
     [
         typeof(float), typeof(double), typeof(int), typeof(long), typeof(short),
         typeof(ushort), typeof(uint), typeof(ulong), typeof(byte), typeof(sbyte),
-        typeof(char), typeof(decimal), typeof(Half), typeof(nint), typeof(nuint),
+        typeof(char), typeof(decimal), typeof(Half), typeof(BFloat16), typeof(nint), typeof(nuint),
         typeof(Int128), typeof(UInt128)
     ];
 

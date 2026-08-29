@@ -1,4 +1,5 @@
 using Nivara.Exceptions;
+using System.Numerics;
 
 namespace Nivara.Helpers;
 
@@ -233,7 +234,7 @@ public static class TypeCompatibilityValidator
             typeof(byte), typeof(sbyte), typeof(short), typeof(ushort), typeof(char),
             typeof(int), typeof(uint), typeof(long), typeof(ulong),
             typeof(nint), typeof(nuint), typeof(Int128), typeof(UInt128),
-            typeof(float), typeof(double), typeof(Half), typeof(decimal)
+            typeof(float), typeof(double), typeof(Half), typeof(BFloat16), typeof(decimal)
         };
     }
 
