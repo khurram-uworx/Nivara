@@ -65,9 +65,9 @@ internal static class ExpressionTypeInferer
     /// <summary>
     /// Gets whether the type participates in generic math (<see cref="INumber{T}"/>), which is what the
     /// generic node-tree kernel requires. Mirrors the AutoDiff <c>IFloatingPointIeee754&lt;T&gt;</c> domain
-    /// validation: float, double, and Half pass. BFloat16 is intentionally excluded from the fused
-    /// expression engine (it is admitted in the AutoDiff domain per issue #137, but the expression tree
-    /// does not yet exercise it).
+    /// validation: float, double, Half, and BFloat16 pass. BFloat16 was admitted to the
+    /// AutoDiff domain per issue #137 and is now exercised by the fused expression engine
+    /// (the column/query layer gained BFloat16 support in the Phase 2 BFloat16 work).
     /// </summary>
     /// <param name="type">The element type to check</param>
     /// <returns>True when the type implements <see cref="INumber{T}"/></returns>
