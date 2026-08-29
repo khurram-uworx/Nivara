@@ -561,28 +561,20 @@ public sealed class MeanAggregation : AggregationFunction
 
         ValidateInputType(column.ElementType);
 
-        // Extract valid values for this group
-        var validValues = new List<object>();
-        foreach (var index in groupIndices)
-        {
-            var value = column.GetValue(index);
-            if (value != null)
-                validValues.Add(value);
-        }
+        int validCount = 0;
+        foreach (var idx in groupIndices)
+            if (!column.IsNull(idx))
+                validCount++;
 
-        if (validValues.Count == 0)
+        if (validCount == 0)
             return null;
 
-        // Calculate sum and divide by count
-        var sumAggregation = new SumAggregation();
-        var sum = sumAggregation.Apply(column, groupIndices);
-
+        // Reuse the box-free Sum aggregation for the widened sum, then divide by the count.
+        var sum = new SumAggregation().Apply(column, groupIndices);
         if (sum == null)
             return null;
 
-        // Convert sum to double and divide by count
-        var doubleSum = ToDouble(sum);
-        return doubleSum / validValues.Count;
+        return ToDouble(sum) / validCount;
     }
 
     /// <summary>
