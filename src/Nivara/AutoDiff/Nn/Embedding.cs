@@ -94,7 +94,8 @@ public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIee
     /// <returns>The embedded tensor of shape <c>[tokenIds.Length, embeddingDim]</c></returns>
     public ReverseGradTensor<T> Forward(int[] tokenIds)
     {
-        if (tokenIds == null || tokenIds.Length == 0)
+        if (tokenIds == null) throw new ArgumentNullException(nameof(tokenIds));
+        if (tokenIds.Length == 0)
             throw new ArgumentException("Embedding.Forward input is empty.", nameof(tokenIds));
 
         for (int i = 0; i < tokenIds.Length; i++)
