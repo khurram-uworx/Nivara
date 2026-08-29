@@ -82,6 +82,36 @@ public sealed class Embedding<T> : Module<T> where T : struct, IFloatingPointIee
     }
 
     /// <summary>
+    /// Looks up embedding vectors for a batch of exact token IDs. Unlike
+    /// <see cref="Forward(ReverseGradTensor{T})"/>, this path preserves token IDs
+    /// exactly regardless of the compute dtype <typeparamref name="T"/>, so it is the
+    /// correct overload for narrow-precision dtypes (e.g. <see cref="BFloat16"/>,
+    /// <see cref="Half"/>) whose representable integer range (&le; 256) is far smaller
+    /// than typical vocabularies (30k+). Token IDs are stored as <see cref="int"/> and
+    /// never round-tripped through <typeparamref name="T"/>.
+    /// </summary>
+    /// <param name="tokenIds">Exact token IDs, each in <c>[0, numEmbeddings)</c></param>
+    /// <returns>The embedded tensor of shape <c>[tokenIds.Length, embeddingDim]</c></returns>
+    public ReverseGradTensor<T> Forward(int[] tokenIds)
+    {
+        if (tokenIds == null || tokenIds.Length == 0)
+            throw new ArgumentException("Embedding.Forward input is empty.", nameof(tokenIds));
+
+        for (int i = 0; i < tokenIds.Length; i++)
+        {
+            if (tokenIds[i] < 0 || tokenIds[i] >= numEmbeddings)
+                throw new ArgumentOutOfRangeException(
+                    nameof(tokenIds),
+                    $"Token ID at position {i} is {tokenIds[i]}, " +
+                    $"must be in range [0, {numEmbeddings}).");
+        }
+
+        var result = ReverseGradOperations.Gather(weight.Tensor, tokenIds);
+        result.Reshape(tokenIds.Length, embeddingDim);
+        return result;
+    }
+
+    /// <summary>
     /// Looks up the embedding vector for a single token ID.
     /// </summary>
     /// <param name="tokenId">The token ID in <c>[0, numEmbeddings)</c></param>
