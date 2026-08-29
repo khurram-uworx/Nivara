@@ -2,6 +2,7 @@ using Microsoft.ML.Tokenizers;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
+using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
 
@@ -48,6 +49,28 @@ static class DistilBertSst
         return model.Forward(inputIds, mask, 1, tokenIds.Length);
     }
 
+    public static DistilBertForSequenceClassification<BFloat16> LoadBFloat16(
+        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
+        string modelDir)
+    {
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var model = new DistilBertForSequenceClassification<BFloat16>(config.ToBertConfig(), numClasses: 2);
+        model.LoadWeights<BFloat16>(tensors);
+        return model;
+    }
+
+    public static ReverseGradTensor<BFloat16> PredictLogitsBFloat16(
+        DistilBertForSequenceClassification<BFloat16> model,
+        BertTokenizer tokenizer,
+        string text,
+        int maxLen)
+    {
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => (BFloat16)x));
+        return model.Forward(intIds, mask, 1, intIds.Length);
+    }
+
     public static (int ArgMax, float[] Probs) Softmax(ReverseGradTensor<float> logits)
     {
         int n = logits.Shape[^1];
@@ -55,19 +78,22 @@ static class DistilBertSst
         logits.Data.TryGetSpan(out var span);
         if (!span.IsEmpty)
             span.Slice(0, n).CopyTo(logitData);
+        return Softmax(logitData.AsSpan());
+    }
 
-        var logitSpan = logitData.AsSpan();
-        float max = TensorPrimitives.Max(logitSpan);
+    public static (int ArgMax, float[] Probs) Softmax(ReadOnlySpan<float> logits)
+    {
+        float max = TensorPrimitives.Max(logits);
 
-        var shifted = new float[n];
-        TensorPrimitives.Add(logitSpan, -max, shifted);
-        var exps = new float[n];
+        var shifted = new float[logits.Length];
+        TensorPrimitives.Add(logits, -max, shifted);
+        var exps = new float[logits.Length];
         TensorPrimitives.Exp(shifted, exps);
         float sum = TensorPrimitives.Sum(exps);
         TensorPrimitives.Divide(exps, sum, exps);
 
         int argMax = 0;
-        for (int i = 1; i < n; i++)
+        for (int i = 1; i < logits.Length; i++)
             if (exps[i] > exps[argMax]) argMax = i;
 
         return (argMax, exps);
@@ -113,6 +139,50 @@ static class DistilBertSst
             fs.Write(MemoryMarshal.AsBytes(probs.AsSpan()));
         }
         Console.WriteLine($"Saved logits + softmax probs to {path}");
+    }
+
+    public static void SaveBFloat16CompareOutput(
+        Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
+        string modelDir,
+        string path)
+    {
+        var model = LoadBFloat16(tensors, modelDir);
+        var tokenizer = LoadTokenizer(modelDir);
+        model.Eval();
+
+        int n = CompareSentences.Length;
+        var logits = new float[n * 2];
+        var probs = new float[n * 2];
+
+        for (int s = 0; s < n; s++)
+        {
+            var output = PredictLogitsBFloat16(model, tokenizer, CompareSentences[s], maxLen: 128);
+            int len = output.Shape[^1];
+            var bf16Logits = new float[len];
+            output.Data.TryGetSpan(out var span);
+            if (!span.IsEmpty)
+            {
+                int take = Math.Min(len, span.Length);
+                for (int i = 0; i < take; i++)
+                    bf16Logits[i] = (float)span[i];
+            }
+
+            var (argMax, p) = Softmax(bf16Logits.AsSpan());
+            logits[s * 2] = bf16Logits[0];
+            logits[s * 2 + 1] = bf16Logits[1];
+            probs[s * 2] = p[0];
+            probs[s * 2 + 1] = p[1];
+            Console.WriteLine($"  [{s}] {Label(argMax),8} ({p[argMax] * 100:F1}%)  \"{CompareSentences[s]}\"");
+        }
+
+        using (var fs = File.Create(path))
+        {
+            var header = BitConverter.GetBytes(n);
+            fs.Write(header, 0, 4);
+            fs.Write(MemoryMarshal.AsBytes(logits.AsSpan()));
+            fs.Write(MemoryMarshal.AsBytes(probs.AsSpan()));
+        }
+        Console.WriteLine($"Saved BFloat16 logits + softmax probs to {path}");
     }
 
     public static void PrintCompareDiff(
