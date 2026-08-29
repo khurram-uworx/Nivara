@@ -148,7 +148,7 @@ public sealed class CountAggregation : AggregationFunction
 
         long count = 0;
         foreach (var index in groupIndices)
-            if (column.GetValue(index) != null)
+            if (!column.IsNull(index))
                 count++;
 
         return count;
