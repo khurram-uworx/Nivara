@@ -47,7 +47,7 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 - Keep the public front ends unchanged (`Where`, `Select`, `.AsQueryFrame()`), so this is an internal rewrite with a compatibility contract.
 - Make expressions first-class typed values so computed results can feed downstream operators (feeds Phase 2 `OrderBy` work).
 
-**Key files:** `src/Nivara/Helpers/ExpressionEvaluator.cs`, `src/Nivara/Expressions/ColumnExpression.cs`, `src/Nivara/Query/QueryFrame.cs`, `src/Nivara/Query/QueryExecutor.cs`.
+**Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/Expressions/ColumnExpression.cs`, `src/Nivara/Query/QueryFrame.cs`, `src/Nivara/Query/QueryExecutor.cs`.
 
 **Dependencies:** none (foundation).
 
@@ -72,14 +72,14 @@ Row-level filters are typed too: the last public `dynamic` surface in the core (
 - **Kernel fusion:** lower expression trees to fused single-pass kernels over `ReadOnlySpan<T>`, with two compile targets:
   - Generic `INumber<T>` / `IFloatingPointIeee754<T>` static kernels via SAIS (the native monomorphization).
   - `Expression.Compile` to a span-consuming delegate as the fallback for non-generic-math types.
-- **OrderBy computed keys:** teach the sort layer to accept an evaluated key column (remove the `NotSupportedException` in `NivaraLinqExtensions.OrderBy`), routing complex expressions through the fused evaluator.
+- **OrderBy computed keys:** teach the sort layer to accept an evaluated key column (remove the `NotSupportedException` in `NivaraQuery.OrderBy`/`SortByExpressionOperation`), routing complex expressions through the fused evaluator.
 - **Generic-math collapse:** replace the explicit `float`/`double` branches in `NivaraColumn<T>` arithmetic (`src/Nivara/NivaraColumn.cs:57-76`, `:188-208`, and operator overloads) with `INumber<T>` generic paths, keeping `TensorPrimitives` on the vectorizable fast path.
 
 **Scope (remaining):**
 - **BFloat16 in the column/query-expression path — ✅ Delivered (branch `khurram/bfloat16`).** Issue #137 admitted `BFloat16` to the **AutoDiff** domain only; the columnar layer now wires it through (mirroring `Half`): `NumericKernelDispatcher.arithmeticDomain`, `NumericPromoter`, `TypeCompatibilityValidator.GetNumericTypes`, `TypeExtensions.IsNumericType`, window functions, sort/comparers, aggregation (Sum→`double`), quantile, the fused evaluator (`FusedKernel.CoerceLiteral`), and `NivaraSeries`. Step-0 probe confirmed the active net11 BCL `TensorPrimitives` exposes `BFloat16` arithmetic overloads, so the generic SIMD path applies with no scalar fallback.
 - **#155 — span-native compiled target — ✅ Resolved.** A literally `Span<T>`-parameterized compiled delegate is impossible under `System.Linq.Expressions` (ref-struct ban), so the compiled path is now **span-equivalent** instead: leaf arrays are the columns' underlying backing arrays (zero-copy, including sliced columns) read at `baseOffset[col] + start + i`, and the per-call dispatch wrapper is rented from `ArrayPool<object>` (no whole-column snapshot copy, no hot-path allocation). The span-capable, memory-budgeted IR path already ships via `FusedKernel` + `EvaluateChunked` (#167).
 
-**Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/Expressions/KernelIR.cs`, `src/Nivara/Expressions/KernelLowerer.cs`, `src/Nivara/Expressions/FusedKernel.cs`, `src/Nivara/Expressions/TensorPrimitivesKernel.cs`, `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraLinqExtensions.cs`, `src/Nivara/KernelSelector.cs`.
+**Key files:** `src/Nivara/Expressions/FusedExpressionEvaluator.cs` (successor to the removed `src/Nivara/Helpers/ExpressionEvaluator.cs`), `src/Nivara/Expressions/KernelIR.cs`, `src/Nivara/Expressions/KernelLowerer.cs`, `src/Nivara/Expressions/FusedKernel.cs`, `src/Nivara/Expressions/TensorPrimitivesKernel.cs`, `src/Nivara/NivaraColumn.cs`, `src/Nivara/Operations/SortOperation.cs`, `src/Nivara/Linq/NivaraQuery.cs`, `src/Nivara/KernelSelector.cs`.
 
 **Dependencies:** Phase 1.
 
