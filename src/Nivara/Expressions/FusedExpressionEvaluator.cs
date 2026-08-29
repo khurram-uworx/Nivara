@@ -7,6 +7,7 @@ using Nivara.Tensors;
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Numerics;
+using System.Buffers;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -19,11 +20,16 @@ namespace Nivara.Expressions;
 /// The primary target compiles the tree with <see cref="System.Linq.Expressions"/> into a cached
 /// delegate over typed leaf arrays. Ref structs (<c>Span&lt;T&gt;</c>) are prohibited in expression
 /// trees (confirmed via MS Learn), so the delegate consumes <c>T[]</c> arrays rather than spans; the
-/// straight-line loop body is emitted by the JIT and auto-vectorizes for numeric leaves. A generic
-/// node-tree kernel (<see cref="FusedKernel"/>) is the fallback when the compiled target cannot be
-/// built. Expressions that cannot be fused at all throw (no boxed fallback). Null masks are OR'd from
-/// the leaf masks in a separate pass; comparisons produce masked-false at nulls (SQL-like semantics),
-/// matching the legacy evaluator.
+/// straight-line loop body is emitted by the JIT and auto-vectorizes for numeric leaves. The compiled
+/// path is span-equivalent: leaf arrays are the columns' underlying backing arrays (zero-copy, even for
+/// sliced columns) and each leaf is read at <c>baseOffset[col] + start + i</c>, so no whole-column
+/// snapshot copy is taken and chunked execution addresses the contiguous backing array directly. A
+/// literal <c>Span&lt;T&gt;</c>-parameterized compiled delegate is impossible under
+/// <see cref="System.Linq.Expressions"/> (ref-struct ban) and not worth a <c>Reflection.Emit</c>
+/// rewrite. A generic node-tree kernel (<see cref="FusedKernel"/>) is the fallback when the compiled
+/// target cannot be built. Expressions that cannot be fused at all throw (no boxed fallback). Null
+/// masks are OR'd from the leaf masks in a separate pass; comparisons produce masked-false at nulls
+/// (SQL-like semantics), matching the legacy evaluator.
 /// </summary>
 sealed class FusedExpressionEvaluator
 {
@@ -53,7 +59,7 @@ sealed class FusedExpressionEvaluator
     /// </summary>
     internal int TensorPrimitivesPathEvaluationCount => tensorPrimitivesPathEvaluationCount;
 
-    delegate void CompiledFusedInvoke(object[] leafArrays, Array dest, int start, int count, int destStart, bool[]? mask);
+    delegate void CompiledFusedInvoke(object[] leafArrays, Array dest, int start, int count, int destStart, bool[]? mask, int[] baseOffsets);
 
     static readonly ConcurrentDictionary<string, CompiledFusedInvoke> compiledKernelCache = new();
 
@@ -287,7 +293,7 @@ sealed class FusedExpressionEvaluator
     /// </summary>
     IColumn EvaluateCompiled(ColumnExpression expression, FusedExpressionPlan plan, KernelPlan kernelPlan, int length, int? chunkSize)
     {
-        var leafArrays = SnapshotLeaves(plan);
+        var leafArrays = SnapshotLeaves(plan, out var baseOffsets);
 
         CompiledFusedInvoke invoke;
         try
@@ -309,17 +315,28 @@ sealed class FusedExpressionEvaluator
         // and write real values behind the mask (issue #247).
         var mask = plan.HasNulls ? ComputeMask(plan, length) : null;
 
-        if (chunkSize == null || chunkSize.Value >= length)
+        // Rent the uniform dispatch wrapper so the compiled hot path allocates no per-call object[];
+        // the underlying leaf backing arrays (zero-copy) and baseOffsets are handed to the delegate.
+        var rented = ArrayPool<object>.Shared.Rent(leafArrays.Length);
+        Array.Copy(leafArrays, rented, leafArrays.Length);
+        try
         {
-            invoke(leafArrays, resultArray, 0, length, 0, mask);
-        }
-        else
-        {
-            for (var start = 0; start < length; start += chunkSize.Value)
+            if (chunkSize == null || chunkSize.Value >= length)
             {
-                var count = Math.Min(chunkSize.Value, length - start);
-                invoke(leafArrays, resultArray, start, count, start, mask);
+                invoke(rented, resultArray, 0, length, 0, mask, baseOffsets);
             }
+            else
+            {
+                for (var start = 0; start < length; start += chunkSize.Value)
+                {
+                    var count = Math.Min(chunkSize.Value, length - start);
+                    invoke(rented, resultArray, start, count, start, mask, baseOffsets);
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<object>.Shared.Return(rented);
         }
 
         fusedPathEvaluationCount++;
@@ -641,19 +658,33 @@ sealed class FusedExpressionEvaluator
     }
 
     /// <summary>
-    /// Snaps each leaf column to a typed array the compiled delegate can index, reading zero-copy
-    /// when the leaf's backing array is contiguous at offset 0. Null positions hold <c>default(T)</c>
-    /// in the backing data, so a zero-copy view is always value-correct; the null mask is computed
-    /// separately. Only sliced columns (offset &gt; 0) require a snapshot copy.
+    /// Zero-copy view of a leaf column's backing data: the underlying array (which may begin before the
+    /// logical column start for a sliced column) plus the base offset the compiled loop adds to each
+    /// read index. Returned as a non-generic carrier so <see cref="SnapshotLeaves"/> can read it without
+    /// reflection on the generic element type.
     /// </summary>
-    static object[] SnapshotLeaves(FusedExpressionPlan plan)
+    sealed class LeafView
+    {
+        public Array Array = null!;
+        public int Offset;
+    }
+
+    /// <summary>
+    /// Returns the underlying backing arrays of every leaf (zero-copy, including sliced columns) plus a
+    /// parallel array of base offsets the compiled loop adds to each read index. This lets the compiled
+    /// target address a sliced column's backing array directly without a whole-column snapshot copy
+    /// (issue #155).
+    /// </summary>
+    static object[] SnapshotLeaves(FusedExpressionPlan plan, out int[] baseOffsets)
     {
         var leafArrays = new object[plan.Columns.Count];
+        baseOffsets = new int[plan.Columns.Count];
         for (int i = 0; i < plan.Columns.Count; i++)
         {
             var column = plan.Columns[i].Column;
-            var kernel = GetSnapshotKernel(column.ElementType);
-            leafArrays[i] = kernel.Invoke(null, new object?[] { column })!;
+            var view = (LeafView)GetSnapshotKernel(column.ElementType).Invoke(null, new object?[] { column })!;
+            leafArrays[i] = view.Array;
+            baseOffsets[i] = view.Offset;
         }
 
         return leafArrays;
@@ -666,14 +697,18 @@ sealed class FusedExpressionEvaluator
                 .MakeGenericMethod(t));
     }
 
-    static T[] SnapshotLeaf<T>(NivaraColumn<T> column)
+    static LeafView SnapshotLeaf<T>(NivaraColumn<T> column)
     {
-        if (MemoryMarshal.TryGetArray(column.Storage.Data, out var segment) && segment.Array is not null && segment.Offset == 0)
-            return segment.Array;
+        // Return the underlying backing array (never a copy) for both sliced and non-sliced columns;
+        // the compiled loop reads at baseOffset[col] + i + start, so the slice offset is preserved
+        // without materializing a whole-column snapshot (issue #155). Only non-array-backed memory
+        // (no array segment) takes a fallback copy.
+        if (MemoryMarshal.TryGetArray(column.Storage.Data, out var segment) && segment.Array is not null)
+            return new LeafView { Array = segment.Array, Offset = segment.Offset };
 
         var array = new T[column.Length];
         column.AsSpan().CopyTo(array);
-        return array;
+        return new LeafView { Array = array, Offset = 0 };
     }
 
     /// <summary>
@@ -779,12 +814,13 @@ sealed class FusedExpressionEvaluator
         var countParam = Expression.Parameter(typeof(int), "count");
         var destStartParam = Expression.Parameter(typeof(int), "destStart");
         var maskParam = Expression.Parameter(typeof(bool[]), "mask");
+        var baseOffsetParam = Expression.Parameter(typeof(int[]), "baseOffsets");
         var indexVar = Expression.Parameter(typeof(int), "i");
 
-        var value = BuildCompiledNode(plan, plan.RootNode, leafParams, indexVar, startParam);
+        var value = BuildCompiledNode(plan, plan.RootNode, leafParams, indexVar, startParam, baseOffsetParam);
         var loopBody = BuildOffsetForLoop(indexVar, value, destParam, destStartParam, countParam, maskParam, plan.ResultType);
 
-        var paramTypes = new Type[plan.Columns.Count + 5];
+        var paramTypes = new Type[plan.Columns.Count + 6];
         for (int i = 0; i < plan.Columns.Count; i++)
             paramTypes[i] = leafParams[i].Type;
         paramTypes[plan.Columns.Count] = destParam.Type;
@@ -792,10 +828,11 @@ sealed class FusedExpressionEvaluator
         paramTypes[plan.Columns.Count + 2] = countParam.Type;
         paramTypes[plan.Columns.Count + 3] = destStartParam.Type;
         paramTypes[plan.Columns.Count + 4] = maskParam.Type;
+        paramTypes[plan.Columns.Count + 5] = baseOffsetParam.Type;
 
         var actionType = Expression.GetActionType(paramTypes);
         var body = Expression.Block(new[] { indexVar }, loopBody);
-        var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam).Append(startParam).Append(countParam).Append(destStartParam).Append(maskParam));
+        var lambda = Expression.Lambda(actionType, body, leafParams.Append(destParam).Append(startParam).Append(countParam).Append(destStartParam).Append(maskParam).Append(baseOffsetParam));
         var typedAction = lambda.Compile();
 
         var argsParam = Expression.Parameter(typeof(object[]), "args");
@@ -804,8 +841,9 @@ sealed class FusedExpressionEvaluator
         var countObjectParam = Expression.Parameter(typeof(int), "count");
         var destStartObjectParam = Expression.Parameter(typeof(int), "destStart");
         var maskObjectParam = Expression.Parameter(typeof(bool[]), "mask");
+        var baseOffsetObjectParam = Expression.Parameter(typeof(int[]), "baseOffsets");
 
-        var callArgs = new Expression[leafParams.Length + 5];
+        var callArgs = new Expression[leafParams.Length + 6];
         for (int i = 0; i < leafParams.Length; i++)
             callArgs[i] = Expression.Convert(Expression.ArrayIndex(argsParam, Expression.Constant(i)), leafParams[i].Type);
         callArgs[leafParams.Length] = Expression.Convert(destObjectParam, destParam.Type);
@@ -813,10 +851,11 @@ sealed class FusedExpressionEvaluator
         callArgs[leafParams.Length + 2] = countObjectParam;
         callArgs[leafParams.Length + 3] = destStartObjectParam;
         callArgs[leafParams.Length + 4] = maskObjectParam;
+        callArgs[leafParams.Length + 5] = baseOffsetObjectParam;
 
         var wrapperBody = Expression.Invoke(Expression.Constant(typedAction), callArgs);
 
-        return Expression.Lambda<CompiledFusedInvoke>(wrapperBody, argsParam, destObjectParam, startObjectParam, countObjectParam, destStartObjectParam, maskObjectParam).Compile();
+        return Expression.Lambda<CompiledFusedInvoke>(wrapperBody, argsParam, destObjectParam, startObjectParam, countObjectParam, destStartObjectParam, maskObjectParam, baseOffsetObjectParam).Compile();
     }
 
     /// <summary>
@@ -826,13 +865,19 @@ sealed class FusedExpressionEvaluator
     /// Leaf reads use <c>leaf[i + start]</c> so one cached delegate serves whole-column and chunked
     /// execution alike (issue #167).
     /// </summary>
-    static Expression BuildCompiledNode(KernelPlan plan, int nodeIndex, ParameterExpression[] leafParams, ParameterExpression indexVar, ParameterExpression startParam)
+    static Expression BuildCompiledNode(KernelPlan plan, int nodeIndex, ParameterExpression[] leafParams, ParameterExpression indexVar, ParameterExpression startParam, ParameterExpression baseOffsetParam)
     {
         var node = plan.Nodes[nodeIndex];
         switch (node.Op)
         {
             case KernelOp.Column:
-                return Expression.ArrayAccess(leafParams[node.Left], Expression.Add(indexVar, startParam));
+                // Read at baseOffset[col] + start + i so a sliced column's backing array is addressed
+                // zero-copy (no whole-column snapshot) — see SnapshotLeaf / issue #155.
+                return Expression.ArrayAccess(
+                    leafParams[node.Left],
+                    Expression.Add(
+                        Expression.Add(indexVar, startParam),
+                        Expression.ArrayAccess(baseOffsetParam, Expression.Constant(node.Left))));
 
             case KernelOp.Literal:
                 return Expression.Constant(node.Value, node.Value!.GetType());
@@ -843,16 +888,16 @@ sealed class FusedExpressionEvaluator
             case KernelOp.Divide:
             case KernelOp.Modulo:
                 {
-                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
-                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
+                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam, baseOffsetParam);
+                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam, baseOffsetParam);
                     return ApplyArithmetic(MapToBinaryOperator(node.Op), ConvertTo(left, node.ComputeType), ConvertTo(right, node.ComputeType));
                 }
 
             case KernelOp.And:
             case KernelOp.Or:
                 {
-                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
-                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
+                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam, baseOffsetParam);
+                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam, baseOffsetParam);
                     return node.Op == KernelOp.And ? Expression.AndAlso(left, right) : Expression.OrElse(left, right);
                 }
 
@@ -863,21 +908,21 @@ sealed class FusedExpressionEvaluator
             case KernelOp.GreaterThanOrEqual:
             case KernelOp.LessThanOrEqual:
                 {
-                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
-                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
+                    var left = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam, baseOffsetParam);
+                    var right = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam, baseOffsetParam);
                     var operandType = NumericPromoter.GetPromotedType(left.Type, right.Type) ?? left.Type;
                     return BuildComparison(MapToComparisonOperator(node.Op), ConvertTo(left, operandType), ConvertTo(right, operandType));
                 }
 
             case KernelOp.Not:
-                return Expression.Not(BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam));
+                return Expression.Not(BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam, baseOffsetParam));
 
             case KernelOp.Conditional:
                 {
                     // Lowering convention: Left=test index, Right=trueValue index, Value=falseValue index (boxed int)
-                    var testExpr = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam);
-                    var trueExpr = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam);
-                    var falseExpr = BuildCompiledNode(plan, (int)node.Value!, leafParams, indexVar, startParam);
+                    var testExpr = BuildCompiledNode(plan, node.Left, leafParams, indexVar, startParam, baseOffsetParam);
+                    var trueExpr = BuildCompiledNode(plan, node.Right, leafParams, indexVar, startParam, baseOffsetParam);
+                    var falseExpr = BuildCompiledNode(plan, (int)node.Value!, leafParams, indexVar, startParam, baseOffsetParam);
                     return Expression.Condition(
                         testExpr,
                         ConvertTo(trueExpr, node.ComputeType),

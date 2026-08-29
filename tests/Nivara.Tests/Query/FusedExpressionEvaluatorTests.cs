@@ -538,6 +538,63 @@ public class FusedExpressionEvaluatorTests
         Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(0));
     }
 
+    [Test]
+    public void Evaluate_SlicedLeaf_CompiledChain_ReadsAtBaseOffset()
+    {
+        // Junk sits before the slice offset: if the compiled path ignored the per-leaf base offset it
+        // would read 999 instead of the logical slice values (issue #155 regression).
+        var full = NivaraColumn<double>.Create(new[] { 999.0, 999.0, 1.0, 2.0, 3.0, 999.0 });
+        var sliced = full.Slice(2, 3); // logical {1, 2, 3}, backing offset 2
+        var input = new Dictionary<string, IColumn> { ["A"] = sliced };
+        var expression = ColumnExpressions.Col("A") * 1.1 + 1000;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(1));
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "null-free chains must run through the compiled target");
+        AssertColumn(result, new double?[] { 1001.1, 1002.2, 1003.3 });
+    }
+
+    [Test]
+    public void EvaluateChunked_SlicedLeaves_CompiledChain_MatchesWholeColumn()
+    {
+        var fullA = NivaraColumn<double>.Create(Enumerable.Range(0, 2000).Select(i => (double)i).ToArray());
+        var fullB = NivaraColumn<double>.Create(Enumerable.Range(0, 2000).Select(i => (double)(i * 3)).ToArray());
+        var input = new Dictionary<string, IColumn>
+        {
+            // Distinct offsets per leaf to exercise per-leaf base-offset slicing (issue #155).
+            ["A"] = fullA.Slice(100, 1000),
+            ["B"] = fullB.Slice(500, 1000)
+        };
+        var expression = ColumnExpressions.Col("A") * 1.1 + 1000 - ColumnExpressions.Col("B");
+
+        var fused = new FusedExpressionEvaluator();
+        AssertChunkedMatchesWhole(fused, expression, input, new[] { 1, 2, 3, 250, 511, 512, 999, 1000 });
+
+        Assert.That(fused.FusedPathEvaluationCount, Is.EqualTo(9), "whole + 8 chunk sizes must all run through the fused evaluator");
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(9), "null-free chains must run through the compiled target");
+    }
+
+    [Test]
+    public void Evaluate_SlicedLeaf_BooleanComparison_ReadsAtBaseOffset()
+    {
+        var full = NivaraColumn<double>.Create(new[] { 999.0, 5.0, 250.0, 400.0, 999.0 });
+        var sliced = full.Slice(1, 3); // logical {5, 250, 400}, backing offset 1
+        var input = new Dictionary<string, IColumn> { ["A"] = sliced };
+        var expression = ColumnExpressions.Col("A") > 100;
+
+        var fused = new FusedExpressionEvaluator();
+        var result = fused.Evaluate(expression, input);
+
+        Assert.That(fused.CompiledPathEvaluationCount, Is.EqualTo(1), "bool comparison must run through the compiled target");
+        Assert.That(result.ElementType, Is.EqualTo(typeof(bool)));
+        var typed = (NivaraColumn<bool>)result;
+        Assert.That(typed[0], Is.False, "5 > 100 is false");
+        Assert.That(typed[1], Is.True, "250 > 100 is true");
+        Assert.That(typed[2], Is.True, "400 > 100 is true");
+    }
+
     /// <summary>
     /// Evaluates the expression once against the whole input and once per chunk size, asserting
     /// identical output for every requested chunk size. Null masks must match at every position,
