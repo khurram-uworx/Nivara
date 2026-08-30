@@ -7,10 +7,64 @@ so it natively satisfies the `IFloatingPointIeee754<T>` constraint that Nivara's
 AutoDiff and numeric kernels are built around, and the BCL `TensorPrimitives`
 exposes `BFloat16` arithmetic overloads.
 
+> **Vectorization note — read this first.** `BFloat16` (like `Half`) is **first-class
+> and correct** in Nivara, but **not SIMD-accelerated** on .NET 11. The phrase
+> "TensorPrimitives supports BFloat16" is true in one sense and false in another, and that
+> ambiguity is the usual source of confusion:
+>
+> - **Type support (TRUE).** `TensorPrimitives` exposes *generic* overloads such as
+>   `Add<T>`, `Multiply<T>`, `Dot<T>`, `Sum<T>` constrained only to
+>   `IAdditionOperators<T,T,T>` + `IAdditiveIdentity<T,T>`. `BFloat16` satisfies those
+>   interfaces (it implements `IBinaryFloatingPointIeee754<BFloat16>`), so
+>   `TensorPrimitives.Add<BFloat16>` **compiles and returns correct results** — no
+>   `NotSupportedException`.
+> - **SIMD acceleration (FALSE).** Microsoft documents that TensorPrimitives is
+>   *"hardware-accelerated for the element types that `Vector<T>` supports
+>   (`Vector<T>.IsSupported`)."* Because `Vector<BFloat16>.IsSupported` is `false` at every
+>   width (64/128/256), the BCL cannot build a `Vector<BFloat16>` and silently drops to its
+>   **scalar** fallback loop. The operation is correct — just not vectorized.
+>
+> So "BFloat16 is supported in Nivara" means: *the same generic code paths run end-to-end with
+> correct results*, **not** that the kernel is vectorized. `Half` is in the identical situation.
+> The measured cost (matmul ~26× slower than F32) is in *SIMD / Vector Lane Support* under
+> [Precision & limitations](#precision--limitations) below.
+
+| `TensorPrimitives` aspect | `BFloat16` / `Half` | `float` / `double` |
+| --- | --- | --- |
+| Generic overloads compile & run (`Add<T>`, `Dot<T>`, …) | Yes | Yes |
+| Result correctness | Correct | Correct |
+| SIMD / `Vector<T>` fast path | No — scalar BCL fallback | Yes |
+| Relative throughput | ≈ hand-written scalar loop | much faster |
+
+> **Hints for .NET `Numerics` engineers.**
+> - `TensorPrimitives` is an *encapsulated* dispatcher: per element type `T` it picks the
+>   SIMD kernel when `Vector<T>.IsSupported` is `true`, otherwise a scalar loop. **You don't
+>   choose — the runtime does, per `T`.** It always "tries," but the best available path for
+>   `BFloat16`/`Half` *is* the scalar fallback, so "supported" there means *correct*, not
+>   *accelerated*.
+> - `BFloat16`/`Half` implement the generic-math interfaces (`IAdditionOperators`,
+>   `IBinaryFloatingPointIeee754`, …), so every **generic** `TensorPrimitives` overload
+>   (`Add<T>`, `Dot<T>`, `Sum<T>`, …) compiles and returns correct results. Type-level
+>   support ≠ acceleration.
+> - SIMD in .NET is `Vector<T>`-gated. `Vector<BFloat16>`/`Vector<Half>` report
+>   `IsSupported == false` on .NET 11 at every width. No `Vector<T>` support ⇒ no SIMD kernel
+>   in `TensorPrimitives`, however "native" the type is — `BFloat16` is a first-class runtime
+>   type, just not a *vectorizable* one.
+> - The BCL does **not** auto-widen narrow floats to `float` to gain SIMD.
+>   `TensorPrimitives.Add<BFloat16>` operates on `BFloat16` *as* `BFloat16` and falls back to
+>   scalar. (Only the explicit `ConvertToSingle` / `ConvertChecked` helpers widen.)
+> - To actually vectorize BF16/Half you must do it yourself: reinterpret the 16-bit values into
+>   `float` lanes — `BFloat16` is losslessly the top half of `float32`; `Half` via the standard
+>   conversion — run the genuinely-SIMD `TensorPrimitives<float>`, then narrow back. The BCL
+>   won't do this for you; it's the manual path a library like Nivara can add (see the
+>   *SIMD / Vector Lane Support* note under [Precision & limitations](#precision--limitations)).
+> - Watch `Vector<BFloat16>` in future .NET: if it ever flips to supported, the BCL scalar
+>   fallback disappears with **no Nivara code change**.
+
 Nivara supports `BFloat16` in **two layers**:
 
 1. **The column / query-analytics layer** — `BFloat16` is now a first-class numeric column
-   type: vectorized arithmetic, window functions, sorting, aggregation, and
+   type: element-wise arithmetic (scalar, see note), window functions, sorting, aggregation, and
    fused query expressions.
 2. **The AutoDiff domain** — `BFloat16` is a first-class gradient type: it flows through every
    op, optimizer, and module.
@@ -29,9 +83,11 @@ This document covers both. Related references:
 - **Range**: the same exponent range as `float32`, so it survives the wide
   dynamic range of gradients and normalized activations without under/overflow
   (where `Half` can be marginal).
-- **.NET 11**: the type is built in, and `TensorPrimitives` provides the SIMD
-  arithmetic kernels — so Nivara's generic `TensorPrimitives`-based paths apply
-  with no scalar fallback.
+- **.NET 11**: the type is built in and `TensorPrimitives` exposes `BFloat16`
+  overloads, so Nivara's generic code paths apply with **no `NotSupportedException`**.
+  They are **not** SIMD-accelerated: because `Vector<BFloat16>` is unsupported, the BCL
+  executes a scalar loop for `BFloat16`/`Half` arithmetic and reductions (see the
+  *Vectorization note* above and *SIMD / Vector Lane Support* below).
 
 For the concrete end-to-end numbers (weight memory F32 vs FP16/BF16 and the
 accuracy-vs-reference table), see the *Narrow-precision inference* section of
@@ -56,17 +112,19 @@ var ncol = NivaraColumn.CreateFromNullable(new BFloat16?[] { (BFloat16)1.5f, nul
 `double`, since there is no implicit `BFloat16`↔integral conversion),
 `TypeCompatibilityValidator.GetNumericTypes`, and `TypeExtensions.IsNumericType`.
 
-### Vectorized arithmetic (null-mask preserved)
+### Element-wise arithmetic (null-mask preserved)
 
 ```csharp
-var scaled = col.Multiply((BFloat16)2.0f);   // [3.0, 5.0, 7.0] via generic TensorPrimitives SIMD path
+var scaled = col.Multiply((BFloat16)2.0f);   // [3.0, 5.0, 7.0] via the generic TensorPrimitives path (scalar for BF16)
 var ratio  = col.Divide((BFloat16)2.0f);      // [0.75, 1.25, 1.75]
 var added  = col.Add(otherColumn);            // column-on-column
 ```
 
-Arithmetic runs through the same generic `TensorPrimitives` SIMD path as
-`Half`; **null masks are preserved** (a null input position yields a null
-output, like every other numeric type).
+Arithmetic runs through the same generic `TensorPrimitives` path as `Half`. On
+.NET 11 `Vector<BFloat16>` is unsupported, so the BCL runs a **scalar** loop rather
+than a SIMD kernel — the result is correct and first-class, just not vectorized
+(see the *Vectorization note*). **Null masks are preserved** (a null input position
+yields a null output, like every other numeric type).
 
 ### Window functions
 
@@ -136,8 +194,9 @@ exactly like `float`/`double`/`Half` across the autograd engine:
 
 - **All operations** — element-wise, `MatMul` (runs through the BCL
   `TensorPrimitives.Dot` row dot-product; the old hand-rolled `Vector<T>` SIMD
-  branch that threw `NotSupportedException` for `BFloat16` was removed),
-  reductions, normalization, activations, attention, convolutions, VAE/Transformer
+  branch that threw `NotSupportedException` for `BFloat16` was removed — note this
+  `Dot` is the **scalar** BCL path for `BFloat16`/`Half`, since `Vector<BFloat16>`
+  is unsupported), reductions, normalization, activations, attention, convolutions, VAE/Transformer
   modules.
 - **Optimizers** — `SGD<BFloat16>`, `Adam<BFloat16>`, `AdamW<BFloat16>` with
   their `TensorPrimitives`-based state buffers.
