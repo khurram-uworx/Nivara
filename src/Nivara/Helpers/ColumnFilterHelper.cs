@@ -105,28 +105,40 @@ static class ColumnFilterHelper
     {
         if (typeof(T).IsValueType && column is NivaraColumn<T> typed)
         {
-            var filteredValues = new T[indices.Count];
-            var nullMask = new bool[indices.Count];
-            bool hasNulls = typed.HasNulls;
-            bool anyNull = false;
-
-            for (int i = 0; i < indices.Count; i++)
+            if (Nullable.GetUnderlyingType(typeof(T)) != null)
             {
-                int index = indices[i];
-                if (hasNulls && typed.IsNull(index))
-                {
-                    nullMask[i] = true;
-                    anyNull = true;
-                }
-                else
-                {
-                    filteredValues[i] = typed[index];
-                }
+                // Nullable-element column (T is TValue?): nulls live in the elements as default(T)
+                // (no null bitmap), so copy via the typed indexer and round-trip the element type.
+                var filteredValues = new T[indices.Count];
+                for (int i = 0; i < indices.Count; i++)
+                    filteredValues[i] = typed[indices[i]];
+                return NivaraColumn<T>.CreateFromOwnedArray(filteredValues);
             }
 
-            if (!anyNull)
-                return NivaraColumn<T>.CreateFromOwnedArray(filteredValues);
-            return NivaraColumn<T>.CreateFromSpans(filteredValues, nullMask);
+            {
+                var filteredValues = new T[indices.Count];
+                var nullMask = new bool[indices.Count];
+                bool hasNulls = typed.HasNulls;
+                bool anyNull = false;
+
+                for (int i = 0; i < indices.Count; i++)
+                {
+                    int index = indices[i];
+                    if (hasNulls && typed.IsNull(index))
+                    {
+                        nullMask[i] = true;
+                        anyNull = true;
+                    }
+                    else
+                    {
+                        filteredValues[i] = typed[index];
+                    }
+                }
+
+                if (!anyNull)
+                    return NivaraColumn<T>.CreateFromOwnedArray(filteredValues);
+                return NivaraColumn<T>.CreateFromSpans(filteredValues, nullMask);
+            }
         }
 
         if (typeof(T).IsValueType)
@@ -166,27 +178,37 @@ static class ColumnFilterHelper
     {
         if (typeof(T).IsValueType && column is NivaraColumn<T> typed)
         {
-            var reorderedValues = new T[indices.Length];
-            var nullMask = new bool[indices.Length];
-            bool hasNulls = typed.HasNulls;
-            bool anyNull = false;
-            for (int i = 0; i < indices.Length; i++)
+            if (Nullable.GetUnderlyingType(typeof(T)) != null)
             {
-                int index = indices[i];
-                if (hasNulls && typed.IsNull(index))
-                {
-                    nullMask[i] = true;
-                    anyNull = true;
-                }
-                else
-                {
-                    reorderedValues[i] = typed[index];
-                }
+                var reorderedValues = new T[indices.Length];
+                for (int i = 0; i < indices.Length; i++)
+                    reorderedValues[i] = typed[indices[i]];
+                return NivaraColumn<T>.CreateFromOwnedArray(reorderedValues);
             }
 
-            if (anyNull)
-                return NivaraColumn<T>.CreateFromSpans(reorderedValues, nullMask);
-            return NivaraColumn<T>.CreateFromOwnedArray(reorderedValues);
+            {
+                var reorderedValues = new T[indices.Length];
+                var nullMask = new bool[indices.Length];
+                bool hasNulls = typed.HasNulls;
+                bool anyNull = false;
+                for (int i = 0; i < indices.Length; i++)
+                {
+                    int index = indices[i];
+                    if (hasNulls && typed.IsNull(index))
+                    {
+                        nullMask[i] = true;
+                        anyNull = true;
+                    }
+                    else
+                    {
+                        reorderedValues[i] = typed[index];
+                    }
+                }
+
+                if (anyNull)
+                    return NivaraColumn<T>.CreateFromSpans(reorderedValues, nullMask);
+                return NivaraColumn<T>.CreateFromOwnedArray(reorderedValues);
+            }
         }
 
         if (typeof(T).IsValueType)
@@ -239,26 +261,41 @@ static class ColumnFilterHelper
 
         if (typeof(T).IsValueType && columns.All(c => c is NivaraColumn<T>))
         {
-            var concatenatedValues = new T[totalLength];
-            var nullMask = new bool[totalLength];
-
-            int currentIndex = 0;
-            foreach (var column in columns)
+            if (Nullable.GetUnderlyingType(typeof(T)) != null)
             {
-                var typedColumn = (NivaraColumn<T>)column;
-                for (int i = 0; i < column.Length; i++)
+                var concatenatedValues = new T[totalLength];
+                int currentIndex = 0;
+                foreach (var column in columns)
                 {
-                    if (typedColumn.IsNull(i))
-                        nullMask[currentIndex] = true;
-                    else
-                        concatenatedValues[currentIndex] = typedColumn[i];
-                    currentIndex++;
+                    var typedColumn = (NivaraColumn<T>)column;
+                    for (int i = 0; i < column.Length; i++)
+                        concatenatedValues[currentIndex++] = typedColumn[i];
                 }
+                return NivaraColumn<T>.CreateFromOwnedArray(concatenatedValues);
             }
 
-            if (!nullMask.Any())
-                return NivaraColumn<T>.CreateFromOwnedArray(concatenatedValues);
-            return NivaraColumn<T>.CreateFromSpans(concatenatedValues, nullMask);
+            {
+                var concatenatedValues = new T[totalLength];
+                var nullMask = new bool[totalLength];
+
+                int currentIndex = 0;
+                foreach (var column in columns)
+                {
+                    var typedColumn = (NivaraColumn<T>)column;
+                    for (int i = 0; i < column.Length; i++)
+                    {
+                        if (typedColumn.IsNull(i))
+                            nullMask[currentIndex] = true;
+                        else
+                            concatenatedValues[currentIndex] = typedColumn[i];
+                        currentIndex++;
+                    }
+                }
+
+                if (!nullMask.Any())
+                    return NivaraColumn<T>.CreateFromOwnedArray(concatenatedValues);
+                return NivaraColumn<T>.CreateFromSpans(concatenatedValues, nullMask);
+            }
         }
 
         if (typeof(T).IsValueType)
@@ -323,32 +360,46 @@ static class ColumnFilterHelper
     {
         if (typeof(T).IsValueType && parts.All(p => p is NivaraColumn<T>))
         {
-            var result = new T[positions.Length];
-            var nullMask = new bool[positions.Length];
-            bool anyNull = false;
-            int pos = 0;
-            foreach (NivaraColumn<T> part in parts)
+            if (Nullable.GetUnderlyingType(typeof(T)) != null)
             {
-                bool hasNulls = part.HasNulls;
-                for (int i = 0; i < part.Length; i++)
+                var result = new T[positions.Length];
+                int pos = 0;
+                foreach (NivaraColumn<T> part in parts)
                 {
-                    int target = positions[pos];
-                    if (hasNulls && part.IsNull(i))
-                    {
-                        nullMask[target] = true;
-                        anyNull = true;
-                    }
-                    else
-                    {
-                        result[target] = part[i];
-                    }
-                    pos++;
+                    for (int i = 0; i < part.Length; i++)
+                        result[positions[pos++]] = part[i];
                 }
+                return NivaraColumn<T>.CreateFromOwnedArray(result);
             }
 
-            if (anyNull)
-                return NivaraColumn<T>.CreateFromSpans(result, nullMask);
-            return NivaraColumn<T>.CreateFromOwnedArray(result);
+            {
+                var result = new T[positions.Length];
+                var nullMask = new bool[positions.Length];
+                bool anyNull = false;
+                int pos = 0;
+                foreach (NivaraColumn<T> part in parts)
+                {
+                    bool hasNulls = part.HasNulls;
+                    for (int i = 0; i < part.Length; i++)
+                    {
+                        int target = positions[pos];
+                        if (hasNulls && part.IsNull(i))
+                        {
+                            nullMask[target] = true;
+                            anyNull = true;
+                        }
+                        else
+                        {
+                            result[target] = part[i];
+                        }
+                        pos++;
+                    }
+                }
+
+                if (anyNull)
+                    return NivaraColumn<T>.CreateFromSpans(result, nullMask);
+                return NivaraColumn<T>.CreateFromOwnedArray(result);
+            }
         }
 
         if (typeof(T).IsValueType)
