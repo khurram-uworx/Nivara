@@ -361,6 +361,33 @@ public class StreamixBridgeTests
     }
 
     [Test]
+    public async Task ToNivaraFrameAsync_FromRows_NullableElementColumn_RoundTrips()
+    {
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Age", NivaraColumn<int?>.Create(new int?[] { 10, null, 30 })));
+
+        try
+        {
+            var fluxRows = frame.ToFluxRows(chunkSize: 2);
+            using var result = await fluxRows.ToNivaraFrameAsync();
+
+            Assert.That(result.RowCount, Is.EqualTo(3));
+            var ageCol = result.GetColumn<int>("Age");
+
+            Assert.That(ageCol.IsNull(0), Is.False);
+            Assert.That(ageCol[0], Is.EqualTo(10));
+            Assert.That(ageCol.IsNull(1), Is.True);
+            Assert.That(ageCol.IsNull(2), Is.False);
+            Assert.That(ageCol[2], Is.EqualTo(30));
+        }
+        finally
+        {
+            frame.Dispose();
+        }
+    }
+
+    [Test]
     public async Task ToNivaraFrameAsync_EmptyStream_ThrowsInvalidOperation()
     {
         var emptyFlux = Flux.Empty<NivaraRow>();
