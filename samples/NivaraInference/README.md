@@ -28,10 +28,17 @@ dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
 
-# BFloat16 inference (half weight memory; see "BFloat16 inference" below)
+# Narrow-precision inference (half weight memory; see "Narrow-precision inference" below)
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
 dotnet run --project samples/NivaraInference -c Release -- distilbert bf16
 dotnet run --project samples/NivaraInference -c Release -- minilm bf16
+# fp16 / Half variant (--precision fp16, or a bare fp16/half positional)
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --precision fp16
+dotnet run --project samples/NivaraInference -c Release -- distilbert --precision fp16
+dotnet run --project samples/NivaraInference -c Release -- minilm --precision fp16
+# Benchmark also honors --precision (times F32 / fp16 / bf16; see "Speed" below)
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision fp16
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision bf16
 ```
 
 ## Supported models
@@ -212,40 +219,111 @@ Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor
 - **DistilBERT**: 105 tensors mapped via `DistilBertLoader.LoadEncoderWeights` from `distilbert.embeddings.*` and `distilbert.transformer.layer.{0-5}.*` keys
 - **DistilBERT SST-2**: 104 tensors — 102 encoder tensors via `DistilBertLoader.LoadEncoderWeights` + `pre_classifier.{weight,bias}` and `classifier.{weight,bias}` loaded via `DistilBertForSequenceClassification<T>.LoadWeights`
 
-## BFloat16 inference
+## Narrow-precision inference (BFloat16 / Half)
 
 Every transformer model in this sample is generic over the compute dtype
-`T : IFloatingPointIeee754<T>`, so it runs in F32, F16, or BFloat16. A `bf16`
-run mode demonstrates **genuine BFloat16 inference** end-to-end:
+`T : IFloatingPointIeee754<T>`, so it runs in F32, BFloat16, or Half (fp16).
+A `--precision` argument selects the compute dtype (text models only; the
+vision samples stay F32):
 
 ```bash
-dotnet run --project samples/NivaraInference -c Release -- distilbert_sst bf16
-dotnet run --project samples/NivaraInference -c Release -- distilbert bf16
-dotnet run --project samples/NivaraInference -c Release -- minilm bf16
+dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --precision bf16
+dotnet run --project samples/NivaraInference -c Release -- distilbert --precision fp16
+dotnet run --project samples/NivaraInference -c Release -- minilm --precision fp16
 ```
 
-**What the `bf16` mode does**
-- Loads the on-disk **F32** weights as `BFloat16` via `SafeTensorsLoader.Read<BFloat16>` — the loader truncates each `float` to 7-bit-mantissa BF16 at load time (analogous to PyTorch loading an F32 checkpoint into a `torch.bfloat16` model; the file on disk stays F32).
-- Builds the `<BFloat16>` model via the generic `LoadWeights<BFloat16>` and runs the full forward pass in BFloat16.
-- Diffs the output against the same PyTorch reference fixtures used by `compare` (logits for SST-2; normalized embeddings / L2 norms for MiniLM and DistilBERT).
+`--precision` accepts `f32` (default), `bf16`, or `fp16`. A bare
+`bf16` / `fp16` / `half` positional is also accepted (`-- distilbert_sst bf16`), so
+the pre-#341 `bf16` invocations keep working unchanged.
 
-**Token-ID correctness (the subtle bit)** — BFloat16 represents integers *exactly* only up to 256, but transformer vocabularies reach ~30k. Converting token IDs to a BF16 tensor before the embedding lookup corrupts them (e.g. `30522 → 30512`), sending the lookup to the wrong row and producing garbage (we measured a ~7.4 logit diff vs the F32 reference before the fix). The fix keeps token IDs as **exact `int`**: `Embedding<T>`, `BertEncoder<T>`, `MiniLMDistilled<T>` and `DistilBertForSequenceClassification<T>` all expose `Forward(int[] tokenIds, ...)` overloads that look up embeddings by exact integer index, independent of the compute dtype. Only the attention mask stays a BF16 tensor (its `0`/`1` values round-trip exactly). See `docs/BFLOAT16.md` for the engine-level details.
+**What a narrow-precision mode does**
+- Loads the on-disk **F32** weights as `BFloat16` (`SafeTensorsLoader.Read<BFloat16>`) or
+  `Half` (`SafeTensorsLoader.Read<Half>`) — the loader truncates each `float` to the
+  narrow dtype at load time (analogous to PyTorch loading an F32 checkpoint into a
+  `torch.bfloat16`/`torch.float16` model; the file on disk stays F32).
+- Builds the `<BFloat16>` / `<Half>` model via the generic `LoadWeights<...>` and runs the
+  full forward pass in that dtype.
+- Diffs the output against the same PyTorch reference fixtures used by `compare` (logits for
+  SST-2; normalized embeddings / L2 norms for MiniLM and DistilBERT).
+
+**Token-ID correctness (the subtle bit)** — BFloat16 represents integers *exactly* only up to
+256 and Half only up to 2048, but transformer vocabularies reach ~30k. Converting token IDs to a
+narrow-precision tensor before the embedding lookup corrupts them (e.g. `30522 → 30512` in BF16),
+sending the lookup to the wrong row and producing garbage (we measured a ~7.4 logit diff vs the
+F32 reference before the fix). The fix keeps token IDs as **exact `int`**: `Embedding<T>`,
+`BertEncoder<T>`, `MiniLMDistilled<T>` and `DistilBertForSequenceClassification<T>` all expose
+`Forward(int[] tokenIds, ...)` overloads that look up embeddings by exact integer index,
+independent of the compute dtype. Only the attention mask stays a narrow tensor (its `0`/`1`
+values round-trip exactly). See `docs/BFLOAT16.md` for the engine-level details.
 
 **Results** (against the F32 HuggingFace reference, CPU):
 
-| Model | Metric | F32 vs Ref | BFloat16 vs Ref |
-|---|---|---|---|
-| `distilbert_sst` | argmax agreement | 8/8 | **8/8** |
-| `distilbert_sst` | max abs logit diff | ~1e-6 | **~0.33** |
+| Model | Metric | F32 vs Ref | BFloat16 vs Ref | Half (fp16) vs Ref |
+|---|---|---|---|---|
+| `distilbert_sst` | argmax agreement | 8/8 | **8/8** | **8/8** |
+| `distilbert_sst` | max abs logit diff | ~1e-6 | **~0.33** | **~0.22** |
 
-The base `distilbert` and `minilm` `bf16` modes run correctly (unit-length
-embeddings, sensible cosine similarities — e.g. 0.90 between "I love programming"
-and "I love coding"). Quantitative base/minilm cosine-vs-reference requires
-generating the reference fixtures via `samples/NivaraInference/Python/distilbert_compare.py`
-and `minilm_compare.py` (they are not checked into the repo). BFloat16 halves
-weight memory (2 vs 4 bytes/param) for a negligible precision cost, and preserves
-every prediction on the SST-2 set. The column/tensor engine's BFloat16 path is
-documented in `docs/BFLOAT16.md`.
+Half uses a 10-bit mantissa (vs BF16's 7), which is why its logits land closer to the F32
+reference; both preserve every SST-2 prediction.
+
+**Memory** — narrow precision stores each weight in 2 bytes (FP16/BF16) vs 4 for
+F32, so weight memory **exactly halves** (same parameter count, half the bytes):
+
+| Model | F32 weights | FP16 / BF16 weights |
+|---|---|---|
+| MiniLM | ~91 MB | ~45.5 MB |
+| DistilBERT (base) | ~255.5 MB | ~127.8 MB |
+| DistilBERT SST-2 | ~255.4 MB | ~127.7 MB |
+
+**Speed** — `benchmark` now accepts `--precision` (all three dtypes), so you can time F32,
+fp16, and bf16 inference for the same model in one generic code path (3 warmup + 10 timed
+passes, avg/min/max ms, with params + weight MB reported):
+
+```bash
+# F32, fp16, bf16 MiniLM
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision fp16
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision bf16
+
+# Same for distilbert / distilbert_sst (e.g. --precision fp16)
+dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark --precision fp16
+```
+
+Measured on CPU, MiniLM (seqLen 128), single thread:
+
+| Precision | Avg ms/pass | Weight MB |
+|-----------|-------------|-----------|
+| F32       | ~142 | 86.6 |
+| Half      | ~3658 | 43.3 |
+| BFloat16  | similar to Half (see issue #363) | 43.3 |
+
+The **halved weight memory** is the narrow-precision win; on CPU the narrow matmul runs
+through non-SIMD fallbacks and is dramatically *slower* per pass than F32 (fp16 was ~26x
+slower in the measurement above, issue [#363](https://github.com/khurram-uworx/Nivara/issues/363)).
+Don't read narrow benchmarks as a CPU speed win — treat them as a memory trade that preserves
+every prediction.
+
+The base `distilbert` and `minilm` narrow-precision modes run correctly (unit-length
+embeddings, sensible cosine similarities — e.g. 0.90 between "I love programming" and "I love
+coding"). The column/tensor engine's BFloat16 path is documented in `docs/BFLOAT16.md`.
+
+**Reference fixtures for `compare` / narrow-precision diffs** — the quantitative cosine (or
+logit) diff against the HuggingFace reference is shown only when the F32 reference `.bin` files
+exist. They are **not checked into the repo** (they live in / beside the gitignored model-weight
+directories, which hold the multi-hundred-MB checkpoints), but each has a local Python generator.
+Run them once on-demand to enable the diffs:
+
+```bash
+# Base DistilBERT hidden states -> samples/data/distilbert/last_hidden_state_py.bin
+python samples/NivaraInference/Python/distilbert_compare.py
+# MiniLM embeddings -> samples/data/compare_minilm_embeddings_py.bin
+python samples/NivaraInference/Python/minilm_compare.py
+# DistilBERT SST-2 logits -> samples/data/compare_distilbert_sst_py.bin
+python samples/NivaraInference/Python/distilbert_sst_compare.py
+```
+
+Without a fixture the relevant mode prints "reference not found; skipping diff" and otherwise
+runs normally (e.g. the SST-2 mode still prints each predicted label).
 
 ## SafeTensors loader
 

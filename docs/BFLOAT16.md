@@ -33,6 +33,12 @@ This document covers both. Related references:
   arithmetic kernels — so Nivara's generic `TensorPrimitives`-based paths apply
   with no scalar fallback.
 
+For the concrete end-to-end numbers (weight memory F32 vs FP16/BF16 and the
+accuracy-vs-reference table), see the *Narrow-precision inference* section of
+`samples/NivaraInference/README.md`. Both FP16 (`Half`) and BF16 halve weight
+memory (2 B/param vs `float`'s 4): the sample measures ~91→~45.5 MB (MiniLM) and
+~255→~128 MB (DistilBERT / SST-2).
+
 ---
 
 ## Column / query-analytics layer
@@ -256,5 +262,6 @@ inference-default graph guard.
 - **Non-nullable at the AutoDiff boundary (ADR-001).** Resolve nulls
   (`FillNull` / `DropNulls`) before converting a `BFloat16` column to a gradient
   tensor.
+- **SIMD / Vector Lane Support (empirical, .NET 11, net11 `System.Numerics.Tensors` 11.0.0-preview.7)**: `BFloat16` and `Half` are scalar-first-class but SIMD-second-class. `Vector<BFloat16>`.IsSupported = false (all widths 64/128/256); `Vector.Create<BFloat16>` throws `NotSupportedException`. Matmul (`TensorsHelper.MultiplyCore<T>`) routes only `float`/`double` to SIMD row-dot kernels; `BFloat16`/`Half` fall to scalar `MultiplyRowScalar` (~26× slower, verified via `NivaraInference` benchmark). Forward SIMD path possible via bit-reinterpret `ushort` lanes + widen to `float` + existing `TensorPrimitives.Dot` — confirmed by probe (dot on widened `float` = 204 matches scalar `Dot<BFloat16>`).
 
 ---
