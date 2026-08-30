@@ -4,10 +4,10 @@ using Nivara.Helpers;
 using Nivara.Operations;
 using Nivara.Storage;
 using Nivara.Tensors;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Linq.Expressions;
 using System.Numerics;
-using System.Buffers;
 using System.Reflection;
 using System.Runtime.InteropServices;
 

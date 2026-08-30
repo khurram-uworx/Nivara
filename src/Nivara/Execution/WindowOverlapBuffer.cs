@@ -1,5 +1,4 @@
 using Nivara.Expressions;
-using Nivara.Operations;
 using Nivara.Query;
 
 namespace Nivara.Execution;
