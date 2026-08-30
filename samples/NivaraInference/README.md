@@ -263,10 +263,23 @@ values round-trip exactly). See `docs/BFLOAT16.md` for the engine-level details.
 Half uses a 10-bit mantissa (vs BF16's 7), which is why its logits land closer to the F32
 reference; both preserve every SST-2 prediction.
 
+**Memory** — narrow precision stores each weight in 2 bytes (FP16/BF16) vs 4 for
+F32, so weight memory **exactly halves** (same parameter count, half the bytes):
+
+| Model | F32 weights | FP16 / BF16 weights |
+|---|---|---|
+| MiniLM | ~91 MB | ~45.5 MB |
+| DistilBERT (base) | ~255.5 MB | ~127.8 MB |
+| DistilBERT SST-2 | ~255.4 MB | ~127.7 MB |
+
+**Speed** — fp16/bf16 inference runs through the same `TensorPrimitives` kernels as
+F32, so per-pass ms is not yet separately benchmarked (the `benchmark` mode is
+F32-only). Narrow precision is primarily a **memory** trade: you halve weight memory
+while preserving every prediction.
+
 The base `distilbert` and `minilm` narrow-precision modes run correctly (unit-length
 embeddings, sensible cosine similarities — e.g. 0.90 between "I love programming" and "I love
-coding"). Narrow precision halves weight memory (2 vs 4 bytes/param) for a negligible precision
-cost. The column/tensor engine's BFloat16 path is documented in `docs/BFLOAT16.md`.
+coding"). The column/tensor engine's BFloat16 path is documented in `docs/BFLOAT16.md`.
 
 **Reference fixtures for `compare` / narrow-precision diffs** — the quantitative cosine (or
 logit) diff against the HuggingFace reference is shown only when the F32 reference `.bin` files
