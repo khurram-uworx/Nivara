@@ -159,8 +159,8 @@ public class ColumnFilterHelperTests
 
     // Issue #349: nullable-element columns (NivaraColumn<int?>, ElementType == typeof(int?))
     // must be routed through the typed (non-boxing) kernels and round-trip their element type.
-    // Nullable-element results store nulls in-value (no separate null bitmap), so HasNulls is
-    // false even when nulls are present; nullness is asserted via IsNull / GetValue.
+    // Results stay mask-based (HasNulls reflects nulls) so downstream consumers that gate on
+    // HasNulls keep working; nullness is asserted via HasNulls / IsNull / GetValue.
 
     [Test]
     public void CreateFilteredColumn_NullableElementInt_PreservesNullableElementTypeAndNulls()
@@ -172,6 +172,7 @@ public class ColumnFilterHelperTests
 
         Assert.That(filtered.ElementType, Is.EqualTo(typeof(int?)), "nullable element type must be preserved");
         Assert.That(filtered.Length, Is.EqualTo(3));
+        Assert.That(filtered.HasNulls, Is.True, "HasNulls must reflect the remaining null so downstream consumers gate correctly");
         Assert.That(filtered.IsNull(1), Is.True, "null at source index 1 must round-trip");
         Assert.That(filtered.GetValue(0), Is.EqualTo(40));
         Assert.That(filtered.GetValue(1), Is.Null, "null must surface through GetValue");
