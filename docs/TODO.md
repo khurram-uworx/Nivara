@@ -89,11 +89,24 @@ round-trip preservation):
 
 ## Planned commits
 
-1. `fix: route nullable-element columns through typed ColumnFilterHelper kernels (issue #349)` —
-   core fix in `ColumnFilterHelper.cs` (commit after build).
-2. `test: cover nullable-element round-trip in ColumnFilterHelper (issue #349)` — new unit tests +
-   frame-level `FilterByMask`/`Where` round-trip test.
-3. If review surfaces a gap: additional fix/test commit on the same branch.
+Executed on `khurram/349`:
+
+1. `docs: plan issue #349 nullable-element column filter fix in TODO.md` (`edfb5bd`)
+2. `fix: route nullable-element columns through typed ColumnFilterHelper kernels` (`3db12e2`) — removed
+   `unwrapNullable`, dispatch typed kernels with the actual runtime element type (no boxing, round-trip `int?`).
+3. `fix: handle in-value nulls in nullable-element ColumnFilterHelper kernels` (`5cc648b`) — added
+   nullable-element branches reading via the typed indexer for in-value nulls.
+4. `fix: keep HasNulls meaningful for nullable-element ColumnFilterHelper results` (`7434040`) — build
+   mask-based `NivaraColumn<T?>` results (consult `IsNull`, not the `HasNulls` gate) so downstream
+   consumers gating on `HasNulls` stay correct.
+5. `test: cover nullable-element round-trip in ColumnFilterHelper (issue #349)` (`b81c477`) — unit tests
+   + frame-level `FilterByMask` round-trip test.
+6. `docs: log deferred perf-baseline issue #352 for #349 gate` (`f6107f7`)
+
+Verification: `ColumnFilterHelperTests`/`NivaraFrameFilteringSlicingTests` pass (~31), plus a broad
+targeted subset (~605) covering Linq/Sort/Join/GroupBy/Window/NivaraSeries/Frame/Row/Query/Arrow/Parquet
+expression, and slicing — all green. Full suite not run (per user choice). Perf-baseline recording
+deferred to #352.
 
 ## GitHub issues log
 
