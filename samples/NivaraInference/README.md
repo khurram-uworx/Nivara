@@ -36,6 +36,9 @@ dotnet run --project samples/NivaraInference -c Release -- minilm bf16
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst --precision fp16
 dotnet run --project samples/NivaraInference -c Release -- distilbert --precision fp16
 dotnet run --project samples/NivaraInference -c Release -- minilm --precision fp16
+# Benchmark also honors --precision (times F32 / fp16 / bf16; see "Speed" below)
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision fp16
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision bf16
 ```
 
 ## Supported models
@@ -272,10 +275,33 @@ F32, so weight memory **exactly halves** (same parameter count, half the bytes):
 | DistilBERT (base) | ~255.5 MB | ~127.8 MB |
 | DistilBERT SST-2 | ~255.4 MB | ~127.7 MB |
 
-**Speed** — fp16/bf16 inference runs through the same `TensorPrimitives` kernels as
-F32, so per-pass ms is not yet separately benchmarked (the `benchmark` mode is
-F32-only). Narrow precision is primarily a **memory** trade: you halve weight memory
-while preserving every prediction.
+**Speed** — `benchmark` now accepts `--precision` (all three dtypes), so you can time F32,
+fp16, and bf16 inference for the same model in one generic code path (3 warmup + 10 timed
+passes, avg/min/max ms, with params + weight MB reported):
+
+```bash
+# F32, fp16, bf16 MiniLM
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision fp16
+dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --precision bf16
+
+# Same for distilbert / distilbert_sst (e.g. --precision fp16)
+dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark --precision fp16
+```
+
+Measured on CPU, MiniLM (seqLen 128), single thread:
+
+| Precision | Avg ms/pass | Weight MB |
+|-----------|-------------|-----------|
+| F32       | ~142 | 86.6 |
+| Half      | ~3658 | 43.3 |
+| BFloat16  | similar to Half (see issue #363) | 43.3 |
+
+The **halved weight memory** is the narrow-precision win; on CPU the narrow matmul runs
+through non-SIMD fallbacks and is dramatically *slower* per pass than F32 (fp16 was ~26x
+slower in the measurement above, issue [#363](https://github.com/khurram-uworx/Nivara/issues/363)).
+Don't read narrow benchmarks as a CPU speed win — treat them as a memory trade that preserves
+every prediction.
 
 The base `distilbert` and `minilm` narrow-precision modes run correctly (unit-length
 embeddings, sensible cosine similarities — e.g. 0.90 between "I love programming" and "I love
