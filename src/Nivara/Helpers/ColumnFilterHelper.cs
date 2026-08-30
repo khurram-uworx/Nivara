@@ -14,16 +14,14 @@ static class ColumnFilterHelper
     static MethodInfo getMethod(string name)
         => typeof(ColumnFilterHelper).GetMethod(name, BindingFlags.NonPublic | BindingFlags.Static)!;
 
-    static Type unwrapNullable(Type elementType)
-        => Nullable.GetUnderlyingType(elementType) ?? elementType;
-
     /// <summary>
     /// Creates a new column containing only the values at the specified indices,
-    /// preserving the source column's element type.
+    /// preserving the source column's element type (including nullable element types such as
+    /// <c>NivaraColumn&lt;int?&gt;</c>).
     /// </summary>
     public static IColumn CreateFilteredColumn(IColumn column, List<int> indices)
     {
-        var elementType = unwrapNullable(column.ElementType);
+        var elementType = column.ElementType;
         return (IColumn)s_createFilteredColumnTyped
             .MakeGenericMethod(elementType)
             .Invoke(null, new object[] { column, indices })!;
@@ -31,11 +29,11 @@ static class ColumnFilterHelper
 
     /// <summary>
     /// Reorders a column using the specified indices,
-    /// preserving the source column's element type.
+    /// preserving the source column's element type (including nullable element types).
     /// </summary>
     public static IColumn ReorderColumn(IColumn column, int[] indices)
     {
-        var elementType = unwrapNullable(column.ElementType);
+        var elementType = column.ElementType;
         return (IColumn)s_reorderColumnTyped
             .MakeGenericMethod(elementType)
             .Invoke(null, new object[] { column, indices })!;
@@ -46,7 +44,7 @@ static class ColumnFilterHelper
     /// </summary>
     public static IColumn CreateEmptyColumn(Type elementType)
     {
-        var targetType = unwrapNullable(elementType);
+        var targetType = elementType;
         return (IColumn)s_createEmptyColumnTyped
             .MakeGenericMethod(targetType)
             .Invoke(null, null)!;
@@ -54,17 +52,17 @@ static class ColumnFilterHelper
 
     /// <summary>
     /// Concatenates columns of the same element type,
-    /// preserving the source element type.
+    /// preserving the source element type (including nullable element types).
     /// </summary>
     public static IColumn ConcatenateColumns(List<IColumn> columns)
     {
         if (columns.Count == 1)
             return columns[0];
 
-        var elementType = unwrapNullable(columns[0].ElementType);
+        var elementType = columns[0].ElementType;
 
         foreach (var column in columns)
-            if (unwrapNullable(column.ElementType) != elementType)
+            if (column.ElementType != elementType)
                 throw new ArgumentException(
                     $"Cannot concatenate columns of different types: {column.ElementType.Name} vs {columns[0].ElementType.Name}");
 
@@ -78,7 +76,7 @@ static class ColumnFilterHelper
     /// </summary>
     public static IColumn CreateNullColumn(Type elementType, int length)
     {
-        var targetType = unwrapNullable(elementType);
+        var targetType = elementType;
         return (IColumn)s_createNullColumnTyped
             .MakeGenericMethod(targetType)
             .Invoke(null, new object[] { length })!;
@@ -91,10 +89,10 @@ static class ColumnFilterHelper
     /// </summary>
     public static IColumn ScatterPartsColumn(IReadOnlyList<IColumn> parts, int[] positions)
     {
-        var elementType = unwrapNullable(parts[0].ElementType);
+        var elementType = parts[0].ElementType;
 
         foreach (var column in parts)
-            if (unwrapNullable(column.ElementType) != elementType)
+            if (column.ElementType != elementType)
                 throw new ArgumentException(
                     $"Cannot scatter columns of different types: {column.ElementType.Name} vs {parts[0].ElementType.Name}");
 
