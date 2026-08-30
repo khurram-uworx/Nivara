@@ -19,11 +19,32 @@ class Program
         Console.WriteLine();
 
         string modelType = args.Length > 0 ? args[0] : "";
-        string mode = args.Length > 1 ? args[1] : "";
+        string precision = "f32";
+        string mode = "";
+        for (int i = 1; i < args.Length; i++)
+        {
+            if (args[i] == "--precision" && i + 1 < args.Length)
+            {
+                precision = args[i + 1].ToLowerInvariant() switch
+                {
+                    "f32" or "float" => "f32",
+                    "bf16" or "bfloat16" => "bf16",
+                    "fp16" or "f16" or "half" => "fp16",
+                    var other => other
+                };
+                i++;
+            }
+            else if (args[i] is "bf16" or "bfloat16")
+                precision = "bf16";
+            else if (args[i] is "fp16" or "f16" or "half")
+                precision = "fp16";
+            else if (mode.Length == 0)
+                mode = args[i];
+        }
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst> [benchmark|similarity|compare|compare_diag|predict|bf16|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
@@ -31,6 +52,11 @@ class Program
             Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
             Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
             Console.WriteLine("  <image-path>      Run inference on a single image");
+            Console.WriteLine();
+            Console.WriteLine("Precision (text models only):");
+            Console.WriteLine("  --precision f32   Default; full float32 weights");
+            Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
+            Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
             return 1;
         }
 
@@ -43,17 +69,18 @@ class Program
             return 1;
         }
 
-        Console.WriteLine($"Loading weights from {Path.GetFileName(modelPath)}...");
-        var loadSw = Stopwatch.StartNew();
-        var tensors = SafeTensorsLoader.Read(modelPath);
-        loadSw.Stop();
-        Console.WriteLine($"  SafeTensors parse: {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
-        Console.WriteLine();
-
         bool benchmark = mode == "benchmark";
         bool compare = mode == "compare";
         bool compareDiag = mode == "compare_diag";
-        bool bf16 = mode == "bf16";
+        bool fp16 = precision == "fp16";
+        bool bf16 = precision == "bf16";
+
+        Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
+        var loadSw = Stopwatch.StartNew();
+        var tensors = SafeTensorsLoader.Read(modelPath);
+        loadSw.Stop();
+        Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
+        Console.WriteLine();
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
         if (bf16)
@@ -62,6 +89,16 @@ class Program
             tensorsBf16 = SafeTensorsLoader.Read<BFloat16>(modelPath);
             loadSwBf16.Stop();
             Console.WriteLine($"  SafeTensors parse (BFloat16): {loadSwBf16.ElapsedMilliseconds} ms ({tensorsBf16.Count} tensors)");
+            Console.WriteLine();
+        }
+
+        Dictionary<string, (Half[] Data, int[] Shape)> tensorsHalf = null!;
+        if (fp16)
+        {
+            var loadSwFp16 = Stopwatch.StartNew();
+            tensorsHalf = SafeTensorsLoader.Read<Half>(modelPath);
+            loadSwFp16.Stop();
+            Console.WriteLine($"  SafeTensors parse (Half): {loadSwFp16.ElapsedMilliseconds} ms ({tensorsHalf.Count} tensors)");
             Console.WriteLine();
         }
 
@@ -77,15 +114,18 @@ class Program
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
             case "minilm":
                 if (bf16) return RunMiniLMBFloat16(tensorsBf16);
+                if (fp16) return RunMiniLMHalf(tensorsHalf);
                 if (compare) return RunMiniLMCompare(tensors);
                 bool similarity = mode == "similarity";
                 return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? RunMiniLMBenchmark(tensors) : RunMiniLMInference(tensors);
             case "distilbert":
                 if (bf16) return RunDistilBertBFloat16(tensorsBf16);
+                if (fp16) return RunDistilBertHalf(tensorsHalf);
                 if (compare) return RunDistilBertCompare(tensors);
                 return benchmark ? RunDistilBertBenchmark(tensors) : RunDistilBertInference(tensors);
             case "distilbert_sst":
                 if (bf16) return RunDistilBertSstBFloat16(tensorsBf16);
+                if (fp16) return RunDistilBertSstHalf(tensorsHalf);
                 if (compare) return RunDistilBertSstCompare(tensors);
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? RunDistilBertSstBenchmark(tensors) : RunDistilBertSstInference(tensors);
@@ -1373,6 +1413,216 @@ class Program
             var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, sentences[s], maxLen: 128);
             var intIds = Array.ConvertAll(tokenIds, x => (int)x);
             var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => (BFloat16)x));
+            var output = model.ForwardWithMask(intIds, mask);
+            var outputData = new float[output.Length];
+            output.Data.TryGetSpan(out var outSpan);
+            if (!outSpan.IsEmpty)
+            {
+                int take = Math.Min(outputData.Length, outSpan.Length);
+                for (int i = 0; i < take; i++)
+                    outputData[i] = (float)outSpan[i];
+            }
+            embeddings[s] = outputData;
+        }
+        fwdSw.Stop();
+
+        double avgMs = fwdSw.ElapsedMilliseconds / (double)sentences.Length;
+        Console.WriteLine($"Forward total: {fwdSw.ElapsedMilliseconds} ms across {sentences.Length} sentences ({avgMs:F1} ms/sentence)");
+        Console.WriteLine();
+
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            var emb = embeddings[i];
+            float norm = TensorPrimitives.Norm(emb.AsSpan());
+            Console.WriteLine($"[{i}] {sentences[i]}");
+            Console.Write($"    first 10: [");
+            for (int j = 0; j < Math.Min(10, emb.Length); j++)
+            {
+                Console.Write($"{emb[j]:F6}");
+                if (j < Math.Min(10, emb.Length) - 1) Console.Write(", ");
+            }
+            Console.WriteLine("]");
+            Console.WriteLine($"    stats: min={TensorPrimitives.Min(emb.AsSpan()):F6}, max={TensorPrimitives.Max(emb.AsSpan()):F6}, mean={TensorPrimitives.Average(emb.AsSpan()):F6}, L2 norm={norm:F6}");
+            Console.WriteLine();
+        }
+
+        Console.WriteLine("Cosine Similarity Matrix:");
+        Console.Write("       ");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.Write($"  [{i}]   ");
+        Console.WriteLine();
+        for (int i = 0; i < sentences.Length; i++)
+        {
+            Console.Write($"  [{i}]  ");
+            for (int j = 0; j < sentences.Length; j++)
+            {
+                float sim = TensorPrimitives.CosineSimilarity(embeddings[i].AsSpan(), embeddings[j].AsSpan());
+                Console.Write($"{sim,7:F4} ");
+            }
+            Console.WriteLine();
+        }
+        Console.WriteLine();
+
+        string pyPath = Path.Combine("samples", "data", "compare_minilm_embeddings_py.bin");
+        if (File.Exists(pyPath))
+        {
+            var rawBytes = File.ReadAllBytes(pyPath);
+            float[] refData = new float[rawBytes.Length / 4];
+            Buffer.BlockCopy(rawBytes, 0, refData, 0, rawBytes.Length);
+            int rows = sentences.Length;
+            int dim = refData.Length / rows;
+            Console.WriteLine($"Cosine similarity vs F32 reference ({rows} sentences, dim {dim}):");
+            for (int i = 0; i < rows; i++)
+            {
+                var csSpan = embeddings[i].AsSpan(0, Math.Min(embeddings[i].Length, dim));
+                var pySpan = refData.AsSpan(i * dim, dim);
+                float sim = TensorPrimitives.CosineSimilarity(csSpan, pySpan);
+                Console.WriteLine($"  [{i}] cosine(C#, F32 reference) = {sim:F6}");
+            }
+            Console.WriteLine();
+        }
+        else
+        {
+            Console.WriteLine("F32 reference (compare_minilm_embeddings_py.bin) not found; skipping diff.");
+            Console.WriteLine();
+        }
+
+        return 0;
+    }
+
+    static int RunDistilBertSstHalf(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== DistilBERT SST-2 Half Compare ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: Half (fp16)");
+        Console.WriteLine();
+
+        string modelDir = Path.Combine("samples", "data", "distilbert_sst");
+        string csPath = Path.Combine("samples", "data", "compare_distilbert_sst_fp16_cs.bin");
+        string pyPath = Path.Combine("samples", "data", "compare_distilbert_sst_py.bin");
+
+        double mbHalf = tensors.Values.Sum(t => t.Data.Length) * 2.0 / (1024.0 * 1024.0);
+        Console.WriteLine($"Weight memory (Half): {mbHalf:F1} MB  (half of F32 = {mbHalf * 2:F1} MB)");
+        Console.WriteLine();
+
+        Console.WriteLine($"Sentences ({DistilBertSst.CompareSentences.Length}):");
+        for (int i = 0; i < DistilBertSst.CompareSentences.Length; i++)
+            Console.WriteLine($"  [{i}] {DistilBertSst.CompareSentences[i]}");
+        Console.WriteLine();
+
+        DistilBertSst.SaveHalfCompareOutput(tensors, modelDir, csPath);
+        DistilBertSst.PrintCompareDiff(pyPath, csPath, DistilBertSst.CompareSentences.Length);
+
+        return 0;
+    }
+
+    static int RunDistilBertHalf(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        string refPath = Path.Combine("samples", "data", "distilbert", "last_hidden_state_py.bin");
+        if (!File.Exists(refPath))
+        {
+            Console.Error.WriteLine($"Reference file not found: {refPath}");
+            Console.Error.WriteLine("Run: python samples/NivaraInference/Python/distilbert_compare.py");
+            return 1;
+        }
+
+        Console.WriteLine("=== DistilBERT Half Compare ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: Half (fp16)");
+        Console.WriteLine();
+
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
+        var encoder = new BertEncoder<Half>(config.ToBertConfig(), includeTokenTypeEmbedding: false);
+        DistilBertLoader.LoadEncoderWeights<Half, Half>(encoder, tensors, "distilbert");
+        encoder.Eval();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
+        string text = "This is a test sentence.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => (Half)x));
+
+        var output = encoder.ForwardWithMask(intIds, mask);
+
+        var outputData = new float[output.Length];
+        output.Data.TryGetSpan(out var outSpan);
+        if (!outSpan.IsEmpty)
+        {
+            int take = Math.Min(outputData.Length, outSpan.Length);
+            for (int i = 0; i < take; i++)
+                outputData[i] = (float)outSpan[i];
+        }
+
+        var rawBytes = File.ReadAllBytes(refPath);
+        float[] refData = new float[rawBytes.Length / 4];
+        Buffer.BlockCopy(rawBytes, 0, refData, 0, rawBytes.Length);
+
+        int len = Math.Min(outputData.Length, refData.Length);
+        var outputSpan = outputData.AsSpan(0, len);
+        var refSpan = refData.AsSpan(0, len);
+
+        var diffArr = new float[len];
+        TensorPrimitives.Subtract(outputSpan, refSpan, diffArr);
+        var absDiff = new float[len];
+        TensorPrimitives.Abs(diffArr.AsSpan(), absDiff);
+        float maxAbs = TensorPrimitives.Max(absDiff);
+        float sumAbs = TensorPrimitives.Sum(absDiff);
+        float cosineSim = TensorPrimitives.CosineSimilarity(outputSpan, refSpan);
+
+        Console.WriteLine($"Input text: \"{text}\"");
+        Console.WriteLine($"Output shape: [{string.Join(", ", output.Shape)}]");
+        Console.WriteLine($"  C# stats: min={TensorPrimitives.Min(outputData.AsSpan()):F6}, max={TensorPrimitives.Max(outputData.AsSpan()):F6}, mean={TensorPrimitives.Average(outputData.AsSpan()):F6}, std={StdDev(outputData):F6}");
+        Console.WriteLine($"  Py stats: min={TensorPrimitives.Min(refData.AsSpan()):F6}, max={TensorPrimitives.Max(refData.AsSpan()):F6}, mean={TensorPrimitives.Average(refData.AsSpan()):F6}, std={StdDev(refData):F6}");
+        Console.WriteLine($"  max abs diff: {maxAbs:F6}");
+        Console.WriteLine($"  mean abs diff: {sumAbs / len:F8}");
+        Console.WriteLine($"  cosine similarity: {cosineSim:F8}");
+        Console.WriteLine();
+        Console.WriteLine($"Weight memory (Half): {tensors.Values.Sum(t => t.Data.Length) * 2.0 / (1024.0 * 1024.0):F1} MB  (half of F32)");
+
+        return 0;
+    }
+
+    static int RunMiniLMHalf(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+    {
+        Console.WriteLine("=== MiniLM Half Compare ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: Half (fp16)");
+        Console.WriteLine();
+
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = MiniLMDistilled<Half>.LoadWeights<Half, Half>(tensors, config);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weight memory (Half): {totalParams * 2.0 / (1024.0 * 1024.0):F1} MB  (half of F32)");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+
+        var sentences = new[]
+        {
+            "This is a cat.",
+            "This is a dog.",
+            "I love programming.",
+            "The weather is nice today.",
+            "I love coding."
+        };
+
+        Console.WriteLine($"Sentences ({sentences.Length}):");
+        for (int i = 0; i < sentences.Length; i++)
+            Console.WriteLine($"  [{i}] {sentences[i]}");
+        Console.WriteLine();
+
+        model.Eval();
+
+        var embeddings = new float[sentences.Length][];
+        var fwdSw = Stopwatch.StartNew();
+        for (int s = 0; s < sentences.Length; s++)
+        {
+            var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, sentences[s], maxLen: 128);
+            var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+            var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => (Half)x));
             var output = model.ForwardWithMask(intIds, mask);
             var outputData = new float[output.Length];
             output.Data.TryGetSpan(out var outSpan);

@@ -342,6 +342,8 @@ samples/data/compare_logits_cs.bin
 samples/data/compare_mobilenet_logits.bin
 samples/data/compare_stem_conv.bin
 samples/data/compare_distilbert_sst_cs.bin
+samples/data/compare_distilbert_sst_bf16_cs.bin
+samples/data/compare_distilbert_sst_fp16_cs.bin
 samples/data/compare_distilbert_sst_py.bin
 
 samples/data/diag/
