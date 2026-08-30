@@ -99,16 +99,11 @@ foreach (var slot in carrySlots)
     emitted[slot.OutputName] = carryColumnForEmission(slot, processedChunk, emitCount);
 ```
 
-Set `lastRunResult = result` and track the run length explicitly (`lastRunLength = runLength`)
-so `Flush` no longer depends on `getRowLength(lastRunResult)`.
-
-### `Flush` — use tracked run length
-
-`lastRunResult` may now be empty (all-carry case). Compute `runLength` from the new
-`lastRunLength` field rather than `getRowLength(lastRunResult)`, and slice non-carry keys exactly
-as before (carry keys still come from `buildDeferredColumn`). Note: every all-carry case has
-`leadDistance == 0`, so `Flush` early-returns when `emittedCount >= totalRowsSeen`; the tracked
-length mainly keeps the no-lead invariant clean and the code branch-free.
+Set `lastRunResult = result` as today. **`Flush` is unchanged**: when `reRunBoundaryOp == null`
+every boundary column is a carry slot, which implies `leadDistance == 0`, so `Flush` early-returns
+at `emittedCount >= totalRowsSeen` and never reaches `getRowLength(lastRunResult)`. In mixed cases
+the pruned `result` is non-empty (carry slots excluded from emission but present in the dict) and
+`Flush` slices non-carry keys from it exactly as before.
 
 ## Correctness notes / edge cases
 
