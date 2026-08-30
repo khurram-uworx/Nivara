@@ -156,4 +156,105 @@ public class ColumnFilterHelperTests
         Assert.That(nullColumn.HasNulls, Is.True);
         Assert.That(nullColumn.IsNull(0), Is.True);
     }
+
+    // Issue #349: nullable-element columns (NivaraColumn<int?>, ElementType == typeof(int?))
+    // must be routed through the typed (non-boxing) kernels and round-trip their element type.
+    // Nullable-element results store nulls in-value (no separate null bitmap), so HasNulls is
+    // false even when nulls are present; nullness is asserted via IsNull / GetValue.
+
+    [Test]
+    public void CreateFilteredColumn_NullableElementInt_PreservesNullableElementTypeAndNulls()
+    {
+        var column = NivaraColumn<int?>.Create(new int?[] { 10, null, 30, 40 });
+        var indices = new List<int> { 3, 1, 0 };
+
+        var filtered = ColumnFilterHelper.CreateFilteredColumn(column, indices);
+
+        Assert.That(filtered.ElementType, Is.EqualTo(typeof(int?)), "nullable element type must be preserved");
+        Assert.That(filtered.Length, Is.EqualTo(3));
+        Assert.That(filtered.IsNull(1), Is.True, "null at source index 1 must round-trip");
+        Assert.That(filtered.GetValue(0), Is.EqualTo(40));
+        Assert.That(filtered.GetValue(1), Is.Null, "null must surface through GetValue");
+        Assert.That(filtered.GetValue(2), Is.EqualTo(10));
+    }
+
+    [Test]
+    public void CreateFilteredColumn_NullableElementIntWithoutNulls_PreservesNullableElementType()
+    {
+        var column = NivaraColumn<int?>.Create(new int?[] { 10, 20, 30 });
+        var indices = new List<int> { 2, 0 };
+
+        var filtered = ColumnFilterHelper.CreateFilteredColumn(column, indices);
+
+        Assert.That(filtered.ElementType, Is.EqualTo(typeof(int?)), "nullable element type must be preserved");
+        Assert.That(filtered.HasNulls, Is.False);
+        Assert.That(filtered.GetValue(0), Is.EqualTo(30));
+        Assert.That(filtered.GetValue(1), Is.EqualTo(10));
+    }
+
+    [Test]
+    public void ReorderColumn_NullableElementInt_PreservesNullableElementTypeAndNulls()
+    {
+        var column = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
+        var indices = new[] { 2, 0, 1 };
+
+        var reordered = ColumnFilterHelper.ReorderColumn(column, indices);
+
+        Assert.That(reordered.ElementType, Is.EqualTo(typeof(int?)), "reorder must preserve nullable element type");
+        Assert.That(reordered.IsNull(2), Is.True, "null at source index 1 must land at target index 2");
+        Assert.That(reordered.GetValue(0), Is.EqualTo(30));
+        Assert.That(reordered.GetValue(1), Is.EqualTo(10));
+    }
+
+    [Test]
+    public void ConcatenateColumns_NullableElementInt_PreservesNullableElementType()
+    {
+        var left = NivaraColumn<int?>.Create(new int?[] { 1, null });
+        var right = NivaraColumn<int?>.Create(new int?[] { null, 4 });
+
+        var concatenated = ColumnFilterHelper.ConcatenateColumns(new List<IColumn> { left, right });
+
+        Assert.That(concatenated.ElementType, Is.EqualTo(typeof(int?)), "concatenation must preserve nullable element type");
+        Assert.That(concatenated.Length, Is.EqualTo(4));
+        Assert.That(concatenated.IsNull(1), Is.True);
+        Assert.That(concatenated.IsNull(2), Is.True);
+        Assert.That(concatenated.GetValue(0), Is.EqualTo(1));
+        Assert.That(concatenated.GetValue(3), Is.EqualTo(4));
+    }
+
+    [Test]
+    public void ScatterPartsColumn_NullableElementInt_PreservesNullableElementType()
+    {
+        var partA = NivaraColumn<int?>.Create(new int?[] { 10, null });
+        var partB = NivaraColumn<int?>.Create(new int?[] { 30 });
+        // concatenated = [10, null, 30]; positions {2,0,1} -> result[2]=10, result[0]=null, result[1]=30
+        var positions = new[] { 2, 0, 1 };
+
+        var scattered = ColumnFilterHelper.ScatterPartsColumn(new IColumn[] { partA, partB }, positions);
+
+        Assert.That(scattered.ElementType, Is.EqualTo(typeof(int?)), "scatter must preserve nullable element type");
+        Assert.That(scattered.IsNull(0), Is.True, "null from partA[1] must scatter to target 0");
+        Assert.That(scattered.GetValue(1), Is.EqualTo(30));
+        Assert.That(scattered.GetValue(2), Is.EqualTo(10));
+    }
+
+    [Test]
+    public void CreateEmptyColumn_NullableInt_PreservesNullableElementType()
+    {
+        var empty = ColumnFilterHelper.CreateEmptyColumn(typeof(int?));
+
+        Assert.That(empty.ElementType, Is.EqualTo(typeof(int?)), "empty nullable column must preserve element type");
+        Assert.That(empty.Length, Is.EqualTo(0));
+    }
+
+    [Test]
+    public void CreateNullColumn_NullableInt_PreservesNullableElementType()
+    {
+        var nullColumn = ColumnFilterHelper.CreateNullColumn(typeof(int?), 3);
+
+        Assert.That(nullColumn.ElementType, Is.EqualTo(typeof(int?)), "null column must preserve nullable element type");
+        Assert.That(nullColumn.Length, Is.EqualTo(3));
+        Assert.That(nullColumn.HasNulls, Is.True);
+        Assert.That(nullColumn.IsNull(2), Is.True);
+    }
 }

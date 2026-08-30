@@ -38,6 +38,26 @@ public class NivaraFrameFilteringSlicingTests
     }
 
     [Test]
+    public void FilterByMask_NullableElementColumn_PreservesElementType()
+    {
+        // Issue #349: a nullable-element column (NivaraColumn<int?>, ElementType == typeof(int?))
+        // must round-trip its element type through FilterByMask instead of being coerced to int.
+        var frame = NivaraFrame.Create(
+            ("Age", NivaraColumn<int?>.Create(new int?[] { 10, null, 30, null, 50 }))
+        );
+
+        var mask = NivaraColumn<bool>.Create(new[] { true, false, true, false, true });
+        var filtered = frame.FilterByMask(mask);
+
+        var ageColumn = filtered.GetColumn("Age");
+        Assert.That(ageColumn.ElementType, Is.EqualTo(typeof(int?)), "nullable element type must be preserved through FilterByMask");
+        Assert.That(ageColumn.HasNulls, Is.False, "no null rows were selected");
+        Assert.That(ageColumn.GetValue(0), Is.EqualTo(10));
+        Assert.That(ageColumn.GetValue(1), Is.EqualTo(30));
+        Assert.That(ageColumn.GetValue(2), Is.EqualTo(50));
+    }
+
+    [Test]
     public void FilterByMask_WithAllFalseMask_ReturnsEmptyFrame()
     {
         // Arrange
