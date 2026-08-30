@@ -1807,6 +1807,33 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Property_StreamingVsLazy_NegativeShiftWithCumulativeCount_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.CumulativeCount(ColumnExpressions.Col("A")),
+            ColumnExpressions.Shift(ColumnExpressions.Col("A"), -2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 271;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
     public void Property_StreamingVsLazy_LeadWithCumulativeCount_MatchesLazy()
     {
         var lazyStrategy = new LazyExecutionStrategy();
