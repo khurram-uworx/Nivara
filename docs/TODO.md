@@ -97,4 +97,4 @@ round-trip preservation):
 
 ## GitHub issues log
 
-- [ ] (none yet — capture any deferred work discovered here during execution)
+- [ ] #352 — record the `Row.Where nullable-element GetValue 100k` perf harness baseline (gate for #349); deferred perf-benchmark step, out of scope for the code fix (created while working on #349)
