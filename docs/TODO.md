@@ -72,8 +72,9 @@ The existing 20 `NivaraRowTests` must keep passing unchanged.
 
 ### 3. (Optional) `tests/Nivara.PerformanceTests/Program.cs` — scenario
 
-Add a `Run("Row.Where NullableElement GetValue", …)` scenario so the win shows in `--compare`
-bytes/op output. Optional; correctness + allocation-guard tests are primary.
+Add a `Run("Row.Where nullable-element GetValue", …)` scenario so the win shows in `--compare`
+bytes/op output. DONE — registered in a new `RunRowWhereScenarios()` (100k rows); prints as a
+NEW baseline row (not gated) until a future harness baseline records it.
 
 ## Blast radius
 
@@ -93,17 +94,22 @@ bytes/op output. Optional; correctness + allocation-guard tests are primary.
 ## Verification
 
 1. `dotnet build Nivara.slnx`
-2. `dotnet test` on `tests/Nivara.Tests` (ask before running — AGENTS.md)
-3. Allocation guard test confirms 0 B/row steady-state nullable-element reads.
+2. `dotnet test` on `tests/Nivara.Tests` (ask before running — AGENTS.md) — DONE: full suite
+   3287 passed / 1 failed; the sole failure (`Transpose_PerformanceProbe_...`) reproduces on
+   `main` (2 of 3 isolated runs) — pre-existing timing flake, tracked as issue #350.
+3. Allocation guard test confirms 0 B/row steady-state nullable-element reads — DONE
+   (`NivaraRowTests` 24/24 across 3 runs).
 
 ## Planned commits
 
-1. `docs: plan issue #347 — nullable GetValue reflection fix in TODO.md`
-2. `feat: allocation-free nullable-element GetValue/TryGetValue reads (issue #347)` —
-   `src/Nivara/NivaraRow.cs`
-3. `test: guard nullable-element Where() read-path allocation parity (issue #347)` —
-   `tests/Nivara.Tests/NivaraRowTests.cs`
-4. `docs: remove TODO.md — issue #347 plan executed` (then offer push + PR)
+1. ✓ `docs: plan issue #347 — nullable GetValue reflection fix in TODO.md` — committed `7c4b474`
+2. ✓ `feat: allocation-free nullable-element GetValue/TryGetValue reads (issue #347)` —
+   `src/Nivara/NivaraRow.cs` — committed `c81dd60`
+3. ✓ `test: guard nullable-element Where() read-path allocation parity (issue #347)` —
+   `tests/Nivara.Tests/NivaraRowTests.cs` — committed `da488ad`
+4. `perf: add Row.Where nullable-element GetValue scenario (issue #347)` —
+   `tests/Nivara.PerformanceTests/Program.cs`
+5. `docs: remove TODO.md — issue #347 plan executed` (then offer push + PR)
 
 ## GitHub issues log
 
@@ -112,3 +118,6 @@ bytes/op output. Optional; correctness + allocation-guard tests are primary.
 - [ ] #349 — `FilterByMask`/`ReorderColumn` per-element boxing for nullable-element columns
   (created while working on #347: nullable-element columns fall off the typed
   `ColumnFilterHelper` branch into the boxed `GetValue` fallback, ~24 B/row)
+- [ ] #350 — Transpose perf-probe test is flaky on this machine (created while running the full
+  `Nivara.Tests` suite; fails ~2 of 3 isolated runs on `main` — timing-sensitive `#136` gate,
+  unrelated to the #347 change)
