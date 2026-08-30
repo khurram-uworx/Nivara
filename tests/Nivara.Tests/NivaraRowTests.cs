@@ -110,11 +110,98 @@ public class NivaraRowTests
     }
 
     [Test]
+    public void GetValue_NullableElementColumn_TypeMismatch_ThrowsColumnTypeMismatchException()
+    {
+        var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Age", ages));
+
+        Assert.Throws<ColumnTypeMismatchException>(() => frame.Where(row => row.GetValue<long>("Age") > 0));
+    }
+
+    [Test]
     public void GetValue_BlankColumnName_ThrowsArgumentException()
     {
         using var frame = CreateFrame();
 
         Assert.Throws<ArgumentException>(() => frame.Where(row => row.GetValue<int>("  ") > 0));
+    }
+
+    [Test]
+    public void GetValue_NullableElementColumn_ReadsUnderlyingValue()
+    {
+        var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Age", ages));
+
+        var result = frame.Where(row => !row.IsNull("Age") && row.GetValue<int>("Age") > 15);
+
+        Assert.That(result.RowCount, Is.EqualTo(1));
+        Assert.That(result.GetColumn<string>("Name")[0], Is.EqualTo("c"));
+    }
+
+    [Test]
+    public void GetValue_NullableElementColumn_NullCell_ReturnsDefault()
+    {
+        var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Age", ages));
+
+        var result = frame.Where(row =>
+            row.RowIndex == 1
+            ? row.IsNull("Age") && row.GetValue<int>("Age") == default
+            : false);
+
+        Assert.That(result.RowCount, Is.EqualTo(1));
+        Assert.That(result.GetColumn<string>("Name")[0], Is.EqualTo("b"));
+    }
+
+    [Test]
+    public void GetValue_NullableElementType_ReadsNullableValue()
+    {
+        var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Age", ages));
+
+        var result = frame.Where(row => row.GetValue<int?>("Age") is null);
+
+        Assert.That(result.RowCount, Is.EqualTo(1));
+        Assert.That(result.GetColumn<string>("Name")[0], Is.EqualTo("b"));
+    }
+
+    [Test]
+    public void TryGetValue_NullableElementColumn_ReturnsTrueWithValue()
+    {
+        var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Age", ages));
+
+        var result = frame.Where(row => row.TryGetValue<int>("Age", out var age) && !row.IsNull("Age") && age > 15);
+
+        Assert.That(result.RowCount, Is.EqualTo(1));
+        Assert.That(result.GetColumn<string>("Name")[0], Is.EqualTo("c"));
+    }
+
+    [Test]
+    public void TryGetValue_NullableElementColumn_NullCell_ReturnsDefault()
+    {
+        var ages = NivaraColumn<int?>.Create(new int?[] { 10, null, 30 });
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(new[] { "a", "b", "c" })),
+            ("Age", ages));
+
+        var result = frame.Where(row =>
+            row.RowIndex == 1
+            ? row.TryGetValue<int>("Age", out var age) && row.IsNull("Age") && age == default
+            : false);
+
+        Assert.That(result.RowCount, Is.EqualTo(1));
+        Assert.That(result.GetColumn<string>("Name")[0], Is.EqualTo("b"));
     }
 
     [Test]
