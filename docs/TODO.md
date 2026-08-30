@@ -79,10 +79,12 @@ consistent and fast. It is a rare cold path; the common `IColumn<T>` cast remain
 
 ## Planned commits
 
-1. `docs: plan fix for issue #344 (nullable-element row casts) in TODO.md`
-2. `fix NivaraRow nullable-element GetValue<T>/TryGetValue<T> casts` (+ tests)
-3. `harden NivaraFlux ReadColumnFast<T> against nullable-element columns` (+ round-trip test)
+1. `docs: plan fix for issue #344 (nullable-element row casts) in TODO.md` — ✅ 5ceea2b
+2. `fix NivaraRow nullable-element GetValue<T>/TryGetValue<T> casts` (+ tests) — ✅ f2826c5
+3. `harden NivaraFlux ReadColumnFast<T> against nullable-element columns` (+ round-trip test) — ✅ 8f74af4
+
+All three landed; #344 is resolved on this branch.
 
 ## GitHub issues log
 
-- (none yet — this plan directly resolves #344)
+- [ ] #347 — Reflective `GetValue<T>` nullable-element unwrap can bottleneck hot loops (created while working on #344 row-materialization fix)
