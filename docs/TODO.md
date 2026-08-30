@@ -68,8 +68,11 @@ readonly HashSet<string> carryOutputNames = new(StringComparer.OrdinalIgnoreCase
   `CollectCarrySlots` collects (top-level `WindowExpression` of a cumulative kind), so the slot
   set and the pruned set always agree. If the pruned select would have zero columns (a select of
   only cumulative windows), set `reRunBoundaryOp = null`.
-- **Standalone cumulative path** (`boundaryOp is CumulativeOperation`): its only output is a carry
-  slot, so `reRunBoundaryOp = null` (the boundary re-run is fully redundant).
+- **Standalone cumulative path** (`boundaryOp is CumulativeOperation`): its only window output is a
+  carry slot, but `WindowOperationBase.Execute` still passes the source columns through, so
+  `reRunBoundaryOp` is a minimal `PassthroughOperation` that echoes `run` (source columns only,
+  no cumulative re-materialization). This keeps the emitted frame's source columns without the
+  overflow-prone mid-run product.
 - **Rolling / Shift paths** are unaffected (no carry slots; re-run context supplies correct
   lookback/lookahead history, no cumulative re-materialization).
 
@@ -84,7 +87,8 @@ var runStart = totalRowsSeen - contextLength;
 IReadOnlyDictionary<string, IColumn> result = reRunBoundaryOp is not null
     ? reRunBoundaryOp.Execute(run)
     : new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
-// (reRunBoundaryOp being null means every boundary column is owned by a carry slot.)
+// (reRunBoundaryOp is null only for an all-carry SelectOperation, which passes no source columns
+// through and needs zero boundary re-computation.)
 ```
 
 Build `emitted` only from non-carry keys of `result`:
@@ -99,11 +103,12 @@ foreach (var slot in carrySlots)
     emitted[slot.OutputName] = carryColumnForEmission(slot, processedChunk, emitCount);
 ```
 
-Set `lastRunResult = result` as today. **`Flush` is unchanged**: when `reRunBoundaryOp == null`
-every boundary column is a carry slot, which implies `leadDistance == 0`, so `Flush` early-returns
-at `emittedCount >= totalRowsSeen` and never reaches `getRowLength(lastRunResult)`. In mixed cases
-the pruned `result` is non-empty (carry slots excluded from emission but present in the dict) and
-`Flush` slices non-carry keys from it exactly as before.
+Set `lastRunResult = result` as today. **`Flush` is unchanged**: `reRunBoundaryOp` is null only for
+an all-carry SelectOperation (every boundary column a carry slot → `leadDistance == 0`), so `Flush`
+early-returns at `emittedCount >= totalRowsSeen` and never reaches `getRowLength(lastRunResult)`. In
+mixed select cases the pruned `result` is non-empty (carry slots excluded from emission but present
+in the dict) and in the standalone/passthrough case `result` is `run` itself (non-empty) — `Flush`
+slices non-carry keys from each exactly as before.
 
 ## Correctness notes / edge cases
 
