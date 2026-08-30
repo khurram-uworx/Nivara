@@ -1540,6 +1540,33 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Property_StreamingVsLazy_CumulativeProduct_IntSource_AllCarrySelect_MatchesLazy()
+    {
+        // A SelectOperation whose only column is a cumulative window is an all-carry select:
+        // reRunBoundaryOp is null and the emitted frame has just the carry column. data[i] = i.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.CumulativeProduct(ColumnExpressions.Col("A")),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), "should stream multiple chunks");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
     public void Property_StreamingVsLazy_CumulativeProduct_IntSource_BoundedValues_MatchesLazy()
     {
         // Values bounded so the true carried product stays small (product alternates and never grows).
