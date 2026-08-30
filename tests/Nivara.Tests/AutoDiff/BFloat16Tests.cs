@@ -1,4 +1,3 @@
-using System.Numerics;
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Extensions;
 using Nivara.AutoDiff.Nn;
@@ -7,6 +6,7 @@ using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Optimizer;
 using Nivara.AutoDiff.Utilities;
 using NUnit.Framework;
+using System.Numerics;
 
 namespace Nivara.Tests.AutoDiff;
 

@@ -2,10 +2,8 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Nn.Functional;
 using Nivara.AutoDiff.Optimizer;
-using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
 using Nivara.Expressions;
-using Nivara.Query;
 using Nivara.Streamix;
 using Streamix;
 

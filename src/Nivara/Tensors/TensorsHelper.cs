@@ -1,7 +1,6 @@
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Nivara.Tensors;
