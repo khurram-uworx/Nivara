@@ -1897,6 +1897,122 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Property_StreamingVsLazy_LeadWithCumulativeMaxMinProduct_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.CumulativeMax(ColumnExpressions.Col("A")),
+            ColumnExpressions.CumulativeMin(ColumnExpressions.Col("A")),
+            ColumnExpressions.CumulativeProduct(ColumnExpressions.Col("A") % 10),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        foreach (var memoryBudget in chunkEquivalenceBudgets)
+        {
+            var streamingSource = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+            var plan = new QueryPlan(streamingSource, new IQueryOperation[] { select });
+            var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+            context.MemoryBudget = memoryBudget;
+
+            using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+            Assert.That(streamingSource.ChunksRead.Count, Is.GreaterThan(1),
+                $"Budget {memoryBudget} should stream multiple chunks");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+        }
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_LeadWithCumulativeSum_NullableSource_MatchesWithMasks()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("B"),
+            ColumnExpressions.CumulativeSum(ColumnExpressions.Col("B")),
+            ColumnExpressions.Lead(ColumnExpressions.Col("B"), 2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 3000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateNullableChunkedSource(rowCount: 3000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 512;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_NegativeShiftWithCumulativeSumAndMax_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.CumulativeSum(ColumnExpressions.Col("A")),
+            ColumnExpressions.CumulativeMax(ColumnExpressions.Col("A")),
+            ColumnExpressions.Shift(ColumnExpressions.Col("A"), -2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 2000),
+            new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 271;
+
+        using var result = new StreamingExecutionStrategy().Execute(streamingPlan, context);
+
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_LeadWithCumulativeSum_DecimalSource_MatchesLazy()
+    {
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<decimal>("A"),
+            ColumnExpressions.CumulativeSum(ColumnExpressions.Col("A")),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            new DecimalChunkedSource(2000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var streamingSource = new DecimalChunkedSource(2000);
+        var plan = new QueryPlan(streamingSource, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 271;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(streamingSource.ChunksRead.Count, Is.GreaterThan(1),
+            "ChunkSize 271 should stream multiple chunks");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
     public void Execute_LeadSelect_TinyChunksSmallerThanLeadDistance_MatchesLazy()
     {
         var lazyStrategy = new LazyExecutionStrategy();
@@ -2248,6 +2364,51 @@ sealed class DoubleChunkedSource : IQuerySource
         var data = new double[length];
         for (int i = 0; i < length; i++) data[i] = ValueAt(start + i);
         return new Dictionary<string, IColumn> { ["V"] = NivaraColumn<double>.Create(data) };
+    }
+
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.Yield();
+        return ReadChunk(chunkIndex, chunkSize);
+    }
+
+    public void Dispose() { }
+}
+
+sealed class DecimalChunkedSource : IQuerySource
+{
+    readonly int totalRowCount;
+
+    public DecimalChunkedSource(int totalRowCount)
+    {
+        this.totalRowCount = totalRowCount;
+    }
+
+    public Schema Schema => new(new[] { ("A", typeof(decimal)) });
+    public bool IsLazy => false;
+    public bool CanReadInChunks => true;
+    public int? EstimatedRowCount => totalRowCount;
+    public System.Collections.Concurrent.ConcurrentBag<int> ChunksRead { get; } = new();
+
+    public IReadOnlyDictionary<string, IColumn> Execute()
+    {
+        var data = new decimal[totalRowCount];
+        for (int i = 0; i < totalRowCount; i++) data[i] = i + 0.5m;
+        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<decimal>.Create(data) };
+    }
+
+    public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
+    {
+        ChunksRead.Add(chunkIndex);
+        var start = chunkIndex * chunkSize;
+        if (start >= totalRowCount)
+            return new Dictionary<string, IColumn>();
+        var length = Math.Min(chunkSize, totalRowCount - start);
+        var data = new decimal[length];
+        for (int i = 0; i < length; i++) data[i] = start + i + 0.5m;
+        return new Dictionary<string, IColumn> { ["A"] = NivaraColumn<decimal>.Create(data) };
     }
 
     public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(

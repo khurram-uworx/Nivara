@@ -103,4 +103,5 @@ All assert `ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result)`
 
 ## GitHub issues log
 
-- (empty — no deferred work expected so far; create and record issues here at discovery time)
+- [ ] #358 — StreamingWindowProcessor per-run re-materialization can overflow int-family
+      CumulativeProduct (found while adding #356 tests; pre-existing, outside this plan)
