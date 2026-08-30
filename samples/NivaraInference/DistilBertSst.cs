@@ -24,74 +24,68 @@ static class DistilBertSst
 
     public const string LabelsPath = "samples/data/compare_distilbert_sst_cs.bin";
 
-    public static DistilBertForSequenceClassification<float> Load(
-        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+    public static DistilBertForSequenceClassification<T> Load<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors,
         string modelDir)
+        where T : struct, IFloatingPointIeee754<T>
     {
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var model = new DistilBertForSequenceClassification<float>(config.ToBertConfig(), numClasses: 2);
-        model.LoadWeights(tensors);
+        var model = new DistilBertForSequenceClassification<T>(config.ToBertConfig(), numClasses: 2);
+        model.LoadWeights<T>(tensors);
         return model;
     }
 
     public static BertTokenizer LoadTokenizer(string modelDir)
         => MiniLMTokenizer.Load(Path.Combine(modelDir, "vocab.txt"));
 
+    public static ReverseGradTensor<T> PredictLogits<T>(
+        DistilBertForSequenceClassification<T> model,
+        BertTokenizer tokenizer,
+        string text,
+        int maxLen)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => T.CreateChecked(x)));
+        return model.Forward(intIds, mask, 1, intIds.Length);
+    }
+
+    public static DistilBertForSequenceClassification<float> Load(
+        Dictionary<string, (float[] Data, int[] Shape)> tensors,
+        string modelDir)
+        => Load<float>(tensors, modelDir);
+
     public static ReverseGradTensor<float> PredictLogits(
         DistilBertForSequenceClassification<float> model,
         BertTokenizer tokenizer,
         string text,
         int maxLen)
-    {
-        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen);
-        var inputIds = GradientUtils.Constant(tokenIds);
-        var mask = GradientUtils.Constant(attnMask);
-        return model.Forward(inputIds, mask, 1, tokenIds.Length);
-    }
+        => PredictLogits<float>(model, tokenizer, text, maxLen);
 
     public static DistilBertForSequenceClassification<BFloat16> LoadBFloat16(
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors,
         string modelDir)
-    {
-        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var model = new DistilBertForSequenceClassification<BFloat16>(config.ToBertConfig(), numClasses: 2);
-        model.LoadWeights<BFloat16>(tensors);
-        return model;
-    }
+        => Load<BFloat16>(tensors, modelDir);
 
     public static ReverseGradTensor<BFloat16> PredictLogitsBFloat16(
         DistilBertForSequenceClassification<BFloat16> model,
         BertTokenizer tokenizer,
         string text,
         int maxLen)
-    {
-        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen);
-        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
-        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => (BFloat16)x));
-        return model.Forward(intIds, mask, 1, intIds.Length);
-    }
+        => PredictLogits<BFloat16>(model, tokenizer, text, maxLen);
 
     public static DistilBertForSequenceClassification<Half> LoadHalf(
         Dictionary<string, (Half[] Data, int[] Shape)> tensors,
         string modelDir)
-    {
-        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
-        var model = new DistilBertForSequenceClassification<Half>(config.ToBertConfig(), numClasses: 2);
-        model.LoadWeights<Half>(tensors);
-        return model;
-    }
+        => Load<Half>(tensors, modelDir);
 
     public static ReverseGradTensor<Half> PredictLogitsHalf(
         DistilBertForSequenceClassification<Half> model,
         BertTokenizer tokenizer,
         string text,
         int maxLen)
-    {
-        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen);
-        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
-        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => (Half)x));
-        return model.Forward(intIds, mask, 1, intIds.Length);
-    }
+        => PredictLogits<Half>(model, tokenizer, text, maxLen);
 
     public static (int ArgMax, float[] Probs) Softmax(ReverseGradTensor<float> logits)
     {
