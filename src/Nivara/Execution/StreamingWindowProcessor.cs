@@ -51,10 +51,97 @@ internal sealed class StreamingWindowProcessor
         public bool HasState { get; set; }
         public object? State { get; set; }
 
-        // Delayed-emission queue of cumulative values computed for rows whose results are
-        // not yet emitted (used only when leadDistance > 0). Null entries mark null cells.
-        public Queue<object?> PendingValues { get; } = new();
+        // Delayed-emission staging of cumulative values computed for rows whose results
+        // are not yet emitted (used only when leadDistance > 0). Created lazily on the
+        // first carry; null cells are preserved via the buffer's null mask.
+        public PendingColumnBuffer? PendingBuffer { get; set; }
         public Type? ElementType { get; set; }
+    }
+
+    /// <summary>
+    /// Typed staging for cumulative values whose emission is delayed by a lookahead
+    /// window. Subclasses remove the per-element boxing the previous boxed queue
+    /// incurred while preserving null cells through a null mask.
+    /// </summary>
+    abstract class PendingColumnBuffer
+    {
+        public abstract int Count { get; }
+        public abstract void Enqueue(IColumn corrected);
+        public abstract IColumn Dequeue(int count);
+    }
+
+    /// <summary>
+    /// Null-aware staging for a numeric <see cref="NivaraColumn{T}"/>: values queue as
+    /// <see cref="Nullable{T}"/> (no boxing) and dequeue into caller-owned arrays plus a
+    /// null mask, materialized without an object[] round trip.
+    /// </summary>
+    sealed class TypedPendingColumnBuffer<T> : PendingColumnBuffer
+        where T : struct
+    {
+        readonly Queue<T?> values = new();
+
+        public override int Count => values.Count;
+
+        public override void Enqueue(IColumn column)
+        {
+            var typed = (NivaraColumn<T>)column;
+            for (var i = 0; i < typed.Length; i++)
+                values.Enqueue(typed.IsNull(i) ? null : typed[i]);
+        }
+
+        public override IColumn Dequeue(int count)
+        {
+            var data = new T[count];
+            var nullMask = new bool[count];
+            var hasNulls = false;
+            for (var i = 0; i < count; i++)
+            {
+                var value = values.Dequeue();
+                if (value.HasValue)
+                    data[i] = value.Value;
+                else
+                {
+                    nullMask[i] = true;
+                    hasNulls = true;
+                }
+            }
+
+            return hasNulls
+                ? NivaraColumn<T>.CreateFromOwnedArrays(data, nullMask)
+                : NivaraColumn<T>.CreateFromOwnedArray(data);
+        }
+    }
+
+    /// <summary>
+    /// Fallback staging for reference-typed or unknown columns, preserving the prior
+    /// boxed object[] behavior.
+    /// </summary>
+    sealed class BoxedPendingBuffer : PendingColumnBuffer
+    {
+        readonly Queue<object?> values = new();
+        readonly Type elementType;
+
+        public BoxedPendingBuffer(Type elementType)
+        {
+            this.elementType = elementType;
+        }
+
+        public override int Count => values.Count;
+
+        public override void Enqueue(IColumn column)
+        {
+            for (var i = 0; i < column.Length; i++)
+                values.Enqueue(column.IsNull(i) ? null : column.GetValue(i));
+        }
+
+        public override IColumn Dequeue(int count)
+        {
+            var boxed = new object?[count];
+            for (var i = 0; i < count; i++)
+                boxed[i] = values.Dequeue();
+
+            return ColumnFactory.Create(elementType, boxed);
+        }
     }
 
     readonly IQueryOperation boundaryOp;
@@ -289,30 +376,53 @@ internal sealed class StreamingWindowProcessor
 
         // Cumulative values are computed over the fresh rows only: re-run context rows
         // were already counted into the carried state when they were fresh. Values wait in
-        // the slot's queue until their row enters the emitted range.
+        // the slot's buffer until their row enters the emitted range.
         slot.ElementType ??= corrected.ElementType;
-        for (var i = 0; i < corrected.Length; i++)
-            slot.PendingValues.Enqueue(corrected.IsNull(i) ? null : corrected.GetValue(i));
+        slot.PendingBuffer ??= createPendingBuffer(corrected);
+        slot.PendingBuffer.Enqueue(corrected);
 
         return buildDeferredPrefix(slot, emitCount);
     }
 
     IColumn buildDeferredPrefix(CarrySlot slot, int count)
-    {
-        var values = new object?[count];
-        for (var i = 0; i < count; i++)
-            values[i] = slot.PendingValues.Dequeue();
-
-        return ColumnFactory.Create(slot.ElementType ?? typeof(long), values);
-    }
+        => slot.PendingBuffer!.Dequeue(count);
 
     IColumn buildDeferredColumn(CarrySlot slot)
     {
-        var values = new object?[slot.PendingValues.Count];
-        for (var i = 0; i < values.Length; i++)
-            values[i] = slot.PendingValues.Dequeue();
+        if (slot.PendingBuffer is { } buffer && buffer.Count > 0)
+            return buffer.Dequeue(buffer.Count);
 
-        return ColumnFactory.Create(slot.ElementType ?? typeof(long), values);
+        return ColumnFactory.Create(slot.ElementType ?? typeof(long), []);
+    }
+
+    /// <summary>
+    /// Creates the null-aware typed staging buffer matching the corrected column's
+    /// element type, falling back to boxed staging for any non-numeric column.
+    /// </summary>
+    static PendingColumnBuffer createPendingBuffer(IColumn corrected)
+    {
+        return corrected switch
+        {
+            NivaraColumn<int> => new TypedPendingColumnBuffer<int>(),
+            NivaraColumn<long> => new TypedPendingColumnBuffer<long>(),
+            NivaraColumn<float> => new TypedPendingColumnBuffer<float>(),
+            NivaraColumn<double> => new TypedPendingColumnBuffer<double>(),
+            NivaraColumn<decimal> => new TypedPendingColumnBuffer<decimal>(),
+            NivaraColumn<byte> => new TypedPendingColumnBuffer<byte>(),
+            NivaraColumn<sbyte> => new TypedPendingColumnBuffer<sbyte>(),
+            NivaraColumn<short> => new TypedPendingColumnBuffer<short>(),
+            NivaraColumn<ushort> => new TypedPendingColumnBuffer<ushort>(),
+            NivaraColumn<uint> => new TypedPendingColumnBuffer<uint>(),
+            NivaraColumn<ulong> => new TypedPendingColumnBuffer<ulong>(),
+            NivaraColumn<char> => new TypedPendingColumnBuffer<char>(),
+            NivaraColumn<nint> => new TypedPendingColumnBuffer<nint>(),
+            NivaraColumn<nuint> => new TypedPendingColumnBuffer<nuint>(),
+            NivaraColumn<Int128> => new TypedPendingColumnBuffer<Int128>(),
+            NivaraColumn<UInt128> => new TypedPendingColumnBuffer<UInt128>(),
+            NivaraColumn<Half> => new TypedPendingColumnBuffer<Half>(),
+            NivaraColumn<BFloat16> => new TypedPendingColumnBuffer<BFloat16>(),
+            _ => new BoxedPendingBuffer(corrected.ElementType)
+        };
     }
 
     static IColumn sliceRange(IColumn column, int start, int count)
