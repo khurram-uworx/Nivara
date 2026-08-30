@@ -6,6 +6,16 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Changed
 
+- **Nested (non-slot) cumulative windows fall back to exact boundary materialization (#360)** —
+  `StreamingWindowProcessor.isStreamableNode` now only admits a cumulative window
+  (`CumulativeSum`/`CumulativeMax`/`CumulativeMin`/`CumulativeProduct`/`CumulativeCount`)
+  when it is a top-level carry slot. A cumulative window nested inside a larger expression
+  (e.g. `CumulativeProduct(Col("A")) + Col("B")`) previously passed the streamable check
+  but was not a carry slot, so per-chunk boundary runs re-scanned the cumulative from the
+  run's first value — wrong values for sums/max/min and checked-`long` `OverflowException`
+  for int-family products. Such selects now materialize the boundary once, exactly like
+  rank/broadcast windows; top-level cumulative windows keep chunked carry-slot streaming.
+
 - **net11 BCL tensor swap targets verified (#136)** — `TensorsHelper` MatMul/Transpose
   annotations now reflect the verified state of `System.Numerics.Tensors`
   11.0.0-preview.7: `Tensor.Transpose<T>` ships as a zero-copy strided view, so the
