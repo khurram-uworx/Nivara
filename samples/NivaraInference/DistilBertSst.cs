@@ -71,6 +71,28 @@ static class DistilBertSst
         return model.Forward(intIds, mask, 1, intIds.Length);
     }
 
+    public static DistilBertForSequenceClassification<Half> LoadHalf(
+        Dictionary<string, (Half[] Data, int[] Shape)> tensors,
+        string modelDir)
+    {
+        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+        var model = new DistilBertForSequenceClassification<Half>(config.ToBertConfig(), numClasses: 2);
+        model.LoadWeights<Half>(tensors);
+        return model;
+    }
+
+    public static ReverseGradTensor<Half> PredictLogitsHalf(
+        DistilBertForSequenceClassification<Half> model,
+        BertTokenizer tokenizer,
+        string text,
+        int maxLen)
+    {
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => (Half)x));
+        return model.Forward(intIds, mask, 1, intIds.Length);
+    }
+
     public static (int ArgMax, float[] Probs) Softmax(ReverseGradTensor<float> logits)
     {
         int n = logits.Shape[^1];
@@ -183,6 +205,50 @@ static class DistilBertSst
             fs.Write(MemoryMarshal.AsBytes(probs.AsSpan()));
         }
         Console.WriteLine($"Saved BFloat16 logits + softmax probs to {path}");
+    }
+
+    public static void SaveHalfCompareOutput(
+        Dictionary<string, (Half[] Data, int[] Shape)> tensors,
+        string modelDir,
+        string path)
+    {
+        var model = LoadHalf(tensors, modelDir);
+        var tokenizer = LoadTokenizer(modelDir);
+        model.Eval();
+
+        int n = CompareSentences.Length;
+        var logits = new float[n * 2];
+        var probs = new float[n * 2];
+
+        for (int s = 0; s < n; s++)
+        {
+            var output = PredictLogitsHalf(model, tokenizer, CompareSentences[s], maxLen: 128);
+            int len = output.Shape[^1];
+            var halfLogits = new float[len];
+            output.Data.TryGetSpan(out var span);
+            if (!span.IsEmpty)
+            {
+                int take = Math.Min(len, span.Length);
+                for (int i = 0; i < take; i++)
+                    halfLogits[i] = (float)span[i];
+            }
+
+            var (argMax, p) = Softmax(halfLogits.AsSpan());
+            logits[s * 2] = halfLogits[0];
+            logits[s * 2 + 1] = halfLogits[1];
+            probs[s * 2] = p[0];
+            probs[s * 2 + 1] = p[1];
+            Console.WriteLine($"  [{s}] {Label(argMax),8} ({p[argMax] * 100:F1}%)  \"{CompareSentences[s]}\"");
+        }
+
+        using (var fs = File.Create(path))
+        {
+            var header = BitConverter.GetBytes(n);
+            fs.Write(header, 0, 4);
+            fs.Write(MemoryMarshal.AsBytes(logits.AsSpan()));
+            fs.Write(MemoryMarshal.AsBytes(probs.AsSpan()));
+        }
+        Console.WriteLine($"Saved Half logits + softmax probs to {path}");
     }
 
     public static void PrintCompareDiff(
