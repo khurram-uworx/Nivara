@@ -57,9 +57,16 @@ underlying `T`, mismatch throws, `TryGetValue` false paths — all identical.
 ### 2. `tests/Nivara.Tests/NivaraRowTests.cs` — allocation regression guard
 
 Add a guard in the `Tensors/WindowAllocationTests.cs` style (`MeasureOnce`/`MeasureBestOf`):
-`Where` over a nullable-element `NivaraColumn<int?>` vs a mask-based `NivaraColumn<int>` (same
-frame shape, ~10 000 rows) must allocate comparably (`allocNullable <= allocOrdinary + margin`).
-Old path would allocate ~88 B × rows ≈ 880 KB → guard fails only on a real regression.
+on the **same** nullable-element frame (~10 000 rows), `Where(row => row.GetValue<int>("Age") > 15)`
+must allocate comparably to `Where(row => row.RowIndex >= 0)` (filter-only baseline),
+`readAlloc <= baselineAlloc + 32 KB`. Old path added ~88 B × 10 000 ≈ 880 KB → guard fails only
+on a real regression. Measured (probe vs real Nivara assembly): read path delta is ~0 after fix.
+
+Note: comparing a nullable-element frame against a mask-based frame for the same `Where`
+**also** shows ~24 B/row of frame-construction cost, but that is a separate per-element boxing
+in `ColumnFilterHelper.createFilteredColumnTyped` (nullable-element columns fall off the
+`column is NivaraColumn<T>` typed branch into the boxed `GetValue` fallback) — tracked as
+issue #349, out of scope here.
 
 The existing 20 `NivaraRowTests` must keep passing unchanged.
 
@@ -94,7 +101,7 @@ bytes/op output. Optional; correctness + allocation-guard tests are primary.
 1. `docs: plan issue #347 — nullable GetValue reflection fix in TODO.md`
 2. `feat: allocation-free nullable-element GetValue/TryGetValue reads (issue #347)` —
    `src/Nivara/NivaraRow.cs`
-3. `test: guard nullable-element Where() allocation parity (issue #347)` —
+3. `test: guard nullable-element Where() read-path allocation parity (issue #347)` —
    `tests/Nivara.Tests/NivaraRowTests.cs`
 4. `docs: remove TODO.md — issue #347 plan executed` (then offer push + PR)
 
@@ -102,3 +109,6 @@ bytes/op output. Optional; correctness + allocation-guard tests are primary.
 
 - [ ] #347 — Reflective `GetValue<T>` nullable-element unwrap can bottleneck hot loops
   (this plan)
+- [ ] #349 — `FilterByMask`/`ReorderColumn` per-element boxing for nullable-element columns
+  (created while working on #347: nullable-element columns fall off the typed
+  `ColumnFilterHelper` branch into the boxed `GetValue` fallback, ~24 B/row)
