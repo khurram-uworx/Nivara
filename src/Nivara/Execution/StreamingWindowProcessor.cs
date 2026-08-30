@@ -1,6 +1,7 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Helpers;
+using System.Numerics;
 using Nivara.Operations;
 using Nivara.Query;
 
@@ -408,6 +409,63 @@ internal sealed class StreamingWindowProcessor
     }
 
     static IColumn AddConstant(IColumn column, long constant)
+    {
+        return column switch
+        {
+            NivaraColumn<int> c => addConstant(c, constant),
+            NivaraColumn<long> c => addConstant(c, constant),
+            NivaraColumn<float> c => addConstant(c, constant),
+            NivaraColumn<double> c => addConstant(c, constant),
+            NivaraColumn<decimal> c => addConstant(c, constant),
+            NivaraColumn<byte> c => addConstant(c, constant),
+            NivaraColumn<sbyte> c => addConstant(c, constant),
+            NivaraColumn<short> c => addConstant(c, constant),
+            NivaraColumn<ushort> c => addConstant(c, constant),
+            NivaraColumn<uint> c => addConstant(c, constant),
+            NivaraColumn<ulong> c => addConstant(c, constant),
+            NivaraColumn<char> c => addConstant(c, constant),
+            NivaraColumn<nint> c => addConstant(c, constant),
+            NivaraColumn<nuint> c => addConstant(c, constant),
+            NivaraColumn<Int128> c => addConstant(c, constant),
+            NivaraColumn<UInt128> c => addConstant(c, constant),
+            NivaraColumn<Half> c => addConstant(c, constant),
+            NivaraColumn<BFloat16> c => addConstant(c, constant),
+            _ => addConstantBoxed(column, constant)
+        };
+    }
+
+    static IColumn addConstant<T>(NivaraColumn<T> column, long constant)
+        where T : struct, INumber<T>
+    {
+        var result = new T[column.Length];
+        if (column.TryGetSpan(out var span))
+        {
+            NumericTensorKernels<T>.Add(span, T.CreateChecked(constant), result);
+            return NivaraColumn<T>.CreateFromOwnedArray(result);
+        }
+
+        var nullMask = new bool[column.Length];
+        var hasNulls = false;
+        var offset = T.CreateChecked(constant);
+        for (var i = 0; i < column.Length; i++)
+        {
+            if (column.IsNull(i))
+            {
+                nullMask[i] = true;
+                hasNulls = true;
+            }
+            else
+            {
+                result[i] = column[i] + offset;
+            }
+        }
+
+        return hasNulls
+            ? NivaraColumn<T>.CreateFromSpans(result, nullMask)
+            : NivaraColumn<T>.CreateFromOwnedArray(result);
+    }
+
+    static IColumn addConstantBoxed(IColumn column, long constant)
     {
         var values = new object?[column.Length];
         for (var i = 0; i < column.Length; i++)
