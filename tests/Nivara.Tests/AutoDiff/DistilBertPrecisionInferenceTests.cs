@@ -71,13 +71,13 @@ public class DistilBertPrecisionInferenceTests
         int agree = 0;
         for (int s = 0; s < CompareSentences.Length; s++)
         {
-            var (f32Ids, f32Mask, f32Len) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
+            var (f32Ids, f32Mask, _) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
             var f32Logits = f32Model.Forward(Array.ConvertAll(f32Ids, x => (int)x),
-                GradientUtils.Constant(f32Mask), 1, f32Len);
+                GradientUtils.Constant(f32Mask), 1, f32Ids.Length);
 
-            var (ids, mask, len) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
+            var (ids, mask, _) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
             var halfLogits = halfModel.Forward(Array.ConvertAll(ids, x => (int)x),
-                GradientUtils.Constant(Array.ConvertAll(mask, x => (Half)x)), 1, len);
+                GradientUtils.Constant(Array.ConvertAll(mask, x => (Half)x)), 1, ids.Length);
 
             if (ArgMax(f32Logits.Data[0], f32Logits.Data[1]) == ArgMax((float)halfLogits.Data[0], (float)halfLogits.Data[1]))
                 agree++;
@@ -115,13 +115,13 @@ public class DistilBertPrecisionInferenceTests
         int agree = 0;
         for (int s = 0; s < CompareSentences.Length; s++)
         {
-            var (f32Ids, f32Mask, f32Len) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
+            var (f32Ids, f32Mask, _) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
             var f32Logits = f32Model.Forward(Array.ConvertAll(f32Ids, x => (int)x),
-                GradientUtils.Constant(f32Mask), 1, f32Len);
+                GradientUtils.Constant(f32Mask), 1, f32Ids.Length);
 
-            var (ids, mask, len) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
+            var (ids, mask, _) = MiniLMTokenizer.Encode(tokenizer, CompareSentences[s], maxLen: 128);
             var bf16Logits = bf16Model.Forward(Array.ConvertAll(ids, x => (int)x),
-                GradientUtils.Constant(Array.ConvertAll(mask, x => (BFloat16)x)), 1, len);
+                GradientUtils.Constant(Array.ConvertAll(mask, x => (BFloat16)x)), 1, ids.Length);
 
             if (ArgMax(f32Logits.Data[0], f32Logits.Data[1]) == ArgMax((float)bf16Logits.Data[0], (float)bf16Logits.Data[1]))
                 agree++;
