@@ -167,12 +167,19 @@ public static class NivaraFlux
             namedColumns[colIdx] = (columnNames[colIdx], elementType switch
             {
                 Type t when t == typeof(int) => ReadColumnFast<int>(rows, colIdx, count),
+                Type t when t == typeof(int?) => ReadColumnFast<int>(rows, colIdx, count),
                 Type t when t == typeof(double) => ReadColumnFast<double>(rows, colIdx, count),
+                Type t when t == typeof(double?) => ReadColumnFast<double>(rows, colIdx, count),
                 Type t when t == typeof(float) => ReadColumnFast<float>(rows, colIdx, count),
+                Type t when t == typeof(float?) => ReadColumnFast<float>(rows, colIdx, count),
                 Type t when t == typeof(long) => ReadColumnFast<long>(rows, colIdx, count),
+                Type t when t == typeof(long?) => ReadColumnFast<long>(rows, colIdx, count),
                 Type t when t == typeof(bool) => ReadColumnFast<bool>(rows, colIdx, count),
+                Type t when t == typeof(bool?) => ReadColumnFast<bool>(rows, colIdx, count),
                 Type t when t == typeof(short) => ReadColumnFast<short>(rows, colIdx, count),
+                Type t when t == typeof(short?) => ReadColumnFast<short>(rows, colIdx, count),
                 Type t when t == typeof(byte) => ReadColumnFast<byte>(rows, colIdx, count),
+                Type t when t == typeof(byte?) => ReadColumnFast<byte>(rows, colIdx, count),
                 Type t when t == typeof(string) => ReadColumnFastRef<string>(rows, colIdx, count),
                 _ => ReadColumnBoxed(rows, colIdx, count, elementType),
             });
@@ -187,13 +194,22 @@ public static class NivaraFlux
         bool hasNulls = false;
         for (int i = 0; i < count; i++)
         {
-            if (rows[i].Columns[colIdx].IsNull(rows[i].RowIndex))
+            var col = rows[i].Columns[colIdx];
+            if (col is IColumn<T?> nullableCol)
+            {
+                var value = nullableCol[rows[i].RowIndex];
+                if (value.HasValue)
+                    values[i] = value.GetValueOrDefault();
+                else
+                    hasNulls = true;
+            }
+            else if (col.IsNull(rows[i].RowIndex))
             {
                 hasNulls = true;
             }
             else
             {
-                values[i] = ((IColumn<T>)rows[i].Columns[colIdx])[rows[i].RowIndex];
+                values[i] = ((IColumn<T>)col)[rows[i].RowIndex];
             }
         }
         if (!hasNulls)
@@ -208,6 +224,8 @@ public static class NivaraFlux
 
     static NivaraColumn<T> ReadColumnFastRef<T>(IList<NivaraRow> rows, int colIdx, int count) where T : class
     {
+        // Reference types cannot be nullable-element columns (Nullable<T> requires a value type), so
+        // every reference column here implements IColumn<T> directly and the cast below is always safe.
         var values = new T[count];
         for (int i = 0; i < count; i++)
             values[i] = ((IColumn<T>)rows[i].Columns[colIdx])[rows[i].RowIndex];
