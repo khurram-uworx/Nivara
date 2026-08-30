@@ -1,9 +1,9 @@
 using Nivara.Exceptions;
 using Nivara.Expressions;
 using Nivara.Helpers;
-using System.Numerics;
 using Nivara.Operations;
 using Nivara.Query;
+using System.Numerics;
 
 namespace Nivara.Execution;
 
@@ -144,10 +144,38 @@ internal sealed class StreamingWindowProcessor
         }
     }
 
-    readonly IQueryOperation boundaryOp;
+    /// <summary>
+    /// Echoes the input columns unchanged, mirroring <c>WindowOperationBase.Execute</c>'s source
+    /// passthrough for standalone window operations whose only computed output is a carry slot
+    /// (issue #358). Lets the streaming path keep the source columns in the emitted frame without
+    /// re-materializing the (overflow-prone, mid-run) cumulative over the boundary run.
+    /// </summary>
+    sealed class PassthroughOperation : IQueryOperation
+    {
+        public string OperationType => Query.OperationType.Select;
+
+        public Schema TransformSchema(Schema inputSchema) => inputSchema;
+
+        public IReadOnlyDictionary<string, IColumn> Execute(IReadOnlyDictionary<string, IColumn> input) => input;
+
+        public ValueTask<IReadOnlyDictionary<string, IColumn>> ExecuteAsync(
+            IReadOnlyDictionary<string, IColumn> input, CancellationToken ct = default)
+        {
+            ct.ThrowIfCancellationRequested();
+            return new(input);
+        }
+    }
+
+    // Per-run op evaluating only the non-carry boundary columns. Null only when every select column
+    // is a carry window (all-carry SelectOperation), where no boundary re-computation is needed and
+    // a SelectOperation passes no source columns through. For a standalone CumulativeOperation it is
+    // a source-column passthrough (its only window output is a carry slot, but WindowOperationBase
+    // still passes the source columns through).
+    readonly IQueryOperation? reRunBoundaryOp;
     readonly int contextSize;
     readonly int leadDistance;
     readonly List<CarrySlot> carrySlots = [];
+    readonly HashSet<string> carryOutputNames = new(StringComparer.OrdinalIgnoreCase);
     readonly FusedExpressionEvaluator expressionEvaluator = new();
 
     Dictionary<string, IColumn>? lastRunInput;
@@ -158,15 +186,58 @@ internal sealed class StreamingWindowProcessor
 
     StreamingWindowProcessor(IQueryOperation boundaryOp, SelectOperation? boundarySelect, CumulativeOperation? cumulative, int overlapSize, int leadDistance)
     {
-        this.boundaryOp = boundaryOp;
         // Re-run rows need their own lookback history behind them AND their lookahead
         // ahead of them, so the carried tail must span the sum of both distances.
         this.contextSize = Math.Max(0, overlapSize) + Math.Max(0, leadDistance);
         this.leadDistance = leadDistance;
         if (boundarySelect != null)
+        {
             CollectCarrySlots(boundarySelect);
+            this.reRunBoundaryOp = BuildReducedSelect(boundarySelect);
+        }
         else if (cumulative != null)
+        {
             CollectCarrySlots(cumulative);
+            // WindowOperationBase semantics pass the source columns through; a passthrough yields
+            // them without re-materializing the cumulative over the run (which could overflow, #358).
+            this.reRunBoundaryOp = new PassthroughOperation();
+        }
+        else
+        {
+            this.reRunBoundaryOp = boundaryOp;
+        }
+    }
+
+    /// <summary>
+    /// Builds the per-run boundary select that evaluates only the non-carry columns: each top-level
+    /// carried cumulative window is replaced by its source projection, because its emitted value is
+    /// always overwritten by the carry slot. Re-materializing the cumulative product over a re-run
+    /// (which starts mid-column, not at dataset row 0) would trip the checked long accumulator in
+    /// <c>cumulativeScan</c> (issue #358). Returns null when every select column is a carry window.
+    /// </summary>
+    static SelectOperation? BuildReducedSelect(SelectOperation select)
+    {
+        var columns = new List<ColumnExpression>(select.Columns.Count);
+        var outputNames = new List<string>(select.Columns.Count);
+        var anyRealColumn = false;
+
+        for (var i = 0; i < select.Columns.Count; i++)
+        {
+            var expr = select.Columns[i];
+            if (expr is WindowExpression { Kind: WindowFunctionKind.CumulativeSum or WindowFunctionKind.CumulativeMax or WindowFunctionKind.CumulativeMin or WindowFunctionKind.CumulativeProduct or WindowFunctionKind.CumulativeCount } window)
+            {
+                columns.Add(window.Source!);
+            }
+            else
+            {
+                columns.Add(expr);
+                anyRealColumn = true;
+            }
+
+            outputNames.Add(select.OutputNames is not null ? select.OutputNames[i] : expr.Name);
+        }
+
+        return anyRealColumn ? new SelectOperation(columns.ToArray(), outputNames.ToArray()) : null;
     }
 
     /// <summary>
@@ -237,7 +308,12 @@ internal sealed class StreamingWindowProcessor
         var runLength = contextLength + chunkLength;
         var runStart = totalRowsSeen - contextLength;
 
-        var result = boundaryOp.Execute(run);
+        // Re-run the boundary op over only the non-carry columns. Carry slots compute their
+        // columns from the carried state over the fresh chunk (never re-materialized over the
+        // mid-run start), which both avoids overflow (issue #358) and is the authoritative value.
+        var result = reRunBoundaryOp is not null
+            ? reRunBoundaryOp.Execute(run)
+            : new Dictionary<string, IColumn>(StringComparer.OrdinalIgnoreCase);
 
         // Rows farther than leadDistance from the newest row have their entire lookahead
         // inside this run and are final; the tail rows are re-computed in a later run.
@@ -246,9 +322,12 @@ internal sealed class StreamingWindowProcessor
         var to = (int)Math.Max(from, finalEnd - runStart);
         var emitCount = to - from;
 
-        var emitted = new Dictionary<string, IColumn>(result.Count, StringComparer.OrdinalIgnoreCase);
+        var emitted = new Dictionary<string, IColumn>(result.Count + carrySlots.Count, StringComparer.OrdinalIgnoreCase);
         foreach (var kvp in result)
-            emitted[kvp.Key] = sliceRange(kvp.Value, from, emitCount);
+        {
+            if (!carryOutputNames.Contains(kvp.Key))
+                emitted[kvp.Key] = sliceRange(kvp.Value, from, emitCount);
+        }
 
         foreach (var slot in carrySlots)
             emitted[slot.OutputName] = carryColumnForEmission(slot, processedChunk, emitCount);
@@ -472,6 +551,7 @@ internal sealed class StreamingWindowProcessor
                             : NivaraFrameExtensions.CumulativeKind.Sum,
                 IsCount = window.Kind == WindowFunctionKind.CumulativeCount,
             });
+            carryOutputNames.Add(select.OutputNames is not null ? select.OutputNames[i] : expr.Name);
         }
     }
 
@@ -486,6 +566,7 @@ internal sealed class StreamingWindowProcessor
             Kind = cumulative.Kind,
             IsCount = cumulative.IsCount,
         });
+        carryOutputNames.Add(cumulative.ResultColumn);
     }
 
     IColumn ComputeCarryColumn(CarrySlot slot, IReadOnlyDictionary<string, IColumn> rawChunk)

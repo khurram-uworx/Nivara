@@ -1509,6 +1509,127 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Property_StreamingVsLazy_CumulativeProduct_IntSource_LeadingZero_MatchesLazy()
+    {
+        // Issue #358: streaming must not re-materialize the cumulative product over a mid-run start
+        // (chunk 2 onward). data[i] = i has row-0 = 0, so the full-column product is 0 and well-defined;
+        // the per-run re-materialization used to overflow the checked long accumulator before the carry
+        // column overwrote it. Streaming must stay chunked and match lazy.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.CumulativeProduct(ColumnExpressions.Col("A")),
+            ColumnExpressions.Lead(ColumnExpressions.Col("A"), 2),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), "should stream multiple chunks");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_CumulativeProduct_IntSource_AllCarrySelect_MatchesLazy()
+    {
+        // A SelectOperation whose only column is a cumulative window is an all-carry select:
+        // reRunBoundaryOp is null and the emitted frame has just the carry column. data[i] = i.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.CumulativeProduct(ColumnExpressions.Col("A")),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), "should stream multiple chunks");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_CumulativeProduct_IntSource_BoundedValues_MatchesLazy()
+    {
+        // Values bounded so the true carried product stays small (product alternates and never grows).
+        // Both streaming and lazy must agree without any overflow.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var kinds = new (string Name, Func<ColumnExpression, ColumnExpression> Factory)[]
+        {
+            ("CumulativeSum(V)", s => ColumnExpressions.CumulativeSum(s)),
+            ("CumulativeProduct(V)", s => ColumnExpressions.CumulativeProduct(s)),
+        };
+
+        foreach (var (name, factory) in kinds)
+        {
+            var select = new SelectOperation(new[]
+            {
+                ColumnExpressions.Col<int>("V"),
+                factory(ColumnExpressions.Col("V")),
+            });
+
+            var lazyPlan = new QueryPlan(
+                new IntBoundedChunkedSource(totalRowCount: 6000),
+                new IQueryOperation[] { select });
+            using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+            var source = new IntBoundedChunkedSource(totalRowCount: 6000);
+            var plan = new QueryPlan(source, new IQueryOperation[] { select });
+            var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+            context.ChunkSize = 333;
+
+            using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+            Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), $"{name} should stream multiple chunks");
+            ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+        }
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_StandaloneCumulativeProduct_IntSource_LeadingZero_MatchesLazy()
+    {
+        // Standalone CumulativeOperation with Kind.Product: its only output is a carry slot, so the
+        // per-run boundary re-execution is fully skipped (reRunBoundaryOp == null). data[i] = i.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var op = new CumulativeOperation(
+            ColumnExpressions.Col("A"), "Cum", nullHandler: null,
+            NivaraFrameExtensions.CumulativeKind.Product);
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { op });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { op });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), "should stream multiple chunks");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
     public void Property_StreamingVsLazy_CumulativeSum_NullableSource_MatchesWithMasks()
     {
         var lazyStrategy = new LazyExecutionStrategy();
@@ -2364,6 +2485,56 @@ sealed class DoubleChunkedSource : IQuerySource
         var data = new double[length];
         for (int i = 0; i < length; i++) data[i] = ValueAt(start + i);
         return new Dictionary<string, IColumn> { ["V"] = NivaraColumn<double>.Create(data) };
+    }
+
+    public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
+        int chunkIndex, int chunkSize, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        await Task.Yield();
+        return ReadChunk(chunkIndex, chunkSize);
+    }
+
+    public void Dispose() { }
+}
+
+sealed class IntBoundedChunkedSource : IQuerySource
+{
+    readonly int totalRowCount;
+
+    public IntBoundedChunkedSource(int totalRowCount)
+    {
+        this.totalRowCount = totalRowCount;
+    }
+
+    public Schema Schema => new(new[] { ("V", typeof(int)) });
+    public bool IsLazy => false;
+    public bool CanReadInChunks => true;
+    public int? EstimatedRowCount => totalRowCount;
+    public System.Collections.Concurrent.ConcurrentBag<int> ChunksRead { get; } = new();
+
+    // Values alternate 1 / -1 so the running sum and product stay bounded near [-1, 1]: the
+    // full-column product is well-defined and never overflows, which is exactly the #358 case
+    // where the per-run re-materialization must not throw.
+    static int ValueAt(int i) => i % 2 == 0 ? 1 : -1;
+
+    public IReadOnlyDictionary<string, IColumn> Execute()
+    {
+        var data = new int[totalRowCount];
+        for (int i = 0; i < totalRowCount; i++) data[i] = ValueAt(i);
+        return new Dictionary<string, IColumn> { ["V"] = NivaraColumn<int>.Create(data) };
+    }
+
+    public IReadOnlyDictionary<string, IColumn> ReadChunk(int chunkIndex, int chunkSize)
+    {
+        ChunksRead.Add(chunkIndex);
+        var start = chunkIndex * chunkSize;
+        if (start >= totalRowCount)
+            return new Dictionary<string, IColumn>();
+        var length = Math.Min(chunkSize, totalRowCount - start);
+        var data = new int[length];
+        for (int i = 0; i < length; i++) data[i] = ValueAt(start + i);
+        return new Dictionary<string, IColumn> { ["V"] = NivaraColumn<int>.Create(data) };
     }
 
     public async ValueTask<IReadOnlyDictionary<string, IColumn>> ReadChunkAsync(
