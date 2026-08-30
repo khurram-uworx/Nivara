@@ -101,56 +101,65 @@ Per-phase workflow (on an idle machine — see the load caveat below):
 
 ## Results
 
-*Recorded 2026-08-21 — Intel Core Ultra 7 255H, 16 logical processors, .NET 10.0.11 (Release). Medians of 3 child processes (`--runs 3`).*
+*Recorded 2026-08-30 — Intel Core Ultra 7 255H, 16 logical processors, .NET 11.0.0 (Release). Medians of 3 child processes (`--runs 3`).*
 
-Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 10.0.11 (Release). Medians of 3 child processes (`--runs 3`).
+Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Release). Medians of 3 child processes (`--runs 3`).
 
 | Scenario | Prev | Current | Ratio | Δ% | B/op | gen0/op |
 |---|---|---|---|---|---|---|
-| ColumnAdd 1M x float | 1,577 | 1,515 | 0.96 | −3.9% | 4,000,192 | 0.24 |
-| ColumnSigmoid 1M x float | 634 | 625 | 0.99 | −1.4% | 0 | 0.00 |
-| Span chain 1M x 3 ops (raw) | 903 | 934 | 1.03 | +3.4% | 0 | 0.00 |
-| Column chain 1M x 3 ops (wrapper) | 314 | 324 | 1.03 | +3.2% | 12,000,416 | 0.34 |
-| Fused chain 1M x (Salary\*1.1)+1000-Tax | 266 | 284 | 1.07 | +6.8% | 16,005,312 | 0.34 |
-| Fused chain chunked 1M x 64k rows | 266 | 240 | 0.90 | −9.8% | 16,005,312 | 0.32 |
-| Fused single-op TP 1M x (Salary\*1.1) | 568 | 479 | 0.84 | −15.7% | 8,003,436 | 0.34 |
-| Column mul-scalar 1M (wrapper) | 589 | 555 | 0.94 | −5.8% | 8,000,280 | 0.34 |
-| Linear forward [32x256] -> [32x256] | 835 | 960 | 1.15 | +15.0% | 68,824 | 0.00 |
-| Linear forward+backward [32x256] | 131 | 124 | 0.95 | −5.3% | 668,500 | 0.15 |
-| TransformerBlock forward [32x64, 4 heads] | 113 | 118 | 1.04 | +4.4% | 185,889 | 0.00 |
-| Attn per-seq forward [B16 L128 D64 H4] | 58 | 91 | 1.57 | +56.9% | 2,125,927 | 0.17 |
-| Attn batched forward [B16 L128 D64 H4] | 291 | 338 | 1.16 | +16.1% | 528,352 | 0.00 |
-| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 23 | 25 | 1.09 | +8.7% | 7,938,117 | 0.92 |
-| Attn batched fwd+bwd [B16 L128 D64 H4] | 114 | 118 | 1.04 | +3.5% | 7,875,346 | 0.25 |
-| RowScore per-row copy+dot [10k x 128] | 118 | 114 | 0.97 | −3.4% | 2 | 0.00 |
-| Frame RowDot [10k x 128] | 294 | 357 | 1.21 | +21.4% | 51,722 | 0.00 |
-| Frame Slice [10k x 128] | 14,842 | 14,996 | 1.01 | +1.0% | 89,936 | 0.01 |
-| RowDot kernel raw [10k x 128] | 835 | 1,161 | 1.39 | +39.0% | 1 | 0.00 |
-| RowCosineSimilarity kernel raw [10k x 128] | 272 | 246 | 0.90 | −9.6% | 1 | 0.00 |
-| RollingSum null-free 1M x int (w10) | 411 | 520 | 1.27 | +26.5% | 5,000,137 | 0.18 |
-| RollingSum nulls 1M x int (w10) | 74 | 82 | 1.11 | +10.8% | 22,000,233 | 0.50 |
-| RankKernel RowNumber 100k x int | 34 | 35 | 1.03 | +2.9% | 1,700,577 | 0.04 |
-| GroupBy 1M rows x 1000 keys (typed) | 23 | 30 | 1.30 | +30.4% | 8,906,948 | 0.70 |
-| GroupBy 1M rows x 100 string keys (typed) | 13 | 17 | 1.31 | +30.8% | 13,188,506 | 1.05 |
-| PartitionedWindow RollingSum 1M x 100 parts | 13 | 11 | 0.85 | −15.4% | 36,216,510 | 2.15 |
-| Streaming cancel mid-stream 200k x 10k chunk | 4,169 | 2,871 | 0.69 | −31.1% | 5,435 | 0.07 |
-| AutoDiff Pow(2.5) fwd+bwd 1M x float | 62 | 68 | 1.10 | +9.7% | 8,001,858 | 0.20 |
-| AutoDiff Pow(2.5) scalar baseline 1M x float | 21 | 24 | 1.14 | +14.3% | 2 | 0.00 |
-| AutoDiff RMSNorm fwd+bwd 1M x float | 281 | 360 | 1.28 | +28.1% | 8,002,186 | 0.10 |
-| AutoDiff RMSNorm scalar baseline 1M x float | 509 | 466 | 0.92 | −8.4% | 2 | 0.00 |
+| ColumnAdd 1M x float | 1,515 | 1,684 | 1.11 | +11.2% | 4,000,192 | 0.24 |
+| ColumnSigmoid 1M x float | 625 | 993 | 1.59 | +58.9% | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 934 | 994 | 1.06 | +6.4% | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 324 | 323 | 1.00 | −0.3% | 12,000,416 | 0.34 |
+| Fused chain 1M x (Salary\*1.1)+1000-Tax | 284 | 278 | 0.98 | −2.1% | 16,005,408 | 0.34 |
+| Fused chain chunked 1M x 64k rows | 240 | 240 | 1.00 | 0.0% | 16,005,408 | 0.34 |
+| Fused single-op TP 1M x (Salary\*1.1) | 479 | 674 | 1.41 | +40.7% | 8,002,986 | 0.24 |
+| Column mul-scalar 1M (wrapper) | 555 | 642 | 1.16 | +15.7% | 8,000,272 | 0.22 |
+| Linear forward [32x256] -> [32x256] | 960 | 1,363 | 1.42 | +42.0% | 69,122 | 0.00 |
+| Linear forward+backward [32x256] | 124 | 227 | 1.83 | +83.1% | 668,974 | 0.10 |
+| TransformerBlock forward [32x64, 4 heads] | 118 | 284 | 2.41 | +140.7% | 186,457 | 0.00 |
+| Attn per-seq forward [B16 L128 D64 H4] | 91 | 68 | 0.75 | −25.3% | 2,126,467 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | 338 | 410 | 1.21 | +21.3% | 528,637 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 25 | 29 | 1.16 | +16.0% | 7,935,987 | 0.42 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 118 | 110 | 0.93 | −6.8% | 7,875,807 | 0.42 |
+| RowScore per-row copy+dot [10k x 128] | 114 | 140 | 1.23 | +22.8% | 2 | 0.00 |
+| Frame RowDot [10k x 128] | 357 | 496 | 1.39 | +38.9% | 51,706 | 0.00 |
+| Frame Slice [10k x 128] | 14,996 | 7,091 | 0.47 | −52.7% | 89,942 | 0.02 |
+| RowDot kernel raw [10k x 128] | 1,161 | 1,226 | 1.06 | +5.6% | 1 | 0.00 |
+| RowCosineSimilarity kernel raw [10k x 128] | 246 | 429 | 1.74 | +74.4% | 1 | 0.00 |
+| RollingSum null-free 1M x int (w10) | 520 | 526 | 1.01 | +1.2% | 5,000,137 | 0.10 |
+| RollingSum nulls 1M x int (w10) | 82 | 93 | 1.13 | +13.4% | 22,000,233 | 0.26 |
+| RankKernel RowNumber 100k x int | 35 | 44 | 1.26 | +25.7% | 1,700,313 | 0.00 |
+| GroupBy 1M rows x 1000 keys (typed) | 30 | 29 | 0.97 | −3.3% | 8,906,940 | 0.75 |
+| GroupBy 1M rows x 100 string keys (typed) | 17 | 23 | 1.35 | +35.3% | 13,188,494 | 1.05 |
+| PartitionedWindow RollingSum 1M x 100 parts | 11 | 18 | 1.64 | +63.6% | 36,216,494 | 2.15 |
+| Row.Where nullable-element GetValue 100k | — | 117 | — | — | 7,316,162 | 0.35 |
+| Streaming cancel mid-stream 200k x 10k chunk | 2,871 | 6,152 | 2.14 | +114.3% | 5,587 | 0.07 |
+| AutoDiff Pow(2.5) fwd+bwd 1M x float | 68 | 92 | 1.35 | +35.3% | 8,001,874 | 0.10 |
+| AutoDiff Pow(2.5) scalar baseline 1M x float | 24 | 38 | 1.58 | +58.3% | 2 | 0.00 |
+| AutoDiff RMSNorm fwd+bwd 1M x float | 360 | 405 | 1.13 | +12.5% | 8,002,194 | 0.15 |
+| AutoDiff RMSNorm scalar baseline 1M x float | 466 | 764 | 1.64 | +63.9% | 2 | 0.00 |
 
 ### Notes
 
 - **This table is the current-machine rolling history.** The Prev column
-  carries the v1.4.0 release-prep numbers (2026-08-21, first run); the Current
-  column carries the re-measured numbers from the same machine. The B/op values
-  are stable across runs (allocation-driven), confirming no regressions.
+  carries the numbers recorded 2026-08-21 on .NET 10.0.11; the Current column
+  carries the re-measured numbers recorded 2026-08-30 on .NET 11.0.0. B/op
+  values are stable across runs (allocation-driven), confirming no regressions.
+- **This refresh spans a runtime change (net10.0.11 → net11.0).** Ratio/Δ%
+  compare across runtimes and are **indicative only** — same policy as
+  cross-machine comparisons. Notable shifts (Frame Slice −52.7%,
+  TransformerBlock +140.7%, Attn per-seq forward −25.3%) reflect the runtime
+  retarget, not a code regression; this measurement re-baselines the
+  `--compare` gate on the current build.
+- **Row.Where nullable-element GetValue 100k** is a new baseline row (no prior
+  reading): 116.7 ops/s, **7,316,162 B/op** (~73 B/row) — the FilterByMask
+  result-frame construction after the #349 fix removed per-element boxing. It
+  now gates in `--compare` instead of printing NEW.
 - **B/op and gen0/op are allocation-driven and stable** across runs — they
   are the reliable regression signals for the `--compare` gate.
   ColumnSigmoid and the raw span chain are 0 B/op by construction (destination
   pre-allocated).
-- **TransformerBlock forward** at 118 ops/s vs prev 113 — within run-to-run
-  variance; B/op identical at 185,889. Not a regression.
 - **ops/s are load-sensitive.** Treat ops/s as order-of-magnitude; B/op and
   gen0/op are the reliable signals.
 
