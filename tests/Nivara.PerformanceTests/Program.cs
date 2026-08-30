@@ -282,8 +282,29 @@ static class Program
         RunBatchedAttentionScenarios();
         RunRowScoringScenarios();
         RunWindowAllocationScenarios();
+        RunRowWhereScenarios();
         RunStreamingCancellationScenarios();
         RunAutoDiffSimdScenarios();
+    }
+
+    static void RunRowWhereScenarios()
+    {
+        // Issue #347 gate: row GetValue<int> over a nullable-element column (NivaraColumn<int?>)
+        // must not allocate per read. The cached delegate path makes the read cost ~0 B/row; the
+        // residual B/op is the Where result-frame construction (FilterByMask), which is fixed
+        // separately in issue #349. Registered as a NEW baseline row so --compare gates it once a
+        // baseline is recorded for this harness revision.
+        Run("Row.Where nullable-element GetValue 100k", 5, 20,
+            () =>
+            {
+                var values = new int?[100_000];
+                for (int i = 0; i < values.Length; i++)
+                    values[i] = i % 100 == 0 ? null : i;
+                var frame = NivaraFrame.Create(
+                    ("Name", NivaraColumn<string>.CreateForReferenceType(Enumerable.Repeat("x", values.Length).ToArray())),
+                    ("Age", NivaraColumn<int?>.Create(values)));
+                return () => frame.Where(row => row.GetValue<int>("Age") > 15_000);
+            });
     }
 
     static void RunWindowAllocationScenarios()

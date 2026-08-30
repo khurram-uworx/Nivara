@@ -66,16 +66,20 @@ public readonly struct NivaraRow
     {
         var column = GetColumn(columnName);
 
-        // Nullable-element columns (e.g. NivaraColumn<int?>) implement IColumn<int?>, not IColumn<int>.
-        // When the caller requests the underlying type T, read through IColumn<T?> and unwrap so the
-        // cast never fails. Mask-based NivaraColumn<T> keeps the direct IColumn<T> cast below.
-        if (Nullable.GetUnderlyingType(column.ElementType) == typeof(T))
+        // Fast path — ordinary columns (mask-based value columns, nullable-element columns
+        // requested as T?, reference-type columns) all implement IColumn<T> directly.
+        if (column is IColumn<T> typed)
+            return typed[rowIndex];
+
+        // Nullable-element columns (NivaraColumn<T?>) implement IColumn<T?>, not IColumn<T>.
+        // When the caller requests the underlying value type, read through a cached typed
+        // delegate (built once per T) rather than reflection so predicate hot loops stay
+        // allocation-free. Reference-type requesters can never satisfy this branch; the mismatch
+        // throw below keeps the old contract.
+        if (typeof(T).IsValueType && Nullable.GetUnderlyingType(column.ElementType) == typeof(T))
             return NullableColumnReader.Read<T>(column, rowIndex);
 
-        if (column.ElementType != typeof(T))
-            throw new ColumnTypeMismatchException(columnName, typeof(T), column.ElementType);
-
-        return ((IColumn<T>)column)[rowIndex];
+        throw new ColumnTypeMismatchException(columnName, typeof(T), column.ElementType);
     }
 
     /// <summary>
@@ -93,21 +97,23 @@ public readonly struct NivaraRow
             return false;
         }
 
-        // Nullable-element columns are a valid match for the underlying value type T.
-        if (Nullable.GetUnderlyingType(column!.ElementType) == typeof(T))
+        if (column is IColumn<T> typed)
+        {
+            value = typed[rowIndex];
+            return true;
+        }
+
+        // Nullable-element columns (NivaraColumn<T?>) implement IColumn<T?>, not IColumn<T>.
+        // When the caller requests the underlying value type, treat it as a match and read via
+        // the cached typed delegate.
+        if (typeof(T).IsValueType && Nullable.GetUnderlyingType(column!.ElementType) == typeof(T))
         {
             value = NullableColumnReader.Read<T>(column, rowIndex);
             return true;
         }
 
-        if (column!.ElementType != typeof(T))
-        {
-            value = default!;
-            return false;
-        }
-
-        value = ((IColumn<T>)column)[rowIndex];
-        return true;
+        value = default!;
+        return false;
     }
 
     /// <summary>
@@ -149,19 +155,24 @@ public readonly struct NivaraRow
     }
 
     // Reads a nullable-element column (NivaraColumn<T?>, which implements IColumn<T?> rather than
-    // IColumn<T>) through the nullable indexer and returns the underlying T. Unconstrained GetValue<T>
-    // cannot form IColumn<T?> directly (T? collapses to T), so dispatch goes through a TValue:struct
-    // helper via cached MakeGenericMethod, mirroring the ColumnFactory pattern.
+    // IColumn<T>) through the nullable indexer and returns the underlying T. Unconstrained
+    // GetValue<T> cannot form IColumn<T?> directly (T? collapses to T for an unconstrained T), so
+    // dispatch goes through a TValue:struct core via a cached closed generic delegate. The delegate
+    // is built once per T (small cached reflection) but invoked without boxing or reflection, so
+    // Where()/predicate loops over nullable-element columns stay allocation-free.
     static class NullableColumnReader
     {
         static readonly MethodInfo readCore = typeof(NullableColumnReader)
             .GetMethod(nameof(ReadCore), BindingFlags.NonPublic | BindingFlags.Static)!;
-        static readonly ConcurrentDictionary<Type, MethodInfo> cache = new();
+        static readonly ConcurrentDictionary<Type, Delegate> cache = new();
 
         public static T Read<T>(IColumn column, int rowIndex)
         {
-            var reader = cache.GetOrAdd(typeof(T), static t => readCore.MakeGenericMethod(t));
-            return (T)reader.Invoke(null, new object[] { column, rowIndex })!;
+            if (!cache.TryGetValue(typeof(T), out var reader))
+                reader = cache.GetOrAdd(typeof(T), static t =>
+                    readCore.MakeGenericMethod(t).CreateDelegate(typeof(Func<,,>)
+                        .MakeGenericType(typeof(IColumn), typeof(int), t)));
+            return ((Func<IColumn, int, T>)reader)(column, rowIndex);
         }
 
         static TValue ReadCore<TValue>(IColumn column, int rowIndex)

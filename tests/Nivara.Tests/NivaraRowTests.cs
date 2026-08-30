@@ -267,4 +267,70 @@ public class NivaraRowTests
 
         Assert.Throws<ArgumentNullException>(() => frame.Where((Func<NivaraRow, bool>)null!));
     }
+
+    [Test]
+    public void Where_NullableElementColumn_GetValue_AllocatesLikeFilterOnly()
+    {
+        var values = new int?[10_000];
+        for (int i = 0; i < values.Length; i++)
+            values[i] = i % 100 == 0 ? null : i;
+
+        using var frame = NivaraFrame.Create(
+            ("Name", NivaraColumn<string>.CreateForReferenceType(Enumerable.Repeat("x", values.Length).ToArray())),
+            ("Age", NivaraColumn<int?>.Create(values)));
+
+        Func<NivaraRow, bool> readPredicate = static row => row.GetValue<int>("Age") > 15;
+        Func<NivaraRow, bool> baselinePredicate = static row => row.RowIndex >= 0;
+
+        var (readAlloc, baselineAlloc) = MeasureReadAndBaseline(frame, readPredicate, baselinePredicate);
+
+        // The nullable-element GetValue<T> read must be allocation-free per row: a Where that
+        // reads the column should cost the same as one that only inspects RowIndex on the same
+        // source frame (observed delta ≈ 0, slightly negative because the read predicate filters
+        // a few rows more). The old cached MethodInfo.Invoke reader added an object[] and two
+        // boxings per row (~88 B × 10 000 ≈ 880 KB), far beyond any measurement margin.
+        Assert.That(readAlloc, Is.LessThanOrEqualTo(baselineAlloc + 65_536),
+            $"GetValue read path allocated {readAlloc} B vs filter-only baseline {baselineAlloc} B");
+    }
+
+    static int RunWhere(NivaraFrame frame, Func<NivaraRow, bool> predicate)
+    {
+        using var result = frame.Where(predicate);
+        return result.RowCount;
+    }
+
+    /// <summary>
+    /// Best-of-N steady-state allocation of <see cref="RunWhere"/> for each predicate, measured
+    /// with both alternated per sample so GC/finalizer drift hits both sides equally (per the
+    /// Tensor allocation-guard pattern; cleans the flakiness of measuring two blocks back-to-back).
+    /// </summary>
+    static (long Read, long Baseline) MeasureReadAndBaseline(
+        NivaraFrame frame, Func<NivaraRow, bool> readPredicate, Func<NivaraRow, bool> baselinePredicate)
+    {
+        long readBest = long.MaxValue;
+        long baselineBest = long.MaxValue;
+
+        for (int sample = 0; sample < 7; sample++)
+        {
+            for (int i = 0; i < 3; i++)
+            {
+                RunWhere(frame, readPredicate);
+                RunWhere(frame, baselinePredicate);
+            }
+
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            readBest = Math.Min(readBest, MeasureWhere(frame, readPredicate));
+            baselineBest = Math.Min(baselineBest, MeasureWhere(frame, baselinePredicate));
+        }
+
+        return (readBest, baselineBest);
+    }
+
+    static long MeasureWhere(NivaraFrame frame, Func<NivaraRow, bool> predicate)
+    {
+        long pre = GC.GetAllocatedBytesForCurrentThread();
+        RunWhere(frame, predicate);
+        return GC.GetAllocatedBytesForCurrentThread() - pre;
+    }
 }
