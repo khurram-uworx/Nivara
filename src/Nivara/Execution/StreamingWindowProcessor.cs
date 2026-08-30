@@ -249,7 +249,8 @@ internal sealed class StreamingWindowProcessor
     /// <summary>
     /// Creates a processor for a boundary operation containing window expressions, or
     /// null when the operation cannot stream per-chunk (no windows, rank/broadcast
-    /// windows only, partitioned standalone windows, or non-window operations).
+    /// windows only, nested cumulative windows that are not top-level carry slots,
+    /// partitioned standalone windows, or non-window operations).
     /// </summary>
     public static StreamingWindowProcessor? TryCreate(IQueryOperation? boundaryOp)
     {
@@ -374,14 +375,14 @@ internal sealed class StreamingWindowProcessor
     {
         foreach (var column in select.Columns)
         {
-            if (!isStreamableNode(column))
+            if (!isStreamableNode(column, isRoot: true))
                 return false;
         }
 
         return true;
     }
 
-    static bool isStreamableNode(ColumnExpression node)
+    static bool isStreamableNode(ColumnExpression node, bool isRoot = false)
         => node switch
         {
             WindowExpression window => window.Kind switch
@@ -391,7 +392,12 @@ internal sealed class StreamingWindowProcessor
                     or WindowFunctionKind.CumulativeSum or WindowFunctionKind.CumulativeMax
                     or WindowFunctionKind.CumulativeMin or WindowFunctionKind.CumulativeProduct
                     or WindowFunctionKind.CumulativeCount
-                    => true,
+                    // Cumulative kinds accumulate from dataset row 0 and stream only as top-level
+                    // carry slots; a nested one (e.g. inside a binary/comparison/conditional) has no
+                    // carry slot and per-run re-materialization would start from the run's first
+                    // value — wrong values for sums, checked-long overflow for int-family products
+                    // (issue #360).
+                    => isRoot,
                 WindowFunctionKind.Shift => true,
                 WindowFunctionKind.Lead => true,
 
