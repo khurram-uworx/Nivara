@@ -7,6 +7,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace NivaraInference;
@@ -113,22 +114,22 @@ class Program
                 if (compare) return RunCompare(tensors, "resnet18");
                 return benchmark ? RunResNet18Benchmark(tensors) : RunResNet18Inference(tensors, mode);
             case "minilm":
-                if (bf16) return RunMiniLMBFloat16(tensorsBf16);
-                if (fp16) return RunMiniLMHalf(tensorsHalf);
+                if (bf16) return benchmark ? BenchmarkMiniLM(tensorsBf16, "BFloat16") : RunMiniLMBFloat16(tensorsBf16);
+                if (fp16) return benchmark ? BenchmarkMiniLM(tensorsHalf, "Half") : RunMiniLMHalf(tensorsHalf);
                 if (compare) return RunMiniLMCompare(tensors);
                 bool similarity = mode == "similarity";
-                return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? RunMiniLMBenchmark(tensors) : RunMiniLMInference(tensors);
+                return similarity ? RunMiniLMSimilarity(tensors) : benchmark ? BenchmarkMiniLM(tensors, "F32") : RunMiniLMInference(tensors);
             case "distilbert":
-                if (bf16) return RunDistilBertBFloat16(tensorsBf16);
-                if (fp16) return RunDistilBertHalf(tensorsHalf);
+                if (bf16) return benchmark ? BenchmarkDistilBert(tensorsBf16, "BFloat16") : RunDistilBertBFloat16(tensorsBf16);
+                if (fp16) return benchmark ? BenchmarkDistilBert(tensorsHalf, "Half") : RunDistilBertHalf(tensorsHalf);
                 if (compare) return RunDistilBertCompare(tensors);
-                return benchmark ? RunDistilBertBenchmark(tensors) : RunDistilBertInference(tensors);
+                return benchmark ? BenchmarkDistilBert(tensors, "F32") : RunDistilBertInference(tensors);
             case "distilbert_sst":
-                if (bf16) return RunDistilBertSstBFloat16(tensorsBf16);
-                if (fp16) return RunDistilBertSstHalf(tensorsHalf);
+                if (bf16) return benchmark ? BenchmarkDistilBertSst(tensorsBf16, "BFloat16") : RunDistilBertSstBFloat16(tensorsBf16);
+                if (fp16) return benchmark ? BenchmarkDistilBertSst(tensorsHalf, "Half") : RunDistilBertSstHalf(tensorsHalf);
                 if (compare) return RunDistilBertSstCompare(tensors);
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
-                return benchmark ? RunDistilBertSstBenchmark(tensors) : RunDistilBertSstInference(tensors);
+                return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -844,31 +845,16 @@ class Program
         return 0;
     }
 
-    static int RunMiniLMBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    static void ReportTiming<T>(Func<ReverseGradTensor<T>> forward, int warmup = 3, int passes = 10)
+        where T : struct, IFloatingPointIeee754<T>
     {
-        Console.WriteLine("=== MiniLM Benchmark ===");
-        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
-        Console.WriteLine();
-
-        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
-        var model = MiniLMDistilled<float>.LoadWeights(tensors, config);
-
-        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
-        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the MiniLM model inference across multiple tokens for benchmarking purposes.";
-        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
-        Func<ReverseGradTensor<float>> forward = () => mask != null ? model.ForwardWithMask(input, mask) : model.Forward(input);
-
-        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
-        Console.WriteLine($"Input tokens: {input.Length}");
-        Console.WriteLine();
-
-        Console.WriteLine("Warmup (3 passes)...");
-        for (int i = 0; i < 3; i++)
+        Console.WriteLine($"Warmup ({warmup} passes)...");
+        for (int i = 0; i < warmup; i++)
             forward();
 
-        Console.WriteLine("Benchmarking (10 passes)...");
+        Console.WriteLine($"Benchmarking ({passes} passes)...");
         var times = new List<long>();
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < passes; i++)
         {
             var sw = Stopwatch.StartNew();
             forward();
@@ -876,14 +862,39 @@ class Program
             times.Add(sw.ElapsedMilliseconds);
         }
 
-        double avg = times.Average();
-        double min = times.Min();
-        double max = times.Max();
-        Console.WriteLine($"  Average: {avg:F1} ms");
-        Console.WriteLine($"  Min:     {min} ms");
-        Console.WriteLine($"  Max:     {max} ms");
+        Console.WriteLine($"  Average: {times.Average():F1} ms");
+        Console.WriteLine($"  Min:     {times.Min()} ms");
+        Console.WriteLine($"  Max:     {times.Max()} ms");
+        Console.WriteLine();
+    }
+
+    static int BenchmarkMiniLM<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precision)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        Console.WriteLine("=== MiniLM Benchmark ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precision}");
         Console.WriteLine();
 
+        var config = BertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "minilm", "config.json")));
+        var model = MiniLMDistilled<T>.LoadWeights<T, T>(tensors, config);
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights: {totalParams * Unsafe.SizeOf<T>() / (1024.0 * 1024.0):F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "minilm", "vocab.txt"));
+        string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the MiniLM model inference across multiple tokens for benchmarking purposes.";
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => T.CreateChecked(x)));
+        model.Eval();
+
+        Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
+        Console.WriteLine($"Input tokens: {intIds.Length}");
+        Console.WriteLine();
+
+        ReportTiming<T>(() => model.ForwardWithMask(intIds, mask));
         return 0;
     }
 
@@ -940,55 +951,37 @@ class Program
         return 0;
     }
 
-    static int RunDistilBertBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    static int BenchmarkDistilBert<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precision)
+        where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== DistilBERT Benchmark ===");
-        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precision}");
         Console.WriteLine();
 
         var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine("samples", "data", "distilbert", "config.json")));
         var buildSw = Stopwatch.StartNew();
-        var encoder = DistilBertLoader.LoadEncoder(tensors, config.ToBertConfig());
+        var encoder = new BertEncoder<T>(config.ToBertConfig(), includeTokenTypeEmbedding: false);
+        DistilBertLoader.LoadEncoderWeights<T, T>(encoder, tensors, "distilbert");
+        encoder.Eval();
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = tensors.Values.Sum(t => t.Data.Length);
-        double weightMb = tensors.Values.Sum(t => t.Data.Length * 4.0) / (1024.0 * 1024.0);
         Console.WriteLine($"Parameters: {totalParams:N0}");
-        Console.WriteLine($"Weights: {weightMb:F1} MB");
+        Console.WriteLine($"Weights: {totalParams * Unsafe.SizeOf<T>() / (1024.0 * 1024.0):F1} MB");
         Console.WriteLine();
 
         var tokenizer = MiniLMTokenizer.Load(Path.Combine("samples", "data", "distilbert", "vocab.txt"));
         string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the DistilBERT model inference across multiple tokens for benchmarking purposes.";
-        var (input, mask) = MiniLMTokenizer.TokenizeWithMask(tokenizer, text, maxLen: 128);
-        Func<ReverseGradTensor<float>> forward = () => mask != null ? encoder.ForwardWithMask(input, mask) : encoder.Forward(input);
+        var (tokenIds, attnMask, _) = MiniLMTokenizer.Encode(tokenizer, text, maxLen: 128);
+        var intIds = Array.ConvertAll(tokenIds, x => (int)x);
+        var mask = GradientUtils.Constant(Array.ConvertAll(attnMask, x => T.CreateChecked(x)));
 
         Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
-        Console.WriteLine($"Input tokens: {input.Length}");
+        Console.WriteLine($"Input tokens: {intIds.Length}");
         Console.WriteLine();
 
-        Console.WriteLine("Warmup (3 passes)...");
-        for (int i = 0; i < 3; i++)
-            forward();
-
-        Console.WriteLine("Benchmarking (10 passes)...");
-        var times = new List<long>();
-        for (int i = 0; i < 10; i++)
-        {
-            var sw = Stopwatch.StartNew();
-            forward();
-            sw.Stop();
-            times.Add(sw.ElapsedMilliseconds);
-        }
-
-        double avg = times.Average();
-        double min = times.Min();
-        double max = times.Max();
-        Console.WriteLine($"  Average: {avg:F1} ms");
-        Console.WriteLine($"  Min:     {min} ms");
-        Console.WriteLine($"  Max:     {max} ms");
-        Console.WriteLine();
-
+        ReportTiming<T>(() => encoder.ForwardWithMask(intIds, mask));
         return 0;
     }
 
@@ -1167,57 +1160,34 @@ class Program
         return 0;
     }
 
-    static int RunDistilBertSstBenchmark(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    static int BenchmarkDistilBertSst<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precision)
+        where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("=== DistilBERT SST-2 Benchmark ===");
-        Console.WriteLine($"Device: CPU (.NET {Environment.Version})");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precision}");
         Console.WriteLine();
 
         string modelDir = Path.Combine("samples", "data", "distilbert_sst");
-        var config = DistilBertConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
         var buildSw = Stopwatch.StartNew();
-        var model = DistilBertSst.Load(tensors, modelDir);
+        var model = DistilBertSst.Load<T>(tensors, modelDir);
         var tokenizer = DistilBertSst.LoadTokenizer(modelDir);
         buildSw.Stop();
         Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
 
         int totalParams = DistilBertSst.CountParameters(tensors);
-        double weightMb = DistilBertSst.WeightMb(tensors);
         Console.WriteLine($"Parameters: {totalParams:N0}");
-        Console.WriteLine($"Weights: {weightMb:F1} MB");
+        Console.WriteLine($"Weights: {totalParams * Unsafe.SizeOf<T>() / (1024.0 * 1024.0):F1} MB");
         Console.WriteLine();
 
         string text = "This is a long test sentence that will be tokenized to demonstrate the performance of the DistilBERT SST-2 model inference across multiple tokens for benchmarking purposes.";
-        Func<ReverseGradTensor<float>> forward = () => DistilBertSst.PredictLogits(model, tokenizer, text, maxLen: 128);
-
         Console.WriteLine($"Input text length: {text.Split(' ').Length} words");
         Console.WriteLine($"Input tokens: 128");
         Console.WriteLine();
 
         model.Eval();
-        Console.WriteLine("Warmup (3 passes)...");
-        for (int i = 0; i < 3; i++)
-            forward();
+        ReportTiming<T>(() => DistilBertSst.PredictLogits<T>(model, tokenizer, text, maxLen: 128));
 
-        Console.WriteLine("Benchmarking (10 passes)...");
-        var times = new List<long>();
-        for (int i = 0; i < 10; i++)
-        {
-            var sw = Stopwatch.StartNew();
-            forward();
-            sw.Stop();
-            times.Add(sw.ElapsedMilliseconds);
-        }
-
-        double avg = times.Average();
-        double min = times.Min();
-        double max = times.Max();
-        Console.WriteLine($"  Average: {avg:F1} ms");
-        Console.WriteLine($"  Min:     {min} ms");
-        Console.WriteLine($"  Max:     {max} ms");
-        Console.WriteLine();
-
-        var (argMax, probs) = DistilBertSst.Softmax(forward());
+        var (argMax, probs) = DistilBertSst.Softmax(DistilBertSst.PredictLogits<T>(model, tokenizer, text, maxLen: 128));
         Console.WriteLine($"Last pass sentiment: {DistilBertSst.Label(argMax)} ({probs[argMax] * 100:F1}%)");
         Console.WriteLine();
 

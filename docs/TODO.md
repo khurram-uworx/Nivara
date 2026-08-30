@@ -137,6 +137,6 @@ modes keep their existing `(float[],...)` methods unchanged.
 
 ## GitHub issues log
 
-- [ ] none yet — as tasks execute, any deferred concern discovered (e.g. leftover per-dtype verbose
-  compare helpers that could also be genericized later) will be filed as a tracked issue here
-  (`gh issue create --repo khurram-uworx/Nivara`) rather than held in memory.
+- [ ] #363 — Narrow-precision (fp16/bf16) CPU inference is ~26x slower than F32 in benchmark mode
+  (observed while verifying Approach B; document caveat + consider a vectorized narrow kernel later).
+  <https://github.com/khurram-uworx/Nivara/issues/363>

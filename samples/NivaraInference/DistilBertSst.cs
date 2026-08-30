@@ -97,6 +97,21 @@ static class DistilBertSst
         return Softmax(logitData.AsSpan());
     }
 
+    public static (int ArgMax, float[] Probs) Softmax<T>(ReverseGradTensor<T> logits)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        int n = logits.Shape[^1];
+        var logitData = new float[n];
+        logits.Data.TryGetSpan(out var span);
+        if (!span.IsEmpty)
+        {
+            int take = Math.Min(n, span.Length);
+            for (int i = 0; i < take; i++)
+                logitData[i] = float.CreateChecked(span[i]);
+        }
+        return Softmax(logitData.AsSpan());
+    }
+
     public static (int ArgMax, float[] Probs) Softmax(ReadOnlySpan<float> logits)
     {
         float max = TensorPrimitives.Max(logits);
@@ -117,7 +132,8 @@ static class DistilBertSst
 
     public static string Label(int argMax) => argMax == 0 ? "NEGATIVE" : "POSITIVE";
 
-    public static int CountParameters(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+    public static int CountParameters<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
+        where T : struct
         => tensors.Values.Sum(t => t.Data.Length);
 
     public static double WeightMb(Dictionary<string, (float[] Data, int[] Shape)> tensors)
