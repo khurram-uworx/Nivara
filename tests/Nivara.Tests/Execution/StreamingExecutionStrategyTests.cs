@@ -1630,6 +1630,103 @@ public class StreamingExecutionStrategyTests
     }
 
     [Test]
+    public void Property_StreamingVsLazy_NestedCumulativeProduct_IntSource_LeadingZero_MatchesLazy()
+    {
+        // Issue #360: a cumulative product nested inside a binary expression is not a carry slot,
+        // so per-run re-materialization used to start the product at the run's first value and
+        // overflow the checked long accumulator. The boundary must materialize exactly instead of
+        // streaming. data[i] = i has row-0 = 0, so the full-column product is well-defined.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.CumulativeProduct(ColumnExpressions.Col("A")) + ColumnExpressions.Col<int>("A"),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        context.ExecutionDiagnostics = diagnostics;
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), "source should still be read in chunks");
+        Assert.That(diagnostics.StreamMaterializationCount, Is.EqualTo(1),
+            "nested cumulative windows must fall back to exact boundary materialization");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_NestedCumulativeSum_IntSource_MatchesLazy()
+    {
+        // Issue #360: the same nesting failure affects every cumulative kind. The per-run re-scan of
+        // a nested cumulative sum starts at the run's first value, so emitted values were missing the
+        // dataset row-0 seed (wrong values, no overflow). Exact boundary materialization fixes it.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            ColumnExpressions.CumulativeSum(ColumnExpressions.Col("A")) + ColumnExpressions.Col<int>("A"),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        var diagnostics = new Nivara.Diagnostics.ExecutionDiagnostics();
+        context.ExecutionDiagnostics = diagnostics;
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), "source should still be read in chunks");
+        Assert.That(diagnostics.StreamMaterializationCount, Is.EqualTo(1),
+            "nested cumulative windows must fall back to exact boundary materialization");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
+    public void Property_StreamingVsLazy_NestedCumulativeProductAndSum_NestedTwice_IntSource_MatchesLazy()
+    {
+        // Issue #360: multiple non-slot cumulative windows under one column (a product and a sum)
+        // must all take the exact-boundary fallback rather than per-run re-materialization.
+        var lazyStrategy = new LazyExecutionStrategy();
+        var select = new SelectOperation(new[]
+        {
+            ColumnExpressions.Col<int>("A"),
+            (ColumnExpressions.CumulativeProduct(ColumnExpressions.Col("A"))
+                + ColumnExpressions.CumulativeSum(ColumnExpressions.Col("A")))
+                + ColumnExpressions.Col<int>("A"),
+        });
+
+        var lazyPlan = new QueryPlan(
+            ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000),
+            new IQueryOperation[] { select });
+        using var lazyResult = lazyStrategy.Execute(lazyPlan, ExecutionTestHelpers.CreateTestContext());
+
+        var source = ExecutionTestHelpers.CreateLargeChunkedSource(rowCount: 6000);
+        var plan = new QueryPlan(source, new IQueryOperation[] { select });
+        var context = ExecutionTestHelpers.CreateTestContext(ExecutionStrategy.Streaming);
+        context.ChunkSize = 333;
+
+        using var result = new StreamingExecutionStrategy().Execute(plan, context);
+
+        Assert.That(source.ChunksRead.Count, Is.GreaterThan(1), "source should still be read in chunks");
+        ExecutionTestHelpers.AssertFramesEqualWithMasks(lazyResult, result);
+    }
+
+    [Test]
     public void Property_StreamingVsLazy_CumulativeSum_NullableSource_MatchesWithMasks()
     {
         var lazyStrategy = new LazyExecutionStrategy();
