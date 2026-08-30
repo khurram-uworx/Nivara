@@ -152,6 +152,11 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
   TransformerBlock +140.7%, Attn per-seq forward −25.3%) reflect the runtime
   retarget, not a code regression; this measurement re-baselines the
   `--compare` gate on the current build.
+- **Frame Slice and AutoDiff RMSNorm fwd+bwd tripped the ops/s floor (90%) on
+  an immediate follow-up `--compare` run** (5,366 vs 7,091 and 356 vs 405
+  ops/s) with **byte-identical B/op and gen0** — throughput-only noise on the
+  preview runtime, not an allocation regression. Issue #354 tracks the
+  flakiness; ops/s on these rows is order-of-magnitude per the guidance above.
 - **Row.Where nullable-element GetValue 100k** is a new baseline row (no prior
   reading): 116.7 ops/s, **7,316,162 B/op** (~73 B/row) — the FilterByMask
   result-frame construction after the #349 fix removed per-element boxing. It

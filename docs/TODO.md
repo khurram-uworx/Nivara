@@ -65,3 +65,6 @@ refresh; harness run happens here during implementation.
   baseline (gate for #349); being executed on this branch.
 - [ ] #349 — the fix (nullable-element typed ColumnFilterHelper kernels),
   merged to main via PR #353; #352 records its gate baseline.
+- [ ] #354 — `Frame Slice` and `AutoDiff RMSNorm fwd+bwd` gate-flaky on net11
+  preview (ops/s noise with byte-identical B/op); created after a follow-up
+  `--compare` run failed those rows during #352 execution.
