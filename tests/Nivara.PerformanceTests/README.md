@@ -87,17 +87,22 @@ Per-phase workflow (on an idle machine — see the load caveat below):
   in-process repeats are JIT-tiering-skewed (see the `--runs` note above) and
   run-to-run variance is ~±10% for these scenarios under load.
 
-### Baseline policy (rolling Prev/Current history)
+### Baseline policy (release-by-release rolling history)
 
-- The **Results** table carries its own comparison context: the **Prev** column
-  holds the most recent prior reading, the **Current** column holds the fresh
-  measurement, and **Ratio** / **Δ%** show the delta.
-- When measuring: shift the existing Current to Prev, place new numbers in
-  Current, and compute Ratio (`Current / Prev`) and Δ% (`((Current − Prev) / Prev) × 100`).
+- The **Results** table is a release-by-release rolling track on one machine:
+  the **Prev** column holds the most recent prior release's reading, the
+  **Current** column holds this release's fresh measurement, and **Δ%** is
+  the this-vs-last delta: `((Current − Prev) / Prev) × 100`.
+- When measuring a new release: shift the existing Current to Prev, place the
+  new numbers in Current, and recompute Δ%. The previous Prev is discarded —
+  it is superseded by the new Prev. History before that lives in git.
+- New scenarios with no prior reading: leave Prev and Δ% blank (e.g.
+  `Row.Where nullable-element GetValue 100k`).
 - If the Previous reading was on a **different machine**, note the machine
-  difference in the Prev column — ratio is not meaningful across machines.
+  difference in the Prev column — the delta is not meaningful across machines.
 - **B/op** and **gen0/op** are stability indicators (not throughput metrics)
-  and do not get ratio columns.
+  and are copied alongside, unchanged, as the allocation-driven regression
+  signal.
 
 ## Results
 
@@ -105,40 +110,40 @@ Per-phase workflow (on an idle machine — see the load caveat below):
 
 Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Release). Medians of 3 child processes (`--runs 3`).
 
-| Scenario | Prev | Current | Ratio | Δ% | B/op | gen0/op |
-|---|---|---|---|---|---|---|
-| ColumnAdd 1M x float | 1,515 | 1,684 | 1.11 | +11.2% | 4,000,192 | 0.24 |
-| ColumnSigmoid 1M x float | 625 | 993 | 1.59 | +58.9% | 0 | 0.00 |
-| Span chain 1M x 3 ops (raw) | 934 | 994 | 1.06 | +6.4% | 0 | 0.00 |
-| Column chain 1M x 3 ops (wrapper) | 324 | 323 | 1.00 | −0.3% | 12,000,416 | 0.34 |
-| Fused chain 1M x (Salary\*1.1)+1000-Tax | 284 | 278 | 0.98 | −2.1% | 16,005,408 | 0.34 |
-| Fused chain chunked 1M x 64k rows | 240 | 240 | 1.00 | 0.0% | 16,005,408 | 0.34 |
-| Fused single-op TP 1M x (Salary\*1.1) | 479 | 674 | 1.41 | +40.7% | 8,002,986 | 0.24 |
-| Column mul-scalar 1M (wrapper) | 555 | 642 | 1.16 | +15.7% | 8,000,272 | 0.22 |
-| Linear forward [32x256] -> [32x256] | 960 | 1,363 | 1.42 | +42.0% | 69,122 | 0.00 |
-| Linear forward+backward [32x256] | 124 | 227 | 1.83 | +83.1% | 668,974 | 0.10 |
-| TransformerBlock forward [32x64, 4 heads] | 118 | 284 | 2.41 | +140.7% | 186,457 | 0.00 |
-| Attn per-seq forward [B16 L128 D64 H4] | 91 | 68 | 0.75 | −25.3% | 2,126,467 | 0.17 |
-| Attn batched forward [B16 L128 D64 H4] | 338 | 410 | 1.21 | +21.3% | 528,637 | 0.00 |
-| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 25 | 29 | 1.16 | +16.0% | 7,935,987 | 0.42 |
-| Attn batched fwd+bwd [B16 L128 D64 H4] | 118 | 110 | 0.93 | −6.8% | 7,875,807 | 0.42 |
-| RowScore per-row copy+dot [10k x 128] | 114 | 140 | 1.23 | +22.8% | 2 | 0.00 |
-| Frame RowDot [10k x 128] | 357 | 496 | 1.39 | +38.9% | 51,706 | 0.00 |
-| Frame Slice [10k x 128] | 14,996 | 7,091 | 0.47 | −52.7% | 89,942 | 0.02 |
-| RowDot kernel raw [10k x 128] | 1,161 | 1,226 | 1.06 | +5.6% | 1 | 0.00 |
-| RowCosineSimilarity kernel raw [10k x 128] | 246 | 429 | 1.74 | +74.4% | 1 | 0.00 |
-| RollingSum null-free 1M x int (w10) | 520 | 526 | 1.01 | +1.2% | 5,000,137 | 0.10 |
-| RollingSum nulls 1M x int (w10) | 82 | 93 | 1.13 | +13.4% | 22,000,233 | 0.26 |
-| RankKernel RowNumber 100k x int | 35 | 44 | 1.26 | +25.7% | 1,700,313 | 0.00 |
-| GroupBy 1M rows x 1000 keys (typed) | 30 | 29 | 0.97 | −3.3% | 8,906,940 | 0.75 |
-| GroupBy 1M rows x 100 string keys (typed) | 17 | 23 | 1.35 | +35.3% | 13,188,494 | 1.05 |
-| PartitionedWindow RollingSum 1M x 100 parts | 11 | 18 | 1.64 | +63.6% | 36,216,494 | 2.15 |
-| Row.Where nullable-element GetValue 100k | — | 117 | — | — | 7,316,162 | 0.35 |
-| Streaming cancel mid-stream 200k x 10k chunk | 2,871 | 6,152 | 2.14 | +114.3% | 5,587 | 0.07 |
-| AutoDiff Pow(2.5) fwd+bwd 1M x float | 68 | 92 | 1.35 | +35.3% | 8,001,874 | 0.10 |
-| AutoDiff Pow(2.5) scalar baseline 1M x float | 24 | 38 | 1.58 | +58.3% | 2 | 0.00 |
-| AutoDiff RMSNorm fwd+bwd 1M x float | 360 | 405 | 1.13 | +12.5% | 8,002,194 | 0.15 |
-| AutoDiff RMSNorm scalar baseline 1M x float | 466 | 764 | 1.64 | +63.9% | 2 | 0.00 |
+| Scenario | Prev | Current | Δ% | B/op | gen0/op |
+|---|---|---|---|---|---|
+| ColumnAdd 1M x float | 1,515 | 1,684 | +11.2% | 4,000,192 | 0.24 |
+| ColumnSigmoid 1M x float | 625 | 993 | +58.9% | 0 | 0.00 |
+| Span chain 1M x 3 ops (raw) | 934 | 994 | +6.4% | 0 | 0.00 |
+| Column chain 1M x 3 ops (wrapper) | 324 | 323 | −0.3% | 12,000,416 | 0.34 |
+| Fused chain 1M x (Salary\*1.1)+1000-Tax | 284 | 278 | −2.1% | 16,005,408 | 0.34 |
+| Fused chain chunked 1M x 64k rows | 240 | 240 | 0.0% | 16,005,408 | 0.34 |
+| Fused single-op TP 1M x (Salary\*1.1) | 479 | 674 | +40.7% | 8,002,986 | 0.24 |
+| Column mul-scalar 1M (wrapper) | 555 | 642 | +15.7% | 8,000,272 | 0.22 |
+| Linear forward [32x256] -> [32x256] | 960 | 1,363 | +42.0% | 69,122 | 0.00 |
+| Linear forward+backward [32x256] | 124 | 227 | +83.1% | 668,974 | 0.10 |
+| TransformerBlock forward [32x64, 4 heads] | 118 | 284 | +140.7% | 186,457 | 0.00 |
+| Attn per-seq forward [B16 L128 D64 H4] | 91 | 68 | −25.3% | 2,126,467 | 0.17 |
+| Attn batched forward [B16 L128 D64 H4] | 338 | 410 | +21.3% | 528,637 | 0.00 |
+| Attn per-seq fwd+bwd [B16 L128 D64 H4] | 25 | 29 | +16.0% | 7,935,987 | 0.42 |
+| Attn batched fwd+bwd [B16 L128 D64 H4] | 118 | 110 | −6.8% | 7,875,807 | 0.42 |
+| RowScore per-row copy+dot [10k x 128] | 114 | 140 | +22.8% | 2 | 0.00 |
+| Frame RowDot [10k x 128] | 357 | 496 | +38.9% | 51,706 | 0.00 |
+| Frame Slice [10k x 128] | 14,996 | 7,091 | −52.7% | 89,942 | 0.02 |
+| RowDot kernel raw [10k x 128] | 1,161 | 1,226 | +5.6% | 1 | 0.00 |
+| RowCosineSimilarity kernel raw [10k x 128] | 246 | 429 | +74.4% | 1 | 0.00 |
+| RollingSum null-free 1M x int (w10) | 520 | 526 | +1.2% | 5,000,137 | 0.10 |
+| RollingSum nulls 1M x int (w10) | 82 | 93 | +13.4% | 22,000,233 | 0.26 |
+| RankKernel RowNumber 100k x int | 35 | 44 | +25.7% | 1,700,313 | 0.00 |
+| GroupBy 1M rows x 1000 keys (typed) | 30 | 29 | −3.3% | 8,906,940 | 0.75 |
+| GroupBy 1M rows x 100 string keys (typed) | 17 | 23 | +35.3% | 13,188,494 | 1.05 |
+| PartitionedWindow RollingSum 1M x 100 parts | 11 | 18 | +63.6% | 36,216,494 | 2.15 |
+| Row.Where nullable-element GetValue 100k | — | 117 | — | 7,316,162 | 0.35 |
+| Streaming cancel mid-stream 200k x 10k chunk | 2,871 | 6,152 | +114.3% | 5,587 | 0.07 |
+| AutoDiff Pow(2.5) fwd+bwd 1M x float | 68 | 92 | +35.3% | 8,001,874 | 0.10 |
+| AutoDiff Pow(2.5) scalar baseline 1M x float | 24 | 38 | +58.3% | 2 | 0.00 |
+| AutoDiff RMSNorm fwd+bwd 1M x float | 360 | 405 | +12.5% | 8,002,194 | 0.15 |
+| AutoDiff RMSNorm scalar baseline 1M x float | 466 | 764 | +63.9% | 2 | 0.00 |
 
 ### Notes
 
@@ -146,8 +151,8 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
   carries the numbers recorded 2026-08-21 on .NET 10.0.11; the Current column
   carries the re-measured numbers recorded 2026-08-30 on .NET 11.0.0. B/op
   values are stable across runs (allocation-driven), confirming no regressions.
-- **This refresh spans a runtime change (net10.0.11 → net11.0).** Ratio/Δ%
-  compare across runtimes and are **indicative only** — same policy as
+- **This refresh spans a runtime change (net10.0.11 → net11.0).** The Δ%
+  compares across runtimes and is **indicative only** — same policy as
   cross-machine comparisons. Notable shifts (Frame Slice −52.7%,
   TransformerBlock +140.7%, Attn per-seq forward −25.3%) reflect the runtime
   retarget, not a code regression; this measurement re-baselines the
@@ -180,9 +185,10 @@ dotnet run --project tests/Nivara.PerformanceTests -c Release -- --json <path> -
 Save the JSON output (e.g., `baseline-vX.Y.Z.json`) and reference it in the PR.
 
 **Update the Results table:**
-1. Shift existing **ops/s** values to the **Prev** column.
+1. Shift existing **Current** ops/s values to the **Prev** column (this is the
+   prior release's reading — the previous Prev is superseded).
 2. Place fresh measurements in the **Current** column.
-3. Add **Ratio** (`Current / Prev`) and **Δ%** (`((Current − Prev) / Prev) × 100`).
+3. Compute **Δ%** (`((Current − Prev) / Prev) × 100`) — the this-vs-last delta.
 4. Keep **B/op** and **gen0/op** as-is (stability indicators).
-5. New scenarios with no prior reading: leave Prev/Ratio/Δ% blank.
+5. New scenarios with no prior reading: leave Prev/Δ% blank.
 6. Update the machine line and recording date at the top of the table.
