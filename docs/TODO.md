@@ -4,6 +4,15 @@
 **Source direction:** `docs/BFLOAT16-TRANSFORMER.md` (§6 Phase 0, §3.1–3.3)
 **Companion planning note:** `C:\Users\khurram\.opencode\plan\bf16-widen-phase0.md`
 
+## Progress (updated during execution)
+
+- ✅ Download: SmolLM-135M-Instruct into `samples/data/smollm-135m` (hf CLI, 8 files; 272 tensors all BF16, 269 MB). Model files gitignored.
+- ✅ PyTorch reference generator: `samples/NivaraInference/Python/smollm_generate_reference.py` (saves token-id stream + final-position logits).
+- ✅ Phase 0 skeleton: `KernelType.WidenToFloatSimd`, `NivaraPrimitives.UseWidenSimd` (off), `WidenPrimitives` dispatch contract (stubbed widen, length gate), `KernelSelector` wiring. No call sites changed.
+- ✅ Unit tests: `KernelSelectorWidenTests` (7 pass, dispatch contract only).
+- ✅ README: SmolLM download + BF16-native + config + Phase 2 gaps + reference-gen recorded in `samples/NivaraInference/README.md`.
+- ✅ Issues created for Phase 2 deferrals: #367 (GQA), #368 (causal-LM ops).
+
 ## Problem
 
 Nivara has no SIMD-accelerated `BFloat16`/`Half` math because `Vector<BFloat16>.IsSupported`
@@ -97,7 +106,8 @@ plus the model download as infra and records the model decision.
 
 ## GitHub issues log
 
-- [ ] — (to be filled as issues are created during execution)
+- [ ] #367 — GQA (grouped-query attention: 9 Q heads / 3 KV heads) support for the SmolLM causal-LM driver (created while planning the Phase 2 model ops)
+- [ ] #368 — Causal-LM ops for SmolLM: RoPE, gated SiLU FFN, tied-embedding LM head, greedy generation loop (created while planning the Phase 2 model ops)
 
 ---
 
