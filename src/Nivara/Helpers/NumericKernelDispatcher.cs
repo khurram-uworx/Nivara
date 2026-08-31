@@ -183,7 +183,7 @@ static class NumericKernelDispatcher
         .GetMethod(nameof(createComparison), BindingFlags.NonPublic | BindingFlags.Static)!;
 
     static Delegate createArithmetic<U>(Operation op, Shape shape)
-        where U : INumber<U>
+        where U : struct, INumber<U>
         => op switch
         {
             Operation.Add => shape switch
@@ -220,7 +220,7 @@ static class NumericKernelDispatcher
         };
 
     static Delegate createComparison<U>(Operation op, Shape shape)
-        where U : INumber<U>
+        where U : struct, INumber<U>
         => op switch
         {
             Operation.Equals => shape switch
