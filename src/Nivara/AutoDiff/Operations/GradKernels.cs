@@ -239,6 +239,55 @@ internal static class GradKernels
     }
 
     // ═══════════════════════════════════════════════════════════════
+    //  Rotary position embeddings (RoPE)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Performs the pairwise rotary rotation for a single position. cos/sin hold
+    /// [headDim/2] values for that position.
+    /// </summary>
+    public static void RotaryForward<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> cos, ReadOnlySpan<T> sin, Span<T> output)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (x.Length != output.Length) throw new ArgumentException("Input and output spans must match length.");
+        if (cos.Length != sin.Length || cos.Length * 2 != x.Length)
+            throw new ArgumentException("cos/sin must each hold headDim/2 values matching half the input width.");
+        for (int j = 0; j < cos.Length; j++)
+        {
+            int i0 = j * 2;
+            int i1 = j * 2 + 1;
+            T c = cos[j];
+            T s = sin[j];
+            T x0 = x[i0];
+            T x1 = x[i1];
+            output[i0] = x0 * c - x1 * s;
+            output[i1] = x0 * s + x1 * c;
+        }
+    }
+
+    /// <summary>
+    /// Backward through the pairwise rotary rotation for a single position.
+    /// </summary>
+    public static void RotaryBackward<T>(ReadOnlySpan<T> gradOut, ReadOnlySpan<T> cos, ReadOnlySpan<T> sin, Span<T> gradX)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (gradOut.Length != gradX.Length) throw new ArgumentException("Gradient spans must match length.");
+        if (cos.Length != sin.Length || cos.Length * 2 != gradOut.Length)
+            throw new ArgumentException("cos/sin must each hold headDim/2 values matching half the input width.");
+        for (int j = 0; j < cos.Length; j++)
+        {
+            int i0 = j * 2;
+            int i1 = j * 2 + 1;
+            T c = cos[j];
+            T s = sin[j];
+            T go0 = gradOut[i0];
+            T go1 = gradOut[i1];
+            gradX[i0] = go0 * c + go1 * s;
+            gradX[i1] = -go0 * s + go1 * c;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Element-wise math
     // ═══════════════════════════════════════════════════════════════
 
