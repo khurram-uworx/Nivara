@@ -197,10 +197,12 @@ job is to pull in the *new* ops above.
 - **Phase 0 — skeleton (model-agnostic, low risk):** create `WidenPrimitives` with the dispatch
   contract; add `KernelType.WidenToFloatSimd` + `NivaraPrimitives.UseWidenSimd` toggle (default
   off); wire `KernelSelector`. No call sites changed yet → zero behavior change.
-- **Phase 1 — core widen (benefits all):** implement widen for element-wise
-  `Add/Mul/Div/Sub` and `MatMul`/`Dot` in `NumericTensorKernels` + `TensorsHelper.MultiplyCore`
-  (the latter also lifts AutoDiff matmul). Unit tests: scalar BF16/Half reference vs widen,
-  per op.
+- **Phase 1 — core widen (benefits all) — DONE (branch `khurram/smollm-1`):** implemented widen for
+  element-wise `Add/Sub/Mul/Div` (routed through `WidenPrimitives` in `NumericTensorKernels`) and
+  `MatMul`/`Dot` in `TensorsHelper.MultiplyCore` (the latter also lifts AutoDiff matmul). Kernels
+  live in `src/Nivara/Primitives/NarrowFloatKernels.cs` (BF16 bit-shift widen/narrow; Half portable
+  conversion). Unit tests: scalar BF16/Half reference vs widen, per op, toggle on/off
+  (`WidenPrimitivesPhase1Tests.cs`).
 - **Phase 2 — 5th model + its ops:** add the TinyLlama/SmolLM sample; implement RoPE, causal
   attention mask, GPT-2 Gelu wiring, generation loop; route its numeric ops through
   `WidenPrimitives`. Only the ops this model needs are implemented first.

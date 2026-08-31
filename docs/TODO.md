@@ -54,12 +54,17 @@ Phase 0 built the dispatch contract but the widen branches are **stubbed** — w
 
 ## Planned commits
 
-1. `feat: promote NarrowFloatKernels (BFloat16/Half widen-compute-narrow) into src/Nivara`
-2. `feat: fill WidenPrimitives Dot/Add/Sub/Mul/Div, relax constraint to INumber<T>`
-3. `feat: route NumericTensorKernels span-span element-wise through WidenPrimitives`
-4. `feat: route TensorsHelper matmul row-dot through WidenPrimitives (lifts AutoDiff)`
-5. `test: widen vs scalar-reference correctness + regression toggles`
-6. `docs: verify BFLOAT16.md / BFLOAT16-TRANSFORMER.md Phase 1 notes`
+1. ✅ `feat: promote NarrowFloatKernels (BFloat16/Half widen-compute-narrow) into src/Nivara` — 8c4e794
+2. ✅ `feat: fill WidenPrimitives Dot/Add/Sub/Mul/Div, relax constraint to INumber<T>` — 4feb4ed
+3. ✅ `feat: route NumericTensorKernels span-span element-wise through WidenPrimitives` — 3e9c663
+4. ✅ `feat: route TensorsHelper matmul row-dot through WidenPrimitives (lifts AutoDiff)` — f07eba3
+5. ✅ `test: widen vs scalar-reference correctness + regression toggles` — 789b356
+6. ⬜ `docs: verify BFLOAT16.md / BFLOAT16-TRANSFORMER.md Phase 1 notes`
+
+## Deviations from plan (noted for PR)
+
+- **`struct` constraint ripple (commit 3):** the plan assumed routing `NumericTensorKernels<T>` through `WidenPrimitives` was a "direct call, no constraint gymnastics." In practice `WidenPrimitives` needs `T : struct` (for `MemoryMarshal.Cast<T, ...>` dispatch), while `NumericTensorKernels<T>` declared only `INumber<T>`. Fixed by adding `struct` to `NumericTensorKernels<T>` and to the two private delegate-creating methods in `NumericKernelDispatcher` (`createArithmetic<U>`, `createComparison<U>`), which reference `NumericTensorKernels<U>` directly and are invoked via `MakeGenericMethod` (so the constraint is compile-time only, no public-API or call-site change).
+- **`NarrowFloatKernels.Dot` return type (commit 4):** the promoted Dot returned a raw `float`, but `WidenPrimitives.Dot<T>` must return `T` (matmul assigns to `T[]`). Fixed by having `NarrowFloatKernels.Dot` return the narrowed `BFloat16`/`Half`. This also makes the `(T)(object)` box-unbox cast valid.
 
 ## Out of scope (deferred → later phases)
 
