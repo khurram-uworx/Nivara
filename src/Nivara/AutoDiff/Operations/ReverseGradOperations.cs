@@ -1331,6 +1331,42 @@ public static class ReverseGradOperations
     }
 
     /// <summary>
+    /// Applies the SiLU (Swish) activation: <c>x * sigmoid(x)</c>.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with SiLU applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    public static ReverseGradTensor<T> Silu<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        bool trackGrad = GradientUtils.ShouldTrackGrad(a);
+
+        var resultArr = new T[a.Length];
+        GradKernels.Silu(a.AsSpan(), resultArr);
+
+        var resultTensor = ResultTensor(resultArr, a, trackGrad);
+
+        if (trackGrad)
+        {
+            var aArr = new T[a.Length];
+            a.AsSpan().CopyTo(aArr.AsSpan());
+
+            var gradFn = new OpNode<T>("Silu", [a], (typedGradOutput) =>
+            {
+                typedGradOutput.TryGetSpan(out var gSpan);
+                var gradArr = new T[a.Length];
+                GradKernels.SiluGradient(aArr, gSpan, gradArr);
+                AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    /// <summary>
     /// Applies the exact Gaussian error linear unit using the error function.
     /// </summary>
     /// <param name="a">The input tensor</param>

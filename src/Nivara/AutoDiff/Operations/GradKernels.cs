@@ -175,6 +175,40 @@ internal static class GradKernels
         }
     }
 
+    public static void Silu<T>(ReadOnlySpan<T> input, Span<T> output)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (output.Length < input.Length)
+            throw new ArgumentException($"Output span length ({output.Length}) must be at least the input length ({input.Length}).", nameof(output));
+        TensorPrimitives.Sigmoid(input, output);
+        TensorPrimitives.Multiply(input, output, output);
+    }
+
+    public static void SiluGradient<T>(ReadOnlySpan<T> input, ReadOnlySpan<T> gradOutput, Span<T> output)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (input.Length != gradOutput.Length || output.Length < gradOutput.Length)
+            throw new ArgumentException("All spans must have the same length.");
+        int n = input.Length;
+        var sigArr = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var sig = sigArr.AsSpan(0, n);
+            // d/dx silu(x) = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+            TensorPrimitives.Sigmoid(input, sig);
+            TensorPrimitives.Negate(sig, output);
+            TensorPrimitives.Add(output, T.One, output);
+            TensorPrimitives.Multiply(output, input, output);
+            TensorPrimitives.Add(output, T.One, output);
+            TensorPrimitives.Multiply(output, sig, output);
+            TensorPrimitives.Multiply(output, gradOutput, output);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(sigArr);
+        }
+    }
+
     public static void GeluExact<T>(ReadOnlySpan<T> input, Span<T> output)
         where T : struct, IFloatingPointIeee754<T>
     {

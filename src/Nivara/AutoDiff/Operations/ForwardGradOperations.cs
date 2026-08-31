@@ -914,6 +914,31 @@ public static class ForwardGradOperations
     }
 
     /// <summary>
+    /// Applies the SiLU (Swish) activation: <c>x * sigmoid(x)</c>.
+    /// JVP: t_out = silu'(a) * t_a
+    /// </summary>
+    public static ForwardGradTensor<T> Silu<T>(ForwardGradTensor<T> a)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Silu(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.SiluGradient(aSpan, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
+    /// <summary>
     /// Applies the Tanh activation.
     /// JVP: t_out = (1 - tanh²(a)) * t_a = (1 - result²) * t_a
     /// </summary>
