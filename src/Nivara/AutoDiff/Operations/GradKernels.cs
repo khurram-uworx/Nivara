@@ -724,6 +724,67 @@ internal static class GradKernels
         => TensorsHelper.Transpose(src, dst, rows, cols);
 
     // ═══════════════════════════════════════════════════════════════
+    //  GQA head repeat / scatter
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Repeats grouped key/value heads so Q/K/V share an equal head count (GQA).
+    /// Input is <c>[L, numKvHeads * headDim]</c> with one head per contiguous
+    /// <c>headDim</c> block; output is <c>[L, numHeads * headDim]</c> where logical head
+    /// <c>g</c> copies source KV head <c>g / repeat</c> (repeat = numHeads / numKvHeads).
+    /// </summary>
+    public static void HeadRepeat<T>(
+        ReadOnlySpan<T> src, Span<T> dst, int seqLen, int numKvHeads, int numHeads, int headDim)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (numHeads % numKvHeads != 0)
+            throw new ArgumentException($"numHeads ({numHeads}) must be divisible by numKvHeads ({numKvHeads}).");
+        int repeat = numHeads / numKvHeads;
+        for (int l = 0; l < seqLen; l++)
+        {
+            int srcBase = l * numKvHeads * headDim;
+            int dstBase = l * numHeads * headDim;
+            for (int h = 0; h < numKvHeads; h++)
+            {
+                for (int r = 0; r < repeat; r++)
+                {
+                    int g = h * repeat + r;
+                    src.Slice(srcBase + h * headDim, headDim).CopyTo(dst.Slice(dstBase + g * headDim, headDim));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Backward through <see cref="HeadRepeat"/>: the gradient of each source KV head is the
+    /// sum of the gradients of all logical heads that copied from it.
+    /// </summary>
+    public static void HeadRepeatBackward<T>(
+        ReadOnlySpan<T> gradLogical, Span<T> gradSrc, int seqLen, int numKvHeads, int numHeads, int headDim)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (numHeads % numKvHeads != 0)
+            throw new ArgumentException($"numHeads ({numHeads}) must be divisible by numKvHeads ({numKvHeads}).");
+        int repeat = numHeads / numKvHeads;
+        for (int l = 0; l < seqLen; l++)
+        {
+            for (int h = 0; h < numKvHeads; h++)
+            {
+                var acc = gradSrc.Slice(l * numKvHeads * headDim + h * headDim, headDim);
+                for (int d = 0; d < headDim; d++)
+                    acc[d] = default(T);
+                for (int r = 0; r < repeat; r++)
+                {
+                    int g = h * repeat + r;
+                    var src = gradLogical.Slice(l * numHeads * headDim + g * headDim, headDim);
+                    for (int d = 0; d < headDim; d++)
+                        acc[d] += src[d];
+                }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     //  Erf (Abramowitz–Stegun 7.1.26 approximation)
     // ═══════════════════════════════════════════════════════════════
 

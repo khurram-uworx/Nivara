@@ -53,21 +53,26 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
     }
 
     /// <summary>
-    /// Rotates every row of a <c>[L, headDim]</c> tensor by its absolute position.
-    /// The leading dimension is treated as the sequence length; each row is a single
-    /// query/key head vector of width <c>headDim</c>.
+    /// Rotates the last dimension of a tensor by its absolute position. Each row is treated
+    /// as one or more contiguous <c>headDim</c> blocks; every block is rotated by the row's
+    /// position. The leading dimension is the sequence length. A tensor of width
+    /// <c>headDim</c> (one head per row) or <c>numHeads * headDim</c> (all heads combined,
+    /// head-major) is supported.
     /// </summary>
-    /// <param name="input">The query or key tensor with shape <c>[L, headDim]</c></param>
+    /// <param name="input">The query or key tensor with shape <c>[L, headDim]</c> or <c>[L, numHeads * headDim]</c></param>
     /// <returns>The rotated tensor with the same shape</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
-        if (input.Rank != 2) throw new ArgumentException($"RotaryEmbedding expects a 2D [L, headDim] tensor, got rank {input.Rank}.");
+        if (input.Rank != 2) throw new ArgumentException($"RotaryEmbedding expects a 2D tensor, got rank {input.Rank}.");
         int seqLen = input.shape[0];
-        if (input.shape[1] != headDim)
-            throw new ArgumentException($"Expected width {headDim}, got {input.shape[1]}.");
+        int width = input.shape[1];
+        if (width % headDim != 0)
+            throw new ArgumentException($"Width ({width}) must be a multiple of headDim ({headDim}).");
         if (seqLen > maxPositionEmbeddings)
             throw new ArgumentException($"Sequence length {seqLen} exceeds max_position_embeddings {maxPositionEmbeddings}.");
+
+        int numBlocks = width / headDim;
 
         EnsureCache(seqLen);
         var cos = cosCache.AsSpan(0, seqLen * (headDim / 2));
@@ -81,7 +86,14 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
         {
             var rowC = cos.Slice(p * (headDim / 2), headDim / 2);
             var rowS = sin.Slice(p * (headDim / 2), headDim / 2);
-            GradKernels.RotaryForward(inputData.Slice(p * headDim, headDim), rowC, rowS, outputData.AsSpan(p * headDim, headDim));
+            var rowIn = inputData.Slice(p * width, width);
+            var rowOut = outputData.AsSpan(p * width, width);
+            for (int b = 0; b < numBlocks; b++)
+            {
+                GradKernels.RotaryForward(
+                    rowIn.Slice(b * headDim, headDim), rowC, rowS,
+                    rowOut.Slice(b * headDim, headDim));
+            }
         }
 
         var resultTensor = new ReverseGradTensor<T>(
@@ -94,6 +106,7 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
             var savedSin = sin.ToArray();
             int savedSeq = seqLen;
             int savedHeadDim = headDim;
+            int savedBlocks = numBlocks;
 
             var gradFn = new OpNode<T>("RotaryEmbedding", [input], (typedGradOutput) =>
             {
@@ -103,7 +116,13 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
                 {
                     var rowC = savedCos.AsSpan(p * (savedHeadDim / 2), savedHeadDim / 2);
                     var rowS = savedSin.AsSpan(p * (savedHeadDim / 2), savedHeadDim / 2);
-                    GradKernels.RotaryBackward(gradArr.AsSpan(p * savedHeadDim, savedHeadDim), rowC, rowS, gradArr.AsSpan(p * savedHeadDim, savedHeadDim));
+                    var rowG = gradArr.AsSpan(p * width, width);
+                    for (int b = 0; b < savedBlocks; b++)
+                    {
+                        GradKernels.RotaryBackward(
+                            rowG.Slice(b * savedHeadDim, savedHeadDim), rowC, rowS,
+                            rowG.Slice(b * savedHeadDim, savedHeadDim));
+                    }
                 }
                 ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
