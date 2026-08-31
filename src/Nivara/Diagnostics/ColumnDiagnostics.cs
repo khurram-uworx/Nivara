@@ -171,7 +171,14 @@ public enum KernelType
     /// <summary>
     /// Vectorized operations using SIMD instructions
     /// </summary>
-    Vectorized
+    Vectorized,
+
+    /// <summary>
+    /// Narrow float (Half/BFloat16) widened to float, computed with float SIMD,
+    /// then narrowed back. Selected only when <see cref="Nivara.Primitives.NivaraPrimitives.UseWidenSimd"/>
+    /// is enabled (off by default).
+    /// </summary>
+    WidenToFloatSimd
 }
 
 /// <summary>

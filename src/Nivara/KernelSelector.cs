@@ -1,4 +1,5 @@
 using Nivara.Diagnostics;
+using Nivara.Primitives;
 using Nivara.Storage;
 using System.Numerics;
 
@@ -23,6 +24,13 @@ static class KernelSelector
 
     public static KernelType DetermineKernelType<T>(int length)
     {
+        if (typeof(T) == typeof(Half) || typeof(T) == typeof(BFloat16))
+        {
+            if (WidenPrimitives.ShouldWiden(typeof(T), length))
+                return KernelType.WidenToFloatSimd;
+            return KernelType.Scalar;
+        }
+
         return DetermineKernelType(length, ColumnStorageFactory.IsVectorizable<T>());
     }
 
