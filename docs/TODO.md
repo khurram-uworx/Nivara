@@ -59,7 +59,8 @@ Phase 0 built the dispatch contract but the widen branches are **stubbed** — w
 3. ✅ `feat: route NumericTensorKernels span-span element-wise through WidenPrimitives` — 3e9c663
 4. ✅ `feat: route TensorsHelper matmul row-dot through WidenPrimitives (lifts AutoDiff)` — f07eba3
 5. ✅ `test: widen vs scalar-reference correctness + regression toggles` — 789b356
-6. ⬜ `docs: verify BFLOAT16.md / BFLOAT16-TRANSFORMER.md Phase 1 notes`
+6. ✅ `docs: verify BFLOAT16.md / BFLOAT16-TRANSFORMER.md Phase 1 notes` — 1879b29
+7. ✅ `test: add toggle-off element-wise regression guard (BF16/Half all 4 ops)` — e801b7a (additive fix-test; fills the plan's per-op toggle-off regression guard)
 
 ## Deviations from plan (noted for PR)
 
