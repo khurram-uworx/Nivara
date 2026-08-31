@@ -62,13 +62,25 @@ internal static class Benchmark
 
     static ulong TimeIt(Action action)
     {
-        // warm
-        action();
-        int reps = 2000;
-        var sw = Stopwatch.StartNew();
-        for (int i = 0; i < reps; i++) action();
-        sw.Stop();
-        return (ulong)(sw.Elapsed.TotalNanoseconds / reps);
+        // Warm up the JIT (multiple passes).
+        for (int i = 0; i < 20; i++) action();
+
+        // Measure Trials, take the median to discard GC/JIT outliers.
+        int reps = 5000;
+        int trials = 7;
+        var samples = new ulong[trials];
+        for (int t = 0; t < trials; t++)
+        {
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            var sw = Stopwatch.StartNew();
+            for (int i = 0; i < reps; i++) action();
+            sw.Stop();
+            samples[t] = (ulong)(sw.Elapsed.TotalNanoseconds / reps);
+        }
+        Array.Sort(samples);
+        return samples[samples.Length / 2];
     }
 
     static float[] ToFloatSpan(BFloat16[] arr)
