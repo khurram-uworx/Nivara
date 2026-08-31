@@ -13,12 +13,18 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
 {
     readonly int hiddenSize;
 
-    readonly RMSNorm<T> inputNorm;
-    readonly LlamaCausalAttention<T> attention;
-    readonly RMSNorm<T> postNorm;
-    readonly Linear<T> gateProj;
-    readonly Linear<T> upProj;
-    readonly Linear<T> downProj;
+    /// <summary>Gets the pre-attention RMS norm.</summary>
+    public RMSNorm<T> InputNorm { get; }
+    /// <summary>Gets the attention module.</summary>
+    public LlamaCausalAttention<T> Attention { get; }
+    /// <summary>Gets the post-attention RMS norm.</summary>
+    public RMSNorm<T> PostNorm { get; }
+    /// <summary>Gets the SiLU gated-projection linear.</summary>
+    public Linear<T> GateProj { get; }
+    /// <summary>Gets the up-projection linear.</summary>
+    public Linear<T> UpProj { get; }
+    /// <summary>Gets the down-projection linear.</summary>
+    public Linear<T> DownProj { get; }
 
     /// <summary>Gets the hidden (embedding) dimension.</summary>
     public int HiddenSize => hiddenSize;
@@ -47,14 +53,14 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
 
         this.hiddenSize = hiddenSize;
 
-        inputNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
-        attention = new LlamaCausalAttention<T>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta);
-        postNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
-        gateProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
-        upProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
-        downProj = new Linear<T>(intermediateSize, hiddenSize, bias: false);
+        InputNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
+        Attention = new LlamaCausalAttention<T>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta);
+        PostNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
+        GateProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
+        UpProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
+        DownProj = new Linear<T>(intermediateSize, hiddenSize, bias: false);
 
-        RegisterModules(inputNorm, attention, postNorm, gateProj, upProj, downProj);
+        RegisterModules(InputNorm, Attention, PostNorm, GateProj, UpProj, DownProj);
     }
 
     /// <summary>
@@ -70,15 +76,15 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
             throw new ArgumentException($"Expected input width {hiddenSize}, got {input.shape[1]}.");
 
         // Pre-norm self-attention with residual add.
-        var attnOut = attention.Forward(inputNorm.Forward(input));
+        var attnOut = Attention.Forward(InputNorm.Forward(input));
         var h = ReverseGradOperations.Add(input, attnOut);
 
         // Pre-norm gated SiLU feed-forward with residual add.
-        var ffnIn = postNorm.Forward(h);
-        var gate = Activation.Silu(gateProj.Forward(ffnIn));
-        var up = upProj.Forward(ffnIn);
+        var ffnIn = PostNorm.Forward(h);
+        var gate = Activation.Silu(GateProj.Forward(ffnIn));
+        var up = UpProj.Forward(ffnIn);
         var gated = ReverseGradOperations.Multiply(gate, up);
-        var mlpOut = downProj.Forward(gated);
+        var mlpOut = DownProj.Forward(gated);
         return ReverseGradOperations.Add(h, mlpOut);
     }
 }

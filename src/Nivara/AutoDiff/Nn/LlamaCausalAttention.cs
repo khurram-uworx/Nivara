@@ -18,10 +18,14 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     readonly int numKeyValueHeads;
     readonly int headDim;
 
-    readonly Linear<T> qProj;
-    readonly Linear<T> kProj;
-    readonly Linear<T> vProj;
-    readonly Linear<T> oProj;
+    /// <summary>Gets the query projection linear.</summary>
+    public Linear<T> QProj { get; }
+    /// <summary>Gets the key projection linear.</summary>
+    public Linear<T> KProj { get; }
+    /// <summary>Gets the value projection linear.</summary>
+    public Linear<T> VProj { get; }
+    /// <summary>Gets the output projection linear.</summary>
+    public Linear<T> OProj { get; }
     readonly RotaryEmbedding<T> rotary;
 
     readonly T attnScale;
@@ -64,13 +68,13 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         headDim = hiddenSize / numHeads;
         attnScale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
 
-        qProj = new Linear<T>(hiddenSize, numHeads * headDim, bias: false);
-        kProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: false);
-        vProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: false);
-        oProj = new Linear<T>(hiddenSize, hiddenSize, bias: false);
+        QProj = new Linear<T>(hiddenSize, numHeads * headDim, bias: false);
+        KProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: false);
+        VProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: false);
+        OProj = new Linear<T>(hiddenSize, hiddenSize, bias: false);
         rotary = new RotaryEmbedding<T>(headDim, maxPositionEmbeddings, ropeTheta);
 
-        RegisterModules(qProj, kProj, vProj, oProj, rotary);
+        RegisterModules(QProj, KProj, VProj, OProj, rotary);
     }
 
     /// <summary>
@@ -88,9 +92,9 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
 
         int qLen = input.shape[0];
 
-        var Q = qProj.Forward(input);
-        var K = kProj.Forward(input);
-        var V = vProj.Forward(input);
+        var Q = QProj.Forward(input);
+        var K = KProj.Forward(input);
+        var V = VProj.Forward(input);
 
         // Apply RoPE before splitting/repeating.
         Q = rotary.Forward(Q);
@@ -102,6 +106,6 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
 
         var mask = ModuleHelpers<T>.CreateCausalMask(qLen, qLen);
         var attn = ReverseGradOperations.MultiHeadAttention(Q, K, V, numHeads, attnScale, mask);
-        return oProj.Forward(attn);
+        return OProj.Forward(attn);
     }
 }
