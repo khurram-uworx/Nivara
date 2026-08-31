@@ -68,6 +68,8 @@ public class WidenPrimitivesPhase1Tests
         WithWidenEnabled(() =>
         {
             int n = 256;
+            Assert.That(WidenPrimitives.ShouldWiden<BFloat16>(n), Is.True,
+                "test must genuinely exercise the widen path, not the scalar fallback");
             var rng = new Random(42);
             var a = Enumerable.Range(0, n).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
             var b = Enumerable.Range(0, n).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
@@ -172,6 +174,8 @@ public class WidenPrimitivesPhase1Tests
         WithWidenEnabled(() =>
         {
             int n = 200;
+            Assert.That(WidenPrimitives.ShouldWiden(type, n), Is.True,
+                "test must genuinely exercise the widen path, not the scalar fallback");
             var rng = new Random(42);
 
             if (type == typeof(BFloat16))
@@ -433,7 +437,9 @@ public class WidenPrimitivesPhase1Tests
     {
         WithWidenEnabled(() =>
         {
-            int rows = 3, cols = 4, k = 5;
+            int rows = 3, cols = 256, k = 5;
+            Assert.That(WidenPrimitives.ShouldWiden<BFloat16>(cols), Is.True,
+                "matmul must genuinely exercise the widen path, not the scalar fallback");
             var rng = new Random(42);
             var a = Enumerable.Range(0, rows * cols).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
             var b = Enumerable.Range(0, cols * k).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
@@ -458,7 +464,9 @@ public class WidenPrimitivesPhase1Tests
     {
         WithWidenEnabled(() =>
         {
-            int rows = 3, cols = 4, k = 5;
+            int rows = 3, cols = 256, k = 5;
+            Assert.That(WidenPrimitives.ShouldWiden<Half>(cols), Is.True,
+                "matmul must genuinely exercise the widen path, not the scalar fallback");
             var rng = new Random(42);
             var a = Enumerable.Range(0, rows * cols).Select(_ => (Half)(float)(rng.NextDouble() * 2 - 1)).ToArray();
             var b = Enumerable.Range(0, cols * k).Select(_ => (Half)(float)(rng.NextDouble() * 2 - 1)).ToArray();
@@ -475,6 +483,36 @@ public class WidenPrimitivesPhase1Tests
                     Assert.That((float)result[i * k + j], Is.EqualTo(expected).Within(MathF.Abs(expected) * 0.02f + 0.01f),
                         $"Mismatch at [{i},{j}]");
                 }
+        });
+    }
+
+    [Test]
+    public void MultiplyCore_BFloat16_MatMul_ToggleOff_MatchScalarDot()
+    {
+        WithWidenDisabled(() =>
+        {
+            int rows = 3, cols = 256, k = 5;
+            Assert.That(WidenPrimitives.ShouldWiden<BFloat16>(cols), Is.False,
+                "toggle off must disable the widen path");
+            var rng = new Random(42);
+            var a = Enumerable.Range(0, rows * cols).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var b = Enumerable.Range(0, cols * k).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var result = new BFloat16[rows * k];
+
+            TensorsHelper.MultiplyCore(a, b, result, rows, cols, k);
+
+            for (int j = 0; j < k; j++)
+            {
+                var col = new BFloat16[cols];
+                for (int p = 0; p < cols; p++)
+                    col[p] = b[p * k + j];
+                for (int i = 0; i < rows; i++)
+                {
+                    BFloat16 expected = TensorPrimitives.Dot<BFloat16>(a.AsSpan(i * cols, cols), col);
+                    Assert.That(result[i * k + j], Is.EqualTo(expected),
+                        $"Scalar dot mismatch at [{i},{j}]");
+                }
+            }
         });
     }
 
