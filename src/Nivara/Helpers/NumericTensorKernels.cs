@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Numerics.Tensors;
+using Nivara.Primitives;
 
 namespace Nivara.Helpers;
 
@@ -12,20 +13,20 @@ namespace Nivara.Helpers;
 /// instantiations of this type after a runtime <c>typeof(T)</c> check.
 /// </summary>
 static class NumericTensorKernels<T>
-    where T :
+    where T : struct,
         IAdditionOperators<T, T, T>, IAdditiveIdentity<T, T>,
         IMultiplyOperators<T, T, T>, IMultiplicativeIdentity<T, T>,
         IEqualityOperators<T, T, bool>, IComparisonOperators<T, T, bool>,
         INumber<T>
 {
     public static void Add(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-        => TensorPrimitives.Add(x, y, destination);
+        => WidenPrimitives.Add(x, y, destination);
 
     public static void Add(ReadOnlySpan<T> x, T y, Span<T> destination)
         => TensorPrimitives.Add(x, y, destination);
 
     public static void Subtract(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-        => TensorPrimitives.Subtract(x, y, destination);
+        => WidenPrimitives.Subtract(x, y, destination);
 
     public static void Subtract(ReadOnlySpan<T> x, T y, Span<T> destination)
         => TensorPrimitives.Subtract(x, y, destination);
@@ -44,7 +45,7 @@ static class NumericTensorKernels<T>
     }
 
     public static void Divide(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-        => TensorPrimitives.Divide(x, y, destination);
+        => WidenPrimitives.Divide(x, y, destination);
 
     public static void Divide(ReadOnlySpan<T> x, T y, Span<T> destination)
         => TensorPrimitives.Divide(x, y, destination);
@@ -63,7 +64,7 @@ static class NumericTensorKernels<T>
     }
 
     public static void Multiply(ReadOnlySpan<T> x, ReadOnlySpan<T> y, Span<T> destination)
-        => TensorPrimitives.Multiply(x, y, destination);
+        => WidenPrimitives.Multiply(x, y, destination);
 
     public static void Multiply(ReadOnlySpan<T> x, T y, Span<T> destination)
         => TensorPrimitives.Multiply(x, y, destination);
