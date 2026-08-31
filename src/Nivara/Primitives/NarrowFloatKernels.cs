@@ -100,11 +100,11 @@ internal static class NarrowFloatKernels
     // Dot product (matmul hot path)
     // ─────────────────────────────────────────────────────────────────────────
 
-    internal static float Dot(ReadOnlySpan<BFloat16> a, ReadOnlySpan<BFloat16> b)
-        => Vector128.IsHardwareAccelerated ? DotBf16Core(a, b) : DotScalar(a, b);
+    internal static BFloat16 Dot(ReadOnlySpan<BFloat16> a, ReadOnlySpan<BFloat16> b)
+        => (BFloat16)(Vector128.IsHardwareAccelerated ? DotBf16Core(a, b) : DotScalar(a, b));
 
-    internal static float Dot(ReadOnlySpan<Half> a, ReadOnlySpan<Half> b)
-        => Vector128.IsHardwareAccelerated ? DotHalfCore(a, b) : DotScalar(a, b);
+    internal static Half Dot(ReadOnlySpan<Half> a, ReadOnlySpan<Half> b)
+        => (Half)(Vector128.IsHardwareAccelerated ? DotHalfCore(a, b) : DotScalar(a, b));
 
     private static float DotBf16Core(ReadOnlySpan<BFloat16> a, ReadOnlySpan<BFloat16> b)
     {

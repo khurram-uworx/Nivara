@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
+using Nivara.Primitives;
 
 namespace Nivara.Tensors;
 
@@ -279,7 +280,7 @@ static class TensorsHelper
         int aOff = i * aCols;
         int outOff = i * bCols;
         for (int j = 0; j < bCols; j++)
-            result[outOff + j] = TensorPrimitives.Dot(a.Slice(aOff, aCols), bT.AsSpan(j * aCols, aCols));
+            result[outOff + j] = WidenPrimitives.Dot(a.Slice(aOff, aCols), bT.AsSpan(j * aCols, aCols));
     }
 
     /// <summary>
