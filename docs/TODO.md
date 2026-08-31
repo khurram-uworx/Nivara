@@ -32,7 +32,8 @@ The strategy: **Load 8× BF16/Half as `Vector128<ushort>` → widen to float lan
 
 Probe lives at `tests/Nivara.SimdProbe/` as a net11.0 console app (mirrors the
 `Nivara.PerformanceTests` pattern — run manually, **not** part of CI's NUnit
-run).
+run). It is **self-contained** — it references only the `System.Numerics.Tensors`
+NuGet package (for the scalar BCL baseline) and does not reference Nivara.
 
 ## Measured Results (Release, X64, .NET 11)
 
@@ -58,8 +59,9 @@ dominates).
 
 ## Proposed Changes (probe)
 
-- `tests/Nivara.SimdProbe/Nivara.SimdProbe.csproj` — net11.0 console app
-  referencing Nivara core + Samples.
+- `tests/Nivara.SimdProbe/Nivara.SimdProbe.csproj` — net11.0 console app,
+  self-contained (references only the `System.Numerics.Tensors` package for the
+  scalar BCL baseline; not Nivara, not Nivara.Samples).
 - `NarrowSimdKernels.cs` — widen-compute-narrow SIMD kernels:
   - `DotBf16` / `DotHalf` (matrix multiply row-dot hot path)
   - `AddBf16` / `AddHalf`, `MultiplyBf16` / `MultiplyHalf`
@@ -88,9 +90,10 @@ dominates).
 ## Blast Radius
 
 Entirely **additive and sample/test-scoped** — the probe lives under
-`tests/Nivara.SimdProbe/` and references (but does not modify) Nivara core and
-`Nivara.Samples`. Nothing in `src/` is touched. The only risk is if the probe is
-later promoted into `src/Nivara` kernels (e.g. `TensorsHelper`,
+`tests/Nivara.SimdProbe/` and is **self-contained** (references only the
+`System.Numerics.Tensors` package for its scalar baseline; no Nivara or
+Nivara.Samples references). Nothing in `src/` is touched. The only risk is if the
+probe is later promoted into `src/Nivara` kernels (e.g. `TensorsHelper`,
 `RMSNormKernel`, `Adam`), which would be a separate follow-up.
 
 ## Blockers / Red Flags

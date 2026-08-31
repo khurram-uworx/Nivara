@@ -29,7 +29,9 @@ dotnet run -c Release --project tests/Nivara.SimdProbe                  # both
 ```
 
 Always benchmark in `-c Release` — the SIMD payloads are inlined/optimized paths
-and Debug numbers are meaningless.
+and Debug numbers are meaningless. The probe is **self-contained** (only the
+`System.Numerics.Tensors` package for its scalar BCL baseline), so it builds
+fast and isn't coupled to Nivara internals.
 
 ## The Strategy: Widen-Compute-Narrow
 
