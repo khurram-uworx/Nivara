@@ -317,6 +317,50 @@ public class WidenPrimitivesPhase1Tests
     }
 
     [Test]
+    public void ToggleOff_Elementwise_MatchTensorPrimitives()
+    {
+        WithWidenDisabled(() =>
+        {
+            int n = 200;
+            var rng = new Random(42);
+
+            var ab = Enumerable.Range(0, n).Select(_ => (BFloat16)(float)(rng.NextDouble() * 4 - 2)).ToArray();
+            var bb = Enumerable.Range(0, n).Select(_ => (BFloat16)(float)(rng.NextDouble() * 4 - 2)).ToArray();
+            var expB = new BFloat16[n];
+            var actB = new BFloat16[n];
+            TensorPrimitives.Add(ab, bb, expB);
+            WidenPrimitives.Add<BFloat16>(ab, bb, actB);
+            AssertElementwiseEqual(expB, actB);
+            TensorPrimitives.Subtract(ab, bb, expB);
+            WidenPrimitives.Subtract<BFloat16>(ab, bb, actB);
+            AssertElementwiseEqual(expB, actB);
+            TensorPrimitives.Multiply(ab, bb, expB);
+            WidenPrimitives.Multiply<BFloat16>(ab, bb, actB);
+            AssertElementwiseEqual(expB, actB);
+            TensorPrimitives.Divide(ab, bb, expB);
+            WidenPrimitives.Divide<BFloat16>(ab, bb, actB);
+            AssertElementwiseEqual(expB, actB);
+
+            var ah = Enumerable.Range(0, n).Select(_ => (Half)(float)(rng.NextDouble() * 4 - 2)).ToArray();
+            var bh = Enumerable.Range(0, n).Select(_ => (Half)(float)(rng.NextDouble() * 4 - 2)).ToArray();
+            var expH = new Half[n];
+            var actH = new Half[n];
+            TensorPrimitives.Add(ah, bh, expH);
+            WidenPrimitives.Add<Half>(ah, bh, actH);
+            AssertElementwiseEqual(expH, actH);
+            TensorPrimitives.Subtract(ah, bh, expH);
+            WidenPrimitives.Subtract<Half>(ah, bh, actH);
+            AssertElementwiseEqual(expH, actH);
+            TensorPrimitives.Multiply(ah, bh, expH);
+            WidenPrimitives.Multiply<Half>(ah, bh, actH);
+            AssertElementwiseEqual(expH, actH);
+            TensorPrimitives.Divide(ah, bh, expH);
+            WidenPrimitives.Divide<Half>(ah, bh, actH);
+            AssertElementwiseEqual(expH, actH);
+        });
+    }
+
+    [Test]
     public void NumericTensorKernels_Add_BFloat16_ToggleOn_MatchesScalar()
     {
         WithWidenEnabled(() =>
