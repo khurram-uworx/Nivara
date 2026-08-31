@@ -21,42 +21,68 @@ The strategy: **Load 8× BF16/Half as `Vector128<ushort>` → widen to float lan
 
 - **BFloat16** is losslessly the top 16 bits of float32 → widen via `<< 16`
   bit shift + reinterpret; narrow via `>> 16` (rounding: truncation, matching
-  current `T.CreateChecked` truncation in the scalar path).
-- **Half** requires a real conversion. .NET 11 JIT already uses the **F16C**
-  hardware instructions (`vcvtph2ps` / `vcvtps2ph`) for scalar Half↔float;
-  the batch intrinsic path (`F16C.ConvertToVector128Single`) exists.
+  current `T.CreateChecked` truncation in the scalar path). No hardware-specific
+  intrinsic needed; this is the clean primary path.
+- **Half** requires a real conversion. **An important grounding discovery:** .NET 11
+  does **not** expose an `F16C` batch intrinsic (`F16C.ConvertToVector128Single`
+  does not exist in the net11 `System.Runtime.Intrinsics` surface — the scalar
+  JIT consumes `vcvtph2ps`/`vcvtps2ph` internally, but there is no public batch
+  intrinsic class). The Half SIMD path therefore widens/narrows via a portable
+  element-wise `BitConverter` conversion while still accumulating in float SIMD.
 
-Probe delivers a standalone console app `samples/Bfloat16SimdProbe/` measuring
-kernels in isolation and then, if promising, an end-to-end MiniLM BF16
-benchmark.
+Probe lives at `tests/Nivara.SimdProbe/` as a net11.0 console app (mirrors the
+`Nivara.PerformanceTests` pattern — run manually, **not** part of CI's NUnit
+run).
+
+## Measured Results (Release, X64, .NET 11)
+
+All correctness checks pass (DotBf16/DotHalf/AddBf16/MultiplyBf16/RmsNormBf16).
+
+Dot product (the matmul hot path), median of 7 trials × 5000 reps:
+
+| n     | BF16 scalar | BF16 SIMD | speedup | Half scalar | Half SIMD | speedup |
+|-------|------------|-----------|---------|-------------|-----------|---------|
+| 128   | 1456 ns    | 1542 ns   | slower  | 2123 ns     | 2588 ns   | slower  |
+| 384   | 4090 ns    |  200 ns   | 20.4×   | 3424 ns     |  563 ns   | 6.1×    |
+| 768   | 6643 ns    |  384 ns   | 17.3×   | 6901 ns     | 1105 ns   | 6.2×    |
+| 1536  | 22529 ns   |  956 ns   | 23.6×   | 18892 ns    | 2942 ns   | 6.4×    |
+| 3072  | 47120 ns   | 3940 ns   | 12.0×   | 44360 ns    | 9669 ns   | 4.6×    |
+
+Element-wise (n=3072): AddBf16 **2.4×** (SIMD now matches the F32 reference),
+MulBf16 **1.7×**.
+
+**Headline: BFloat16 SIMD dot runs ~12–24× faster than the scalar BCL fallback**
+at the vector lengths MiniLM uses (384/768/1536), directly attacking the ~26×
+MiniLM slowdown. Half wins ~4.6–6.4× (slower at n=128 where conversion overhead
+dominates).
 
 ## Proposed Changes (probe)
 
-- `samples/Bfloat16SimdProbe/Bfloat16SimdProbe.csproj` — net11.0 console app
+- `tests/Nivara.SimdProbe/Nivara.SimdProbe.csproj` — net11.0 console app
   referencing Nivara core + Samples.
-- `SimdKernels.cs` — widen-compute-narrow SIMD kernels:
-  - `DotProductBFloat16` / `DotProductHalf` (matrix multiply row-dot hot path)
-  - `AddBFloat16` / `AddHalf`, `Multiply*`
-  - `RmsNormBFloat16` (per-row SIMD RMSNorm)
-  - `GeluBFloat16`
-- `CorrectnessTests.cs` — compare SIMD results against scalar BCL path.
-- `BenchmarkHarness.cs` — timed loops scalar vs SIMD.
-- `Program.cs` — CLI to run individual probes.
+- `NarrowSimdKernels.cs` — widen-compute-narrow SIMD kernels:
+  - `DotBf16` / `DotHalf` (matrix multiply row-dot hot path)
+  - `AddBf16` / `AddHalf`, `MultiplyBf16` / `MultiplyHalf`
+  - `RmsNormBf16` (per-row RMSNorm)
+  - (GELU dropped — no `MathF.Erf`/`Vector128.Erf` in BCL; not a matmul hot path)
+- `Correctness.cs` — compare SIMD results against scalar baseline.
+- `Benchmark.cs` — median-of-trials timed harness scalar vs SIMD.
+- `Program.cs` — CLI: `correctness`, `benchmark`, or `all`.
 
 ## Verification Steps
 
-1. `dotnet build samples/Bfloat16SimdProbe` succeeds.
-2. Correctness: SIMD kernels match scalar within float tolerance.
-3. Benchmark: SIMD row-dot vs scalar — measure speedup (expect 4–8×).
-4. If promising: wire SIMD matmul into a MiniLM BF16 forward and measure
-   end-to-end (target < 200 ms vs ~3658 ms scalar).
+1. `dotnet build tests/Nivara.SimdProbe` succeeds.
+2. Correctness: SIMD kernels match scalar within float tolerance. ✅
+3. Benchmark: SIMD row-dot vs scalar — measured 12–24× BF16, 4.6–6.4× Half. ✅
+4. Next: wire SIMD matmul into a MiniLM BF16 forward and measure end-to-end
+   (target < 200 ms vs ~3658 ms scalar).
 
 ## Planned Commits
 
-1. `probe: scaffold Bfloat16SimdProbe project + plan in TODO.md`
+1. `probe: scaffold Bfloat16SimdProbe project + plan in TODO.md` ✅
 2. `probe: add BFloat16 SIMD dot-product kernel (widen-compute-narrow)`
-3. `probe: add Half SIMD dot-product kernel (F16C path)`
-4. `probe: add element-wise + RMSNorm + GELU SIMD kernels`
+3. `probe: add Half SIMD dot-product kernel (portable conversion, no F16C batch)`
+4. `probe: add element-wise + RMSNorm SIMD kernels`
 5. `probe: correctness validation + benchmark harness`
 6. `probe: end-to-end MiniLM BF16 benchmark + results`
 
@@ -65,19 +91,21 @@ investigation, not a fixed implementation.)
 
 ## Blast Radius
 
-Entirely **additive and sample-scoped** — the probe lives under
-`samples/Bfloat16SimdProbe/` and references (but does not modify) Nivara core
-and `Nivara.Samples`. Nothing in `src/` is touched. The only risk is if the
-probe is later promoted into `src/Nivara` kernels (e.g. `TensorsHelper`,
+Entirely **additive and sample/test-scoped** — the probe lives under
+`tests/Nivara.SimdProbe/` and references (but does not modify) Nivara core and
+`Nivara.Samples`. Nothing in `src/` is touched. The only risk is if the probe is
+later promoted into `src/Nivara` kernels (e.g. `TensorsHelper`,
 `RMSNormKernel`, `Adam`), which would be a separate follow-up.
 
 ## Blockers / Red Flags
 
-- Whether the F16C batch intrinsic (`F16C.ConvertToVector128Single`) is exposed
-  in .NET 11 and yields a measurable win over element-wise scalar conversion —
-  to be measured in the probe, not assumed.
-- BFloat16 result rounding: the current scalar `T.CreateChecked` path truncates;
-  the SIMD path should match that (or be validated as an acceptable improvement).
+- **No F16C batch intrinsic on .NET 11** — resolved: Half uses a portable
+  element-wise conversion in the widen/narrow step (still wins 4.6–6.4×);
+  BFloat16 bit-shift needs no intrinsic at all and is the primary target.
+- Small-vector (n < 128) dot: SIMD widening overhead exceeds the benefit — the
+  scalar path remains appropriate there.
+- BFloat16 result rounding: SIMD truncates via `>> 16`, matching the scalar
+  `T.CreateChecked` truncation; validated within float tolerance.
 
 ## GitHub issues log
 
