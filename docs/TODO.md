@@ -79,15 +79,11 @@ dominates).
 
 ## Planned Commits
 
-1. `probe: scaffold Bfloat16SimdProbe project + plan in TODO.md` ✅
-2. `probe: add BFloat16 SIMD dot-product kernel (widen-compute-narrow)`
-3. `probe: add Half SIMD dot-product kernel (portable conversion, no F16C batch)`
-4. `probe: add element-wise + RMSNorm SIMD kernels`
-5. `probe: correctness validation + benchmark harness`
-6. `probe: end-to-end MiniLM BF16 benchmark + results`
+1. `docs: plan BF16/Half SIMD probe in TODO.md` ✅
+2. `probe: scaffold Nivara.SimdProbe console app (kernels + correctness + benchmark)` ✅
+3. `probe: record measured BF16/Half SIMD results in TODO.md` ✅
+4. `probe: add README documenting findings and recommendations` ✅
 
-(Commits will be adjusted as the probe's findings dictate — this is an open
-investigation, not a fixed implementation.)
 
 ## Blast Radius
 
