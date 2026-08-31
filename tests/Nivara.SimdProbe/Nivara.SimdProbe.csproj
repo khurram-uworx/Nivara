@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
+    <ProjectReference Include="..\..\samples\Nivara.Samples\Nivara.Samples.csproj" />
+    <PackageReference Include="System.Drawing.Common" Version="11.0.0-preview.7.26381.103" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-preview.7.26381.103" />
+  </ItemGroup>
+
+</Project>
