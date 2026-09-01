@@ -7,9 +7,9 @@ namespace Nivara.AutoDiff.Nn;
 /// <summary>
 /// Rotary position embeddings (RoPE) for transformer attention. Precomputes the cosine and
 /// sine frequency tables once from <c>inv_freq = theta^(-2j/dim)</c> and rotates every
-/// adjacent pair of a <c>[L, headDim]</c> query/key by its absolute position, making
-/// attention positions relative. This is the positional-encoding scheme used by the
-/// Llama family of models. No learnable parameters are involved.
+/// position's query/key by its absolute position using the Llama-family <c>rotate_half</c>
+/// (half-split) layout, making attention positions relative. This is the positional-encoding
+/// scheme used by the Llama family of models. No learnable parameters are involved.
 /// </summary>
 public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPointIeee754<T>
 {
@@ -39,7 +39,7 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
     public RotaryEmbedding(int headDim, int maxPositionEmbeddings = 2048, float ropeTheta = 10000f)
     {
         if (headDim <= 0) throw new ArgumentOutOfRangeException(nameof(headDim));
-        if (headDim % 2 != 0) throw new ArgumentException("headDim must be even for pairwise rotary rotation.", nameof(headDim));
+        if (headDim % 2 != 0) throw new ArgumentException("headDim must be even for rotary rotation.", nameof(headDim));
         if (maxPositionEmbeddings <= 0) throw new ArgumentOutOfRangeException(nameof(maxPositionEmbeddings));
         if (ropeTheta <= 0) throw new ArgumentOutOfRangeException(nameof(ropeTheta));
 
@@ -55,9 +55,9 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
     /// <summary>
     /// Rotates the last dimension of a tensor by its absolute position. Each row is treated
     /// as one or more contiguous <c>headDim</c> blocks; every block is rotated by the row's
-    /// position. The leading dimension is the sequence length. A tensor of width
-    /// <c>headDim</c> (one head per row) or <c>numHeads * headDim</c> (all heads combined,
-    /// head-major) is supported.
+    /// position using the half-split (<c>rotate_half</c>) layout. The leading dimension is the
+    /// sequence length. A tensor of width <c>headDim</c> (one head per row) or
+    /// <c>numHeads * headDim</c> (all heads combined, head-major) is supported.
     /// </summary>
     /// <param name="input">The query or key tensor with shape <c>[L, headDim]</c> or <c>[L, numHeads * headDim]</c></param>
     /// <returns>The rotated tensor with the same shape</returns>

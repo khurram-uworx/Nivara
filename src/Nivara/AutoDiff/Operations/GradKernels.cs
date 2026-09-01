@@ -243,8 +243,9 @@ internal static class GradKernels
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Performs the pairwise rotary rotation for a single position. cos/sin hold
-    /// [headDim/2] values for that position.
+    /// Performs the half-split rotary rotation (HF <c>rotate_half</c>) for a single position.
+    /// cos/sin hold <c>headDim/2</c> values each, one per frequency index <c>i</c>; index
+    /// <c>i</c> pairs columns <c>i</c> and <c>i + headDim/2</c>.
     /// </summary>
     public static void RotaryForward<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> cos, ReadOnlySpan<T> sin, Span<T> output)
         where T : struct, IFloatingPointIeee754<T>
@@ -252,12 +253,12 @@ internal static class GradKernels
         if (x.Length != output.Length) throw new ArgumentException("Input and output spans must match length.");
         if (cos.Length != sin.Length || cos.Length * 2 != x.Length)
             throw new ArgumentException("cos/sin must each hold headDim/2 values matching half the input width.");
-        for (int j = 0; j < cos.Length; j++)
+        for (int i = 0; i < cos.Length; i++)
         {
-            int i0 = j * 2;
-            int i1 = j * 2 + 1;
-            T c = cos[j];
-            T s = sin[j];
+            int i0 = i;
+            int i1 = i + cos.Length;
+            T c = cos[i];
+            T s = sin[i];
             T x0 = x[i0];
             T x1 = x[i1];
             output[i0] = x0 * c - x1 * s;
@@ -266,7 +267,8 @@ internal static class GradKernels
     }
 
     /// <summary>
-    /// Backward through the pairwise rotary rotation for a single position.
+    /// Backward through the half-split rotary rotation (HF <c>rotate_half</c>) for a single
+    /// position.
     /// </summary>
     public static void RotaryBackward<T>(ReadOnlySpan<T> gradOut, ReadOnlySpan<T> cos, ReadOnlySpan<T> sin, Span<T> gradX)
         where T : struct, IFloatingPointIeee754<T>
@@ -274,12 +276,12 @@ internal static class GradKernels
         if (gradOut.Length != gradX.Length) throw new ArgumentException("Gradient spans must match length.");
         if (cos.Length != sin.Length || cos.Length * 2 != gradOut.Length)
             throw new ArgumentException("cos/sin must each hold headDim/2 values matching half the input width.");
-        for (int j = 0; j < cos.Length; j++)
+        for (int i = 0; i < cos.Length; i++)
         {
-            int i0 = j * 2;
-            int i1 = j * 2 + 1;
-            T c = cos[j];
-            T s = sin[j];
+            int i0 = i;
+            int i1 = i + cos.Length;
+            T c = cos[i];
+            T s = sin[i];
             T go0 = gradOut[i0];
             T go1 = gradOut[i1];
             gradX[i0] = go0 * c + go1 * s;

@@ -161,7 +161,22 @@ Weight keys (HF Llama convention): `model.embed_tokens.weight`,
   new gap surfaces.
 - [ ] #367 — GQA support (KV-repeat recommended) — approach adopted (KV-repeat); shared-KV
   kernel is a Phase 3+ follow-up.
-- [ ] *(new)* — if the Microsoft.ML.Tokenizers BPE path cannot reproduce SmolLM byte-level
-  token IDs and a sample-local byte-level BPE reader is required, consider filing an upstream
-  MS.ML.Tokenizers feature request (byte-level normalizer/pretokenizer) and note it here. Created
-  during Unit 7 if confirmed.
+- [x] *(new)* — the Microsoft.ML.Tokenizers BPE path **cannot** reproduce SmolLM byte-level
+  token IDs (empirically confirmed in Unit 7: every MS pre-tokenizer variant returns
+  `[504, 29721, 1714, 33488, 271]` vs. the expected `[504, 3575, 282, 4649, 314]`), so a
+  sample-local byte-level BPE reader (`Gpt2BpeTokenizer`) was implemented. An upstream
+  MS.ML.Tokenizers feature request (byte-level normalizer/pretokenizer) could be filed later;
+  not blocking this phase.
+- [x] *(Unit 8 finding)* — RoPE layout bug: `RotaryEmbedding` implemented the GPT-NeoX-style
+  **interleaved-pairwise** rotation, but Llama/SmolLM uses the **`rotate_half` (half-split)**
+  layout (HF `LlamaRotaryEmbedding.apply_rotary_pos_emb`). A wrong layout rotated Q/K
+  incorrectly → logits near-anti-correlated with the reference (cosine −0.92). Fixed
+  `GradKernels.RotaryForward`/`RotaryBackward` to half-split and updated
+  `RotaryEmbeddingTests`; end-to-end F32 went from 4/32 → 30/32 generated-token match with
+  byte-identical decoded text.
+- [x] *(Unit 8 finding)* — BF16 generation needs the Phase-1 SIMD widen path: with
+  `NivaraPrimitives.UseWidenSimd` off, BFloat16 matmul falls to scalar `TensorPrimitives.Dot`
+  (~100× slower), making a 32-token BF16 generation impractical (30+ min). `Program.cs`'s
+  `smollm` mode now enables `UseWidenSimd` for the narrow (BFloat16/Half) runs (restoring the
+  prior global value afterward so other modes are unaffected). BF16 generation then completes
+  in ~17 s with 22/32 generated-token match and final-logits cosine 0.94.

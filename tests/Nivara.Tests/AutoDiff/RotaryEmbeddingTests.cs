@@ -35,19 +35,20 @@ public class RotaryEmbeddingTests
         return (cos, sin);
     }
 
-    static float RotateValue(float x0, float x1, float c, float s, bool isOdd)
-        => isOdd ? x0 * s + x1 * c : x0 * c - x1 * s;
-
     [Test]
     public void Forward_MatchesManualHfFormula()
     {
+        // Reference: HF Llama rotate_half (half-split) RoPE. With input x of width headDim,
+        // half = headDim/2, and for each position of cos/sin index i in [0, half):
+        //   out[i]       = x[i]*cos[i] - x[i+half]*sin[i]
+        //   out[i+half]  = x[i]*sin[i] + x[i+half]*cos[i]
         const int headDim = 4;
         const int seqLen = 3;
         using var rope = new RotaryEmbedding<float>(headDim, maxPositionEmbeddings: 64, ropeTheta: 10000f);
 
         var inputData = new float[seqLen * headDim];
         for (int i = 0; i < inputData.Length; i++)
-            inputData[i] = i + 1; // 1,2,...,12 → makes pairwise values distinct
+            inputData[i] = i + 1;
 
         var input = ReverseGradTensor<float>.FromMatrix(inputData, seqLen, headDim, requiresGrad: false);
         var output = rope.Forward(input);
@@ -55,14 +56,14 @@ public class RotaryEmbeddingTests
         var (cos, sin) = Precompute(seqLen, headDim);
         for (int p = 0; p < seqLen; p++)
         {
-            for (int j = 0; j < headDim / 2; j++)
+            for (int i = 0; i < headDim / 2; i++)
             {
-                int i0 = p * headDim + j * 2;
-                int i1 = i0 + 1;
-                float c = cos[p * (headDim / 2) + j];
-                float s = sin[p * (headDim / 2) + j];
-                Assert.That(output[i0], Is.EqualTo(RotateValue(inputData[i0], inputData[i1], c, s, false)).Within(1e-5f));
-                Assert.That(output[i1], Is.EqualTo(RotateValue(inputData[i0], inputData[i1], c, s, true)).Within(1e-5f));
+                int i0 = p * headDim + i;
+                int i1 = p * headDim + i + headDim / 2;
+                float c = cos[p * (headDim / 2) + i];
+                float s = sin[p * (headDim / 2) + i];
+                Assert.That(output[i0], Is.EqualTo(inputData[i0] * c - inputData[i1] * s).Within(1e-5f));
+                Assert.That(output[i1], Is.EqualTo(inputData[i0] * s + inputData[i1] * c).Within(1e-5f));
             }
         }
     }
@@ -115,13 +116,13 @@ public class RotaryEmbeddingTests
         Assert.That(input.Grad, Is.Not.Null);
         for (int p = 0; p < seqLen; p++)
         {
-            for (int j = 0; j < headDim / 2; j++)
+            for (int i = 0; i < headDim / 2; i++)
             {
-                int i0 = p * headDim + j * 2;
-                int i1 = i0 + 1;
-                float c = cos[p * (headDim / 2) + j];
-                float s = sin[p * (headDim / 2) + j];
-                // With dL/dout = 1, dL/dx0 = cos + sin, dL/dx1 = -sin + cos.
+                int i0 = p * headDim + i;
+                int i1 = p * headDim + i + headDim / 2;
+                float c = cos[p * (headDim / 2) + i];
+                float s = sin[p * (headDim / 2) + i];
+                // With dL/dout = 1, dL/dx[i] = cos + sin, dL/dx[i+half] = -sin + cos.
                 Assert.That(input.Grad![i0], Is.EqualTo(c + s).Within(1e-5f));
                 Assert.That(input.Grad![i1], Is.EqualTo(-s + c).Within(1e-5f));
             }
