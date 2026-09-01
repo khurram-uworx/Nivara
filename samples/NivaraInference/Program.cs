@@ -24,6 +24,7 @@ class Program
         string resolvedType = modelType == "smollm" ? "smollm-135m" : modelType;
         string precision = "f32";
         string mode = "";
+        bool simdWiden = false;
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--precision" && i + 1 < args.Length)
@@ -41,6 +42,8 @@ class Program
                 precision = "bf16";
             else if (args[i] is "fp16" or "f16" or "half")
                 precision = "fp16";
+            else if (args[i] == "--simd-widen")
+                simdWiden = true;
             else if (mode.Length == 0)
                 mode = args[i];
         }
@@ -61,6 +64,11 @@ class Program
             Console.WriteLine("  --precision f32   Default; full float32 weights");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
+            Console.WriteLine();
+            Console.WriteLine("SIMD (narrow-float models):");
+            Console.WriteLine("  --simd-widen      Enable widen-compute-narrow SIMD kernels for BFloat16/Half");
+            Console.WriteLine("                    (NivaraPrimitives.UseWidenSimd). A/B against scalar: run");
+            Console.WriteLine("                    once without and once with this flag, or use the 'ab' mode.");
             return 1;
         }
 
@@ -106,6 +114,9 @@ class Program
             Console.WriteLine();
         }
 
+        if (simdWiden)
+            NivaraPrimitives.UseWidenSimd = true;
+
         switch (modelType)
         {
             case "mobilenet_v2":
@@ -134,9 +145,9 @@ class Program
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             case "smollm":
-                if (bf16) return RunSmolLM(tensorsBf16);
-                if (fp16) return RunSmolLM(tensorsHalf);
-                return RunSmolLM(tensors);
+                if (bf16) return RunSmolLM(tensorsBf16, simdWiden);
+                if (fp16) return RunSmolLM(tensorsHalf, simdWiden);
+                return RunSmolLM(tensors, simdWiden);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -1167,32 +1178,33 @@ class Program
         return 0;
     }
 
-    static int RunSmolLM(Dictionary<string, (float[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+    static int RunSmolLM(Dictionary<string, (float[] Data, int[] Shape)> tensors, bool simdWiden)
+        => RunSmolLMCore(tensors, simdWiden);
 
-    static int RunSmolLM(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+    static int RunSmolLM(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors, bool simdWiden)
+        => RunSmolLMCore(tensors, simdWiden);
 
-    static int RunSmolLM(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
-        => RunSmolLMCore(tensors);
+    static int RunSmolLM(Dictionary<string, (Half[] Data, int[] Shape)> tensors, bool simdWiden)
+        => RunSmolLMCore(tensors, simdWiden);
 
     static string PrecisionName(Type t)
         => t == typeof(BFloat16) ? "BFloat16"
          : t == typeof(Half) ? "Half"
          : "F32";
 
-    static int RunSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
+    static int RunSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, bool simdWiden)
         where T : struct, IFloatingPointIeee754<T>
     {
         string precisionName = PrecisionName(typeof(T));
 
         // The narrow 16-bit paths (BFloat16/Half) run through the Phase-1 SIMD
-        // widen-compute-narrow kernels; without them BF16 matmul falls back to a
-        // ~100x-slower scalar dot. Enable the toggle for this run and restore the
-        // prior global value afterwards so other model modes are unaffected.
+        // widen-compute-narrow kernels by default; without them BF16 matmul falls back
+        // to a ~100x-slower scalar dot. --simd-widen opts additional precisions in, and
+        // setting it off explicitly (scalar A/B) is done by the 'ab' mode. Save and
+        // restore the prior global value so other model modes are unaffected.
         bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
         bool priorWiden = NivaraPrimitives.UseWidenSimd;
-        if (narrow)
+        if (simdWiden || narrow)
             NivaraPrimitives.UseWidenSimd = true;
         try
         {
