@@ -585,14 +585,13 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
 
                     for (int oh = 0; oh < oH; oh++)
                     {
-                        int baseIH = oh;
+                        int baseIH = oh - 1;
 
                         for (int ow = 0; ow < oW; ow++)
                         {
                             T g = gradOutData[gradChBase + oh * oW + ow];
                             if (g == T.Zero) continue;
 
-                            int iRow0 = inputChBase + baseIH * w + ow;
                             int wRow0 = weightBase;
 
                             for (int kh = 0; kh < 3; kh++)
@@ -605,7 +604,7 @@ public sealed class Conv2d<T> : Module<T> where T : struct, IFloatingPointIeee75
 
                                 for (int kw = 0; kw < 3; kw++)
                                 {
-                                    int iw = ow + kw;
+                                    int iw = ow - 1 + kw;
                                     if ((uint)iw >= (uint)w) continue;
 
                                     inputGrad[iBase + iw] += g * weightData[wBase + kw];
