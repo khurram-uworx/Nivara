@@ -283,7 +283,10 @@ logits.
 impractical (~100× slower). The `smollm` mode therefore enables
 `NivaraPrimitives.UseWidenSimd` for the narrow (BFloat16/Half) runs so the Phase-1
 widen-compute-narrow SIMD kernels drive the matmuls (and restores the prior global
-value afterwards, so other model modes are unaffected).
+value afterwards, so other model modes are unaffected). A `--simd-widen` flag opts any
+model into the widen path explicitly, `smollm benchmark` reports median-of-3
+full-generation timing, and `smollm ab` runs the scalar-vs-widen side-by-side
+comparison (see the A/B table under Performance benchmarks).
 
 **Numerical caveats** (documented tolerance, not bit-exact): greedy argmax agreement
 with the PyTorch reference is high but not perfect — F32 matches ~25/32 generated
@@ -546,6 +549,21 @@ takeaway: on CPU, use BF16 only when you need the halved memory footprint; if yo
 BF16 native load also skips the F32→BF16 truncation the other models' narrow modes do —
 on disk SmolLM is already BF16.)
 
+**BF16 scalar-fallback vs widen SIMD A/B (`smollm --precision bf16 ab`, 2026-09-01, same machine):**
+
+| Mode | ms/token | Full gen (32 tokens) | vs |
+|---|---|---|---|
+| BF16 scalar fallback (`UseWidenSimd = off`) | 7,032 | 225,037 ms | — |
+| BF16 widen (`UseWidenSimd = on`, default for narrow) | 705 | 22,591 ms | **~10× faster** |
+| F32 native (control) | 333 | 10,660–10,926 ms | widen transparent |
+
+The `--simd-widen` flag toggles the widen path from the CLI; for narrow models it is enabled
+by default (without it, BF16 matmul falls back to the ~26–100×-slower scalar dot). The F32
+control confirms the toggle is a no-op for `float` (identical token streams, 32/32). Reading
+the table together with the memory-vs-performance table above: BF16 **widen** is ~10× faster
+than BF16 **scalar** and still ~2× slower than F32 native — the widen path restores usable
+BF16 performance (memory-halving convenience) while remaining slower than native F32 compute.
+
 AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The AutoDiff refactor closed most of the gap: on the 2026-08-04 machine it cut vision inference ~4× (MobileNetV2 ~2,254 ms → ~563 ms, ResNet-18 ~641 ms → ~263 ms) and transformers ~1.5× (MiniLM ~110 → ~73 ms, DistilBERT ~186 → ~164 ms, SST-2 ~232 → ~187 ms). The vision gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops — ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, keeping DistilBERT encoder inference at ~508 ms on this laptop.
 
 ## Sample data
@@ -632,6 +650,7 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `Gpt2BpeTokenizer` | Sample-local GPT-2 byte-level BPE tokenization |
 | `NivaraPrimitives.UseWidenSimd` | SIMD widen-compute-narrow BF16 matmul (native path) |
 | Greedy generation (inference-default) | 32-token decode, no `GradientUtils.Grad()` scope |
+| `smollm ab` A/B + `smollm benchmark` | Scalar-vs-widen comparison; median-of-3 generation timing |
 
 ## Release Benchmark
 
@@ -647,9 +666,10 @@ dotnet run --project samples/NivaraInference -c Release -- resnet18 benchmark
 dotnet run --project samples/NivaraInference -c Release -- minilm benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert benchmark
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchmark
-# SmolLM uses the generate mode (32 greedy tokens), not `benchmark`:
-dotnet run --project samples/NivaraInference -c Release -- smollm            # F32
-dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16  # native BF16
+# SmolLM: benchmark (median-of-3 full generation timing) or generate (full diff):
+dotnet run --project samples/NivaraInference -c Release -- smollm benchmark                     # F32
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 benchmark   # native BF16 (widen)
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 ab          # A/B scalar vs widen
 
 # PyTorch (Python) — run immediately after on the same machine
 cd samples/NivaraInference/Python

@@ -1,6 +1,6 @@
 # BFloat16 Transformer Acceleration — Plan & Research
 
-**Status:** Planning / agreed direction.
+**Status:** Implemented — Phases 0–2 shipped in v2.0.0-preview (branches `khurram/smollm-1`, `khurram/smollm-2`); Phase 3 (A/B + benchmark + docs) landed on branch `khurram/smollm-3`. The widen kernels are switch-gated (`NivaraPrimitives.UseWidenSimd`, **default off**).
 **Goal:** Give Nivara SIMD-accelerated `BFloat16` / `Half` numeric math — something the BCL
 (`TensorPrimitives`) cannot do on .NET 11 — by widening narrow floats to `float` and running
 the genuinely-SIMD `TensorPrimitives<float>` kernels, then narrowing back. The work is driven
@@ -212,10 +212,25 @@ job is to pull in the *new* ops above.
   Validated against the HuggingFace reference (`compare_smollm_py.bin`): BF16 22/32 generated-token
   argmax match, 0.94 final-position logits cosine (see `samples/NivaraInference/README.md`).
   Closes #367 (GQA) and #368 (causal-LM ops).
-- **Phase 3 — A/B + correctness + docs:** `--simd-widen` in `NivaraInference`; benchmark scalar
-  vs widen; add a Python reference generator for the 5th model; verify argmax/logit diff vs
-  HuggingFace; update `BFLOAT16.md` and this doc with results. Optionally flip the global switch
-  and re-run the 4 existing models as a regression check.
+- **Phase 3 — A/B + correctness + docs — DONE (branch `khurram/smollm-3`):** `--simd-widen`
+  CLI flag in `NivaraInference` opts any narrow model into the widen kernels (default stays
+  off; SmolLM narrow keeps its auto-enable); a `smollm benchmark` mode reports median-of-3
+  full-generation timing; a `smollm ab` mode runs scalar vs widen side-by-side. The Python
+  reference generator + argmax/logit diff already exist from Phase 2 and are reused.
+  **Measured (SmolLM-135M, 32 greedy tokens, .NET 11, this machine):**
+  - BF16 scalar: ~225 s (7,032 ms/token); BF16 widen: **median 22.6 s (705 ms/token)** → the
+    widen path is **~10× faster** than the scalar BF16 fallback.
+  - F32 native: ~10.7 s (333 ms/token); the `--simd-widen` toggle is transparent to F32
+    (identical token streams, 32/32) as expected.
+  - Note: BF16+widen (705 ms/token) is still ~2× slower than F32 native (333 ms/token) —
+    the widen path does F32 compute plus widen/narrow conversion overhead, so BF16 is a
+    memory-halving convenience, not a compute win, for SmolLM on this workload.
+  - Widen correctness unchanged vs Phase 2: SmolLM BF16 22/32 generated-token argmax,
+    0.937 final-logits cosine (matches the documented baseline). Regression check on the 4
+    existing models: `distilbert_sst --precision bf16` argmax stays **8/8** vs PyTorch both
+    with and without `--simd-widen`.
+  Phase 3 closes the flag/benchmark/A-B gap from this doc's §6. The global switch remains
+  **off** by default; the docs above record the A/B numbers.
 
 ---
 
