@@ -5,12 +5,12 @@ Test fixtures go to samples/data/torch-comparison/.
 
 Reproducibility:
   - Verified with Python 3.12, torch 2.13.0+cpu, numpy 1.26.
-  - Fixtures are RNG-derived. A single shared torch.Generator is seeded with
-    42 (see run()) and every random draw uses generator=rng. Weights are
-    created by nn.* modules, which consume from the global torch RNG, so
-    CPU-only execution is required for bit-stable output. Add a new draw to
-    the end of a case, never insert one mid-stream, or every subsequent
-    fixture changes and the C# manifest must be regenerated together.
+  - Fixtures are RNG-derived. Both the global torch RNG (consumed by nn.*
+    module weight initialization) and a dedicated torch.Generator are seeded
+    with 42 (see run()), and every random draw uses generator=rng. CPU-only
+    execution is required for bit-stable output. Add a new draw to the end of
+    a case, never insert one mid-stream, or every subsequent fixture changes
+    and the C# manifest must be regenerated together.
   - Regenerate after upgrading torch/numpy: run `python gen_reference.py` and
     commit the full samples/data/torch-comparison/ tree as one unit.
 
@@ -38,9 +38,10 @@ def run():
     manifest = {}
 
     print(f"torch {torch.__version__} | numpy {np.__version__} | python {sys.version.split()[0]}")
-    print(f"RNG seed: 42 (single shared torch.Generator)\n")
+    print(f"RNG seed: 42 (global torch RNG + dedicated per-case generators)\n")
 
     # Deterministic RNG
+    torch.manual_seed(42)
     rng = torch.Generator()
     rng.manual_seed(42)
 
@@ -984,6 +985,444 @@ def run():
     bat_cmask[:, :, 4] = float("-inf")
     bat_cdout = torch.randn(2, 3, 8, generator=attn_rng)
     save_batched_attn_case("batched_attn_cross", bat_cq, bat_ck, bat_cv, bat_cscale, bat_cmask, bat_cdout, num_heads=2)
+
+    # =========================================================================
+    # SiLU tests (Activation.Silu / ReverseGradOperations.Silu)
+    # Element-wise silu(x) = x * sigmoid(x). Dedicated RNG keeps the main and
+    # all earlier per-case streams bit-identical. Saves forward output + the
+    # input gradient of the sum (sum-backward parity).
+    # =========================================================================
+    silu_rng = torch.Generator().manual_seed(505)
+
+    for name, inp_shape in [("silu_1d", (32,)), ("silu_4d", (1, 8, 4, 4))]:
+        inp = torch.randn(inp_shape, generator=silu_rng).requires_grad_(True)
+        out = F.silu(inp)
+        out.sum().backward()
+
+        inp_np = inp.detach().numpy().astype(np.float32)
+        out_np = out.detach().numpy().astype(np.float32)
+        grad_np = inp.grad.detach().numpy().astype(np.float32)
+
+        inp_np.tofile(os.path.join(TEST_DIR, f"{name}_input.bin"))
+        out_np.tofile(os.path.join(TEST_DIR, f"{name}_output.bin"))
+        grad_np.tofile(os.path.join(TEST_DIR, f"{name}_grad.bin"))
+
+        manifest[name] = {
+            "layer": "SiLU",
+            "input_shape": list(inp_shape),
+            "output_shape": list(out_np.shape),
+            "grad_shape": list(grad_np.shape),
+        }
+        print(f"  {name}: input={inp_shape} output={out_np.shape}")
+
+    # =========================================================================
+    # RotaryEmbedding (RoPE) tests — Llama-family half-split rotate_half layout.
+    # No parameters. Saves forward output + input gradient of the sum. Uses its
+    # own dedicated RNG and pure-tensor math (no nn.* modules), so the global
+    # torch RNG stream is untouched.
+    # =========================================================================
+    rope_rng = torch.Generator().manual_seed(606)
+
+    def build_rope_cache(head_dim, seq_len, theta):
+        half = head_dim // 2
+        inv_freq = 1.0 / (theta ** (torch.arange(0, head_dim, 2, dtype=torch.float32) / head_dim))
+        positions = torch.arange(seq_len, dtype=torch.float32)
+        freqs = torch.outer(positions, inv_freq)  # [L, half]
+        return torch.cos(freqs), torch.sin(freqs)
+
+    def apply_rope(x, cos, sin):
+        # x: [L, width], cos/sin: [L, headDim/2]; rotate every contiguous headDim
+        # block using the half-split rotate_half layout:
+        #   out[i]      = x[i] * c[i] - x[half+i] * s[i]
+        #   out[half+i] = x[i] * s[i] + x[half+i] * c[i]
+        L, width = x.shape
+        half = cos.shape[-1]
+        head_dim = 2 * half
+        xr = x.reshape(L, -1, head_dim)  # [L, blocks, headDim]
+        x1 = xr[..., :half]
+        x2 = xr[..., half:]
+        c = cos.reshape(L, 1, half)
+        s = sin.reshape(L, 1, half)
+        out = torch.cat([x1 * c - x2 * s, x1 * s + x2 * c], dim=-1)
+        return out.reshape(L, width)
+
+    for name, head_dim, seq_len, width, theta in [
+        ("rope_1head", 8, 8, 8, 10000.0),
+        ("rope_2head", 8, 8, 16, 10000.0),
+    ]:
+        inp = torch.randn(seq_len, width, generator=rope_rng).requires_grad_(True)
+        cos, sin = build_rope_cache(head_dim, seq_len, theta)
+        out = apply_rope(inp, cos, sin)
+        out.sum().backward()
+
+        inp_np = inp.detach().numpy().astype(np.float32)
+        out_np = out.detach().numpy().astype(np.float32)
+        grad_np = inp.grad.detach().numpy().astype(np.float32)
+
+        inp_np.tofile(os.path.join(TEST_DIR, f"{name}_input.bin"))
+        out_np.tofile(os.path.join(TEST_DIR, f"{name}_output.bin"))
+        grad_np.tofile(os.path.join(TEST_DIR, f"{name}_grad.bin"))
+
+        manifest[name] = {
+            "layer": "RotaryEmbedding",
+            "input_shape": [seq_len, width],
+            "output_shape": list(out_np.shape),
+            "grad_shape": list(grad_np.shape),
+            "params": {"head_dim": head_dim, "max_position_embeddings": seq_len, "rope_theta": theta},
+        }
+        print(f"  {name}: input=[{seq_len},{width}] head_dim={head_dim} output={out_np.shape}")
+
+    # =========================================================================
+    # RMSNorm module tests (elementwise affine gamma)
+    # PyTorch nn.RMSNorm initializes gamma to ones (no RNG draw), so the global
+    # stream is untouched. Saves input, gamma, output, input grad AND gamma grad
+    # (all from a single sum-backward).
+    # =========================================================================
+    rms_rng = torch.Generator().manual_seed(707)
+
+    rn = nn.RMSNorm(32, eps=1e-5)
+    rn.weight.data.copy_(torch.randn(32, generator=rms_rng) * 0.1 + 1.0)
+    rms_inp = torch.randn(4, 32, generator=rms_rng).requires_grad_(True)
+    rms_out = rn(rms_inp)
+    rms_out.sum().backward()
+
+    rms_name = "rmsnorm_module_2d"
+    rms_inp.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{rms_name}_input.bin"))
+    rn.weight.data.cpu().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{rms_name}_gamma.bin"))
+    rms_out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{rms_name}_output.bin"))
+    rms_inp.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{rms_name}_input_grad.bin"))
+    rn.weight.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{rms_name}_gamma_grad.bin"))
+
+    manifest[rms_name] = {
+        "layer": "RMSNormModule",
+        "input_shape": list(rms_inp.shape),
+        "gamma_shape": list(rn.weight.data.shape),
+        "output_shape": list(rms_out.shape),
+        "input_grad_shape": list(rms_inp.grad.shape),
+        "gamma_grad_shape": list(rn.weight.grad.shape),
+        "params": {"normalized_shape": 32, "eps": 1e-5},
+    }
+    print(f"  {rms_name}: input={list(rms_inp.shape)} gamma={list(rn.weight.data.shape)} output={list(rms_out.shape)}")
+
+    # =========================================================================
+    # LlamaCausalAttention tests (GQA + RoPE + causal mask, fused MHA)
+    # Reference: bias-less Linear projections -> RoPE -> consecutive KV-head
+    # repeat (repeat_interleave per head) -> per-head scaled dot product with an
+    # additive causal mask -> concat heads -> output projection. Saves input, the
+    # four Linear weights ([out, in] row-major, matching the raw nn.Linear
+    # layout), output, and the input gradient of the sum.
+    # =========================================================================
+    llama_rng = torch.Generator().manual_seed(808)
+
+    def gqa_mha(q, k, v, num_heads, num_kv_heads, mask, scale):
+        L, width = q.shape
+        head_dim = width // num_heads
+        repeat = num_heads // num_kv_heads
+        kh = k.reshape(L, num_kv_heads, head_dim).repeat_interleave(repeat, dim=1).reshape(L, width)
+        vh = v.reshape(L, num_kv_heads, head_dim).repeat_interleave(repeat, dim=1).reshape(L, width)
+        heads = []
+        for h in range(num_heads):
+            qq = q[:, h * head_dim:(h + 1) * head_dim]
+            kk = kh[:, h * head_dim:(h + 1) * head_dim]
+            vv = vh[:, h * head_dim:(h + 1) * head_dim]
+            scores = torch.matmul(qq, kk.transpose(-2, -1)) * scale
+            if mask is not None:
+                scores = scores + mask
+            p = torch.softmax(scores, dim=-1)
+            heads.append(torch.matmul(p, vv))
+        return torch.cat(heads, dim=-1)
+
+    attn_hidden = 64
+    attn_heads = 4
+    attn_kv_heads = 2
+    attn_head_dim = 16
+    attn_seq = 5
+
+    wq = torch.randn(attn_heads * attn_head_dim, attn_hidden, generator=llama_rng)
+    wk = torch.randn(attn_kv_heads * attn_head_dim, attn_hidden, generator=llama_rng)
+    wv = torch.randn(attn_kv_heads * attn_head_dim, attn_hidden, generator=llama_rng)
+    wo = torch.randn(attn_hidden, attn_hidden, generator=llama_rng)
+    attn_inp = torch.randn(attn_seq, attn_hidden, generator=llama_rng).requires_grad_(True)
+
+    q = attn_inp @ wq.t()
+    k = attn_inp @ wk.t()
+    v = attn_inp @ wv.t()
+    cos, sin = build_rope_cache(attn_head_dim, attn_seq, 10000.0)
+    q = apply_rope(q, cos, sin)
+    k = apply_rope(k, cos, sin)
+    attn_mask = torch.triu(torch.full((attn_seq, attn_seq), float("-inf")), diagonal=1)
+    attn_scale = 1.0 / math.sqrt(attn_head_dim)
+    attn_out = gqa_mha(q, k, v, attn_heads, attn_kv_heads, attn_mask, attn_scale) @ wo.t()
+    attn_out.sum().backward()
+
+    attn_name = "llama_attn"
+    attn_inp.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{attn_name}_input.bin"))
+    wq.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{attn_name}_qw.bin"))
+    wk.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{attn_name}_kw.bin"))
+    wv.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{attn_name}_vw.bin"))
+    wo.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{attn_name}_ow.bin"))
+    attn_out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{attn_name}_output.bin"))
+    attn_inp.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{attn_name}_input_grad.bin"))
+
+    manifest[attn_name] = {
+        "layer": "LlamaCausalAttention",
+        "input_shape": [attn_seq, attn_hidden],
+        "q_weight_shape": list(wq.shape),
+        "k_weight_shape": list(wk.shape),
+        "v_weight_shape": list(wv.shape),
+        "o_weight_shape": list(wo.shape),
+        "output_shape": list(attn_out.shape),
+        "input_grad_shape": list(attn_inp.grad.shape),
+        "params": {"hidden_size": attn_hidden, "num_heads": attn_heads,
+                   "num_key_value_heads": attn_kv_heads, "max_position_embeddings": 16,
+                   "rope_theta": 10000.0},
+    }
+    print(f"  {attn_name}: input=[{attn_seq},{attn_hidden}] q={list(wq.shape)} k={list(wk.shape)} output={list(attn_out.shape)}")
+
+    # =========================================================================
+    # LlamaDecoderBlock tests (pre-norm GQA attention + gated SiLU FFN, residuals)
+    # Reference: RMSNorm(affine) -> Llama attention -> residual; then RMSNorm
+    # (affine) -> silu(gate(h)) * up(h) -> down -> residual. Saves input, every
+    # learnable weight ([out, in] row-major), output, and the input gradient.
+    # =========================================================================
+    dec_rng = torch.Generator().manual_seed(909)
+
+    dec_hidden = 32
+    dec_heads = 4
+    dec_kv_heads = 2
+    dec_head_dim = 8
+    dec_seq = 4
+    dec_inter = 48
+    dec_eps = 1e-5
+
+    def rms_norm_affine(x, gamma, eps):
+        rms = torch.sqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+        return x / rms * gamma
+
+    dec_in_gamma = torch.randn(dec_hidden, generator=dec_rng) * 0.1 + 1.0
+    dec_post_gamma = torch.randn(dec_hidden, generator=dec_rng) * 0.1 + 1.0
+    dec_wq = torch.randn(dec_heads * dec_head_dim, dec_hidden, generator=dec_rng)
+    dec_wk = torch.randn(dec_kv_heads * dec_head_dim, dec_hidden, generator=dec_rng)
+    dec_wv = torch.randn(dec_kv_heads * dec_head_dim, dec_hidden, generator=dec_rng)
+    dec_wo = torch.randn(dec_hidden, dec_hidden, generator=dec_rng)
+    dec_gate = torch.randn(dec_inter, dec_hidden, generator=dec_rng)
+    dec_up = torch.randn(dec_inter, dec_hidden, generator=dec_rng)
+    dec_down = torch.randn(dec_hidden, dec_inter, generator=dec_rng)
+    dec_inp = torch.randn(dec_seq, dec_hidden, generator=dec_rng).requires_grad_(True)
+
+    h = rms_norm_affine(dec_inp, dec_in_gamma, dec_eps)
+    qq = h @ dec_wq.t()
+    kk = h @ dec_wk.t()
+    vv = h @ dec_wv.t()
+    cos, sin = build_rope_cache(dec_head_dim, dec_seq, 10000.0)
+    qq = apply_rope(qq, cos, sin)
+    kk = apply_rope(kk, cos, sin)
+    dec_mask = torch.triu(torch.full((dec_seq, dec_seq), float("-inf")), diagonal=1)
+    attn_h = gqa_mha(qq, kk, vv, dec_heads, dec_kv_heads, dec_mask, 1.0 / math.sqrt(dec_head_dim)) @ dec_wo.t()
+    h = dec_inp + attn_h
+
+    ffn_in = rms_norm_affine(h, dec_post_gamma, dec_eps)
+    gate_h = F.silu(ffn_in @ dec_gate.t())
+    up_h = ffn_in @ dec_up.t()
+    mlp_h = (gate_h * up_h) @ dec_down.t()
+    dec_out = h + mlp_h
+    dec_out.sum().backward()
+
+    dec_name = "llama_decoder"
+    dec_inp.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_input.bin"))
+    dec_in_gamma.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_in_gamma.bin"))
+    dec_post_gamma.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_post_gamma.bin"))
+    dec_wq.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_qw.bin"))
+    dec_wk.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_kw.bin"))
+    dec_wv.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_vw.bin"))
+    dec_wo.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_ow.bin"))
+    dec_gate.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_gatew.bin"))
+    dec_up.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_upw.bin"))
+    dec_down.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_downw.bin"))
+    dec_out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_output.bin"))
+    dec_inp.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dec_name}_input_grad.bin"))
+
+    manifest[dec_name] = {
+        "layer": "LlamaDecoderBlock",
+        "input_shape": [dec_seq, dec_hidden],
+        "in_gamma_shape": list(dec_in_gamma.shape),
+        "post_gamma_shape": list(dec_post_gamma.shape),
+        "q_weight_shape": list(dec_wq.shape),
+        "k_weight_shape": list(dec_wk.shape),
+        "v_weight_shape": list(dec_wv.shape),
+        "o_weight_shape": list(dec_wo.shape),
+        "gate_weight_shape": list(dec_gate.shape),
+        "up_weight_shape": list(dec_up.shape),
+        "down_weight_shape": list(dec_down.shape),
+        "output_shape": list(dec_out.shape),
+        "input_grad_shape": list(dec_inp.grad.shape),
+        "params": {"hidden_size": dec_hidden, "num_heads": dec_heads,
+                   "num_key_value_heads": dec_kv_heads, "intermediate_size": dec_inter,
+                   "max_position_embeddings": 16, "rope_theta": 10000.0, "rms_norm_eps": dec_eps},
+    }
+    print(f"  {dec_name}: input=[{dec_seq},{dec_hidden}] gate={list(dec_gate.shape)} output={list(dec_out.shape)}")
+
+    # =========================================================================
+    # DepthwiseSeparableConv2d tests
+    # Reference: depthwise Conv2d (groups=inCh) -> ReLU -> 1x1 pointwise Conv2d.
+    # Uses F.conv2d with explicit weight tensors (no nn.Conv2d module) so the
+    # global torch RNG stream is untouched. Saves input, depthwise and pointwise
+    # weights, pointwise bias, output, and the input gradient of the sum.
+    # =========================================================================
+    dsc_rng = torch.Generator().manual_seed(1010)
+
+    dsc_in_c = 4
+    dsc_out_c = 8
+    dsc_k = 3
+    dsc_inp = torch.randn(1, dsc_in_c, 8, 8, generator=dsc_rng).requires_grad_(True)
+
+    dw_weight = torch.randn(dsc_in_c, 1, dsc_k, dsc_k, generator=dsc_rng)
+    pw_weight = torch.randn(dsc_out_c, dsc_in_c, 1, 1, generator=dsc_rng)
+    pw_bias = torch.randn(dsc_out_c, generator=dsc_rng)
+
+    dsc_h = torch.relu(F.conv2d(dsc_inp, dw_weight, stride=1, padding=1, groups=dsc_in_c))
+    dsc_out = F.conv2d(dsc_h, pw_weight, pw_bias, stride=1, padding=0)
+    dsc_out.sum().backward()
+
+    dsc_name = "dsc"
+    dsc_inp.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dsc_name}_input.bin"))
+    dw_weight.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dsc_name}_dw_weight.bin"))
+    pw_weight.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dsc_name}_pw_weight.bin"))
+    pw_bias.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dsc_name}_pw_bias.bin"))
+    dsc_out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dsc_name}_output.bin"))
+    dsc_inp.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{dsc_name}_input_grad.bin"))
+
+    manifest[dsc_name] = {
+        "layer": "DepthwiseSeparableConv2d",
+        "input_shape": list(dsc_inp.shape),
+        "dw_weight_shape": list(dw_weight.shape),
+        "pw_weight_shape": list(pw_weight.shape),
+        "pw_bias_shape": list(pw_bias.shape),
+        "output_shape": list(dsc_out.shape),
+        "input_grad_shape": list(dsc_inp.grad.shape),
+        "params": {"in_channels": dsc_in_c, "out_channels": dsc_out_c,
+                   "kernel_size": dsc_k, "stride": 1, "padding": 1},
+    }
+    print(f"  {dsc_name}: input={list(dsc_inp.shape)} dw={list(dw_weight.shape)} output={list(dsc_out.shape)}")
+
+    # =========================================================================
+    # TransformerBlock tests (pre-norm GELU MLP, causal MHA; RMSNorm + LayerNorm)
+    # Reference: pre-norm (no-affine RMSNorm or LayerNorm) -> Q/K/V project ->
+    # per-head causal scaled-dot-product -> O project + residual -> pre-norm ->
+    # GELU(tanh) MLP -> residual. Saves input, all six Linear weights ([out, in]
+    # row-major), output, and the input gradient of the sum.
+    # =========================================================================
+    tb_rng = torch.Generator().manual_seed(1111)
+    tb_ln_rng = torch.Generator().manual_seed(1212)
+
+    def rms_norm_no_affine(x, eps=1e-5):
+        return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + eps)
+
+    def transformer_block_forward(x, qw, kw, vw, ow, f1w, f2w, n_embd, n_head, norm_fn, eps=1e-5):
+        L, D = x.shape
+        head_dim = D // n_head
+        scale = 1.0 / math.sqrt(head_dim)
+        mask = torch.triu(torch.full((L, L), float("-inf")), diagonal=1)
+        h = norm_fn(x, eps)
+        q = h @ qw.t()
+        k = h @ kw.t()
+        v = h @ vw.t()
+        attn = gqa_mha(q, k, v, n_head, n_head, mask, scale)  # repeat=1 when kv==heads
+        x = x + attn @ ow.t()
+        h = norm_fn(x, eps)
+        mlp_h = F.gelu(h @ f1w.t(), approximate="tanh") @ f2w.t()
+        return x + mlp_h
+
+    tb_embd = 32
+    tb_heads = 4
+    tb_seq = 6
+
+    def tb_layer_norm_no_affine(x, eps):
+        return F.layer_norm(x, (tb_embd,), None, None, eps)
+
+    for tb_name, tb_rng_used, tb_norm_fn in [
+        ("transformer_block_rms", tb_rng, rms_norm_no_affine),
+        ("transformer_block_ln", tb_ln_rng, tb_layer_norm_no_affine),
+    ]:
+        tb_qw = torch.randn(tb_embd, tb_embd, generator=tb_rng_used)
+        tb_kw = torch.randn(tb_embd, tb_embd, generator=tb_rng_used)
+        tb_vw = torch.randn(tb_embd, tb_embd, generator=tb_rng_used)
+        tb_ow = torch.randn(tb_embd, tb_embd, generator=tb_rng_used)
+        tb_f1w = torch.randn(4 * tb_embd, tb_embd, generator=tb_rng_used)
+        tb_f2w = torch.randn(tb_embd, 4 * tb_embd, generator=tb_rng_used)
+        tb_inp = torch.randn(tb_seq, tb_embd, generator=tb_rng_used).requires_grad_(True)
+
+        tb_out = transformer_block_forward(
+            tb_inp, tb_qw, tb_kw, tb_vw, tb_ow, tb_f1w, tb_f2w,
+            tb_embd, tb_heads, tb_norm_fn)
+        tb_out.sum().backward()
+
+        tb_inp.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_input.bin"))
+        tb_qw.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_qw.bin"))
+        tb_kw.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_kw.bin"))
+        tb_vw.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_vw.bin"))
+        tb_ow.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_ow.bin"))
+        tb_f1w.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_f1w.bin"))
+        tb_f2w.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_f2w.bin"))
+        tb_out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_output.bin"))
+        tb_inp.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{tb_name}_input_grad.bin"))
+
+        manifest[tb_name] = {
+            "layer": "TransformerBlock",
+            "input_shape": [tb_seq, tb_embd],
+            "q_weight_shape": list(tb_qw.shape),
+            "k_weight_shape": list(tb_kw.shape),
+            "v_weight_shape": list(tb_vw.shape),
+            "o_weight_shape": list(tb_ow.shape),
+            "f1_weight_shape": list(tb_f1w.shape),
+            "f2_weight_shape": list(tb_f2w.shape),
+            "output_shape": list(tb_out.shape),
+            "input_grad_shape": list(tb_inp.grad.shape),
+            "params": {"n_embd": tb_embd, "n_head": tb_heads, "dropout": 0.0, "eps": 1e-5},
+        }
+        print(f"  {tb_name}: input=[{tb_seq},{tb_embd}] f1={list(tb_f1w.shape)} output={list(tb_out.shape)}")
+
+    # =========================================================================
+    # SparseEmbedding tests (sum-mode embedding bag with padding indices skipped)
+    # Reference: per-batch sum of selected embedding rows; entries equal to the
+    # padding index are ignored. Saves weight, float-cast index input, output,
+    # and the weight gradient of the sum.
+    # =========================================================================
+    sse_rng = torch.Generator().manual_seed(1313)
+
+    sse_num_emb = 20
+    sse_emb_dim = 8
+    sse_batch = 4
+    sse_max_active = 5
+    sse_padding = -1
+
+    sse_weight = torch.randn(sse_num_emb, sse_emb_dim, generator=sse_rng).requires_grad_(True)
+    sse_idx = torch.randint(0, 12, (sse_batch, sse_max_active), generator=sse_rng).long()
+    sse_idx[0, 1] = sse_padding
+    sse_idx[2, 3] = sse_padding
+
+    sse_out = torch.zeros(sse_batch, sse_emb_dim)
+    for b in range(sse_batch):
+        active = sse_idx[b][sse_idx[b] != sse_padding]
+        sse_out[b] = sse_weight.index_select(0, active).sum(0)
+    sse_out.sum().backward()
+
+    sse_name = "sparse_embedding"
+    sse_weight.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{sse_name}_weight.bin"))
+    sse_idx.numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{sse_name}_input.bin"))
+    sse_out.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{sse_name}_output.bin"))
+    sse_weight.grad.detach().numpy().astype(np.float32).tofile(os.path.join(TEST_DIR, f"{sse_name}_weight_grad.bin"))
+
+    manifest[sse_name] = {
+        "layer": "SparseEmbedding",
+        "input_shape": [sse_batch, sse_max_active],
+        "weight_shape": [sse_num_emb, sse_emb_dim],
+        "output_shape": list(sse_out.shape),
+        "weight_grad_shape": list(sse_weight.grad.shape),
+        "params": {"num_embeddings": sse_num_emb, "embedding_dim": sse_emb_dim,
+                   "padding_index": sse_padding},
+    }
+    print(f"  {sse_name}: input=[{sse_batch},{sse_max_active}] weight=[{sse_num_emb},{sse_emb_dim}] output={list(sse_out.shape)}")
 
     # =========================================================================
     # Write manifest
