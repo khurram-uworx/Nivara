@@ -86,7 +86,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
 }
 
 /// <summary>Configuration for a SmolLM / Llama-family causal LM.</summary>
-public sealed record LlamaConfig
+public sealed record LlamaConfig : LLamaConfigLike
 {
     public int HiddenSize { get; init; } = 576;
     public int NumHiddenLayers { get; init; } = 30;

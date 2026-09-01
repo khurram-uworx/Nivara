@@ -2,6 +2,7 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using Nivara.Primitives;
 using Nivara.Samples;
 using System.Diagnostics;
 using System.Drawing;
@@ -20,6 +21,7 @@ class Program
         Console.WriteLine();
 
         string modelType = args.Length > 0 ? args[0] : "";
+        string resolvedType = modelType == "smollm" ? "smollm-135m" : modelType;
         string precision = "f32";
         string mode = "";
         for (int i = 1; i < args.Length; i++)
@@ -45,13 +47,14 @@ class Program
 
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|smollm> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
             Console.WriteLine("  compare           Run forward pass on shared input, print logits for Python comparison");
             Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
             Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
+            Console.WriteLine("  generate          Greedy causal-LM generation (smollm)");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
             Console.WriteLine("Precision (text models only):");
@@ -61,7 +64,7 @@ class Program
             return 1;
         }
 
-        string modelDir = Path.Combine("samples", "data", modelType);
+        string modelDir = Path.Combine("samples", "data", resolvedType);
         string modelPath = Path.Combine(modelDir, "model.safetensors");
 
         if (!File.Exists(modelPath))
@@ -130,6 +133,10 @@ class Program
                 if (compare) return RunDistilBertSstCompare(tensors);
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
+            case "smollm":
+                if (bf16) return RunSmolLM(tensorsBf16);
+                if (fp16) return RunSmolLM(tensorsHalf);
+                return RunSmolLM(tensors);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -1158,6 +1165,249 @@ class Program
         DistilBertSst.PrintCompareDiff(pyPath, csPath, DistilBertSst.CompareSentences.Length);
 
         return 0;
+    }
+
+    static int RunSmolLM(Dictionary<string, (float[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore(tensors);
+
+    static int RunSmolLM(Dictionary<string, (BFloat16[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore(tensors);
+
+    static int RunSmolLM(Dictionary<string, (Half[] Data, int[] Shape)> tensors)
+        => RunSmolLMCore(tensors);
+
+    static string PrecisionName(Type t)
+        => t == typeof(BFloat16) ? "BFloat16"
+         : t == typeof(Half) ? "Half"
+         : "F32";
+
+    static int RunSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        string precisionName = PrecisionName(typeof(T));
+
+        // The narrow 16-bit paths (BFloat16/Half) run through the Phase-1 SIMD
+        // widen-compute-narrow kernels; without them BF16 matmul falls back to a
+        // ~100x-slower scalar dot. Enable the toggle for this run and restore the
+        // prior global value afterwards so other model modes are unaffected.
+        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
+        bool priorWiden = NivaraPrimitives.UseWidenSimd;
+        if (narrow)
+            NivaraPrimitives.UseWidenSimd = true;
+        try
+        {
+            RunSmolLMGenerate(tensors, precisionName);
+        }
+        finally
+        {
+            NivaraPrimitives.UseWidenSimd = priorWiden;
+        }
+        return 0;
+    }
+
+    static void RunSmolLMGenerate<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precisionName)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        Console.WriteLine($"=== SmolLM-135M Causal LM ({precisionName}) ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
+        Console.WriteLine();
+
+        var modelDir = Path.Combine("samples", "data", "smollm-135m");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = LlamaLoader.Load<T, T>(config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Config: hidden={config.HiddenSize}, layers={config.NumHiddenLayers}, " +
+                          $"heads={config.NumAttentionHeads}, kvHeads={config.NumKeyValueHeads}, " +
+                          $"intermediate={config.IntermediateSize}");
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        int bytesPerWeight = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half) ? 2 : 4;
+        double weightMb = tensors.Values.Sum(t => t.Data.Length * (long)bytesPerWeight) / (1024.0 * 1024.0);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
+        ConsumeGenerated(model, modelDir, tokenizer, config, precisionName);
+    }
+
+    /// <summary>
+    /// Greedy-generates up to <c>maxNewTokens</c> tokens from the fixed SmolLM prompt and,
+    /// when the PyTorch reference fixtures are present, diffs the token-id stream and the
+    /// final-position logits. Inference-by-default: never enters a <c>GradientUtils.Grad()</c>
+    /// scope, so no graph nodes are built.
+    /// </summary>
+    static void ConsumeGenerated<T>(
+        LlamaForCausalLM<T> model,
+        string modelDir,
+        Gpt2BpeTokenizer tokenizer,
+        LlamaConfig config,
+        string precisionName)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        const string Prompt = "The capital of France is";
+        const int MaxNewTokens = 32;
+
+        var promptIds = tokenizer.Encode(Prompt);
+        Console.WriteLine($"Prompt: \"{Prompt}\"");
+        Console.WriteLine($"Prompt token ids ({promptIds.Count}): [{string.Join(", ", promptIds)}]");
+        Console.WriteLine();
+
+        var sequence = new List<int>(promptIds);
+        var generatedIds = new List<int>();
+        int generated = 0;
+
+        var genSw = Stopwatch.StartNew();
+        while (generated < MaxNewTokens)
+        {
+            var logits = model.Forward(sequence.ToArray()); // [L, vocab]
+            int vocab = config.VocabSize;
+            int row = logits.Shape[0];                       // current sequence length
+            int next = ArgMaxLastRow(logits, row, vocab);
+
+            generatedIds.Add(next);
+            sequence.Add(next);
+            generated++;
+
+            if (next == config.EosTokenId)
+                break;
+        }
+        genSw.Stop();
+
+        Console.WriteLine($"Generated {generated} tokens in {genSw.ElapsedMilliseconds} ms " +
+                          $"({genSw.ElapsedMilliseconds / Math.Max(1, generated)} ms/token)");
+        Console.WriteLine($"Generated token ids: [{string.Join(", ", generatedIds)}]");
+        Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
+        Console.WriteLine();
+
+        // Final-position logits for the numeric precision diff: feed the full prefix
+        // (prompt + all but the last generated token) so the model predicts the last
+        // generated token, matching the Python reference generator.
+        var lastLogits = LastPositionLogits(model, sequence, config.VocabSize);
+
+        CompareSmolLmFixtures(modelDir, promptIds.Count, sequence, lastLogits, precisionName);
+    }
+
+    /// <summary>Returns the argmax vocabulary index of the model's final-position logits.</summary>
+    static int ArgMaxLastRow<T>(ReverseGradTensor<T> logits, int rows, int vocab)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        logits.Data.TryGetSpan(out var span);
+        int offset = (rows - 1) * vocab;
+        int best = 0;
+        double bestVal = double.CreateChecked(span[offset]);
+        for (int i = 1; i < vocab; i++)
+        {
+            double v = double.CreateChecked(span[offset + i]);
+            if (v > bestVal)
+            {
+                bestVal = v;
+                best = i;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Runs the full prefix through the model and returns the last-row logits as float[].</summary>
+    static float[] LastPositionLogits<T>(
+        LlamaForCausalLM<T> model, IReadOnlyList<int> sequence, int vocab)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var prefix = new int[sequence.Count - 1];
+        for (int i = 0; i < prefix.Length; i++)
+            prefix[i] = sequence[i];
+
+        var logits = model.Forward(prefix); // [L, vocab]
+        logits.Data.TryGetSpan(out var span);
+        int rows = logits.Shape[0];
+        int offset = (rows - 1) * vocab;
+
+        var result = new float[vocab];
+        for (int i = 0; i < vocab; i++)
+            result[i] = (float)double.CreateChecked(span[offset + i]);
+        return result;
+    }
+
+    static void CompareSmolLmFixtures(
+        string modelDir, int inputLen, IReadOnlyList<int> fullPrefix, float[] lastLogits, string precisionName)
+    {
+        string tokenPath = Path.Combine(modelDir, "..", "compare_smollm_py.bin");
+        string logitsPath = Path.Combine(modelDir, "..", "compare_smollm_logits_py.bin");
+
+        if (!File.Exists(tokenPath) || !File.Exists(logitsPath))
+        {
+            Console.WriteLine("Reference fixtures (compare_smollm_py.bin / compare_smollm_logits_py.bin) not found;");
+            Console.WriteLine("skipping the PyTorch diff. Run:");
+            Console.WriteLine("  python samples/NivaraInference/Python/smollm_generate_reference.py");
+            return;
+        }
+
+        // Token-id stream: [int32 input_len][int32 full prefix = prompt + generated].
+        using (var br = new BinaryReader(File.OpenRead(tokenPath)))
+        {
+            int refInputLen = br.ReadInt32();
+            int refCount = (int)(new FileInfo(tokenPath).Length - 4) / 4;
+            var refIds = new int[refCount];
+            for (int i = 0; i < refCount; i++)
+                refIds[i] = br.ReadInt32();
+
+            int streamLen = Math.Min(fullPrefix.Count, refIds.Length);
+
+            int genMatch = 0;
+            var mismatches = new List<string>();
+            for (int i = inputLen; i < streamLen; i++)
+            {
+                if (fullPrefix[i] == refIds[i])
+                    genMatch++;
+                else if (mismatches.Count < 8)
+                    mismatches.Add($"@{i}: C#={fullPrefix[i]} Py={refIds[i]}");
+            }
+            int genCount = Math.Max(0, streamLen - inputLen);
+
+            Console.WriteLine($"=== PyTorch diff ({precisionName}) ===");
+            Console.WriteLine($"  Reference stream: {refInputLen} prompt + {refCount - refInputLen} generated (total {refCount})");
+            Console.WriteLine($"  C# stream length: {fullPrefix.Count} (prompt {inputLen} + {fullPrefix.Count - inputLen} generated)");
+            Console.WriteLine($"  Generated-token argmax match: {genMatch}/{genCount}");
+            if (mismatches.Count > 0)
+                Console.WriteLine("  Mismatches (C# vs Py): " + string.Join(", ", mismatches));
+        }
+
+        // Final-position logits: [float32 vocab_size].
+        var rawBytes = File.ReadAllBytes(logitsPath);
+        float[] refLogits = new float[rawBytes.Length / 4];
+        Buffer.BlockCopy(rawBytes, 0, refLogits, 0, rawBytes.Length);
+
+        int len = Math.Min(lastLogits.Length, refLogits.Length);
+        var diffArr = new float[len];
+        TensorPrimitives.Subtract(lastLogits.AsSpan(0, len), refLogits.AsSpan(0, len), diffArr);
+        var absDiff = new float[len];
+        TensorPrimitives.Abs(diffArr.AsSpan(), absDiff);
+        float maxAbs = TensorPrimitives.Max(absDiff);
+        float sumAbs = TensorPrimitives.Sum(absDiff);
+        float cosineSim = TensorPrimitives.CosineSimilarity(lastLogits.AsSpan(0, len), refLogits.AsSpan(0, len));
+
+        int csArgmax = ArgMax(lastLogits);
+        int pyArgmax = ArgMax(refLogits);
+
+        Console.WriteLine($"  C# final-logits argmax: {csArgmax}");
+        Console.WriteLine($"  Py final-logits argmax: {pyArgmax}");
+        Console.WriteLine($"  max abs diff: {maxAbs:F6}");
+        Console.WriteLine($"  mean abs diff: {sumAbs / len:F8}");
+        Console.WriteLine($"  cosine similarity: {cosineSim:F8}");
+        Console.WriteLine();
+    }
+
+    static int ArgMax(float[] values)
+    {
+        int best = 0;
+        for (int i = 1; i < values.Length; i++)
+            if (values[i] > values[best])
+                best = i;
+        return best;
     }
 
     static int BenchmarkDistilBertSst<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precision)
