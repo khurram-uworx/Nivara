@@ -32,63 +32,71 @@ RMSNorm has no learnable weight" — outdated since the affine-gamma module.
 
 ### Phase A — Fixture generation (`samples/NivaraTorch/gen_reference.py`)
 Append new cases **at the end** of the generation stream, each on a **dedicated** `torch.Generator`
-with a fresh seed (preserving the file's bit-stable RNG contract). New fixtures:
+with a fresh seed. New fixtures:
 - `silu_1d`, `silu_4d` (forward + input grad via `.sum().backward()`).
-- `rope_1head`, `rope_2head` (RoPE forward, no grad; implement Llama `rotate_half` half-split with
+- `rope_1head`, `rope_2head` (RoPE forward + input grad; Llama `rotate_half` half-split with
   torch cos/sin).
 - `rmsnorm_module_2d` (affine gamma; forward + grad w.r.t. input and gamma via
   `nn.RMSNorm(..., elementwise_affine=True)`).
 - `llama_attn` (GQA: Q/K/V Linear proj → RoPE → KV-repeat → scaled-dot causal attention → O proj;
   forward + input grad).
-- `llama_decoder_block` (pre-norm attn residual + pre-norm gated-SiLU FFN; forward + input grad).
-- `llama_lm` (tied-hidden LM head logits; forward only, small vocab).
+- `llama_decoder` (pre-norm attn residual + pre-norm gated-SiLU FFN; forward + input grad).
 - `dsc` (depthwise separate conv via groups=inCh + ReLU + 1×1; forward + grad).
-- `transformer_block_rms`, `transformer_block_ln` (forward only).
-- `sparse_embedding` (EmbeddingBag mode=sum; forward + weight grad).
+- `transformer_block_rms`, `transformer_block_ln` (forward + input grad).
+- `sparse_embedding` (sum-bag with padding index skipped; forward + weight grad).
+
+> **Determinism fix (departs from the original "existing fixtures bit-stable" blast-radius claim):**
+> `gen_reference.py` never seeded the global torch RNG, so `nn.Conv2d`/`nn.Linear` module weights
+> (which consume it) changed on every run. The harness now calls `torch.manual_seed(42)` up front and
+> the **full** fixture tree (276 files) was regenerated and verified byte-stable across two runs. The
+> 33 previously-affected conv/linear fixture values changed as a result; the C# tests are data-driven
+> (load from `.bin`), so this is safe. `llama_lm` was dropped (deferred with `LlamaForCausalLM`).
 
 Run `python samples/NivaraTorch/gen_reference.py`, commit the whole
 `samples/data/torch-comparison/` tree (manifest + `.bin` files) as one unit.
 
 ### Phase B — New NivaraTorch test classes (`tests/Nivara.Tests/NivaraTorch/`)
 Match the existing pattern (TestHelpers.LoadBin / AssertTensorEqual, `[SetUp] GradientUtils.Grad()`):
-- `SiluTests.cs` — extend existing `ActivationTests` or new class w/ forward + grad.
-- `RotaryEmbeddingTests.cs` — forward parity (2 layouts).
+- `SiluTests.cs` — forward + grad.
+- `RotaryEmbeddingTests.cs` — forward + grad (2 layouts).
 - `RMSNormModuleTests.cs` — module forward + backward (input **and** gamma grads).
-- `LlamaAttentionTests.cs`, `LlamaDecoderBlockTests.cs`.
-- `DepthwiseSeparableConvTests.cs`, `TransformerBlockTests.cs`, `SparseEmbeddingTests.cs`.
+- `LlamaCausalAttentionTests.cs`, `LlamaDecoderBlockTests.cs`.
+- `DepthwiseSeparableConv2dTests.cs`, `TransformerBlockTests.cs`, `SparseEmbeddingTests.cs`.
 
 (`LlamaForCausalLM` deferred — see issues log.)
 
-Update `samples/NivaraTorch/README.md` fixture table + fix stale RMSNorm text.
+Update `samples/NivaraTorch/README.md` fixture table + fix stale RMSNorm text (op vs module).
 
 ### Phase C — Forward-mode JVP parity (only forward ops that exist)
 Add JVP cross-checks to `tests/Nivara.Tests/AutoDiff/ForwardParityTests.cs` for `Silu` and
-`GqaRepeatKV` (both confirmed to have `ForwardGradOperations`). RoPE is **reverse-only** (no
-`ForwardGradOperations.Rotary*`) — skip it.
+`GqaRepeatKV` (both confirmed to have `ForwardGradOperations`): reverse-gradient parity +
+finite-difference JVP. RoPE is **reverse-only** (no `ForwardGradOperations.Rotary*`) — skipped.
 
 ## Verification
-- `python samples/NivaraTorch/gen_reference.py` (available: torch 2.13.0+cpu, py 3.12.8).
+- `python samples/NivaraTorch/gen_reference.py` (done, 276 fixtures, byte-stable across two runs).
+- `dotnet build tests/Nivara.Tests` — clean (0 warn / 0 err).
 - `dotnet test --filter "FullyQualifiedName~NivaraTorch"` (ask before running).
 - `dotnet test --filter "FullyQualifiedName~NivaraTorch"` again after any fixes.
 
 ## Planned commits
 1. `docs: plan NivaraTorch parity gap fill in TODO.md` (this file). ✅ (5129581)
 2. `test(nivara-torch): add PyTorch parity fixtures for Llama-family + new building blocks`
-   (gen_reference.py + `samples/data/torch-comparison/` tree).
-3. Per-phase test class commits:
-   - `test: Silu + RMSNorm module + RotaryEmbedding parity tests`
-   - `test: LlamaCausalAttention + LlamaDecoderBlock parity tests`
-   - `test: DepthwiseSeparableConv2d + TransformerBlock + SparseEmbedding parity tests`
-   - `test: forward-mode JVP parity for Silu/GqaRepeatKV` (Phase C)
-4. `docs: update NivaraTorch README fixture table + fix stale RMSNorm note`
+   (gen_reference.py + `samples/data/torch-comparison/` tree). ✅ (6ac5863)
+   - Wording adjusted: "plus a determinism fix in the fixture harness" (global-RNG `torch.manual_seed`).
+3. `test(nivara-torch): add PyTorch parity + JVP tests for the new building blocks` ✅ (80a7acc)
+   - Committed as one unit (silu/rope/RMSNorm-module/Llama-attn/Llama-decoder/DSC/TransformerBlock/
+     SparseEmbedding + forward-mode `Silu`/`GqaRepeatKV` JVP), not the originally-planned
+     per-module splits.
+4. `docs: update NivaraTorch README fixture table + fix stale RMSNorm note` (this commit).
 5. The pre-staged `docs/BFLOAT16-TRANSFORMER.md` doc update was committed separately as
    `docs: mark SmolLM Phase 2 complete in BFLOAT16 transformer doc` ✅ (77a20f7).
 
 ## Blast radius
-- **gen_reference.py**: appended cases only; existing fixtures bit-stable (dedicated RNGs).
+- **gen_reference.py**: appended new cases; added `torch.manual_seed(42)` (determinism fix). Existing
+  conv/linear fixtures were **regenerated** (see Phase A note) — full tree committed as one unit.
 - **New test files only** under `tests/Nivara.Tests/NivaraTorch/` + `AutoDiff/ForwardParityTests.cs`
   (additive). **No changes to `src/Nivara/**` product code** unless a parity test reveals a bug.
-- **Fixture tree**: regenerating commits ~28+ new `.bin` files; no existing fixture changes.
+- **Fixture tree**: regenerating committed 276 files (updated manifest + `.bin` tree).
 - Downstream: `dotnet test --filter ...NivaraTorch` runs. No public API changes.
 
 ## GitHub issues log

@@ -564,7 +564,9 @@ def run():
     print(f"  dropout_eval: input={drop_inp.shape} output={drop_out.shape}")
 
     # =========================================================================
-    # RMSNorm tests (no learnable params)
+    # RMSNorm test (op-level, no affine gamma — the op normalizes only)
+    # The affine-gamma RMSNorm<T> module is exercised separately below via
+    # nn.RMSNorm in "rmsnorm_module_2d".
     # =========================================================================
     rms_cases = [
         ("rmsnorm_2d", (4, 32)),
@@ -573,8 +575,6 @@ def run():
 
     for name, inp_shape in rms_cases:
         inp = torch.randn(inp_shape, generator=rng)
-        # PyTorch RMSNorm: x / sqrt(mean(x^2) + eps) * weight
-        # But Nivara's RMSNorm has no learnable weight — it's just normalization
         eps = 1e-5
         rms = torch.sqrt(torch.mean(inp ** 2, dim=-1, keepdim=True) + eps)
         out = inp / rms

@@ -353,12 +353,12 @@ Formal A/B validation of every NN layer type in Nivara's AutoDiff engine. PyTorc
 
 ### What's here
 
-- **`gen_reference.py`** — Generates PyTorch reference fixtures (float32 binary + JSON manifest) for all 21+ layer types. Run `python gen_reference.py` to regenerate.
+- **`gen_reference.py`** — Generates PyTorch reference fixtures (float32 binary + JSON manifest) for all 30+ layer types. Run `python gen_reference.py` to regenerate.
 - **Tests live in `tests/Nivara.Tests/NivaraTorch/`** — NUnit test files organized by layer type, comparing C# output against PyTorch fixtures.
 
 ### Fixture data
 
-All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 51 test cases covering:
+All fixtures are stored in `samples/data/torch-comparison/` (not in this directory). The generator writes 68 test cases covering:
 
 | Layer type | Configs | Notes |
 |---|---|---|
@@ -371,12 +371,20 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 | Sigmoid | 2 | 1D and 4D |
 | Tanh | 2 | 1D and 4D |
 | GELU | 4 | Tanh approximation (`gelu_*`) and exact erf (`gelu_exact_*`), 1D and 4D each |
+| SiLU | 2 | `silu_1d`, `silu_4d`; forward + input grad |
 | MaxPool2d | 2 | 3x3 stride 2, 2x2 stride 2 |
 | AdaptiveAvgPool2d | 2 | Large and small feature maps |
 | Linear | 2 | 128→64, 512→1000 |
 | Embedding | 2 | Single and batch lookup |
 | Dropout | 1 | Eval mode passthrough |
-| RMSNorm | 2 | Per-row, 2D and 3D |
+| RMSNorm (op) | 2 | Per-row, 2D and 3D |
+| RMSNorm module | 1 | `rmsnorm_module_2d`: affine gamma, forward + input/gamma grads |
+| RotaryEmbedding | 2 | `rope_1head`, `rope_2head`: half-split `rotate_half`, forward + input grad |
+| LlamaCausalAttention | 1 | `llama_attn`: GQA KV-repeat + RoPE + causal mask, forward + input grad |
+| LlamaDecoderBlock | 1 | `llama_decoder`: pre-norm GQA attention + gated-SiLU FFN, forward + input grad |
+| DepthwiseSeparableConv2d | 1 | `dsc`: depthwise→ReLU→1×1 pointwise, forward + input grad |
+| TransformerBlock | 2 | `transformer_block_rms`, `transformer_block_ln`; forward + input grad |
+| SparseEmbedding | 1 | `sparse_embedding`: sum-bag with padding index skipped, forward + weight grad |
 | LayerNorm | 2 | 2D and 3D |
 | Softmax / LogSoftmax | 2 | Over dim 1 |
 | MatMul | 1 | 4×8 @ 8×16 |
@@ -389,8 +397,10 @@ All fixtures are stored in `samples/data/torch-comparison/` (not in this directo
 
 ### Layout notes
 
-- **RMSNorm**: `ReverseGradOperations.RMSNorm` normalizes over the entire flattened tensor. For per-row normalization (matching PyTorch), use `ReverseGradOperations.PerRowRMSNorm`.
-- **MatMulTransposedB**: the transpose-free inference matmul (`a @ b^T`, raw `[N, K]` weight layout) used by `Linear.Forward` outside `Grad()`. It is `internal`; the test reaches it via `InternalsVisibleTo`.
+- **RMSNorm op vs module**: `ReverseGradOperations.RMSNorm` / `PerRowRMSNorm` normalize without a learnable scale. The `RMSNorm<T>` module is affine — it multiplies each normalized row by a per-dimension learnable gamma (`Weight`, shape `[normalizedShape]`); parity fixture `rmsnorm_module_2d` covers forward plus input **and** gamma gradients. For per-row normalization (matching PyTorch), use `ReverseGradOperations.PerRowRMSNorm`.
+- **RotaryEmbedding (RoPE)**: uses the Llama-family half-split `rotate_half` layout — `out[i] = x0·c − x1·s`, `out[i1] = x0·s + x1·c` over contiguous `headDim` blocks; cos/sin tables are precomputed from `theta^(−2j/dim)`.
+- **LlamaCausalAttention / LlamaDecoderBlock**: GQA repeats KV heads **consecutively** via `repeat_interleave` (head `h` gets copy `r`), causal masks are upper-triangular `−inf` additive, and attention scale is `1/√headDim`.
+- **MatMulTransposedB**: the transpose-free inference matmul (`a @ b^T`, raw `[N, K]` weight layout) used by `Linear.Forward` outside `Grad()`. It is `internal`; the test reaches it via `InternalsVisibleTo`. Linear weights are stored `[out, in]` row-major, matching PyTorch's `weight` tensor.
 
 ### How to run tests
 
