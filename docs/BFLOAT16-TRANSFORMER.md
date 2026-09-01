@@ -222,9 +222,10 @@ job is to pull in the *new* ops above.
     widen path is **~10× faster** than the scalar BF16 fallback.
   - F32 native: ~10.7 s (333 ms/token); the `--simd-widen` toggle is transparent to F32
     (identical token streams, 32/32) as expected.
-  - Note: BF16+widen (705 ms/token) is still ~2× slower than F32 native (333 ms/token) —
-    the widen path does F32 compute plus widen/narrow conversion overhead, so BF16 is a
-    memory-halving convenience, not a compute win, for SmolLM on this workload.
+  - Note: BF16+widen (705 ms/token) is still roughly 1.5–2× slower than F32 native
+    (333 ms/token) — the widen path does F32 compute plus widen/narrow conversion overhead
+    and the exact ratio varies with machine load, so BF16 is a memory-halving convenience,
+    not a compute win, for SmolLM on this workload.
   - Widen correctness unchanged vs Phase 2: SmolLM BF16 22/32 generated-token argmax,
     0.937 final-logits cosine (matches the documented baseline). Regression check on the 4
     existing models: `distilbert_sst --precision bf16` argmax stays **8/8** vs PyTorch both

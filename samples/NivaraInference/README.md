@@ -561,8 +561,10 @@ The `--simd-widen` flag toggles the widen path from the CLI; for narrow models i
 by default (without it, BF16 matmul falls back to the ~26–100×-slower scalar dot). The F32
 control confirms the toggle is a no-op for `float` (identical token streams, 32/32). Reading
 the table together with the memory-vs-performance table above: BF16 **widen** is ~10× faster
-than BF16 **scalar** and still ~2× slower than F32 native — the widen path restores usable
-BF16 performance (memory-halving convenience) while remaining slower than native F32 compute.
+than BF16 **scalar** and roughly **1.5–2× slower than F32 native** (the exact F32-vs-BF16
+ratio varies with machine load — ~1.5× in the memory-vs-performance table above, captured
+at a cooler baseline, ~2× under sustained load) — the widen path restores usable BF16
+performance (memory-halving convenience) while remaining slower than native F32 compute.
 
 AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used by `TrainingLoop` and manual training code). Inference passes outside `Grad()` produce leaf tensors with no computation graph overhead. The AutoDiff refactor closed most of the gap: on the 2026-08-04 machine it cut vision inference ~4× (MobileNetV2 ~2,254 ms → ~563 ms, ResNet-18 ~641 ms → ~263 ms) and transformers ~1.5× (MiniLM ~110 → ~73 ms, DistilBERT ~186 → ~164 ms, SST-2 ~232 → ~187 ms). The vision gap is dominated by convolution kernels (especially depthwise convolutions in MobileNetV2), which use naive nested loops — ResNet-18 benefits from fewer depthwise layers. Transformer inference runs on a transpose-free path: `Linear` passes the raw weight `[out, in]` directly to the kernel's transposed-B matmul (no per-forward weight transpose), bias is applied via a row-broadcast `AddBias` op, op results are wrapped without a copy, and LayerNorm/Gelu/GeluExact skip saved-state allocations when gradients are not tracked. Attention runs through the fused `ReverseGradOperations.MultiHeadAttention` kernel (#86): heads are packed once per forward and QK^T/softmax/PV run as a single per-head pass over `TensorPrimitives` row kernels with no per-head `Slice`/`Transpose` graph nodes, keeping DistilBERT encoder inference at ~508 ms on this laptop.
 
