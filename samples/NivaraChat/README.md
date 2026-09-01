@@ -71,6 +71,13 @@ dotnet run --project samples/NivaraChat -- --tinyshakespeare
 
 # Smoke run: smaller vocab is ~3x faster (full options: --tinyshakespeare --help)
 dotnet run --project samples/NivaraChat -- --tinyshakespeare --vocab-size 1200 --prompt "ROMEO:"
+
+# SmolLM — serve the pretrained SmolLM-135M-Instruct causal LM as an IChatClient (no LLM needed)
+# Model files must be present under samples/data/smollm-135m (see "SmolLM" section below)
+dotnet run --project samples/NivaraChat -- --smollm plain --text "The capital of France is"
+
+# Interactive multi-turn chat, token-streamed (full options: --smollm --help)
+dotnet run --project samples/NivaraChat -- --smollm chat
 ```
 
 ## CLI options
@@ -91,6 +98,7 @@ dotnet run --project samples/NivaraChat -- --tinyshakespeare --vocab-size 1200 -
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
 | `--tinyshakespeare` | — | Mode: train/serve a batched TinyShakespeare transformer as `IChatClient` (see `--tinyshakespeare --help` for its options) |
+| `--smollm` | — | Mode: serve the pretrained SmolLM-135M-Instruct causal LM as `IChatClient` (`chat`/`plain` sub-modes; see `--smollm --help`) |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
@@ -316,6 +324,39 @@ Tested examples:
 
 Uses: `BatchedTransformer<T>`, `BatchedChatClient` (`IChatClient`), `TextTokenizer`, `ModelSerializer.Save/Load`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Embedding`/`Linear`/`LayerNorm`/`Activation.Gelu`, `CrossEntropyLoss<T>`, `Adam<T>`, `services.AddChatClient()`.
 
+### SmolLM (`--smollm`)
+Serves the **pretrained SmolLM-135M-Instruct causal LM** through the standard `Microsoft.Extensions.AI.IChatClient` interface — no training, no LLM server, no Python runtime. The model runs in-process on Nivara's zero-dependency tensor engine: `LlamaForCausalLM<T>` (greedy, autoregressive) + the GPT-2 byte-level BPE tokenizer. The conversation is rendered into SmolLM's Hermes/ChatML format (`<|im_start|>role\n...<|im_end|>`) and the reply is **token-streamed** via `GetStreamingResponseAsync`. Two sub-modes:
+
+```
+config.json + model.safetensors + vocab.json + merges.txt
+    → SafeTensorsLoader.Read → LlamaLoader.Load → LlamaForCausalLM
+    → SmolLMChatClient : IChatClient (greedy, token-streamed)
+    → --smollm plain/chat
+```
+
+- `--smollm plain --text "..."` — single-shot reply, no REPL.
+- `--smollm chat [--text "..."]` — interactive multi-turn REPL (default when no `--text`); a prompt skips straight to one turn.
+
+Options after `--smollm`: `chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/smollm-135m`), `--precision f32|bf16` (default `f32`), `--max-new-tokens <n>` (default 64), `--text <string>`. Run `--smollm --help` for the full list.
+
+Model files must be present under `samples/data/smollm-135m` (already downloaded in this repo). To re-download:
+
+```
+hf download HuggingFaceTB/SmolLM-135M-Instruct config.json model.safetensors tokenizer.json tokenizer_config.json vocab.json merges.txt generation_config.json special_tokens_map.json --local-dir samples/data/smollm-135m
+```
+
+Tested examples:
+
+| Command | Precision | Result |
+|---------|-----------|--------|
+| `--smollm plain --text "The capital of France is" --max-new-tokens 12` | f32 | Streams "The capital of France is Paris, which is the largest city" |
+| `--smollm chat` | f32 | Interactive multi-turn REPL; reply streamed token-by-token |
+| `--smollm plain --text "The capital of France is" --precision bf16` | bf16 | Same reply, ~half the memory footprint |
+
+This is **Stage A** of the SmolLM two-demo plan: plain causal-LM chat only. Tool calling (the SmolLM2 Hermes `<tool_call>`/`<tool_response>` format wiring Nivara's trained models as `AIFunction` tools) is a later stage and is intentionally not included here.
+
+Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `SafeTensorsLoader.Read<T>`, `Gpt2BpeTokenizer` (`Encode`/`Decode`/`TokenId`), a new `SmolLMChatClient<T>` (`IChatClient`), `SmollmChatTemplate` (Hermes ChatML rendering).
+
 ## Agents pipeline architecture
 
 ```
@@ -430,6 +471,10 @@ NivaraChat/
 │   ├── BatchedChatClient.cs          # IChatClient over a trained BatchedTransformer<float>
 │   ├── PositionEncoding.cs           # Fixed sinusoidal position encoding
 │   └── TinyShakespeare.cs            # Corpus downloader + line-document loader
+├── SmolLM/
+│   ├── SmollmMode.cs                 # --smollm CLI mode + interactive entry (chat/plain)
+│   ├── SmolLMChatClient.cs           # IChatClient over LlamaForCausalLM<T> (greedy, token-streamed)
+│   └── SmollmChatTemplate.cs         # Hermes ChatML conversation rendering
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```

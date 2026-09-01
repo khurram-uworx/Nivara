@@ -31,6 +31,17 @@ public sealed class Gpt2BpeTokenizer
     public int UnknownTokenId => unkTokenId;
 
     /// <summary>
+    /// Returns the token id for an exact vocabulary token (used for special tokens such as
+    /// <c>&lt;|im_start|&gt;</c> that byte-level BPE would otherwise split). Returns -1 when the
+    /// token is not in the vocabulary.
+    /// </summary>
+    public int TokenId(string token)
+    {
+        ArgumentNullException.ThrowIfNull(token);
+        return vocab.TryGetValue(token, out var id) ? id : -1;
+    }
+
+    /// <summary>
     /// Loads the tokenizer from <c>vocab.json</c> and <c>merges.txt</c>.
     /// </summary>
     /// <param name="vocabPath">Path to vocab.json</param>

@@ -7,6 +7,7 @@ using Nivara.Samples;
 using NivaraChat;
 using NivaraChat.Training;
 using NivaraChat.Transformer;
+using NivaraChat.SmolLM;
 using OllamaSharp;
 using System.Numerics.Tensors;
 
@@ -81,6 +82,9 @@ if (args.Length > 0)
         case "--tinyshakespeare":
             TransformerMode.Run(args.Skip(1).ToArray());
             break;
+        case "--smollm":
+            await SmollmMode.Run(args.Skip(1).ToArray());
+            break;
         default:
             PrintUsage();
             break;
@@ -117,6 +121,10 @@ async Task RunInteractiveMenu(string modelsDir)
                 TransformerMode.RunInteractive();
                 Console.WriteLine();
                 break;
+            case "5":
+                await SmollmMode.RunInteractive();
+                Console.WriteLine();
+                break;
             case "q":
                 return;
         }
@@ -131,6 +139,7 @@ string ShowMainMenu()
     Console.WriteLine("  2. Workflow    - Run the Agent Framework workflow pipeline");
     Console.WriteLine("  3. Agents      - Run the agents pipeline with live chat");
     Console.WriteLine("  4. TinyShakespeare - Train/serve a batched transformer as IChatClient");
+    Console.WriteLine("  5. SmolLM        - Serve the pretrained SmolLM-135M-Instruct causal LM as IChatClient");
     Console.WriteLine("  q. Quit\n");
     Console.Write("> ");
     return Console.ReadLine()?.Trim().ToLower() ?? "";
