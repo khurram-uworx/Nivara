@@ -87,6 +87,39 @@ public class WidenPrimitivesPhase3Tests
     }
 
     /// <summary>
+    /// The A/B mode toggles <c>UseWidenSimd</c> between the scalar and widen sides;
+    /// the gate (<c>ShouldWiden&lt;T&gt;</c>) must track that toggle and the length
+    /// gate so a small input still falls back to scalar even when the toggle is on
+    /// (the sample's scalar A/B side relies on the ordered-gate behavior).
+    /// </summary>
+    [Test]
+    public void ShouldWiden_TracksToggleAndLengthGate_ForAb()
+    {
+        bool original = WidenEnabled;
+        try
+        {
+            // Scalar A/B side: toggle off → widen must never engage.
+            WidenEnabled = false;
+            Assert.That(WidenPrimitives.ShouldWiden<BFloat16>(256), Is.False,
+                "toggle off must force scalar regardless of length");
+
+            // Widen A/B side: toggle on + above the length gate → widen engages.
+            WidenEnabled = true;
+            Assert.That(WidenPrimitives.ShouldWiden<BFloat16>(256), Is.True,
+                "toggle on + large enough input must engage widen");
+
+            // Length gate: toggle on but a tiny input must stay scalar so the
+            // per-vector overhead is not paid for degenerate cases.
+            Assert.That(WidenPrimitives.ShouldWiden<BFloat16>(8), Is.False,
+                "small inputs must not engage widen even when the toggle is on");
+        }
+        finally
+        {
+            WidenEnabled = original;
+        }
+    }
+
+    /// <summary>
     /// When the A/B mode runs scalar then widen, both sides must produce the
     /// same numerical results for BFloat16 element-wise Add (within BF16 tolerance),
     /// confirming that toggling UseWidenSimd between passes is safe and correct.
