@@ -17,10 +17,13 @@ Affected (confirmed no `silu_*`/`rope`/`rmsnorm_module`/`llama_*` fixtures in
 3. `RMSNorm<T>` module **with affine gamma** (only the no-gamma `PerRowRMSNorm` op is parity-tested).
 4. `LlamaCausalAttention<T>` (GQA KV-repeat + RoPE + causal mask).
 5. `LlamaDecoderBlock<T>` (pre-norm gated SiLU FFN with residual adds).
-6. `LlamaForCausalLM` (tied LM head) — end-to-end logits parity.
-7. `DepthwiseSeparableConv2d` (pre-existing, no parity).
-8. `TransformerBlock` (pre-existing, no parity).
-9. `SparseEmbedding` module (pre-existing, no parity; ops `SparseEmbeddingBag` are covered).
+6. `DepthwiseSeparableConv2d` (pre-existing, no parity).
+7. `TransformerBlock` (pre-existing, no parity).
+8. `SparseEmbedding` module (pre-existing, no parity; ops `SparseEmbeddingBag` are covered).
+
+Deferred (human decision): `LlamaForCausalLM` (tied LM head) full-model parity **not in scope** for this
+branch — it is a sample-side composition wrapper, and composition correctness is covered by existing
+unit tests + decoder-block parity. Captured as a GitHub issue (see issues log).
 
 Stale docs: `samples/NivaraTorch/README.md` and `gen_reference.py` RMSNorm comments say "Nivara's
 RMSNorm has no learnable weight" — outdated since the affine-gamma module.
@@ -51,15 +54,17 @@ Match the existing pattern (TestHelpers.LoadBin / AssertTensorEqual, `[SetUp] Gr
 - `SiluTests.cs` — extend existing `ActivationTests` or new class w/ forward + grad.
 - `RotaryEmbeddingTests.cs` — forward parity (2 layouts).
 - `RMSNormModuleTests.cs` — module forward + backward (input **and** gamma grads).
-- `LlamaAttentionTests.cs`, `LlamaDecoderBlockTests.cs`, `LlamaForCausalLMTests.cs`.
+- `LlamaAttentionTests.cs`, `LlamaDecoderBlockTests.cs`.
 - `DepthwiseSeparableConvTests.cs`, `TransformerBlockTests.cs`, `SparseEmbeddingTests.cs`.
+
+(`LlamaForCausalLM` deferred — see issues log.)
 
 Update `samples/NivaraTorch/README.md` fixture table + fix stale RMSNorm text.
 
-### Phase C — Forward-mode JVP parity (if forward ops exist)
-Add JVP cross-checks to `tests/Nivara.Tests/AutoDiff/ForwardParityTests.cs` for `Silu`, and RoPE /
-`GqaRepeatKV` only if they have `ForwardGradOperations` support. **Verify forward-op existence
-first; skip silently if reverse-only.**
+### Phase C — Forward-mode JVP parity (only forward ops that exist)
+Add JVP cross-checks to `tests/Nivara.Tests/AutoDiff/ForwardParityTests.cs` for `Silu` and
+`GqaRepeatKV` (both confirmed to have `ForwardGradOperations`). RoPE is **reverse-only** (no
+`ForwardGradOperations.Rotary*`) — skip it.
 
 ## Verification
 - `python samples/NivaraTorch/gen_reference.py` (available: torch 2.13.0+cpu, py 3.12.8).
@@ -67,17 +72,17 @@ first; skip silently if reverse-only.**
 - `dotnet test --filter "FullyQualifiedName~NivaraTorch"` again after any fixes.
 
 ## Planned commits
-1. `docs: plan NivaraTorch parity gap fill in TODO.md` (this file).
+1. `docs: plan NivaraTorch parity gap fill in TODO.md` (this file). ✅ (5129581)
 2. `test(nivara-torch): add PyTorch parity fixtures for Llama-family + new building blocks`
    (gen_reference.py + `samples/data/torch-comparison/` tree).
 3. Per-phase test class commits:
    - `test: Silu + RMSNorm module + RotaryEmbedding parity tests`
-   - `test: LlamaCausalAttention + LlamaDecoderBlock + LlamaForCausalLM parity tests`
+   - `test: LlamaCausalAttention + LlamaDecoderBlock parity tests`
    - `test: DepthwiseSeparableConv2d + TransformerBlock + SparseEmbedding parity tests`
+   - `test: forward-mode JVP parity for Silu/GqaRepeatKV` (Phase C)
 4. `docs: update NivaraTorch README fixture table + fix stale RMSNorm note`
-5. (Phase C, if forward ops exist) `test: forward-mode JVP parity for Silu/RoPE/GqaRepeatKV`
-6. Include the pre-staged `docs/BFLOAT16-TRANSFORMER.md` doc update (marks Phase 2 done) as a
-   separate commit under this branch.
+5. The pre-staged `docs/BFLOAT16-TRANSFORMER.md` doc update was committed separately as
+   `docs: mark SmolLM Phase 2 complete in BFLOAT16 transformer doc` ✅ (77a20f7).
 
 ## Blast radius
 - **gen_reference.py**: appended cases only; existing fixtures bit-stable (dedicated RNGs).
@@ -88,4 +93,5 @@ first; skip silently if reverse-only.**
 
 ## GitHub issues log
 
-- (empty — populate as deferred work is discovered)
+- [ ] #372 — `LlamaForCausalLM` full-model PyTorch parity (tied LM head + N decoder blocks + final
+  RMSNorm) — deferred from the core-block parity branch by human decision.
