@@ -1,9 +1,9 @@
-using NUnit.Framework;
-using System.Numerics;
-using System.Numerics.Tensors;
 using Nivara.Helpers;
 using Nivara.Primitives;
 using Nivara.Tensors;
+using NUnit.Framework;
+using System.Numerics;
+using System.Numerics.Tensors;
 
 namespace Nivara.Tests.Primitives;
 

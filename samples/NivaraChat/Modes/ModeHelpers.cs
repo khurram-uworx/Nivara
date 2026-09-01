@@ -1,8 +1,6 @@
-using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Serialization;
-using Nivara.Samples;
 
 namespace NivaraChat.Modes;
 

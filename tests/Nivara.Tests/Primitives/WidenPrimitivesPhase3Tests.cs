@@ -1,7 +1,6 @@
+using Nivara.Primitives;
 using NUnit.Framework;
 using System.Numerics;
-using Nivara.Primitives;
-using Nivara.Tensors;
 
 namespace Nivara.Tests.Primitives;
 

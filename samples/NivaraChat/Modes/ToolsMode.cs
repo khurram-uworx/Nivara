@@ -88,7 +88,7 @@ public static class ToolsMode
             }
         }
 
-    cleanup:
+cleanup:
         sentimentModel.Dispose();
         entityModel.Dispose();
         validatorModel.Dispose();

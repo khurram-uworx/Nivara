@@ -1,6 +1,5 @@
 using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
-using Microsoft.Extensions.AI;
 using Nivara.Samples;
 using NivaraChat.Helpers;
 using OllamaSharp;

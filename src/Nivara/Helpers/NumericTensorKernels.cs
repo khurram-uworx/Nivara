@@ -1,6 +1,6 @@
+using Nivara.Primitives;
 using System.Numerics;
 using System.Numerics.Tensors;
-using Nivara.Primitives;
 
 namespace Nivara.Helpers;
 
