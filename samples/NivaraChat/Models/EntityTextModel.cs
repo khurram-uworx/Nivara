@@ -1,8 +1,9 @@
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Serialization;
+using NivaraChat.Helpers;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Models;
 
 internal sealed class EntityTextModel : ITextModel
 {

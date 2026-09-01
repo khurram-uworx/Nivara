@@ -1,7 +1,7 @@
 using Microsoft.Agents.AI.Workflows;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
 internal sealed class EscalationExecutor : Executor<string, string>
 {

@@ -1,7 +1,8 @@
 using Nivara.AutoDiff.Nn;
 using Nivara.AutoDiff.Serialization;
+using NivaraChat.Helpers;
 
-namespace NivaraChat;
+namespace NivaraChat.Models;
 
 internal sealed class SentimentTextModel : ITextModel
 {

@@ -3,14 +3,14 @@ using Microsoft.Extensions.AI;
 using OllamaSharp;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
-internal sealed class ChitchatExecutor : Executor<string, string>
+internal sealed class QuestionExecutor : Executor<string, string>
 {
     private readonly OllamaApiClient _chatClient;
 
-    public ChitchatExecutor(OllamaApiClient chatClient)
-        : base("Chitchat")
+    public QuestionExecutor(OllamaApiClient chatClient)
+        : base("Question")
     {
         _chatClient = chatClient;
     }
@@ -20,7 +20,7 @@ internal sealed class ChitchatExecutor : Executor<string, string>
         try
         {
             var originalText = ExtractInput(input);
-            var prompt = "You are a friendly chatbot. Have a casual, warm conversation with the user. Keep responses short and engaging.\n\n" + originalText;
+            var prompt = "You are a helpful assistant. Answer the user's question clearly and concisely.\n\n" + originalText;
             var response = await _chatClient.GetResponseAsync(prompt);
             return response.ToString();
         }

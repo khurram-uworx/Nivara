@@ -1,8 +1,9 @@
 using Microsoft.Agents.AI.Workflows;
 using Nivara.AutoDiff.Nn;
+using NivaraChat.Helpers;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
 internal sealed class CriticExecutor : Executor<string, string>
 {

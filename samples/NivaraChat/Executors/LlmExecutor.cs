@@ -2,7 +2,7 @@ using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
 internal sealed class LlmExecutor : Executor<string, string>
 {

@@ -2,7 +2,9 @@ using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using Nivara.Samples;
-using NivaraChat;
+using NivaraChat.Executors;
+using NivaraChat.Helpers;
+using NivaraChat.Tools;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;

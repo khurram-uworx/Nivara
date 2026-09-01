@@ -1,8 +1,9 @@
 using Microsoft.Extensions.AI;
+using NivaraChat.Executors;
 using OllamaSharp;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Helpers;
 
 internal sealed class WriterCriticLoop
 {

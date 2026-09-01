@@ -1,4 +1,4 @@
-namespace NivaraChat;
+namespace NivaraChat.Models;
 
 public interface ITextModel
 {

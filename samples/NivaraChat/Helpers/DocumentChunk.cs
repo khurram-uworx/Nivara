@@ -1,6 +1,6 @@
 using Microsoft.Extensions.VectorData;
 
-namespace NivaraChat;
+namespace NivaraChat.Helpers;
 
 public sealed class DocumentChunk
 {

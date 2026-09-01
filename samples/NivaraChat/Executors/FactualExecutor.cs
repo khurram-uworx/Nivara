@@ -1,9 +1,10 @@
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
+using NivaraChat.Helpers;
 using OllamaSharp;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
 internal sealed class FactualExecutor : Executor<string, string>
 {

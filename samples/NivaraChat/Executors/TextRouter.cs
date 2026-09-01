@@ -1,6 +1,6 @@
 using Microsoft.Agents.AI.Workflows;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
 internal sealed class TextRouter : Executor<string, string>
 {

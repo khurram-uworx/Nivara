@@ -2,7 +2,7 @@ using Microsoft.Extensions.AI;
 using Nivara.AutoDiff.Nn;
 using NivaraChat.Training;
 
-namespace NivaraChat;
+namespace NivaraChat.Helpers;
 
 internal sealed class FeedbackCollector
 {

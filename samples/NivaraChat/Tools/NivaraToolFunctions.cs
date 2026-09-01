@@ -1,8 +1,9 @@
 using Nivara.AutoDiff.Nn;
+using NivaraChat.Helpers;
 using System.ComponentModel;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Tools;
 
 public static class NivaraToolFunctions
 {

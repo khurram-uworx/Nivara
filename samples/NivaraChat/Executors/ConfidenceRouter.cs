@@ -3,7 +3,7 @@ using Microsoft.Extensions.AI;
 using OllamaSharp;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
 internal sealed class ConfidenceRouter : Executor<string, string>
 {

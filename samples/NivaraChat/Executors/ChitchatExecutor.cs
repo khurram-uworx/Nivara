@@ -1,21 +1,18 @@
-using Microsoft.Agents.AI;
 using Microsoft.Agents.AI.Workflows;
 using Microsoft.Extensions.AI;
 using OllamaSharp;
 using System.Text.Json;
 
-namespace NivaraChat;
+namespace NivaraChat.Executors;
 
-internal sealed class CommandExecutor : Executor<string, string>
+internal sealed class ChitchatExecutor : Executor<string, string>
 {
     private readonly OllamaApiClient _chatClient;
-    private readonly AIFunction[] _tools;
 
-    public CommandExecutor(OllamaApiClient chatClient, AIFunction[] tools)
-        : base("Command")
+    public ChitchatExecutor(OllamaApiClient chatClient)
+        : base("Chitchat")
     {
         _chatClient = chatClient;
-        _tools = tools;
     }
 
     public override async ValueTask<string> HandleAsync(string input, IWorkflowContext context, CancellationToken cancellationToken = default)
@@ -23,17 +20,13 @@ internal sealed class CommandExecutor : Executor<string, string>
         try
         {
             var originalText = ExtractInput(input);
-            var agent = new ChatClientAgent(_chatClient,
-                instructions: "You are an action assistant. Use the provided tools to fulfill the user's request.",
-                name: "CommandAgent",
-                tools: _tools);
-
-            var response = await agent.RunAsync(originalText);
+            var prompt = "You are a friendly chatbot. Have a casual, warm conversation with the user. Keep responses short and engaging.\n\n" + originalText;
+            var response = await _chatClient.GetResponseAsync(prompt);
             return response.ToString();
         }
         catch (Exception ex)
         {
-            return $"Error in command execution: {ex.Message}";
+            return $"Error calling LLM: {ex.Message}";
         }
     }
 

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace NivaraChat;
+namespace NivaraChat.Models;
 
 internal sealed class NivaraChatClient : IChatClient
 {

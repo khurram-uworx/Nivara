@@ -3,7 +3,7 @@ using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
 using System.Numerics.Tensors;
 
-namespace NivaraChat;
+namespace NivaraChat.Helpers;
 
 internal static class ModelInferenceHelper
 {

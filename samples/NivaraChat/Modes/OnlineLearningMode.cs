@@ -1,5 +1,5 @@
 using Microsoft.Extensions.AI;
-using NivaraChat;
+using NivaraChat.Helpers;
 using OllamaSharp;
 
 namespace NivaraChat.Modes;
