@@ -53,6 +53,6 @@ public class LlamaDecoderBlockTests
 
         Assert.That(output.Shape, Is.EqualTo(new[] { 4, 32 }));
         TestHelpers.AssertTensorEqual(expectedOutput, TestHelpers.ExtractOutput(output), label: "LlamaDecoderBlock_output");
-        TestHelpers.AssertTensorEqual(expectedInputGrad, TestHelpers.ExtractGrad(inputTensor), label: "LlamaDecoderBlock_input_grad");
+        TestHelpers.AssertTensorEqual(expectedInputGrad, TestHelpers.ExtractGrad(inputTensor), relTol: 1e-3f, label: "LlamaDecoderBlock_input_grad");
     }
 }

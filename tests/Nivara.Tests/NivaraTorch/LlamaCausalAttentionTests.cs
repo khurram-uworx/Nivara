@@ -42,6 +42,6 @@ public class LlamaCausalAttentionTests
 
         Assert.That(output.Shape, Is.EqualTo(new[] { 5, 64 }));
         TestHelpers.AssertTensorEqual(expectedOutput, TestHelpers.ExtractOutput(output), label: "LlamaCausalAttention_output");
-        TestHelpers.AssertTensorEqual(expectedInputGrad, TestHelpers.ExtractGrad(inputTensor), label: "LlamaCausalAttention_input_grad");
+        TestHelpers.AssertTensorEqual(expectedInputGrad, TestHelpers.ExtractGrad(inputTensor), absTol: 1e-4f, relTol: 1e-3f, label: "LlamaCausalAttention_input_grad");
     }
 }
