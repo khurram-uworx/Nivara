@@ -5,7 +5,7 @@ using Nivara.Samples.Incident;
 using System.Diagnostics;
 
 var mode = args.Length > 0 ? args[0] : "";
-string datasetPath = "./data/incident-lab";
+string datasetPath = "./samples/data/incident-lab";
 string scenarioId = "A";
 int scale = 1;
 long records = 0;
