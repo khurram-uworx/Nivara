@@ -53,11 +53,12 @@ class Program
             Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|smollm> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
-            Console.WriteLine("  benchmark         Run 10 inference passes on synthetic data + real images");
+            Console.WriteLine("  benchmark         Run timed inference passes and report median timing");
             Console.WriteLine("  compare           Run forward pass on shared input, print logits for Python comparison");
             Console.WriteLine("  compare_diag      Step-by-step diagnostics, save intermediates to samples/data/diag/");
             Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
             Console.WriteLine("  generate          Greedy causal-LM generation (smollm)");
+            Console.WriteLine("  ab                A/B scalar vs widen comparison (smollm only)");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
             Console.WriteLine("Precision (text models only):");
@@ -145,6 +146,12 @@ class Program
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             case "smollm":
+                if (mode == "ab")
+                {
+                    if (bf16) return SmolLMAb(tensorsBf16);
+                    if (fp16) return SmolLMAb(tensorsHalf);
+                    return SmolLMAb(tensors);
+                }
                 if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16, simdWiden) : RunSmolLM(tensorsBf16, simdWiden);
                 if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, simdWiden) : RunSmolLM(tensorsHalf, simdWiden);
                 return benchmark ? BenchmarkSmolLM(tensors, simdWiden) : RunSmolLM(tensors, simdWiden);
@@ -1266,6 +1273,96 @@ class Program
         Console.WriteLine();
         Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
                           $"{medianMs / Math.Max(1, medianTokens):F1} ms/token)");
+
+        return 0;
+    }
+
+    /// <summary>
+    /// SmolLM A/B comparison: runs one full generation with <c>UseWidenSimd = false</c>
+    /// (scalar) then one with <c>UseWidenSimd = true</c> (widen), and prints a
+    /// side-by-side table of timing and generated-token counts. Also diffs the
+    /// generated-token streams to confirm numerical equivalence. For BF16 this
+    /// measures the actual widen-compute-narrow cost; for F32 it is effectively a
+    /// no-op control (the toggle is transparent to float).
+    /// </summary>
+    static int SmolLMAb<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        string precisionName = PrecisionName(typeof(T));
+        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
+        Console.WriteLine($"=== SmolLM-135M A/B: Scalar vs SIMD Widen ({precisionName}) ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}");
+        if (!narrow)
+            Console.WriteLine("Note: F32 widening is transparent (no-op). Timing differences are noise.");
+        Console.WriteLine();
+
+        var modelDir = Path.Combine("samples", "data", "smollm-135m");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = LlamaLoader.Load<T, T>(config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        int bytesPerWeight = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half) ? 2 : 4;
+        double weightMb = tensors.Values.Sum(t => t.Data.Length * (long)bytesPerWeight) / (1024.0 * 1024.0);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
+        const string Prompt = "The capital of France is";
+        var promptIds = tokenizer.Encode(Prompt);
+        const int MaxNewTokens = 32;
+
+        // Warmup pass (discarded — JIT + cache warming).
+        NivaraPrimitives.UseWidenSimd = false;
+        RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+
+        // Side A: scalar (UseWidenSimd = false).
+        NivaraPrimitives.UseWidenSimd = false;
+        var scalar = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+        Console.WriteLine($"Scalar:  {scalar.Milliseconds} ms  ({scalar.Generated} tokens, " +
+                          $"{scalar.Milliseconds / Math.Max(1, scalar.Generated)} ms/token)");
+
+        // Side B: widen (UseWidenSimd = true).
+        NivaraPrimitives.UseWidenSimd = true;
+        var widened = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+        Console.WriteLine($"Widen:   {widened.Milliseconds} ms  ({widened.Generated} tokens, " +
+                          $"{widened.Milliseconds / Math.Max(1, widened.Generated)} ms/token)");
+        NivaraPrimitives.UseWidenSimd = false; // restore safe default
+
+        // Summary.
+        Console.WriteLine();
+        double ratio = scalar.Milliseconds > 0
+            ? (double)scalar.Milliseconds / widened.Milliseconds
+            : 0;
+        Console.WriteLine($"Scalar/Widen ratio: {ratio:F2}x  " +
+                          $"(values > 1 mean widen is faster)");
+        Console.WriteLine();
+
+        // Correctness: compare generated-token streams.
+        var scalarIds = scalar.Sequence.Skip(promptIds.Count).ToList();
+        var widenIds = widened.Sequence.Skip(promptIds.Count).ToList();
+        int genCount = Math.Max(scalarIds.Count, widenIds.Count);
+        int match = 0;
+        for (int i = 0; i < Math.Min(scalarIds.Count, widenIds.Count); i++)
+            if (scalarIds[i] == widenIds[i]) match++;
+
+        Console.WriteLine("Token equivalence (scalar vs widen):");
+        Console.WriteLine($"  Generated: scalar={scalarIds.Count}  widen={widenIds.Count}  " +
+                          $"match={match}/{Math.Min(scalarIds.Count, widenIds.Count)}");
+        if (scalarIds.Count == widenIds.Count && match == scalarIds.Count)
+            Console.WriteLine("  ✓ Scalar and widen produced identical token streams");
+        else
+            Console.WriteLine($"  ✗ Mismatch — {scalarIds.Count - match} positions differ " +
+                              $"(may indicate precision-dependent argmax divergence)");
+        Console.WriteLine();
+
+        Console.WriteLine($"Scalar tokens: [{string.Join(", ", scalarIds)}]");
+        Console.WriteLine($"Widen tokens:  [{string.Join(", ", widenIds)}]");
 
         return 0;
     }
