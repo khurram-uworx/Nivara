@@ -145,9 +145,9 @@ class Program
                 if (mode == "predict") return RunDistilBertSstPredict(tensors);
                 return benchmark ? BenchmarkDistilBertSst(tensors, "F32") : RunDistilBertSstInference(tensors);
             case "smollm":
-                if (bf16) return RunSmolLM(tensorsBf16, simdWiden);
-                if (fp16) return RunSmolLM(tensorsHalf, simdWiden);
-                return RunSmolLM(tensors, simdWiden);
+                if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16, simdWiden) : RunSmolLM(tensorsBf16, simdWiden);
+                if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, simdWiden) : RunSmolLM(tensorsHalf, simdWiden);
+                return benchmark ? BenchmarkSmolLM(tensors, simdWiden) : RunSmolLM(tensors, simdWiden);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;
@@ -1217,6 +1217,80 @@ class Program
         return 0;
     }
 
+    static int BenchmarkSmolLM<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, bool simdWiden)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        string precisionName = PrecisionName(typeof(T));
+        Console.WriteLine($"=== SmolLM-135M Benchmark ({precisionName}) ===");
+        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}" +
+                          $"  SIMD-widen: {(NivaraPrimitives.UseWidenSimd ? "on" : "off")}");
+        Console.WriteLine();
+
+        var modelDir = Path.Combine("samples", "data", "smollm-135m");
+        var config = LlamaConfig.FromJson(File.ReadAllText(Path.Combine(modelDir, "config.json")));
+
+        var buildSw = Stopwatch.StartNew();
+        var model = LlamaLoader.Load<T, T>(config, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"Model build: {buildSw.ElapsedMilliseconds} ms");
+
+        int totalParams = tensors.Values.Sum(t => t.Data.Length);
+        int bytesPerWeight = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half) ? 2 : 4;
+        double weightMb = tensors.Values.Sum(t => t.Data.Length * (long)bytesPerWeight) / (1024.0 * 1024.0);
+        Console.WriteLine($"Parameters: {totalParams:N0}");
+        Console.WriteLine($"Weights ({precisionName}): {weightMb:F1} MB");
+        Console.WriteLine();
+
+        var tokenizer = new Gpt2BpeTokenizer(
+            Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
+        const string Prompt = "The capital of France is";
+        var promptIds = tokenizer.Encode(Prompt);
+        const int MaxNewTokens = 32;
+
+        // Warmup pass (discarded — JIT + cache warming).
+        var warmup = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+        Console.WriteLine($"Warmup: {warmup.Milliseconds} ms ({warmup.Generated} tokens)");
+
+        // Median-of-3 timed runs (matches samples/NivaraInference/README.md methodology).
+        var runs = new (long Ms, int Generated)[3];
+        for (int i = 0; i < 3; i++)
+        {
+            var timing = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+            runs[i] = (timing.Milliseconds, timing.Generated);
+            Console.WriteLine($"Run {i + 1}: {timing.Milliseconds} ms ({timing.Generated} tokens, " +
+                              $"{timing.Milliseconds / Math.Max(1, timing.Generated)} ms/token)");
+        }
+        Array.Sort(runs, (a, b) => a.Ms.CompareTo(b.Ms));
+        long medianMs = runs[1].Ms;
+        int medianTokens = runs[1].Generated;
+        Console.WriteLine();
+        Console.WriteLine($"Median: {medianMs} ms ({medianTokens} tokens, " +
+                          $"{medianMs / Math.Max(1, medianTokens):F1} ms/token)");
+
+        return 0;
+    }
+
+    static (int Generated, long Milliseconds, List<int> Sequence) RunSmolLMGeneration<T>(
+        LlamaForCausalLM<T> model, IReadOnlyList<int> promptIds, LlamaConfig config, int maxNewTokens)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var sequence = new List<int>(promptIds);
+        int generated = 0;
+        var genSw = Stopwatch.StartNew();
+        while (generated < maxNewTokens)
+        {
+            var logits = model.Forward(sequence.ToArray());
+            int vocab = config.VocabSize;
+            int next = ArgMaxLastRow(logits, logits.Shape[0], vocab);
+            sequence.Add(next);
+            generated++;
+            if (next == config.EosTokenId)
+                break;
+        }
+        genSw.Stop();
+        return (generated, genSw.ElapsedMilliseconds, sequence);
+    }
+
     static void RunSmolLMGenerate<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, string precisionName)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -1269,29 +1343,11 @@ class Program
         Console.WriteLine($"Prompt token ids ({promptIds.Count}): [{string.Join(", ", promptIds)}]");
         Console.WriteLine();
 
-        var sequence = new List<int>(promptIds);
-        var generatedIds = new List<int>();
-        int generated = 0;
+        var (generated, genMs, sequence) = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+        var generatedIds = sequence.Skip(promptIds.Count).ToList();
 
-        var genSw = Stopwatch.StartNew();
-        while (generated < MaxNewTokens)
-        {
-            var logits = model.Forward(sequence.ToArray()); // [L, vocab]
-            int vocab = config.VocabSize;
-            int row = logits.Shape[0];                       // current sequence length
-            int next = ArgMaxLastRow(logits, row, vocab);
-
-            generatedIds.Add(next);
-            sequence.Add(next);
-            generated++;
-
-            if (next == config.EosTokenId)
-                break;
-        }
-        genSw.Stop();
-
-        Console.WriteLine($"Generated {generated} tokens in {genSw.ElapsedMilliseconds} ms " +
-                          $"({genSw.ElapsedMilliseconds / Math.Max(1, generated)} ms/token)");
+        Console.WriteLine($"Generated {generated} tokens in {genMs} ms " +
+                          $"({genMs / Math.Max(1, generated)} ms/token)");
         Console.WriteLine($"Generated token ids: [{string.Join(", ", generatedIds)}]");
         Console.WriteLine($"Decoded: \"{tokenizer.Decode(sequence)}\"");
         Console.WriteLine();
