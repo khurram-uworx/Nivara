@@ -156,11 +156,12 @@ Weight keys (HF Llama convention): `model.embed_tokens.weight`,
 
 ## GitHub issues log
 
-- [ ] #368 — causal-LM/llama-family ops (RoPE, SiLU FFN, causal mask, greedy generation, tied
-  embedding LM head) — referenced by this plan; tracked upstream, no new issue needed unless a
-  new gap surfaces.
-- [ ] #367 — GQA support (KV-repeat recommended) — approach adopted (KV-repeat); shared-KV
-  kernel is a Phase 3+ follow-up.
+- [x] #368 — causal-LM/llama-family ops (RoPE, SiLU FFN, causal mask, greedy generation, tied
+  embedding LM head) — **implemented this phase** (RMSNorm+gamma, SiLU, RoPE, GQA attention,
+  gated SiLU FFN, tied-embedding LM head, byte-level BPE tokenizer, greedy generation loop);
+  no new gap surfaced beyond the two findings below.
+- [x] #367 — GQA support (KV-repeat recommended) — **approach adopted and implemented** via
+  `GqaRepeatKV`/`GradKernels.HeadRepeat`; shared-KV kernel is a Phase 3+ follow-up.
 - [x] *(new)* — the Microsoft.ML.Tokenizers BPE path **cannot** reproduce SmolLM byte-level
   token IDs (empirically confirmed in Unit 7: every MS pre-tokenizer variant returns
   `[504, 29721, 1714, 33488, 271]` vs. the expected `[504, 3575, 282, 4649, 314]`), so a
