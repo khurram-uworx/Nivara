@@ -22,6 +22,8 @@ dotnet run --project samples/NivaraInference -c Release -- resnet18
 dotnet run --project samples/NivaraInference -c Release -- minilm
 dotnet run --project samples/NivaraInference -c Release -- distilbert
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst
+dotnet run --project samples/NivaraInference -c Release -- smollm                 # greedy causal-LM generation (F32)
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16  # native BF16 (256.6 MB)
 
 # Benchmark (10 passes each)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
@@ -119,6 +121,15 @@ python samples/NivaraInference/Python/distilbert_sst_compare.py
 dotnet run --project samples/NivaraInference -- distilbert_sst compare
 ```
 
+**SmolLM-135M-Instruct (causal LM / generation):**
+```bash
+# Greedy generation from the fixed prompt (F32; add --precision bf16 for the native BF16 path,
+# or fp16 for Half). Run the Python reference generator first to enable the PyTorch diff.
+python samples/NivaraInference/Python/smollm_generate_reference.py
+dotnet run --project samples/NivaraInference -- smollm
+dotnet run --project samples/NivaraInference -- smollm --precision bf16
+```
+
 ### Python (PyTorch reference)
 
 ```bash
@@ -214,34 +225,103 @@ Nivara modules used: `DistilBertForSequenceClassification<T>` (shared from `Niva
 
 ### SmolLM-135M-Instruct (HuggingFaceTB/SmolLM-135M-Instruct)
 
-The **5th HuggingFace model** and the primary driver for the BF16 widening work
+The **5th HuggingFace model** (and first causal LM / generative model in the sample)
+and the primary driver for the BF16 widening work
 (`docs/BFLOAT16-TRANSFORMER.md`). It is a **BF16-native** Llama-family causal LM —
 all 272 on-disk tensors are `BF16` (269 MB), exercising the native
 `SafeTensorsLoader.Read<BFloat16>` zero-hop path (unlike the other 4 models, which
-are F32 on disk). The weights are downloaded now so they are resident when the
-causal-LM sample lands in Phase 2.
+are F32 on disk). The Nivara side runs the full stack in Nivara's AutoDiff engine
+over the model ops below and greedily decodes a response.
 
 - **Config**: `hidden_size=576`, `intermediate_size=1536`, 30 layers,
   `num_attention_heads=9`, **`num_key_value_heads=3` (GQA)**, `hidden_act=silu`
   (gated FFN), RMSNorm (`eps=1e-5`), RoPE (`theta=10000`),
   `max_position_embeddings=2048`, `vocab_size=49152`, `tie_word_embeddings=true`
-- **Tokenizer**: chat variant (`<|im_start|>`/`<|im_end|>` template; bos `<|im_start|>`,
-  eos/pad `<|im_end|>`)
-- **New ops Phase 2 must add** (revised for SmolLM vs the doc's GPT-2 tanh-GELU
-  assumption): **RoPE**, **GQA attention (9↔3 KV heads)**, **gated SiLU FFN**,
-  causal self-attention mask (exists), greedy generation loop, and tied embedding
-  LM head (input embedding weight is reused as the output projection — the
-  checkpoint has no separate LM-head tensors)
-- **Reference fixture**: `Python/smollm_generate_reference.py` (run once to enable
-  the Phase 3 A/B diff) saves the token-id stream and final-position logits:
+- **Tokenizer**: **GPT-2 byte-level BPE** (not SentencePiece — see the note below),
+  chat variant (`<|im_start|>`/`<|im_end|>` template; bos `<|im_start|>`,
+  eos/pad `<|im_end|>`), 49152-token vocab built from `vocab.json` + `merges.txt`
+- **Nivara modules added for this model**: `RMSNorm<T>` (affine gamma), `Activation.Silu`,
+  `RotaryEmbedding<T>` (RoPE, Llama `rotate_half` half-split layout),
+  `LlamaCausalAttention<T>` (GQA 9↔3 KV heads via KV-repeat), `LlamaDecoderBlock<T>`
+  (pre-norm attention + residual + pre-norm gated SiLU FFN + residual),
+  `LlamaForCausalLM<T>` (embed → 30 blocks → final RMSNorm → tied-embedding LM head),
+  and `Gpt2BpeTokenizer` (sample-local byte-level BPE reader)
+- **Tied LM head**: the input embedding weight is reused as the output projection —
+  the checkpoint has no separate LM-head tensors
+- **Reference fixture**: `Python/smollm_generate_reference.py` saves the token-id
+  stream and final-position logits for diffing:
 
   ```bash
   python samples/NivaraInference/Python/smollm_generate_reference.py
   # -> samples/data/compare_smollm_py.bin, samples/data/compare_smollm_logits_py.bin
   ```
 
-  The C# causal-LM `compare` mode (Phase 2/3) diffs against these. No `dotnet run
-  -- smollm` mode exists yet — it lands with the Phase 2 implementation.
+  The C# `smollm generate` mode diffs against these when present (see "Causal-LM
+  generation" below).
+
+**Usage:**
+
+```bash
+# Greedy causal-LM generation (F32, BF16 native on disk, or fp16)
+dotnet run --project samples/NivaraInference -c Release -- smollm
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16
+dotnet run --project samples/NivaraInference -c Release -- smollm --precision fp16
+```
+
+Each run loads SmolLM-135M, tokenizes the fixed prompt *"The capital of France is"*,
+greedily decodes up to 32 new tokens (inference-only: no `GradientUtils.Grad()` scope,
+so no graph nodes are built), prints the token ids + decoded text, and — when the
+PyTorch reference fixtures exist — diffs the token-id stream and final-position
+logits.
+
+**BF16 SIMD widening**: with scalar BFloat16 math, a 32-token generation is
+impractical (~100× slower). The `smollm` mode therefore enables
+`NivaraPrimitives.UseWidenSimd` for the narrow (BFloat16/Half) runs so the Phase-1
+widen-compute-narrow SIMD kernels drive the matmuls (and restores the prior global
+value afterwards, so other model modes are unaffected).
+
+**Numerical caveats** (documented tolerance, not bit-exact): greedy argmax agreement
+with the PyTorch reference is high but not perfect — F32 matches ~30/32 generated
+tokens (decoded text byte-identical through the first ~30; the tail diverges because a
+small numeric difference at a near-tie flips argmax and the error compounds), and BF16
+matches ~22/32 with a final-position-logits cosine similarity of ~0.94 vs the
+reference. This is the expected "numeric precision diff" behavior for a single forward
+step, not a structural mismatch.
+
+> **Tokenizer correction (historical)**: this README previously listed SmolLM's
+> tokenizer as SentencePiece. It is actually a **GPT-2 byte-level BPE** tokenizer
+> (`tokenizer_class: GPT2Tokenizer`, `add_prefix_space: false`). The
+> `Microsoft.ML.Tokenizers` BPE path cannot reproduce SmolLM's byte-level token IDs
+> (every pre-tokenizer variant diverges at space-prefixed tokens), so a sample-local
+> `Gpt2BpeTokenizer` (HF `bytes_to_unicode` map + GPT-2 regex + ranked greedy merges)
+> implements the reader.
+
+#### Gaps found & fixed (5th model)
+
+Adding the causal-LM path surfaced ops Nivara did not yet have. Each was implemented,
+unit-tested, and verified end-to-end against the PyTorch reference:
+
+- **`RMSNorm<T>`** with affine gamma (`Llama` RMSNorm uses per-channel `weight`, unlike
+  the plain mean/var normalization already present).
+- **`Activation.Silu`** (`x·sigmoid(x)`, forward + VJP + JVP) — Llama uses SiLU gating,
+  not GELU.
+- **`RotaryEmbedding<T>`** (RoPE) + `GradKernels.RotaryForward/Backward` — precomputed
+  cos/sin from `rope_theta`. Caught and fixed a subtle layout bug during end-to-end
+  verification: the first implementation used the GPT-NeoX **interleaved-pairwise**
+  rotation, but the Llama family uses HF **`rotate_half` (half-split)**, which
+  anti-correlated the logits (cosine −0.92); after the fix the F32 greedy agreement went
+  4/32 → 30/32 with byte-identical text.
+- **`LlamaCausalAttention<T>`** — **GQA** (9 Q / 3 KV heads) via KV-repeat
+  (`ReverseGradOperations.GqaRepeatKV` + `GradKernels.HeadRepeat`), fused causal masked
+  attention loop.
+- **`LlamaDecoderBlock<T>`** — pre-norm attention + residual, pre-norm **gated SiLU
+  FFN** (`down(silu(gate)⊙up)`) + residual.
+- **`LlamaForCausalLM<T>`** — embed → 30 blocks → final RMSNorm → **tied-embedding LM
+  head** (reuses the input embedding weight).
+- **`Gpt2BpeTokenizer`** — sample-local **GPT-2 byte-level BPE** reader (see the
+  tokenizer-correction note above).
+- **BF16 SIMD widening** enabled on the `smollm` narrow runs so generation is practical
+  (see the BF16 section above).
 
 ### Weight loading
 
@@ -252,6 +332,7 @@ Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor
 - **MiniLM**: 96 tensors mapped from HuggingFace keys like `encoder.layers.N.attention.self.query.weight` to Nivara `Linear<T>` weight/bias fields
 - **DistilBERT**: 105 tensors mapped via `DistilBertLoader.LoadEncoderWeights` from `distilbert.embeddings.*` and `distilbert.transformer.layer.{0-5}.*` keys
 - **DistilBERT SST-2**: 104 tensors — 102 encoder tensors via `DistilBertLoader.LoadEncoderWeights` + `pre_classifier.{weight,bias}` and `classifier.{weight,bias}` loaded via `DistilBertForSequenceClassification<T>.LoadWeights`
+- **SmolLM-135M**: 272 tensors (all BF16 on disk) via `LlamaLoader.Load<TModel,TWeight>` + `LlamaConfig.FromJson` — maps `model.embed_tokens.weight` (reused for the tied LM head), `model.layers.N.*` (input_layernorm, self_attn.{q,k,v,o}_proj, post_attention_layernorm, mlp.{gate,up,down}_proj), and `model.norm.weight`, with RMSNorm/attention/MLP weights bound via `StateDictLoader.LoadRMSNorm`/`LoadLinear`
 
 ## Narrow-precision inference (BFloat16 / Half)
 
@@ -308,6 +389,7 @@ F32, so weight memory **exactly halves** (same parameter count, half the bytes):
 | MiniLM | ~91 MB | ~45.5 MB |
 | DistilBERT (base) | ~255.5 MB | ~127.8 MB |
 | DistilBERT SST-2 | ~255.4 MB | ~127.7 MB |
+| SmolLM-135M | ~513 MB (widened) | **~256.6 MB (native on disk)** |
 
 **Speed** — `benchmark` now accepts `--precision` (all three dtypes), so you can time F32,
 fp16, and bf16 inference for the same model in one generic code path (3 warmup + 10 timed
@@ -340,6 +422,12 @@ every prediction.
 The base `distilbert` and `minilm` narrow-precision modes run correctly (unit-length
 embeddings, sensible cosine similarities — e.g. 0.90 between "I love programming" and "I love
 coding"). The column/tensor engine's BFloat16 path is documented in `docs/BFLOAT16.md`.
+
+SmolLM differs from the other models: it is **BF16-native on disk**, so the `smollm
+--precision bf16` mode reads the weights directly (no F32→BF16 truncation at load).
+Because a scalar-BF16 32-token generation is impractical, the `smollm` BF16/Half runs
+enable `NivaraPrimitives.UseWidenSimd` so matmuls flow through the Phase-1
+widen-compute-narrow SIMD kernels (see `docs/BFLOAT16-TRANSFORMER.md`).
 
 **Reference fixtures for `compare` / narrow-precision diffs** — the quantitative cosine (or
 logit) diff against the HuggingFace reference is shown only when the F32 reference `.bin` files
@@ -412,7 +500,7 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `samples/data/compare_distilbert_sst_py.bin` | PyTorch reference logits + softmax probs (generated by `Python/distilbert_sst_compare.py`) |
 | `samples/data/smollm-135m/model.safetensors` | SmolLM-135M-Instruct weights (~269 MB, 272 tensors, all BF16) |
 | `samples/data/smollm-135m/config.json` | SmolLM-135M config (`hidden=576`, `n_layers=30`, GQA 9/3, SiLU, RoPE) |
-| `samples/data/smollm-135m/tokenizer.json` | SmolLM chat tokenizer (SentencePiece; `<|im_start|>`/`<|im_end|>`) |
+| `samples/data/smollm-135m/tokenizer.json` | SmolLM tokenizer (GPT-2 byte-level BPE; `<|im_start|>`/`<|im_end|>` chat template) |
 | `samples/data/compare_smollm_py.bin` | PyTorch reference token-id stream (generated by `Python/smollm_generate_reference.py`) |
 | `samples/data/compare_smollm_logits_py.bin` | PyTorch reference final-position logits (generated by `Python/smollm_generate_reference.py`) |
 | `samples/data/compare_input.bin` | Shared `[1,3,224,224]` input for compare modes (generated by `Python/generate_input.py`) |
@@ -463,6 +551,20 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `GradientUtils.Grad()`-free inference | Leaf logits, no computation graph overhead |
 | `MiniLMTokenizer.Encode` + `Microsoft.ML.Tokenizers.BertTokenizer` | WordPiece tokenization with `[CLS]`/`[SEP]` |
 | Softmax + argmax via tensor span | Sentiment label + confidence |
+
+### SmolLM-135M-Instruct (causal LM / generation)
+
+| Capability | Where exercised |
+|---|---|
+| `RMSNorm<T>` affine gamma | Pre-norm in every decoder block + final norm |
+| `Activation.Silu` (forward/VJP/JVP) | Gated SiLU FFN gate path |
+| `RotaryEmbedding<T>` (RoPE, `rotate_half`) | Q/K rotary position embeddings |
+| `LlamaCausalAttention<T>` + `GqaRepeatKV` | GQA self-attention (9 Q / 3 KV) |
+| `LlamaDecoderBlock<T>` | Pre-norm attention + gated SiLU FFN + residuals |
+| `LlamaForCausalLM<T>` + tied LM head | Embed → blocks → final norm → `hidden @ embed^T` |
+| `Gpt2BpeTokenizer` | Sample-local GPT-2 byte-level BPE tokenization |
+| `NivaraPrimitives.UseWidenSimd` | SIMD widen-compute-narrow BF16 matmul (native path) |
+| Greedy generation (inference-default) | 32-token decode, no `GradientUtils.Grad()` scope |
 
 ## Release Benchmark
 
