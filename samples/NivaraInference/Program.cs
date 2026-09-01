@@ -1334,6 +1334,22 @@ class Program
         var promptIds = tokenizer.Encode(Prompt);
         const int MaxNewTokens = 32;
 
+        // Half (fp16) is unsupported for SmolLM generation: the 16-bit weights produce
+        // NaN logits (see README numerical caveats), so an A/B comparison would be
+        // meaningless. Fall back to a single timed generation reporting timing only.
+        if (typeof(T) == typeof(Half))
+        {
+            Console.WriteLine("Note: Half (fp16) is unsupported for SmolLM generation (NaN");
+            Console.WriteLine("logits — see README numerical caveats). The A/B comparison is");
+            Console.WriteLine("only meaningful for BF16; running a single timed run instead.");
+            Console.WriteLine();
+            NivaraPrimitives.UseWidenSimd = true; // narrow auto-enable
+            var fallback = RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
+            Console.WriteLine($"Generated {fallback.Generated} tokens in {fallback.Milliseconds} ms " +
+                              $"({fallback.Milliseconds / Math.Max(1, fallback.Generated)} ms/token)");
+            return 0;
+        }
+
         // Warmup pass (discarded — JIT + cache warming).
         NivaraPrimitives.UseWidenSimd = false;
         RunSmolLMGeneration(model, promptIds, config, MaxNewTokens);
