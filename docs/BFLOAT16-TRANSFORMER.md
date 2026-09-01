@@ -159,7 +159,7 @@ today:
 |---|---|---|
 | **Causal self-attention mask** | autoregressive attention | new mask shape vs bidirectional |
 | **RoPE (RotaryEmbedding)** | Llama positional encoding | new op: rotate Q/K by position |
-| **GPT-2 `Gelu` (tanh approx)** | Llama FFN activation | `ReverseGradOperations.Gelu` path (already exists, wire it) |
+| **Gated SiLU FFN** | Llama FFN activation | `Activation.Silu` path (`silu(gate)*up → down`) |
 | **Greedy generation loop** | token-by-token decode | reuses `int[]` token-ID path (F8) |
 | (optional) **Conv1d** | only if a Whisper-style model is chosen instead | not needed for TinyLlama |
 
@@ -177,14 +177,14 @@ job is to pull in the *new* ops above.
 - **Edge AI fit:** TinyLlama / SmolLM-class models are explicitly designed for edge and
   on-device inference, where halved weight memory (BF16) + SIMD math is exactly the sweet spot
   Nivara can own. This aligns the feature with a concrete, marketable use case.
-- **New-op coverage:** adds causal masking, RoPE, GPT-2 Gelu, and a generation loop — the
+- **New-op coverage:** adds causal masking, RoPE, gated SiLU FFN, and a generation loop — the
   missing pieces in the shared layer.
 
 **Architecture mapping (target Nivara modules):**
 - Token + position embeddings → `Embedding<T>` (+ RoPE applied to Q/K before attention).
-- Layers: `LayerNorm<T>` → causal `MultiheadAttention<T>` (masked) → residual → `LayerNorm<T>`
-  → `Linear<T>` → `Gelu` (tanh) → `Linear<T>` → residual.
-- LM head: `Linear<T>` → logits; greedy decode via `Softmax` + argmax, feeding `int[]` token
+- Layers: `RMSNorm<T>` → causal `LlamaCausalAttention<T>` (GQA + masked) → residual →
+  `RMSNorm<T>` → `Linear<T>` (gate/up) → SiLU gate-multiply → `Linear<T>` (down) → residual.
+- LM head: tied embedding `Linear` → logits; greedy decode via argmax, feeding `int[]` token
   IDs back (F8).
 
 **Loading:** BF16-native checkpoint via `SafeTensorsLoader.Read<BFloat16>` + `Module<BFloat16>`
@@ -203,9 +203,15 @@ job is to pull in the *new* ops above.
   live in `src/Nivara/Primitives/NarrowFloatKernels.cs` (BF16 bit-shift widen/narrow; Half portable
   conversion). Unit tests: scalar BF16/Half reference vs widen, per op, toggle on/off
   (`WidenPrimitivesPhase1Tests.cs`).
-- **Phase 2 — 5th model + its ops:** add the TinyLlama/SmolLM sample; implement RoPE, causal
-  attention mask, GPT-2 Gelu wiring, generation loop; route its numeric ops through
-  `WidenPrimitives`. Only the ops this model needs are implemented first.
+- **Phase 2 — 5th model + its ops — DONE:** added the TinyLlama/SmolLM sample (`smollm` mode in
+  `samples/NivaraInference`); implemented RoPE (`RotaryEmbedding<T>`), causal attention mask
+  (`ModuleHelpers<T>.CreateCausalMask`), gated SiLU FFN (`Activation.Silu`), tied-embedding LM
+  head, and a greedy generation loop — the missing pieces in the shared layer. Built the full
+  `LlamaForCausalLM<T>` stack + `LlamaConfig`/`LlamaLoader` in `samples/Nivara.Samples`. GQA
+  (9↔3 KV heads) wired via `ReverseGradOperations.GqaRepeatKV` to keep the fused MHA kernel.
+  Validated against the HuggingFace reference (`compare_smollm_py.bin`): BF16 22/32 generated-token
+  argmax match, 0.94 final-position logits cosine (see `samples/NivaraInference/README.md`).
+  Closes #367 (GQA) and #368 (causal-LM ops).
 - **Phase 3 — A/B + correctness + docs:** `--simd-widen` in `NivaraInference`; benchmark scalar
   vs widen; add a Python reference generator for the 5th model; verify argmax/logit diff vs
   HuggingFace; update `BFLOAT16.md` and this doc with results. Optionally flip the global switch
