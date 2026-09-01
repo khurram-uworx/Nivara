@@ -101,5 +101,4 @@ the mode + wiring + README are the user-facing increment.)
 
 ## GitHub issues log
 
-- (none yet — Stage A is additive and self-contained; any deferred concern found during
-  execution will be captured here as a tracked issue before `docs/TODO.md` is deleted.)
+- [ ] #375 — SmolLM IChatClient follow-ups: KV cache + temperature/top-p sampling (created while concluding Stage A; intentional out-of-scope items tracked so they aren't lost after TODO.md removal)
