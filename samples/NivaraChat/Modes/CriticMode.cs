@@ -1,4 +1,3 @@
-using Microsoft.Extensions.AI;
 using NivaraChat.Executors;
 using NivaraChat.Helpers;
 using OllamaSharp;
