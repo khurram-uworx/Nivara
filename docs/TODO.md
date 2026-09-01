@@ -171,6 +171,7 @@ All verification steps passed and results are recorded in the docs. Commits (`da
 6. `48ef05a` — docs: results + CHANGELOG entry.
 7. `4c0fb11` — docs: reconciled BF16-vs-F32 ratio claim (1.5–2× range, machine-load variance) so README memory-vs-perf table (16.8 s) and the A/B table (22.6 s, captured under load) don't conflict.
 8. `6224dc6` — Half guard in `smollm ab` (plan requirement): fp16 prints the NaN note and falls back to a single timed run instead of a meaningless A/B.
+9. `58eb3ce` — added a `ShouldWiden` toggle/length-gate test to the Phase 3 file (honors plan §4a's "plus ShouldWiden gating" explicitly; Phase1Tests cover it too). **6/6 pass.**
 
 **Verified results (SmolLM-135M, 32 greedy tokens, .NET 11, this machine):**
 
