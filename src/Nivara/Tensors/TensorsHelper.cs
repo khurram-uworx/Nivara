@@ -1,8 +1,8 @@
+using Nivara.Primitives;
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
 using System.Runtime.InteropServices;
-using Nivara.Primitives;
 
 namespace Nivara.Tensors;
 

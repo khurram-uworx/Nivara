@@ -431,50 +431,68 @@ Further reading:
 
 ```
 NivaraChat/
-├── Program.cs                         # CLI entry, all mode orchestration
-├── TextRouter.cs                      # Pass-through executor for fan-out routing
-├── SentimentExecutor.cs               # Sentiment classification executor (--workflow)
-├── EntityExtractor.cs                 # NER entity extraction executor (--workflow)
-├── ValidatorExecutor.cs               # Rule-based validator executor (--workflow)
-├── LlmExecutor.cs                     # Ollama LLM executor (--workflow)
-├── ConfidenceRouter.cs                # Confidence-based routing executor (--handoff)
-├── NivaraResultFormatter.cs           # Formats confident Nivara results (--handoff)
-├── CriticExecutor.cs                  # Scores LLM response quality (--critic)
-├── WriterCriticLoop.cs                # Bounded writer-critic retry loop (--critic)
-├── NivaraToolFunctions.cs             # Nivara models as AIFunction tools (--tools)
-├── ITextModel.cs                      # Text-in/text-out abstraction for ML models
-├── SentimentTextModel.cs              # ITextModel wrapping TextClassifierModel<float>
-├── EntityTextModel.cs                 # ITextModel wrapping TokenClassifierModel<float>
-├── ValidatorTextModel.cs              # ITextModel wrapping TextClassifierModel<float>
-├── NivaraChatClient.cs                # IChatClient wrapping ITextModel for agent participation
-├── PassthroughTextModel.cs            # ITextModel wrapping IChatClient (Ollama passthrough)
-├── ModelInferenceHelper.cs            # Shared inference pipeline (DRY)
+├── Program.cs                         # Thin CLI dispatcher: option parsing + mode routing
+├── Modes/                             # One static class per CLI mode
+│   ├── ModeContext.cs                 # Immutable option bag shared by every mode runner
+│   ├── ModeHelpers.cs                 # Shared model loaders + agent run/print helpers
+│   ├── TrainingMode.cs                # --train / --intent-train
+│   ├── WorkflowMode.cs                # --workflow (fan-out/fan-in pipeline, Ollama optional)
+│   ├── AgentsMode.cs                  # --agents / --interactive (agents pipeline)
+│   ├── HandoffMode.cs                 # --handoff (confidence-based LLM handoff)
+│   ├── ToolsMode.cs                   # --tools (LLM orchestrator + Nivara AIFunction tools)
+│   ├── CriticMode.cs                  # --critic (writer-critic loop)
+│   ├── IntentMode.cs                  # --intent (5-class routing to specialist executors)
+│   ├── OnlineLearningMode.cs          # --online-learning (LLM feedback + retrain)
+│   ├── EmbeddingMode.cs               # --embed (embedding search demo)
+│   ├── RagMode.cs                     # --rag (retrieval-augmented generation)
+│   └── RagAgentMode.cs                # --rag-agent (RAG with TextSearchProvider)
+├── Executors/                         # Agent Framework Executor<string, string> subclasses
+│   ├── TextRouter.cs                  # Pass-through executor for fan-out routing
+│   ├── SentimentExecutor.cs           # Sentiment classification executor (--workflow)
+│   ├── EntityExtractor.cs             # NER entity extraction executor (--workflow)
+│   ├── ValidatorExecutor.cs           # Rule-based validator executor (--workflow)
+│   ├── LlmExecutor.cs                 # Ollama LLM executor (--workflow)
+│   ├── ConfidenceRouter.cs            # Confidence-based routing executor (--handoff)
+│   ├── CriticExecutor.cs              # Scores LLM response quality (--critic)
+│   ├── IntentClassifier.cs            # Intent classification executor (--intent)
+│   ├── FactualExecutor.cs             # RAG-based factual executor (--intent)
+│   ├── QuestionExecutor.cs            # General Q&A executor (--intent)
+│   ├── CommandExecutor.cs             # Tool-calling executor (--intent)
+│   ├── EscalationExecutor.cs          # Complaint escalation executor (--intent)
+│   └── ChitchatExecutor.cs            # Casual conversation executor (--intent)
+├── Models/                            # Text-in/text-out wrappers around ML models
+│   ├── ITextModel.cs                  # Text-in/text-out abstraction for ML models
+│   ├── SentimentTextModel.cs          # ITextModel wrapping TextClassifierModel<float>
+│   ├── EntityTextModel.cs             # ITextModel wrapping TokenClassifierModel<float>
+│   ├── ValidatorTextModel.cs          # ITextModel wrapping TextClassifierModel<float>
+│   ├── NivaraChatClient.cs            # IChatClient wrapping ITextModel for agent participation
+│   └── PassthroughTextModel.cs        # ITextModel wrapping IChatClient (Ollama passthrough)
+├── Helpers/
+│   ├── ModelInferenceHelper.cs        # Shared inference pipeline (DRY)
+│   ├── DocumentChunk.cs               # DocumentChunk + DocumentChunker for RAG indexing
+│   ├── FeedbackCollector.cs           # LLM fallback + feedback buffer (--online-learning)
+│   └── WriterCriticLoop.cs            # Bounded writer-critic retry loop (--critic)
+├── Tools/
+│   └── NivaraToolFunctions.cs         # Nivara models as AIFunction tools (--tools)
 ├── Training/
-│   ├── SentimentTrainer.cs           # Train sentiment model
-│   ├── EntityTrainer.cs              # Train entity NER model
-│   ├── ValidatorTrainer.cs           # Train workflow validator model
-│   ├── AgentsValidatorTrainer.cs     # Train agents validator model
-│   └── IntentTrainer.cs              # Train intent classifier + incremental retrain
+│   ├── SentimentTrainer.cs            # Train sentiment model
+│   ├── EntityTrainer.cs               # Train entity NER model
+│   ├── ValidatorTrainer.cs            # Train workflow validator model
+│   ├── AgentsValidatorTrainer.cs      # Train agents validator model
+│   └── IntentTrainer.cs               # Train intent classifier + incremental retrain
 ├── Data/
-│   ├── SyntheticDataGenerator.cs     # Generate all four datasets
-│   └── IntentDataGenerator.cs        # Generate 5-class intent data
-├── IntentClassifier.cs               # Intent classification executor (--intent)
-├── FactualExecutor.cs                # RAG-based factual executor (--intent)
-├── QuestionExecutor.cs               # General Q&A executor (--intent)
-├── CommandExecutor.cs                # Tool-calling executor (--intent)
-├── EscalationExecutor.cs             # Complaint escalation executor (--intent)
-├── ChitchatExecutor.cs               # Casual conversation executor (--intent)
-├── FeedbackCollector.cs              # LLM fallback + feedback buffer (--online-learning)
+│   ├── SyntheticDataGenerator.cs      # Generate all four datasets
+│   └── IntentDataGenerator.cs         # Generate 5-class intent data
 ├── Transformer/
-│   ├── TransformerMode.cs            # --tinyshakespeare CLI mode + interactive entry
-│   ├── BatchedTransformer.cs         # BatchedTransformer<T> + BatchedTransformerBlock<T>
-│   ├── BatchedChatClient.cs          # IChatClient over a trained BatchedTransformer<float>
-│   ├── PositionEncoding.cs           # Fixed sinusoidal position encoding
-│   └── TinyShakespeare.cs            # Corpus downloader + line-document loader
+│   ├── TransformerMode.cs             # --tinyshakespeare CLI mode + interactive entry
+│   ├── BatchedTransformer.cs          # BatchedTransformer<T> + BatchedTransformerBlock<T>
+│   ├── BatchedChatClient.cs           # IChatClient over a trained BatchedTransformer<float>
+│   ├── PositionEncoding.cs            # Fixed sinusoidal position encoding
+│   └── TinyShakespeare.cs             # Corpus downloader + line-document loader
 ├── SmolLM/
-│   ├── SmollmMode.cs                 # --smollm CLI mode + interactive entry (chat/plain)
-│   ├── SmolLMChatClient.cs           # IChatClient over LlamaForCausalLM<T> (greedy, token-streamed)
-│   └── SmollmChatTemplate.cs         # Hermes ChatML conversation rendering
+│   ├── SmollmMode.cs                  # --smollm CLI mode + interactive entry (chat/plain)
+│   ├── SmolLMChatClient.cs            # IChatClient over LlamaForCausalLM<T> (greedy, token-streamed)
+│   └── SmollmChatTemplate.cs          # Hermes ChatML conversation rendering
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```
