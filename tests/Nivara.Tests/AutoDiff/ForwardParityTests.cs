@@ -660,6 +660,41 @@ public class ForwardParityTests
         AssertTangentSumEqualsGradientSum(result, expected, "SparseEmbeddingBag");
     }
 
+    [Test]
+    public void Silu_ForwardTangent_EqualsBackwardGradient()
+    {
+        var xData = new float[] { -2f, -0.5f, 0f, 0.5f, 2f };
+
+        var rx = new ReverseGradTensor<float>(NivaraColumn<float>.Create(xData), requiresGrad: true);
+        ReverseGradOperations.Sum(ReverseGradOperations.Silu(rx)).Backward();
+        var expected = rx.Grad!;
+
+        var fx = Fwd(xData, new float[] { 1f, 1f, 1f, 1f, 1f });
+        var result = ForwardGradOperations.Silu(fx);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "Silu");
+    }
+
+    [Test]
+    public void GqaRepeatKV_ForwardTangent_EqualsBackwardGradient()
+    {
+        var data = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f };
+
+        var rx = new ReverseGradTensor<float>(NivaraColumn<float>.Create(data), requiresGrad: true);
+        rx.Reshape(2, 4);
+        ReverseGradOperations.Sum(ReverseGradOperations.GqaRepeatKV(rx, 4, 2)).Backward();
+        var expected = rx.Grad!;
+
+        // With repeat = numHeads / numKvHeads = 2, every input element feeds two
+        // outputs, so both the forward tangent (seed 2) and the sum-backward
+        // gradient are uniform 2s and the element-wise comparison holds.
+        var fx = Fwd(data, new float[] { 2f, 2f, 2f, 2f, 2f, 2f, 2f, 2f });
+        fx.Reshape(2, 4);
+        var result = ForwardGradOperations.GqaRepeatKV(fx, 4, 2);
+
+        AssertTangentEqualsGradient(result, expected, expected.Length, "GqaRepeatKV");
+    }
+
     #endregion
 
     #region New-Op Finite-Difference JVP
@@ -725,6 +760,41 @@ public class ForwardParityTests
             x, v, 6);
         for (int i = 0; i < 6; i++)
             Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"SparseEmbeddingBag position {i}");
+    }
+
+    [Test]
+    public void Silu_FiniteDifference_JvpMatches()
+    {
+        var x = new float[] { -2f, -0.5f, 0f, 0.5f, 2f };
+        var v = new float[] { 0.3f, -0.7f, 1f, 0.2f, -0.5f };
+
+        var fwd = ForwardGradOperations.Silu(Fwd(x, v));
+
+        var fdJvp = CentralDifferenceJvp(a => ForwardGradOperations.Silu(Fwd(a)), x, v, 5);
+        for (int i = 0; i < 5; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"Silu position {i}");
+    }
+
+    [Test]
+    public void GqaRepeatKV_FiniteDifference_JvpMatches()
+    {
+        var x = new float[] { 1f, 2f, 3f, 4f, 5f, 6f, 7f, 8f };
+        var v = new float[] { 0.5f, -0.25f, 1f, 0.1f, -0.5f, 2f, 0.75f, -0.1f };
+
+        var fx = Fwd(x, v);
+        fx.Reshape(2, 4);
+        var fwd = ForwardGradOperations.GqaRepeatKV(fx, 4, 2);
+
+        var fdJvp = CentralDifferenceJvp(
+            a =>
+            {
+                var q = Fwd(a);
+                q.Reshape(2, 4);
+                return ForwardGradOperations.GqaRepeatKV(q, 4, 2);
+            },
+            x, v, 16);
+        for (int i = 0; i < 16; i++)
+            Assert.That(fwd.Tangent![i], Is.EqualTo(fdJvp[i]).Within(1e-3f), $"GqaRepeatKV position {i}");
     }
 
     [Test]
