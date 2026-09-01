@@ -1227,6 +1227,23 @@ class Program
     static int BenchmarkSmolLM<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors, bool simdWiden)
         where T : struct, IFloatingPointIeee754<T>
     {
+        bool narrow = typeof(T) == typeof(BFloat16) || typeof(T) == typeof(Half);
+        bool priorWiden = NivaraPrimitives.UseWidenSimd;
+        if (simdWiden || narrow)
+            NivaraPrimitives.UseWidenSimd = true;
+        try
+        {
+            return BenchmarkSmolLMCore(tensors);
+        }
+        finally
+        {
+            NivaraPrimitives.UseWidenSimd = priorWiden;
+        }
+    }
+
+    static int BenchmarkSmolLMCore<T>(Dictionary<string, (T[] Data, int[] Shape)> tensors)
+        where T : struct, IFloatingPointIeee754<T>
+    {
         string precisionName = PrecisionName(typeof(T));
         Console.WriteLine($"=== SmolLM-135M Benchmark ({precisionName}) ===");
         Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: {precisionName}" +
@@ -1343,10 +1360,13 @@ class Program
                           $"(values > 1 mean widen is faster)");
         Console.WriteLine();
 
-        // Correctness: compare generated-token streams.
+        // Correctness: compare generated-token streams. For narrow types (BFloat16/Half)
+        // the scalar fallback computes in reduced precision and legitimately diverges
+        // from the numerically-correct widen path, so a match here is not required —
+        // it is informational. The widen side's correctness against PyTorch is pinned
+        // separately by the compare/generate modes (compare_smollm_py.bin fixtures).
         var scalarIds = scalar.Sequence.Skip(promptIds.Count).ToList();
         var widenIds = widened.Sequence.Skip(promptIds.Count).ToList();
-        int genCount = Math.Max(scalarIds.Count, widenIds.Count);
         int match = 0;
         for (int i = 0; i < Math.Min(scalarIds.Count, widenIds.Count); i++)
             if (scalarIds[i] == widenIds[i]) match++;
@@ -1356,9 +1376,11 @@ class Program
                           $"match={match}/{Math.Min(scalarIds.Count, widenIds.Count)}");
         if (scalarIds.Count == widenIds.Count && match == scalarIds.Count)
             Console.WriteLine("  ✓ Scalar and widen produced identical token streams");
+        else if (!narrow)
+            Console.WriteLine($"  ✗ {scalarIds.Count - match} positions differ");
         else
-            Console.WriteLine($"  ✗ Mismatch — {scalarIds.Count - match} positions differ " +
-                              $"(may indicate precision-dependent argmax divergence)");
+            Console.WriteLine("  (informational) divergence is expected for the reduced-" +
+                              "precision scalar fallback; the widen side is the reference-verified path");
         Console.WriteLine();
 
         Console.WriteLine($"Scalar tokens: [{string.Join(", ", scalarIds)}]");
