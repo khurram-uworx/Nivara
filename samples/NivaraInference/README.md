@@ -225,9 +225,8 @@ Nivara modules used: `DistilBertForSequenceClassification<T>` (shared from `Niva
 
 ### SmolLM-135M-Instruct (HuggingFaceTB/SmolLM-135M-Instruct)
 
-The **5th HuggingFace model** (and first causal LM / generative model in the sample)
-and the primary driver for the BF16 widening work
-(`docs/BFLOAT16-TRANSFORMER.md`). It is a **BF16-native** Llama-family causal LM —
+The **First causal LM / generative model** in the sample and the primary driver for the BF16 widening work
+(`docs/BFLOAT16.md`). It is a **BF16-native** Llama-family causal LM —
 all 272 on-disk tensors are `BF16` (269 MB), exercising the native
 `SafeTensorsLoader.Read<BFloat16>` zero-hop path (unlike the other 4 models, which
 are F32 on disk). The Nivara side runs the full stack in Nivara's AutoDiff engine
