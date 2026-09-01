@@ -952,6 +952,66 @@ public static class ReverseGradOperations
             AutoDiffDiagnostics.ShapeNote("BatchedMultiHeadAttention", [batch, qLen, D]));
     }
 
+    /// <summary>
+    /// Repeats grouped key/value heads (GQA) so query, key, and value share an equal head
+    /// count. Input is <c>[L, numKvHeads * headDim]</c>; output is
+    /// <c>[L, numHeads * headDim]</c> where logical head <c>g</c> is a copy of source KV head
+    /// <c>g / repeat</c> (repeat = numHeads / numKvHeads). The output feeds the shared-head
+    /// attention path directly.
+    /// </summary>
+    /// <param name="a">The key/value tensor with <c>[L, numKvHeads * headDim]</c></param>
+    /// <param name="numHeads">The query head count (must be divisible by numKvHeads)</param>
+    /// <param name="numKvHeads">The key/value head count</param>
+    /// <returns>A repeated tensor with <c>[L, numHeads * headDim]</c></returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    public static ReverseGradTensor<T> GqaRepeatKV<T>(
+        ReverseGradTensor<T> a, int numHeads, int numKvHeads) where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (numHeads <= 0 || numKvHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
+        if (numHeads % numKvHeads != 0)
+            throw new ArgumentException($"numHeads ({numHeads}) must be divisible by numKvHeads ({numKvHeads}).");
+        if (a.Rank != 2)
+            throw new ArgumentException($"GqaRepeatKV expects a matrix (rank 2), got rank {a.Rank}", nameof(a));
+
+        int seqLen = a.shape[0];
+        int kvWidth = a.shape[1];
+        if (kvWidth % numKvHeads != 0)
+            throw new ArgumentException($"Width ({kvWidth}) must be divisible by numKvHeads ({numKvHeads}).");
+        int headDim = kvWidth / numKvHeads;
+
+        bool trackGrad = GradientUtils.ShouldTrackGrad(a);
+        int outWidth = numHeads * headDim;
+
+        var resultArr = new T[seqLen * outWidth];
+        GradKernels.HeadRepeat(a.AsSpan(), resultArr, seqLen, numKvHeads, numHeads, headDim);
+
+        int[] outShape = [seqLen, outWidth];
+        var resultTensor = new ReverseGradTensor<T>(
+            NivaraColumn<T>.CreateFromOwnedArray(resultArr), trackGrad, outShape);
+
+        if (trackGrad)
+        {
+            int savedSeq = seqLen;
+            int savedKv = numKvHeads;
+            int savedHeads = numHeads;
+            int savedHeadDim = headDim;
+
+            var gradFn = new OpNode<T>("GqaRepeatKV", [a], (typedGradOutput) =>
+            {
+                var gradLogical = new T[typedGradOutput.Length];
+                typedGradOutput.CopyTo(gradLogical, default(T)!);
+                var gradSrc = new T[savedSeq * savedKv * savedHeadDim];
+                GradKernels.HeadRepeatBackward(gradLogical, gradSrc, savedSeq, savedKv, savedHeads, savedHeadDim);
+                AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradSrc));
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
     static bool ShouldParallelizeBatch(int batch, long workPerBatch)
         => batch >= 4 && batch * workPerBatch >= 2L << 20;
 
@@ -1321,6 +1381,42 @@ public static class ReverseGradOperations
                 typedGradOutput.TryGetSpan(out var gSpan);
                 var gradArr = new T[a.Length];
                 GradKernels.GeluGradient(a.AsSpan(), gSpan, gradArr);
+                AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
+            });
+
+            ComputationGraph.AddNode(resultTensor, gradFn);
+        }
+
+        return resultTensor;
+    }
+
+    /// <summary>
+    /// Applies the SiLU (Swish) activation: <c>x * sigmoid(x)</c>.
+    /// </summary>
+    /// <param name="a">The input tensor</param>
+    /// <returns>A new tensor with SiLU applied element-wise</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="a"/> is null</exception>
+    public static ReverseGradTensor<T> Silu<T>(ReverseGradTensor<T> a) where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        bool trackGrad = GradientUtils.ShouldTrackGrad(a);
+
+        var resultArr = new T[a.Length];
+        GradKernels.Silu(a.AsSpan(), resultArr);
+
+        var resultTensor = ResultTensor(resultArr, a, trackGrad);
+
+        if (trackGrad)
+        {
+            var aArr = new T[a.Length];
+            a.AsSpan().CopyTo(aArr.AsSpan());
+
+            var gradFn = new OpNode<T>("Silu", [a], (typedGradOutput) =>
+            {
+                typedGradOutput.TryGetSpan(out var gSpan);
+                var gradArr = new T[a.Length];
+                GradKernels.SiluGradient(aArr, gSpan, gradArr);
                 AccumulateGradient(a, NivaraColumn<T>.CreateFromOwnedArray(gradArr));
             });
 

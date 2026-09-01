@@ -18,7 +18,7 @@ creating the tag.
 - **Model weights** — download HuggingFace weights before running inference benchmarks
   (see `samples/NivaraInference/README.md` Quick start for `hf download` commands).
 - **NivaraIncident dataset** — generate with
-  `dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -- generate --dataset ./data/incident-lab --scenario A --scale 1`
+  `dotnet run --project samples/NivaraIncident/NivaraIncident.Cli -- generate --dataset ./samples/data/incident-lab --scenario A --scale 1`
   before running NivaraIncident benchmarks.
 
 ## Release checklist

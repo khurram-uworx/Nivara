@@ -54,4 +54,18 @@ public static class StateDictLoader
                 ReverseGradTensor<TWeight>.FromArray(b.Data));
         if (dict.Count > 0) ln.LoadStateDict(dict);
     }
+
+    public static void LoadRMSNorm<TModel, TWeight>(
+        RMSNorm<TModel> rms,
+        Dictionary<string, (TWeight[] Data, int[] Shape)> tensors,
+        string prefix)
+        where TModel : struct, IFloatingPointIeee754<TModel>
+        where TWeight : struct, IFloatingPointIeee754<TWeight>
+    {
+        if (!tensors.TryGetValue($"{prefix}.weight", out var w))
+            throw new KeyNotFoundException($"Missing tensor: {prefix}.weight");
+        var tensor = TypeConverter.Convert<TWeight, TModel>(
+            ReverseGradTensor<TWeight>.FromArray(w.Data));
+        rms.LoadStateDict(new Dictionary<string, ReverseGradTensor<TModel>> { ["Weight"] = tensor });
+    }
 }

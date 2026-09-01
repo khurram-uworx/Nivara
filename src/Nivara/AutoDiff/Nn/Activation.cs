@@ -39,6 +39,12 @@ public static class Activation
     public static ReverseGradTensor<T> GeluExact<T>(ReverseGradTensor<T> input) where T : struct, IFloatingPointIeee754<T>
         => ReverseGradOperations.GeluExact(input);
 
+    /// <summary>Applies the SiLU (Swish) activation: <c>x * sigmoid(x)</c>.</summary>
+    /// <param name="input">The input tensor</param>
+    /// <returns>The activated tensor</returns>
+    public static ReverseGradTensor<T> Silu<T>(ReverseGradTensor<T> input) where T : struct, IFloatingPointIeee754<T>
+        => ReverseGradOperations.Silu(input);
+
     /// <summary>Applies the leaky rectified linear unit: <c>x</c> for <c>x &gt;= 0</c>, otherwise <c>negativeSlope * x</c>.</summary>
     /// <param name="input">The input tensor</param>
     /// <param name="negativeSlope">Slope applied to negative inputs; zero (the default) is interpreted as 0.01</param>

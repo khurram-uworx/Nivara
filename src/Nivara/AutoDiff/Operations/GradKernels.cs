@@ -175,6 +175,40 @@ internal static class GradKernels
         }
     }
 
+    public static void Silu<T>(ReadOnlySpan<T> input, Span<T> output)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (output.Length < input.Length)
+            throw new ArgumentException($"Output span length ({output.Length}) must be at least the input length ({input.Length}).", nameof(output));
+        TensorPrimitives.Sigmoid(input, output);
+        TensorPrimitives.Multiply(input, output, output);
+    }
+
+    public static void SiluGradient<T>(ReadOnlySpan<T> input, ReadOnlySpan<T> gradOutput, Span<T> output)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (input.Length != gradOutput.Length || output.Length < gradOutput.Length)
+            throw new ArgumentException("All spans must have the same length.");
+        int n = input.Length;
+        var sigArr = ArrayPool<T>.Shared.Rent(n);
+        try
+        {
+            var sig = sigArr.AsSpan(0, n);
+            // d/dx silu(x) = sigmoid(x) * (1 + x * (1 - sigmoid(x)))
+            TensorPrimitives.Sigmoid(input, sig);
+            TensorPrimitives.Negate(sig, output);
+            TensorPrimitives.Add(output, T.One, output);
+            TensorPrimitives.Multiply(output, input, output);
+            TensorPrimitives.Add(output, T.One, output);
+            TensorPrimitives.Multiply(output, sig, output);
+            TensorPrimitives.Multiply(output, gradOutput, output);
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(sigArr);
+        }
+    }
+
     public static void GeluExact<T>(ReadOnlySpan<T> input, Span<T> output)
         where T : struct, IFloatingPointIeee754<T>
     {
@@ -201,6 +235,57 @@ internal static class GradKernels
             T cdf = T.CreateChecked(0.5) * (T.One + Erf(v * invSqrt2));
             T pdf = T.Exp(-T.CreateChecked(0.5) * v * v) * invSqrt2Pi;
             output[i] = (cdf + v * pdf) * gradOutput[i];
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  Rotary position embeddings (RoPE)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Performs the half-split rotary rotation (HF <c>rotate_half</c>) for a single position.
+    /// cos/sin hold <c>headDim/2</c> values each, one per frequency index <c>i</c>; index
+    /// <c>i</c> pairs columns <c>i</c> and <c>i + headDim/2</c>.
+    /// </summary>
+    public static void RotaryForward<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> cos, ReadOnlySpan<T> sin, Span<T> output)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (x.Length != output.Length) throw new ArgumentException("Input and output spans must match length.");
+        if (cos.Length != sin.Length || cos.Length * 2 != x.Length)
+            throw new ArgumentException("cos/sin must each hold headDim/2 values matching half the input width.");
+        for (int i = 0; i < cos.Length; i++)
+        {
+            int i0 = i;
+            int i1 = i + cos.Length;
+            T c = cos[i];
+            T s = sin[i];
+            T x0 = x[i0];
+            T x1 = x[i1];
+            output[i0] = x0 * c - x1 * s;
+            output[i1] = x0 * s + x1 * c;
+        }
+    }
+
+    /// <summary>
+    /// Backward through the half-split rotary rotation (HF <c>rotate_half</c>) for a single
+    /// position.
+    /// </summary>
+    public static void RotaryBackward<T>(ReadOnlySpan<T> gradOut, ReadOnlySpan<T> cos, ReadOnlySpan<T> sin, Span<T> gradX)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (gradOut.Length != gradX.Length) throw new ArgumentException("Gradient spans must match length.");
+        if (cos.Length != sin.Length || cos.Length * 2 != gradOut.Length)
+            throw new ArgumentException("cos/sin must each hold headDim/2 values matching half the input width.");
+        for (int i = 0; i < cos.Length; i++)
+        {
+            int i0 = i;
+            int i1 = i + cos.Length;
+            T c = cos[i];
+            T s = sin[i];
+            T go0 = gradOut[i0];
+            T go1 = gradOut[i1];
+            gradX[i0] = go0 * c + go1 * s;
+            gradX[i1] = -go0 * s + go1 * c;
         }
     }
 
@@ -639,6 +724,67 @@ internal static class GradKernels
     public static void Transpose<T>(ReadOnlySpan<T> src, Span<T> dst, int rows, int cols)
         where T : struct, IFloatingPointIeee754<T>
         => TensorsHelper.Transpose(src, dst, rows, cols);
+
+    // ═══════════════════════════════════════════════════════════════
+    //  GQA head repeat / scatter
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Repeats grouped key/value heads so Q/K/V share an equal head count (GQA).
+    /// Input is <c>[L, numKvHeads * headDim]</c> with one head per contiguous
+    /// <c>headDim</c> block; output is <c>[L, numHeads * headDim]</c> where logical head
+    /// <c>g</c> copies source KV head <c>g / repeat</c> (repeat = numHeads / numKvHeads).
+    /// </summary>
+    public static void HeadRepeat<T>(
+        ReadOnlySpan<T> src, Span<T> dst, int seqLen, int numKvHeads, int numHeads, int headDim)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (numHeads % numKvHeads != 0)
+            throw new ArgumentException($"numHeads ({numHeads}) must be divisible by numKvHeads ({numKvHeads}).");
+        int repeat = numHeads / numKvHeads;
+        for (int l = 0; l < seqLen; l++)
+        {
+            int srcBase = l * numKvHeads * headDim;
+            int dstBase = l * numHeads * headDim;
+            for (int h = 0; h < numKvHeads; h++)
+            {
+                for (int r = 0; r < repeat; r++)
+                {
+                    int g = h * repeat + r;
+                    src.Slice(srcBase + h * headDim, headDim).CopyTo(dst.Slice(dstBase + g * headDim, headDim));
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Backward through <see cref="HeadRepeat"/>: the gradient of each source KV head is the
+    /// sum of the gradients of all logical heads that copied from it.
+    /// </summary>
+    public static void HeadRepeatBackward<T>(
+        ReadOnlySpan<T> gradLogical, Span<T> gradSrc, int seqLen, int numKvHeads, int numHeads, int headDim)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (numHeads % numKvHeads != 0)
+            throw new ArgumentException($"numHeads ({numHeads}) must be divisible by numKvHeads ({numKvHeads}).");
+        int repeat = numHeads / numKvHeads;
+        for (int l = 0; l < seqLen; l++)
+        {
+            for (int h = 0; h < numKvHeads; h++)
+            {
+                var acc = gradSrc.Slice(l * numKvHeads * headDim + h * headDim, headDim);
+                for (int d = 0; d < headDim; d++)
+                    acc[d] = default(T);
+                for (int r = 0; r < repeat; r++)
+                {
+                    int g = h * repeat + r;
+                    var src = gradLogical.Slice(l * numHeads * headDim + g * headDim, headDim);
+                    for (int d = 0; d < headDim; d++)
+                        acc[d] += src[d];
+                }
+            }
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     //  Erf (Abramowitz–Stegun 7.1.26 approximation)

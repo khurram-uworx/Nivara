@@ -18,6 +18,8 @@ sides diff the identical sequence.
 import os
 import sys
 import struct
+import time
+import argparse
 import numpy as np
 import torch
 
@@ -31,12 +33,28 @@ PROMPT = "The capital of France is"
 MAX_NEW_TOKENS = 32
 
 
+def _dtype(name: str) -> torch.dtype:
+    return {"float32": torch.float32, "bfloat16": torch.bfloat16}[name]
+
+
 def main():
+    ap = argparse.ArgumentParser(
+        description="SmolLM-135M greedy reference + timing (bfloat16 default).")
+    ap.add_argument("--dtype", choices=("float32", "bfloat16"), default="bfloat16",
+                    help="Compute dtype: float32 (widened) or bfloat16 (native on disk). Default bfloat16.")
+    args = ap.parse_args()
+    dtype = _dtype(args.dtype)
+
     tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR, local_files_only=True)
     model = AutoModelForCausalLM.from_pretrained(
-        MODEL_DIR, local_files_only=True, torch_dtype=torch.bfloat16
+        MODEL_DIR, local_files_only=True, torch_dtype=dtype
     )
     model.eval()
+
+    params = sum(p.numel() for p in model.parameters())
+    bytes_per = 2 if dtype == torch.bfloat16 else 4
+    print(f"Parameters: {params:,}   weights (~{args.dtype}): "
+          f"{params * bytes_per / 1024 / 1024:.1f} MB")
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -47,13 +65,18 @@ def main():
     print(f"Input token ids ({input_len}): {ids.input_ids[0].tolist()}")
 
     with torch.no_grad():
+        t0 = time.perf_counter()
         out = model.generate(
             **ids,
             max_new_tokens=MAX_NEW_TOKENS,
             do_sample=False,   # greedy -> deterministic argmax stream
         )
+        gen_sec = time.perf_counter() - t0
         generated = out[0, input_len:].tolist()
 
+    print(f"Generated {len(generated)} tokens in {gen_sec * 1000:.0f} ms "
+          f"({gen_sec * 1000 / max(1, len(generated)):.0f} ms/token) "
+          f"[PyTorch {args.dtype} CPU]")
     print(f"Generated token ids ({len(generated)}): {generated}")
     print(f"Decoded: {tokenizer.decode(out[0], skip_special_tokens=True)!r}")
 

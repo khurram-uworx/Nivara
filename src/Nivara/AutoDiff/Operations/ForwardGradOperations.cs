@@ -604,6 +604,47 @@ public static class ForwardGradOperations
     }
 
     /// <summary>
+    /// Repeats grouped key/value heads (GQA) so Q/K/V share an equal head count.
+    /// JVP: t_out = HeadRepeat(t_a) — the repeat is a deterministic copy, so the tangent
+    /// follows the same gather pattern as the primal.
+    /// </summary>
+    public static ForwardGradTensor<T> GqaRepeatKV<T>(
+        ForwardGradTensor<T> a, int numHeads, int numKvHeads)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+        if (numHeads <= 0 || numKvHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
+        if (numHeads % numKvHeads != 0)
+            throw new ArgumentException($"numHeads ({numHeads}) must be divisible by numKvHeads ({numKvHeads}).");
+        if (a.Rank != 2)
+            throw new ArgumentException($"GqaRepeatKV expects a matrix (rank 2), got rank {a.Rank}", nameof(a));
+
+        int seqLen = a.shape[0];
+        int kvWidth = a.shape[1];
+        if (kvWidth % numKvHeads != 0)
+            throw new ArgumentException($"Width ({kvWidth}) must be divisible by numKvHeads ({numKvHeads}).");
+        int headDim = kvWidth / numKvHeads;
+        int outWidth = numHeads * headDim;
+
+        a.Data.TryGetSpan(out var span);
+        var resultValues = new T[seqLen * outWidth];
+        GradKernels.HeadRepeat(span, resultValues, seqLen, numKvHeads, numHeads, headDim);
+        var resultCol = NivaraColumn<T>.CreateFromOwnedArray(resultValues);
+
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var tanSpan);
+            var tanValues = new T[seqLen * outWidth];
+            GradKernels.HeadRepeat(tanSpan, tanValues, seqLen, numKvHeads, numHeads, headDim);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanValues);
+        }
+
+        int[] resultShape = [seqLen, outWidth];
+        return new ForwardGradTensor<T>(resultCol, tangent, resultShape);
+    }
+
+    /// <summary>
     /// Embedding-bag: sums the rows of a [numEmbeddings, embeddingDim] weight tensor
     /// selected by 2D integer indices, producing [batchSize, embeddingDim]. Positions
     /// equal to <paramref name="paddingIndex"/> are skipped. Indices are not differentiable;
@@ -907,6 +948,31 @@ public static class ForwardGradOperations
             a.Tangent.TryGetSpan(out var aTanSpan);
             var tanArr = new T[a.Length];
             GradKernels.SigmoidGradient(primalArr, aTanSpan, tanArr);
+            tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
+        }
+
+        return new ForwardGradTensor<T>(primal, tangent, PropagateShape(a));
+    }
+
+    /// <summary>
+    /// Applies the SiLU (Swish) activation: <c>x * sigmoid(x)</c>.
+    /// JVP: t_out = silu'(a) * t_a
+    /// </summary>
+    public static ForwardGradTensor<T> Silu<T>(ForwardGradTensor<T> a)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        if (a == null) throw new ArgumentNullException(nameof(a));
+
+        a.Data.TryGetSpan(out var aSpan);
+        var primalArr = new T[a.Length];
+        GradKernels.Silu(aSpan, primalArr);
+        var primal = NivaraColumn<T>.CreateFromOwnedArray(primalArr);
+        NivaraColumn<T>? tangent = null;
+        if (a.RequiresTangent && a.Tangent != null)
+        {
+            a.Tangent.TryGetSpan(out var aTanSpan);
+            var tanArr = new T[a.Length];
+            GradKernels.SiluGradient(aSpan, aTanSpan, tanArr);
             tangent = NivaraColumn<T>.CreateFromOwnedArray(tanArr);
         }
 
