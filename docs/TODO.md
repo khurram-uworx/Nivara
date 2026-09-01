@@ -101,6 +101,14 @@ stable, matching the existing `RunSmolLMCore<T>` pattern.
 Design decision (verified in README): **SmolLM A/B is BF16-only.** The doc explicitly says
 "pick BF16 (native) or F32 — never Half — for SmolLM generation."
 
+### 4a. Test strategy (decided at G1 — core-only, no console project ref)
+
+The test project (`Nivara.Tests`) references `src/Nivara` + `Nivara.Samples` but NOT the
+`NivaraInference` console app. Per human decision, do **not** add a project reference to the
+Exe. Instead, add a small test file covering the core toggle/A-B *pattern* the sample relies
+on (save `UseWidenSimd` → set → run → restore), plus `ShouldWiden` gating. The thin Program.cs
+CLI plumbing stays untested (consistent with existing benchmark modes like `BenchmarkMiniLM`).
+
 ## Verification steps
 
 1. `dotnet build Nivara.slnx` — must pass.
@@ -125,7 +133,7 @@ do not fabricate numbers.
 1. `feat: add --simd-widen CLI flag for narrow-float SIMD in NivaraInference`
 2. `feat: add SmolLM benchmark mode (median-of-3 generation timing)`
 3. `feat: add SmolLM BF16 A/B (scalar vs widen) comparison mode`
-4. `test: add WidenPrimitivesPhase3Tests for flag/benchmark/A-B`
+4. `test: add Phase 3 toggle/A-B pattern tests (core-only, no console project ref)`
 5. `docs: record Phase 3 results in BFLOAT16-TRANSFORMER.md, BFLOAT16.md, README.md (+ CHANGELOG)`
 
 ## Blast radius
@@ -133,7 +141,8 @@ do not fabricate numbers.
 - **`samples/NivaraInference/Program.cs`** — the only core file edited. New methods
   (`BenchmarkSmolLM<T>`, A/B runner) + args parsing + runtime `UseWidenSimd` handling. Public
   model-loading code and the Python scripts are untouched.
-- **`tests/Nivara.Tests/Primitives/WidenPrimitivesPhase3Tests.cs`** — new test file.
+- **`tests/Nivara.Tests/Primitives/WidenPrimitivesPhase3Tests.cs`** — new test file (core-only
+  toggle/A-B pattern; no reference to the console app).
 - **Docs** — results-only updates post-measurement.
 - **No change to `src/Nivara`.** The widen kernels, `KernelSelector`, and `NivaraPrimitives`
   toggle are all Phase 1–2 work and are intentionally left as-is. The runtime toggle is read
