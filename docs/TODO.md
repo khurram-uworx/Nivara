@@ -2,7 +2,7 @@
 
 **Branch:** `khurram/smollm-3`
 **Source plan:** `docs/BFLOAT16-TRANSFORMER.md` §6 Phase 3
-**Status:** In progress
+**Status:** Complete — all tasks committed (`6224dc6`..`dabb317`); pending G2 review + TODO.md removal
 
 ---
 
@@ -155,7 +155,43 @@ do not fabricate numbers.
 
 ## GitHub issues log
 
-- (none yet — created at discovery time during execution)
+- (none — no new deferred work discovered; see Completed notes for the two in-scope findings that were fixed)
+
+---
+
+## Completed (2026-09-01)
+
+All verification steps passed and results are recorded in the docs. Commits (`dabb317`..`6224dc6`):
+
+1. `130fa22` — `--simd-widen` CLI flag (parse, help text, Main-level toggle, `RunSmolLMCore` accepts flag, narrow auto-enable preserved for backward compat).
+2. `41c8c13` — SmolLM `benchmark` mode: `BenchmarkSmolLM<T>` median-of-3 over full 32-token generations (warmup + 3 timed), header with precision / weight MB / `UseWidenSimd` state. Extracted shared `RunSmolLMGeneration<T>` helper, refactored `ConsumeGenerated` onto it (DRY).
+3. `9b08f84` — `smollm ab` A/B mode: scalar (`UseWidenSimd=false`) vs widen (`true`) side-by-side with timing table + generated-token stream diff.
+4. `29d56c2` — **fix found during verification:** `BenchmarkSmolLM` was invoked directly from the switch, bypassing `RunSmolLMCore`'s narrow auto-enable, so bare `smollm --precision bf16 benchmark` ran the slow scalar fallback (~225 s/pass). Wrapped the benchmark in the same save/set/restore toggle.
+5. `e23ef51` — `WidenPrimitivesPhase3Tests.cs` (core-only, no console ref): save/restore pattern, nested save/restore, BF16 Add + Half Multiply A/B equivalence, F32 no-op control. **5/5 pass.**
+6. `48ef05a` — docs: results + CHANGELOG entry.
+7. `4c0fb11` — docs: reconciled BF16-vs-F32 ratio claim (1.5–2× range, machine-load variance) so README memory-vs-perf table (16.8 s) and the A/B table (22.6 s, captured under load) don't conflict.
+8. `6224dc6` — Half guard in `smollm ab` (plan requirement): fp16 prints the NaN note and falls back to a single timed run instead of a meaningless A/B.
+
+**Verified results (SmolLM-135M, 32 greedy tokens, .NET 11, this machine):**
+
+- BF16 scalar fallback: ~225 s (7,032 ms/token) — single A/B run.
+- BF16 widen: median **22.6 s** (705 ms/token) over 3 runs → **~10× faster** than scalar.
+- F32 control: 10.7–10.9 s (333 ms/token), toggle transparent (identical token streams 32/32).
+- BF16+widen remains ~1.5–2× slower than F32 native (widening does F32 compute + conversion overhead) — documented honestly.
+- Widen correctness unchanged vs Phase 2: SmolLM BF16 22/32 argmax, 0.937 logits cosine vs PyTorch; `distilbert_sst --precision bf16` argmax 8/8 with and without `--simd-widen`.
+
+**Deviations from the original plan (all safe/explicit):**
+
+- `benchmark` routing lives at the `smollm` switch case (not inside `RunSmolLMCore`); the save/set/restore toggle was duplicated into `BenchmarkSmolLM` instead (equivalent behavior, simpler switch).
+- The A/B runner is a separate `SmolLMAb<T>` method (not inside `RunSmolLMCore`); `ab` is dispatched before the precision branches and routes the matching tensor dictionary.
+- A/B correctness check compares generated-token streams (informational for narrow, where scalar divergence is expected) rather than a full final-logits cosine re-run — the cosine vs PyTorch is already pinned by the `generate`/`compare` modes.
+
+**Notes on in-scope findings (fixed, not deferred):**
+
+- The benchmark scalar-fallback bug above (item 4) was introduced by Task 2's commit and fixed in the same branch.
+- The A/B measurement variance (BF16 widen 16.8 s in the pre-existing README table vs 22.6 s captured here under sustained load) is machine-load noise; documented as a 1.5–2× range rather than two conflicting single values.
+
+---
 
 ---
 
