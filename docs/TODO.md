@@ -75,8 +75,20 @@ finite-difference JVP. RoPE is **reverse-only** (no `ForwardGradOperations.Rotar
 ## Verification
 - `python samples/NivaraTorch/gen_reference.py` (done, 276 fixtures, byte-stable across two runs).
 - `dotnet build tests/Nivara.Tests` — clean (0 warn / 0 err).
-- `dotnet test --filter "FullyQualifiedName~NivaraTorch"` (ask before running).
-- `dotnet test --filter "FullyQualifiedName~NivaraTorch"` again after any fixes.
+- `dotnet test --filter "FullyQualifiedName~NivaraTorch"` — 87/87 green ✅ (after the Conv2d fix + tolerance relax).
+- `dotnet test --filter "FullyQualifiedName~ForwardParityTests"` — 40/40 green ✅.
+- Full `dotnet test` — 3381 passed / 1 failed / 4 skipped. The one failure was
+  `TrainingLoop_Run_CompletesEpochs`, a **pre-existing flaky** test (fresh random model init + a
+  convergence assertion, unrelated to this branch; it passes in isolation).
+
+## Bug discovered & fixed during Phase B validation
+The new `DepthwiseSeparableConv2d` parity test exposed a latent bug in `Conv2d`'s
+`ConvInputGrad3x3` (stride-1/pad-1 3×3 input-gradient kernel): it used `ih = oh + kh` / `iw = ow + kw`
+instead of `ih = oh - 1 + kh` / `iw = ow - 1 + kw`, producing a +1 spatial shift in the backward
+input-grad. Forward was correct (output matched PyTorch), so the existing `Conv2d_3x3` forward-only
+parity test never caught it. Fixed in commit `9cbd39e`. The same commit relaxes the input-gradient
+tolerance for `LlamaCausalAttention` (absTol 1e-4, relTol 1e-3) and `LlamaDecoderBlock` (relTol 1e-3) —
+float32 accumulation-order divergence through the deep fused chains (~4e-4 max relative), not errors.
 
 ## Planned commits
 1. `docs: plan NivaraTorch parity gap fill in TODO.md` (this file). ✅ (5129581)
@@ -87,8 +99,9 @@ finite-difference JVP. RoPE is **reverse-only** (no `ForwardGradOperations.Rotar
    - Committed as one unit (silu/rope/RMSNorm-module/Llama-attn/Llama-decoder/DSC/TransformerBlock/
      SparseEmbedding + forward-mode `Silu`/`GqaRepeatKV` JVP), not the originally-planned
      per-module splits.
-4. `docs: update NivaraTorch README fixture table + fix stale RMSNorm note` (this commit).
-5. The pre-staged `docs/BFLOAT16-TRANSFORMER.md` doc update was committed separately as
+4. `docs: update NivaraTorch README fixture table + fix stale RMSNorm note` ✅ (13ed196)
+5. `fix: Conv2d 3x3 input-grad shift bug + relax deep-chain gradient tolerances` ✅ (9cbd39e)
+6. The pre-staged `docs/BFLOAT16-TRANSFORMER.md` doc update was committed separately as
    `docs: mark SmolLM Phase 2 complete in BFLOAT16 transformer doc` ✅ (77a20f7).
 
 ## Blast radius
@@ -103,3 +116,8 @@ finite-difference JVP. RoPE is **reverse-only** (no `ForwardGradOperations.Rotar
 
 - [ ] #372 — `LlamaForCausalLM` full-model PyTorch parity (tied LM head + N decoder blocks + final
   RMSNorm) — deferred from the core-block parity branch by human decision.
+- (no issue) — `Conv2d.ConvInputGrad3x3` backward shift bug found & fixed in-branch (9cbd39e). If it
+  should be tracked/grepped for users who hit wrong gradients from 3×3 stride-1 conv backward, a
+  follow-up issue could note the fix landed in the parity branch.
+- (no issue) — `TrainingLoop_Run_CompletesEpochs` is flaky under a full parallel suite run (random
+  model init + convergence assertion); passes in isolation. Pre-existing, not introduced here.
