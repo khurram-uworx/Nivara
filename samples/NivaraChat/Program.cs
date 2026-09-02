@@ -169,6 +169,7 @@ void PrintUsage()
     Console.WriteLine("  --intent             Intent routing: classify input, route to specialist executor");
     Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
     Console.WriteLine("  --tinyshakespeare    TinyShakespeare: train/serve a batched transformer as IChatClient (see --tinyshakespeare --help)");
+    Console.WriteLine("  --smollm             SmolLM: serve the pretrained SmolLM-135M-Instruct causal LM as IChatClient (see --smollm --help)");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
@@ -179,4 +180,5 @@ void PrintUsage()
     Console.WriteLine("  --tinyshakespeare options: --n-embd --n-layer --block-size --n-head --epochs --batch-size --lr");
     Console.WriteLine("                        --vocab-size --temperature --max-new-tokens --samples --seed --data");
     Console.WriteLine("                        --prompt --save --load --no-di-demo --help");
+    Console.WriteLine("  --smollm options:    --model-dir --precision --text --max-new-tokens --help");
 }
