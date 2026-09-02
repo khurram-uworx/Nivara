@@ -25,10 +25,23 @@ public static class SmollmMode
         await Execute(options);
     }
 
-    /// <summary>Interactive-menu entry point: prompts for generation options, loads the model, and enters the REPL.</summary>
+    /// <summary>Interactive-menu entry point: prompts for a demo and generation options, loads the
+    /// model, and enters the REPL.</summary>
     public static async Task RunInteractive()
     {
         Console.WriteLine("\n=== SmolLM-135M-Instruct — causal LM as IChatClient ===\n");
+
+        Console.WriteLine("Choose a demo:");
+        Console.WriteLine("  1) Plain chat (sampling options below)");
+        Console.WriteLine("  2) Weather tool-calling (GetWeather AIFunction)");
+        Console.Write("Choice [1]: ");
+        var choice = Console.ReadLine()?.Trim();
+
+        if (choice == "2")
+        {
+            await Execute(new SmollmOptions { Mode = "tools-weather" });
+            return;
+        }
 
         Console.Write("Temperature (0 = greedy, >0 = sampling) [0]: ");
         var tempStr = Console.ReadLine()?.Trim();
