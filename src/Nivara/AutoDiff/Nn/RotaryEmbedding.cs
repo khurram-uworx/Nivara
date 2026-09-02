@@ -62,21 +62,35 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
     /// <param name="input">The query or key tensor with shape <c>[L, headDim]</c> or <c>[L, numHeads * headDim]</c></param>
     /// <returns>The rotated tensor with the same shape</returns>
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
+        => Forward(input, 0);
+
+    /// <summary>
+    /// Rotates the last dimension of a tensor by its absolute position, starting at a
+    /// <paramref name="positionOffset"/>. Row <c>p</c> is rotated by absolute position
+    /// <c>positionOffset + p</c>. Used by cached inference where a single new token at a later
+    /// absolute position is rotated independently of the cached (already-rotated) prefix.
+    /// </summary>
+    /// <param name="input">The query or key tensor with shape <c>[L, headDim]</c> or <c>[L, numHeads * headDim]</c></param>
+    /// <param name="positionOffset">Absolute position of the first row (default 0)</param>
+    /// <returns>The rotated tensor with the same shape</returns>
+    public ReverseGradTensor<T> Forward(ReverseGradTensor<T> input, int positionOffset)
     {
         if (input == null) throw new ArgumentNullException(nameof(input));
+        if (positionOffset < 0) throw new ArgumentOutOfRangeException(nameof(positionOffset));
         if (input.Rank != 2) throw new ArgumentException($"RotaryEmbedding expects a 2D tensor, got rank {input.Rank}.");
         int seqLen = input.shape[0];
         int width = input.shape[1];
         if (width % headDim != 0)
             throw new ArgumentException($"Width ({width}) must be a multiple of headDim ({headDim}).");
-        if (seqLen > maxPositionEmbeddings)
-            throw new ArgumentException($"Sequence length {seqLen} exceeds max_position_embeddings {maxPositionEmbeddings}.");
+        if (positionOffset + seqLen > maxPositionEmbeddings)
+            throw new ArgumentException($"Position {positionOffset + seqLen - 1} exceeds max_position_embeddings {maxPositionEmbeddings}.");
 
         int numBlocks = width / headDim;
 
-        EnsureCache(seqLen);
-        var cos = cosCache.AsSpan(0, seqLen * (headDim / 2));
-        var sin = sinCache.AsSpan(0, seqLen * (headDim / 2));
+        EnsureCache(positionOffset + seqLen);
+        int cacheStart = positionOffset * (headDim / 2);
+        var cos = cosCache.AsSpan(cacheStart, seqLen * (headDim / 2));
+        var sin = sinCache.AsSpan(cacheStart, seqLen * (headDim / 2));
 
         var inputData = ModuleHelpers<T>.GetSpan(input);
         bool trackGrad = GradientUtils.ShouldTrackGrad(input);
