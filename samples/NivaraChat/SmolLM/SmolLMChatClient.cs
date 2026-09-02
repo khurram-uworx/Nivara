@@ -78,19 +78,8 @@ internal sealed class SmolLMChatClient<T> : IChatClient
     {
         var text = Generate(messages, options, cancellationToken);
         if (SmollmChatTemplate.TryParseToolCall(text, out var calls))
-        {
-            var contents = new List<AIContent>();
-            foreach (var (name, argsJson) in calls)
-            {
-                var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argsJson);
-                contents.Add(new FunctionCallContent(
-                    callId: Guid.NewGuid().ToString("N"),
-                    name: name,
-                    arguments: arguments ?? []));
-            }
             return Task.FromResult(new ChatResponse(
-                [new ChatMessage(ChatRole.Assistant, contents)]));
-        }
+                [new ChatMessage(ChatRole.Assistant, BuildToolCallContents(calls))]));
         return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, text)]));
     }
 
@@ -112,22 +101,25 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         // calls never arrive as a stream of partial tokens.
         var text = Generate(messages, options, cancellationToken);
         if (SmollmChatTemplate.TryParseToolCall(text, out var calls))
-        {
-            var contents = new List<AIContent>();
-            foreach (var (name, argsJson) in calls)
-            {
-                var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argsJson);
-                contents.Add(new FunctionCallContent(
-                    callId: Guid.NewGuid().ToString("N"),
-                    name: name,
-                    arguments: arguments ?? []));
-            }
-            yield return new ChatResponseUpdate(ChatRole.Assistant, contents);
-        }
+            yield return new ChatResponseUpdate(ChatRole.Assistant, BuildToolCallContents(calls));
         else
-        {
             yield return new ChatResponseUpdate(ChatRole.Assistant, text);
+    }
+
+    /// <summary>Builds <see cref="FunctionCallContent"/> items from parsed tool calls, deserializing
+    /// each call's JSON arguments into a dictionary for <see cref="FunctionInvokingChatClient"/>.</summary>
+    static List<AIContent> BuildToolCallContents(List<(string name, string argsJson)> calls)
+    {
+        var contents = new List<AIContent>();
+        foreach (var (name, argsJson) in calls)
+        {
+            var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argsJson);
+            contents.Add(new FunctionCallContent(
+                callId: Guid.NewGuid().ToString("N"),
+                name: name,
+                arguments: arguments ?? []));
         }
+        return contents;
     }
 
     /// <summary>Streams a plain-chat reply token-by-token (no tools), preserving Stage A behavior.</summary>
