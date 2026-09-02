@@ -82,6 +82,113 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
 
     public override ReverseGradTensor<T> Forward(ReverseGradTensor<T> input)
         => throw new NotImplementedException("Use Forward(int[] inputIds) for LlamaForCausalLM.");
+
+    /// <summary>
+    /// Runs the causal-LM stack for a <em>single</em> token during cached inference, returning
+    /// logits <c>[1, vocabSize]</c>. The token's hidden state is embedded and passed through every
+    /// layer's <see cref="LlamaDecoderBlock{T}.ForwardCached"/>, which appends the new key/value to
+    /// the supplied <see cref="LlamaKVCache{T}"/> and attends against the cached prefix. Numerically
+    /// identical to processing the token as the final position of a full
+    /// <see cref="Forward(int[])"/> call.
+    /// </summary>
+    /// <param name="tokenId">The new token id</param>
+    /// <param name="positionOffset">Absolute position of this token</param>
+    /// <param name="cache">The shared KV cache (positions 0..<paramref name="positionOffset"/>-1)</param>
+    /// <returns>Logits with shape <c>[1, vocabSize]</c></returns>
+    public ReverseGradTensor<T> ForwardCached(int tokenId, int positionOffset, LlamaKVCache<T> cache)
+    {
+        if (tokenId < 0 || tokenId >= vocabSize) throw new ArgumentOutOfRangeException(nameof(tokenId));
+        if (positionOffset < 0) throw new ArgumentOutOfRangeException(nameof(positionOffset));
+        ArgumentNullException.ThrowIfNull(cache);
+
+        cache.Ensure(positionOffset + 1);
+
+        var h = Embed.Forward(tokenId); // [1, hidden]
+
+        for (int i = 0; i < layers.Length; i++)
+        {
+            var layer = layers[i];
+            h = layer.ForwardCached(h, positionOffset, cache.keys[i], cache.values[i], positionOffset);
+        }
+
+        h = finalNorm.Forward(h); // [1, hidden]
+
+        var logits = ReverseGradOperations.MatMulTransposedB(h, Embed.Weight!.Tensor);
+        logits.Reshape(1, vocabSize);
+        return logits;
+    }
+}
+
+/// <summary>
+/// Holds the per-layer key/value caches for cached inference on
+/// <see cref="LlamaForCausalLM{T}"/>. Each layer stores the RoPE'd keys and values (per-KV-head,
+/// row-major) of every generated position. Buffers grow on demand and are reused across steps.
+/// Call <see cref="Reset"/> before starting a new generation sequence.
+/// </summary>
+public sealed class LlamaKVCache<T> : IDisposable where T : struct, IFloatingPointIeee754<T>
+{
+    internal readonly T[][] keys;
+    internal readonly T[][] values;
+    int capacity;
+    bool disposed;
+
+    /// <summary>Creates a fresh cache sized for <paramref name="numLayers"/> layers.</summary>
+    public LlamaKVCache(int numLayers, int kvWidth, int initialCapacity = 16)
+    {
+        if (numLayers <= 0) throw new ArgumentOutOfRangeException(nameof(numLayers));
+        if (kvWidth <= 0) throw new ArgumentOutOfRangeException(nameof(kvWidth));
+        if (initialCapacity < 1) throw new ArgumentOutOfRangeException(nameof(initialCapacity));
+
+        keys = new T[numLayers][];
+        values = new T[numLayers][];
+        capacity = initialCapacity;
+        for (int i = 0; i < numLayers; i++)
+        {
+            keys[i] = new T[initialCapacity * kvWidth];
+            values[i] = new T[initialCapacity * kvWidth];
+        }
+        KvWidth = kvWidth;
+    }
+
+    /// <summary>Gets the per-KV-head width of each cached row.</summary>
+    public int KvWidth { get; }
+
+    /// <summary>Returns the buffers to their initial size and clears the position counter.</summary>
+    public void Reset()
+    {
+        ObjectDisposedException.ThrowIf(disposed, this);
+        capacity = keys[0].Length / KvWidth;
+        for (int i = 0; i < keys.Length; i++)
+        {
+            Array.Clear(keys[i]);
+            Array.Clear(values[i]);
+        }
+    }
+
+    internal void Ensure(int neededLength)
+    {
+        if (neededLength <= capacity) return;
+        int newCap = Math.Max(capacity * 2, neededLength);
+        for (int i = 0; i < keys.Length; i++)
+        {
+            var newK = new T[newCap * KvWidth];
+            var newV = new T[newCap * KvWidth];
+            Array.Copy(keys[i], newK, capacity * KvWidth);
+            Array.Copy(values[i], newV, capacity * KvWidth);
+            keys[i] = newK;
+            values[i] = newV;
+        }
+        capacity = newCap;
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        if (disposed) return;
+        Array.Clear(keys);   // drop references so the pooled buffers can be collected
+        Array.Clear(values);
+        disposed = true;
+    }
 }
 
 /// <summary>Configuration for a SmolLM / Llama-family causal LM.</summary>
