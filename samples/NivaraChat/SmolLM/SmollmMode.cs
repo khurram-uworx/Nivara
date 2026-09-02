@@ -50,7 +50,8 @@ public static class SmollmMode
 
         Console.Write("Max tokens [64]: ");
         var maxStr = Console.ReadLine()?.Trim();
-        int maxNewTokens = int.TryParse(maxStr, out int m) && m > 0 ? m : 64;
+        bool hasMax = int.TryParse(maxStr, out int m) && m > 0;
+        int maxNewTokens = hasMax ? m : 64;
 
         Console.WriteLine();
 
@@ -63,6 +64,7 @@ public static class SmollmMode
             Seed = seed,
             UseKvCache = useKvCache,
             MaxNewTokens = maxNewTokens,
+            HasMaxNewTokens = hasMax,
         });
     }
 
@@ -81,7 +83,7 @@ public static class SmollmMode
                         _ => "f32",
                     };
                     break;
-                case "--max-new-tokens": options.MaxNewTokens = int.Parse(args[++i]); break;
+                case "--max-new-tokens": options.MaxNewTokens = int.Parse(args[++i]); options.HasMaxNewTokens = true; break;
                 case "--temperature": options.Temperature = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;
                 case "--top-p":
                     options.TopP = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
@@ -103,9 +105,9 @@ public static class SmollmMode
 
     static async Task Execute(SmollmOptions options)
     {
-        if (options.Mode is not ("chat" or "plain"))
+        if (options.Mode is not ("chat" or "plain" or "tools-weather"))
         {
-            Console.WriteLine("Usage: --smollm {chat|plain} [--text \"...\"] [options]");
+            Console.WriteLine("Usage: --smollm {chat|plain|tools-weather} [--text \"...\"] [options]");
             PrintHelp();
             return;
         }
@@ -142,13 +144,23 @@ public static class SmollmMode
         var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
         var model = LlamaLoader.Load<T, T>(config, tensors);
 
+        int maxNewTokens = options.Mode == "tools-weather" && !options.HasMaxNewTokens
+            ? 256
+            : options.MaxNewTokens;
+
         using var client = new SmolLMChatClient<T>(
             model, tokenizer, config,
-            maxNewTokens: options.MaxNewTokens,
+            maxNewTokens: maxNewTokens,
             temperature: options.Temperature,
             topP: options.HasTopP ? options.TopP : null,
             seed: options.Seed,
             useKvCache: options.UseKvCache);
+
+        if (options.Mode == "tools-weather")
+        {
+            await RunToolsWeather(client, options);
+            return;
+        }
 
         if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
         {
@@ -224,6 +236,71 @@ public static class SmollmMode
         }
     }
 
+    /// <summary>Runs the Stage B <c>tools-weather</c> demo: wraps the client with
+    /// <c>FunctionInvokingChatClient</c> and the single <c>GetWeather</c> tool, then either answers
+    /// one prompt or enters a REPL. The framework drives the tool loop internally, returning only
+    /// the final natural-language answer (raw <c>&lt;tool_call&gt;</c> markup is not shown).</summary>
+    static async Task RunToolsWeather<T>(SmolLMChatClient<T> client, SmollmOptions options)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        var tools = SmollmTools.GetWeatherTools();
+        using var funcClient = new FunctionInvokingChatClient(client);
+
+        if (!string.IsNullOrEmpty(options.Text))
+        {
+            await RunToolsWeatherSingleTurn(funcClient, tools, options.Text);
+            return;
+        }
+
+        await RunToolsWeatherRepl(funcClient, tools);
+    }
+
+    static async Task RunToolsWeatherSingleTurn(FunctionInvokingChatClient funcClient, AITool[] tools, string text)
+    {
+        Console.WriteLine($"\nYou: {text}");
+        Console.Write("SmolLM: ");
+        var sw = Stopwatch.StartNew();
+        var response = await funcClient.GetResponseAsync(
+            [new ChatMessage(ChatRole.User, text)],
+            new ChatOptions { Tools = tools });
+        sw.Stop();
+        Console.WriteLine(response.Text);
+        Console.WriteLine($"\n[tool-call loop in {sw.ElapsedMilliseconds} ms]\n");
+    }
+
+    static async Task RunToolsWeatherRepl(FunctionInvokingChatClient funcClient, AITool[] tools)
+    {
+        Console.WriteLine("Ask about the weather (type 'quit' or 'exit' to leave).\n");
+        var history = new List<ChatMessage>();
+        while (true)
+        {
+            Console.Write("You: ");
+            var input = Console.ReadLine()?.Trim();
+            if (input is null || input.Equals("quit", StringComparison.OrdinalIgnoreCase)
+                || input.Equals("exit", StringComparison.OrdinalIgnoreCase))
+                break;
+
+            if (string.IsNullOrEmpty(input))
+            {
+                Console.WriteLine("(empty prompt, try a question)\n");
+                continue;
+            }
+
+            history.Add(new ChatMessage(ChatRole.User, input));
+            Console.Write("SmolLM: ");
+            var sw = Stopwatch.StartNew();
+            var response = await funcClient.GetResponseAsync(
+                history, new ChatOptions { Tools = tools });
+            sw.Stop();
+            Console.WriteLine(response.Text);
+
+            if (response.Text is not null)
+                history.Add(new ChatMessage(ChatRole.Assistant, response.Text));
+
+            Console.WriteLine($"\n[tool-call loop in {sw.ElapsedMilliseconds} ms]\n");
+        }
+    }
+
     static string GetRepoRoot()
         => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
@@ -233,17 +310,21 @@ public static class SmollmMode
             NivaraChat --smollm — serve the pretrained SmolLM-135M-Instruct causal LM as an IChatClient
 
             Usage:
-              dotnet run --project samples/NivaraChat -- --smollm chat    [--text "prompt"]
-              dotnet run --project samples/NivaraChat -- --smollm plain   [--text "prompt"]
+              dotnet run --project samples/NivaraChat -- --smollm chat           [--text "prompt"]
+              dotnet run --project samples/NivaraChat -- --smollm plain          [--text "prompt"]
+              dotnet run --project samples/NivaraChat -- --smollm tools-weather  [--text "prompt"]
 
-            Sub-modes (Stage A):
-              chat   Interactive REPL (default) or single prompt with --text
-              plain  Single-shot plain-text reply, no REPL
+            Sub-modes:
+              chat            Interactive REPL (default) or single prompt with --text
+              plain           Single-shot plain-text reply, no REPL
+              tools-weather   Stage B native tool-calling: model emits <tool_call> → FunctionInvokingChatClient
+                              invokes the deterministic GetWeather AIFunction → <tool_response> → final answer.
+                              Default max tokens 256; only the final answer is shown.
 
             Options:
               --model-dir <path>     Model directory (default samples/data/smollm-135m)
               --precision f32|bf16   Compute precision (default f32)
-              --max-new-tokens <n>   Max tokens to generate (default 64)
+              --max-new-tokens <n>   Max tokens to generate (default 64; 256 for tools-weather)
               --temperature <t>      Sampling temperature; >0 enables sampling (default 0 = greedy)
               --top-p <p>            Nucleus (top-p) cutoff for sampling, 0-1 (default 1 = off)
               --seed <n>             RNG seed for reproducible sampling (default 0)
@@ -260,6 +341,7 @@ public static class SmollmMode
         public string? ModelDir { get; set; }
         public string Precision { get; set; } = "f32";
         public int MaxNewTokens { get; set; } = 64;
+        public bool HasMaxNewTokens { get; set; }
         public float? Temperature { get; set; }
         public float TopP { get; set; } = 1f;
         public bool HasTopP { get; set; }
