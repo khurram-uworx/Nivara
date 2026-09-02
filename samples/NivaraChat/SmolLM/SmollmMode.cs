@@ -25,17 +25,45 @@ public static class SmollmMode
         await Execute(options);
     }
 
-    /// <summary>Interactive-menu entry point: asks for a prompt, defaults every other answer.</summary>
+    /// <summary>Interactive-menu entry point: prompts for generation options, loads the model, and enters the REPL.</summary>
     public static async Task RunInteractive()
     {
         Console.WriteLine("\n=== SmolLM-135M-Instruct — causal LM as IChatClient ===\n");
 
-        Console.Write("Prompt? (blank = \"The capital of France is\"): ");
-        var prompt = Console.ReadLine()?.Trim();
-        if (string.IsNullOrEmpty(prompt)) prompt = "The capital of France is";
+        Console.Write("Temperature (0 = greedy, >0 = sampling) [0]: ");
+        var tempStr = Console.ReadLine()?.Trim();
+        float? temp = float.TryParse(tempStr, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out float t) ? t : null;
+
+        Console.Write("Top-p nucleus cutoff (0–1, default 1) [1]: ");
+        var topPStr = Console.ReadLine()?.Trim();
+        float? topP = float.TryParse(topPStr, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out float p) ? p : null;
+
+        Console.Write("Seed (blank = 0): ");
+        var seedStr = Console.ReadLine()?.Trim();
+        int? seed = int.TryParse(seedStr, out int s) ? s : null;
+
+        Console.Write("KV cache? (y/n, default y) [y]: ");
+        var cacheStr = Console.ReadLine()?.Trim();
+        bool useKvCache = !string.Equals(cacheStr, "n", StringComparison.OrdinalIgnoreCase);
+
+        Console.Write("Max tokens [64]: ");
+        var maxStr = Console.ReadLine()?.Trim();
+        int maxNewTokens = int.TryParse(maxStr, out int m) && m > 0 ? m : 64;
 
         Console.WriteLine();
-        await Execute(new SmollmOptions { Mode = "chat", Text = prompt });
+
+        await Execute(new SmollmOptions
+        {
+            Mode = "chat",
+            Temperature = temp,
+            TopP = topP ?? 1f,
+            HasTopP = topP.HasValue,
+            Seed = seed,
+            UseKvCache = useKvCache,
+            MaxNewTokens = maxNewTokens,
+        });
     }
 
     static SmollmOptions ParseArgs(string[] args)
@@ -54,6 +82,14 @@ public static class SmollmMode
                     };
                     break;
                 case "--max-new-tokens": options.MaxNewTokens = int.Parse(args[++i]); break;
+                case "--temperature": options.Temperature = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture); break;
+                case "--top-p":
+                    options.TopP = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
+                    options.HasTopP = true;
+                    break;
+                case "--seed": options.Seed = int.Parse(args[++i]); break;
+                case "--kv-cache": options.UseKvCache = true; break;
+                case "--no-kv-cache": options.UseKvCache = false; break;
                 case "--text": options.Text = args[++i]; break;
                 case "--help": options.ShowHelp = true; break;
                 case "-h": options.ShowHelp = true; break;
@@ -106,7 +142,13 @@ public static class SmollmMode
         var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
         var model = LlamaLoader.Load<T, T>(config, tensors);
 
-        using var client = new SmolLMChatClient<T>(model, tokenizer, config, options.MaxNewTokens);
+        using var client = new SmolLMChatClient<T>(
+            model, tokenizer, config,
+            maxNewTokens: options.MaxNewTokens,
+            temperature: options.Temperature,
+            topP: options.HasTopP ? options.TopP : null,
+            seed: options.Seed,
+            useKvCache: options.UseKvCache);
 
         if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
         {
@@ -123,40 +165,61 @@ public static class SmollmMode
         Console.WriteLine($"\nYou: {text}");
         Console.Write("SmolLM: ");
         var sw = Stopwatch.StartNew();
+        int tokens = 0;
         await foreach (var update in client.GetStreamingResponseAsync([new ChatMessage(ChatRole.User, text)]))
         {
             if (update.Text is not null)
+            {
                 Console.Write(update.Text);
+                tokens++;
+            }
         }
         sw.Stop();
-        Console.WriteLine($"\n\n[streamed in {sw.ElapsedMilliseconds} ms]\n");
+        Console.WriteLine($"\n\n[streamed {tokens} tokens in {sw.ElapsedMilliseconds} ms — {TokensPerSecond(tokens, sw.Elapsed)}]\n");
+    }
+
+    static string TokensPerSecond(int tokens, TimeSpan elapsed)
+    {
+        if (tokens <= 0 || elapsed.TotalSeconds <= 0) return "0 tok/s";
+        return $"{tokens / elapsed.TotalSeconds:F1} tok/s";
     }
 
     static async Task RunRepl<T>(SmolLMChatClient<T> client)
         where T : struct, IFloatingPointIeee754<T>
     {
-        Console.WriteLine("Interactive chat (type 'quit' to exit).\n");
+        Console.WriteLine("Interactive chat (type 'quit' or 'exit' to leave).\n");
         var history = new List<ChatMessage>();
         while (true)
         {
             Console.Write("You: ");
             var input = Console.ReadLine()?.Trim();
-            if (string.IsNullOrEmpty(input) || input.Equals("quit", StringComparison.OrdinalIgnoreCase))
+            if (input is null || input.Equals("quit", StringComparison.OrdinalIgnoreCase)
+                || input.Equals("exit", StringComparison.OrdinalIgnoreCase))
                 break;
+
+            if (string.IsNullOrEmpty(input))
+            {
+                Console.WriteLine("(empty prompt, try a question)\n");
+                continue;
+            }
 
             history.Add(new ChatMessage(ChatRole.User, input));
             Console.Write("SmolLM: ");
 
             var updates = new List<ChatResponseUpdate>();
+            var sw = Stopwatch.StartNew();
+            int tokens = 0;
             await foreach (var update in client.GetStreamingResponseAsync(history))
             {
                 if (update.Text is not null)
                 {
                     Console.Write(update.Text);
                     updates.Add(update);
+                    tokens++;
                 }
             }
-            Console.WriteLine("\n");
+            sw.Stop();
+            Console.WriteLine($"\n[{tokens} tokens in {sw.ElapsedMilliseconds} ms — {TokensPerSecond(tokens, sw.Elapsed)}]\n");
             history.AddMessages(updates);
         }
     }
@@ -181,6 +244,11 @@ public static class SmollmMode
               --model-dir <path>     Model directory (default samples/data/smollm-135m)
               --precision f32|bf16   Compute precision (default f32)
               --max-new-tokens <n>   Max tokens to generate (default 64)
+              --temperature <t>      Sampling temperature; >0 enables sampling (default 0 = greedy)
+              --top-p <p>            Nucleus (top-p) cutoff for sampling, 0-1 (default 1 = off)
+              --seed <n>             RNG seed for reproducible sampling (default 0)
+              --kv-cache             Use the KV cache for faster generation (default)
+              --no-kv-cache          Re-run the full forward per token (no cache)
               --text <string>        Single-shot prompt (skips REPL)
               -h, --help             Show this help
             """);
@@ -192,6 +260,11 @@ public static class SmollmMode
         public string? ModelDir { get; set; }
         public string Precision { get; set; } = "f32";
         public int MaxNewTokens { get; set; } = 64;
+        public float? Temperature { get; set; }
+        public float TopP { get; set; } = 1f;
+        public bool HasTopP { get; set; }
+        public int? Seed { get; set; }
+        public bool UseKvCache { get; set; } = true;
         public string? Text { get; set; }
         public bool ShowHelp { get; set; }
     }
