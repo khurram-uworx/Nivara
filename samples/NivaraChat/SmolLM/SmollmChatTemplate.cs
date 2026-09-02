@@ -23,12 +23,16 @@ internal static class SmollmChatTemplate
     const string ToolResponseTag = "<tool_response>";
 
     const string ToolSystemPrompt =
-        "You are an expert in composing functions. You can answer questions and invoke "
-        + "functions to find answers. You have access to the following functions:\n\n"
-        + "<tools>\n{json}\n</tools>\n\n"
-        + "When you need to call a function, output a "
-        + "<tool_call>[{\"name\": \"function_name\", \"arguments\": {\"arg1\": \"value1\"}}]</tool_call> "
-        + "block. If no function matches, respond normally.";
+        "You are an expert in composing functions. You are given a question and a set of "
+        + "possible functions. Based on the question, you will need to make one or more "
+        + "function/tool calls to achieve the purpose. If none of the functions can be used, "
+        + "point it out and refuse to answer. If the given question lacks the parameters "
+        + "required by the function, also point it out.\n\n"
+        + "You have access to the following tools:\n<tools>\n{json}\n</tools>\n\n"
+        + "The output MUST strictly adhere to the following format, and NO other text MUST be "
+        + "included. The example format is as follows. Please make sure the parameter type is "
+        + "correct. If no function call is needed, please make the tool calls an empty list '[]'.\n"
+        + "<tool_call>[{\"name\": \"func_name1\", \"arguments\": {\"argument1\": \"value1\"}}]</tool_call>";
 
     /// <summary>
     /// Renders the conversation, optionally appending the assistant generation prompt so the model
@@ -147,7 +151,7 @@ internal static class SmollmChatTemplate
 
     /// <summary>Serializes the Hermes tool definitions from the provided tools' <see cref="AIFunction"/>s
     /// (Name / Description / JsonSchema) into a compact JSON array.</summary>
-    static string RenderTools(IList<AITool> tools)
+    internal static string RenderTools(IList<AITool> tools)
     {
         var arr = new JsonArray();
         foreach (var tool in tools)

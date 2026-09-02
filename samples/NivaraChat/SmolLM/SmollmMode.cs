@@ -29,7 +29,7 @@ public static class SmollmMode
     /// model, and enters the REPL.</summary>
     public static async Task RunInteractive()
     {
-        Console.WriteLine("\n=== SmolLM-135M-Instruct — causal LM as IChatClient ===\n");
+        Console.WriteLine("\n=== SmolLM-family causal LM as IChatClient ===\n");
 
         Console.WriteLine("Choose a demo:");
         Console.WriteLine("  1) Plain chat (sampling options below)");
@@ -125,11 +125,25 @@ public static class SmollmMode
             return;
         }
 
-        var modelDir = options.ModelDir ?? Path.Combine(GetRepoRoot(), "samples", "data", "smollm-135m");
+        // tools-weather uses the dedicated function-calling fine-tune (archit11/small-function-calling,
+        // a Biggie-SmoLlm-0.15B SmolLM variant trained on Hermes function-calling data, with the base
+        // model's GPT-2 BPE tokenizer). Plain chat/plain use the stock SmolLM-135M-Instruct.
+        bool isTools = options.Mode == "tools-weather";
+        string modelName = isTools ? "small-function-calling (Biggie-SmoLlm 0.15B)" : "SmolLM-135M-Instruct";
+        string defaultDir = isTools ? "smollm-fn-135m" : "smollm-135m";
+        var modelDir = options.ModelDir ?? Path.Combine(GetRepoRoot(), "samples", "data", defaultDir);
         if (!File.Exists(Path.Combine(modelDir, "model.safetensors")))
         {
-            Console.WriteLine($"Model files not found in '{modelDir}'. Download SmolLM-135M-Instruct first:");
-            Console.WriteLine("  hf download HuggingFaceTB/SmolLM-135M-Instruct config.json model.safetensors tokenizer.json tokenizer_config.json vocab.json merges.txt generation_config.json special_tokens_map.json --local-dir samples/data/smollm-135m");
+            Console.WriteLine($"Model files not found in '{modelDir}'. Download {modelName} first:");
+            if (isTools)
+            {
+                Console.WriteLine("  hf download archit11/small-function-calling config.json model.safetensors generation_config.json --local-dir samples/data/smollm-fn-135m");
+                Console.WriteLine("  hf download nisten/Biggie-SmoLlm-0.15B-Base vocab.json merges.txt tokenizer.json --local-dir samples/data/smollm-fn-135m");
+            }
+            else
+            {
+                Console.WriteLine($"  hf download HuggingFaceTB/SmolLM-135M-Instruct config.json model.safetensors tokenizer.json tokenizer_config.json vocab.json merges.txt generation_config.json special_tokens_map.json --local-dir samples/data/smollm-135m");
+            }
             return;
         }
 
@@ -137,12 +151,12 @@ public static class SmollmMode
         var tokenizer = new Gpt2BpeTokenizer(
             Path.Combine(modelDir, "vocab.json"), Path.Combine(modelDir, "merges.txt"));
 
-        Console.WriteLine($"Loading SmolLM-135M-Instruct ({options.Precision})...");
+        Console.WriteLine($"Loading {modelName} ({options.Precision})...");
         var loadSw = Stopwatch.StartNew();
         if (options.Precision == "bf16")
-            await Run<BFloat16>(config, tokenizer, modelDir, options);
+            await Run<BFloat16>(config, tokenizer, modelDir, options, modelName);
         else
-            await Run<float>(config, tokenizer, modelDir, options);
+            await Run<float>(config, tokenizer, modelDir, options, modelName);
         loadSw.Stop();
         Console.WriteLine($"Model ready in {loadSw.ElapsedMilliseconds} ms.");
     }
@@ -151,7 +165,8 @@ public static class SmollmMode
         LlamaConfig config,
         Gpt2BpeTokenizer tokenizer,
         string modelDir,
-        SmollmOptions options)
+        SmollmOptions options,
+        string modelName)
         where T : struct, IFloatingPointIeee754<T>
     {
         var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
@@ -161,13 +176,24 @@ public static class SmollmMode
             ? 256
             : options.MaxNewTokens;
 
-        using var client = new SmolLMChatClient<T>(
-            model, tokenizer, config,
-            maxNewTokens: maxNewTokens,
-            temperature: options.Temperature,
-            topP: options.HasTopP ? options.TopP : null,
-            seed: options.Seed,
-            useKvCache: options.UseKvCache);
+        // The Biggie-SmoLlm function-calling fine-tune (archit11/small-function-calling) needs the
+        // lenient parser in BiggieChatClient; everything else (SmolLM/SmolLM2 Hermes) uses SmolLMChatClient.
+        bool useBiggie = IsBiggieFunctionModel(modelDir);
+        using LlamaChatClientBase<T> client = useBiggie
+            ? new BiggieChatClient<T>(
+                model, tokenizer, config, modelName,
+                maxNewTokens: maxNewTokens,
+                temperature: options.Temperature,
+                topP: options.HasTopP ? options.TopP : null,
+                seed: options.Seed,
+                useKvCache: options.UseKvCache)
+            : new SmolLMChatClient<T>(
+                model, tokenizer, config, modelName,
+                maxNewTokens: maxNewTokens,
+                temperature: options.Temperature,
+                topP: options.HasTopP ? options.TopP : null,
+                seed: options.Seed,
+                useKvCache: options.UseKvCache);
 
         if (options.Mode == "tools-weather")
         {
@@ -184,7 +210,13 @@ public static class SmollmMode
         await RunRepl(client);
     }
 
-    static async Task RunSingleTurn<T>(SmolLMChatClient<T> client, string text)
+    /// <summary>True when the model directory holds the Biggie-SmoLlm function-calling fine-tune
+    /// that ships without its own tokenizer and benefits from the lenient tool-call parser.</summary>
+    static bool IsBiggieFunctionModel(string modelDir)
+        => string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(modelDir)), "smollm-fn-135m",
+            StringComparison.OrdinalIgnoreCase);
+
+    static async Task RunSingleTurn<T>(LlamaChatClientBase<T> client, string text)
         where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine($"\nYou: {text}");
@@ -209,7 +241,7 @@ public static class SmollmMode
         return $"{tokens / elapsed.TotalSeconds:F1} tok/s";
     }
 
-    static async Task RunRepl<T>(SmolLMChatClient<T> client)
+    static async Task RunRepl<T>(LlamaChatClientBase<T> client)
         where T : struct, IFloatingPointIeee754<T>
     {
         Console.WriteLine("Interactive chat (type 'quit' or 'exit' to leave).\n");
@@ -253,11 +285,16 @@ public static class SmollmMode
     /// <c>FunctionInvokingChatClient</c> and the single <c>GetWeather</c> tool, then either answers
     /// one prompt or enters a REPL. The framework drives the tool loop internally, returning only
     /// the final natural-language answer (raw <c>&lt;tool_call&gt;</c> markup is not shown).</summary>
-    static async Task RunToolsWeather<T>(SmolLMChatClient<T> client, SmollmOptions options)
+    static async Task RunToolsWeather<T>(LlamaChatClientBase<T> client, SmollmOptions options)
         where T : struct, IFloatingPointIeee754<T>
     {
         var tools = SmollmTools.GetWeatherTools();
-        using var funcClient = new FunctionInvokingChatClient(client);
+        using var funcClient = new FunctionInvokingChatClient(client)
+        {
+            // The small function-calling fine-tune tends to keep requesting the tool rather than
+            // closing with a final answer; cap iterations so a runaway loop terminates quickly.
+            MaximumIterationsPerRequest = 3,
+        };
 
         if (!string.IsNullOrEmpty(options.Text))
         {
@@ -320,7 +357,13 @@ public static class SmollmMode
     static void PrintHelp()
     {
         Console.WriteLine("""
-            NivaraChat --smollm — serve the pretrained SmolLM-135M-Instruct causal LM as an IChatClient
+            NivaraChat --smollm — serve SmolLM-family causal LMs as IChatClient
+
+            Models:
+              chat / plain     SmolLM-135M-Instruct      samples/data/smollm-135m
+              tools-weather    small-function-calling     samples/data/smollm-fn-135m
+                               (archit11 fine-tune of Biggie-SmoLlm-0.15B, trained on Hermes
+                               function-calling data; GPT-2 BPE tokenizer from the base model)
 
             Usage:
               dotnet run --project samples/NivaraChat -- --smollm chat           [--text "prompt"]
@@ -330,12 +373,12 @@ public static class SmollmMode
             Sub-modes:
               chat            Interactive REPL (default) or single prompt with --text
               plain           Single-shot plain-text reply, no REPL
-              tools-weather   Stage B native tool-calling: model emits <tool_call> → FunctionInvokingChatClient
+              tools-weather   Native tool-calling: model emits <tool_call> → FunctionInvokingChatClient
                               invokes the deterministic GetWeather AIFunction → <tool_response> → final answer.
                               Default max tokens 256; only the final answer is shown.
 
             Options:
-              --model-dir <path>     Model directory (default samples/data/smollm-135m)
+              --model-dir <path>     Model directory (default depends on sub-mode, above)
               --precision f32|bf16   Compute precision (default f32)
               --max-new-tokens <n>   Max tokens to generate (default 64; 256 for tools-weather)
               --temperature <t>      Sampling temperature; >0 enables sampling (default 0 = greedy)
