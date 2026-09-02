@@ -107,4 +107,75 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         var attn = ReverseGradOperations.MultiHeadAttention(Q, K, V, numHeads, attnScale, mask);
         return OProj.Forward(attn);
     }
+
+    /// <summary>
+    /// Runs Llama causal self-attention for a <em>single new token</em> during cached inference.
+    /// Computes Q/K/V for the one position, applies RoPE at its absolute position
+    /// (<paramref name="positionOffset"/>), appends the per-KV-head K/V into
+    /// <paramref name="kCache"/>/<paramref name="vCache"/>, and attends the new query against the
+    /// full cached prefix. The cache holds all positions seen so far (inclusive of the new token),
+    /// with the parent incrementing <paramref name="cacheLen"/> across calls. This mirrors
+    /// <see cref="Forward(ReverseGradTensor{T})"/> numerically but avoids re-running projections
+    /// over the whole prefix. Inference-only (no graph nodes built).
+    /// </summary>
+    /// <param name="input">The new-token hidden state <c>[1, hiddenSize]</c></param>
+    /// <param name="positionOffset">Absolute position of the new token</param>
+    /// <param name="kCache">Buffer of RoPE'd per-KV-head keys, row-major <c>[kvLen, numKeyValueHeads * headDim]</c></param>
+    /// <param name="vCache">Buffer of per-KV-head values, row-major <c>[kvLen, numKeyValueHeads * headDim]</c></param>
+    /// <param name="cacheLen">Number of tokens already cached before this call</param>
+    /// <returns>The attention output <c>[1, hiddenSize]</c> after the output projection</returns>
+    public ReverseGradTensor<T> ForwardCached(
+        ReverseGradTensor<T> input,
+        int positionOffset,
+        T[] kCache,
+        T[] vCache,
+        int cacheLen)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (input.Shape[0] != 1) throw new ArgumentException($"ForwardCached expects a single-token input [1, D], got [.., {input.Shape[0]}].", nameof(input));
+        if (positionOffset < 0) throw new ArgumentOutOfRangeException(nameof(positionOffset));
+        if (cacheLen < 0) throw new ArgumentOutOfRangeException(nameof(cacheLen));
+
+        int kvWidth = numKeyValueHeads * headDim;
+        int newLen = cacheLen + 1;
+        int needed = newLen * kvWidth;
+        if (kCache.Length < needed || vCache.Length < needed)
+            throw new ArgumentException("Cache buffers must have capacity for the new token row.");
+
+        var Q = QProj.Forward(input);                     // [1, numHeads * headDim]
+        var K = KProj.Forward(input);                     // [1, numKeyValueHeads * headDim]
+        var V = VProj.Forward(input);                     // [1, numKeyValueHeads * headDim]
+
+        Q = rotary.Forward(Q, positionOffset);
+        K = rotary.Forward(K, positionOffset);
+
+        K.AsSpan().CopyTo(kCache.AsSpan(cacheLen * kvWidth, kvWidth));
+        V.AsSpan().CopyTo(vCache.AsSpan(cacheLen * kvWidth, kvWidth));
+
+        // Build exact-size per-KV-head K/V matrices from the used cache region.
+        var kData = new T[needed];
+        var vData = new T[needed];
+        Buffer.BlockCopy(kCache, 0, kData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
+        Buffer.BlockCopy(vCache, 0, vData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
+
+        var kCol = NivaraColumn<T>.CreateFromOwnedArray(kData);
+        var vCol = NivaraColumn<T>.CreateFromOwnedArray(vData);
+        var kTensor = new ReverseGradTensor<T>(kCol, requiresGrad: false);
+        var vTensor = new ReverseGradTensor<T>(vCol, requiresGrad: false);
+        kTensor.Reshape(newLen, kvWidth);
+        vTensor.Reshape(newLen, kvWidth);
+
+        // GQA: repeat KV heads to the query head count across the full prefix.
+        var KFull = ReverseGradOperations.GqaRepeatKV(kTensor, numHeads, numKeyValueHeads);
+        var VFull = ReverseGradOperations.GqaRepeatKV(vTensor, numHeads, numKeyValueHeads);
+
+        // Fully-open mask: the new token attends to every cached position.
+        var openMaskData = new T[newLen];
+        var maskCol = NivaraColumn<T>.CreateFromOwnedArray(openMaskData);
+        var openMask = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
+        openMask.Reshape(1, newLen);
+
+        var attn = ReverseGradOperations.MultiHeadAttention(Q, KFull, VFull, numHeads, attnScale, openMask);
+        return OProj.Forward(attn);
+    }
 }
