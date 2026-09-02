@@ -325,19 +325,19 @@ Tested examples:
 Uses: `BatchedTransformer<T>`, `BatchedChatClient` (`IChatClient`), `TextTokenizer`, `ModelSerializer.Save/Load`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Embedding`/`Linear`/`LayerNorm`/`Activation.Gelu`, `CrossEntropyLoss<T>`, `Adam<T>`, `services.AddChatClient()`.
 
 ### SmolLM (`--smollm`)
-Serves the **pretrained SmolLM-135M-Instruct causal LM** through the standard `Microsoft.Extensions.AI.IChatClient` interface — no training, no LLM server, no Python runtime. The model runs in-process on Nivara's zero-dependency tensor engine: `LlamaForCausalLM<T>` (greedy, autoregressive) + the GPT-2 byte-level BPE tokenizer. The conversation is rendered into SmolLM's Hermes/ChatML format (`<|im_start|>role\n...<|im_end|>`) and the reply is **token-streamed** via `GetStreamingResponseAsync`. Two sub-modes:
+Serves the **pretrained SmolLM-135M-Instruct causal LM** through the standard `Microsoft.Extensions.AI.IChatClient` interface — no training, no LLM server, no Python runtime. The model runs in-process on Nivara's zero-dependency tensor engine: `LlamaForCausalLM<T>` (autoregressive) + the GPT-2 byte-level BPE tokenizer. The conversation is rendered into SmolLM's Hermes/ChatML format (`<|im_start|>role\n...<|im_end|>`) and the reply is **token-streamed** via `GetStreamingResponseAsync`. Two sub-modes:
 
 ```
 config.json + model.safetensors + vocab.json + merges.txt
     → SafeTensorsLoader.Read → LlamaLoader.Load → LlamaForCausalLM
-    → SmolLMChatClient : IChatClient (greedy, token-streamed)
+    → SmolLMChatClient : IChatClient (greedy/sampled, token-streamed, KV-cached)
     → --smollm plain/chat
 ```
 
 - `--smollm plain --text "..."` — single-shot reply, no REPL.
-- `--smollm chat [--text "..."]` — interactive multi-turn REPL (default when no `--text`); a prompt skips straight to one turn.
+- `--smollm chat [--text "..."]` — interactive multi-turn REPL (default when no `--text`); a prompt skips straight to one turn. In the interactive menu (`RunInteractive`), generation options are prompted with sensible defaults.
 
-Options after `--smollm`: `chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/smollm-135m`), `--precision f32|bf16` (default `f32`), `--max-new-tokens <n>` (default 64), `--text <string>`. Run `--smollm --help` for the full list.
+Options after `--smollm`: `chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/smollm-135m`), `--precision f32|bf16` (default `f32`), `--max-new-tokens <n>` (default 64), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed for reproducible sampling), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--smollm --help` for the full list.
 
 Model files must be present under `samples/data/smollm-135m` (already downloaded in this repo). To re-download:
 
@@ -350,12 +350,13 @@ Tested examples:
 | Command | Precision | Result |
 |---------|-----------|--------|
 | `--smollm plain --text "The capital of France is" --max-new-tokens 12` | f32 | Streams "The capital of France is Paris, which is the largest city" |
-| `--smollm chat` | f32 | Interactive multi-turn REPL; reply streamed token-by-token |
+| `--smollm chat` | f32 | Interactive multi-turn REPL; reply streamed token-by-token (KV-cached by default) |
+| `--smollm chat --temperature 0.6` | f32 | Interactive REPL with sampling; varied replies across turns |
 | `--smollm plain --text "The capital of France is" --precision bf16` | bf16 | Same reply, ~half the memory footprint |
 
 This is **Stage A** of the SmolLM two-demo plan: plain causal-LM chat only. Tool calling (the SmolLM2 Hermes `<tool_call>`/`<tool_response>` format wiring Nivara's trained models as `AIFunction` tools) is a later stage and is intentionally not included here.
 
-Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `SafeTensorsLoader.Read<T>`, `Gpt2BpeTokenizer` (`Encode`/`Decode`/`TokenId`), a new `SmolLMChatClient<T>` (`IChatClient`), `SmollmChatTemplate` (Hermes ChatML rendering).
+Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>`, `Gpt2BpeTokenizer` (`Encode`/`Decode`/`TokenId`), `SmolLMChatClient<T>` (`IChatClient`, temperature/top-p sampling, KV-cached generation), `SmollmChatTemplate` (Hermes ChatML rendering).
 
 ## Agents pipeline architecture
 
@@ -491,7 +492,7 @@ NivaraChat/
 │   └── TinyShakespeare.cs             # Corpus downloader + line-document loader
 ├── SmolLM/
 │   ├── SmollmMode.cs                  # --smollm CLI mode + interactive entry (chat/plain)
-│   ├── SmolLMChatClient.cs            # IChatClient over LlamaForCausalLM<T> (greedy, token-streamed)
+│   ├── SmolLMChatClient.cs            # IChatClient over LlamaForCausalLM<T> (greedy/sampled, KV-cached, token-streamed)
 │   └── SmollmChatTemplate.cs          # Hermes ChatML conversation rendering
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
