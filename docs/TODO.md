@@ -1,5 +1,23 @@
 # TODO: SmolLM native tool-calling (Phase B) — `GetWeather`
 
+## Status: Plan executed → experiment ended (2026-09-02)
+
+This plan was implemented, but the `tools-weather` native tool-calling path is **not shipped**.
+The committed/demo code was wired to run the actual model, and the plan's `chat`/`plain`
+sub-modes work exactly as designed; however the **model** made the tool loop non-functional:
+
+- The stock SmolLM-135M was never trained for function calling.
+- To validate the pipeline before a larger integration, the `tools-weather` mode was pointed at a
+  community Hermes fine-tune (`archit11/small-function-calling`, `Biggie-SmoLlm-0.15B`). The
+  pipeline mechanics (render → parse → `getWeather`→`GetWeather` name normalization → invoke →
+  feed back → re-prompt) all work, but the 0.15B model **never terminates the loop** — it
+  re-issues `<tool_call>` on every turn and produces no final answer (iteration-capped → blank).
+
+**Decision (user, 2026-09-02):** end the experiment; do not ship function calling through these
+small-LLM clients for now. Code and model files kept as-is. Detailed findings and the option to
+pivot to `Qwen2.5-0.5B-Instruct` (Option C) are recorded in
+[`docs/research/SMALL-MODEL-TOOL-CALLING.md`](research/SMALL-MODEL-TOOL-CALLING.md).
+
 ## Problem
 
 Phase A (`khurram/causal-lm-a`, on `main`) landed the SmolLM-135M-Instruct causal LM as an
