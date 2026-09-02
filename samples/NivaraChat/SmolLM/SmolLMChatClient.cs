@@ -3,6 +3,7 @@ using Nivara.AutoDiff;
 using Nivara.Samples;
 using System.Numerics;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 
 namespace NivaraChat.SmolLM;
 
@@ -75,7 +76,21 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         ChatOptions? options = null,
         CancellationToken cancellationToken = default)
     {
-        var text = Generate(messages, cancellationToken);
+        var text = Generate(messages, options, cancellationToken);
+        if (SmollmChatTemplate.TryParseToolCall(text, out var calls))
+        {
+            var contents = new List<AIContent>();
+            foreach (var (name, argsJson) in calls)
+            {
+                var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argsJson);
+                contents.Add(new FunctionCallContent(
+                    callId: Guid.NewGuid().ToString("N"),
+                    name: name,
+                    arguments: arguments ?? []));
+            }
+            return Task.FromResult(new ChatResponse(
+                [new ChatMessage(ChatRole.Assistant, contents)]));
+        }
         return Task.FromResult(new ChatResponse([new ChatMessage(ChatRole.Assistant, text)]));
     }
 
@@ -83,6 +98,42 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         IEnumerable<ChatMessage> messages,
         ChatOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        bool hasTools = options?.Tools is { Count: > 0 };
+
+        if (!hasTools)
+        {
+            await foreach (var update in StreamPlain(messages, cancellationToken))
+                yield return update;
+            yield break;
+        }
+
+        // Tool-calling: buffer the full generated text, then emit the outcome atomically so tool
+        // calls never arrive as a stream of partial tokens.
+        var text = Generate(messages, options, cancellationToken);
+        if (SmollmChatTemplate.TryParseToolCall(text, out var calls))
+        {
+            var contents = new List<AIContent>();
+            foreach (var (name, argsJson) in calls)
+            {
+                var arguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(argsJson);
+                contents.Add(new FunctionCallContent(
+                    callId: Guid.NewGuid().ToString("N"),
+                    name: name,
+                    arguments: arguments ?? []));
+            }
+            yield return new ChatResponseUpdate(ChatRole.Assistant, contents);
+        }
+        else
+        {
+            yield return new ChatResponseUpdate(ChatRole.Assistant, text);
+        }
+    }
+
+    /// <summary>Streams a plain-chat reply token-by-token (no tools), preserving Stage A behavior.</summary>
+    async IAsyncEnumerable<ChatResponseUpdate> StreamPlain(
+        IEnumerable<ChatMessage> messages,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var prompt = SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
         var ids = new List<int>(EncodePrompt(prompt));
@@ -127,9 +178,9 @@ internal sealed class SmolLMChatClient<T> : IChatClient
 
     public void Dispose() { }
 
-    string Generate(IEnumerable<ChatMessage> messages, CancellationToken cancellationToken)
+    string Generate(IEnumerable<ChatMessage> messages, ChatOptions? options, CancellationToken cancellationToken)
     {
-        var prompt = SmollmChatTemplate.Render(messages, addGenerationPrompt: true);
+        var prompt = SmollmChatTemplate.Render(messages, addGenerationPrompt: true, tools: options?.Tools);
         var ids = new List<int>(EncodePrompt(prompt));
 
         using var cache = useKvCache

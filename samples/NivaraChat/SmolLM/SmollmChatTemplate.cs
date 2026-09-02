@@ -38,7 +38,7 @@ internal static class SmollmChatTemplate
     public static string Render(
         IEnumerable<ChatMessage> messages,
         bool addGenerationPrompt = true,
-        IReadOnlyList<AITool>? tools = null)
+        IList<AITool>? tools = null)
     {
         ArgumentNullException.ThrowIfNull(messages);
 
@@ -147,7 +147,7 @@ internal static class SmollmChatTemplate
 
     /// <summary>Serializes the Hermes tool definitions from the provided tools' <see cref="AIFunction"/>s
     /// (Name / Description / JsonSchema) into a compact JSON array.</summary>
-    static string RenderTools(IReadOnlyList<AITool> tools)
+    static string RenderTools(IList<AITool> tools)
     {
         var arr = new JsonArray();
         foreach (var tool in tools)
