@@ -78,6 +78,9 @@ dotnet run --project samples/NivaraChat -- --smollm plain --text "The capital of
 
 # Interactive multi-turn chat, token-streamed (full options: --smollm --help)
 dotnet run --project samples/NivaraChat -- --smollm chat
+
+# Stage B native tool-calling: model emits <tool_call> → GetWeather invoked → final answer
+dotnet run --project samples/NivaraChat -- --smollm tools-weather --text "What's the weather in Paris?"
 ```
 
 ## CLI options
@@ -98,7 +101,7 @@ dotnet run --project samples/NivaraChat -- --smollm chat
 | `--intent-train` | — | Mode: train intent classifier (5 classes) |
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
 | `--tinyshakespeare` | — | Mode: train/serve a batched TinyShakespeare transformer as `IChatClient` (see `--tinyshakespeare --help` for its options) |
-| `--smollm` | — | Mode: serve the pretrained SmolLM-135M-Instruct causal LM as `IChatClient` (`chat`/`plain` sub-modes; see `--smollm --help`) |
+| `--smollm` | — | Mode: serve the pretrained SmolLM-135M-Instruct causal LM as `IChatClient` (`chat`/`plain`/`tools-weather` sub-modes; see `--smollm --help`) |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
@@ -325,19 +328,20 @@ Tested examples:
 Uses: `BatchedTransformer<T>`, `BatchedChatClient` (`IChatClient`), `TextTokenizer`, `ModelSerializer.Save/Load`, `ReverseGradOperations.BatchedMultiHeadAttention`, `Embedding`/`Linear`/`LayerNorm`/`Activation.Gelu`, `CrossEntropyLoss<T>`, `Adam<T>`, `services.AddChatClient()`.
 
 ### SmolLM (`--smollm`)
-Serves the **pretrained SmolLM-135M-Instruct causal LM** through the standard `Microsoft.Extensions.AI.IChatClient` interface — no training, no LLM server, no Python runtime. The model runs in-process on Nivara's zero-dependency tensor engine: `LlamaForCausalLM<T>` (autoregressive) + the GPT-2 byte-level BPE tokenizer. The conversation is rendered into SmolLM's Hermes/ChatML format (`<|im_start|>role\n...<|im_end|>`) and the reply is **token-streamed** via `GetStreamingResponseAsync`. Two sub-modes:
+Serves the **pretrained SmolLM-135M-Instruct causal LM** through the standard `Microsoft.Extensions.AI.IChatClient` interface — no training, no LLM server, no Python runtime. The model runs in-process on Nivara's zero-dependency tensor engine: `LlamaForCausalLM<T>` (autoregressive) + the GPT-2 byte-level BPE tokenizer. The conversation is rendered into SmolLM's Hermes/ChatML format (`<|im_start|>role\n...<|im_end|>`) and the reply is **token-streamed** via `GetStreamingResponseAsync`. Three sub-modes:
 
 ```
 config.json + model.safetensors + vocab.json + merges.txt
     → SafeTensorsLoader.Read → LlamaLoader.Load → LlamaForCausalLM
     → SmolLMChatClient : IChatClient (greedy/sampled, token-streamed, KV-cached)
-    → --smollm plain/chat
+    → --smollm plain/chat/tools-weather
 ```
 
 - `--smollm plain --text "..."` — single-shot reply, no REPL.
 - `--smollm chat [--text "..."]` — interactive multi-turn REPL (default when no `--text`); a prompt skips straight to one turn. In the interactive menu (`RunInteractive`), generation options are prompted with sensible defaults.
+- `--smollm tools-weather [--text "..."]` — **Stage B native tool-calling demo.** The client is wrapped with `FunctionInvokingChatClient` and the deterministic `GetWeather` `AIFunction`. The model emits a Hermes `<tool_call>` block, the framework invokes the function, the result is fed back as a `<tool_response>` user turn, and the model produces a final natural-language answer — only that final answer is shown (raw `<tool_call>` markup is hidden). Single prompt with `--text` or an interactive REPL.
 
-Options after `--smollm`: `chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/smollm-135m`), `--precision f32|bf16` (default `f32`), `--max-new-tokens <n>` (default 64), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed for reproducible sampling), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--smollm --help` for the full list.
+Options after `--smollm`: `chat|plain|tools-weather` sub-mode, `--model-dir <path>` (default `samples/data/smollm-135m`), `--precision f32|bf16` (default `f32`), `--max-new-tokens <n>` (default 64; 256 for `tools-weather`), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed for reproducible sampling), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--smollm --help` for the full list.
 
 Model files must be present under `samples/data/smollm-135m` (already downloaded in this repo). To re-download:
 
@@ -353,10 +357,11 @@ Tested examples:
 | `--smollm chat` | f32 | Interactive multi-turn REPL; reply streamed token-by-token (KV-cached by default) |
 | `--smollm chat --temperature 0.6` | f32 | Interactive REPL with sampling; varied replies across turns |
 | `--smollm plain --text "The capital of France is" --precision bf16` | bf16 | Same reply, ~half the memory footprint |
+| `--smollm tools-weather --text "What's the weather in Paris?"` | f32 | Flows through `FunctionInvokingChatClient`: model emits `<tool_call>` → `GetWeather` invoked → `<tool_response>` → final answer shown (e.g. "Partly cloudy, 18°C in Paris...") |
 
-This is **Stage A** of the SmolLM two-demo plan: plain causal-LM chat only. Tool calling (the SmolLM2 Hermes `<tool_call>`/`<tool_response>` format wiring Nivara's trained models as `AIFunction` tools) is a later stage and is intentionally not included here.
+This is **Stage A → B** of the SmolLM demo plan. Stage A landed plain causal-LM chat; **Stage B** (this branch) adds native tool-calling: the Hermes `<tool_call>`/`<tool_response>` format with a single deterministic `GetWeather` `AIFunction`, proving the full `IChatClient` → framework tool loop end-to-end (no Nivara models, no Ollama). Wiring Nivara's trained models as `AIFunction` tools is a later stage.
 
-Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>`, `Gpt2BpeTokenizer` (`Encode`/`Decode`/`TokenId`), `SmolLMChatClient<T>` (`IChatClient`, temperature/top-p sampling, KV-cached generation), `SmollmChatTemplate` (Hermes ChatML rendering).
+Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>`, `Gpt2BpeTokenizer` (`Encode`/`Decode`/`TokenId`), `SmolLMChatClient<T>` (`IChatClient`, temperature/top-p sampling, KV-cached generation), `SmollmChatTemplate` (Hermes ChatML rendering + `<tools>`/`<tool_response>`/`<tool_call>`), `SmollmTools.GetWeather` (`AIFunction`), `FunctionInvokingChatClient`.
 
 ## Agents pipeline architecture
 
@@ -491,9 +496,10 @@ NivaraChat/
 │   ├── PositionEncoding.cs            # Fixed sinusoidal position encoding
 │   └── TinyShakespeare.cs             # Corpus downloader + line-document loader
 ├── SmolLM/
-│   ├── SmollmMode.cs                  # --smollm CLI mode + interactive entry (chat/plain)
-│   ├── SmolLMChatClient.cs            # IChatClient over LlamaForCausalLM<T> (greedy/sampled, KV-cached, token-streamed)
-│   └── SmollmChatTemplate.cs          # Hermes ChatML conversation rendering
+│   ├── SmollmMode.cs                  # --smollm CLI mode + interactive entry (chat/plain/tools-weather)
+│   ├── SmolLMChatClient.cs            # IChatClient over LlamaForCausalLM<T> (greedy/sampled, KV-cached, token-streamed; emits FunctionCallContent)
+│   ├── SmollmChatTemplate.cs          # Hermes ChatML rendering + <tools>/<tool_response>/<tool_call> parsing
+│   └── SmollmTools.cs                 # Stage B GetWeather AIFunction for the native tool-calling demo
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```
