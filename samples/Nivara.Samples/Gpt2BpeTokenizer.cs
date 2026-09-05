@@ -26,6 +26,15 @@ public sealed class Gpt2BpeTokenizer
     readonly HashSet<int> addedTokenIds;
     readonly int unkTokenId;
 
+    /// <summary>
+    /// When the tokenizer.json declares a <c>Split</c> pretokenizer with a regex (Qwen-style
+    /// pipeline), that regex is applied to the RAW normalized text first and each resulting
+    /// chunk is byte-mapped afterwards — matching HuggingFace's Split + ByteLevel(use_regex:false)
+    /// composition. Null keeps the legacy GPT-2 path (regex applied to the mapped text), which
+    /// is what SmolLM's <c>Gpt2BpeTokenizer(vocab, merges)</c> construction relies on.
+    /// </summary>
+    readonly Regex? declaredSplitRegex;
+
     /// <summary>Gets the total number of tokens known to this tokenizer (base vocab plus added tokens).</summary>
     public int VocabSize => vocab.Count + addedTokens.Count;
 
@@ -68,7 +77,11 @@ public sealed class Gpt2BpeTokenizer
         addedTokens = new Dictionary<string, int>();
         addedTokenIds = new HashSet<int>();
         if (tokenizerJsonPath != null)
-            MergeAddedTokens(File.ReadAllText(tokenizerJsonPath));
+        {
+            var json = File.ReadAllText(tokenizerJsonPath);
+            MergeAddedTokens(json);
+            declaredSplitRegex = LoadSplitRegex(json);
+        }
 
         if (!vocab.TryGetValue(unkToken, out unkTokenId) && !addedTokens.TryGetValue(unkToken, out unkTokenId))
             throw new InvalidOperationException($"Unknown token '{unkToken}' not present in vocab. Vocab has {vocab.Count} tokens.");
@@ -154,8 +167,19 @@ public sealed class Gpt2BpeTokenizer
     /// <summary>Runs the byte-level BPE pipeline over a text chunk that contains no added tokens.</summary>
     IReadOnlyList<int> EncodeBpeSegment(string text)
     {
-        var mapped = MapBytesToChars(text);
         var ids = new List<int>();
+
+        if (declaredSplitRegex != null)
+        {
+            // Qwen pipeline: split the RAW normalized text with the declared regex (Isolated),
+            //  byte-map each chunk, then BPE per chunk — merges never cross chunk boundaries.
+            var normalized = text.Normalize(NormalizationForm.FormC);
+            foreach (var chunk in PretokenizeSplit(normalized, declaredSplitRegex))
+                AppendChunkIds(ids, chunk);
+            return ids;
+        }
+
+        var mapped = MapBytesToChars(text);
         var matches = BytePretoken.Matches(mapped);
         foreach (Match m in matches)
         {
@@ -176,11 +200,55 @@ public sealed class Gpt2BpeTokenizer
     /// returning the BPE pieces (not ids).</summary>
     IReadOnlyList<string> BpePieces(string text)
     {
-        var mapped = MapBytesToChars(text);
         var result = new List<string>();
+
+        if (declaredSplitRegex != null)
+        {
+            var normalized = text.Normalize(NormalizationForm.FormC);
+            foreach (var chunk in PretokenizeSplit(normalized, declaredSplitRegex))
+                foreach (var piece in Bpe(MapBytesToChars(chunk)))
+                    result.Add(piece);
+            return result;
+        }
+
+        var mapped = MapBytesToChars(text);
         foreach (Match m in BytePretoken.Matches(mapped))
             result.AddRange(Bpe(m.Value));
         return result;
+    }
+
+    /// <summary>
+    /// Encodes a single pretoken chunk: maps its bytes to the byte-level alphabet, emits the
+    /// whole chunk when it is a known vocab entry, otherwise applies ranked BPE merges.
+    /// </summary>
+    void AppendChunkIds(List<int> ids, string chunk)
+    {
+        var mapped = MapBytesToChars(chunk);
+        if (vocab.TryGetValue(mapped, out var directId))
+        {
+            ids.Add(directId);
+            return;
+        }
+
+        foreach (var piece in Bpe(mapped))
+            ids.Add(vocab.TryGetValue(piece, out var id) ? id : unkTokenId);
+    }
+
+    /// <summary>Splits raw text on a declared regex with HuggingFace "Isolated" semantics:
+    /// the regex matches (and every gap between consecutive matches) each becomes a chunk.</summary>
+    static IEnumerable<string> PretokenizeSplit(string text, Regex regex)
+    {
+        int last = 0;
+        foreach (Match m in regex.Matches(text))
+        {
+            if (m.Index > last)
+                yield return text[last..m.Index];
+            if (m.Length > 0)
+                yield return m.Value;
+            last = m.Index + m.Length;
+        }
+        if (last < text.Length)
+            yield return text[last..];
     }
 
     /// <summary>Decodes token ids back to text.</summary>
@@ -241,6 +309,46 @@ public sealed class Gpt2BpeTokenizer
             }
         }
     }
+
+    /// <summary>
+    /// Extracts the <c>Split</c> pretokenizer regex from a tokenizer.json (Qwen-style
+    /// <c>Sequence</c> of Split + ByteLevel), or null when none is declared (e.g. SmolLM's
+    /// Digits + ByteLevel-UseRegex pipeline, which the legacy GPT-2 path already matches).
+    /// </summary>
+    static Regex? LoadSplitRegex(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("pre_tokenizer", out var pre)
+            || pre.ValueKind != JsonValueKind.Object)
+            return null;
+
+        string? pattern = null;
+        if (pre.TryGetProperty("type", out var type) && type.GetString() == "Split")
+            pattern = TryReadRegexPattern(pre);
+
+        if (pattern == null && pre.TryGetProperty("pretokenizers", out var list)
+            && list.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in list.EnumerateArray())
+            {
+                if (item.TryGetProperty("type", out var itemType) && itemType.GetString() == "Split")
+                {
+                    pattern = TryReadRegexPattern(item);
+                    if (pattern != null)
+                        break;
+                }
+            }
+        }
+
+        return pattern == null
+            ? null
+            : new Regex(pattern, RegexOptions.Compiled | RegexOptions.CultureInvariant);
+    }
+
+    static string? TryReadRegexPattern(JsonElement split)
+        => split.TryGetProperty("pattern", out var pat) && pat.TryGetProperty("Regex", out var regex)
+            ? regex.GetString()
+            : null;
 
     void AddAddedToken(string content, int id)
     {
