@@ -35,7 +35,11 @@ Authoritative sources pulled directly from the HF repo
    messages as a `user` turn).
 2. **Special-token ids:** `eos_token` = `<|im_end|>` (**151645**), `pad_token` /
    `bos_token` = `<|endoftext|>` (**151643**). `bos_token_id` in config = 151643.
-   Config `eos_token_id` = 151645.
+   Config `eos_token_id` = 151645. **V2 (verified from `generation_config.json`):
+   eos is an array `[151645, 151643]`** — generation must stop on EITHER
+   `<|im_end|>` (151645) or `<|endoftext|>` (151643). Default sampling config
+   (`temperature 0.7, top_p 0.8, repetition_penalty 1.1`) is for the demo default;
+   ground truth uses greedy for determinism.
 3. **Vocab-size split (critical risk).** `config.json`: `vocab_size: 151936`,
    `tie_word_embeddings: true`. `tokenizer.json`/`vocab.json` map only vocab ids
    **0–151642** (151,643 entries). Special tokens (151643 `<|endoftext|>`,
