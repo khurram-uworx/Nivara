@@ -360,6 +360,8 @@ samples/data/sst2/
 samples/data/distilbert/
 samples/data/distilbert_sst/
 samples/data/smollm-135m/
+samples/data/smollm-fn-135m/
+samples/data/qwen2.5-0.5b-instruct/
 
 # Benchmark output
 samples/NivaraFineTuning/benchmark_results.txt
