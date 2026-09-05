@@ -1,4 +1,5 @@
 using NivaraChat.Modes;
+using NivaraChat.Qwen;
 using NivaraChat.SmolLM;
 using NivaraChat.Transformer;
 
@@ -77,6 +78,9 @@ if (args.Length > 0)
             break;
         case "--smollm":
             await SmollmMode.Run(args.Skip(1).ToArray());
+            break;
+        case "--qwen":
+            await QwenMode.Run(args.Skip(1).ToArray());
             break;
         default:
             PrintUsage();
@@ -170,6 +174,7 @@ void PrintUsage()
     Console.WriteLine("  --online-learning    Online learning: classify with LLM fallback, collect feedback, retrain");
     Console.WriteLine("  --tinyshakespeare    TinyShakespeare: train/serve a batched transformer as IChatClient (see --tinyshakespeare --help)");
     Console.WriteLine("  --smollm             SmolLM: serve the pretrained SmolLM-135M-Instruct causal LM as IChatClient (see --smollm --help)");
+    Console.WriteLine("  --qwen               Qwen: native function calling with Qwen2.5-0.5B-Instruct (see --qwen --help)");
     Console.WriteLine("\nOptions:");
     Console.WriteLine("  --ollama <url>       Ollama endpoint (default: http://localhost:11434)");
     Console.WriteLine("  --model <name>       Model name (default: llama3.2)");
