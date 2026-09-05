@@ -94,7 +94,12 @@ public class QwenInstructParityTests
     [Test]
     public void Tokenizer_EncodeToolPrompt_MatchesTorchIds()
     {
-        var prompt = File.ReadAllText(Path.Combine(ModelDir, "qwen_tool_prompt.txt"));
+        var promptPath = Path.Combine(ModelDir, "qwen_tool_prompt.txt");
+        var idsPath = Path.Combine(ModelDir, "qwen_tool_prompt_ids.bin");
+        if (!File.Exists(promptPath) || !File.Exists(idsPath))
+            Assert.Ignore("Qwen tool fixtures absent; skipping tool-prompt tokenizer parity verification.");
+
+        var prompt = File.ReadAllText(promptPath);
         var expected = ReadInt32("qwen_tool_prompt_ids.bin");
 
         var ids = Tokenizer.Encode(prompt);
@@ -107,7 +112,12 @@ public class QwenInstructParityTests
     [Test]
     public void Tokenizer_EncodeFinalPrompt_MatchesTorchIds()
     {
-        var prompt = File.ReadAllText(Path.Combine(ModelDir, "qwen_tool_final_prompt.txt"));
+        var promptPath = Path.Combine(ModelDir, "qwen_tool_final_prompt.txt");
+        var idsPath = Path.Combine(ModelDir, "qwen_tool_final_prompt_ids.bin");
+        if (!File.Exists(promptPath) || !File.Exists(idsPath))
+            Assert.Ignore("Qwen tool fixtures absent; skipping final-prompt tokenizer parity verification.");
+
+        var prompt = File.ReadAllText(promptPath);
         var expected = ReadInt32("qwen_tool_final_prompt_ids.bin");
 
         var ids = Tokenizer.Encode(prompt);
