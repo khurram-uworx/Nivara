@@ -10,6 +10,9 @@ It prints and dumps:
     samples/data/qwen_tool_prompt.txt         -- the EXACT rendered prompt string
                                                (apply_chat_template with tools, generation prompt)
     samples/data/qwen_tool_prompt_ids.bin     -- int32: token ids of that rendered prompt
+    samples/data/qwen_tool_final_prompt.txt   -- the EXACT rendered prompt for the FINAL turn,
+                                               i.e. after the tool result is fed back
+    samples/data/qwen_tool_final_prompt_ids.bin -- int32: token ids of that final prompt
     samples/data/qwen_tool_ids_py.bin         -- int32: every greedily generated token id across
                                                the FULL tool loop, concatenated (assistant
                                                <tool_call> turn, then the assistant final-answer
@@ -184,12 +187,21 @@ def main():
             f.write(np.asarray(arr, dtype=fmt).tobytes())
         print(f"\nWrote {path} ({len(arr)} {fmt})")
 
-    # The exact rendered prompt, for C# A/B diffing.
-    with open(os.path.join(model_dir, "qwen_tool_prompt.txt"), "w", encoding="utf-8") as f:
+    # The exact rendered prompt, for C# A/B diffing. newline="" keeps LF so the file bytes match
+    # the in-memory string transformers tokenized (no CRLF round-trip skew on Windows).
+    with open(os.path.join(model_dir, "qwen_tool_prompt.txt"), "w", encoding="utf-8", newline="") as f:
         f.write(tools_prompt)
     print(f"\nWrote {os.path.join(model_dir, 'qwen_tool_prompt.txt')} ({len(tools_prompt)} chars)")
 
     dump(os.path.join(model_dir, "qwen_tool_prompt_ids.bin"), prompt_ids, "int32")
+
+    # The exact rendered final prompt (with the fed-back tool result), also for C# A/B diffing.
+    with open(os.path.join(model_dir, "qwen_tool_final_prompt.txt"), "w", encoding="utf-8", newline="") as f:
+        f.write(final_prompt)
+    print(f"\nWrote {os.path.join(model_dir, 'qwen_tool_final_prompt.txt')} ({len(final_prompt)} chars)")
+
+    dump(os.path.join(model_dir, "qwen_tool_final_prompt_ids.bin"), final_ids, "int32")
+
     dump(os.path.join(model_dir, "qwen_tool_ids_py.bin"),
          tool_turn_ids + final_turn_ids, "int32")
     dump(os.path.join(model_dir, "qwen_tool_logits_py.bin"),
