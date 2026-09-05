@@ -28,6 +28,7 @@ class Program
             _ => modelType
         };
         string precision = "f32";
+        bool explicitPrecision = false;
         string mode = "";
         bool simdWiden = false;
         bool noKvCache = false;
@@ -47,14 +48,24 @@ class Program
                     "ushort" => "ushort",
                     var other => other
                 };
+                explicitPrecision = true;
                 i++;
             }
             else if (args[i] is "bf16" or "bfloat16")
+            {
                 precision = "bf16";
+                explicitPrecision = true;
+            }
             else if (args[i] is "fp16" or "f16" or "half")
+            {
                 precision = "fp16";
+                explicitPrecision = true;
+            }
             else if (args[i] == "--ushort")
+            {
                 precision = "ushort";
+                explicitPrecision = true;
+            }
             else if (args[i] == "--simd-widen")
                 simdWiden = true;
             else if (args[i] == "--no-kv-cache")
@@ -80,6 +91,9 @@ class Program
                 mode = args[i];
         }
 
+        if (modelType == "qwen" && !explicitPrecision)
+            precision = "ushort";
+
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
             Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|smollm|qwen> [--precision f32|bf16|fp16|ushort] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
@@ -103,10 +117,10 @@ class Program
             Console.WriteLine("  --seed N           Distill: seed accepted for future use (Kaiming init is unseeded)");
             Console.WriteLine();
             Console.WriteLine("Precision (text models only):");
-            Console.WriteLine("  --precision f32   Default; full float32 weights");
+            Console.WriteLine("  --precision f32   Full float32 weights (opt-in for qwen; ushort is the qwen default)");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
-            Console.WriteLine("  --precision ushort  Qwen2.5 only: BF16-on-disk, SIMD-widened to F32 at load");
+            Console.WriteLine("  --precision ushort  Qwen2.5 DEFAULT: BF16-on-disk, SIMD-widened to F32 at load");
             Console.WriteLine("                     (bf16/fp16 are rejected for qwen; student training is always F32).");
             Console.WriteLine();
             Console.WriteLine("SIMD (narrow-float models):");
