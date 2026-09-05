@@ -22,39 +22,55 @@ public sealed class Gpt2BpeTokenizer
     readonly Dictionary<(string, string), int> mergeRanks;
     readonly Dictionary<char, string> byteToChar;
     readonly Dictionary<string, char> charToByte;
+    readonly Dictionary<string, int> addedTokens;
+    readonly HashSet<int> addedTokenIds;
     readonly int unkTokenId;
 
-    /// <summary>Gets the vocabulary size.</summary>
-    public int VocabSize => vocab.Count;
+    /// <summary>Gets the total number of tokens known to this tokenizer (base vocab plus added tokens).</summary>
+    public int VocabSize => vocab.Count + addedTokens.Count;
 
     /// <summary>Gets the unknown-token id.</summary>
     public int UnknownTokenId => unkTokenId;
 
     /// <summary>
-    /// Returns the token id for an exact vocabulary token (used for special tokens such as
-    /// <c>&lt;|im_start|&gt;</c> that byte-level BPE would otherwise split). Returns -1 when the
-    /// token is not in the vocabulary.
+    /// Returns the token id for an exact token — either a base-vocab entry or an added token
+    /// (special tokens such as <c>&lt;|im_start|&gt;</c> that byte-level BPE would otherwise split).
+    /// Returns -1 when the token is not known.
     /// </summary>
     public int TokenId(string token)
     {
         ArgumentNullException.ThrowIfNull(token);
-        return vocab.TryGetValue(token, out var id) ? id : -1;
+        if (vocab.TryGetValue(token, out var id))
+            return id;
+        return addedTokens.TryGetValue(token, out id) ? id : -1;
     }
 
     /// <summary>
-    /// Loads the tokenizer from <c>vocab.json</c> and <c>merges.txt</c>.
+    /// Loads the tokenizer from <c>vocab.json</c> and <c>merges.txt</c>, optionally merging the
+    /// added tokens declared in a <c>tokenizer.json</c> (either the Qwen-style <c>added_tokens</c>
+    /// array or the HF <c>added_tokens_decoder</c> dict).
     /// </summary>
     /// <param name="vocabPath">Path to vocab.json</param>
     /// <param name="mergesPath">Path to merges.txt</param>
-    /// <param name="unkToken">Unknown-token string (must be a vocab key); defaults to &lt;|endoftext|&gt;</param>
-    public Gpt2BpeTokenizer(string vocabPath, string mergesPath, string unkToken = "<|endoftext|>")
+    /// <param name="unkToken">Unknown-token string (must be a known token); defaults to &lt;|endoftext|&gt;</param>
+    /// <param name="tokenizerJsonPath">Optional path to tokenizer.json whose added tokens are merged in</param>
+    public Gpt2BpeTokenizer(
+        string vocabPath,
+        string mergesPath,
+        string unkToken = "<|endoftext|>",
+        string? tokenizerJsonPath = null)
     {
         vocab = JsonVocab(File.ReadAllText(vocabPath));
         idToToken = new Dictionary<int, string>(vocab.Count);
         foreach (var (token, id) in vocab)
             idToToken[id] = token;
 
-        if (!vocab.TryGetValue(unkToken, out unkTokenId))
+        addedTokens = new Dictionary<string, int>();
+        addedTokenIds = new HashSet<int>();
+        if (tokenizerJsonPath != null)
+            MergeAddedTokens(File.ReadAllText(tokenizerJsonPath));
+
+        if (!vocab.TryGetValue(unkToken, out unkTokenId) && !addedTokens.TryGetValue(unkToken, out unkTokenId))
             throw new InvalidOperationException($"Unknown token '{unkToken}' not present in vocab. Vocab has {vocab.Count} tokens.");
 
         (byteToChar, charToByte) = BuildByteMap();
@@ -76,11 +92,68 @@ public sealed class Gpt2BpeTokenizer
             mergeRanks[mergesList[i]] = i;
     }
 
-    /// <summary>Encodes text into token ids (no special-token wrapping).</summary>
+    /// <summary>Encodes text into token ids (no special-token wrapping). Added tokens declared in
+    /// the tokenizer are emitted as their single ids wherever they appear; everything else is
+    /// byte-level BPE encoded.</summary>
     public IReadOnlyList<int> Encode(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
 
+        var ids = new List<int>();
+        int pos = 0;
+        int segmentStart = 0;
+        while (pos < text.Length)
+        {
+            if (TryMatchAddedToken(text, pos, out var token, out var id))
+            {
+                if (pos > segmentStart)
+                    ids.AddRange(EncodeBpeSegment(text[segmentStart..pos]));
+                ids.Add(id);
+                pos += token.Length;
+                segmentStart = pos;
+            }
+            else
+            {
+                pos++;
+            }
+        }
+        if (segmentStart < text.Length)
+            ids.AddRange(EncodeBpeSegment(text[segmentStart..]));
+        return ids;
+    }
+
+    /// <summary>Encodes text as byte-level pieces (no special-token wrapping), for diagnostics.
+    /// Added tokens are kept as single whole-token pieces.</summary>
+    public IReadOnlyList<string> EncodePieces(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        var result = new List<string>();
+        int pos = 0;
+        int segmentStart = 0;
+        while (pos < text.Length)
+        {
+            if (TryMatchAddedToken(text, pos, out var token, out _))
+            {
+                if (pos > segmentStart)
+                    result.AddRange(BpePieces(text[segmentStart..pos]));
+                result.Add(token);
+                pos += token.Length;
+                segmentStart = pos;
+            }
+            else
+            {
+                pos++;
+            }
+        }
+        if (segmentStart < text.Length)
+            result.AddRange(BpePieces(text[segmentStart..]));
+        return result;
+    }
+
+    /// <summary>Runs the byte-level BPE pipeline over a text chunk that contains no added tokens.</summary>
+    IReadOnlyList<int> EncodeBpeSegment(string text)
+    {
         var mapped = MapBytesToChars(text);
         var ids = new List<int>();
         var matches = BytePretoken.Matches(mapped);
@@ -99,10 +172,10 @@ public sealed class Gpt2BpeTokenizer
         return ids;
     }
 
-    /// <summary>Encodes text as byte-level pieces (no special-token wrapping), for diagnostics.</summary>
-    public IReadOnlyList<string> EncodePieces(string text)
+    /// <summary>Runs the byte-level BPE pipeline over a text chunk that contains no added tokens,
+    /// returning the BPE pieces (not ids).</summary>
+    IReadOnlyList<string> BpePieces(string text)
     {
-        ArgumentNullException.ThrowIfNull(text);
         var mapped = MapBytesToChars(text);
         var result = new List<string>();
         foreach (Match m in BytePretoken.Matches(mapped))
@@ -123,10 +196,79 @@ public sealed class Gpt2BpeTokenizer
                 continue;
             }
 
+            if (addedTokenIds.Contains(id))
+            {
+                sb.Append(token);
+                continue;
+            }
+
             foreach (var c in token)
                 sb.Append(charToByte.TryGetValue(c.ToString(), out var b) ? (char)b : c);
         }
         return sb.ToString();
+    }
+
+    /// <summary>Merges the added tokens declared in a tokenizer.json into the token↔id maps so
+    /// special tokens resolve as single atomic tokens. Accepts both the Qwen <c>added_tokens</c>
+    /// array form and the HF <c>added_tokens_decoder</c> dict form.</summary>
+    void MergeAddedTokens(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("added_tokens", out var addedTokensEl)
+            && addedTokensEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in addedTokensEl.EnumerateArray())
+            {
+                if (!item.TryGetProperty("id", out var idEl) || !item.TryGetProperty("content", out var contentEl))
+                    continue;
+                int id = idEl.GetInt32();
+                string content = contentEl.GetString()!;
+                AddAddedToken(content, id);
+            }
+            return;
+        }
+
+        if (root.TryGetProperty("added_tokens_decoder", out var decoderEl)
+            && decoderEl.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var prop in decoderEl.EnumerateObject())
+            {
+                if (!int.TryParse(prop.Name, out int id) || !prop.Value.TryGetProperty("content", out var contentEl))
+                    continue;
+                AddAddedToken(contentEl.GetString()!, id);
+            }
+        }
+    }
+
+    void AddAddedToken(string content, int id)
+    {
+        addedTokens[content] = id;
+        idToToken[id] = content;
+        addedTokenIds.Add(id);
+    }
+
+    /// <summary>Finds the longest added token starting at <paramref name="pos"/>, so overlapping
+    /// prefixes (e.g. <c>&lt;|im_|&gt;</c> vs <c>&lt;|im_start|&gt;</c>) resolve to the full token.</summary>
+    bool TryMatchAddedToken(string text, int pos, out string token, out int id)
+    {
+        token = "";
+        id = -1;
+        int bestLength = -1;
+        foreach (var (content, contentId) in addedTokens)
+        {
+            if (content.Length <= bestLength)
+                continue;
+            if (pos + content.Length <= text.Length
+                && string.CompareOrdinal(text, pos, content, 0, content.Length) == 0)
+            {
+                bestLength = content.Length;
+                token = content;
+                id = contentId;
+            }
+        }
+        return id >= 0;
     }
 
     static Dictionary<string, int> JsonVocab(string json)
