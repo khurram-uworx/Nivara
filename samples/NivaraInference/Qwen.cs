@@ -89,7 +89,7 @@ static class QwenChatTemplate
             }
             sb.Append(']');
         }
-        sb.Append("}}");
+        sb.Append("}}}");
         return sb.ToString();
     }
 
