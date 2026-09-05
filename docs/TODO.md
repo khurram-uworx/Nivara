@@ -156,6 +156,18 @@ no `qwen` mode, and the README does not yet record the library work that made th
   `qwen tools` fixture diff (fixtures absent → skip the diff, keep the end-to-end run).
 - Existing Qwen tests already follow this convention; no changes needed there.
 
+### 6. CI — run build + tests on every PR (user-mandated)
+- **Why:** `.github/workflows/ci.yml` currently triggers `pull_request` only when the *base*
+  branch is `main`. This branch's stacked PR targets `khurram/qwen` — a non-main base — so
+  today CI would never run on it.
+- **Change:** drop the `branches: [ main ]` filter on the `pull_request` trigger so *every*
+  PR runs the build + test job (any base branch). Keep `push` on `main` as-is. GitHub
+  evaluates the workflow from the PR head, so committing the new `ci.yml` on this branch is
+  what makes the stacked PR light up.
+- **Stays green without model data:** the test job already filters `Category!=Performance`;
+  the new parity test silently `Assert.Ignore`s when its committed fixtures are absent, and
+  the 989 MB Qwen checkpoint is not a CI dependency. No runner upgrade needed.
+
 ## Verification
 
 - `dotnet build Nivara.slnx` (0 warnings), then **ask** before `dotnet test`.
@@ -171,15 +183,20 @@ no `qwen` mode, and the README does not yet record the library work that made th
   `QwenDistillStudentParityTests` pass (forward logits + backward grad ≈ Torch, ~1e-4). When the
   fixture files are absent the test silently `Assert.Ignore`s (CI/clean).
 - README numbers come from the actual runs on this machine.
+- CI evidence: after the stacked PR (base `khurram/qwen`) is created, the `CI` workflow
+  must run build + tests on the PR head — proof the `pull_request` trigger now fires for
+  non-main bases. Check the PR "checks" tab; the new parity test shows as skipped (Ignored)
+  only when its fixtures are absent, otherwise passes.
 
 ## Planned commits
 
 1. `docs: plan Qwen inference showcase + distillation in TODO.md` (this file)
 2. `samples: add qwen tools + distill mode to NivaraInference (tool loop, KV cache, teacher distillation)`
 3. `tests: pin composed student MLP against Torch (qwen_distill_reference.py + parity fixtures + test)`
-4. `docs(samples): document Qwen2.5 showcase and library gaps in NivaraInference README`
-5. `docs: remove completed plan (iterative-work G2 cleared)` — after the two-gate review
-6. Offer push + stacked PR (base `khurram/qwen`), human-confirmed.
+4. `ci: run build+test on every PR (drop the pull_request main-only base filter)`
+5. `docs(samples): document Qwen2.5 showcase and library gaps in NivaraInference README`
+6. `docs: remove completed plan (iterative-work G2 cleared)` — after the two-gate review
+7. Offer push + stacked PR (base `khurram/qwen`), human-confirmed.
 
 Then `gh pr create` a stacked PR; do not push without confirmation.
 
@@ -189,6 +206,7 @@ Then `gh pr create` a stacked PR; do not push without confirmation.
   `samples/NivaraInference/README.md`,
   `samples/NivaraInference/Python/qwen_distill_reference.py` (new),
   `tests/Nivara.Tests/Qwen/QwenDistillStudentParityTests.cs` (new),
+  `.github/workflows/ci.yml` (pull_request trigger: drop `branches: [ main ]`),
   `samples/data/qwen-distill/*.bin` (new committed small fixtures),
   `samples/data/qwen_distill_labels.json` (gitignored cache artifact).
 - **No `src/Nivara` and no `samples/Nivara.Samples` changes** — everything needed already exists
