@@ -21,10 +21,21 @@ class Program
         Console.WriteLine();
 
         string modelType = args.Length > 0 ? args[0] : "";
-        string resolvedType = modelType == "smollm" ? "smollm-135m" : modelType;
+        string resolvedType = modelType switch
+        {
+            "smollm" => "smollm-135m",
+            "qwen" => "qwen2.5-0.5b-instruct",
+            _ => modelType
+        };
         string precision = "f32";
+        bool explicitPrecision = false;
         string mode = "";
         bool simdWiden = false;
+        bool noKvCache = false;
+        bool force = false;
+        int teacherExamples = 0;
+        int seed = 42;
+        string text = "";
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--precision" && i + 1 < args.Length)
@@ -34,23 +45,58 @@ class Program
                     "f32" or "float" => "f32",
                     "bf16" or "bfloat16" => "bf16",
                     "fp16" or "f16" or "half" => "fp16",
+                    "ushort" => "ushort",
                     var other => other
                 };
+                explicitPrecision = true;
                 i++;
             }
             else if (args[i] is "bf16" or "bfloat16")
+            {
                 precision = "bf16";
+                explicitPrecision = true;
+            }
             else if (args[i] is "fp16" or "f16" or "half")
+            {
                 precision = "fp16";
+                explicitPrecision = true;
+            }
+            else if (args[i] == "--ushort")
+            {
+                precision = "ushort";
+                explicitPrecision = true;
+            }
             else if (args[i] == "--simd-widen")
                 simdWiden = true;
+            else if (args[i] == "--no-kv-cache")
+                noKvCache = true;
+            else if (args[i] == "--force")
+                force = true;
+            else if (args[i] == "--teacher-examples" && i + 1 < args.Length)
+            {
+                int.TryParse(args[i + 1], out teacherExamples);
+                i++;
+            }
+            else if (args[i] == "--seed" && i + 1 < args.Length)
+            {
+                int.TryParse(args[i + 1], out seed);
+                i++;
+            }
+            else if (args[i] == "--text" && i + 1 < args.Length)
+            {
+                text = args[i + 1];
+                i++;
+            }
             else if (mode.Length == 0)
                 mode = args[i];
         }
 
+        if (modelType == "qwen" && !explicitPrecision)
+            precision = "ushort";
+
         if (string.IsNullOrEmpty(modelType) || modelType is "-h" or "--help")
         {
-            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|smollm> [--precision f32|bf16|fp16] [benchmark|similarity|compare|compare_diag|predict|generate|image-path]");
+            Console.WriteLine("Usage: NivaraInference <mobilenet_v2|resnet18|minilm|distilbert|distilbert_sst|smollm|qwen> [--precision f32|bf16|fp16|ushort] [benchmark|similarity|compare|compare_diag|predict|generate|tools|distill|image-path]");
             Console.WriteLine();
             Console.WriteLine("Modes:");
             Console.WriteLine("  benchmark         Run timed inference passes and report median timing");
@@ -59,12 +105,23 @@ class Program
             Console.WriteLine("  predict           Interactive sentiment REPL (distilbert_sst)");
             Console.WriteLine("  generate          Greedy causal-LM generation (smollm)");
             Console.WriteLine("  ab                A/B scalar vs widen comparison (smollm only)");
+            Console.WriteLine("  tools             Native Qwen2.5 function calling (getWeather tool loop)");
+            Console.WriteLine("  distill           Teacher distillation into a tiny sentiment classifier");
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
+            Console.WriteLine("Qwen options:");
+            Console.WriteLine("  --text \"...\"      Override the tools-mode user prompt (default: Paris weather)");
+            Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
+            Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
+            Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
+            Console.WriteLine("  --seed N           Distill: seed accepted for future use (Kaiming init is unseeded)");
+            Console.WriteLine();
             Console.WriteLine("Precision (text models only):");
-            Console.WriteLine("  --precision f32   Default; full float32 weights");
+            Console.WriteLine("  --precision f32   Full float32 weights (opt-in for qwen; ushort is the qwen default)");
             Console.WriteLine("  --precision bf16  BFloat16 (half weight memory). Bare 'bf16' also accepted.");
             Console.WriteLine("  --precision fp16  Half / fp16 (half weight memory). Bare 'fp16'|'half' also accepted.");
+            Console.WriteLine("  --precision ushort  Qwen2.5 DEFAULT: BF16-on-disk, SIMD-widened to F32 at load");
+            Console.WriteLine("                     (bf16/fp16 are rejected for qwen; student training is always F32).");
             Console.WriteLine();
             Console.WriteLine("SIMD (narrow-float models):");
             Console.WriteLine("  --simd-widen      Enable widen-compute-narrow SIMD kernels for BFloat16/Half");
@@ -87,12 +144,34 @@ class Program
         bool compareDiag = mode == "compare_diag";
         bool fp16 = precision == "fp16";
         bool bf16 = precision == "bf16";
+        bool isQwen = modelType == "qwen";
+        bool useUshort = precision == "ushort";
+
+        if (isQwen && bf16)
+        {
+            Console.Error.WriteLine("Qwen2.5 precision error: bf16 is not supported for the qwen mode. Use --precision f32 or --precision ushort (BF16-on-disk, widened to F32 at load).");
+            return 1;
+        }
+        if (isQwen && fp16)
+        {
+            Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode. Use --precision f32 or --precision ushort (BF16-on-disk, widened to F32 at load).");
+            return 1;
+        }
 
         Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
         var loadSw = Stopwatch.StartNew();
-        var tensors = SafeTensorsLoader.Read(modelPath);
+        Dictionary<string, (float[] Data, int[] Shape)> tensors;
+        if (useUshort && isQwen)
+        {
+            var ushortWeights = SafeTensorsLoader.ReadUInt16(modelPath);
+            tensors = SafeTensorsLoader.WidenToF32(ushortWeights);
+        }
+        else
+        {
+            tensors = SafeTensorsLoader.Read(modelPath);
+        }
         loadSw.Stop();
-        Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
+        Console.WriteLine($"  SafeTensors parse ({(useUshort && isQwen ? "BF16->F32 widen" : "F32")}): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
         Console.WriteLine();
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
@@ -155,6 +234,12 @@ class Program
                 if (bf16) return benchmark ? BenchmarkSmolLM(tensorsBf16, simdWiden) : RunSmolLM(tensorsBf16, simdWiden);
                 if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, simdWiden) : RunSmolLM(tensorsHalf, simdWiden);
                 return benchmark ? BenchmarkSmolLM(tensors, simdWiden) : RunSmolLM(tensors, simdWiden);
+            case "qwen":
+                if (mode == "distill")
+                    return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
+                if (mode == "benchmark")
+                    return Qwen.RunBenchmark(tensors, modelDir);
+                return Qwen.RunTools(tensors, modelDir, useKvCache: !noKvCache, text);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");
                 return 1;

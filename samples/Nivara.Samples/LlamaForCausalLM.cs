@@ -36,7 +36,8 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         float rmsNormEps = 1e-5f,
         int maxPositionEmbeddings = 2048,
         float ropeTheta = 10000f,
-        bool tieWordEmbeddings = true)
+        bool tieWordEmbeddings = true,
+        bool qkvBias = false)
     {
         this.vocabSize = vocabSize;
         this.tieWordEmbeddings = tieWordEmbeddings;
@@ -46,7 +47,7 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         for (int i = 0; i < numHiddenLayers; i++)
             layers[i] = new LlamaDecoderBlock<T>(
                 hiddenSize, numHeads, numKeyValueHeads, intermediateSize,
-                rmsNormEps, maxPositionEmbeddings, ropeTheta);
+                rmsNormEps, maxPositionEmbeddings, ropeTheta, qkvBias);
         finalNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
 
         var modules = new Module<T>[layers.Length + 2];
@@ -268,6 +269,11 @@ public static class LlamaLoader
         where TModel : struct, IFloatingPointIeee754<TModel>
         where TWeight : struct, IFloatingPointIeee754<TWeight>
     {
+        // Qwen2-style checkpoints carry bias on the query/key/value projections; canonical
+        // Llama/SmolLM do not. The checkpoint is authoritative — mirror transformers' inference
+        // of use_qkv_bias from the loaded weights rather than requiring a config flag.
+        bool qkvBias = tensors.ContainsKey("model.layers.0.self_attn.q_proj.bias");
+
         var model = new LlamaForCausalLM<TModel>(
             config.VocabSize,
             config.HiddenSize,
@@ -278,7 +284,8 @@ public static class LlamaLoader
             config.RmsNormEps,
             config.MaxPositionEmbeddings,
             config.RopeTheta,
-            config.TieWordEmbeddings);
+            config.TieWordEmbeddings,
+            qkvBias);
 
         StateDictLoader.LoadEmbed(model.Embed, tensors, "model.embed_tokens.weight");
         StateDictLoader.LoadRMSNorm(model.finalNorm, tensors, "model.norm");

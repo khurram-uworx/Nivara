@@ -15,6 +15,8 @@ hf download sentence-transformers/all-MiniLM-L6-v2 --local-dir samples/data/mini
 hf download distilbert/distilbert-base-uncased-finetuned-sst-2-english config.json model.safetensors vocab.txt tokenizer_config.json --local-dir samples/data/distilbert_sst
 # SmolLM-135M-Instruct — BF16-native Llama-family causal LM (GQA, SiLU, RoPE; see "SmolLM" below)
 hf download HuggingFaceTB/SmolLM-135M-Instruct config.json model.safetensors tokenizer.json tokenizer_config.json vocab.json merges.txt generation_config.json special_tokens_map.json --local-dir samples/data/smollm-135m
+# Qwen2.5-0.5B-Instruct — function calling + teacher distillation (BF16 on disk; see "Qwen2.5-0.5B-Instruct" below)
+hf download Qwen/Qwen2.5-0.5B-Instruct config.json model.safetensors tokenizer.json tokenizer_config.json vocab.json merges.txt generation_config.json special_tokens_map.json --local-dir samples/data/qwen2.5-0.5b-instruct
 
 # Run inference
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2
@@ -24,6 +26,9 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert
 dotnet run --project samples/NivaraInference -c Release -- distilbert_sst
 dotnet run --project samples/NivaraInference -c Release -- smollm                 # greedy causal-LM generation (F32)
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16  # native BF16 (256.6 MB)
+dotnet run --project samples/NivaraInference -c Release -- qwen tools            # function calling (KV cache on)
+dotnet run --project samples/NivaraInference -c Release -- qwen distill --teacher-examples 12  # teacher distillation
+dotnet run --project samples/NivaraInference -c Release -- qwen benchmark        # KV-cached vs full re-forward
 
 # Benchmark (10 passes each)
 dotnet run --project samples/NivaraInference -c Release -- mobilenet_v2 benchmark
@@ -55,6 +60,7 @@ dotnet run --project samples/NivaraInference -c Release -- minilm benchmark --pr
 | DistilBERT (base-uncased) | Text (encoder) | 255.5 MB | 105 | 67.0M | `[seqLen, 768]` hidden states |
 | DistilBERT SST-2 (fine-tuned) | Text (classification) | 255.4 MB | 104 | 66.9M | 2-class sentiment (`NEGATIVE`/`POSITIVE`) |
 | SmolLM-135M-Instruct | Text (causal LM) | 269 MB | 272 | 134.5M | token ids (generation) |
+| Qwen2.5-0.5B-Instruct | Text (causal LM + function calling) | 989 MB | 290 | ~494M | token ids (tool-assisted generation) |
 
 ## Usage
 
@@ -342,6 +348,166 @@ first four models exercise), then verified end-to-end against the PyTorch refere
 BPE reader (see the tokenizer-correction note above), and enabling `UseWidenSimd` for the
 BF16/Half narrow runs so generation is practical (see the BF16 section above).
 
+### Qwen2.5-0.5B-Instruct (Qwen/Qwen2.5-0.5B-Instruct)
+
+The **second causal LM / generative model** and this branch's headline showcase:
+**native function calling** (`qwen tools` — the model emits and consumes a
+`<tool_call>` mid-conversation, exactly like a hosted assistant) and
+**teacher distillation** (`qwen distill` — an LLM-as-teacher labeling run that
+trains a tiny sentiment MLP to match the teacher's tool-call classifications).
+It is also the first model with a **real KV cache** (SmolLM decodes cache-free).
+
+- **Config**: `hidden_size=896`, `intermediate_size=4864`, 24 layers,
+  `num_attention_heads=14`, **`num_key_value_heads=2` (GQA 14↔2)**, SiLU gated
+  FFN, RMSNorm (`eps=1e-6`), RoPE with **`theta=1_000_000`** (10× SmolLM's),
+  `max_position_embeddings=32768`, `vocab_size=151936`, tied embeddings,
+  **Q/K/V projections with bias** (the one additive `src/Nivara` gap — see below).
+- **Tokenizer**: GPT-2 byte-level BPE with an added **`Split` regex
+  pretokenizer** (`tokenizer.json` `pre_tokenizer` — the HF `Split` +
+  `ByteLevel use_regex:false` composition, applied to the *raw* text until the
+  byte map) and **added tokens** `<|im_start|>`/`<|im_end|>`/`<|tool_call|>`/
+  `<|tool_response|>`/`<|tool_call_end|>`. See "Sample-scoped additions".
+- **KV cache**: `LlamaKVCache<T>` + `ForwardCached` — each generated token runs
+  only its own position through the 24 layers instead of re-feeding the whole
+  growing sequence (SmolLM's cache-free loop). See the benchmark section.
+- **Function calling**: headed-`<tool_call>` JSON with `getWeather`, parsed by
+  `QwenToolParser` and fed back as `<tool_response>`; both rendered prompts are
+  **byte-verified against the HF `apply_chat_template` fixture** (206 + 258 ids,
+  MATCH) and the generated tool-call turn matches PyTorch **19/19 IDs**.
+- **Distillation**: `distill` loads the teacher Qwen, classifies the 10 train
+  sentences (FNV-1a word+bigram bag-of-words → 4096-dim features), caches the
+  labels to `samples/data/qwen2.5-0.5b-instruct/qwen_distill_labels.json`
+  (resumable; delete it / `--force` to re-annotate), then trains
+  `SentimentMLP` (`Linear(4096→64)` + ReLU + `Linear(64→2)`) with
+  `Adam<float>(1e-3)` + `CrossEntropyLoss` (~200 full-batch epochs inside
+  `GradientUtils.Grad()`), and prints an eval table against a **linear-only
+  baseline** and the real **DistilBERT SST-2** classifier.
+
+**Usage:**
+
+```bash
+# Native function calling — the model issues a <tool_call>, the tool result is
+# fed back, and the model answers from the observation (KV cache on by default)
+dotnet run --project samples/NivaraInference -c Release -- qwen tools
+dotnet run --project samples/NivaraInference -c Release -- qwen tools --no-kv-cache   # full re-forward each token
+
+# Teacher distillation into the tiny sentiment classifier (labels cached/resumable)
+dotnet run --project samples/NivaraInference -c Release -- qwen distill --teacher-examples 12
+dotnet run --project samples/NivaraInference -c Release -- qwen distill --force
+
+# Decode benchmark: median-of-3 tool-call turns, KV-cached vs full re-forward
+dotnet run --project samples/NivaraInference -c Release -- qwen benchmark
+# (--ushort is now the qwen default; explicit --precision f32 opts into the f32 load)
+```
+
+**Precision**: `ushort` is the **default** for `qwen` — the checkpoint is
+BF16-on-disk, read raw via `SafeTensorsLoader.ReadUInt16` and widened to F32
+with the SIMD `WidenBf16ToF32` kernel (numerically identical weights; the
+989 MB checkpoint loads in ~2.2 s on this machine in Release). `f32` stays
+available opt-in via `--precision f32`. `bf16`/`fp16` are rejected for `qwen`
+with a clear error (the generation loop is F32).
+
+**Tools fixture diff** (run automatically when the checkpoint dir has the
+reference files; `qwen_tool_*.txt`/`.bin` generated once by
+`Python/qwen_tool_reference.py`):
+
+| Check | Result |
+|---|---|
+| Rendered tool prompt ids (vs `qwen_tool_prompt_ids.bin`, 206) | MATCH |
+| Rendered final prompt ids (vs `qwen_tool_final_prompt_ids.bin`, 258) | MATCH |
+| Generated tool-call turn ids (vs Py, 19) | 19/19 |
+| Final-position logits | maxAbs 0.399, cosine 0.999771, envelope YES |
+
+The tool-call turn's greedy decode is **byte-exact** against PyTorch; the final
+answer turn stays semantically correct ("partly cloudy", 18°C, northwest —
+verified against the tool observation) though its greedy path can diverge at a
+near-tie (25 vs Py's 23 tokens; documented tolerance, same tie-flip mechanism
+as SmolLM).
+
+#### Core library improvements (gaps found & filled by the 6th model)
+
+- **Additive `src/Nivara` change — biased Q/K/V projections (#384)**: Qwen's
+  attention projects **have bias** (`q_proj.bias` etc.), unlike SmolLM's.
+  `LlamaCausalAttention<T>` gained a `qkvBias` ctor flag (default `false` —
+  SmolLM semantics unchanged); `QProj/KProj/VProj` are built
+  `bias: qkvBias`, `OProj` stays unbiased. Issue #384 tracks the gap.
+
+**Sample-scoped additions** (`samples/Nivara.Samples` / `Program.cs`):
+- **Qwen-style `Split`-regex pretokenizer + added-token merge in
+  `Gpt2BpeTokenizer`**: when `tokenizer.json` declares a `Split` pretokenizer,
+  its regex is applied to the RAW normalized text first and each chunk is
+  byte-mapped after (matches HF `Split` + `ByteLevel(use_regex:false)`);
+  tokenizer.json `added_tokens` (151643/151644/151645/151657/151658) are
+  merged into the vocab and id-to-token map. (This same path fixes a
+  renderer/byte-parity bug found during acceptance: the hand-rolled tool JSON
+  opened 4 objects but closed only 3, so the prompt tokenized 205 vs the
+  fixture's 206 — fixed to `}}}`.)
+- **`SafeTensorsLoader.ReadUInt16` + SIMD `WidenBf16ToF32`**: the default
+  load reads the BF16-on-disk weights as raw `ushort` and widens with
+  vectorized `TensorPrimitives` — the natural read for a BF16 checkpoint
+  (~2.2 s for the 989 MB file on this machine in Release).
+- **`LlamaLoader` qkvBias auto-detect**: presence of
+  `model.layers.0.self_attn.q_proj.bias` flips the attention to biased
+  projections (no manual flag).
+
+**"Already generalized"** (reused from the SmolLM work, zero new core code):
+`RotaryEmbedding<T>` `rotate_half` RoPE (only `theta` differs: 1e6), GQA
+14↔2 KV-repeat (`GqaRepeatKV`), `RMSNorm<T>`, SiLU gated FFN, tied LM head,
+`LlamaForCausalLM<T>`/`LlamaLoader`. **Out of scope**: fp16/bf16 compute for
+qwen (rejected with a clear error), promoting `ReadUInt16`/the Split-regex
+tokenizer into `src/Nivara`, GGUF loading (Phase 5).
+
+#### Results / benchmarks
+
+| Run | Date | Result |
+|---|---|---|
+| `qwen tools` (default ushort load) | 2026-09-06 | tool-call turn: 19 tok, 173,900 ms (~9,153 ms/tok cached); final turn: 25 tok, 227,800 ms; fixture ids MATCH (206/258), 19/19 generated ids (Release) |
+| `qwen benchmark` | 2026-09-06 | KV cache median 189,150 ms vs full re-forward 204,385 ms (19 tok) → 1.1× (Debug build; Release run failed mid-decode — #386 will provide fresh numbers) |
+| Load parse (ushort, default) | 2026-09-06 | 2,159 ms (Release; 290 tensors, 989 MB BF16-on-disk) |
+
+**Why the KV speedup is small here**: the tool prompt is 206 tokens and the
+generated turn just 19, so the cache-free path re-feeds only a slightly
+longer sequence each step — the O(L²) growth hasn't compounded. The real KV
+win appears at long contexts (hundreds of generated tokens); the per-token
+cached decode and the same-turn full re-forward are quoted in the table below.
+
+**Decode throughput** — measured on this machine (Intel Core Ultra 7 255H, 16
+logical processors, .NET 11.0.0, Release build):
+
+| Load precision | Load parse | KV-cached per-token | Full re-forward per-token | Speedup |
+|---|---|---|---|---|
+| ushort (default; BF16→F32 SIMD widen) | 2,159 ms | 9,153 ms/tok (Release) | 10,757 ms/tok (Debug) | — (see note) |
+
+<sup>Load parse and the KV-cached per-token figure are Release-build (2026-09-06,
+`qwen tools`): tool-call turn 19 tok / 173.9 s. The full re-forward per-token and the
+1.1× KV speedup are Debug-era (benchmark chain). The Release benchmark run failed
+mid-decode and will be refreshed via the dedicated-machine cycle (issue #386), when
+both decode paths are re-measured in the same Release build for a clean speedup ratio.
+The f32 opt-in route is not re-timed (per the default-ushort decision) — it widens
+the same BF16-on-disk weights to identical F32 tensors, so decode timing and numerics
+are shared; only the start-up read differs.</sup>
+
+**Distill eval** (`qwen distill --teacher-examples 3`, 2026-09-06, Release
+build; accuracy over the 8 shared SST-2 eval sentences, teacher labels via
+the cached `qwen_distill_labels.json`):
+
+| Model | Accuracy |
+|---|---|
+| Teacher (Qwen2.5-0.5B-Instruct, `classify_sentiment` tool) | 4/8 (50%) |
+| Student (`SentimentMLP`, 3 teacher-labeled train rows) | 4/8 (50%) |
+| Linear baseline (BOW 4096→2) | 4/8 (50%) |
+| DistilBERT SST-2 (dedicated fine-tuned classifier) | 8/8 (100%) |
+
+<sup>`--teacher-examples 12` labels the full 10-row train set; this README used 3
+per a timing decision (each teacher classification ≈ 178–206 s on this machine,
+the first ~25 min once, then cached/resumable). The honest read: the 0.5B
+teacher's tool call defaults to "positive" on SST-2's subtle negatives (4/8 —
+the same as always-positive), so this 3-row student mirrors the teacher's bias
+and ties the linear baseline. The point is the *pipeline*: teacher → cache →
+student training inside `GradientUtils.Grad()` → eval table. A larger teacher or
+a balanced tool prompt would raise the bar; the tiny DistilBERT fine-tuned on
+exactly this task remains the accuracy reference (8/8).</sup>
+
 ### Weight loading
 
 Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor names to Nivara module parameters. No reflection or generic deserialization — explicit, type-safe loading with full compile-time checking.
@@ -352,6 +518,7 @@ Each model defines a static `LoadWeights()` factory that maps HuggingFace tensor
 - **DistilBERT**: 105 tensors mapped via `DistilBertLoader.LoadEncoderWeights` from `distilbert.embeddings.*` and `distilbert.transformer.layer.{0-5}.*` keys
 - **DistilBERT SST-2**: 104 tensors — 102 encoder tensors via `DistilBertLoader.LoadEncoderWeights` + `pre_classifier.{weight,bias}` and `classifier.{weight,bias}` loaded via `DistilBertForSequenceClassification<T>.LoadWeights`
 - **SmolLM-135M**: 272 tensors (all BF16 on disk) via `LlamaLoader.Load<TModel,TWeight>` + `LlamaConfig.FromJson` — maps `model.embed_tokens.weight` (reused for the tied LM head), `model.layers.N.*` (input_layernorm, self_attn.{q,k,v,o}_proj, post_attention_layernorm, mlp.{gate,up,down}_proj), and `model.norm.weight`, with RMSNorm/attention/MLP weights bound via `StateDictLoader.LoadRMSNorm`/`LoadLinear`
+- **Qwen2.5-0.5B-Instruct**: 290 tensors (BF16 on disk, read raw via `ReadUInt16` + widened to F32) via the same `LlamaLoader` route, plus the biased attention arms — `model.layers.N.self_attn.{q,k,v}_proj.bias` (auto-detected from `model.layers.0.self_attn.q_proj.bias`), RoPE `theta=1_000_000`, GQA 14↔2
 
 ## Narrow-precision inference (BFloat16 / Half)
 
@@ -591,6 +758,16 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `samples/data/compare_smollm_logits_py.bin` | PyTorch reference final-position logits (generated by `Python/smollm_generate_reference.py`) |
 | `samples/data/compare_input.bin` | Shared `[1,3,224,224]` input for compare modes (generated by `Python/generate_input.py`) |
 | `samples/data/images/` | Synthetic test images at various resolutions (created by `Python/create_images.py`) |
+| `samples/data/qwen2.5-0.5b-instruct/model.safetensors` | Qwen2.5-0.5B-Instruct weights (~989 MB, 290 tensors, BF16 on disk) |
+| `samples/data/qwen2.5-0.5b-instruct/config.json` | Qwen2.5 config (`hidden=896`, 24 layers, GQA 14/2, `theta=1e6`, max pos 32768) |
+| `samples/data/qwen2.5-0.5b-instruct/tokenizer.json` | Qwen tokenizer (GPT-2 BPE + `Split` regex pretokenizer + added tokens) |
+| `samples/data/qwen2.5-0.5b-instruct/vocab.json`, `merges.txt` | Qwen BPE vocabulary / merges (151,936-token vocab) |
+| `samples/data/qwen2.5-0.5b-instruct/qwen_tool_prompt.txt`, `qwen_tool_prompt_ids.bin` | Tool-prompt fixture (869 chars → 206 ids; generated by `Python/qwen_tool_reference.py`) |
+| `samples/data/qwen2.5-0.5b-instruct/qwen_tool_final_prompt.txt`, `qwen_tool_final_prompt_ids.bin` | Final-prompt fixture (258 ids) |
+| `samples/data/qwen2.5-0.5b-instruct/qwen_tool_ids_py.bin` | PyTorch generated tool-call turn ids (42 = 19 tool + 23 final) |
+| `samples/data/qwen2.5-0.5b-instruct/qwen_tool_logits_py.bin` | PyTorch final-position logits reference |
+| `samples/data/qwen2.5-0.5b-instruct/qwen_distill_labels.json` | Resumable teacher-label cache (runtime-generated; gitignored model dir) |
+| `samples/data/qwen-distill/*.bin` | Torch-parity fixtures for the student MLP (committed, 9 files, ~2.16 MB; generated by `Python/qwen_distill_reference.py`) |
 
 ## Nivara capabilities exercised
 
@@ -653,6 +830,20 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | Greedy generation (inference-default) | 32-token decode, no `GradientUtils.Grad()` scope |
 | `smollm ab` A/B + `smollm benchmark` | Scalar-vs-widen comparison; median-of-3 generation timing |
 
+### Qwen2.5-0.5B-Instruct (causal LM / function calling / distillation)
+
+| Capability | Where exercised |
+|---|---|
+| `LlamaCausalAttention<T>` `qkvBias` (biased Q/K/V) | 24 biased-attention layers (14 Q / 2 KV heads, GQA) |
+| `LlamaKVCache<float>` + `ForwardCached` | Per-token cached decode (each new token runs only its position) |
+| `LlamaForCausalLM<T>` greedy decode (inference-default) | Tool-call turn (19 tok) + answer turn, no `GradientUtils.Grad()` scope |
+| Function-calling loop (`QwenToolParser` + `<tool_call>`/`<tool_response>`) | `getWeather` → tool result fed back → final answer |
+| `Gpt2BpeTokenizer` `Split`-regex pretokenizer + added tokens | Qwen tokenizer path (byte-verified against the HF fixture, 206/258 ids) |
+| `SafeTensorsLoader.ReadUInt16` + SIMD `WidenBf16ToF32` | Default ushort load (BF16-on-disk → F32, ~2.2 s Release) |
+| Teacher distillation inside `GradientUtils.Grad()` | `SentimentMLP` 200-epoch training + linear baseline vs DistilBERT SST-2 eval table |
+| FNV-1a word+bigram feature hashing (4096-dim BOW) | Student/linear input features from raw sentences |
+| Resumable label cache + `--force` | `qwen_distill_labels.json` merge/recompute |
+
 ## Release Benchmark
 
 Run this during release prep (step 5 of `RELEASING.md`). Requires Python, PyTorch,
@@ -671,6 +862,7 @@ dotnet run --project samples/NivaraInference -c Release -- distilbert_sst benchm
 dotnet run --project samples/NivaraInference -c Release -- smollm benchmark                     # F32
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 benchmark   # native BF16 (widen)
 dotnet run --project samples/NivaraInference -c Release -- smollm --precision bf16 ab          # A/B scalar vs widen
+dotnet run --project samples/NivaraInference -c Release -- qwen benchmark                      # KV-cached vs full re-forward (median-of-3)
 
 # PyTorch (Python) — run immediately after on the same machine
 cd samples/NivaraInference/Python

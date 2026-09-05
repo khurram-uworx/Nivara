@@ -46,12 +46,16 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// <param name="numKeyValueHeads">Number of key/value heads (must divide numHeads)</param>
     /// <param name="maxPositionEmbeddings">Maximum position for RoPE tables</param>
     /// <param name="ropeTheta">RoPE inverse-frequency base</param>
+    /// <param name="qkvBias">Whether the query/key/value projections carry a bias vector
+    /// (Qwen2-style models do; canonical Llama does not). Backlog #384: public-docs coverage
+    /// for this option.</param>
     public LlamaCausalAttention(
         int hiddenSize,
         int numHeads,
         int numKeyValueHeads,
         int maxPositionEmbeddings = 2048,
-        float ropeTheta = 10000f)
+        float ropeTheta = 10000f,
+        bool qkvBias = false)
     {
         if (hiddenSize <= 0) throw new ArgumentOutOfRangeException(nameof(hiddenSize));
         if (numHeads <= 0) throw new ArgumentOutOfRangeException(nameof(numHeads));
@@ -67,9 +71,9 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         headDim = hiddenSize / numHeads;
         attnScale = T.CreateChecked(1.0 / Math.Sqrt(headDim));
 
-        QProj = new Linear<T>(hiddenSize, numHeads * headDim, bias: false);
-        KProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: false);
-        VProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: false);
+        QProj = new Linear<T>(hiddenSize, numHeads * headDim, bias: qkvBias);
+        KProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
+        VProj = new Linear<T>(hiddenSize, numKeyValueHeads * headDim, bias: qkvBias);
         OProj = new Linear<T>(hiddenSize, hiddenSize, bias: false);
         rotary = new RotaryEmbedding<T>(headDim, maxPositionEmbeddings, ropeTheta);
 

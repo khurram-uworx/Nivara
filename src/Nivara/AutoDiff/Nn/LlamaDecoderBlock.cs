@@ -39,6 +39,8 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// <param name="rmsNormEps">RMS normalization stability term</param>
     /// <param name="maxPositionEmbeddings">Maximum position for RoPE tables</param>
     /// <param name="ropeTheta">RoPE inverse-frequency base</param>
+    /// <param name="qkvBias">Whether the self-attention query/key/value projections carry a bias
+    /// (Qwen2-style models; backlog #384).</param>
     public LlamaDecoderBlock(
         int hiddenSize,
         int numHeads,
@@ -46,7 +48,8 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         int intermediateSize,
         float rmsNormEps = 1e-5f,
         int maxPositionEmbeddings = 2048,
-        float ropeTheta = 10000f)
+        float ropeTheta = 10000f,
+        bool qkvBias = false)
     {
         if (hiddenSize <= 0) throw new ArgumentOutOfRangeException(nameof(hiddenSize));
         if (intermediateSize <= 0) throw new ArgumentOutOfRangeException(nameof(intermediateSize));
@@ -54,7 +57,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         this.hiddenSize = hiddenSize;
 
         InputNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
-        Attention = new LlamaCausalAttention<T>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta);
+        Attention = new LlamaCausalAttention<T>(hiddenSize, numHeads, numKeyValueHeads, maxPositionEmbeddings, ropeTheta, qkvBias);
         PostNorm = new RMSNorm<T>(hiddenSize, rmsNormEps);
         GateProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
         UpProj = new Linear<T>(hiddenSize, intermediateSize, bias: false);
