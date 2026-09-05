@@ -183,6 +183,37 @@ downloaded checkpoint produced (greedy, `max_new_tokens=160`):
    `Gpt2BpeTokenizerTests`). This validates every building block end-to-end before
    wiring.
 
+### Phase 2.5 — BF16→ushort read path + SIMD widening + Qwen benchmark
+
+New loader gap surfaced while loading Qwen (988 MB BF16, ~2× SmolLM-135M). The
+existing `SafeTensorsLoader` widens BF16→F32 element-by-element
+(`ConvertBF16<T>` scalar loop over raw `ushort` patterns). Two improvements:
+
+1. **`ReadUInt16` read path (BF16→ushort).** The raw 16-bit BF16 patterns ARE the
+   target `ushort` values — reading them as `ushort[]` (reinterpret, no widening)
+   halves the load footprint vs `Read<float>` (~1 GB vs ~2 GB for Qwen) and keeps
+   the lossless source for any later widening. New public `ReadUInt16`
+   overload(s) on `SafeTensorsLoader` that parse the safetensors header and emit
+   `(ushort[] Data, int[] Shape)`; rejects non-16-bit dtypes (F32/I32/I64/F16)
+   with a clear `NotSupportedException` (BF16-only keeps `WidenBf16ToF32` honest).
+2. **SIMD `WidenBf16ToF32` kernel (`Vector<ushort>`).** `Vector<ushort>` is
+   hardware-accelerated and is the natural lane type for BF16 patterns. A
+   `Vector.Widen(ushort→uint)` + `<<16` + bit-reinterpret chain widens a
+   `Vector<ushort>` into two `Vector<float>`s in constant time, with a scalar
+   tail; public helper on the loader, and `ConvertBF16<float>` routes through it
+   so the existing F32 read path is SIMD for free.
+3. **Qwen as the stress case + benchmark.** Qwen's 988 MB file is the largest
+   checkpoint the loader handles; also motivates the fun part — measure load
+   time / peak memory / decode **tok/s** for (a) current `Read<float>` model vs
+   (b) `ReadUInt16` + SIMD-widened model (identical F32 inference numerics, so
+   the gap is load cost + memory, expected to favor ushort). Benchmark harness
+   in `tests/Nivara.Tests` or the Qwen sample, gated on files-absent skip.
+   Torch-parity tests already pin numerics; the benchmark only adds timing.
+
+Verification: kernel test property-matches `WidenBf16ToF32` against the scalar
+widening for every BF16 pattern (all 65,536) plus tail-length cases; `ReadUInt16`
+on the real Qwen file returns the same tensor names/shapes with half the bytes.
+
 ### Phase 3 — Library gaps / improvements (separate section; Torch-checked)
 
 1. **Shared generation core** (corrected, not copied from branch):
@@ -211,6 +242,43 @@ downloaded checkpoint produced (greedy, `max_new_tokens=160`):
 - `docs/research/QWEN-TOOL-CALLING.md` — ground-truth findings (real format, the
   vocab-size subtlety, what's reusable from Phase B, what was fixed, why).
 - Update `docs/TODO.md` and `docs/BFLOAT16.md`/`README` as needed.
+
+### Phase 5 (LATER, not blocking #382 acceptance) — GGUF via LlamaSharp in NivaraChat
+
+Precedent/decision (human-confirmed): the Qwen GGUF quantizations are **read
+through LlamaSharp** (the .NET binding for llama.cpp) instead of extending
+`SafeTensorsLoader`. Do **not** write a native GGUF parser in this repo. This
+phase is planned here and implemented after the #382 safetensors pipeline lands.
+
+1. **Dependency placement.** LlamaSharp is a third-party package → it belongs in
+   a sample/extension project, never in core `src/Nivara`. `samples/NivaraChat`
+   currently has no third-party deps; either add one `LlamaSharp`/`LlamaSharp.Backend`
+   package ref there (keeps core clean) or move the GGUF path into
+   `Nivara.Extensions` if other samples need it. Confirm runtime native payload
+   (`llama.dll` etc. via `LlamaSharp.Backend`) works on this Windows box.
+2. **Model files (gitignored).** Download from `Qwen/Qwen2.5-0.5B-Instruct-GGUF`
+   into `samples/data/qwen2.5-0.5b-instruct-gguf/` (the dir is added to
+   `.gitignore` like the safetensors dir). Variants (repo verified 2026-09):
+   - `qwen2.5-0.5b-instruct-fp16.gguf` (~1.3 GB) — closest numeric match to the
+     BF16-on-disk safetensors checkpoint; best for parity cross-checks.
+   - `qwen2.5-0.5b-instruct-q4_k_m.gguf` (~360 MB) — practical demo quant.
+   - Optionally `q8_0` / `q6_k` for the tok/s ladder.
+3. **Wiring.** New `--qwen` backend option (e.g. `--qwen gguf|safetensors`,
+   default safetensors) reusing the Phase 3 `QwenChatTemplate` / tool-loop /
+   `--qwen tools-weather` gateway. `--smollm chat|plain` stays untouched.
+   LlamaSharp exposes its own tokenizer (GGUF vocab) and KV cache; the chat
+   template renderer(s) from Phase 3 must remain shared/byte-identical.
+4. **Torch/parity note.** GGUF fp16 ≈ safetensors BF16 numerically; reuse the
+   Phase 2 relative-tolerance logits diff as a smoke check. Do not re-derive
+   ground truth from scratch — `qwen_tool_*` fixtures are the oracle.
+5. **The fun comparison (from Phase 2.5).** Benchmark decode tok/s and load/peak
+   memory across: safetensors F32 → safetensors `ReadUInt16`+SIMD-widen → GGUF
+   fp16 → GGUF q4_k_m (all via LlamaSharp). Output alongside the Phase 2.5
+   harness, gated on files-absent skip.
+
+Phase 5 exit: `--qwen gguf --text "What's the weather in Paris?"` closes the
+tool loop with a clean final NL answer through the LlamaSharp-loaded q4_k_m
+artifact.
 
 ---
 

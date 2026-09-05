@@ -362,6 +362,7 @@ samples/data/distilbert_sst/
 samples/data/smollm-135m/
 samples/data/smollm-fn-135m/
 samples/data/qwen2.5-0.5b-instruct/
+samples/data/qwen2.5-0.5b-instruct-gguf/
 
 # Benchmark output
 samples/NivaraFineTuning/benchmark_results.txt
