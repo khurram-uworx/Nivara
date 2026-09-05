@@ -7,6 +7,11 @@ tiny sentiment classifier (`distill`) — the "cool" ML-heavy showcase. The READ
 also documents, per model, the **library enhancements / gap fixes** this branch
 (and #382) contributed.
 
+Two user-mandated test conventions apply to everything this work touches:
+(1) every new neural-network construct is pinned against PyTorch the way the existing
+building blocks are, and (2) every fixture/model-gated test silently `Assert.Ignore`s
+when its files are absent — the `Tokenizer_EncodeFinalPrompt_MatchesTorchIds` pattern. See §4–§5.
+
 ## GitHub issues log
 
 - [ ] #NNN — record issue numbers here as they are created (create via
@@ -114,6 +119,43 @@ no `qwen` mode, and the README does not yet record the library work that made th
   output), and honest notes (first teacher pass ~20–30 min once, cached after;
   `fp16` untested).
 
+### 4. Torch-parity for new neural-network constructs (user-mandated, step 1)
+- **General rule:** any new NN construct this work adds must be pinned against PyTorch
+  the same way existing building blocks are (NivaraTorch block-parity suite + committed
+  `samples/data/torch-comparison/` fixtures).
+- **Already covered on the branch:** the only additive `src/Nivara` change — `qkvBias` on
+  `LlamaCausalAttention<T>` / `LlamaDecoderBlock<T>` — is Torch-verified by
+  `QwenInstructParityTests` (byte-exact prompt ids, tool turn 19/19) plus the tool-loop
+  logits diff (`qwen_tool_logits_py.bin`, 3% rel + 0.5 abs). The student's building blocks
+  (`Linear`, `ReLU`, `CrossEntropyLoss`, `LogSoftmax`) each have committed parity fixtures
+  (`linear_128_64_*`, `relu_1d_*`, `cross_entropy_*`).
+- **New for the composed `SentimentMLP` (Linear→ReLU→Linear→CrossEntropyLoss):** pin the
+  COMPOSITION end-to-end against a fresh Torch fixture, not just the kernels:
+  - New committed reference script `samples/NivaraInference/Python/qwen_distill_reference.py`
+    (**user-approved relaxation** of the earlier "no new Python files" scope — the branch's
+    `qwen_tool_reference.py` cannot generate this). It writes a small **model-independent**
+    fixture set: fixed seeded `Linear(4096→64)` + `Linear(64→2)` weights, input features
+    `[B×4096]`, int targets, gold forward logits, gold mean-CE loss, and gold first-layer
+    weight gradient after one `Backward` — to committed `samples/data/qwen-distill/*.bin`
+    (same layout as the committed `torch-comparison/` fixtures; CI-runnable without the
+    989 MB Qwen checkpoint).
+  - New NUnit test `tests/Nivara.Tests/Qwen/QwenDistillStudentParityTests.cs`: builds the
+    identical stack inline from `Nivara.AutoDiff.Nn` (the tests project references Nivara +
+    Nivara.Samples, not the NivaraInference exe), injects the fixture weights, asserts forward
+    logits + the one-backward weight gradient match Torch (tolerance ~1e-4); per §5 it
+    `Assert.Ignore`s when the fixture files are absent.
+
+### 5. Fixture/file-gated tests — silent-skip convention (user-mandated, step 2)
+- Every test written in this work must silently `Assert.Ignore` when the model files / fixtures
+  it needs are absent, mirroring the existing pattern the user cited:
+  `QwenInstructParityTests.Tokenizer_EncodeFinalPrompt_MatchesTorchIds` (gates in the
+  `Tokenizer`/`Model` property getters + `ReadInt32`/`ReadFloat32` helpers, lines 25–118),
+  `Gpt2BpeTokenizerTests` (lines 30–31: "SmolLM tokenizer files absent; skipping…"), and
+  `QwenChatTemplateTests` / `QwenToolsWeatherLoopTests` (lines 33–51).
+- Applies to: the new student-parity test (fixture dir absent → Ignore) and the sample's
+  `qwen tools` fixture diff (fixtures absent → skip the diff, keep the end-to-end run).
+- Existing Qwen tests already follow this convention; no changes needed there.
+
 ## Verification
 
 - `dotnet build Nivara.slnx` (0 warnings), then **ask** before `dotnet test`.
@@ -124,31 +166,42 @@ no `qwen` mode, and the README does not yet record the library work that made th
   - `qwen distill --teacher-examples 12` → teacher labels cached, student trains,
     eval table printed with real numbers for the README.
   - `--precision ushort` vs `f32` → record load timings for the README bench row.
+- Torch-parity (student): run `python samples/NivaraInference/Python/qwen_distill_reference.py`
+  (Torch env) to generate `samples/data/qwen-distill/*.bin`, then the new
+  `QwenDistillStudentParityTests` pass (forward logits + backward grad ≈ Torch, ~1e-4). When the
+  fixture files are absent the test silently `Assert.Ignore`s (CI/clean).
 - README numbers come from the actual runs on this machine.
 
 ## Planned commits
 
 1. `docs: plan Qwen inference showcase + distillation in TODO.md` (this file)
 2. `samples: add qwen tools + distill mode to NivaraInference (tool loop, KV cache, teacher distillation)`
-3. `docs(samples): document Qwen2.5 showcase and library gaps in NivaraInference README`
-4. `docs: remove completed plan (iterative-work G2 cleared)` — after the two-gate review
-5. Offer push + stacked PR (base `khurram/qwen`), human-confirmed.
+3. `tests: pin composed student MLP against Torch (qwen_distill_reference.py + parity fixtures + test)`
+4. `docs(samples): document Qwen2.5 showcase and library gaps in NivaraInference README`
+5. `docs: remove completed plan (iterative-work G2 cleared)` — after the two-gate review
+6. Offer push + stacked PR (base `khurram/qwen`), human-confirmed.
 
 Then `gh pr create` a stacked PR; do not push without confirmation.
 
 ## Blast radius
 
 - **Files touched:** `samples/NivaraInference/Qwen.cs` (new), `samples/NivaraInference/Program.cs`,
-  `samples/NivaraInference/README.md`, `samples/data/qwen_distill_labels.json` (gitignored cache artifact).
+  `samples/NivaraInference/README.md`,
+  `samples/NivaraInference/Python/qwen_distill_reference.py` (new),
+  `tests/Nivara.Tests/Qwen/QwenDistillStudentParityTests.cs` (new),
+  `samples/data/qwen-distill/*.bin` (new committed small fixtures),
+  `samples/data/qwen_distill_labels.json` (gitignored cache artifact).
 - **No `src/Nivara` and no `samples/Nivara.Samples` changes** — everything needed already exists
   on the branch (tokenizer ctor, loader, qkvBias, KV cache). No new project references
   (Nivara + Nivara.Samples already referenced).
 - **Downstream callers:** none — NivaraInference is a leaf sample. Existing modes
   (`smollm`, `distilbert_sst`, …) are untouched; the shared tensor-load block is only
   widened for the `ushort` precision value.
-- **Tests:** no test changes planned; the committed Nivara.Tests Qwen suites cover the
-  underlying behavior (template, parser, loader, tool loop). The sample re-diffs the same
-  fixtures.
+- **Tests:** ONE new test class (`QwenDistillStudentParityTests`) + one committed reference
+  script, both isolated: the parity test is model-independent (synthetic fixtures) and
+  silently `Assert.Ignore`s when its fixtures are absent. The existing Qwen tests already
+  exercise the underlying behavior (template, parser, loader, tool loop) and are untouched;
+  the sample re-diffs the same fixtures.
 - **Runtime risk to flag:** the distill teacher pass is compute-heavy on CPU
   (~1–2 min/row). Mitigated by the resumable incremental label cache and
   `--teacher-examples`; documented in the README.
