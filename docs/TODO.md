@@ -147,9 +147,10 @@ that Phase B skipped. **Gated on human confirmation before Phase 2.**
    - Reuse Phase B *ideas*: `CanonicalToolName` name normalization; capped
      `FunctionInvokingChatClient` loop; tolerant parser fallback.
 2. **Wiring:** a distinct `--qwen` entry point with a `tools-weather` sub-mode
-   (deterministic `GetWeather` `AIFunction`), `MaximumIterationsPerRequest` cap,
-   and a verification that the loop **closes with a clean final answer**. Keep
-   existing `--smollm chat|plain` untouched.
+   (deterministic `GetWeather` `AIFunction`), `MaximumIterationsPerRequest = 3`
+   (Qwen should close in 2: tool call → final answer), and a verification that the
+   loop **closes with a clean final answer**. Keep existing `--smollm chat|plain`
+   untouched. *(Decision confirmed with human: `--qwen` gateway, cap 3.)*
 3. **Tests:** tool-format render/parse round-trip, name normalization, loop
    termination (not blank), tokenizer parity on Qwen files. Follow the
    "skip when model files absent" pattern so CI stays green.
