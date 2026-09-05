@@ -174,6 +174,7 @@ public class SafeTensorsLoaderBf16Tests
             offset = end;
         }
         builder.Append(",\"__metadata__\":{}");
+        builder.Append('}');
 
         var headerBytes = Encoding.UTF8.GetBytes(builder.ToString());
         var file = new byte[8 + headerBytes.Length + offset];
