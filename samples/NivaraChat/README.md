@@ -78,6 +78,13 @@ dotnet run --project samples/NivaraChat -- --smollm plain --text "The capital of
 
 # Interactive multi-turn chat, token-streamed (full options: --smollm --help)
 dotnet run --project samples/NivaraChat -- --smollm chat
+
+# Qwen — native function calling with Qwen2.5-0.5B-Instruct:
+# Model emits <tool_call>, GetWeather runs in-process, result feeds back, clean final answer
+dotnet run --project samples/NivaraChat -- --qwen tools-weather --text "What's the weather in Paris?"
+
+# Plain transcript streaming (full options: --qwen --help)
+dotnet run --project samples/NivaraChat -- --qwen plain --text "The capital of France is"
 ```
 
 ## CLI options
@@ -99,6 +106,7 @@ dotnet run --project samples/NivaraChat -- --smollm chat
 | `--intent` | — | Mode: intent routing — classify input and route to specialist executor |
 | `--tinyshakespeare` | — | Mode: train/serve a batched TinyShakespeare transformer as `IChatClient` (see `--tinyshakespeare --help` for its options) |
 | `--smollm` | — | Mode: serve the pretrained SmolLM-135M-Instruct causal LM as `IChatClient` (`chat`/`plain` sub-modes; see `--smollm --help`) |
+| `--qwen` | — | Mode: native function calling with Qwen2.5-0.5B-Instruct (`tools-weather`/`chat`/`plain` sub-modes; see `--qwen --help`) |
 | `--text <message>` | — | Single-shot: run pipeline on one message and exit |
 | `--ollama [url]` | — | Flag: enable Ollama LLM agent (optional URL, default: `http://localhost:11434`) |
 | `--model <name>` | `llama3.2` | Ollama model name |
@@ -358,6 +366,40 @@ This is **Stage A** of the SmolLM two-demo plan: plain causal-LM chat only. Tool
 
 Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>`, `Gpt2BpeTokenizer` (`Encode`/`Decode`/`TokenId`), `SmolLMChatClient<T>` (`IChatClient`, temperature/top-p sampling, KV-cached generation), `SmollmChatTemplate` (Hermes ChatML rendering).
 
+### Qwen (`--qwen`)
+
+Native **function calling** with the pretrained **Qwen2.5-0.5B-Instruct** checkpoint, still fully in-process on Nivara's zero-dependency tensor engine (no LLM server, no Python). The conversation is rendered **byte-identically** to HuggingFace's `apply_chat_template` for this checkpoint (`QwenChatTemplate`, pinned against Torch ground-truth fixtures), and the reply is decoded autoregressively with a KV cache. Three sub-modes:
+
+```
+config.json + model.safetensors + vocab.json + merges.txt + tokenizer.json
+    → SafeTensorsLoader.Read → LlamaLoader.Load → LlamaForCausalLM
+    → QwenChatClient : IChatClient (greedy/sampled, token-streamed, KV-cached, <tool_call> parsing)
+    → FunctionInvokingChatClient (tools-weather loop, cap 3) or --qwen chat/plain
+```
+
+- `--qwen tools-weather --text "What's the weather in Paris?"` — the native tool-calling demo: the model emits `<tool_call>\n{"name": "getWeather", "arguments": {"city": "Paris"}}\n</tool_call>`, the `GetWeather` `AIFunction` runs, the result feeds back as `<tool_response>` inside a `user` turn, and the model closes with a clean natural-language answer (loop capped at 3 iterations so a model that never answers still exits cleanly). Interactive REPL when `--text` is omitted.
+- `--qwen chat` / `--qwen plain` — interactive multi-turn REPL / single-shot plain-text reply, token-streamed.
+
+Options after `--qwen`: `tools-weather|chat|plain` sub-mode, `--model-dir <path>` (default `samples/data/qwen2.5-0.5b-instruct`), `--precision f32|bf16` (default `f32`; bf16 keeps BF16 weights and widens via the SIMD `WidenBf16ToF32` path), `--max-new-tokens <n>` (default 128), `--text <string>`, `--temperature <t>` (0 = greedy, >0 = sampling), `--top-p <p>` (nucleus cutoff, 0–1, default 1), `--seed <n>` (RNG seed), `--kv-cache` / `--no-kv-cache` (default: cached). Run `--qwen --help` for the full list.
+
+Model files must be present under `samples/data/qwen2.5-0.5b-instruct`:
+
+```
+hf download Qwen/Qwen2.5-0.5B-Instruct config.json model.safetensors tokenizer.json tokenizer_config.json vocab.json merges.txt generation_config.json special_tokens_map.json --local-dir samples/data/qwen2.5-0.5b-instruct
+```
+
+Tested examples:
+
+| Command | Precision | Result |
+|---------|-----------|--------|
+| `--qwen tools-weather --text "What's the weather in Paris?"` | f32 | `[assistant → getWeather(city: Paris)]` → `[tool] Partly cloudy, 18°C. …` → "The weather in Paris is partly cloudy with a temperature of 18°C. …" (loop closes inside the cap) |
+| `--qwen plain --text "The capital of France is" --max-new-tokens 24` | f32 | Streams "The capital of France is Paris." then stops on `<\|im_end\|>` |
+
+Ground truth, the format findings, the BF16 loader benchmark, and the PyTorch
+parity evidence live in `docs/research/QWEN-TOOL-CALLING.md`.
+
+Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>` / `ReadUInt16` + `WidenBf16ToF32`, `Gpt2BpeTokenizer` (Qwen Split-regex pretokenization), `QwenChatClient<T>` (`IChatClient`), `QwenChatTemplate` (byte-exact renderer), `QwenToolCallParser` (`<tool_call>` → `FunctionCallContent`), `FunctionInvokingChatClient` (MEAI tool loop), `AIFunctionFactory` (`GetWeather`).
+
 ## Agents pipeline architecture
 
 ```
@@ -494,6 +536,12 @@ NivaraChat/
 │   ├── SmollmMode.cs                  # --smollm CLI mode + interactive entry (chat/plain)
 │   ├── SmolLMChatClient.cs            # IChatClient over LlamaForCausalLM<T> (greedy/sampled, KV-cached, token-streamed)
 │   └── SmollmChatTemplate.cs          # Hermes ChatML conversation rendering
+├── Qwen/
+│   ├── QwenMode.cs                    # --qwen CLI mode (tools-weather/chat/plain), tool-loop wiring
+│   ├── QwenChatClient.cs              # IChatClient over LlamaForCausalLM<T> (<tool_call> parsing, KV-cached, token-streamed)
+│   ├── QwenChatTemplate.cs            # Byte-exact Qwen2.5 ChatML renderer (+ Jinja-tojson JSON writer)
+│   ├── QwenToolCallParser.cs          # <tool_call> → FunctionCallContent (strict + tolerant, name canonicalization)
+│   └── QwenSampleTools.cs             # GetWeather AIFunction for the tools-weather demo
 ├── NivaraChat.csproj                  # Core + Agent Framework packages
 └── README.md                          # This file
 ```

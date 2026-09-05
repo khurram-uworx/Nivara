@@ -295,6 +295,25 @@ artifact.
   loop terminates within `MaximumIterationsPerRequest`; `--smollm chat|plain`
   (SmolLM-135M) untouched and working.
 
+### Results (all phases complete)
+
+- **Phase 2/2.5 green** (17 tests): tool turn 19/19 ids byte-exact; final turn
+  semantic with the tie-flip provably a near-tie (0.0234 logits separating
+  `' high'` vs `' temperature'` at generated index 9; PyTorch BF16 resolves it
+  differently); last-row logits within 3% relative + 0.5 abs floor (worst 0.399
+  on a tail entry, argmax 151645 intact). Qwen Split-regex pretokenization
+  matches the HF reference (`48c789a`). Loader benchmark: `ReadUInt16` ~0.70 s vs
+  `Read<float>` ~1.74 s (~2.5×, half the payload), F32 numerics identical.
+- **Phase 3 complete** (`13573b0`): `QwenChatTemplate` byte-identical to the
+  Torch fixtures (tool prompt + parse→render round-trip), `QwenToolCallParser`
+  strict+tolerant, `QwenChatClient<T>` inference-default generation core,
+  `--qwen tools-weather|chat|plain` wired through `FunctionInvokingChatClient`
+  (cap 3). 11 unit tests + 1 model-gated end-to-end loop test green; CLI runs the
+  real transcript (tool call → tool result → "partly cloudy" final answer).
+  `--smollm` untouched.
+- **Phase 4 complete:** `docs/research/QWEN-TOOL-CALLING.md` + NivaraChat README
+  `--qwen` docs + `docs/BFLOAT16.md` loader note.
+
 ---
 
 ## Planned commits (one logical unit each)
