@@ -461,8 +461,8 @@ tokenizer into `src/Nivara`, GGUF loading (Phase 5).
 
 | Run | Date | Result |
 |---|---|---|
-| `qwen tools` (default ushort load) | 2026-09-06 | tool-call turn: 19 tok, 200,300 ms (~10,500 ms/tok cached); final turn: 25 tok, 251,200 ms; fixture ids MATCH (206/258), 19/19 generated ids |
-| `qwen benchmark` | 2026-09-06 | KV cache median 189,150 ms vs full re-forward 204,385 ms (19 tok) → 1.1× |
+| `qwen tools` (default ushort load) | 2026-09-06 | tool-call turn: 19 tok, 173,900 ms (~9,153 ms/tok cached); final turn: 25 tok, 227,800 ms; fixture ids MATCH (206/258), 19/19 generated ids (Release) |
+| `qwen benchmark` | 2026-09-06 | KV cache median 189,150 ms vs full re-forward 204,385 ms (19 tok) → 1.1× (Debug build; Release run failed mid-decode — #386 will provide fresh numbers) |
 | Load parse (ushort, default) | 2026-09-06 | 2,159 ms (Release; 290 tensors, 989 MB BF16-on-disk) |
 
 **Why the KV speedup is small here**: the tool prompt is 206 tokens and the
@@ -476,13 +476,16 @@ logical processors, .NET 11.0.0, Release build):
 
 | Load precision | Load parse | KV-cached per-token | Full re-forward per-token | Speedup |
 |---|---|---|---|---|
-| ushort (default; BF16→F32 SIMD widen) | 2,159 ms | 9,955 ms/tok | 10,757 ms/tok | 1.1× |
+| ushort (default; BF16→F32 SIMD widen) | 2,159 ms | 9,153 ms/tok (Release) | 10,757 ms/tok (Debug) | — (see note) |
 
-<sup>Load parse is Release-build (2026-09-06). Decode rows are the dev-machine acceptance
-measurements; refreshed Release decode readings from the dedicated-machine cycle land
-here afterwards (issue #386). The f32 opt-in route is not re-timed (per the
-default-ushort decision) — it widens the same BF16-on-disk weights to identical F32
-tensors, so decode timing and numerics are shared; only the start-up read differs.</sup>
+<sup>Load parse and the KV-cached per-token figure are Release-build (2026-09-06,
+`qwen tools`): tool-call turn 19 tok / 173.9 s. The full re-forward per-token and the
+1.1× KV speedup are Debug-era (benchmark chain). The Release benchmark run failed
+mid-decode and will be refreshed via the dedicated-machine cycle (issue #386), when
+both decode paths are re-measured in the same Release build for a clean speedup ratio.
+The f32 opt-in route is not re-timed (per the default-ushort decision) — it widens
+the same BF16-on-disk weights to identical F32 tensors, so decode timing and numerics
+are shared; only the start-up read differs.</sup>
 
 **Distill eval** (`qwen distill --teacher-examples 3`, 2026-09-06, Release
 build; accuracy over the 8 shared SST-2 eval sentences, teacher labels via
