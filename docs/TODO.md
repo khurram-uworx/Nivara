@@ -2,7 +2,7 @@
 
 ## GitHub issues log
 
-- [ ] #NNN — record issue numbers here as they are created (create via `gh issue create --repo khurram-uworx/Nivara` the moment a concern is found, never hold in memory)
+- [x] #384 — record issue numbers here as they are created (create via `gh issue create --repo khurram-uworx/Nivara` the moment a concern is found, never hold in memory)
 
 ---
 

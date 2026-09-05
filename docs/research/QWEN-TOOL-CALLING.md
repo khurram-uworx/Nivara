@@ -227,7 +227,10 @@ streaming modes with the same generation core.
 ### Phase 2 — Torch parity (`QwenInstructParityTests`, 13 tests)
 
 - The model/tokenizer load through `LlamaLoader` / `Gpt2BpeTokenizer` with zero
-  library changes (10 tensor names, `tie_word_embeddings`, q/k/v bias variant).
+  *caller* changes (10 tensor names, `tie_word_embeddings`, q/k/v bias variant).
+  The q/k/v-bias load surfaced an additive library gap — `LlamaCausalAttention` /
+  `LlamaDecoderBlock` gained an optional `qkvBias` parameter (default `false`,
+  canonical Llama unchanged; **tracked separately as [#384](https://github.com/khurram-uworx/Nivara/issues/384)**).
 - **Tool turn: 19/19 ids byte-exact** vs the Torch greedy reference — the
   structural function-call contract (`<tool_call>` … `</tool_call>`, id-exact).
 - **Final turn: semantic parity, with the tie-flip provably a near-tie.** At

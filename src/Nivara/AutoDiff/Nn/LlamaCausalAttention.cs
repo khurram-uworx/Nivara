@@ -47,7 +47,8 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     /// <param name="maxPositionEmbeddings">Maximum position for RoPE tables</param>
     /// <param name="ropeTheta">RoPE inverse-frequency base</param>
     /// <param name="qkvBias">Whether the query/key/value projections carry a bias vector
-    /// (Qwen2-style models do; canonical Llama does not)</param>
+    /// (Qwen2-style models do; canonical Llama does not). Backlog #384: public-docs coverage
+    /// for this option.</param>
     public LlamaCausalAttention(
         int hiddenSize,
         int numHeads,

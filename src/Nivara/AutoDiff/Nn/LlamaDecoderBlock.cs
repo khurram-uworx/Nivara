@@ -39,7 +39,8 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     /// <param name="rmsNormEps">RMS normalization stability term</param>
     /// <param name="maxPositionEmbeddings">Maximum position for RoPE tables</param>
     /// <param name="ropeTheta">RoPE inverse-frequency base</param>
-    /// <param name="qkvBias">Whether the self-attention query/key/value projections carry a bias</param>
+    /// <param name="qkvBias">Whether the self-attention query/key/value projections carry a bias
+    /// (Qwen2-style models; backlog #384).</param>
     public LlamaDecoderBlock(
         int hiddenSize,
         int numHeads,
