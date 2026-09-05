@@ -86,7 +86,19 @@ Authoritative sources pulled directly from the HF repo
 
 ## Proposed changes (phased; gaps plan kept separate from demo wiring)
 
-### Phase 1 — Ground truth & confidence (Python, NO C# code) — do this FIRST
+4. **Tensor layout matches `LlamaLoader` exactly**: `model.embed_tokens`,
+   `model.layers.{i}.self_attn.{q,k,v,o}_proj`, `mlp.{gate,up,down}_proj`,
+   `model.norm` — same names `StateDictLoader` already loads. `tie_word_embeddings`
+   true → single embedding reused as head (matches `LlamaForCausalLM`), no `lm_head`.
+   **V2 (verified from safetensors): Qwen2.5-0.5B is the bias variant —**
+   `q_proj.bias=(896,)`, `k_proj.bias=(128,)`, `v_proj.bias=(128,)` exist on every
+   layer (o_proj has none); `config.json` omits `use_qkv_bias` but transformers
+   auto-detects and loads with bias. C# `StateDictLoader.LoadLinear` already treats
+   `bias` as optional, so this loads — the Linears must be created with bias=true.</think>
+
+<｜DSML｜tool_calls>
+<｜DSML｜invoke name="edit">
+<｜DSML｜parameter name="newString" string="true">### Phase 1 — Ground truth & confidence (Python, NO C# code) — do this FIRST
 
 Establishes "the model works" before any implementation, exactly the de-risking
 that Phase B skipped. **Gated on human confirmation before Phase 2.**
@@ -115,6 +127,41 @@ that Phase B skipped. **Gated on human confirmation before Phase 2.**
    `<tool_response>`, and (b) **terminate with a clean final NL answer** — not
    loop, not blank. If it can't close the loop, STOP, record findings, and
    escalate (as with the shelved Biggie run) before any implementation.
+
+### Phase 1 results (gate PASSED — model closes the loop)
+
+Run `python samples/NivaraInference/Python/qwen_tool_reference.py` on the
+downloaded checkpoint produced (greedy, `max_new_tokens=160`):
+
+- **Tool-call turn = 19 tokens:** `<tool_call>\n{"name": "getWeather", "arguments":
+  {"city": "Paris"}}\n</tool_call>` — exact canonical JSON inside the tags.
+- **Tool result rendering confirmed:** the final prompt shows the result inside
+  `<tool_response>\nPartly cloudy, 18°C…</tool_response>` within a
+  `<|im_start|>user…<|im_end|>` turn (format finding #1 confirmed by observation).
+- **Final-answer turn = 23 tokens:** "The weather in Paris is partly cloudy with a
+  high of 18°C and a light breeze from the northwest." — clean final NL answer,
+  grounded in the tool result.
+- End-to-end loop = 42 generated tokens, well under the cap-3 budget.
+
+**Findings recorded (update the pre-flight facts, do not re-verify):**
+
+- **Checkpoint is BF16, not "native F32".** `model.safetensors` is 988 MB (494M
+  params × 2B), `torch_dtype: bfloat16`; the issue's "native F32 ≈ 2 GB" premise
+  is wrong for this upstream repo. Not a blocker: C# runs float32 inference and
+  `SafeTensorsLoader.Read<T>` already has a BF16→F32 arm (per AGENTS).
+- **Tokenizer enumerates 151,665 ids** (`len(tokenizer.get_vocab())`), not the
+  151,643 base vocab — added tokens are in the tokenizer map too.
+- **`<tool_response>` / `</tool_response>` are NOT added/special tokens** — they
+  tokenize as ordinary bytes: `[27, 14172, 9655, 29]` (`/API<`). Only
+  `<tool_call>` (151657) `</tool_call>` (151658) plus `151643/151644/151645` are
+  added tokens. The C# renderer writes them as plain text; only the five specials
+  need added-token handling.
+- **`q/k/v_proj` biases confirmed** on the loaded model (see V2 finding above):
+  `q_proj.bias=(896,)`, `k_proj.bias=(128,)`, `v_proj.bias=(128,)`, o_proj none.
+- Ground-truth artifacts (in the gitignored model dir, same convention as the
+  SmolLM fixtures): `qwen_tool_prompt.txt` (869 chars), `qwen_tool_prompt_ids.bin`
+  (206 ids), `qwen_tool_ids_py.bin` (42 ids), `qwen_tool_logits_py.bin`
+  (151,936 float32).
 
 ### Phase 2 — Loader / model / tokenizer verification (library-gap checks, Torch parity)
 

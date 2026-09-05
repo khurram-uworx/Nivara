@@ -98,7 +98,8 @@ def _greedy(model, tokenizer, input_ids, max_new_tokens):
         if nxt == tokenizer.eos_token_id:
             break
         gen_ids.append(nxt)
-        cur = torch.as_tensor([[nxt]], dtype=torch.long)
+        # Keep the FULL running sequence: attention must span the whole prefix.
+        cur = torch.cat([cur, torch.as_tensor([[nxt]], dtype=torch.long)], dim=1)
     return gen_ids, final_logits
 
 
@@ -117,6 +118,12 @@ def main():
     print(f"Token ids enumerable by tokenizer: {len(tokenizer.get_vocab())}")
     print(f"bos_token_id={model.config.bos_token_id} eos_token_id={model.config.eos_token_id} "
           f"pad_token_id={model.config.pad_token_id}")
+    qb = model.model.layers[0].self_attn.q_proj.bias
+    vb = model.model.layers[0].self_attn.v_proj.bias
+    kb = model.model.layers[0].self_attn.k_proj.bias
+    print(f"layer0 q_proj.bias={None if qb is None else tuple(qb.shape)} "
+          f"k_proj.bias={None if kb is None else tuple(kb.shape)} "
+          f"v_proj.bias={None if vb is None else tuple(vb.shape)}")
     _identify_specials(tokenizer)
 
     # ---- Render the FIRST assistant turn (user -> model may issue a tool call) ----
@@ -177,12 +184,16 @@ def main():
             f.write(np.asarray(arr, dtype=fmt).tobytes())
         print(f"\nWrote {path} ({len(arr)} {fmt})")
 
-    dump(os.path.join(model_dir, "qwen_tool_prompt.txt"), [tools_prompt], "S")  # text marker
+    # The exact rendered prompt, for C# A/B diffing.
+    with open(os.path.join(model_dir, "qwen_tool_prompt.txt"), "w", encoding="utf-8") as f:
+        f.write(tools_prompt)
+    print(f"\nWrote {os.path.join(model_dir, 'qwen_tool_prompt.txt')} ({len(tools_prompt)} chars)")
+
     dump(os.path.join(model_dir, "qwen_tool_prompt_ids.bin"), prompt_ids, "int32")
     dump(os.path.join(model_dir, "qwen_tool_ids_py.bin"),
          tool_turn_ids + final_turn_ids, "int32")
     dump(os.path.join(model_dir, "qwen_tool_logits_py.bin"),
-         final_logits.numpy(), "float32")
+         final_logits.float().numpy(), "float32")
 
 
 if __name__ == "__main__":
