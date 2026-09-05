@@ -156,7 +156,19 @@ no `qwen` mode, and the README does not yet record the library work that made th
   `qwen tools` fixture diff (fixtures absent → skip the diff, keep the end-to-end run).
 - Existing Qwen tests already follow this convention; no changes needed there.
 
-### 6. CI — run build + tests on every PR (user-mandated)
+### 7. Benchmark step (user-mandated) — `qwen benchmark` readings → README
+- **Why:** the README's performance story needs real numbers; the plan's verification
+  already records the `ushort`-vs-`f32` loader bench, and the KV-cache work deserves a
+  measured decode row (KV-cached vs full re-forward).
+- **Change (no code):** run `qwen benchmark` (already implemented — median-of-3 decode
+  timing, KV `ForwardCached` vs full `Forward` re-run) and the existing
+  `--precision ushort` vs `f32` load-timing comparison on this machine; capture the
+  readings into the README's benchmark/results section. No new sample flags (the
+  existing `benchmark` mode's full tool-turn runtime, ~2–4 min, is fine).
+- **Deliverable:** README "Results / benchmarks" subsection with the actual numbers,
+  labeled with the run date and hardware (this dev machine).
+
+### 8. CI — run build + tests on every PR (user-mandated)
 - **Why:** `.github/workflows/ci.yml` currently triggers `pull_request` only when the *base*
   branch is `main`. This branch's stacked PR targets `khurram/qwen` — a non-main base — so
   today CI would never run on it.
@@ -178,6 +190,9 @@ no `qwen` mode, and the README does not yet record the library work that made th
   - `qwen distill --teacher-examples 12` → teacher labels cached, student trains,
     eval table printed with real numbers for the README.
   - `--precision ushort` vs `f32` → record load timings for the README bench row.
+  - `qwen benchmark` → KV-cached vs full re-forward decode readings (median-of-3) for
+    the README benchmark row; run once at `f32` and once at `ushort` (the ushort run
+    doubles as the loader-timing comparison above).
 - Torch-parity (student): run `python samples/NivaraInference/Python/qwen_distill_reference.py`
   (Torch env) to generate `samples/data/qwen-distill/*.bin`, then the new
   `QwenDistillStudentParityTests` pass (forward logits + backward grad ≈ Torch, ~1e-4). When the
@@ -195,6 +210,7 @@ no `qwen` mode, and the README does not yet record the library work that made th
 3. `tests: pin composed student MLP against Torch (qwen_distill_reference.py + parity fixtures + test)`
 4. `ci: run build+test on every PR (drop the pull_request main-only base filter)`
 5. `docs(samples): document Qwen2.5 showcase and library gaps in NivaraInference README`
+   (incl. `qwen benchmark` readings — KV vs full forward, ushort vs f32 load)
 6. `docs: remove completed plan (iterative-work G2 cleared)` — after the two-gate review
 7. Offer push + stacked PR (base `khurram/qwen`), human-confirmed.
 
