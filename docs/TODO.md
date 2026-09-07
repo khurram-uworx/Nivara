@@ -4,6 +4,12 @@ Branch: `khurram/qwen-perf` (off `main`). Feeds the O(qwen-fast) effort; execute
 item **P0-2** from `docs/QWEN-PERF.md`. Harness-first: measure before and after so
 progress is objective (README-methodology: idle machine, `--runs 3` medians).
 
+**Target runtime: .NET 11** (preview as of today, stable within weeks; the next
+Nivara release targets it). The repo already builds/runs on .NET 11
+(`Runtime: 11.0.0`, `System.Numerics.Tensors 11.0.0-preview.7.26381.103`). All
+grounding below cites the net-11.0 moniker / mainline runtime source — the
+ArrayPool behavior verified here is the .NET 11 implementation.
+
 ## Problem
 
 Every decode matmul in the Qwen path is `aRows == 1` against weights stored
@@ -13,11 +19,24 @@ a buffer and **copies the entire weight matrix** (`b.CopyTo(bT)`,
 and `bTransposed` the copy is a pure identity copy — the weight rows *already are*
 the rows we dot against.
 
-Traffic cost per decoded token (F32): LM head `[1,896]·[151936,896]ᵀ` = a fresh
-**~544 MB allocation + copy every token** (ArrayPool's poolable max is ~1M
-elements < 136M → fresh array, GC churn), FFN ≈ **1.25 GB/token** of redundant
-copies, attention QKV+O ≈ 172 MB/token. Effectively doubles decode memory
-traffic (per-token weight reads ~2 GB → ~1 GB once the copies are gone).
+**Corrected premise (empirically measured + source-grounded, 2026-09-07):** the
+original QWEN-PERF.md claim of a "fresh ~544 MB rent per token" is **wrong** on
+the current runtime. `ArrayPool<T>.Shared` (TlsOverPerCoreLockedStacksArrayPool)
+has 27 buckets pooling arrays up to ~2³⁰ elements (verified against the
+dotnet/runtime source pinned by the MS Learn `ArrayPool<T>.Rent` page), so the
+136,134,656-float workspace is pooled (~1 GB bucket) and reused across calls —
+steady-state `B/op ≈ 0`. The actual per-token waste is **memory traffic**:
+
+- `b.CopyTo(bT)`: read 545 MB + write 545 MB (pure identity copy)
+- dot accumulation: read 545 MB (necessary work)
+- `ArrayPool.Return(bT, clearArray: true)`: `Array.Clear` of the ~1 GB bucket
+  (TensorsHelper.cs:173) — unnecessary zeroing on every return
+
+≈ 2.7 GB redundant traffic per LM-head token (measured pre-fix: **188 ms/op**,
+which matches this model). FFN adds ~3 × 17 MB matmuls with the same copy+clear
+pattern. The fix removes the copy and the clear: each weight is read **once**
+(~545 MB/token LM head + per-layer reads), a **~4-6× traffic cut** and a
+**~1 GB working-set reduction** (the giant bucket is never rented again).
 
 Root cause: the transposed-B preparation in `MultiplyCoreFloat` /
 `MultiplyCoreDouble` / `MultiplyCoreGeneric` never considers that
@@ -35,13 +54,14 @@ if (bTransposed && aRows == 1)
 {
     // Single-row mat-vec (BLAS2 GEMV): weights are row-major [out, in], so each
     // output column is a dot against one weight row. No rent/copy — the copy
-    // was a pure identity at aRows == 1 and doubled decode memory traffic
-    // (LM head alone: ~544 MB fresh rent + copy per token). Reuses the same
-    // per-type Dot as the row kernels, so numerics stay bit-identical.
-    // Deliberately TensorPrimitives-based, not hand-rolled intrinsics —
-    // learn.microsoft.com/dotnet/standard/simd: "reach for the existing
-    // higher-level APIs first". Swap target for this whole kernel remains
-    // Tensor.MatrixMultiply once the BCL ships it (dotnet/runtime#95863,
+    // was a pure identity at aRows == 1 and each return zeroed the ~1 GB pool
+    // bucket (clearArray: true), so the LM-head alone moved ~2.7 GB/token
+    // (copy read+write, dot read, bucket clear) when one 545 MB read suffices.
+    // Reuses the same per-type Dot as the row kernels, so numerics stay
+    // bit-identical. Deliberately TensorPrimitives-based, not hand-rolled
+    // intrinsics — learn.microsoft.com/dotnet/standard/simd: "reach for the
+    // existing higher-level APIs first". Swap target for this whole kernel
+    // remains Tensor.MatrixMultiply once the BCL ships it (dotnet/runtime#95863,
     // BLAS epic dotnet/runtime#93286).
     var aRow = a.Slice(0, aCols);
     Span<T> res = result.AsSpan(0, bCols);
@@ -75,10 +95,11 @@ Qwen2.5-0.5B shapes (hidden 896, vocab 151,936, FFN 4864, GQA heads 14/2):
 
 | Scenario | Shape (aRows=1, aCols @ bCols) | What it isolates |
 |---|---|---|
-| `Qwen Decode LM head [1x896 @ 151936x896]` | 896 @ 151,936 | Raw `GradKernels.MatMulTransposedB`, preallocated result. B/op pre-fix ≈ 544 MB/op → post-fix ≈ 0. **The P0-2 signal.** |
-| `Qwen Decode FFN [1x896 @ 4864x896] x3` | 896 @ 4864 | Three FFN matmuls per token |
-| `Qwen Decode QKV [1x896 @ 2688x896]` | 896 @ 2688 | Fused-width QKV projection |
-| `Qwen Decode Linear<float> [1x896 -> 2688]` | op-level | `Linear<T>.Forward` single-row — captures per-op boxing allocs (neighbors P1-#4) |
+| `Qwen LM head matmul [1x896 @ 151936x896]` | 896 @ 151,936 | Raw `GradKernels.MatMulTransposedB`, preallocated result. **The P0-2 signal is ops/s**: pre-fix ≈ 5 ops/s / ~188 ms/op (copy+clear+dot traffic), post-fix ≈ 20-28 ops/s / ~35-50 ms/op. B/op is ~0 on both sides (pool reuse) — unchanged, so it is NOT the gate. |
+| `Qwen FFN gate/up/down x3` | 896 @ 4864 (+ 4864 @ 896) | Three FFN matmuls per token |
+| `Qwen attn Q/K/V/O proj` | 896 @ 896 × 2 + 896 @ 128 × 2 | Q/K/V/O projections per layer |
+| `Qwen Linear fwd [1x896 -> 2688]` | op-level | `Linear<T>.Forward` single-row — captures per-op boxing allocs (neighbors P1-#4) |
+| `Qwen LM head fwd [1x896 -> 151936]` | op-level | End-to-end per-token LM head through the op incl. result alloc |
 
 Preallocated result buffers (fixes the alignment-noise caveat from the SIMD
 guidance); small iteration counts for the LM-head row. Follow the `Run(...)`
@@ -110,8 +131,11 @@ rejected for non-qwen models and must not affect real-weight loads.
   - Cross-path consistency: `aRows == 2` transposed run, row 0 must bit-equal
     the `aRows == 1` fast path.
   - **Alloc regression guard**: `float`, preallocated result,
-    `GC.GetAllocatedBytesForCurrentThread` delta ≈ 0 across the fast-path call
-    (locks "no 544 MB rent" against future regressions).
+    `GC.GetAllocatedBytesForCurrentThread` delta ≈ 0 across the fast-path call.
+    This is a **regression lock, not a discriminator** — steady-state B/op is
+    ~0 on both sides (pool reuse), so it only pins that the fast path never
+    introduces a per-op rent (e.g. a future change going back to a per-call
+    copy/rent would light it up).
 - `WidenPrimitivesPhase1Tests`: transposed single-row `Half`/`BFloat16` parity
   (guards the `WidenPrimitives.Dot` dispatch).
 - AutoDiff level: `MatMulTransposedB` op `aRows == 1` vs. row 0 of `aRows == 2`
@@ -122,18 +146,22 @@ rejected for non-qwen models and must not affect real-weight loads.
 - `CHANGELOG.md`: P0-2 entry.
 - `tests/Nivara.PerformanceTests/README.md`: Results table (Prev/Current/Δ%,
   B/op, gen0/op) + scenario rows.
-- `docs/QWEN-PERF.md`: append a status note marking P0-2 implemented with the
-  measured numbers (review doc stays otherwise untouched) — confirm with human
-  before editing.
+- `docs/QWEN-PERF.md`: **correct the premise** ("544 MB fresh alloc/token" →
+  pooled ~1 GB workspace, per-token copy+clear traffic ≈ 2.7 GB LM-head) **and**
+  append a status note marking P0-2 implemented with the measured numbers
+  (review doc stays otherwise untouched) — confirm with human before editing.
 
 ## Verification
 
 1. `dotnet build Nivara.slnx` after each commit (ask before running).
 2. **Baseline** (before the kernel change, harness committed):
    `dotnet run --project tests/Nivara.PerformanceTests -c Release -- --json qwen-fast-baseline.json --runs 3`
-   → expect LM-head B/op ≈ 5.4e8. Commit the JSON beside `baseline-v140.json`.
-3. **Post-fix**: `--compare qwen-fast-baseline.json --runs 3` → LM-head B/op ≈ 0,
-   ops/s up; keep the no-regression gate green (≤ 1.01× B/op, ≥ 90% ops/s).
+   → expect LM-head ≈ 5 ops/s / ~188 ms/op, B/op ≈ 0 (single-run sanity
+   already observed). Commit the JSON beside `baseline-v140.json`.
+3. **Post-fix**: `--compare qwen-fast-baseline.json --runs 3` → LM-head ops/s
+   ≈ 20-28 (ns/op ~35-50 ms), all other rows unchanged or faster; B/op ≈ 0 both
+   sides; keep the no-regression gate green (B/op ≤ 1.01×, ≥ 90% ops/s — drops
+   and speedups pass; the gate only flags regressions).
 4. **E2E**: `dotnet run --project samples/NivaraInference -c Release -- qwen --synthetic-weights benchmark`
    → KV-cached vs full-forward ms/token before/after.
 5. `dotnet test` — only after human confirmation (AGENTS.md: ask first).
@@ -164,15 +192,32 @@ rejected for non-qwen models and must not affect real-weight loads.
 
 ## MS Learn verification (G1, folded in)
 
-Performed during planning; no decisions surfaced, no plan changes needed:
+Performed during planning and updated 2026-09-07 after the single-run sanity
+pass surfaced a wrong premise (see Problem). Grounding sources:
 
+- **`ArrayPool<T>.Rent` / `Return` contract** — abstract doc:
+  "returns an array at least the requested length", "may not be zero-initialized"
+  (net-11.0 moniker included):
+  https://learn.microsoft.com/dotnet/api/system.buffers.arraypool-1.rent?view=net-11.0
+  The page's Source links pin the dotnet/runtime implementation
+  (`TlsOverPerCoreLockedStacksArrayPool.cs`), which is the ground truth the
+  premise correction rests on:
+  - `NumBuckets = 27; // SelectBucketIndex(1024*1024*1024 + 1)` → the Shared
+    pool buckets array lengths up to **~2³⁰ elements** (comment: "a max size of
+    1B elements") — NOT ~1M as the original plan assumed.
+  - Pooled `Rent` allocates via `GC.AllocateUninitializedArray` (no zeroing) and
+    caches in TLS + per-core stacks; a 136M-float workspace is pooled (~1 GB
+    bucket) and reused → **steady-state B/op ≈ 0** both before and after P0-2.
+  - `Return(clearArray: true)` runs `Array.Clear` over the **whole bucket** on
+    every return — the second removable cost (with the identity `CopyTo`) that
+    makes the per-token LM-head traffic ≈ 2.7 GB today.
 - **`TensorPrimitives.Dot<T>`** is the documented BLAS1 `dot` equivalent —
   generic over numeric types, computes with **no temporary storage**, SIMD /
   architecture-accelerated ("may call into the underlying C runtime or employ
   architecture-specific instructions; exact results may differ between
   OS/arch"). -> fast path must reuse it (bit-exact tests compare Dot-vs-Dot;
   cross-arch safety via tolerance tests, which the plan does).
-  https://learn.microsoft.com/dotnet/api/system.numerics.tensors.tensorprimitives.dot
+  https://learn.microsoft.com/dotnet/api/system.numerics.tensors.tensorprimitives.dot?view=net-11.0
 - **No `Tensor.MatrixMultiply` shipped.** The `System.Numerics.Tensors` API
   catalog at the repo's pinned version (11.0.0-preview.7.26381.103) exposes only
   *element-wise* `Tensor.Multiply`; dense matmul is still tracking
@@ -183,12 +228,12 @@ Performed during planning; no decisions surfaced, no plan changes needed:
   path deliberately routes through the same `TensorPrimitives.Dot` /
   `WidenPrimitives.Dot` the row kernels use; no hand-rolled intrinsics.
 - **"Benchmark to confirm the win… benchmark the input sizes your callers
-  actually use"** (same guide) — the harness measures at real Qwen shapes; B/op
-  is the allocation-driven signal; preallocated result buffers neutralize the
-  documented randomized-alignment noise; `--runs 3` medians on an idle machine
-  are the documented control.
+  actually use"** (same guide) — the harness measures at real Qwen shapes;
+  preallocated result buffers neutralize the documented randomized-alignment
+  noise; `--runs 3` medians on an idle machine are the documented control.
 - Single-row mat-vec is BLAS2 **GEMV**, memory-bound: the optimum reads each
-  weight exactly once; the fast path achieves it (previously ~2× due to copy).
+  weight exactly once; the fast path achieves it (previously ~5× traffic due to
+  copy + bucket clear).
 
 ## GitHub issues log
 
@@ -198,6 +243,8 @@ Performed during planning; no decisions surfaced, no plan changes needed:
 
 ## Open items
 
-- [ ] Confirm whether `docs/QWEN-PERF.md` gets a status note (see §E) before
-      editing it.
+- [ ] Confirm `docs/QWEN-PERF.md` premise correction + P0-2 status note (see §E)
+      before editing it.
+- [ ] Confirm the revised P0-2 acceptance signal (ops/s, not B/op) — reported
+      to human 2026-09-07; implementation held pending confirmation.
 - [ ] Ask before running `dotnet test` / the `--runs 3` baseline harness.
