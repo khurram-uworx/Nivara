@@ -183,3 +183,83 @@ parallelism belongs in batched prefill); speculative decoding / top-k tricks
 - No code was changed as part of this review. Related tracked work: #384
   (qkvBias), #387/#391 (BF16 SIMD), #388 (fused BF16→F32 read), #390 (GGUF
   backend).
+
+---
+
+# Improvement ledger
+
+Tracked record of executed improvements to the Qwen inference path. Each entry
+is written **only after the item's full execution passes** (implementation +
+tests + harness gate + full test suite + E2E), so a status here means the
+evidence exists. The review prose above stays untouched as the pre-execution
+research record; where the ledger contradicts it (measurement, premise,
+framing), the ledger wins. Status values: `DONE` · `IN PROGRESS` · `DEFERRED`.
+
+## P0-2 — Kill the redundant weight copy in single-row transposed-B matmul
+
+**Status: DONE** (2026-09-07 · branch `khurram/qwen-perf` · commit `58b721e`
+kernel + tests, `d6a32df` results)
+
+**Item:** for every decode matmul (`aRows == 1`, `bTransposed == true`),
+dot each output column against the weight row directly — no workspace rent,
+no `b.CopyTo(bT)` identity copy, no `ArrayPool.Return(clearArray: true)`
+bucket clear on return. BLAS2 GEMV reads each weight exactly once.
+
+**Numerics:** bit-identical by construction — the fast path reuses the same
+per-type `Dot` dispatch as the row kernels (`TensorPrimitives.Dot` for
+float/double; `WidenPrimitives.Dot` for the generic/half-precision path),
+locked by parity tests (single-row == row 0 of a two-row run, Dot-vs-Dot
+bit-exact for float/double, Half/BFloat16 widen-path parity, cold-pool
+alloc guard). Full suite: **3449 passed, 0 failed** on net11.0.0.
+
+**Measured before/after** (`--runs 3` child-process medians, same machine,
+net11.0.0, Qwen2.5-0.5B shapes — `qwen-fast-baseline.json` → `qwen-fast-postfix.json`):
+
+| Decode row | Before | After | Δ | B/op before → after |
+|---|---|---|---|---|
+| LM head matmul `[1x896 @ 151936x896]` | 5 ops/s · ~200 ms/op | **36 ops/s · ~28 ms/op** | **+620%** | 53 → 5 |
+| LM head fwd `[1x896 -> 151936]` (op-level) | 5 ops/s | **42 ops/s** | +740% | 608,517 → 608,469 |
+| FFN gate/up/down ×3 | 61 ops/s | **529 ops/s** | +767% | 145 → 1 |
+| attn Q/K/V/O proj | 640 ops/s | **6,658 ops/s** | +940% | 193 → 1 |
+| Linear fwd `[1x896 -> 2688]` (op-level) | 362 ops/s | **5,088 ops/s** | +1,306% | 22,817 → 22,769 |
+
+**E2E (synthetic F32 weights, 64-token prompt + 24-token decode, median of 3):**
+KV-cached **335 ms/token (3.0 tok/s)** vs full-forward 2,074 ms/token — **6.2×**.
+(No pre-fix E2E number exists; the synthetic mode shipped with this branch's
+harness. The harness rows above carry the kernel-level before/after.)
+
+**Premise correction (important — supersedes §2 item 2):** the review claimed
+the LM head "rents+copies **544 MB per token** (ArrayPool cannot pool
+136M elements, so this is a fresh big-array alloc + full copy every token,
+plus GC churn)". Both halves are wrong on the current runtime, measured and
+source-grounded (MS Learn `ArrayPool<T>.Rent` page → dotnet/runtime source,
+net-11.0 moniker):
+
+- `ArrayPool<T>.Shared` (`TlsOverPerCoreLockedStacksArrayPool`) has
+  **27 buckets pooling up to ~2³⁰ elements** — the 136M-float workspace is a
+  reused ~1 GB bucket, so **B/op ≈ 0 steady-state** (no fresh alloc, no GC
+  churn). The review's premise that the pool cannot serve the size is false.
+- The actual waste was **memory traffic**: identity `CopyTo` (read+write
+  545 MB) + the necessary dot read (545 MB) + `Return(clearArray: true)`
+  clearing the ~1 GB bucket on every return ≈ **2.7 GB/token**. The fast path
+  reduces this to the single 545 MB dot read — hence ~200 ms → ~28 ms, and a
+  ~1 GB working-set drop.
+
+**Gate note:** the `--compare` run's 3 FAIL rows (Linear forward 32x256,
+Frame Slice, Attn batched fwd+bwd) are pre-existing throughput/gen0 noise on
+rows this change does not touch (byte-identical B/op; Frame Slice is the
+documented issue #354 flake; machine under load during measurement). All five
+Qwen rows pass with margins of +5–13×.
+
+---
+
+### Future entries (template — fill in as items land)
+
+| Plan item | Status | Measured before → after | Notes |
+|---|---|---|---|
+| P0 — Batched prompt prefill (O(L) → 1 pass) | | | |
+| P0 — Fused GQA decode-attention (no BlockCopy / GqaRepeatKV) | | | |
+| P1 — On-the-fly BF16 weights with F32 compute | | | |
+| P1 — Per-token fused decoder-block kernel | | | |
+| P2 — Sampling path + tokenize-prefix cache | | | |
+| Stretch — INT8 block-quantized weights / GGUF backend (#390) | | | |

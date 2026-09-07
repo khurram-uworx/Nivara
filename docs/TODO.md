@@ -143,13 +143,25 @@ rejected for non-qwen models and must not affect real-weight loads.
 
 ### E. Docs
 
-- `CHANGELOG.md`: P0-2 entry.
-- `tests/Nivara.PerformanceTests/README.md`: Results table (Prev/Current/Δ%,
-  B/op, gen0/op) + scenario rows.
-- `docs/QWEN-PERF.md`: **correct the premise** ("544 MB fresh alloc/token" →
-  pooled ~1 GB workspace, per-token copy+clear traffic ≈ 2.7 GB LM-head) **and**
-  append a status note marking P0-2 implemented with the measured numbers
-  (review doc stays otherwise untouched) — confirm with human before editing.
+- `CHANGELOG.md`: P0-2 entry — **done** (`d6a32df`).
+- `tests/Nivara.PerformanceTests/README.md`: Qwen rows in the Results table
+  (Prev/Current/Δ%) + notes — **done** (`d6a32df`).
+- `docs/QWEN-PERF.md`: becomes the improvement ledger — see §F (final step).
+
+### F. Improvement ledger — `docs/QWEN-PERF.md` (final plan step)
+
+`docs/QWEN-PERF.md` carries an **Improvement ledger** section appended after
+the original review prose (which stays untouched as the pre-execution research
+record): one entry per executed plan item with status, premise corrections,
+and **measured before/after**. The P0-2 entry is written as the **last step of
+the plan** — only after the kernel, parity/alloc tests, harness gate, full
+test suite, and E2E synthetic run have all passed. Rationale: nothing is
+marked done until the full execution evidence exists; the ledger is then the
+single source of truth for what changed and by how much. The P0-2 entry also
+carries the premise correction (original §2 "544 MB fresh alloc/token" claim
+is refuted, superseded by the ledger's measured record). Future items
+(batched prefill, fused GQA decode attention, BF16-on-the-fly, fused
+decoder block, sampling, INT8/GGUF) get entries the same way as they land.
 
 ## Verification
 
@@ -157,24 +169,38 @@ rejected for non-qwen models and must not affect real-weight loads.
 2. **Baseline** (before the kernel change, harness committed):
    `dotnet run --project tests/Nivara.PerformanceTests -c Release -- --json qwen-fast-baseline.json --runs 3`
    → expect LM-head ≈ 5 ops/s / ~188 ms/op, B/op ≈ 0 (single-run sanity
-   already observed). Commit the JSON beside `baseline-v140.json`.
+   already observed). Commit the JSON beside `baseline-v140.json`. **Done**
+   (`43346fb`): LM head 5 ops/s / 200 ms/op, B/op 53; FFN 61; attn 640;
+   Linear fwd 362; LM head fwd 5.
 3. **Post-fix**: `--compare qwen-fast-baseline.json --runs 3` → LM-head ops/s
    ≈ 20-28 (ns/op ~35-50 ms), all other rows unchanged or faster; B/op ≈ 0 both
    sides; keep the no-regression gate green (B/op ≤ 1.01×, ≥ 90% ops/s — drops
-   and speedups pass; the gate only flags regressions).
+   and speedups pass; the gate only flags regressions). **Done** (`d6a32df`):
+   LM head matmul 36 ops/s / ~28 ms (+620%, B/op 53→5), FFN 529, attn 6,658,
+   Linear fwd 5,088, LM head fwd 42. Qwen rows all PASS; the gate's 3 FAIL rows
+   (Linear forward 32x256, Frame Slice, Attn batched fwd+bwd) are pre-existing
+   throughput/gen0 noise on rows this change does not touch (byte-identical
+   B/op; Frame Slice is issue #354) — machine under load, so a full-table
+   refresh was deferred.
 4. **E2E**: `dotnet run --project samples/NivaraInference -c Release -- qwen --synthetic-weights benchmark`
-   → KV-cached vs full-forward ms/token before/after.
+   → KV-cached vs full-forward ms/token before/after. **Done** (2026-09-07):
+   synthetic Qwen2.5-0.5B F32, 64-token prompt + 24-token decode, median of 3:
+   KV-cached 335 ms/token (3.0 tok/s) vs full-forward 2,074 ms/token — **6.2×**.
+   No pre-fix E2E number exists (synthetic mode was added with the harness);
+   the harness rows carry the kernel-level before/after.
 5. `dotnet test` — only after human confirmation (AGENTS.md: ask first).
+   **Done** — full suite **3449 passed, 0 failed** (5 m 31 s, net11.0.0).
 
 ## Planned commits
 
-1. `docs: plan Qwen-fast P0-2 + measurement harness in TODO.md`
-2. `perf: add Qwen decode single-row matmul scenarios to PerformanceTests`
-3. `perf: add NivaraInference qwen --synthetic-weights decode benchmark mode`
-4. `perf: record qwen-fast baseline (tests/Nivara.PerformanceTests/qwen-fast-baseline.json)`
-5. `core: kill redundant weight copy in single-row transposed-B matmul`
-6. `test: pin single-row transposed-B matmul parity + alloc-free fast path`
-7. `docs: record qwen-fast P0-2 results (perf README, CHANGELOG)`
+1. `docs: plan Qwen-fast P0-2 + measurement harness in TODO.md` — done (`f544fbd`)
+2. `perf: add Qwen decode single-row matmul scenarios to PerformanceTests` — done (`4cda229`)
+3. `perf: add NivaraInference qwen --synthetic-weights decode benchmark mode` — done (`83cb0a6`)
+4. `perf: record qwen-fast baseline (tests/Nivara.PerformanceTests/qwen-fast-baseline.json)` — done (`43346fb`)
+5. `core: kill redundant weight copy in single-row transposed-B matmul` — done (`58b721e`, incl. unit tests)
+6. `test: pin single-row transposed-B matmul parity + alloc-free fast path` — done (same commit `58b721e`)
+7. `docs: record qwen-fast P0-2 results (perf README, CHANGELOG)` — done (`d6a32df`, incl. qwen-fast-postfix.json)
+8. `docs: add P0-2 improvement-ledger entry to QWEN-PERF.md` — **remaining (final step, §F)**
 
 ## Blast radius
 
@@ -243,8 +269,13 @@ pass surfaced a wrong premise (see Problem). Grounding sources:
 
 ## Open items
 
-- [ ] Confirm `docs/QWEN-PERF.md` premise correction + P0-2 status note (see §E)
-      before editing it.
-- [ ] Confirm the revised P0-2 acceptance signal (ops/s, not B/op) — reported
-      to human 2026-09-07; implementation held pending confirmation.
-- [ ] Ask before running `dotnet test` / the `--runs 3` baseline harness.
+- [x] Confirm the revised P0-2 acceptance signal (ops/s, not B/op) — approved
+      2026-09-07; baseline + fast path + compare executed.
+- [x] Confirm `docs/QWEN-PERF.md` becomes the improvement ledger (final plan
+      step, §F) — approved 2026-09-07.
+- [x] Run full `dotnet test` suite — approved + executed: 3449 passed.
+- [ ] **Write the P0-2 improvement-ledger entry in `docs/QWEN-PERF.md` (final
+      step, §F), then G2 review the branch as a whole + against this plan,
+      delete this file only when both gates clear, then offer push + PR
+      (human-confirmed only).**
+- [ ] Ask before any future `dotnet test` / long-running verification.
