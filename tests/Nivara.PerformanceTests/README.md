@@ -159,9 +159,22 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
 | AutoDiff Pow(2.5) scalar baseline 1M x float | 24 | 38 | +58.3% | 2 | 0.00 |
 | AutoDiff RMSNorm fwd+bwd 1M x float | 360 | 405 | +12.5% | 8,002,194 | 0.15 |
 | AutoDiff RMSNorm scalar baseline 1M x float | 466 | 764 | +63.9% | 2 | 0.00 |
+| Qwen LM head matmul [1x896 @ 151936x896] | 5 | 36 | +620.0% | 5 | 0.00 |
+| Qwen FFN gate/up/down x3 | 61 | 529 | +767.2% | 1 | 0.00 |
+| Qwen attn Q/K/V/O proj | 640 | 6,658 | +940.3% | 1 | 0.00 |
+| Qwen Linear fwd [1x896 -> 2688] | 362 | 5,088 | +1305.5% | 22,769 | 0.00 |
+| Qwen LM head fwd [1x896 -> 151936] | 5 | 42 | +740.0% | 608,469 | 0.00 |
 
 ### Notes
 
+- **Qwen decode rows added 2026-09-07 with P0-2 (single-row GEMV fast path).** Prev holds
+  the pre-fix readings from `qwen-fast-baseline.json` (same machine, same-day medians);
+  Current holds the post-fix medians after `TensorsHelper.MultiplyCore` stopped renting/
+  copying/clearing the workspace for `bTransposed && aRows == 1`. LM-head matmul +620%
+  (B/op 53 → 5, gen0 0.00 both) and LM-head forward +740%; FFN, attn projections, and the
+  `Linear` forward all gain the same fast path. The table's other rows are untouched by
+  this change; a full-table refresh was deferred because today's machine was not idle
+  (non-Qwen rows read ~40% below the 2026-08-30 baseline under load).
 - **This table is the current-machine rolling history.** The Prev column
   carries the numbers recorded 2026-08-21 on .NET 10.0.11; the Current column
   carries the re-measured numbers recorded 2026-08-30 on .NET 11.0.0. B/op

@@ -121,6 +121,25 @@ static class TensorsHelper
         if (result.Length < aRows * bCols)
             throw new ArgumentException($"Result length ({result.Length}) must be at least {aRows * bCols}", nameof(result));
 
+        if (bTransposed && aRows == 1)
+        {
+            // Single-row mat-vec (BLAS2 GEMV): weights are row-major [out, in], so each
+            // output column is a dot against one weight row. No rent/copy — the copy was a
+            // pure identity at aRows == 1 and every return then cleared the whole pool bucket
+            // (clearArray: true), so the LM head alone moved ~2.7 GB/token (copy read+write,
+            // dot read, bucket clear) when one 545 MB read suffices. Reuses the same per-type
+            // Dot as the row kernels, so numerics stay bit-identical. Deliberately
+            // TensorPrimitives-based, not hand-rolled intrinsics — the .NET SIMD guidance says
+            // to reach for the existing higher-level APIs first. Swap target for this whole
+            // kernel remains Tensor.MatrixMultiply once the BCL ships it (dotnet/runtime#95863,
+            // BLAS epic dotnet/runtime#93286).
+            var aRow = a.Slice(0, aCols);
+            Span<T> res = result.AsSpan(0, bCols);
+            for (int j = 0; j < bCols; j++)
+                res[j] = DotFor<T>(aRow, b.Slice(j * aCols, aCols));
+            return;
+        }
+
         if (typeof(T) == typeof(float))
         {
             MultiplyCoreFloat(MemoryMarshal.Cast<T, float>(a), MemoryMarshal.Cast<T, float>(b),
@@ -138,6 +157,18 @@ static class TensorsHelper
 
     static bool ShouldParallelize(int aRows, int aCols, int bCols)
         => aRows >= 4 && (long)aRows * aCols * bCols >= 2 << 20;
+
+    /// <summary>Dot kernel mirroring the per-type dispatch of the row-matmul paths:
+    /// float/double use <see cref="TensorPrimitives.Dot"/> directly (matches
+    /// <see cref="MultiplyRowFloat{T}"/> / <see cref="MultiplyRowDouble{T}"/>); all other types
+    /// go through <see cref="WidenPrimitives.Dot"/> (matches <see cref="MultiplyRowScalar{T}"/> —
+    /// widens Half/BFloat16 to float before SIMD when beneficial). Keeping this mirror is what
+    /// makes the single-row fast path bit-identical to the multi-row paths.</summary>
+    static T DotFor<T>(ReadOnlySpan<T> x, ReadOnlySpan<T> y)
+        where T : struct, INumber<T>
+        => typeof(T) == typeof(float) || typeof(T) == typeof(double)
+            ? TensorPrimitives.Dot(x, y)
+            : WidenPrimitives.Dot(x, y);
 
     static void MultiplyCoreFloat<T>(ReadOnlySpan<float> a, ReadOnlySpan<float> b, T[] result,
         int aRows, int aCols, int bCols, bool bTransposed)

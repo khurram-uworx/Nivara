@@ -29,6 +29,18 @@ All notable changes to Nivara are documented here. Released versions are publish
   for int-family products. Such selects now materialize the boundary once, exactly like
   rank/broadcast windows; top-level cumulative windows keep chunked carry-slot streaming.
 
+- **Single-row transposed matmul fast path (P0-2) — decode GEMV without the weight copy** —
+  `TensorsHelper.MultiplyCore` gains a BLAS2 GEMV fast path for `bTransposed && aRows == 1`
+  (the Qwen decode shape): each output column is a plain dot against one row of the
+  row-major weight matrix, so the per-call workspace rent, the identity `CopyTo`, and the
+  `clearArray` bucket zeroing on return are gone. The LM-head matmul reads each weight
+  exactly once (545 MB/token instead of ~2.7 GB of copy+dot+clear traffic); measured at
+  Qwen2.5-0.5B shapes with `--runs 3` medians, the LM-head matmul row went 5 → 36 ops/s
+  (~200 ms → ~28 ms/op, +620%) and the end-to-end LM-head forward 5 → 42 ops/s (+740%).
+  Numerics are bit-identical to the prior row kernels (same `TensorPrimitives.Dot` /
+  `WidenPrimitives.Dot` dispatch), locked by new parity + allocation guards in
+  `TensorsHelperTests`, `GradKernelsTests`, and `WidenPrimitivesPhase1Tests`.
+
 - **net11 BCL tensor swap targets verified (#136)** — `TensorsHelper` MatMul/Transpose
   annotations now reflect the verified state of `System.Numerics.Tensors`
   11.0.0-preview.7: `Tensor.Transpose<T>` ships as a zero-copy strided view, so the

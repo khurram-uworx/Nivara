@@ -291,6 +291,7 @@ static class Program
         RunRowWhereScenarios();
         RunStreamingCancellationScenarios();
         RunAutoDiffSimdScenarios();
+        RunQwenDecodeMatMulScenarios();
     }
 
     static void RunRowWhereScenarios()
@@ -460,6 +461,91 @@ static class Program
                         var normed = data[i] / rms;
                         grad[i] = (1.0f / rms) * (1.0f - normed * normed / n);
                     }
+                };
+            });
+    }
+
+    static void RunQwenDecodeMatMulScenarios()
+    {
+        // Qwen2.5-0.5B decode hot shapes (docs/QWEN-PERF.md §2B). Every decode matmul is a
+        // single-row multiply against row-major [out, in] weights (bTransposed: true), so
+        // these rows gate P0-2: the kernel must read each weight once — no rent + identity
+        // copy — and allocate ~0 B/op with a preallocated result. Benchmarked at the real
+        // caller sizes per the .NET SIMD guidance ("benchmark the input sizes your callers
+        // actually use", learn.microsoft.com/dotnet/standard/simd).
+
+        Run("Qwen LM head matmul [1x896 @ 151936x896]", 2, 8,
+            () =>
+            {
+                const int aCols = 896, bCols = 151_936;
+                var a = Fill(new float[aCols]);
+                var b = Fill(new float[aCols * bCols]);
+                var result = new float[bCols];
+                return () => GradKernels.MatMulTransposedB(a, b, result, 1, aCols, bCols);
+            });
+
+        Run("Qwen FFN gate/up/down x3", 5, 30,
+            () =>
+            {
+                const int hidden = 896, ff = 4864;
+                var h = Fill(new float[hidden]);
+                var ffHidden = Fill(new float[ff]);
+                var wGate = Fill(new float[hidden * ff]);
+                var wUp = Fill(new float[hidden * ff]);
+                var wDown = Fill(new float[ff * hidden]);
+                var ffOut = new float[ff];
+                var hiddenOut = new float[hidden];
+                return () =>
+                {
+                    GradKernels.MatMulTransposedB(h, wGate, ffOut, 1, hidden, ff);
+                    GradKernels.MatMulTransposedB(h, wUp, ffOut, 1, hidden, ff);
+                    GradKernels.MatMulTransposedB(ffHidden, wDown, hiddenOut, 1, ff, hidden);
+                };
+            });
+
+        Run("Qwen attn Q/K/V/O proj", 5, 30,
+            () =>
+            {
+                const int hidden = 896, oCols = 896, kvCols = 128;
+                var h = Fill(new float[hidden]);
+                var wQ = Fill(new float[hidden * oCols]);
+                var wK = Fill(new float[hidden * kvCols]);
+                var wV = Fill(new float[hidden * kvCols]);
+                var wO = Fill(new float[hidden * oCols]);
+                var outO = new float[oCols];
+                var outKV = new float[kvCols];
+                return () =>
+                {
+                    GradKernels.MatMulTransposedB(h, wQ, outO, 1, hidden, oCols);
+                    GradKernels.MatMulTransposedB(h, wK, outKV, 1, hidden, kvCols);
+                    GradKernels.MatMulTransposedB(h, wV, outKV, 1, hidden, kvCols);
+                    GradKernels.MatMulTransposedB(h, wO, outO, 1, hidden, oCols);
+                };
+            });
+
+        Run("Qwen Linear fwd [1x896 -> 2688]", 5, 30,
+            () =>
+            {
+                var linear = new Linear<float>(896, 2688);
+                var inputColumn = NivaraColumn<float>.Create(Fill(new float[896]));
+                return () =>
+                {
+                    var input = new ReverseGradTensor<float>(inputColumn, requiresGrad: false);
+                    input.Reshape(1, 896);
+                    linear.Forward(input);
+                };
+            });
+
+        Run("Qwen LM head fwd [1x896 -> 151936]", 2, 8,
+            () =>
+            {
+                var head = new Linear<float>(896, 151_936, bias: false);
+                var inputColumn = NivaraColumn<float>.Create(Fill(new float[896]));
+                return () =>
+                {
+                    var input = new ReverseGradTensor<float>(inputColumn, requiresGrad: false);
+                    input.Reshape(1, 896);
+                    head.Forward(input);
                 };
             });
     }

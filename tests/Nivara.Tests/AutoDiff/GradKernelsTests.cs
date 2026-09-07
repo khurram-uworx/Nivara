@@ -1017,6 +1017,68 @@ public class GradKernelsTests
             }
     }
 
+    [Test]
+    public void MatMulTransposedB_SingleRow_MatchesRowZeroOfTwoRowCall()
+    {
+        var rng = new Random(999);
+        (int Cols, int BCols)[] shapes = [(1, 1), (5, 1), (64, 48), (128, 256)];
+        foreach (var (aCols, bCols) in shapes)
+        {
+            var aRow = new float[aCols];
+            var aTwo = new float[2 * aCols];
+            var b = new float[aCols * bCols];
+            for (int i = 0; i < aCols; i++)
+            {
+                aRow[i] = (float)(rng.NextDouble() * 2 - 1);
+                aTwo[i] = aRow[i];
+            }
+            for (int i = aCols; i < 2 * aCols; i++)
+                aTwo[i] = (float)(rng.NextDouble() * 2 - 1);
+            for (int i = 0; i < b.Length; i++)
+                b[i] = (float)(rng.NextDouble() * 2 - 1);
+
+            var single = new float[bCols];
+            var two = new float[2 * bCols];
+            GradKernels.MatMulTransposedB<float>(aRow, b, single, 1, aCols, bCols);
+            GradKernels.MatMulTransposedB<float>(aTwo, b, two, 2, aCols, bCols);
+
+            for (int j = 0; j < bCols; j++)
+                Assert.That(single[j], Is.EqualTo(two[j]),
+                    $"Row-0 mismatch at col {j} for {aCols}@{bCols}");
+        }
+    }
+
+    [Test]
+    public void MatMulTransposedB_Half_SingleRow_MatchesRowZeroOfTwoRowCall()
+    {
+        var rng = new Random(1001);
+        (int Cols, int BCols)[] shapes = [(64, 48), (256, 5)];
+        foreach (var (aCols, bCols) in shapes)
+        {
+            var aRow = new Half[aCols];
+            var aTwo = new Half[2 * aCols];
+            var b = new Half[aCols * bCols];
+            for (int i = 0; i < aCols; i++)
+            {
+                aRow[i] = (Half)(float)(rng.NextDouble() * 2 - 1);
+                aTwo[i] = aRow[i];
+            }
+            for (int i = aCols; i < 2 * aCols; i++)
+                aTwo[i] = (Half)(float)(rng.NextDouble() * 2 - 1);
+            for (int i = 0; i < b.Length; i++)
+                b[i] = (Half)(float)(rng.NextDouble() * 2 - 1);
+
+            var single = new Half[bCols];
+            var two = new Half[2 * bCols];
+            GradKernels.MatMulTransposedB<Half>(aRow, b, single, 1, aCols, bCols);
+            GradKernels.MatMulTransposedB<Half>(aTwo, b, two, 2, aCols, bCols);
+
+            for (int j = 0; j < bCols; j++)
+                Assert.That((float)single[j], Is.EqualTo((float)two[j]).Within(1e-3),
+                    $"Row-0 mismatch at col {j} for {aCols}@{bCols}");
+        }
+    }
+
     // ══════════════════════════════════════════════════════════════════════
     //  Error paths
     // ══════════════════════════════════════════════════════════════════════
