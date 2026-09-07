@@ -166,6 +166,11 @@ static class Qwen
 {
     const int FeatureDim = 4096;
     const int MaxNewTokens = 160;
+    /// <summary>Decode cap for the synthetic benchmark: with random weights the argmax never hits
+    /// a stop id, so the full-forward path would otherwise run all 160 tokens while re-forwarding
+    /// the prefix each step (~30 min). 24 tokens keeps the timing regime comparable to the real
+    /// tool turn (~19 tokens) at a practical runtime.</summary>
+    const int MaxNewTokensSynthetic = 24;
     const string WeatherToolName = "getWeather";
     const string WeatherToolDesc = "Gets the current weather for a city. Returns a short description like 'Sunny, 22\u00b0C'.";
     const string CityParamDesc = "The city name, e.g. 'Paris' or 'New York'";
@@ -204,6 +209,82 @@ static class Qwen
             unkToken: "<|endoftext|>",
             tokenizerJsonPath: Path.Combine(modelDir, "tokenizer.json"));
         return (model, config, tokenizer);
+    }
+
+    // ----------------------------------------------------------------------------------
+    // Synthetic weights (--synthetic-weights): Qwen2.5-0.5B-shaped random tensors so the
+    // benchmark runs without the ~2 GB checkpoint. Timing is shape-driven; the values are
+    // deterministic pseudo-random near zero to keep activations finite.
+    // ----------------------------------------------------------------------------------
+
+    static readonly LlamaConfig QwenSyntheticConfig = new()
+    {
+        HiddenSize = 896,
+        NumHiddenLayers = 24,
+        NumAttentionHeads = 14,
+        NumKeyValueHeads = 2,
+        IntermediateSize = 4864,
+        VocabSize = 151_936,
+        MaxPositionEmbeddings = 32_768,
+        RmsNormEps = 1e-6f,
+        RopeTheta = 1_000_000f,
+        TieWordEmbeddings = true,
+        HiddenAct = "silu",
+    };
+
+    static uint rngState = 0x9E3779B9;
+
+    static uint SyntheticRng()
+    {
+        uint x = rngState;
+        x ^= x << 13;
+        x ^= x >> 17;
+        x ^= x << 5;
+        rngState = x;
+        return x;
+    }
+
+    static void FillSynthetic(float[] data)
+    {
+        for (int i = 0; i < data.Length; i++)
+            data[i] = (SyntheticRng() / (float)uint.MaxValue - 0.5f) * 0.1f;
+    }
+
+    static void AddSynthetic(Dictionary<string, (float[] Data, int[] Shape)> tensors, string name, params int[] shape)
+    {
+        int count = 1;
+        foreach (var d in shape) count *= d;
+        var data = new float[count];
+        FillSynthetic(data);
+        tensors[name] = (data, shape);
+    }
+
+    /// <summary>Fabricates the exact tensor keys <see cref="LlamaLoader.Load{TModel, TWeight}"/>
+    /// expects (including the q/k/v biases so Qwen's qkvBias inference engages).</summary>
+    static Dictionary<string, (float[] Data, int[] Shape)> SynthesizeTensors(LlamaConfig config)
+    {
+        var tensors = new Dictionary<string, (float[] Data, int[] Shape)>();
+        int h = config.HiddenSize;
+        int kvHidden = config.NumKeyValueHeads * (h / config.NumAttentionHeads);
+        AddSynthetic(tensors, "model.embed_tokens.weight", config.VocabSize, h);
+        AddSynthetic(tensors, "model.norm.weight", h);
+        for (int i = 0; i < config.NumHiddenLayers; i++)
+        {
+            var p = $"model.layers.{i}";
+            AddSynthetic(tensors, $"{p}.input_layernorm.weight", h);
+            AddSynthetic(tensors, $"{p}.post_attention_layernorm.weight", h);
+            AddSynthetic(tensors, $"{p}.self_attn.q_proj.weight", h, h);
+            AddSynthetic(tensors, $"{p}.self_attn.q_proj.bias", h);
+            AddSynthetic(tensors, $"{p}.self_attn.k_proj.weight", kvHidden, h);
+            AddSynthetic(tensors, $"{p}.self_attn.k_proj.bias", kvHidden);
+            AddSynthetic(tensors, $"{p}.self_attn.v_proj.weight", kvHidden, h);
+            AddSynthetic(tensors, $"{p}.self_attn.v_proj.bias", kvHidden);
+            AddSynthetic(tensors, $"{p}.self_attn.o_proj.weight", h, h);
+            AddSynthetic(tensors, $"{p}.mlp.gate_proj.weight", config.IntermediateSize, h);
+            AddSynthetic(tensors, $"{p}.mlp.up_proj.weight", config.IntermediateSize, h);
+            AddSynthetic(tensors, $"{p}.mlp.down_proj.weight", h, config.IntermediateSize);
+        }
+        return tensors;
     }
 
     // ----------------------------------------------------------------------------------
@@ -402,11 +483,37 @@ static class Qwen
         string systemMessage = QwenChatTemplate.BuildToolsSystemMessage(toolJson);
         var promptIds = tokenizer.Encode(QwenChatTemplate.RenderFirstTurn(systemMessage, "What's the weather in Paris?"));
 
+        return RunDecodeBenchmark(model, config, promptIds, MaxNewTokens);
+    }
+
+    /// <summary>Decode benchmark over synthetic Qwen-shaped weights (Program.cs
+    /// --synthetic-weights) — runs without the model file. Timing is shape-driven only;
+    /// correctness is intentionally NOT exercised (random weights).</summary>
+    public static int RunSyntheticBenchmark()
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark ===");
+        var tensors = SynthesizeTensors(QwenSyntheticConfig);
+        long mb = tensors.Values.Sum(t => (long)t.Data.Length) * sizeof(float) / (1024 * 1024);
+        var buildSw = System.Diagnostics.Stopwatch.StartNew();
+        var model = LlamaLoader.Load<float, float>(QwenSyntheticConfig, tensors);
+        buildSw.Stop();
+        Console.WriteLine($"  Model build (synthetic F32): {buildSw.ElapsedMilliseconds} ms ({tensors.Count} tensors, {mb} MB)");
+        Console.WriteLine();
+
+        var promptIds = new int[64];
+        for (int i = 0; i < promptIds.Length; i++)
+            promptIds[i] = (int)(SyntheticRng() % (uint)QwenSyntheticConfig.VocabSize);
+        return RunDecodeBenchmark(model, QwenSyntheticConfig, promptIds, MaxNewTokensSynthetic);
+    }
+
+    /// <summary>Shared decode-timing body: cached vs full forward, 3 runs each, median-of-3.</summary>
+    static int RunDecodeBenchmark(LlamaForCausalLM<float> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens)
+    {
         Console.WriteLine($"Prompt tokens: {promptIds.Count}. Decoding the tool call turn {3} times each path...");
         Console.WriteLine();
 
-        TimeResult Cached() => TimeGeneration(model, config, promptIds, useKvCache: true);
-        TimeResult Full() => TimeGeneration(model, config, promptIds, useKvCache: false);
+        TimeResult Cached() => TimeGeneration(model, config, promptIds, maxNewTokens, useKvCache: true);
+        TimeResult Full() => TimeGeneration(model, config, promptIds, maxNewTokens, useKvCache: false);
 
         // Warmup.
         Cached();
@@ -432,10 +539,10 @@ static class Qwen
 
     struct TimeResult { public double Ms; public double MsPerTok; public int Tokens; }
 
-    static TimeResult TimeGeneration(LlamaForCausalLM<float> model, LlamaConfig config, IReadOnlyList<int> promptIds, bool useKvCache)
+    static TimeResult TimeGeneration(LlamaForCausalLM<float> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var ids = Generate(model, config, promptIds, MaxNewTokens, useKvCache);
+        var ids = Generate(model, config, promptIds, maxNewTokens, useKvCache);
         sw.Stop();
         return new TimeResult
         {

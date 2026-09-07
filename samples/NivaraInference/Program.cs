@@ -32,9 +32,11 @@ class Program
         bool simdWiden = false;
         bool noKvCache = false;
         bool force = false;
+        bool syntheticWeights = false;
         int teacherExamples = 0;
         int seed = 42;
         string text = "";
+        bool isQwen = modelType == "qwen";
         for (int i = 1; i < args.Length; i++)
         {
             if (args[i] == "--precision" && i + 1 < args.Length)
@@ -72,6 +74,8 @@ class Program
                 int.TryParse(args[i + 1], out seed);
                 i++;
             }
+            else if (args[i] == "--synthetic-weights")
+                syntheticWeights = true;
             else if (args[i] == "--text" && i + 1 < args.Length)
             {
                 text = args[i + 1];
@@ -98,6 +102,8 @@ class Program
             Console.WriteLine();
             Console.WriteLine("Qwen options:");
             Console.WriteLine("  --text \"...\"      Override the tools-mode user prompt (default: Paris weather)");
+            Console.WriteLine("  --synthetic-weights  qwen benchmark: fabricate Qwen2.5-0.5B-shaped weights (no model");
+            Console.WriteLine("                    file needed). Timing is shape-driven; correctness requires real weights.");
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
             Console.WriteLine("  --teacher-examples N  Distill: annotate the first N train sentences (default: all)");
             Console.WriteLine("  --force            Distill: ignore the resumable teacher-label cache and recompute");
@@ -121,7 +127,21 @@ class Program
 
         if (!File.Exists(modelPath))
         {
-            Console.Error.WriteLine($"Model file not found: {modelPath}");
+            if (syntheticWeights && isQwen)
+            {
+                Console.WriteLine("--synthetic-weights: no model file required; fabricating Qwen2.5-0.5B-shaped weights.");
+                Console.WriteLine();
+            }
+            else
+            {
+                Console.Error.WriteLine($"Model file not found: {modelPath}");
+                return 1;
+            }
+        }
+
+        if (syntheticWeights && !isQwen)
+        {
+            Console.Error.WriteLine("--synthetic-weights is only supported for the qwen benchmark mode.");
             return 1;
         }
 
@@ -130,7 +150,6 @@ class Program
         bool compareDiag = mode == "compare_diag";
         bool fp16 = precision == "fp16";
         bool bf16 = precision == "bf16";
-        bool isQwen = modelType == "qwen";
 
         if (isQwen && bf16)
         {
@@ -145,9 +164,10 @@ class Program
 
         Console.WriteLine($"Loading weights ({precision}) from {Path.GetFileName(modelPath)}...");
         var loadSw = Stopwatch.StartNew();
-        var tensors = SafeTensorsLoader.Read(modelPath);
+        var tensors = syntheticWeights ? null! : SafeTensorsLoader.Read(modelPath);
         loadSw.Stop();
-        Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
+        if (!syntheticWeights)
+            Console.WriteLine($"  SafeTensors parse (F32): {loadSw.ElapsedMilliseconds} ms ({tensors.Count} tensors)");
         Console.WriteLine();
 
         Dictionary<string, (BFloat16[] Data, int[] Shape)> tensorsBf16 = null!;
@@ -211,6 +231,15 @@ class Program
                 if (fp16) return benchmark ? BenchmarkSmolLM(tensorsHalf, simdWiden) : RunSmolLM(tensorsHalf, simdWiden);
                 return benchmark ? BenchmarkSmolLM(tensors, simdWiden) : RunSmolLM(tensors, simdWiden);
             case "qwen":
+                if (syntheticWeights)
+                {
+                    if (mode.Length > 0 && mode != "benchmark")
+                    {
+                        Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' mode (decode timing; correctness needs real weights).");
+                        return 1;
+                    }
+                    return Qwen.RunSyntheticBenchmark();
+                }
                 if (mode == "distill")
                     return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
                 if (mode == "benchmark")

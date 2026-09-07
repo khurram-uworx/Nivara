@@ -91,7 +91,12 @@ names `LlamaForCausalLM.LoadModel` expects, with Qwen shapes from `LlamaConfig`
 and deterministic pseudo-random values — so `qwen benchmark: KV-cache decode`
 (and `RunBenchmark`) runs **without the model file** (timing is shape-driven).
 Correctness stays gated on the real fixtures (`qwen_tool_logits_py.bin`, etc.).
-Flag must be rejected for non-qwen models and must not affect real-weight loads.
+Implemented via `Qwen.RunSyntheticBenchmark()` sharing one benchmark body
+(`RunDecodeBenchmark`) with the real path. Design details: a random-weight
+argmax can never hit a stop id, so the synthetic decode is capped at 24 tokens
+per path (vs 160 real) to keep the full-forward path practical (~30 min
+otherwise) — same timing regime as the real ~19-token tool turn. Flag must be
+rejected for non-qwen models and must not affect real-weight loads.
 
 ### D. Unit tests — `tests/Nivara.Tests`
 
