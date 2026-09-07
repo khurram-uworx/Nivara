@@ -536,4 +536,80 @@ public class WidenPrimitivesPhase1Tests
                 Assert.That(result[i * k + j], Is.EqualTo(expected).Within(1e-4f));
             }
     }
+
+    [Test]
+    public void MultiplyCore_BFloat16_TransposedSingleRow_MatchesReference()
+    {
+        WithWidenEnabled(() =>
+        {
+            int aCols = 256, bCols = 5;
+            Assert.That(WidenPrimitives.ShouldWiden<BFloat16>(aCols), Is.True,
+                "single-row matmul must genuinely exercise the widen path, not the scalar fallback");
+            var rng = new Random(42);
+            var a = Enumerable.Range(0, aCols).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var b = Enumerable.Range(0, aCols * bCols).Select(_ => (BFloat16)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var result = new BFloat16[bCols];
+
+            TensorsHelper.MultiplyCore(a, b, result, 1, aCols, bCols, bTransposed: true);
+
+            for (int j = 0; j < bCols; j++)
+            {
+                float expected = 0;
+                for (int p = 0; p < aCols; p++)
+                    expected += (float)a[p] * (float)b[j * aCols + p];
+                Assert.That((float)result[j], Is.EqualTo(expected).Within(MathF.Abs(expected) * 0.02f + 0.01f),
+                    $"Mismatch at col {j}");
+            }
+        });
+    }
+
+    [Test]
+    public void MultiplyCore_Half_TransposedSingleRow_MatchesReference()
+    {
+        WithWidenEnabled(() =>
+        {
+            int aCols = 256, bCols = 5;
+            Assert.That(WidenPrimitives.ShouldWiden<Half>(aCols), Is.True,
+                "single-row matmul must genuinely exercise the widen path, not the scalar fallback");
+            var rng = new Random(43);
+            var a = Enumerable.Range(0, aCols).Select(_ => (Half)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var b = Enumerable.Range(0, aCols * bCols).Select(_ => (Half)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var result = new Half[bCols];
+
+            TensorsHelper.MultiplyCore(a, b, result, 1, aCols, bCols, bTransposed: true);
+
+            for (int j = 0; j < bCols; j++)
+            {
+                float expected = 0;
+                for (int p = 0; p < aCols; p++)
+                    expected += (float)a[p] * (float)b[j * aCols + p];
+                Assert.That((float)result[j], Is.EqualTo(expected).Within(MathF.Abs(expected) * 0.02f + 0.01f),
+                    $"Mismatch at col {j}");
+            }
+        });
+    }
+
+    [Test]
+    public void MultiplyCore_Half_TransposedSingleRow_MatchesRowZeroOfTwoRowRun()
+    {
+        WithWidenEnabled(() =>
+        {
+            int aCols = 256, bCols = 5;
+            var rng = new Random(44);
+            var aRow = Enumerable.Range(0, aCols).Select(_ => (Half)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var aTwo = aRow
+                .Concat(Enumerable.Range(0, aCols).Select(_ => (Half)(float)(rng.NextDouble() * 2 - 1)))
+                .ToArray();
+            var b = Enumerable.Range(0, aCols * bCols).Select(_ => (Half)(float)(rng.NextDouble() * 2 - 1)).ToArray();
+            var single = new Half[bCols];
+            var two = new Half[2 * bCols];
+
+            TensorsHelper.MultiplyCore(aRow, b, single, 1, aCols, bCols, bTransposed: true);
+            TensorsHelper.MultiplyCore(aTwo, b, two, 2, aCols, bCols, bTransposed: true);
+
+            for (int j = 0; j < bCols; j++)
+                Assert.That((float)single[j], Is.EqualTo((float)two[j]).Within(1e-3f),
+                    $"Row-0 mismatch at col {j}");
+        });
+    }
 }

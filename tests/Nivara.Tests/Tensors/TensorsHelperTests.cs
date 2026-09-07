@@ -259,6 +259,164 @@ public class TensorsHelperTests
         }
     }
 
+    [Test]
+    public void MultiplyCore_Float_TransposedB_MultipleShapes_MatchesReference() =>
+        CheckMatMulShapesTransposedB<float>(1e-4);
+
+    [Test]
+    public void MultiplyCore_Double_TransposedB_MultipleShapes_MatchesReference() =>
+        CheckMatMulShapesTransposedB<double>(1e-10);
+
+    [Test]
+    public void MultiplyCore_Int_TransposedB_MultipleShapes_MatchesReference() =>
+        CheckMatMulShapesTransposedB<int>(0.0);
+
+    static void CheckMatMulShapesTransposedB<T>(double tolerance) where T : struct, INumber<T>
+    {
+        (int Rows, int Cols, int BCols)[] shapes =
+        [
+            (1, 1, 1),
+            (1, 5, 1),
+            (1, 64, 48),
+            (1, 128, 256),
+            (2, 1, 3),
+            (3, 7, 11),
+            (12, 20, 24),
+            (16, 64, 48)
+        ];
+        foreach (var (rows, cols, bCols) in shapes)
+            AssertMatMulTransposedBMatchesReference<T>(rows, cols, bCols, tolerance);
+    }
+
+    static void AssertMatMulTransposedBMatchesReference<T>(int aRows, int aCols, int bCols, double tolerance)
+        where T : struct, INumber<T>
+    {
+        var rng = new Random(9876 + aRows * 31 + aCols * 7 + bCols);
+        var a = new T[aRows * aCols];
+        var b = new T[aCols * bCols];
+        for (int i = 0; i < a.Length; i++)
+            a[i] = FillValue<T>(rng);
+        for (int i = 0; i < b.Length; i++)
+            b[i] = FillValue<T>(rng);
+
+        var result = new T[aRows * bCols];
+        var reference = new T[aRows * bCols];
+        TensorsHelper.MultiplyCore(a.AsSpan(), b.AsSpan(), result, aRows, aCols, bCols, bTransposed: true);
+        ReferenceMatMulTransposedB(a, b, reference, aRows, aCols, bCols);
+
+        for (int i = 0; i < result.Length; i++)
+        {
+            double diff = Math.Abs(double.CreateChecked(result[i]) - double.CreateChecked(reference[i]));
+            double magnitude = Math.Abs(double.CreateChecked(reference[i]));
+            Assert.That(diff, Is.LessThanOrEqualTo(tolerance * Math.Max(1.0, magnitude)),
+                $"Mismatch at index {i} for {typeof(T).Name} {aRows}x{aCols}@bT[{aCols}x{bCols}]: " +
+                $"kernel={result[i]}, reference={reference[i]}");
+        }
+    }
+
+    static void ReferenceMatMulTransposedB<T>(T[] a, T[] b, T[] result, int aRows, int aCols, int bCols)
+        where T : struct, INumber<T>
+    {
+        // bT is row-major [bCols, aCols]: result[i, j] = sum_k a[i, k] * b[j * aCols + k]
+        for (int i = 0; i < aRows; i++)
+        {
+            for (int j = 0; j < bCols; j++)
+            {
+                T sum = T.Zero;
+                for (int k = 0; k < aCols; k++)
+                    sum += a[i * aCols + k] * b[j * aCols + k];
+                result[i * bCols + j] = sum;
+            }
+        }
+    }
+
+    [Test]
+    public void MultiplyCore_Float_SingleRowTransposedB_IsBitExactVsTensorPrimitivesDot() =>
+        CheckSingleRowDotBitExact<float>();
+
+    [Test]
+    public void MultiplyCore_Double_SingleRowTransposedB_IsBitExactVsTensorPrimitivesDot() =>
+        CheckSingleRowDotBitExact<double>();
+
+    static void CheckSingleRowDotBitExact<T>() where T : struct, INumber<T>
+    {
+        var rng = new Random(4242);
+        (int Cols, int BCols)[] shapes = [(1, 1), (5, 1), (64, 48), (128, 256)];
+        foreach (var (aCols, bCols) in shapes)
+        {
+            var a = new T[aCols];
+            var b = new T[aCols * bCols];
+            for (int i = 0; i < a.Length; i++) a[i] = FillValue<T>(rng);
+            for (int i = 0; i < b.Length; i++) b[i] = FillValue<T>(rng);
+
+            var result = new T[bCols];
+            TensorsHelper.MultiplyCore(a.AsSpan(), b.AsSpan(), result, 1, aCols, bCols, bTransposed: true);
+
+            for (int j = 0; j < bCols; j++)
+            {
+                T expected = TensorPrimitives.Dot<T>(a, b.AsSpan(j * aCols, aCols));
+                Assert.That(result[j], Is.EqualTo(expected),
+                    $"Bit-exact dot mismatch at col {j} for {aCols}@{bCols}");
+            }
+        }
+    }
+
+    [Test]
+    public void MultiplyCore_Float_SingleRowTransposedB_MatchesRowZeroOfTwoRowRun_BitExact()
+    {
+        var rng = new Random(777);
+        (int Cols, int BCols)[] shapes = [(1, 1), (5, 1), (64, 48), (128, 256)];
+        foreach (var (aCols, bCols) in shapes)
+        {
+            var aRow = new float[aCols];
+            var aTwo = new float[2 * aCols];
+            var b = new float[aCols * bCols];
+            for (int i = 0; i < aCols; i++)
+            {
+                aRow[i] = (float)FillValue<float>(rng);
+                aTwo[i] = aRow[i];
+            }
+            for (int i = aCols; i < 2 * aCols; i++)
+                aTwo[i] = (float)FillValue<float>(rng);
+            for (int i = 0; i < b.Length; i++)
+                b[i] = (float)FillValue<float>(rng);
+
+            var single = new float[bCols];
+            var two = new float[2 * bCols];
+            TensorsHelper.MultiplyCore(aRow.AsSpan(), b.AsSpan(), single, 1, aCols, bCols, bTransposed: true);
+            TensorsHelper.MultiplyCore(aTwo.AsSpan(), b.AsSpan(), two, 2, aCols, bCols, bTransposed: true);
+
+            for (int j = 0; j < bCols; j++)
+                Assert.That(single[j], Is.EqualTo(two[j]),
+                    $"Row-0 mismatch at col {j} for {aCols}@{bCols}");
+        }
+    }
+
+    [Test]
+    public void MultiplyCore_Float_SingleRowTransposedB_FastPathAllocatesNothing()
+    {
+        // JIT the MultiplyCore<float> instantiation with a small shape first so the
+        // measured window below is allocation-pure. The ~2M-float workspace bucket is
+        // cold here — the old path's per-call Rent would allocate it now (≥ 8 MB),
+        // the fast path allocates nothing.
+        TensorsHelper.MultiplyCore(new float[2], new float[6], new float[3], 1, 2, 3, bTransposed: true);
+
+        const int aCols = 512, bCols = 4096;
+        var rng = new Random(1);
+        var a = new float[aCols];
+        var b = new float[aCols * bCols];
+        for (int i = 0; i < a.Length; i++) a[i] = (float)FillValue<float>(rng);
+        for (int i = 0; i < b.Length; i++) b[i] = (float)FillValue<float>(rng);
+        var result = new float[bCols];
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        TensorsHelper.MultiplyCore(a.AsSpan(), b.AsSpan(), result, 1, aCols, bCols, bTransposed: true);
+        long after = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.That(after - before, Is.LessThan(4096),
+            $"Fast path must not rent the workspace: allocated {after - before} bytes");
+    }
+
     #endregion
 
     #region Transpose
