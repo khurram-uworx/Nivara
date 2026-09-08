@@ -1,0 +1,288 @@
+{
+  "runtime": "11.0.0",
+  "machine": "16 logical processors, x64",
+  "timestamp": "2026-09-08T17:09:47.9366442+00:00",
+  "runs": 3,
+  "results": [
+    {
+      "name": "ColumnAdd 1M x float",
+      "opsPerSec": 854.5394416952012,
+      "nsPerOp": 1170221,
+      "bytesPerOp": 4000291.2,
+      "gen0PerOp": 0.23
+    },
+    {
+      "name": "ColumnSigmoid 1M x float",
+      "opsPerSec": 606.2084841908405,
+      "nsPerOp": 1649597.5,
+      "bytesPerOp": 0.2,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Span chain 1M x 3 ops (raw)",
+      "opsPerSec": 396.39423944035474,
+      "nsPerOp": 2522741,
+      "bytesPerOp": 0.4,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Column chain 1M x 3 ops (wrapper)",
+      "opsPerSec": 166.6641667041661,
+      "nsPerOp": 6000090,
+      "bytesPerOp": 12000484.72,
+      "gen0PerOp": 0.31
+    },
+    {
+      "name": "Fused chain 1M x (Salary*1.1)+1000-Tax",
+      "opsPerSec": 124.6036668865506,
+      "nsPerOp": 8025446,
+      "bytesPerOp": 16005563.36,
+      "gen0PerOp": 0.34
+    },
+    {
+      "name": "Fused chain chunked 1M x 64k rows",
+      "opsPerSec": 142.2889222097925,
+      "nsPerOp": 7027954,
+      "bytesPerOp": 16005485.44,
+      "gen0PerOp": 0.34
+    },
+    {
+      "name": "Fused single-op TP 1M x (Salary*1.1)",
+      "opsPerSec": 302.23332291635813,
+      "nsPerOp": 3308702,
+      "bytesPerOp": 8002986.4,
+      "gen0PerOp": 0.24
+    },
+    {
+      "name": "Column mul-scalar 1M (wrapper)",
+      "opsPerSec": 387.27477067524455,
+      "nsPerOp": 2582146,
+      "bytesPerOp": 8000272.4,
+      "gen0PerOp": 0.22
+    },
+    {
+      "name": "Linear forward [32x256] -> [32x256]",
+      "opsPerSec": 575.7234685036084,
+      "nsPerOp": 1736945,
+      "bytesPerOp": 69082.08,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Linear forward+backward [32x256]",
+      "opsPerSec": 118.93915786318667,
+      "nsPerOp": 8407660,
+      "bytesPerOp": 668891.2,
+      "gen0PerOp": 0.1
+    },
+    {
+      "name": "TransformerBlock forward [32x64, 4 heads]",
+      "opsPerSec": 128.5088814629794,
+      "nsPerOp": 7781563.333333333,
+      "bytesPerOp": 186457.33333333334,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Attn per-seq forward [B16 L128 D64 H4]",
+      "opsPerSec": 45.961778950654285,
+      "nsPerOp": 21757208.333333332,
+      "bytesPerOp": 2126467.3333333335,
+      "gen0PerOp": 0.16666666666666666
+    },
+    {
+      "name": "Attn batched forward [B16 L128 D64 H4]",
+      "opsPerSec": 136.18983955701984,
+      "nsPerOp": 7342691.666666667,
+      "bytesPerOp": 528917.3333333334,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Attn per-seq fwd+bwd [B16 L128 D64 H4]",
+      "opsPerSec": 13.006792038412526,
+      "nsPerOp": 76882908.33333333,
+      "bytesPerOp": 7936864.666666667,
+      "gen0PerOp": 0.5
+    },
+    {
+      "name": "Attn batched fwd+bwd [B16 L128 D64 H4]",
+      "opsPerSec": 47.85517111015224,
+      "nsPerOp": 20896383.333333332,
+      "bytesPerOp": 7875714.666666667,
+      "gen0PerOp": 0.4166666666666667
+    },
+    {
+      "name": "RowScore per-row copy+dot [10k x 128]",
+      "opsPerSec": 79.60088118175469,
+      "nsPerOp": 12562675,
+      "bytesPerOp": 2,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Frame RowDot [10k x 128]",
+      "opsPerSec": 232.03740442959406,
+      "nsPerOp": 4309650,
+      "bytesPerOp": 51706,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Frame Slice [10k x 128]",
+      "opsPerSec": 6310.820532885686,
+      "nsPerOp": 158458,
+      "bytesPerOp": 89938.64,
+      "gen0PerOp": 0.02
+    },
+    {
+      "name": "RowDot kernel raw [10k x 128]",
+      "opsPerSec": 640.4574403221757,
+      "nsPerOp": 1561384,
+      "bytesPerOp": 0.8,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "RowCosineSimilarity kernel raw [10k x 128]",
+      "opsPerSec": 244.9621092609395,
+      "nsPerOp": 4082264,
+      "bytesPerOp": 0.8,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "RollingSum null-free 1M x int (w10)",
+      "opsPerSec": 275.785077379777,
+      "nsPerOp": 3626012,
+      "bytesPerOp": 5000136.8,
+      "gen0PerOp": 0.1
+    },
+    {
+      "name": "RollingSum nulls 1M x int (w10)",
+      "opsPerSec": 58.91263997790541,
+      "nsPerOp": 16974286,
+      "bytesPerOp": 22000232.8,
+      "gen0PerOp": 0.24
+    },
+    {
+      "name": "RankKernel RowNumber 100k x int",
+      "opsPerSec": 20.732030585052513,
+      "nsPerOp": 48234542,
+      "bytesPerOp": 1700636.32,
+      "gen0PerOp": 0.04
+    },
+    {
+      "name": "GroupBy 1M rows x 1000 keys (typed)",
+      "opsPerSec": 14.127199039802536,
+      "nsPerOp": 70785440,
+      "bytesPerOp": 8906938,
+      "gen0PerOp": 0.7
+    },
+    {
+      "name": "GroupBy 1M rows x 100 string keys (typed)",
+      "opsPerSec": 11.192781103899229,
+      "nsPerOp": 89343300,
+      "bytesPerOp": 13188500,
+      "gen0PerOp": 1.05
+    },
+    {
+      "name": "PartitionedWindow RollingSum 1M x 100 parts",
+      "opsPerSec": 8.45814560655371,
+      "nsPerOp": 118229225,
+      "bytesPerOp": 36216476,
+      "gen0PerOp": 2.15
+    },
+    {
+      "name": "Row.Where nullable-element GetValue 100k",
+      "opsPerSec": 67.31611005780098,
+      "nsPerOp": 14855285,
+      "bytesPerOp": 7316162,
+      "gen0PerOp": 0.4
+    },
+    {
+      "name": "Streaming cancel mid-stream 200k rows x 10k chunk",
+      "opsPerSec": 2172.4647336558237,
+      "nsPerOp": 460306.6666666667,
+      "bytesPerOp": 6067.733333333334,
+      "gen0PerOp": 0.06666666666666667
+    },
+    {
+      "name": "AutoDiff Pow(2.5) fwd+bwd 1M x float",
+      "opsPerSec": 45.32617965348589,
+      "nsPerOp": 22062305,
+      "bytesPerOp": 8001874,
+      "gen0PerOp": 0.2
+    },
+    {
+      "name": "AutoDiff Pow(2.5) scalar baseline 1M x float",
+      "opsPerSec": 15.960917459073016,
+      "nsPerOp": 62653040,
+      "bytesPerOp": 2,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "AutoDiff RMSNorm fwd+bwd 1M x float",
+      "opsPerSec": 172.4169144441408,
+      "nsPerOp": 5799895,
+      "bytesPerOp": 8002194,
+      "gen0PerOp": 0.15
+    },
+    {
+      "name": "AutoDiff RMSNorm scalar baseline 1M x float",
+      "opsPerSec": 331.38204538939874,
+      "nsPerOp": 3017665,
+      "bytesPerOp": 2,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Qwen LM head matmul [1x896 @ 151936x896]",
+      "opsPerSec": 24.966833122623665,
+      "nsPerOp": 40053137.5,
+      "bytesPerOp": 5,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Qwen FFN gate/up/down x3",
+      "opsPerSec": 287.0574411508324,
+      "nsPerOp": 3483623.3333333335,
+      "bytesPerOp": 1.3333333333333333,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Qwen attn Q/K/V/O proj",
+      "opsPerSec": 3019.0198248968504,
+      "nsPerOp": 331233.3333333333,
+      "bytesPerOp": 1.3333333333333333,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Qwen Linear fwd [1x896 -> 2688]",
+      "opsPerSec": 2034.9054108134874,
+      "nsPerOp": 491423.3333333333,
+      "bytesPerOp": 22769.333333333332,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Qwen LM head fwd [1x896 -> 151936]",
+      "opsPerSec": 27.703296311340726,
+      "nsPerOp": 36096787.5,
+      "bytesPerOp": 608469,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Qwen decode-attn fwd [1x896 @ kvLen=64]",
+      "opsPerSec": 1225.865767698437,
+      "nsPerOp": 815750,
+      "bytesPerOp": 561521.3333333334,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "Qwen decode-attn fwd [1x896 @ kvLen=128]",
+      "opsPerSec": 826.6580694227447,
+      "nsPerOp": 1209690,
+      "bytesPerOp": 1086065.3333333333,
+      "gen0PerOp": 0.03333333333333333
+    },
+    {
+      "name": "Qwen decode-attn fwd [1x896 @ kvLen=256]",
+      "opsPerSec": 560.4957023992018,
+      "nsPerOp": 1784135,
+      "bytesPerOp": 2135154,
+      "gen0PerOp": 0
+    }
+  ]
+}
