@@ -292,6 +292,7 @@ static class Program
         RunStreamingCancellationScenarios();
         RunAutoDiffSimdScenarios();
         RunQwenDecodeMatMulScenarios();
+        RunQwenDecodeAttentionScenarios();
     }
 
     static void RunRowWhereScenarios()
@@ -548,6 +549,56 @@ static class Program
                     head.Forward(input);
                 };
             });
+    }
+
+    static void RunQwenDecodeAttentionScenarios()
+    {
+        // Qwen2.5-0.5B decode attention (docs/QWEN-PERF.md §2B, §3 item 3). Each per-token
+        // decode step in LlamaCausalAttention.ForwardCached currently BlockCopies the whole
+        // cached KV prefix, runs GqaRepeatKV x2 (14->2 heads), and re-packs K/V head-major via
+        // MultiHeadAttention.PackHeads — O(newLen * numHeads * headDim) copies per layer per
+        // token. The fused GQA single-query kernel replaces that with zero-copy cache reads.
+        // These rows gate that P0: B/op should drop ~22+ MB/token (at kvLen=128 F32) toward the
+        // residual op-boxing allocs (tracked separately by the P1 fused-decoder-block item).
+
+        Run("Qwen decode-attn fwd [1x896 @ kvLen=64]", 3, 30,
+            () => CreateQwenDecodeAttentionScenario(64));
+        Run("Qwen decode-attn fwd [1x896 @ kvLen=128]", 3, 30,
+            () => CreateQwenDecodeAttentionScenario(128));
+        Run("Qwen decode-attn fwd [1x896 @ kvLen=256]", 3, 20,
+            () => CreateQwenDecodeAttentionScenario(256));
+    }
+
+    // Qwen2.5-0.5B shapes: hidden 896, heads 14, kvHeads 2, headDim 64. Pre-populates a cache
+    // with kvLen positions (seeded, deterministic) and runs one single-token decode step. Each
+    // run reuses the same pre-seeded cache so the measured op is exactly the decode attention.
+    static Action CreateQwenDecodeAttentionScenario(int kvLen)
+    {
+        const int hidden = 896, numHeads = 14, numKvHeads = 2;
+        var attn = new LlamaCausalAttention<float>(hidden, numHeads, numKvHeads, maxPositionEmbeddings: 2048);
+        int kvWidth = numKvHeads * (hidden / numHeads);
+        var seed = new Random(42 + kvLen);
+        // Capacity for kvLen cached positions plus the new decode row (required by ForwardCached).
+        var kCache = new float[(kvLen + 1) * kvWidth];
+        var vCache = new float[(kvLen + 1) * kvWidth];
+        for (int i = 0; i < kvLen * kvWidth; i++)
+        {
+            kCache[i] = (float)(seed.NextDouble() * 2 - 1);
+            vCache[i] = (float)(seed.NextDouble() * 2 - 1);
+        }
+
+        // A single throwaway decode warms the RoPE tables (cached lazily) so the timed op is
+        // purely the decode attention, not first-use table construction.
+        var warmToken = new ReverseGradTensor<float>(NivaraColumn<float>.Create(Fill(new float[hidden])), requiresGrad: false);
+        warmToken.Reshape(1, hidden);
+        attn.ForwardCached(warmToken, kvLen, kCache, vCache, kvLen);
+
+        return () =>
+        {
+            var input = new ReverseGradTensor<float>(NivaraColumn<float>.Create(Fill(new float[hidden])), requiresGrad: false);
+            input.Reshape(1, hidden);
+            attn.ForwardCached(input, kvLen, kCache, vCache, kvLen);
+        };
     }
 
     static void RunRowScoringScenarios()
