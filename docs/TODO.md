@@ -192,15 +192,22 @@ Performed during planning; no decisions surfaced, no plan changes needed:
 
 ## GitHub issues log
 
-- (none at plan time; created during execution as deferred work is found)
+- [x] #399 — DecodeAttention per-dot score loop may regress at large kvLen (created while
+      executing P0 fused GQA decode-attention — follow-up on the per-call
+      `TensorPrimitives.Dot` overhead as context grows beyond the measured 64–256).
 - Related tracked work referenced: #384 (qkvBias, landed), #387/#391 (BF16 SIMD — orthogonal
   to this memory-traffic P0; composes unchanged), #388 (fused BF16→F32 read), #390 (GGUF
   backend). The batched-prefill P0 remains open in the ledger as the next item after this.
 
 ## Open items
 
-- [ ] Confirm whether `docs/QWEN-PERF.md` review prose gets edited vs. only a ledger entry
-      appended (see §E) before touching it.
-- [ ] Ask before running `dotnet test` / `--runs 3` harness.
-- [ ] Lock the fused-vs-slow parity tolerance (bit-exact vs 1e-5) after the first run — the
-      softmax/weighted-sum accumulation order may differ, which decides how tight we can go.
+- [x] Confirm whether `docs/QWEN-PERF.md` review prose gets edited vs. only a ledger entry
+      appended — resolved at execution: **ledger entry only** (user-confirmed, mirrors P0-2).
+- [x] Ask before running `dotnet test` / `--runs 3` harness — harness approvals given;
+      full `dotnet test` gated separately.
+- [x] Lock the fused-vs-slow parity tolerance (bit-exact vs 1e-5) — **1e-5 held** across GQA
+      ratios 14/2, 8/4, 12/4, 8/8 (12/12 fixture pass); matches the existing cache-vs-full
+      parity convention.
+- [x] E2E apples-to-apples (main vs branch) resolved at execution: harness is authoritative;
+      E2E A/B documented as inconclusive due to machine-load noise (identical main binaries
+      swung 22%; change's max effect ~1% of E2E).
