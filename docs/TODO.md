@@ -204,13 +204,15 @@ Mirror the TinyModel fixture in `LlamaCausalKVCacheTests` (vocab 128, hidden 32,
 
 1. `docs: plan Qwen-fast P0 batched prompt prefill in TODO.md` (this plan)
 2. `perf: add Qwen prefill scenarios to PerformanceTests` (loop-based `PrefillInto` on main)
-3. `perf: record qwen prefill baseline` (main → `qwen-prefill-baseline.json`)
-4. `perf: batched prompt prefill (ForwardPrefill)` — core attention + block + sample model +
+3. `perf: split prefill/decode timing in Qwen benchmark` (E2E instrumentation — landed before
+   the baseline so the main-side baseline already reports `prefill ms` + `decode ms/token`)
+4. `perf: record qwen prefill baseline` (main → `qwen-prefill-baseline.json`; E2E split baseline
+   numbers captured on the same pre-change build)
+5. `perf: batched prompt prefill (ForwardPrefill)` — core attention + block + sample model +
    chat-client swaps + harness `PrefillInto` swap
-5. `perf: split prefill/decode timing in Qwen benchmark` (E2E instrumentation)
 6. `test: pin batched prefill parity, cache capture, and alloc-free path`
 7. `perf: record qwen prefill postfix results` (`qwen-prefill-postfix.json`)
-8. E2E A/B runs (no commit)
+8. E2E A/B runs (no commit; branch vs main-side baseline)
 9. `docs: record qwen-fast P0 prefill results (perf README, CHANGELOG, QWEN.md, AUTODIFF)`
 10. `docs: add P0 prefill improvement-ledger entry to QWEN-PERF.md`
 11. G2 → `docs: remove executed plan` (+ any issue-log updates)
