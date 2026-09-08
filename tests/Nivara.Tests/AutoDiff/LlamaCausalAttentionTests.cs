@@ -1,6 +1,8 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Operations;
 using Nivara.AutoDiff.Utilities;
+using System.Numerics.Tensors;
 using NUnit.Framework;
 
 namespace Nivara.Tests.AutoDiff;
@@ -144,5 +146,132 @@ public class LlamaCausalAttentionTests
                 float step = stepOutputs[p][d];
                 Assert.That(step, Is.EqualTo(full).Within(1e-5f), $"Cached vs full mismatch at token {p}, dim {d}.");
             }
+    }
+
+    [Test]
+    public void DecodeAttention_FusedMatchesMultiHeadAttention_AcrossGqaRatios()
+    {
+        // The fused single-query decode kernel must reproduce the multi-step MultiHeadAttention
+        // path (GqaRepeatKV + PackHeads + per-head QK^T/softmax/V) for every GQA head ratio.
+        const int headDim = 16;
+        const int kvLen = 5;
+        float scale = 1.0f / MathF.Sqrt(headDim);
+        var ratios = new (int NumHeads, int NumKvHeads)[] { (14, 2), (8, 4), (12, 4), (8, 8) };
+
+        foreach (var (numHeads, numKvHeads) in ratios)
+        {
+            int hidden = numHeads * headDim;
+            int kvWidth = numKvHeads * headDim;
+            var rnd = new Random(100 + numHeads + numKvHeads);
+
+            var q = new float[hidden];
+            var kCache = new float[kvLen * kvWidth];
+            var vCache = new float[kvLen * kvWidth];
+            for (int i = 0; i < q.Length; i++) q[i] = (float)(rnd.NextDouble() * 2 - 1);
+            for (int i = 0; i < kCache.Length; i++) { kCache[i] = (float)(rnd.NextDouble() * 2 - 1); vCache[i] = (float)(rnd.NextDouble() * 2 - 1); }
+
+            var fusedOut = new float[hidden];
+            AttentionKernels<float>.DecodeAttention(q, kCache, vCache, fusedOut, kvLen, numHeads, numKvHeads, headDim, scale);
+
+            // Slow reference: exactly what ForwardCached did before the fused path.
+            var qTensor = ReverseGradTensor<float>.FromMatrix(q, 1, hidden, requiresGrad: false);
+            var kTensor = ReverseGradTensor<float>.FromMatrix(kCache, kvLen, kvWidth, requiresGrad: false);
+            var vTensor = ReverseGradTensor<float>.FromMatrix(vCache, kvLen, kvWidth, requiresGrad: false);
+            var kFull = ReverseGradOperations.GqaRepeatKV(kTensor, numHeads, numKvHeads);
+            var vFull = ReverseGradOperations.GqaRepeatKV(vTensor, numHeads, numKvHeads);
+            var openMask = ReverseGradTensor<float>.FromMatrix(new float[kvLen], 1, kvLen, requiresGrad: false);
+            var slow = ReverseGradOperations.MultiHeadAttention(qTensor, kFull, vFull, numHeads, scale, openMask);
+
+            for (int d = 0; d < hidden; d++)
+                Assert.That(fusedOut[d], Is.EqualTo(slow[d]).Within(1e-5f),
+                    $"Fused vs slow mismatch heads {numHeads}/{numKvHeads}, dim {d}.");
+        }
+    }
+
+    [Test]
+    public void DecodeAttention_GqaMapping_ReusesSharedKeyValueHead()
+    {
+        // For a 4:1 GQA ratio the fused kernel must route every query head in a group to the
+        // same KV head, so the fused output equals per-query-head attention against that single
+        // KV head. Guards the virtual mapping kvHead = qh / repeat (no GqaRepeatKV expansion).
+        const int headDim = 16, numHeads = 8, numKvHeads = 2, kvLen = 4;
+        float scale = 1.0f / MathF.Sqrt(headDim);
+        var rnd = new Random(7);
+        var q = new float[numHeads * headDim];
+        var kCache = new float[kvLen * numKvHeads * headDim];
+        var vCache = new float[kvLen * numKvHeads * headDim];
+        for (int i = 0; i < q.Length; i++) q[i] = (float)(rnd.NextDouble() * 2 - 1);
+        for (int i = 0; i < kCache.Length; i++) { kCache[i] = (float)(rnd.NextDouble() * 2 - 1); vCache[i] = (float)(rnd.NextDouble() * 2 - 1); }
+
+        var fused = new float[numHeads * headDim];
+        AttentionKernels<float>.DecodeAttention(q, kCache, vCache, fused, kvLen, numHeads, numKvHeads, headDim, scale);
+
+        // Independent reference: for each query head, dot against the KV head kv = qh / 4,
+        // softmax, weighted V.
+        for (int qh = 0; qh < numHeads; qh++)
+        {
+            int kv = qh / (numHeads / numKvHeads);
+            var scores = new float[kvLen];
+            for (int j = 0; j < kvLen; j++)
+                scores[j] = scale * TensorPrimitives.Dot(
+                    q.AsSpan(qh * headDim, headDim),
+                    kCache.AsSpan(j * numKvHeads * headDim + kv * headDim, headDim));
+            AttentionKernels<float>.SoftmaxRows(scores, 1, kvLen);
+            for (int d = 0; d < headDim; d++)
+            {
+                float acc = 0;
+                for (int j = 0; j < kvLen; j++)
+                    acc += scores[j] * vCache[j * numKvHeads * headDim + kv * headDim + d];
+                Assert.That(fused[qh * headDim + d], Is.EqualTo(acc).Within(1e-5f),
+                    $"GQA mapping mismatch head {qh}, dim {d}.");
+            }
+        }
+    }
+
+    [Test]
+    public void DecodeAttention_SteadyState_AllocatesNothing()
+    {
+        // The fused decode kernel must not copy the cached prefix: steady-state (pooled scores
+        // buffer) allocation must be ~0 with a preallocated output span.
+        const int headDim = 16, numHeads = 8, numKvHeads = 2, kvLen = 64;
+        float scale = 1.0f / MathF.Sqrt(headDim);
+        var rnd = new Random(3);
+        var q = new float[numHeads * headDim];
+        var kCache = new float[kvLen * numKvHeads * headDim];
+        var vCache = new float[kvLen * numKvHeads * headDim];
+        for (int i = 0; i < q.Length; i++) q[i] = (float)(rnd.NextDouble() * 2 - 1);
+        for (int i = 0; i < kCache.Length; i++) { kCache[i] = (float)(rnd.NextDouble() * 2 - 1); vCache[i] = (float)(rnd.NextDouble() * 2 - 1); }
+        var output = new float[numHeads * headDim];
+
+        // Warm the ArrayPool so steady-state rent/return allocates nothing.
+        for (int i = 0; i < 2; i++)
+            AttentionKernels<float>.DecodeAttention(q, kCache, vCache, output, kvLen, numHeads, numKvHeads, headDim, scale);
+
+        long before = GC.GetAllocatedBytesForCurrentThread();
+        for (int i = 0; i < 50; i++)
+            AttentionKernels<float>.DecodeAttention(q, kCache, vCache, output, kvLen, numHeads, numKvHeads, headDim, scale);
+        long after = GC.GetAllocatedBytesForCurrentThread();
+
+        Assert.That(after - before, Is.LessThan(2048), "Fused decode kernel must not allocate per call (no cache copy).");
+    }
+
+    [Test]
+    public void ForwardCached_OutsideGrad_FusedPathBuildsNoGraphNode()
+    {
+        const int hidden = 112, numHeads = 14, numKvHeads = 2, kvLen = 4, maxPos = 32;
+        using var attn = new LlamaCausalAttention<float>(hidden, numHeads, numKvHeads, maxPositionEmbeddings: maxPos);
+        int kvWidth = numKvHeads * (hidden / numHeads);
+        var kCache = new float[(kvLen + 1) * kvWidth];
+        var vCache = new float[(kvLen + 1) * kvWidth];
+        var rnd = new Random(4);
+        for (int i = 0; i < kvLen * kvWidth; i++) { kCache[i] = (float)(rnd.NextDouble() * 2 - 1); vCache[i] = (float)(rnd.NextDouble() * 2 - 1); }
+
+        var input = new ReverseGradTensor<float>(NivaraColumn<float>.Create(new float[hidden]), requiresGrad: false);
+        input.Reshape(1, hidden);
+        var output = attn.ForwardCached(input, kvLen, kCache, vCache, kvLen);
+
+        Assert.That(output.IsLeaf, Is.True, "Inference ForwardCached must not build a graph node (fused path).");
+        for (int i = 0; i < output.Length; i++)
+            Assert.That(float.IsFinite(output[i]), Is.True, $"Output[{i}] must be finite.");
     }
 }
