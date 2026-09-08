@@ -557,9 +557,10 @@ static class Program
         // decode step in LlamaCausalAttention.ForwardCached currently BlockCopies the whole
         // cached KV prefix, runs GqaRepeatKV x2 (14->2 heads), and re-packs K/V head-major via
         // MultiHeadAttention.PackHeads — O(newLen * numHeads * headDim) copies per layer per
-        // token. The fused GQA single-query kernel replaces that with zero-copy cache reads.
-        // These rows gate that P0: B/op should drop ~22+ MB/token (at kvLen=128 F32) toward the
-        // residual op-boxing allocs (tracked separately by the P1 fused-decoder-block item).
+        // token (~1 MB/op at kvLen=128; ~25 MB/token across 24 layers). The fused GQA
+        // single-query kernel replaces that with zero-copy cache reads. These rows gate that
+        // P0: B/op should drop from ~1 MB/op (kvLen=128) toward the residual op-boxing allocs
+        // (~26 KB, tracked separately by the P1 fused-decoder-block item).
 
         Run("Qwen decode-attn fwd [1x896 @ kvLen=64]", 3, 30,
             () => CreateQwenDecodeAttentionScenario(64));
