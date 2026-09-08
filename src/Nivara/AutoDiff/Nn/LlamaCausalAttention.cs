@@ -1,4 +1,5 @@
 using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using System.Numerics;
 
 namespace Nivara.AutoDiff.Nn;
@@ -156,30 +157,48 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         K.AsSpan().CopyTo(kCache.AsSpan(cacheLen * kvWidth, kvWidth));
         V.AsSpan().CopyTo(vCache.AsSpan(cacheLen * kvWidth, kvWidth));
 
-        // Build exact-size per-KV-head K/V matrices from the used cache region.
-        var kData = new T[needed];
-        var vData = new T[needed];
-        Buffer.BlockCopy(kCache, 0, kData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
-        Buffer.BlockCopy(vCache, 0, vData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
+        ReverseGradTensor<T> attn;
+        if (!GradientUtils.IsGradEnabled)
+        {
+            // Inference-only fused path: attend the single query row against the cached KV
+            // prefix with virtual GQA head mapping — zero-copy cache reads (no BlockCopy), no
+            // GqaRepeatKV expansion across the prefix, no head repack, no mask allocation.
+            var outData = new T[numHeads * headDim];
+            AttentionKernels<T>.DecodeAttention(
+                Q.AsSpan(), kCache.AsSpan(0, needed), vCache.AsSpan(0, needed),
+                outData, newLen, numHeads, numKeyValueHeads, headDim, attnScale);
+            attn = new ReverseGradTensor<T>(
+                NivaraColumn<T>.CreateFromOwnedArray(outData), requiresGrad: false, new[] { 1, numHeads * headDim });
+        }
+        else
+        {
+            // Grad-enabled fallback: keep the exact multi-step path so backward flows through
+            // the same graph nodes as before (the fused path is inference-only).
+            var kData = new T[needed];
+            var vData = new T[needed];
+            Buffer.BlockCopy(kCache, 0, kData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
+            Buffer.BlockCopy(vCache, 0, vData, 0, needed * System.Runtime.CompilerServices.Unsafe.SizeOf<T>());
 
-        var kCol = NivaraColumn<T>.CreateFromOwnedArray(kData);
-        var vCol = NivaraColumn<T>.CreateFromOwnedArray(vData);
-        var kTensor = new ReverseGradTensor<T>(kCol, requiresGrad: false);
-        var vTensor = new ReverseGradTensor<T>(vCol, requiresGrad: false);
-        kTensor.Reshape(newLen, kvWidth);
-        vTensor.Reshape(newLen, kvWidth);
+            var kCol = NivaraColumn<T>.CreateFromOwnedArray(kData);
+            var vCol = NivaraColumn<T>.CreateFromOwnedArray(vData);
+            var kTensor = new ReverseGradTensor<T>(kCol, requiresGrad: false);
+            var vTensor = new ReverseGradTensor<T>(vCol, requiresGrad: false);
+            kTensor.Reshape(newLen, kvWidth);
+            vTensor.Reshape(newLen, kvWidth);
 
-        // GQA: repeat KV heads to the query head count across the full prefix.
-        var KFull = ReverseGradOperations.GqaRepeatKV(kTensor, numHeads, numKeyValueHeads);
-        var VFull = ReverseGradOperations.GqaRepeatKV(vTensor, numHeads, numKeyValueHeads);
+            // GQA: repeat KV heads to the query head count across the full prefix.
+            var KFull = ReverseGradOperations.GqaRepeatKV(kTensor, numHeads, numKeyValueHeads);
+            var VFull = ReverseGradOperations.GqaRepeatKV(vTensor, numHeads, numKeyValueHeads);
 
-        // Fully-open mask: the new token attends to every cached position.
-        var openMaskData = new T[newLen];
-        var maskCol = NivaraColumn<T>.CreateFromOwnedArray(openMaskData);
-        var openMask = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
-        openMask.Reshape(1, newLen);
+            // Fully-open mask: the new token attends to every cached position.
+            var openMaskData = new T[newLen];
+            var maskCol = NivaraColumn<T>.CreateFromOwnedArray(openMaskData);
+            var openMask = new ReverseGradTensor<T>(maskCol, requiresGrad: false);
+            openMask.Reshape(1, newLen);
 
-        var attn = ReverseGradOperations.MultiHeadAttention(Q, KFull, VFull, numHeads, attnScale, openMask);
+            attn = ReverseGradOperations.MultiHeadAttention(Q, KFull, VFull, numHeads, attnScale, openMask);
+        }
+
         return OProj.Forward(attn);
     }
 }
