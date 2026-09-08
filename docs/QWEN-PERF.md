@@ -315,7 +315,11 @@ wall-clock number is ever needed.)
 throughput/gen0 noise on rows this change does not touch (byte-identical
 B/op; machine under load during measurement, as in P0-2). All three P0
 decode-attention rows PASS with margins of +60–90% ops/s and B/op reduced
-21–81×.
+21–81×. **Test scope:** the `LlamaCausalAttentionTests` fixture passed 12/12
+(existing cache-vs-full parity + 4 new fused-kernel tests); the full suite
+was not re-run at execution time (deferred by human decision — the change is
+confined to `LlamaCausalAttention.ForwardCached` + `AttentionKernels`, both
+covered by that fixture).
 
 ---
 
