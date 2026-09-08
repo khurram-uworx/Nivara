@@ -41,6 +41,27 @@ All notable changes to Nivara are documented here. Released versions are publish
   `WidenPrimitives.Dot` dispatch), locked by new parity + allocation guards in
   `TensorsHelperTests`, `GradKernelsTests`, and `WidenPrimitivesPhase1Tests`.
 
+- **Fused GQA single-query decode-attention (P0) — decode without the cache copy** —
+  `LlamaCausalAttention.ForwardCached` no longer re-runs the whole post-projection path per
+  token: previously it BlockCopied the cached KV prefix, ran `GqaRepeatKV` ×2 (Qwen's
+  14→2 heads, ×7 data blowup), re-packed K/V head-major via `MultiHeadAttention.PackHeads`,
+  and allocated an all-zeros open mask every token — `O(newLen·numHeads·headDim)` copies per
+  layer per token. It now dispatches to a zero-copy fused kernel
+  (`AttentionKernels.DecodeAttention`) that reads the row-major cache strided via virtual GQA
+  head mapping (`kvHead = qh / repeat`), folds the attention scale into per-query-head score
+  dots, does a single-row softmax (shared `SoftmaxRows`), and writes the weighted V sum
+  straight into the output span — no cache copy, no KV expansion, no head repack, no mask.
+  The fused path is inference-only (guarded on `!GradientUtils.IsGradEnabled`, falling back
+  to the original multi-step path inside `Grad()` so backward is unchanged), and allocates
+  only an ArrayPool-reused `kvLen` score buffer. Measured at Qwen2.5-0.5B shapes with
+  `--runs 3` medians, decode-attention B/op collapses to a flat ~26 KB regardless of context
+  (was 561 KB @64, 1,086 KB @128, 2,135 KB @256 — 21×/41×/81×) and ops/s roughly doubles
+  (1,226→1,992 @64, 827→1,967 @128, 560→1,552 @256). Outputs match the prior path within the
+  existing 1e-5 parity tolerance across GQA ratios 14/2, 8/4, 12/4, 8/8 (new
+  `DecodeAttention_FusedMatchesMultiHeadAttention_AcrossGqaRatios`, GQA-mapping, and
+  allocation guards in `LlamaCausalAttentionTests`); the cache-vs-full parity test stays
+  green through the fused path.
+
 - **net11 BCL tensor swap targets verified (#136)** — `TensorsHelper` MatMul/Transpose
   annotations now reflect the verified state of `System.Numerics.Tensors`
   11.0.0-preview.7: `Tensor.Transpose<T>` ships as a zero-copy strided view, so the
