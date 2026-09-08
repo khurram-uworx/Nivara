@@ -164,6 +164,9 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
 | Qwen attn Q/K/V/O proj | 640 | 6,658 | +940.3% | 1 | 0.00 |
 | Qwen Linear fwd [1x896 -> 2688] | 362 | 5,088 | +1305.5% | 22,769 | 0.00 |
 | Qwen LM head fwd [1x896 -> 151936] | 5 | 42 | +740.0% | 608,469 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=64] | 1,226 | 1,992 | +62.5% | 26,313 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=128] | 827 | 1,967 | +138.0% | 26,313 | 0.00 |
+| Qwen decode-attn fwd [1x896 @ kvLen=256] | 560 | 1,552 | +177.0% | 26,314 | 0.00 |
 
 ### Notes
 
@@ -175,6 +178,15 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
   `Linear` forward all gain the same fast path. The table's other rows are untouched by
   this change; a full-table refresh was deferred because today's machine was not idle
   (non-Qwen rows read ~40% below the 2026-08-30 baseline under load).
+- **Qwen decode-attention rows added 2026-09-08 with P0 (fused GQA single-query
+  decode-attention).** Prev holds the pre-fix medians from `qwen-gqa-baseline.json`; Current
+  holds the post-fix medians after `LlamaCausalAttention.ForwardCached` gained a zero-copy
+  fused decode kernel (`AttentionKernels.DecodeAttention` — no BlockCopy of the cached KV
+  prefix, no `GqaRepeatKV` expansion, no `PackHeads` re-layout, no mask alloc; inference-only
+  behind `GradientUtils`. B/op collapses to a **flat ~26 KB regardless of kvLen** (the residual
+  op-boxing allocs tracked by the P1 fused-decoder-block item) — 21×/41×/81× reduction at
+  kvLen 64/128/256 respectively, and the context-proportional growth slope is gone. gen0 stays
+  0.00 on all three rows.
 - **This table is the current-machine rolling history.** The Prev column
   carries the numbers recorded 2026-08-21 on .NET 10.0.11; the Current column
   carries the re-measured numbers recorded 2026-08-30 on .NET 11.0.0. B/op

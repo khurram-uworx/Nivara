@@ -253,12 +253,81 @@ Qwen rows pass with margins of +5–13×.
 
 ---
 
+## P0 — Fused GQA decode-attention (no BlockCopy / GqaRepeatKV)
+
+**Status: DONE** (2026-09-08 · branch `khurram/qwen-perf` · commit `7cb63df`
+kernel, `1421aca` tests, `53f278b` results, `19d9e3f` docs)
+
+**Item:** `LlamaCausalAttention.ForwardCached` attended the single query row
+by BlockCopying the whole cached KV prefix, running `GqaRepeatKV` ×2
+(Qwen 14→2 heads, ×7 data blowup), re-packing K/V head-major via
+`MultiHeadAttention.PackHeads`, and allocating an all-zeros open mask *every
+token* — `O(newLen·numHeads·headDim)` copies per layer per token. The new
+`AttentionKernels.DecodeAttention` reads the row-major cache **zero-copy**
+with virtual GQA head mapping (`kvHead = qh / repeat`), folds the scale into
+per-query-head score dots (each query head has its own Q, so scores are
+computed per query head against the shared KV head — no KV expansion
+anywhere), single-row softmax (shared `SoftmaxRows`), and a strided weighted
+V sum straight into the output span. No cache copy, no KV expansion, no head
+repack, no mask. Inference-only: guarded on `!GradientUtils.IsGradEnabled`,
+falling back to the original multi-step path inside `Grad()` so backward
+flows unchanged. Allocates only an ArrayPool-reused `kvLen` score buffer.
+
+**Numerics:** fused output equals the `GqaRepeatKV` + `MultiHeadAttention`
+slow path within the existing 1e-5 parity tolerance across GQA ratios 14/2,
+8/4, 12/4, 8/8 (`DecodeAttention_FusedMatchesMultiHeadAttention_AcrossGqaRatios`),
+plus an independent per-query-head reference pinning the `kvHead = qh / repeat`
+mapping (`DecodeAttention_GqaMapping_ReusesSharedKeyValueHead`). The cache-vs-full
+parity test (`ForwardCached_QkvBiasTrue_MatchesFullForward`) stays green
+through the fused path; an allocation guard locks ~0 steady-state bytes
+(`DecodeAttention_SteadyState_AllocatesNothing`) and the inference path
+builds no graph node (`ForwardCached_OutsideGrad_FusedPathBuildsNoGraphNode`).
+Fixture: 12/12 passed.
+
+**Measured before/after** (`--runs 3` child-process medians, same machine,
+Qwen2.5-0.5B shapes — `qwen-gqa-baseline.json` → `qwen-gqa-postfix.json`):
+
+| Decode row | Before | After | Δ | B/op before → after |
+|---|---|---|---|---|
+| decode-attn `[1x896 @ kvLen=64]` | 1,226 ops/s · 816 µs/op | **1,992 ops/s · 502 µs/op** | **+62%** | 561,521 → 26,313 |
+| decode-attn `[1x896 @ kvLen=128]` | 827 ops/s · 1,210 µs/op | **1,967 ops/s · 508 µs/op** | **+138%** | 1,086,065 → 26,313 |
+| decode-attn `[1x896 @ kvLen=256]` | 560 ops/s · 1,784 µs/op | **1,552 ops/s · 644 µs/op** | **+177%** | 2,135,154 → 26,314 |
+
+B/op collapses to a **flat ~26 KB regardless of kvLen** (21×/41×/81×
+reduction) — the context-proportional cache-copy/GQA-materialization cost is
+gone; the residual 26 KB is the Q/K/V/O op-boxing allocs tracked by the P1
+per-token fused decoder-block item.
+
+**E2E (synthetic F32 weights, 64-token prompt + 24-token decode, median of 3,
+same machine):** apples-to-apples main (pre-fix) vs this branch (fused) —
+main **524 ms/token (1.9 tok/s)**, branch **571 ms/token (1.8 tok/s)**.
+**Inconclusive — the E2E instrument cannot resolve this change**: identical
+`main` binaries swung 22% (495.6 → 605.8 ms/token) across their three runs,
+and the fused kernel removes only ~25 MB/token of attention cache traffic out
+of ~1.9 GB/token of weight re-reads (~1% of E2E time; attention is 2–4% of
+the decode step). The ~9% nominal gap sits inside the demonstrated noise band
+and cannot come from this change, which does strictly less work with
+parity-proven numerics; the op-level harness deltas above are the
+authoritative before/after. (Re-run the A/B on an idle machine if a
+wall-clock number is ever needed.)
+
+**Gate note:** the `--compare` run's FAIL rows are pre-existing
+throughput/gen0 noise on rows this change does not touch (byte-identical
+B/op; machine under load during measurement, as in P0-2). All three P0
+decode-attention rows PASS with margins of +60–90% ops/s and B/op reduced
+21–81×. **Test scope:** the `LlamaCausalAttentionTests` fixture passed 12/12
+(existing cache-vs-full parity + 4 new fused-kernel tests); the full suite
+was not re-run at execution time (deferred by human decision — the change is
+confined to `LlamaCausalAttention.ForwardCached` + `AttentionKernels`, both
+covered by that fixture).
+
+---
+
 ### Future entries (template — fill in as items land)
 
 | Plan item | Status | Measured before → after | Notes |
 |---|---|---|---|
 | P0 — Batched prompt prefill (O(L) → 1 pass) | | | |
-| P0 — Fused GQA decode-attention (no BlockCopy / GqaRepeatKV) | | | |
 | P1 — On-the-fly BF16 weights with F32 compute | | | |
 | P1 — Per-token fused decoder-block kernel | | | |
 | P2 — Sampling path + tokenize-prefix cache | | | |
