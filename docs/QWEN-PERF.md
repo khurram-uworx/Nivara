@@ -323,11 +323,91 @@ covered by that fixture).
 
 ---
 
+## P0 — Batched prompt prefill (O(L) → 1 pass)
+
+**Status: DONE** (2026-09-09 · branch `khurram/qwen-perf` · commits `2b2cca5`+
+harness scenarios, `f3299ef` E2E split, `7fdcf9d` baseline, `38c2755`
+implementation, `976b67f` tests, `c49ff4d` postfix results, `51b4882` docs)
+
+**Item:** `SeedCache` / `Qwen.Generate` prefilled the KV cache **token-by-token** —
+L full-model `ForwardCached` walks (embed + 24 blocks + final norm + the 151,936-row
+LM head), each re-reading every weight (~2 GB F32 at Qwen2.5-0.5B) from DRAM. New
+`LlamaForCausalLM<T>.ForwardPrefill(int[] ids, LlamaKVCache<T> cache)` runs the whole
+prompt as **one** `[L, hidden]` forward: per layer, `LlamaCausalAttention<T>.Forward`
+was refactored into a private `ForwardCore(input, positionOffset, kCache, vCache)` that
+runs QKV → RoPE → **captures the per-KV-head (pre-repeat) K/V into the cache at
+absolute positions `[offset, offset+L)`** → `GqaRepeatKV` → causal `MultiHeadAttention`
+→ O-proj. The model takes the last hidden row and runs the tied LM head as a single-row
+`MatMulTransposedB` → `[1, vocab]` (P0-2 single-row == row-of-batch lock). The captured
+layout is exactly what the fused `DecodeAttention` reads row-major, so decode after
+prefill is unchanged (no decode changes in this P0). No new kernels — the batched
+attention reuses `MultiHeadAttention` + `GqaRepeatKV` exactly as `Forward` does; a
+GQA-aware batched attention (drop the repeat in prefill via a fused multi-row kernel)
+is the recorded follow-up.
+
+**Numerics:** `[1, vocab]` last-row logits match row L-1 of `model.Forward(ids)` within
+1e-5 (single-row LM head is bit-identical per P0-2). Cache K/V rows at **layer 0 are
+bit-equal** to the per-token walk (same per-row projection + RoPE); deeper layers agree
+within the existing cache-vs-full 1e-5 convention — the batched prefill attention runs
+`MultiHeadAttention` while the token-by-token walk runs the fused `DecodeAttention`,
+whose outputs match within 1e-5 and feed the next layer's input (the 1e-5 fallback was
+documented in-plan). Seed-then-decode equals `model.Forward(prompt ∪ gen)` within 1e-5
+per step; no graph node is built outside `Grad()`; offsets / capacity verified; GQA
+ratios 4/2, 8/2, 14/2 covered. Fixture `LlamaForCausalLMPrefillTests` (6 tests) plus the
+existing KV-cache/attention fixtures — **21/21 passed**. Full suite: **3458 passed,
+1 failed** on net11.0.0 — the single failure is
+`Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization`, a
+`[Category("Performance")]` load-sensitive timing probe (tiled 45,805 vs BCL 40,081
+ticks that run, ~12% under load) on the tensor-transpose path this change does not
+touch (the #136 swap-target probe). Model-gated `QwenInstructParityTests` ran against
+the real checkpoint (3459 total, Skipped: 0) and passed.
+
+**Measured before/after** (`--runs 3` child-process medians, same machine, net11.0.0,
+Qwen2.5-0.5B shapes — `qwen-prefill-baseline.json` → `qwen-prefill-postfix.json`):
+
+| Prefill row | Before (loop) | After (batched) | Δ | B/op before → after | gen0 before → after |
+|---|---|---|---|---|---|
+| seed [8 tok] | 1.3 ops/s · 761 ms/op | **2.4 ops/s · 424 ms/op** | **+79.5%** | 28,999,495 → 25,364,843 | 2.00 → 0.83 |
+| seed [16 tok] | 0.6 ops/s · 1,739 ms/op | **2.1 ops/s · 469 ms/op** | **+270.6%** | 57,998,983 → 49,691,035 | 3.83 → 1.67 |
+| seed [64 tok] | NEW (loop ≈ 25+ s/op) | 1.3 ops/s · 791 ms/op | NEW | — → 195,780,248 | — → 0.33 |
+| seed [256 tok] | NEW (loop ≈ 100+ s/op) | 0.4 ops/s · 2,296 ms/op | NEW | — → 785,702,840 | — → 0.33 |
+
+The seed rows go from L full-model walks (L × ~0.4 s/op) to a single walk plus
+attention; bytes/op growth vs L flattens toward one-forward allocs (residual op-boxing
+at `[L, ·]` scale stays — the P1 per-token fused decoder-block item). The `full fwd`
+no-change siblings are flat (byte-identical B/op).
+
+**E2E (synthetic F32 weights, 64-token prompt + 24-token decode, median of 3, same
+machine, apples-to-apples main (pre-change) vs branch):**
+
+| Path | Main | Branch (batched) | Δ |
+|---|---|---|---|
+| KV-cache prefill | 5,566 ms | **747 ms** | **7.4×** |
+| KV-cache decode | 86.2 ms/token | 85.9 ms/token | flat |
+| KV-cache total / tok/s | 7,635 ms · 3.1 tok/s | **2,808 ms · 8.5 tok/s** | **~2.7×** |
+| Full fwd prefill | 1,669 ms | 1,501 ms | −10% (E2E noise) |
+| Full fwd decode | 1,716.2 ms/token | 1,784.9 ms/token | flat (E2E noise) |
+
+Prefill is ~10–20× above the instrument's documented ±22% noise band, so this A/B is
+conclusive (unlike P0's decode change): the cache-path prefill collapses from
+minutes-scale per-turn weight re-reads to one pass, and decode is flat as designed.
+
+**Gate note:** `--compare` (minOps 90%, alloc ≤×1.01, gen0 ≤+0.05) vs the pre-change
+baseline: **all four gated Qwen P0/P0-sibling rows PASS** with margins (seed [8]
++79.5%, seed [16] +270.6% ops/s; both full-fwd siblings flat with byte-identical
+B/op). Seed [64]/[256] are NEW rows, not gated. The only two FAIL rows are documented
+noise on rows this change does not touch: `Frame Slice [10k x 128]` (known issue #354
+throughput flake under load — 14,727 → 4,834 ops/s with **byte-identical** B/op
+89,936 and gen0 0.02) and `Qwen full fwd [64 tok]` (gen0-only 0.33 → 0.50, Δ +0.17 >
++0.05, with byte-identical B/op 234,075,075 and flat ops/s on the unchanged
+`model.Forward` sibling).
+
+---
+
 ### Future entries (template — fill in as items land)
 
 | Plan item | Status | Measured before → after | Notes |
 |---|---|---|---|
-| P0 — Batched prompt prefill (O(L) → 1 pass) | | | |
 | P1 — On-the-fly BF16 weights with F32 compute | | | |
 | P1 — Per-token fused decoder-block kernel | | | |
 | P2 — Sampling path + tokenize-prefix cache | | | |
