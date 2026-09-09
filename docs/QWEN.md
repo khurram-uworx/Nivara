@@ -292,8 +292,9 @@ and asserts the result is the fixture.
   `GradientUtils.Grad()` scope, so every operation short-circuits to the non-grad
   span path and no graph nodes are ever built (the ADR-002 inference-default guard).
 - **Generation:** render → `tokenizer.Encode` → KV-cached prefill
-  (`SeedCache` forward per prompt token) → per-token `ForwardCached` → decode →
-  parse. Greedy (`ArgMax`) is the default; `temperature > 0` switches to a
+  (one batched `ForwardPrefill` over the whole prompt, capturing K/V into the
+  cache) → per-token `ForwardCached` → decode → parse. Greedy (`ArgMax`) is
+  the default; `temperature > 0` switches to a
   temperature softmax with optional top-p nucleus filtering, drawn from a seeded
   shared RNG. Stops on `QwenIds.StopIds` (151645 or 151643).
 - **`GetResponseAsync`:** returns exactly one assistant message — `FunctionCallContent`s

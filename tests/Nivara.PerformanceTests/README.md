@@ -167,6 +167,12 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
 | Qwen decode-attn fwd [1x896 @ kvLen=64] | 1,226 | 1,992 | +62.5% | 26,313 | 0.00 |
 | Qwen decode-attn fwd [1x896 @ kvLen=128] | 827 | 1,967 | +138.0% | 26,313 | 0.00 |
 | Qwen decode-attn fwd [1x896 @ kvLen=256] | 560 | 1,552 | +177.0% | 26,314 | 0.00 |
+| Qwen prefill seed [8 tok] | 1.3 | 2.4 | +79.5% | 25,364,843 | 0.83 |
+| Qwen prefill seed [16 tok] | 0.6 | 2.1 | +270.6% | 49,691,035 | 1.67 |
+| Qwen prefill seed [64 tok] | — | 1.3 | — | 195,780,248 | 0.33 |
+| Qwen prefill seed [256 tok] | — | 0.4 | — | 785,702,840 | 0.33 |
+| Qwen full fwd [64 tok] | 0.6 | 0.6 | +7.8% | 234,069,039 | 0.50 |
+| Qwen full fwd [256 tok] | 0.2 | 0.2 | +0.4% | 1,120,578,724 | 0.67 |
 
 ### Notes
 
@@ -187,6 +193,18 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
   op-boxing allocs tracked by the P1 fused-decoder-block item) — 21×/41×/81× reduction at
   kvLen 64/128/256 respectively, and the context-proportional growth slope is gone. gen0 stays
   0.00 on all three rows.
+- **Qwen prefill rows added 2026-09-09 with the Qwen-fast P0 (batched prompt prefill).**
+  Prev holds the loop-based `SeedCache` readings from `qwen-prefill-baseline.json` (one
+  `ForwardCached` per prompt token); Current holds the post-fix medians after
+  `LlamaForCausalLM<T>.ForwardPrefill` seeds the whole prompt in one `[L, hidden]` forward
+  (K/V captured at the pre-repeat rows, last-row logits via the single-row LM head). The
+  seed rows drop from L full-model walks (761 ms/8 tok, 1,739 ms/16 tok) to a single walk
+  plus attention (424 ms/8 tok, 469 ms/16 tok) — +79.5%/+270.6% ops/s with B/op and
+  gen0/op down. The 64/256-token seed rows are NEW (the baseline carried loop rows only to
+  L=16 because loop L=64+ ≈ 25+ s/op); their before/after is carried by the E2E split
+  timing (prefill 5,566 → 747 ms, docs/QWEN-PERF.md). The `full fwd` siblings are
+  unchanged-code `model.Forward` rows and are flat (B/op byte-identical; the [64] row's
+  gen0 0.33 → 0.50 is GC-scheduling noise — ops/s and B/op are flat).
 - **This table is the current-machine rolling history.** The Prev column
   carries the numbers recorded 2026-08-21 on .NET 10.0.11; the Current column
   carries the re-measured numbers recorded 2026-08-30 on .NET 11.0.0. B/op

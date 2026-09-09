@@ -118,8 +118,8 @@ Module<T>                             ← Abstract base: Forward(), Parameters()
 ├── TransformerBlock<T>               ← Multi-head causal self-attention + GELU MLP (pre-norm)
 │   └── NormType enum: RMSNorm (default) | LayerNorm
 ├── MultiheadAttention<T>             ← Standalone Q/K/V/O attention (self/cross), delegates to fused ReverseGradOperations.MultiHeadAttention
-├── LlamaCausalAttention<T>           ← Causal GQA attention + RoPE for Llama/Qwen; optional Q/K/V projection bias (`qkvBias: false`)
-├── LlamaDecoderBlock<T>              ← Llama block: RMSNorm → LlamaCausalAttention → SiLU gated FFN; forwards `qkvBias`
+├── LlamaCausalAttention<T>           ← Causal GQA attention + RoPE for Llama/Qwen; optional Q/K/V projection bias (`qkvBias: false`); `ForwardPrefill` feeds a batched prompt through QKV → RoPE → K/V capture → GQA + causal `MultiHeadAttention` in one pass
+├── LlamaDecoderBlock<T>              ← Llama block: RMSNorm → LlamaCausalAttention → SiLU gated FFN; forwards `qkvBias`; `ForwardPrefill` runs the block over `[L, hidden]`, capturing K/V into the cache
 ├── Sampler<T>                        ← Temperature/top-k categorical sampling
 ├── TextTokenizer                     ← Vocabulary builder with special tokens
 └── Initializers/                     ← Kaiming, Xavier, Uniform, Normal, PyTorchDefault
