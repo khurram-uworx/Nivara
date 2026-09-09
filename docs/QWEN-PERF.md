@@ -296,7 +296,7 @@ Qwen2.5-0.5B shapes — `qwen-gqa-baseline.json` → `qwen-gqa-postfix.json`):
 B/op collapses to a **flat ~26 KB regardless of kvLen** (21×/41×/81×
 reduction) — the context-proportional cache-copy/GQA-materialization cost is
 gone; the residual 26 KB is the Q/K/V/O op-boxing allocs tracked by the P1
-per-token fused decoder-block item.
+per-token fused decoder-block item (issue #404).
 
 **E2E (synthetic F32 weights, 64-token prompt + 24-token decode, median of 3,
 same machine):** apples-to-apples main (pre-fix) vs this branch (fused) —
@@ -343,7 +343,7 @@ layout is exactly what the fused `DecodeAttention` reads row-major, so decode af
 prefill is unchanged (no decode changes in this P0). No new kernels — the batched
 attention reuses `MultiHeadAttention` + `GqaRepeatKV` exactly as `Forward` does; a
 GQA-aware batched attention (drop the repeat in prefill via a fused multi-row kernel)
-is the recorded follow-up.
+is the recorded follow-up (issue #403).
 
 **Numerics:** `[1, vocab]` last-row logits match row L-1 of `model.Forward(ids)` within
 1e-5 (single-row LM head is bit-identical per P0-2). Cache K/V rows at **layer 0 are
@@ -374,7 +374,7 @@ Qwen2.5-0.5B shapes — `qwen-prefill-baseline.json` → `qwen-prefill-postfix.j
 
 The seed rows go from L full-model walks (L × ~0.4 s/op) to a single walk plus
 attention; bytes/op growth vs L flattens toward one-forward allocs (residual op-boxing
-at `[L, ·]` scale stays — the P1 per-token fused decoder-block item). The `full fwd`
+at `[L, ·]` scale stays — the P1 per-token fused decoder-block item, #404). The `full fwd`
 no-change siblings are flat (byte-identical B/op).
 
 **E2E (synthetic F32 weights, 64-token prompt + 24-token decode, median of 3, same
@@ -408,7 +408,8 @@ throughput flake under load — 14,727 → 4,834 ops/s with **byte-identical** B
 
 | Plan item | Status | Measured before → after | Notes |
 |---|---|---|---|
-| P1 — On-the-fly BF16 weights with F32 compute | | | |
-| P1 — Per-token fused decoder-block kernel | | | |
-| P2 — Sampling path + tokenize-prefix cache | | | |
+| P0-follow-up — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | | | tracked in #403 |
+| P1 — On-the-fly BF16 weights with F32 compute | | | tracked in #387/#391 |
+| P1 — Per-token fused decoder-block kernel | | | tracked in #404 |
+| P2 — Sampling path + tokenize-prefix cache | | | tracked in #402 |
 | Stretch — INT8 block-quantized weights / GGUF backend (#390) | | | |
