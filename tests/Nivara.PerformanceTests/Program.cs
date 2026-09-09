@@ -612,13 +612,14 @@ static class Program
         // ~2 GB F32); on this branch the same row runs one batched model.ForwardPrefill (single
         // weight pass + K/V capture at post-RoPE, pre-GQA-repeat). Row names are identical on both
         // branches — only PrefillInto's body swaps — so --compare gates the true before/after.
-        // Baseline seed rows are limited to L = 8/16 (the L = 64+ loop costs ~30-100 s/op; see
-        // docs/TODO.md open items). The L = 64/256 batched seed rows are added by the
-        // implementation commit as batched-only NEW rows; the L = 64 before/after is carried by
-        // the E2E split prefill/decode timing (docs/TODO.md §C). "Qwen full fwd" rows are
-        // unchanged model.Forward(ids) on both branches — no-regression siblings.
+        // The L = 64/256 seed rows are batched-only NEW rows added by the implementation commit
+        // (the loop cost ~30-100 s/op there; the L = 64 before/after is carried by the E2E split
+        // prefill/decode timing, docs/TODO.md §C). "Qwen full fwd" rows are unchanged
+        // model.Forward(ids) on both branches — no-regression siblings.
         Run("Qwen prefill seed [8 tok]", 1, 6, () => CreateQwenPrefillScenario(8));
         Run("Qwen prefill seed [16 tok]", 1, 6, () => CreateQwenPrefillScenario(16));
+        Run("Qwen prefill seed [64 tok]", 1, 6, () => CreateQwenPrefillScenario(64));
+        Run("Qwen prefill seed [256 tok]", 1, 6, () => CreateQwenPrefillScenario(256));
         Run("Qwen full fwd [64 tok]", 1, 6, () => CreateQwenFullForwardScenario(64));
         Run("Qwen full fwd [256 tok]", 1, 6, () => CreateQwenFullForwardScenario(256));
     }
@@ -647,13 +648,11 @@ static class Program
         return () => model.Forward(ids);
     }
 
-    // Baseline (on main): the token-by-token SeedCache loop this P0 replaces. The implementation
-    // commit swaps this body to model.ForwardPrefill(ids, cache) — same row names, both JSONs.
+    // Baseline (on main): the token-by-token SeedCache loop this P0 replaces. On this branch the
+    // body is the batched model.ForwardPrefill — same row names, both JSONs — so --compare gates
+    // the true before/after.
     static void PrefillInto(LlamaForCausalLM<float> model, int[] ids, LlamaKVCache<float> cache)
-    {
-        for (int p = 0; p < ids.Length; p++)
-            _ = model.ForwardCached(ids[p], p, cache);
-    }
+        => model.ForwardPrefill(ids, cache);
 
     static void RunRowScoringScenarios()
     {

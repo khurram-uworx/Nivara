@@ -314,9 +314,7 @@ static class Qwen
         ReverseGradTensor<float> logits;
         if (useKvCache)
         {
-            logits = null!;
-            for (int p = 0; p < promptIds.Count; p++)
-                logits = model.ForwardCached(promptIds[p], p, cache);
+            logits = model.ForwardPrefill(promptIds.ToArray(), cache);
         }
         else
         {

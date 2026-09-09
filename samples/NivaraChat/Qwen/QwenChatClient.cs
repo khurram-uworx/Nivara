@@ -154,15 +154,10 @@ internal sealed class QwenChatClient<T> : IChatClient
         return generated;
     }
 
-    /// <summary>Runs the prompt tokens through the cached forward to seed the per-layer cache
+    /// <summary>Runs the prompt tokens through a single batched prefill to seed the per-layer cache
     /// and produce the logits predicting the first generated token.</summary>
     ReverseGradTensor<T> SeedCache(List<int> ids, LlamaKVCache<T> cache)
-    {
-        ReverseGradTensor<T> logits = null!;
-        for (int p = 0; p < ids.Count; p++)
-            logits = model.ForwardCached(ids[p], p, cache);
-        return logits;
-    }
+        => model.ForwardPrefill(ids.ToArray(), cache);
 
     /// <summary>Returns the model's final-position logits (<c>[vocab]</c>) as a span.</summary>
     static ReadOnlySpan<T> LastRow(ReverseGradTensor<T> logits)

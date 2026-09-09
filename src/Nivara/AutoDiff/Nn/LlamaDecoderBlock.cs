@@ -122,4 +122,34 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         var mlpOut = DownProj.Forward(gated);
         return ReverseGradOperations.Add(h, mlpOut);
     }
+
+    /// <summary>
+    /// Runs one Llama decoder block over a batched <c>[L, hiddenSize]</c> prompt during cached
+    /// inference, routing attention through <see cref="LlamaCausalAttention{T}.ForwardPrefill"/>
+    /// so the per-KV-head key/value rows are captured into the caches in a single pass. Mirrors
+    /// <see cref="Forward(ReverseGradTensor{T})"/> (same residual/FFN structure).
+    /// </summary>
+    /// <param name="input">The prompt hidden states <c>[L, hiddenSize]</c></param>
+    /// <param name="positionOffset">Absolute position of the first prompt row</param>
+    /// <param name="kCache">Per-layer RoPE'd key cache (row-major per-KV-head)</param>
+    /// <param name="vCache">Per-layer value cache (row-major per-KV-head)</param>
+    /// <returns>The block output with shape <c>[L, hiddenSize]</c></returns>
+    public ReverseGradTensor<T> ForwardPrefill(
+        ReverseGradTensor<T> input,
+        int positionOffset,
+        T[] kCache,
+        T[] vCache)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+
+        var attnOut = Attention.ForwardPrefill(InputNorm.Forward(input), positionOffset, kCache, vCache);
+        var h = ReverseGradOperations.Add(input, attnOut);
+
+        var ffnIn = PostNorm.Forward(h);
+        var gate = Activation.Silu(GateProj.Forward(ffnIn));
+        var up = UpProj.Forward(ffnIn);
+        var gated = ReverseGradOperations.Multiply(gate, up);
+        var mlpOut = DownProj.Forward(gated);
+        return ReverseGradOperations.Add(h, mlpOut);
+    }
 }
