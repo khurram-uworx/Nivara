@@ -174,15 +174,10 @@ internal sealed class SmolLMChatClient<T> : IChatClient
         return sb.ToString();
     }
 
-    /// <summary>Runs the prompt tokens through the cached forward to seed the per-layer cache
+    /// <summary>Runs the prompt tokens through a single batched prefill to seed the per-layer cache
     /// and produce the logits predicting the first generated token.</summary>
     ReverseGradTensor<T> SeedCache(List<int> ids, LlamaKVCache<T> cache)
-    {
-        ReverseGradTensor<T> logits = null!;
-        for (int p = 0; p < ids.Count; p++)
-            logits = model.ForwardCached(ids[p], p, cache);
-        return logits;
-    }
+        => model.ForwardPrefill(ids.ToArray(), cache);
 
     /// <summary>Selects the next token: argmax when greedy, otherwise temperature softmax with
     /// optional top-p filtering, drawn from the shared seeded RNG.</summary>

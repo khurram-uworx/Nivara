@@ -94,15 +94,73 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         if (input.shape[1] != hiddenSize)
             throw new ArgumentException($"Expected input width {hiddenSize}, got {input.shape[1]}.");
 
+        return ForwardCore(input, 0, null, null);
+    }
+
+    /// <summary>
+    /// Runs Llama causal self-attention over a batched <c>[L, hiddenSize]</c> prompt during
+    /// cached-inference prefill, capturing the per-KV-head key/value rows into
+    /// <paramref name="kCache"/>/<paramref name="vCache"/> exactly as the per-token
+    /// <see cref="ForwardCached"/> walk would. Computes Q/K/V for all L positions at once,
+    /// applies RoPE at absolute positions <c>[positionOffset, positionOffset + L)</c>, copies the
+    /// RoPE'd pre-repeat K/V (<c>[L, kvWidth]</c>, the cache's row-major per-KV-head layout) into
+    /// cache rows <c>[positionOffset, positionOffset + L)</c>, then runs the same GQA repeat,
+    /// causal attention, and output projection as <see cref="Forward(ReverseGradTensor{T})"/>.
+    /// One batched pass reads the weights once instead of L per-token walks. Inference and
+    /// grad-enabled paths follow <see cref="Forward(ReverseGradTensor{T})"/> exactly (the capture
+    /// is a plain array write; no graph node is built for it).
+    /// </summary>
+    /// <param name="input">The prompt hidden states <c>[L, hiddenSize]</c></param>
+    /// <param name="positionOffset">Absolute position of the first prompt row (0 for a fresh prefill)</param>
+    /// <param name="kCache">Per-layer RoPE'd key cache, row-major <c>[kvLen, numKeyValueHeads * headDim]</c></param>
+    /// <param name="vCache">Per-layer value cache, row-major <c>[kvLen, numKeyValueHeads * headDim]</c></param>
+    /// <returns>The attention output with shape <c>[L, hiddenSize]</c></returns>
+    public ReverseGradTensor<T> ForwardPrefill(
+        ReverseGradTensor<T> input,
+        int positionOffset,
+        T[] kCache,
+        T[] vCache)
+    {
+        if (input == null) throw new ArgumentNullException(nameof(input));
+        if (input.Rank != 2) throw new ArgumentException($"LlamaCausalAttention expects 2D input [L, D], got {input.Rank}D");
+        if (input.shape[1] != hiddenSize)
+            throw new ArgumentException($"Expected input width {hiddenSize}, got {input.shape[1]}.");
+        if (positionOffset < 0) throw new ArgumentOutOfRangeException(nameof(positionOffset));
+
+        int kvWidth = numKeyValueHeads * headDim;
+        int needed = (positionOffset + input.shape[0]) * kvWidth;
+        if (kCache.Length < needed || vCache.Length < needed)
+            throw new ArgumentException($"Cache buffers must have capacity for {(positionOffset + input.shape[0])} rows of width {kvWidth}.");
+
+        return ForwardCore(input, positionOffset, kCache, vCache);
+    }
+
+    ReverseGradTensor<T> ForwardCore(
+        ReverseGradTensor<T> input,
+        int positionOffset,
+        T[]? kCache,
+        T[]? vCache)
+    {
         int qLen = input.shape[0];
 
         var Q = QProj.Forward(input);
         var K = KProj.Forward(input);
         var V = VProj.Forward(input);
 
-        // Apply RoPE before splitting/repeating.
-        Q = rotary.Forward(Q);
-        K = rotary.Forward(K);
+        // Apply RoPE before splitting/repeating (batched with an absolute offset; row p is
+        // rotated by positionOffset + p — the same per-row math as ForwardCached).
+        Q = rotary.Forward(Q, positionOffset);
+        K = rotary.Forward(K, positionOffset);
+
+        // Prefill: capture the pre-repeat per-KV-head K/V into the cache rows the fused
+        // DecodeAttention reads (row-major [kvLen, numKeyValueHeads * headDim]).
+        if (kCache is not null && vCache is not null)
+        {
+            int kvWidth = numKeyValueHeads * headDim;
+            int rowBytes = qLen * kvWidth;
+            K.AsSpan().CopyTo(kCache.AsSpan(positionOffset * kvWidth, rowBytes));
+            V.AsSpan().CopyTo(vCache.AsSpan(positionOffset * kvWidth, rowBytes));
+        }
 
         // GQA: repeat key/value heads to the query head count.
         K = ReverseGradOperations.GqaRepeatKV(K, numHeads, numKeyValueHeads);

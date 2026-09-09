@@ -7,6 +7,7 @@ using Nivara.Execution;
 using Nivara.Expressions;
 using Nivara.Operations;
 using Nivara.Query;
+using Nivara.Samples;
 using Nivara.Storage;
 using Nivara.Tensors;
 using System.Diagnostics;
@@ -293,6 +294,7 @@ static class Program
         RunAutoDiffSimdScenarios();
         RunQwenDecodeMatMulScenarios();
         RunQwenDecodeAttentionScenarios();
+        RunQwenPrefillScenarios();
     }
 
     static void RunRowWhereScenarios()
@@ -601,6 +603,56 @@ static class Program
             attn.ForwardCached(input, kvLen, kCache, vCache, kvLen);
         };
     }
+
+    static void RunQwenPrefillScenarios()
+    {
+        // Qwen2.5-0.5B prompt prefill (docs/QWEN-PERF.md §2A, docs/TODO.md §B). "Qwen prefill
+        // seed [L]" measures seeding the KV cache for an L-token prompt: on main the row runs the
+        // current token-by-token SeedCache loop (L full-model walks — each re-reads every weight,
+        // ~2 GB F32); on this branch the same row runs one batched model.ForwardPrefill (single
+        // weight pass + K/V capture at post-RoPE, pre-GQA-repeat). Row names are identical on both
+        // branches — only PrefillInto's body swaps — so --compare gates the true before/after.
+        // The L = 64/256 seed rows are batched-only NEW rows added by the implementation commit
+        // (the loop cost ~30-100 s/op there; the L = 64 before/after is carried by the E2E split
+        // prefill/decode timing, docs/TODO.md §C). "Qwen full fwd" rows are unchanged
+        // model.Forward(ids) on both branches — no-regression siblings.
+        Run("Qwen prefill seed [8 tok]", 1, 6, () => CreateQwenPrefillScenario(8));
+        Run("Qwen prefill seed [16 tok]", 1, 6, () => CreateQwenPrefillScenario(16));
+        Run("Qwen prefill seed [64 tok]", 1, 6, () => CreateQwenPrefillScenario(64));
+        Run("Qwen prefill seed [256 tok]", 1, 6, () => CreateQwenPrefillScenario(256));
+        Run("Qwen full fwd [64 tok]", 1, 6, () => CreateQwenFullForwardScenario(64));
+        Run("Qwen full fwd [256 tok]", 1, 6, () => CreateQwenFullForwardScenario(256));
+    }
+
+    // Qwen2.5-0.5B shapes: vocab 151,936, hidden 896, 24 layers, 14 heads, 2 KV heads (headDim
+    // 64, kvWidth 128), intermediate 4864 — ~2 GB resident F32, built once per row outside
+    // timing. Deterministic token ids via a seeded RNG (per-row seed) keep runs reproducible.
+    static Action CreateQwenPrefillScenario(int L)
+    {
+        var model = new LlamaForCausalLM<float>(151_936, 896, 24, 14, 2, 4864);
+        var cache = new LlamaKVCache<float>(24, 2 * (896 / 14));
+        var ids = new int[L];
+        var rng = new Random(42 + L);
+        for (int i = 0; i < L; i++)
+            ids[i] = rng.Next(151_936);
+        return () => PrefillInto(model, ids, cache);
+    }
+
+    static Action CreateQwenFullForwardScenario(int L)
+    {
+        var model = new LlamaForCausalLM<float>(151_936, 896, 24, 14, 2, 4864);
+        var ids = new int[L];
+        var rng = new Random(42 + L);
+        for (int i = 0; i < L; i++)
+            ids[i] = rng.Next(151_936);
+        return () => model.Forward(ids);
+    }
+
+    // Baseline (on main): the token-by-token SeedCache loop this P0 replaces. On this branch the
+    // body is the batched model.ForwardPrefill — same row names, both JSONs — so --compare gates
+    // the true before/after.
+    static void PrefillInto(LlamaForCausalLM<float> model, int[] ids, LlamaKVCache<float> cache)
+        => model.ForwardPrefill(ids, cache);
 
     static void RunRowScoringScenarios()
     {

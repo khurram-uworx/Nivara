@@ -17,6 +17,30 @@ All notable changes to Nivara are documented here. Released versions are publish
   new bias parameters is Torch-verified (`llama_attn_bias`/`llama_decoder_bias` parity
   fixtures) plus structural AutoDiff coverage.
 
+- **Batched prompt prefill for Llama/Qwen (Qwen-fast P0)** —
+  `LlamaForCausalLM<T>.ForwardPrefill(int[] ids, LlamaKVCache<T> cache)` seeds the
+  KV cache with **one** `[L, hidden]` forward instead of L per-token `ForwardCached`
+  walks. Per layer, `LlamaCausalAttention<T>.ForwardPrefill` runs QKV → RoPE →
+  captures the per-KV-head (pre-repeat) K/V into the cache at absolute positions
+  `[offset, offset+L)`, then `GqaRepeatKV` + causal `MultiHeadAttention` exactly as
+  `Forward` does (`[L, numHeads·headDim]` → O-proj → `[L, hidden]`). The model slices
+  the last hidden row and runs the tied LM head as a single-row `MatMulTransposedB`
+  → `[1, vocab]` (bit-identical to row L-1 of the full head, per the P0-2
+  single-row == row-of-batch lock). `QwenChatClient.SeedCache`,
+  `SmolLMChatClient.SeedCache`, and `NivaraInference.Generate` now prefill in one
+  pass. The batched forward reads every weight **once** instead of once per prompt
+  token — prompt prefill on Qwen2.5-0.5B shapes drops from O(L)·2 GB to ~2 GB of
+  weight traffic. Measured at Qwen2.5-0.5B shapes with `--runs 3` medians, the
+  harness seed rows go 761 → 424 ms/op (8 tok, +79%) and 1,739 → 469 ms/op
+  (16 tok, +270%) with B/op and gen0/op down; new seed rows at 64/256 tokens run
+  one-pass (791 ms / 2,296 ms per op). E2E (64-token prompt + 24-token decode,
+  median of 3): KV-cache prefill 5,566 → 747 ms (**7.4×**) with decode flat
+  (86.2 → 85.9 ms/token) — cache path total 7,635 → 2,808 ms (~2.7× faster).
+  Parity pinned by new `LlamaForCausalLMPrefillTests` (layer-0 K/V rows bit-equal
+  to the per-token walk, deeper layers within the existing 1e-5 cache-vs-full
+  tolerance, `[1, vocab]` logits match the full forward, no graph node outside
+  `Grad()`, GQA ratios 4/2 · 8/2 · 14/2).
+
 ### Changed
 
 - **Nested (non-slot) cumulative windows fall back to exact boundary materialization (#360)** —

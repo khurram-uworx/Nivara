@@ -118,6 +118,56 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         logits.Reshape(1, vocabSize);
         return logits;
     }
+
+    /// <summary>
+    /// Runs the causal-LM stack over an entire prompt <em>at once</em> during cached-inference
+    /// prefill, capturing every layer's key/value rows into <paramref name="cache"/> and returning
+    /// the <c>[1, vocabSize]</c> logits for the <em>last</em> prompt position (mirroring
+    /// <see cref="ForwardCached"/>'s return shape so <c>Generate</c>/<c>Select</c> call sites are
+    /// unchanged). One batched pass reads the weights once instead of one full-model walk per
+    /// token; the captured cache layout is exactly what the fused decode path consumes, so decode
+    /// after prefill is unchanged. The last hidden row is fed to the tied LM head as a single-row
+    /// matmul — bit-identical to row <c>L-1</c> of the full-sequence head
+    /// (<see cref="Forward(int[])"/>) without allocating the <c>L × vocab</c> logits block.
+    /// </summary>
+    /// <param name="inputIds">Prompt token IDs (length L ≥ 1)</param>
+    /// <param name="cache">The shared KV cache to seed (positions <c>[0, L)</c>)</param>
+    /// <returns>Logits with shape <c>[1, vocabSize]</c> for the last prompt position</returns>
+    public ReverseGradTensor<T> ForwardPrefill(int[] inputIds, LlamaKVCache<T> cache)
+    {
+        if (inputIds == null) throw new ArgumentNullException(nameof(inputIds));
+        if (inputIds.Length == 0) throw new ArgumentException("Prefill requires at least one token.", nameof(inputIds));
+        ArgumentNullException.ThrowIfNull(cache);
+        for (int i = 0; i < inputIds.Length; i++)
+            if (inputIds[i] < 0 || inputIds[i] >= vocabSize)
+                throw new ArgumentOutOfRangeException(nameof(inputIds), inputIds[i], $"Token id {inputIds[i]} out of range 0..{vocabSize - 1}.");
+
+        cache.Ensure(inputIds.Length);
+
+        var h = Embed.Forward(inputIds); // [L, hidden]
+
+        for (int i = 0; i < layers.Length; i++)
+        {
+            var layer = layers[i];
+            h = layer.ForwardPrefill(h, 0, cache.keys[i], cache.values[i]);
+        }
+
+        h = finalNorm.Forward(h); // [L, hidden]
+
+        // Tied LM head on the last hidden row only: [1, hidden] @ [vocab, hidden]^T -> [1, vocab].
+        int hidden = h.Shape[1];
+        int rows = h.Shape[0];
+        var lastRow = new T[hidden];
+        if (h.Data.TryGetSpan(out var hSpan))
+            hSpan.Slice((rows - 1) * hidden, hidden).CopyTo(lastRow);
+        else
+            for (int i = 0; i < hidden; i++) lastRow[i] = h[(rows - 1) * hidden + i];
+        var last = ReverseGradTensor<T>.FromMatrix(lastRow, 1, hidden, requiresGrad: false);
+
+        var logits = ReverseGradOperations.MatMulTransposedB(last, Embed.Weight!.Tensor);
+        logits.Reshape(1, vocabSize);
+        return logits;
+    }
 }
 
 /// <summary>

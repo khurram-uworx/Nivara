@@ -300,21 +300,32 @@ static class Qwen
     {
         int kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
         using var cache = new LlamaKVCache<float>(config.NumHiddenLayers, kvWidth);
+        return GenerateCore(model, config, promptIds, maxNewTokens, useKvCache, cache, out _, out _);
+    }
 
+    /// <summary>Shared generate body with per-phase timing (seed/prefill vs decode) — the plan's
+    /// split-timing driver. Pure benchmark-facility change; <see cref="Generate"/> keeps its exact
+    /// public behavior.</summary>
+    static List<int> GenerateCore(
+        LlamaForCausalLM<float> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens,
+        bool useKvCache, LlamaKVCache<float> cache, out double prefillMs, out double decodeMs)
+    {
+        var prefillSw = System.Diagnostics.Stopwatch.StartNew();
         ReverseGradTensor<float> logits;
         if (useKvCache)
         {
-            logits = null!;
-            for (int p = 0; p < promptIds.Count; p++)
-                logits = model.ForwardCached(promptIds[p], p, cache);
+            logits = model.ForwardPrefill(promptIds.ToArray(), cache);
         }
         else
         {
             logits = model.Forward(promptIds.ToArray());
         }
+        prefillSw.Stop();
+        prefillMs = prefillSw.Elapsed.TotalMilliseconds;
 
         int position = promptIds.Count;
         var gen = new List<int>();
+        var decodeSw = System.Diagnostics.Stopwatch.StartNew();
         for (int t = 0; t < maxNewTokens && gen.Count < config.MaxPositionEmbeddings; t++)
         {
             int next = ArgMaxLastRow(logits, config.VocabSize);
@@ -325,6 +336,8 @@ static class Qwen
                 ? model.ForwardCached(next, position++, cache)
                 : model.Forward(BuildSequence(promptIds, gen));
         }
+        decodeSw.Stop();
+        decodeMs = decodeSw.Elapsed.TotalMilliseconds;
         return gen;
     }
 
@@ -521,33 +534,45 @@ static class Qwen
         var cachedRuns = Enumerable.Range(0, 3).Select(_ => Cached()).ToArray();
         var fullRuns = Enumerable.Range(0, 3).Select(_ => Full()).ToArray();
 
-        static (double AvgMsTok, double MedianMs, int Tokens) Summarize(TimeResult[] runs)
+        static (double AvgMsTok, double MedianMs, double MedianPrefillMs, double MedianDecodeMsTok, int Tokens) Summarize(TimeResult[] runs)
         {
             var s = runs.OrderBy(r => r.Ms).ToArray();
-            return (runs.Average(r => r.MsPerTok), s[1].Ms, s[1].Tokens);
+            return (runs.Average(r => r.MsPerTok), s[1].Ms, s[1].PrefillMs, s[1].DecodeMsTok, s[1].Tokens);
         }
 
         var c = Summarize(cachedRuns);
         var f = Summarize(fullRuns);
-        Console.WriteLine($"  KV cache:  median {c.MedianMs:F0} ms for {c.Tokens} tokens ({c.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, c.AvgMsTok):F1} tok/s)");
-        Console.WriteLine($"  Full fwd:  median {f.MedianMs:F0} ms for {f.Tokens} tokens ({f.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, f.AvgMsTok):F1} tok/s)");
+        Console.WriteLine($"  KV cache:  median {c.MedianMs:F0} ms for {c.Tokens} tokens ({c.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, c.AvgMsTok):F1} tok/s) | prefill {c.MedianPrefillMs:F0} ms, decode {c.MedianDecodeMsTok:F1} ms/token");
+        Console.WriteLine($"  Full fwd:  median {f.MedianMs:F0} ms for {f.Tokens} tokens ({f.AvgMsTok:F1} ms/token, {1000.0 / Math.Max(0.1, f.AvgMsTok):F1} tok/s) | prefill {f.MedianPrefillMs:F0} ms, decode {f.MedianDecodeMsTok:F1} ms/token");
         if (f.AvgMsTok > 0)
             Console.WriteLine($"  Speedup:   {f.AvgMsTok / Math.Max(0.01, c.AvgMsTok):F1}x");
         Console.WriteLine();
         return 0;
     }
 
-    struct TimeResult { public double Ms; public double MsPerTok; public int Tokens; }
+    struct TimeResult
+    {
+        public double Ms;
+        public double MsPerTok;
+        public double PrefillMs;
+        public double DecodeMsTok;
+        public int Tokens;
+    }
 
     static TimeResult TimeGeneration(LlamaForCausalLM<float> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, bool useKvCache)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
-        var ids = Generate(model, config, promptIds, maxNewTokens, useKvCache);
+        int kvWidth = config.NumKeyValueHeads * (config.HiddenSize / config.NumAttentionHeads);
+        using var cache = new LlamaKVCache<float>(config.NumHiddenLayers, kvWidth);
+        var ids = GenerateCore(model, config, promptIds, maxNewTokens, useKvCache, cache, out double prefillMs, out double decodeMs);
         sw.Stop();
+        double totalMs = sw.Elapsed.TotalMilliseconds;
         return new TimeResult
         {
-            Ms = sw.Elapsed.TotalMilliseconds,
-            MsPerTok = sw.Elapsed.TotalMilliseconds / Math.Max(1, ids.Count),
+            Ms = totalMs,
+            MsPerTok = totalMs / Math.Max(1, ids.Count),
+            PrefillMs = prefillMs,
+            DecodeMsTok = decodeMs / Math.Max(1, ids.Count),
             Tokens = ids.Count,
         };
     }
