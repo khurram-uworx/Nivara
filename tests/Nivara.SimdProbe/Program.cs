@@ -19,10 +19,12 @@ internal class Program
         string mode = args.Length > 0 ? args[0] : "all";
         return mode switch
         {
+            "cpu" => CpuIdProbe.Run(),
+            "support" => SupportReport.Run(),
             "correctness" => Correctness.RunAll(),
             "benchmark" => Benchmark.RunAll(),
-            "all" => Correctness.RunAll() + Benchmark.RunAll(),
-            _ => Correctness.RunAll() + Benchmark.RunAll()
+            "all" => CpuIdProbe.Run() + SupportReport.Run() + Correctness.RunAll() + Benchmark.RunAll(),
+            _ => SupportReport.Run() + Correctness.RunAll() + Benchmark.RunAll()
         };
     }
 }
