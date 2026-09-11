@@ -557,7 +557,7 @@ static class Qwen
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
         var model = LlamaLoader.Load<T, T>(QwenSyntheticConfig, tensors);
         buildSw.Stop();
-        Console.WriteLine($"  Model build (synthetic {PrecisionLabel<T>()}): {buildSw.ElapsedMilliseconds} ms ({tensors.Count} tensors, {mb} MB f32 pool)");
+        Console.WriteLine($"  Model build ({syntheticPrecision}): {buildSw.ElapsedMilliseconds} ms ({tensors.Count} tensors, {mb} MB f32 pool)");
         Console.WriteLine();
 
         var promptIds = new int[64];

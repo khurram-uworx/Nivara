@@ -129,4 +129,8 @@ Enables "same machine" to be a checkable field instead of prose.
 - Pre-existing tracked items referenced by this plan: #387/#391 (BF16 SIMD
   research), #402 (sampling path), #403 (GQA-aware batched prefill follow-up),
   #404 (per-token fused decoder-block), #390 (GGUF / quantized weights).
+- [ ] #406 — QwenInstructParityTests fail (FileNotFound) when the checkpoint is
+  present but the Torch reference `.bin` fixtures are absent — tests should
+  `Assert.Ignore` until `samples/NivaraTorch/gen_reference.py` runs (created
+  while executing P1; surfaced by the checkpoint download activating them).
 - New issues created during execution, if any, are recorded here as they land.
