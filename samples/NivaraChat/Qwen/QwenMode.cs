@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using Nivara.Primitives;
 using Nivara.Samples;
 using System.Diagnostics;
 using System.Numerics;
@@ -66,31 +67,52 @@ public static class QwenMode
         QwenOptions options)
         where T : struct, IFloatingPointIeee754<T>
     {
-        var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
-        var model = LlamaLoader.Load<T, T>(config, tensors);
-
-        using var client = new QwenChatClient<T>(
-            model, tokenizer, config,
-            maxNewTokens: options.MaxNewTokens,
-            temperature: options.Temperature,
-            topP: options.HasTopP ? options.TopP : null,
-            seed: options.Seed,
-            useKvCache: options.UseKvCache,
-            knownToolNames: options.Mode == "tools-weather" ? [QwenSampleTools.WeatherToolName] : null);
-
-        if (options.Mode == "tools-weather")
+        bool widenSimd = EnableWidenSimdIfNarrow<T>();
+        try
         {
-            await RunToolsWeather(client, options.Text);
-            return;
-        }
+            var tensors = SafeTensorsLoader.Read<T>(Path.Combine(modelDir, "model.safetensors"));
+            var model = LlamaLoader.Load<T, T>(config, tensors);
 
-        if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+            using var client = new QwenChatClient<T>(
+                model, tokenizer, config,
+                maxNewTokens: options.MaxNewTokens,
+                temperature: options.Temperature,
+                topP: options.HasTopP ? options.TopP : null,
+                seed: options.Seed,
+                useKvCache: options.UseKvCache,
+                knownToolNames: options.Mode == "tools-weather" ? [QwenSampleTools.WeatherToolName] : null);
+
+            if (options.Mode == "tools-weather")
+            {
+                await RunToolsWeather(client, options.Text);
+                return;
+            }
+
+            if (options.Mode == "plain" || !string.IsNullOrEmpty(options.Text))
+            {
+                await RunSingleTurn(client, options.Text ?? "The capital of France is");
+                return;
+            }
+
+            await RunRepl(client);
+        }
+        finally
         {
-            await RunSingleTurn(client, options.Text ?? "The capital of France is");
-            return;
+            if (widenSimd) NivaraPrimitives.UseWidenSimd = false;
         }
+    }
 
-        await RunRepl(client);
+    /// <summary>Narrow compute types (BFloat16/Half) run their dots through the
+    /// widen-compute-narrow SIMD kernels only while <see cref="NivaraPrimitives.UseWidenSimd"/> is
+    /// enabled — without it they fall to the ~26× slower scalar BCL dot. Enabling for the narrow
+    /// session (and restoring afterwards) keeps the BF16 chat host fast by construction.</summary>
+    static bool EnableWidenSimdIfNarrow<T>()
+        where T : struct
+    {
+        if (typeof(T) != typeof(BFloat16) && typeof(T) != typeof(Half))
+            return false; // caller must not restore
+        NivaraPrimitives.UseWidenSimd = true;
+        return true; // caller restores to false
     }
 
     /// <summary>
