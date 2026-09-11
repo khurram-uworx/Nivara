@@ -151,14 +151,9 @@ class Program
         bool fp16 = precision == "fp16";
         bool bf16 = precision == "bf16";
 
-        if (isQwen && bf16)
-        {
-            Console.Error.WriteLine("Qwen2.5 precision error: bf16 is not supported for the qwen mode. Use --precision f32 (BF16-on-disk, widened to F32 at load).");
-            return 1;
-        }
         if (isQwen && fp16)
         {
-            Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode. Use --precision f32 (BF16-on-disk, widened to F32 at load).");
+            Console.Error.WriteLine("Qwen2.5 precision error: fp16 is not supported for the qwen mode. Use --precision f32 (BF16-on-disk, widened to F32 at load) or --precision bf16 (native BFloat16).");
             return 1;
         }
 
@@ -238,7 +233,14 @@ class Program
                         Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' mode (decode timing; correctness needs real weights).");
                         return 1;
                     }
-                    return Qwen.RunSyntheticBenchmark();
+                    return bf16 ? Qwen.RunSyntheticBenchmark<BFloat16>() : Qwen.RunSyntheticBenchmark<float>();
+                }
+                if (bf16)
+                {
+                    if (mode == "benchmark")
+                        return Qwen.RunBenchmark(tensorsBf16, modelDir);
+                    Console.Error.WriteLine("Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32.");
+                    return 1;
                 }
                 if (mode == "distill")
                     return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
