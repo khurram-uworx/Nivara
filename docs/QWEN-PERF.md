@@ -253,7 +253,7 @@ Qwen rows pass with margins of +5–13×.
 
 ---
 
-## P0 — Fused GQA decode-attention (no BlockCopy / GqaRepeatKV)
+## P0-3 — Fused GQA decode-attention (no BlockCopy / GqaRepeatKV)
 
 **Status: DONE** (2026-09-08 · branch `khurram/qwen-perf` · commit `7cb63df`
 kernel, `1421aca` tests, `53f278b` results, `19d9e3f` docs)
@@ -323,7 +323,7 @@ covered by that fixture).
 
 ---
 
-## P0 — Batched prompt prefill (O(L) → 1 pass)
+## P0-1 — Batched prompt prefill (O(L) → 1 pass)
 
 **Status: DONE** (2026-09-09 · branch `khurram/qwen-perf` · commits `2b2cca5`+
 harness scenarios, `f3299ef` E2E split, `7fdcf9d` baseline, `38c2755`
@@ -404,12 +404,116 @@ throughput flake under load — 14,727 → 4,834 ops/s with **byte-identical** B
 
 ---
 
+## P1 — On-the-fly BF16 weights with F32 compute
+
+**Status: DONE** (2026-09-11 · branch `khurram/qwen-perf` · commits `3c4b8bf`
+infer wiring, `e69cf6b` chat toggle, `2aefd64` parity test, results + ledger
+entry in this commit)
+
+**Item:** every Qwen pipeline upcast the BF16-on-disk checkpoint to F32 once at
+load (~1.9 GB model). `--precision bf16` keeps weights as BFloat16 (~942 MB —
+half the weight memory traffic) and widens each lane to F32 inside the dot
+kernel (`NarrowFloatKernels.DotBf16Core` via `WidenPrimitives.Dot`) with
+`NivaraPrimitives.UseWidenSimd` — F32 FMA math on bf16 storage at rest, results
+rounded back to bf16 for the next layer. Wiring: genericized the qwen benchmark
+surface over `T` (`RunBenchmark`/`RunSyntheticBenchmark`/`RunDecodeBenchmark`/
+`TimeGeneration`/`Generate`/`GenerateCore`/`ArgMaxLastRow`), `LoadModel<T>`
+reads `SafeTensorsLoader.Read<BFloat16>` for bf16, and the benchmark auto-enables
+`UseWidenSimd` for the whole measurement (`NarrowWidenScope<T>`, restored after).
+NivaraChat `--qwen/--smollm --precision bf16` now also enable the toggle for the
+whole session (`EnableWidenSimdIfNarrow<T>`; previously the chat host ran the
+scalar BCL `TensorPrimitives.Dot` fallback, ~26× slower). `src/Nivara/`
+untouched — kernel, GEMV fast path, and toggle already existed. Tools/distill
+stay float; fp16 stays rejected. bf16 is supported for benchmark/synthetic modes
+only.
+
+**Tradeoff framing (library stance):** bf16 is a documented, user-selectable
+option (`--precision f32|bf16`), not a verdict. On this machine it loses on
+throughput everywhere, but it halves model memory and weight traffic — the win
+is expected on server-class AVX-512 / memory-bandwidth-bound deployments where
+the widen kernel maps to native `vdpbf16ps` and the halved DRAM traffic pays.
+
+**Numerics:** model-level bf16-vs-f32 parity over a single deterministic LCG
+pool narrowed once to BF16 — both models see identical weight values (f32 =
+widen-at-load pipe, bf16 = on-the-fly widen pipe). Greedy argmax matches
+through full forward, prefill, and 8-step KV-cached decode; logits within
+tolerance (prefill/decode ~1e-4, full re-forward ~1.2e-2 — the fused GQA
+kernels keep attention weights in F32 accumulation; the re-forward path's BF16
+attention-weight rounding is the ~1% per-layer driver). Fixture
+`LlamaCausalLMBf16ParityTests` 2/2 passed; guardrail neighborhood 16 pass / 2
+skip — the 2 skips are the pre-existing `QwenInstructParityTests` model tests,
+which activate once the real checkpoint dir exists and then fail on the absent
+Torch reference `.bin` fixtures (issue #406, unrelated to P1).
+
+**Measured:** machine identity:
+`Intel64 Family 6 Model 140 Stepping 1, GenuineIntel · 8 logical processors ·
+X64 · Microsoft Windows 10.0.26200` · .NET 11.0.0. Clean sequential protocol —
+one benchmark session at a time on an idle machine (the earlier parallel
+3-way/5-way batches are retained in the session logs as load-context only; they
+were not apples-to-apples).
+
+### E2E (f32 vs bf16, median of 3, matched single sessions)
+
+Synthetic Qwen2.5-0.5B shapes (64-token prompt + 24-token decode, identical
+LCG weights):
+
+| Path | F32 | BF16 | Δ |
+|---|---|---|---|
+| KV-cache prefill | 2,561 ms | 5,712 ms | 2.23× |
+| KV-cache decode | 170.3 ms/token | 297.2 ms/token | 1.75× |
+| KV-cache total / tok/s | 6,648 ms · 3.6 tok/s | 12,844 ms · 1.9 tok/s | **1.93×** |
+| Full fwd total | 100,019 ms | 182,850 ms | 1.83× |
+| Full fwd decode | 4,021.1 ms/token | 7,348.1 ms/token | 1.83× |
+| KV speedup vs full fwd | 14.8× | 14.2× | — |
+
+Real Qwen2.5-0.5B-Instruct checkpoint (206-token prompt + 19-token decode):
+
+| Path | F32 | BF16 | Δ |
+|---|---|---|---|
+| SafeTensors parse (one-time) | 4,827 ms | 12,459 (F32) + 661 (BF16) ms | — |
+| KV-cache prefill | 5,234 ms | 9,887 ms | 1.89× |
+| KV-cache decode | 206.4 ms/token | 335.7 ms/token | 1.63× |
+| KV-cache total / tok/s | 9,156 ms · 2.1 tok/s | 16,266 ms · 1.2 tok/s | **1.78×** |
+| Full fwd total | 198,210 ms | 315,204 ms | 1.59× |
+| Full fwd decode | 9,979.6 ms/token | 15,934.1 ms/token | 1.60× |
+| KV speedup vs full fwd | 21.8× | 19.5× | — |
+
+**Verdict on this machine:** bf16 is uniformly slower at every phase — prefill
+1.9–2.2×, decode 1.6–1.8×, full forward 1.6–1.8×. The memory-bound "half the
+weight traffic wins prefill" hypothesis is **disproven on this i5-1135G7**
+(4-core AVX2, dual-channel LPDDR4x): the per-lane widen-narrow overhead of the
+bf16 SIMD kernel exceeds the halved-weight-traffic savings at every phase. Note
+the synthetic bf16 model build includes a one-time 1.9 GB F32-pool → BF16
+narrowing (15,942 ms vs 8,500 ms) and the real bf16 run parses F32 first
+(12,459 ms) before BF16 (661 ms) — both one-time, outside KV-cache timing.
+
+### Op-level gate (src/Nivara unchanged — stability gate)
+
+`--compare i5-clean-gate.json --runs 3` → **FAIL — 13/56 scenarios outside
+tolerance.** Every FAIL is a CPU-throughput row at 70–88% of the cold-start
+baseline (`ColumnAdd` 88%, Attn per-seq/batched 64–73%, `Frame RowDot` 66%,
+`RowDot kernel raw` 86%, RMSNorm fwd+bwd 85%, `Qwen LM head matmul` 88%, `Qwen
+Linear fwd` 70%, `Qwen decode-attn fwd` @kvLen 64/256 70%/79%, plus B/op drift
+on the two large-alloc prefill rows). Cause: the gate baseline was captured
+cold at chain start; the compare ran immediately after ~25 min of sustained
+full-forward compute (real-bf16 full fwd alone 315 s × 3) — the thermal tail of
+the thin-and-light chassis throttling this part to ~70–88% clocks.
+`src/Nivara/` has zero diff on this branch, so this is drift evidence, not a
+code regression (same convention used to document noise FAIL rows in P0-1/P0-2).
+
+**Test scope:** targeted — build clean; `LlamaCausalLMBf16ParityTests` 2/2;
+guardrail neighborhood 16 pass / 2 skip (pre-existing #406). Full suite
+deferred by human decision (change confined to the samples/test surface;
+`src/Nivara/` untouched).
+
+---
+
 ### Future entries (template — fill in as items land)
 
 | Plan item | Status | Measured before → after | Notes |
 |---|---|---|---|
 | P0-follow-up — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | | | tracked in #403 |
-| P1 — On-the-fly BF16 weights with F32 compute | | | tracked in #387/#391 |
+| P1 — On-the-fly BF16 weights with F32 compute | DONE — see entry above (2026-09-11) | on this i5: KV total 1.78–1.93× slower, all phases ~1.6–2.2× slower | documented tradeoff (`--precision f32\|bf16`); win expected on AVX-512/HBM-class hardware · tracked in #387/#391 |
 | P1 — Per-token fused decoder-block kernel | | | tracked in #404 |
 | P2 — Sampling path + tokenize-prefix cache | | | tracked in #402 |
 | Stretch — INT8 block-quantized weights / GGUF backend (#390) | | | |

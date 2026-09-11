@@ -12,6 +12,7 @@ using Nivara.Storage;
 using Nivara.Tensors;
 using System.Diagnostics;
 using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 
@@ -88,7 +89,7 @@ static class Program
     {
         Console.WriteLine("Nivara storage plan benchmark");
         Console.WriteLine($"  Runtime : {Environment.Version}");
-        Console.WriteLine($"  Machine : {Environment.ProcessorCount} logical processors, {(Environment.Is64BitProcess ? "x64" : "x86")}");
+        Console.WriteLine($"  Machine : {MachineIdentityDescription()}");
         Console.WriteLine();
         Console.WriteLine($"{"Scenario",-46} {"ops/s",12} {"ns/op",8} {"B/op",12} {"gen0/op",7}");
         Console.WriteLine(new string('-', 92));
@@ -946,13 +947,47 @@ static class Program
         var report = new HarnessReport
         {
             Runtime = Environment.Version.ToString(),
-            Machine = $"{Environment.ProcessorCount} logical processors, {(Environment.Is64BitProcess ? "x64" : "x86")}",
+            Machine = MachineIdentityDescription(),
             Timestamp = DateTimeOffset.UtcNow,
             Runs = runs,
             Results = results,
         };
         File.WriteAllText(path, JsonSerializer.Serialize(report, s_jsonOptions));
         Console.WriteLine($"Wrote {path}");
+    }
+
+    /// <summary>Self-attesting machine identity for apples-to-apples A/B claims: CPU
+    /// identifier, logical processor count, process architecture, and OS. Windows exposes
+    /// the CPU brand via the PROCESSOR_IDENTIFIER environment variable; other platforms fall
+    /// back to /proc/cpuinfo (Linux) or "unknown".</summary>
+    static string MachineIdentityDescription()
+    {
+        string cpu = CpuIdentifier();
+        string arch = RuntimeInformation.ProcessArchitecture.ToString();
+        string os = RuntimeInformation.OSDescription;
+        return $"{cpu} · {Environment.ProcessorCount} logical processors · {arch} · {os}";
+    }
+
+    static string CpuIdentifier()
+    {
+        var env = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
+        if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
+        try
+        {
+            if (File.Exists("/proc/cpuinfo"))
+            {
+                foreach (var line in File.ReadLines("/proc/cpuinfo"))
+                {
+                    if (line.StartsWith("model name", StringComparison.OrdinalIgnoreCase))
+                        return line[(line.IndexOf(':') + 1)..].Trim();
+                }
+            }
+        }
+        catch
+        {
+            // Fall through to "unknown" — identity capture must never fail the harness.
+        }
+        return "unknown CPU";
     }
 
     static int Compare(string baselinePath, List<ScenarioResult> results, double minOpsFraction)
