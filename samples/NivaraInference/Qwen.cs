@@ -386,7 +386,7 @@ static class Qwen
         string text)
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Native Function Calling (getWeather) ===");
-        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: F32 (BF16-upcast)  KV cache: {(useKvCache ? "on" : "off")}");
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)  KV cache: {(useKvCache ? "on" : "off")}");
         Console.WriteLine();
 
         var (model, config, tokenizer) = LoadModel(tensors, modelDir);
@@ -485,10 +485,35 @@ static class Qwen
     // RunBenchmark — KV-cache decode throughput
     // ----------------------------------------------------------------------------------
 
+    /// <summary>Self-attesting CPU identity for before/after A/B claims: Windows exposes the
+    /// CPU brand via PROCESSOR_IDENTIFIER; other platforms fall back to /proc/cpuinfo.</summary>
+    static string CpuIdentity()
+    {
+        var env = Environment.GetEnvironmentVariable("PROCESSOR_IDENTIFIER");
+        if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
+        try
+        {
+            if (File.Exists("/proc/cpuinfo"))
+            {
+                foreach (var line in File.ReadLines("/proc/cpuinfo"))
+                {
+                    if (line.StartsWith("model name", StringComparison.OrdinalIgnoreCase))
+                        return line[(line.IndexOf(':') + 1)..].Trim();
+                }
+            }
+        }
+        catch
+        {
+            // Identity capture must never fail the benchmark.
+        }
+        return "unknown CPU";
+    }
+
     public static int RunBenchmark(
         Dictionary<string, (float[] Data, int[] Shape)> tensors, string modelDir)
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: KV-cache decode benchmark ===");
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)");
         var (model, config, tokenizer) = LoadModel(tensors, modelDir);
 
         string toolJson = QwenChatTemplate.ToolJson(
@@ -505,6 +530,7 @@ static class Qwen
     public static int RunSyntheticBenchmark()
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark ===");
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (synthetic)");
         var tensors = SynthesizeTensors(QwenSyntheticConfig);
         long mb = tensors.Values.Sum(t => (long)t.Data.Length) * sizeof(float) / (1024 * 1024);
         var buildSw = System.Diagnostics.Stopwatch.StartNew();
@@ -589,7 +615,7 @@ static class Qwen
         int seed)
     {
         Console.WriteLine("=== Qwen2.5-0.5B-Instruct: Teacher distillation into a tiny sentiment classifier ===");
-        Console.WriteLine($"Device: CPU (.NET {Environment.Version})  Precision: F32 (BF16-upcast)");
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: F32 (BF16-upcast)");
         Console.WriteLine();
 
         var (model, config, tokenizer) = LoadModel(tensors, modelDir);
