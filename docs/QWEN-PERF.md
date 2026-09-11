@@ -253,7 +253,7 @@ Qwen rows pass with margins of +5–13×.
 
 ---
 
-## P0 — Fused GQA decode-attention (no BlockCopy / GqaRepeatKV)
+## P0-3 — Fused GQA decode-attention (no BlockCopy / GqaRepeatKV)
 
 **Status: DONE** (2026-09-08 · branch `khurram/qwen-perf` · commit `7cb63df`
 kernel, `1421aca` tests, `53f278b` results, `19d9e3f` docs)
@@ -323,7 +323,7 @@ covered by that fixture).
 
 ---
 
-## P0 — Batched prompt prefill (O(L) → 1 pass)
+## P0-1 — Batched prompt prefill (O(L) → 1 pass)
 
 **Status: DONE** (2026-09-09 · branch `khurram/qwen-perf` · commits `2b2cca5`+
 harness scenarios, `f3299ef` E2E split, `7fdcf9d` baseline, `38c2755`
