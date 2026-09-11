@@ -6,6 +6,29 @@ All notable changes to Nivara are documented here. Released versions are publish
 
 ### Added
 
+- **`tests/Nivara.GpuProbe` — Level Zero iGPU compute probe (hand-authored SPIR-V)** —
+  a standalone, run-manually net11.0 console app (mirrors `Nivara.SimdProbe`; not part of
+  the NUnit suite) that accesses the Core Ultra 7 255H's **Arc 140T iGPU** via pure
+  P/Invoke on the inbox `ze_loader.dll` (API target 1.28 structs from `ze_api_v1282.h`,
+  no packages) and drives **hand-written SPIR-V 1.0** kernels to real compute with
+  host-verified results. `list` enumerates drivers/devices/extensions
+  (iGPU 128 EU @ 2250 MHz, PCI 8086:7DD1, SPIR-V max 1.0, fp16/32/64 + DP4A; the NPU
+  driver exposes no SPIR-V); `run` builds modules, launches kernels on a compute
+  queue, and verifies: (1) **add_parallel** — 256 one-lane work items
+  `OpAtomicIAdd` their ids into a shared counter → exactly 32640, and
+  (2) **add_loop** — one work item runs 1,000,000 serial fp32 adds in an OpPhi
+  loop → c[0] = 1,000,000.0, min ≈ 5.0 ms (~0.20 GFADD/s). The run also bisects 17
+  SPIR-V variants and documents verified **driver bugs on this build**: any
+  OpAccessChain family opcode AVs IGC (`IGC: Internal Compiler Error: Access
+  violation`, same class as IGCIT #1144), Private `OpVariable`s mis-link
+  (`undefined reference to gVar`), Generic-pointer kernel args are rejected, and
+  fat-LocalSize atomics deterministically drop the upper half of each SIMD vector
+  (only lower-half lanes land; 1-lane workgroups avoid it). Expected driver-bug
+  diagnostics are reported separately so the real gates gate the exit code
+  (currently 0 failures). Full details, the working construct subset, and
+  follow-ups (kernel-binary export, BF16 conversions extension) in
+  `tests/Nivara.GpuProbe/README.md`.
+
 - **Optional QKV bias on Llama attention for Qwen2-family checkpoints (#384)** —
   `LlamaCausalAttention<T>` and `LlamaDecoderBlock<T>` gained a `bool qkvBias = false`
   constructor option. Qwen2-style models attach a bias to the self-attention
