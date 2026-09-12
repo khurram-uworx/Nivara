@@ -139,13 +139,16 @@ Update this file's Results section with before/after numbers.
 - **No public API change** — internal implementation detail only
 - **Downstream callers:** `RMSNorm<T>.Forward` backward path (module only; functional op in
   `ReverseGradOperations` is separate and unaffected)
-- **Tests:**
+- **Tests (module backward closure — the real coverage):**
   - `tests/Nivara.Tests/NivaraTorch/RMSNormModuleTests.cs` — `RMSNormModule_2D_AffineGamma_MatchesPyTorch`
-    (asserts output, input grad, gamma grad vs PyTorch fixtures)
+    (asserts output, input grad, gamma grad vs PyTorch fixtures) — acceptance-criteria test
   - `tests/Nivara.Tests/AutoDiff/RMSNormTests.cs` — `Backward_AccumulatesGradientsOnInputAndWeight`
-  - `tests/Nivara.Tests/NivaraTorch/TransformerBlockTests.cs` — `TransformerBlock_RmsNorm_MatchesPyTorch`
-  - Functional op tests (`ForwardGradOperationsTests`, `ForwardParityTests`) — unaffected but
-    run as controls
+- **Tests (controls — untouched by this change, kept green as regression checks):**
+  - `TransformerBlock_RmsNorm_MatchesPyTorch` — TransformerBlock uses its OWN private non-affine
+    `PerRowRMSNorm` helper (no gamma multiply), NOT the `RMSNorm<T>` module (verified in
+    `src/Nivara/AutoDiff/Nn/TransformerBlock.cs:196-231`)
+  - Functional op tests (`ForwardGradOperationsTests`, `ForwardParityTests`) — separate
+    `ReverseGradOperations.PerRowRMSNorm` → `GradOperationKernels.ApplyRMSNorm` path
 - **Perf harness:** new scenario row + existing functional RMSNorm row as control (must stay flat)
 
 ## Planned commits
