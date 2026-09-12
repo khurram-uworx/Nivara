@@ -78,6 +78,7 @@ across processes), so all `--runs > 1` baselines recorded before commit
 | `--json <path>` | — | write results JSON to `<path>` |
 | `--compare <baseline.json>` | — | gate against `<baseline.json>`; exit 1 on regression, 2 on unreadable baseline |
 | `--runs <n>` | 1 | spawn `n` independent single-pass child processes and take the per-scenario median |
+| `--only <substring>` | all | measure only scenarios whose name contains `<substring>` (case-insensitive) — quick targeted gates, e.g. `--only Qwen` |
 | `--tolerance <pct>` | 90 | ops/s floor as a percent of baseline |
 
 Gate criteria (tolerance constants in `Program.cs`):

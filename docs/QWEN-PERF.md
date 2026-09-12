@@ -195,6 +195,31 @@ evidence exists. The review prose above stays untouched as the pre-execution
 research record; where the ledger contradicts it (measurement, premise,
 framing), the ledger wins. Status values: `DONE` · `IN PROGRESS` · `DEFERRED`.
 
+### Harness gate tooling (used by every measured entry below)
+
+All measured before/after tables in this ledger come from
+`tests/Nivara.PerformanceTests` **child-process medians** — `--runs n` spawns
+`n` independent cold single-pass processes (in-process repeats are
+JIT-tiering-skewed) and reports the per-scenario median. Gate defaults in
+`Program.cs`: minOps 90%, alloc ≤ baseline × 1.01, gen0 ≤ baseline + 0.05.
+Standard per-item workflow on an idle machine:
+`--json <baseline>.json --runs 3` (before) →
+`--compare <baseline>.json --runs 3` (after), same filter, same machine.
+
+**`--only <substring>` scenario filter** (added 2026-09-12): scope a gate to a
+subset of scenarios by name substring, e.g. `--only Qwen` measures only the
+Qwen rows (~1–2 min vs ~20–30 min for the full cold harness). Child processes
+inherit the filter, so baseline and compare runs stay apples-to-apples. Use it
+for items that touch a single surface (#403/#404-style gates); drop it for
+whole-harness release trackers.
+
+Committed gate artifacts live next to the harness as
+`qwen-{fast,gqa,prefill}-{baseline,postfix}.json` same-machine pairs. **Stale /
+cross-machine caveat:** the 2026-09-08 `qwen-prefill-baseline.json` is a
+pre-`--only` full-harness run on a 16-logical-processor machine — re-baseline
+fresh per item on the machine you measure on (the P0-1/P0-2/P0-3 tables above
+were re-baselined per item).
+
 ## P0-2 — Kill the redundant weight copy in single-row transposed-B matmul
 
 **Status: DONE** (2026-09-07 · branch `khurram/qwen-perf` · commit `58b721e`
