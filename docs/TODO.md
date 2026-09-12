@@ -173,7 +173,24 @@ Expected after change: B/op −4,000,000 (gradNorm allocation removed), flat-to-
 
 ### After (TensorPrimitives backward)
 
-_Captured during commit 2._
+Captured 2026-09-12 via commit 2, `--only RMSNorm --runs 3` (`.NET 11.0.0`, same machine, same session).
+Medians of 3 child-process runs — `tests/Nivara.PerformanceTests/rmsnorm-after.json`. `--compare` vs
+`rmsnorm-before.json` → **gate PASS** (no regressions).
+
+| Scenario | ops/s before→after | ns/op before→after | B/op before→after | gen0/op |
+|---|---|---|---|---|
+| AutoDiff RMSNorm fwd+bwd 1M x float (functional — control) | 181→177 | 5,521,270→5,662,450 | 8,002,250→8,002,250 | 0.30→0.30 |
+| AutoDiff RMSNorm scalar baseline 1M x float (control) | 309→302 | 3,232,970→3,309,585 | 2→2 | 0.00→0.00 |
+| **AutoDiff RMSNormModule fwd+bwd 1M x float (#418 closure)** | **36→34** | **28,059,495→29,353,245** | **33,606,170→29,428,250** | **0.80→0.80** |
+
+**Delta (module row):**
+- **B/op −4,177,920 (−12.4%)** — exactly the `gradNorm` allocation removed
+  (1,048,576×4 = 4,194,304 B) minus the new `rowProduct` temp (4,096×4 = 16,384 B). Stable signal.
+- **gen0/op flat (0.80).**
+- **ops/s −5.6% (36→34) and ns/op +4.6%** — within run-to-run load noise; the two after runs
+  measured 33 and 34 ops/s (before run measured 36), the gate floor (90% = 32.4) passed, and per
+  the harness README ops/s is order-of-magnitude while B/op/gen0 are the reliable signals. This is
+  a memory win with flat throughput, not a throughput regression. Note recorded per issue request.
 
 ## GitHub issues log
 
