@@ -27,6 +27,7 @@ dotnet run -c Release --project tests/Nivara.SimdProbe -- cpu          # raw CPU
 dotnet run -c Release --project tests/Nivara.SimdProbe -- support       # print Vector<T>/ISA support flags
 dotnet run -c Release --project tests/Nivara.SimdProbe -- correctness   # validate SIMD vs scalar
 dotnet run -c Release --project tests/Nivara.SimdProbe -- benchmark     # timed scalar vs SIMD
+dotnet run -c Release --project tests/Nivara.SimdProbe -- scalar       # Qwen decode scalar hot-path: RoPE + attention V-phase (AVX-512 probe)
 dotnet run -c Release --project tests/Nivara.SimdProbe                  # both
 ```
 
@@ -147,6 +148,67 @@ the stable signal and still match the README ranges originally recorded on
 The element-wise SIMD results now match the F32 reference speed (~8 µs), meaning
 BF16-side compute is no longer a penalty relative to F32.
 
+## Qwen decode scalar hot-path probe (`scalar` mode)
+
+Qwen2.5-0.5B F32 decode (~441 ms/token on this machine) is already
+TensorPrimitives-backed end to end — and TensorPrimitives is vectorized
+(AVX-512-capable) inside the .NET runtime, so replacing those calls would be
+reinventing the wheel. A kernel-by-kernel audit of the per-token hot path found
+exactly **two scalar (non-TensorPrimitives) kernels**: RoPE forward
+(`GradKernels.RotaryForward`) and the decode-attention V-weighted accumulation
+(`AttentionKernels.DecodeAttention`). This mode benchmarks hand-rolled
+`Vector512` branches for both at the exact Qwen shapes, plus the current
+TensorPrimitives GEMV path as an "already vectorized" baseline.
+
+Host for the numbers below (documented by the probe itself): 11th Gen Core
+i5-1135G7 (Tiger Lake), **AVX-512 present** (F/DQ/L/BW/VL etc.,
+`Vector512<float>.Count = 16`). Earlier README sections describe an Arrow Lake
+host — that is a different machine; this section records the real one.
+
+Results (Release, X64, .NET 11, median of 7 trials):
+
+### Correctness
+All PASS — AVX-512 RoPE/V-phase match scalar references to ≤ 3e-6, including
+non-multiple-of-16 widths (p=37, headDim=40 tail handling).
+
+### Baseline: current TensorPrimitives GEMV path (already AVX-512 via runtime)
+
+| shape            | ms    | GB/s | GFLOPS |
+|------------------|-------|------|--------|
+| lm_head 151936×896 | 46.30 | 11.8 | 5.9 |
+| gate/up 4864×896   |  1.52 | 11.5 | 5.7 |
+| qkv/o 896×896      |  0.11 | 29.6 | 14.8 |
+| down 896×4864      |  1.64 | 10.6 | 5.3 |
+
+The LM head reads 545 MB/token at 11.8 GB/s — **memory-bandwidth-bound**, not
+compute-bound. No AVX-512 GEMV branch can move this; the dot path is already at
+the achievable ceiling.
+
+### RoPE forward — no change (below promotion bar)
+
+| measure | scalar | avx512 | speedup |
+|---------|--------|--------|---------|
+| one rotation (p=32) | 1486 ns | 336 ns | 4.42× |
+| per token (24 layers) | 0.571 ms | 0.129 ms | 4.42× (0.13% of 441 ms) |
+| prefill (216 tok) | 123.3 ms | 27.9 ms | 4.4× (one-time) |
+
+4.4× on the kernel, but only ~0.13% of per-token time — **below the ≥ ~1%
+promotion bar. RoPE stays scalar.**
+
+### Decode-attention V-phase — promotable (A/B confirms ≥2× and ≥1% of token time)
+
+| kvLen | scalar | avx512 | speedup | per token (×24 lyr) | share of 441 ms |
+|-------|--------|--------|---------|---------------------|-----------------|
+| 216   | 469 µs | 72 µs | 6.49× | 11.26 ms → 1.74 ms | 2.55% → 0.39% |
+| 376   | 641 µs | 96 µs | 6.70× | 15.39 ms → 2.30 ms | 3.49% → 0.52% |
+
+The scalar V-phase costs 2.6–3.5% of per-token wall time and grows with cache
+length; the AVX-512 d-blocked broadcast-FMA kernel is 6.5–6.7× faster,
+recovering ~2–3% of decode time. This is the one branch worth promoting into
+`src/Nivara` (gated on `Avx512F.IsSupported` + `Vector512.IsHardwareAccelerated`,
+scalar fallback, float path only — the current implementation is generic
+`IFloatingPointIeee754<T>`).
+
 ## Findings
 
 1. **BFloat16 SIMD dot products run ~12–24× faster** than the scalar BCL fallback
@@ -192,4 +254,7 @@ ADR-001 span-ified design) are `TensorsHelper` (matmul) and `RMSNormKernel`
   (`DotBf16`, `DotHalf`, `Add*`, `Multiply*`, `RmsNormBf16`).
 - `Correctness.cs` — scalar-vs-SIMD validation.
 - `Benchmark.cs` — median-of-trials timed harness.
-- `Program.cs` — CLI entry (`support` / `correctness` / `benchmark` / `all`).
+- `ScalarKernelProbe.cs` (`scalar` mode) — Qwen decode scalar hot-path probe:
+  RoPE + attention V-phase vs hand-rolled `Vector512`, plus TensorPrimitives GEMV
+  baseline.
+- `Program.cs` — CLI entry (`support` / `correctness` / `benchmark` / `scalar` / `all`).
