@@ -395,8 +395,10 @@ Tested examples:
 | `--qwen tools-weather --text "What's the weather in Paris?"` | f32 | `[assistant → getWeather(city: Paris)]` → `[tool] Partly cloudy, 18°C. …` → "The weather in Paris is partly cloudy with a temperature of 18°C. …" (loop closes inside the cap) |
 | `--qwen plain --text "The capital of France is" --max-new-tokens 24` | f32 | Streams "The capital of France is Paris." then stops on `<\|im_end\|>` |
 
-Ground truth, the format findings, the BF16 loader benchmark, and the PyTorch
-parity evidence live in `docs/QWEN.md`.
+Ground truth, the format findings, the BF16 loader benchmark, the PyTorch
+parity evidence, and the full performance work (Qwen-fast: batched prefill,
+fused decode attention/decoder block, bf16 tradeoffs and the P2 backlog) live
+in `docs/QWEN.md`.
 
 Uses: `LlamaForCausalLM<T>`, `LlamaLoader.Load`, `LlamaKVCache<T>`, `SafeTensorsLoader.Read<T>` (`Read<float>` fused BF16→F32 at load), `Gpt2BpeTokenizer` (Qwen Split-regex pretokenization), `QwenChatClient<T>` (`IChatClient`), `QwenChatTemplate` (byte-exact renderer), `QwenToolCallParser` (`<tool_call>` → `FunctionCallContent`), `FunctionInvokingChatClient` (MEAI tool loop), `AIFunctionFactory` (`GetWeather`).
 
