@@ -1,0 +1,29 @@
+{
+  "runtime": "11.0.0",
+  "machine": "Intel64 Family 6 Model 197 Stepping 2, GenuineIntel · 16 logical processors · X64 · Microsoft Windows 10.0.26200",
+  "timestamp": "2026-09-12T13:34:41.4514915+00:00",
+  "runs": 3,
+  "results": [
+    {
+      "name": "AutoDiff RMSNorm fwd+bwd 1M x float",
+      "opsPerSec": 176.58328992327455,
+      "nsPerOp": 5663050,
+      "bytesPerOp": 8002250,
+      "gen0PerOp": 0.3
+    },
+    {
+      "name": "AutoDiff RMSNorm scalar baseline 1M x float",
+      "opsPerSec": 314.5979752474313,
+      "nsPerOp": 3178660,
+      "bytesPerOp": 2,
+      "gen0PerOp": 0
+    },
+    {
+      "name": "AutoDiff RMSNormModule fwd+bwd 1M x float",
+      "opsPerSec": 32.595028769187266,
+      "nsPerOp": 30679525,
+      "bytesPerOp": 29428250,
+      "gen0PerOp": 0.8
+    }
+  ]
+}
