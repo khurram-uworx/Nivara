@@ -1149,6 +1149,10 @@ static class Program
         return 1;
     }
 
+    internal sealed record ScenarioDefinition(string Name, int Warmup, int Iterations, Func<Action> Create);
+
+    internal sealed record ScenarioResult(string Name, double OpsPerSec, double NsPerOp, double BytesPerOp, double Gen0PerOp);
+
     internal sealed class HarnessReport
     {
         public string Runtime { get; set; } = "";
@@ -1310,12 +1314,6 @@ static class Program
         return values;
     }
 }
-
-/// <summary>A single registered harness scenario and its timing budget.</summary>
-internal sealed record ScenarioDefinition(string Name, int Warmup, int Iterations, Func<Action> Create);
-
-/// <summary>A measured scenario report row (single pass or child-process median).</summary>
-internal sealed record ScenarioResult(string Name, double OpsPerSec, double NsPerOp, double BytesPerOp, double Gen0PerOp);
 
 /// <summary>
 /// In-memory chunk-capable source used by the streaming-cancellation scenario. Cancels the
