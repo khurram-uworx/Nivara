@@ -410,15 +410,26 @@ dotnet run --project samples/NivaraInference -c Release -- qwen benchmark --plai
 dotnet run --project samples/NivaraInference -c Release -- qwen --synthetic-weights benchmark
 dotnet run --project samples/NivaraInference -c Release -- qwen --synthetic-weights benchmark --plain
 
-# (qwen default load is the fused BF16->F32 read; --precision f32 is equivalent)
+# BF16 benchmark/synthetic — weights stay BFloat16 (~942 MB), widened in-register per dot (#407)
+dotnet run --project samples/NivaraInference -c Release -- qwen benchmark --precision bf16
+dotnet run --project samples/NivaraInference -c Release -- qwen benchmark --plain --precision bf16
+dotnet run --project samples/NivaraInference -c Release -- qwen --synthetic-weights benchmark --precision bf16
+
+# (qwen default load is the fused BF16->F32 read; --precision f32 is equivalent.
+#  bf16 is benchmark/synthetic only — tools/distill/plain single-shot generation run F32)
 ```
 
 **Precision**: `f32` is the **default** for `qwen` — the checkpoint is
 BF16-on-disk and the load **fuses** the SIMD `WidenBf16ToF32` widen directly into
 each tensor's `float[]` (numerically identical weights).
 The 989 MB checkpoint loads in ~0.7–2.2 s on this machine in Release (OS file
-cache drives the spread; median ~0.8 s warm). `bf16`/`fp16` are rejected for
-`qwen` with a clear error (the generation loop is F32).
+cache drives the spread; median ~0.8 s warm). `--precision bf16` is supported for
+`qwen benchmark` / `--synthetic-weights` modes only (#407): weights stay
+`BFloat16` (~942 MB) and widen in-register per dot (`NarrowFloatKernels.DotBf16Core`);
+half the memory at the cost of per-token throughput on this machine
+(the win is expected on AVX-512/HBM-class hardware). `tools`/`distill`/plain
+single-shot generation always run F32. `fp16` is rejected for `qwen` with a
+clear error.
 
 **Tools fixture diff** (run automatically when the checkpoint dir has the
 reference files; `qwen_tool_*.txt`/`.bin` generated once by
@@ -470,41 +481,104 @@ as SmolLM).
 **"Already generalized"** (reused from the SmolLM work, zero new core code):
 `RotaryEmbedding<T>` `rotate_half` RoPE (only `theta` differs: 1e6), GQA
 14↔2 KV-repeat (`GqaRepeatKV`), `RMSNorm<T>`, SiLU gated FFN, tied LM head,
-`LlamaForCausalLM<T>`/`LlamaLoader`. **Out of scope**: fp16/bf16 compute for
-qwen (rejected with a clear error), promoting the fused load / the Split-regex
-tokenizer into `src/Nivara`, GGUF loading (Phase 5).
+`LlamaForCausalLM<T>`/`LlamaLoader`. **Out of scope**: fp16 compute for qwen
+(rejected with a clear error), promoting the fused load / the Split-regex
+tokenizer into `src/Nivara`, GGUF loading (Phase 5). The bf16 benchmark/synthetic
+support lives in the sample (see the precision note above).
+
+#### Qwen inference performance (Qwen-fast)
+
+The Qwen-fast performance program (issues/PRs #398–#415, 2026-09-07→09-12)
+measured and fixed the inference hot paths. The full review findings, measured
+journey, and remaining P2/backlog/stretch items live in
+[`docs/QWEN.md`](../../docs/QWEN.md) → *Making Qwen fast*; this section records
+the library building blocks it added, in the same format as the sections above.
+
+**Core library improvements (`src/Nivara`)**:
+
+- **Single-row GEMV fast path in `TensorsHelper.MultiplyCore` (#398)** — every
+  decode matmul (`bTransposed && aRows == 1`) dots each output column against
+  the weight row directly: no rented transposed copy, no identity `CopyTo`, no
+  clear-on-return. Bit-identical numerics (same per-type `Dot` dispatch); the
+  LM head matmul went 5 → 36 ops/s (+620%). Benefits any batch-1 decode in every
+  model.
+- **Fused GQA decode attention `AttentionKernels<T>.DecodeAttention` (#400)** —
+  single-query decode attention over the row-major KV cache: zero-copy reads,
+  virtual GQA mapping (`kvHead = qh / repeat`), fold-scale + single-row softmax +
+  weighted-V sum. No `BlockCopy`, no `GqaRepeatKV` expansion, no repack, no mask;
+  B/op collapsed 21×/41×/81× to a flat ~26 KB independent of `kvLen`.
+  Inference-only — falls back to the multi-step path inside `Grad()`.
+- **Fused GQA-aware batched attention `AttentionKernels<T>.BatchedAttention`
+  (#403)** — prefill attention as per-head bulk matmuls over rented scratch with
+  virtual GQA mapping (only `numKvHeads` packs — no repeat expansion, no mask
+  alloc); wired into the shared `LlamaCausalAttention<T>.ForwardCore` under
+  `kCache != null && !GradientUtils.IsGradEnabled`. Bit-identical to the MHA
+  reference it replaces (same kernels, same reduction order).
+- **Fused per-token decoder-block kernels (#404)** — `LlamaDecoderBlock<T>`
+  gains public span/scratch `ForwardCachedFused` / `ForwardPrefillFused` running
+  the whole block (InputNorm → QKV(+bias) → RoPE → attention → O → residual →
+  PostNorm → SiLU-FFN → residual) with **zero steady-state decode allocations**;
+  the public opt-out toggle `LlamaFusedKernels.DecoderBlockFused` (default
+  `true`, inference-only, `GradientUtils.IsGradEnabled` guard) routes the model.
+  Reuses existing kernels (⇒ the #398 GEMV fast path), so numerics are unchanged
+  — block-level fused-vs-per-op parity is bit-identical.
+
+**Sample-scoped additions**:
+- **Batched prompt prefill `LlamaForCausalLM<T>.ForwardPrefill(int[] ids,
+  LlamaKVCache<T> cache)` (#401)** — runs the whole prompt as one `[L, hidden]`
+  forward and captures per-KV-head K/V into the cache at absolute positions
+  (last-row `[1, vocab]` logits via the tied single-row head); `SeedCache` in
+  the chat client uses it, so prefill is one weight read instead of L full-model
+  walks (measured 5,566 → 747 ms). The captured layout is exactly what
+  `DecodeAttention` reads row-major, so decode is unchanged.
+- **bf16 benchmark/synthetic (#407)** — `LoadModel<T>`/
+  `SafeTensorsLoader.Read<BFloat16>` + genericized benchmark surface over `T`
+  with `NivaraPrimitives.UseWidenSimd` auto-enabled for the measurement
+  (`NarrowWidenScope<T>`); `--precision bf16` keeps weights BFloat16 (~942 MB)
+  and widens each lane in-register per dot. Measured slower on this AVX2 box
+  (documented tradeoff — see QWEN.md); win expected on AVX-512/HBM-class
+  hardware. Benchmark/synthetic modes only.
+
+**Parity / verification**: fused decode/batched attention equal the
+`GqaRepeatKV` + `MultiHeadAttention` slow path within 1e-5 across GQA
+14/2 · 8/4 · 12/4 · 8/8; prefill equals `model.Forward` (1e-5); cache-vs-full
+parity, steady-state zero-alloc guards, and no-graph-node-outside-`Grad()`
+guards (targeted suites 12/12, 18/18, 42/42 green).
 
 #### Results / benchmarks
 
 | Run | Date | Result |
 |---|---|---|
-| `qwen tools` (default fused load) | 2026-09-06 | tool-call turn: 19 tok, 173,900 ms (~9,153 ms/tok cached); final turn: 25 tok, 227,800 ms; fixture ids MATCH (206/258), 19/19 generated ids (Release) |
-| `qwen benchmark` | 2026-09-06 | KV cache median 189,150 ms vs full re-forward 204,385 ms (19 tok) → 1.1× (Debug build; Release run failed mid-decode — #386 will provide fresh numbers) |
+| `qwen tools` (default fused load) | 2026-09-06 | **historical (pre-Qwen-fast)**: tool-call turn: 19 tok, 173,900 ms (~9,153 ms/tok cached); final turn: 25 tok, 227,800 ms; fixture ids MATCH (206/258), 19/19 generated ids (Release) |
+| `qwen benchmark` | 2026-09-06 | **historical (pre-Qwen-fast)**: KV cache 189,150 ms vs full re-forward 204,385 ms (19 tok) → 1.1× (Debug-era benchmark chain; the Release run failed mid-decode) |
+| `qwen benchmark --plain` (real checkpoint, 36-tok prompt, 7-tok answer) | 2026-09-12 | prefill **1,758 ms**; cached decode **243 ms/tok**; **6.1×** cache-vs-full (warm single-shot; #403/#408) |
+| `qwen benchmark --synthetic-weights` (64-tok prompt + 24-tok decode) | 2026-09-12 | prefill **941 ms**; KV-cache decode **116.5 ms/tok (6.2 tok/s)**; cache total 3,737 ms; full re-forward 2,074 ms/tok → **13.4×** (median-of-3, this machine; #404) |
 | Load parse (fused, default) | 2026-09-06 | ~1.3 s median warm (1.1–1.4 s; Release; 290 tensors, 989 MB BF16-on-disk; memory-mapped, peak managed heap ~1.88 GB); the mmap read is ~0.5 s slower than a warm `ReadAllBytes` copy in exchange for the ~1 GB managed-heap saving |
 
-**Why the KV speedup is small here**: the tool prompt is 206 tokens and the
-generated turn just 19, so the cache-free path re-feeds only a slightly
-longer sequence each step — the O(L²) growth hasn't compounded. The real KV
-win appears at long contexts (hundreds of generated tokens); the per-token
-cached decode and the same-turn full re-forward are quoted in the table below.
+**Why the cache-vs-full gap changed**: the original 1.1× was a Debug-era
+benchmark row with a failed Release run. Post-Qwen-fast, KV-cached decode runs
+the **fused single-position path** (batched prefill once, then one fused decoder
+block per generated token), while the cache-free path re-runs the whole prompt
+through the full model every step — hence the 6–13× measured at these still-short
+contexts. Full journey and cross-machine caveats: `docs/QWEN.md` → *Making Qwen
+fast*.
 
 **Decode throughput** — measured on this machine (Intel Core Ultra 7 255H, 16
 logical processors, .NET 11.0.0, Release build):
 
-| Load precision | Load parse | KV-cached per-token | Full re-forward per-token | Speedup |
+| Scenario | Load parse | KV-cached per-token | Full re-forward per-token | Speedup |
 |---|---|---|---|---|
-| f32 default (fused BF16→F32 SIMD widen) | ~1.3 s median warm (1.1–1.4 s) | 9,153 ms/tok (Release) | 10,757 ms/tok (Debug) | — (see note) |
+| f32 fused, synthetic 64+24-tok prompt/decode (median-of-3, #404) | — (synthetic) | **116.5 ms/tok · 6.2 tok/s** | 2,074 ms/tok | **13.4×** |
+| f32 fused, real checkpoint, plain 36-tok prompt (warm single-shot, #403/#408) | ~1.3 s median warm (1.1–1.4 s) | **243 ms/tok** | — | 6.1× |
+| f32 fused, real checkpoint — **historical pre-Qwen-fast** (2026-09-06) | ~1.3 s median warm (1.1–1.4 s) | 9,153 ms/tok (Release) | 10,757 ms/tok (Debug) | — |
 
-<sup>Load parse is the fused memory-mapped `Read<float>` (Release build, 2026-09-06,
-`qwen tools`): the 989 MB BF16-on-disk file memory-maps and SIMD-widens straight
-into `float[]`; the mmap
-read trades ~0.5 s of warm-load time for that ~1 GB managed-heap saving —
+<sup>Load parse is the fused memory-mapped `Read<float>` (Release build): the 989 MB
+BF16-on-disk file memory-maps and SIMD-widens straight into `float[]`; the mmap
+read trades ~0.5 s of warm-load time for the ~1 GB managed-heap saving —
 physical working set is similar either way because the OS page cache holds the
-file either way). The KV-cached per-token figure is Release; the
-full re-forward per-token and the 1.1× KV speedup are Debug-era (benchmark chain).
-The Release benchmark run failed mid-decode and will be refreshed via the
-dedicated-machine cycle (issue #386), when both decode paths are re-measured in
-the same Release build for a clean speedup ratio.</sup>
+file either way. The pre-Qwen-fast row is kept for reference only. A release-grade
+full E2E table (tools + benchmark + distill on a dedicated machine) is tracked in
+issue #386.</sup>
 
 **Distill eval** (`qwen distill --teacher-examples 3`, 2026-09-06, Release
 build; accuracy over the 8 shared SST-2 eval sentences, teacher labels via
@@ -518,8 +592,10 @@ the cached `qwen_distill_labels.json`):
 | DistilBERT SST-2 (dedicated fine-tuned classifier) | 8/8 (100%) |
 
 <sup>`--teacher-examples 12` labels the full 10-row train set; this README used 3
-per a timing decision (each teacher classification ≈ 178–206 s on this machine,
-the first ~25 min once, then cached/resumable). The honest read: the 0.5B
+per a timing decision made **pre-Qwen-fast** (each teacher classification ≈
+178–206 s on this machine — the batched prefill + fused decode work since then
+makes the teacher pass much cheaper; the fresh dedicated-machine run is issue
+#386). Labels are cached/resumable. The honest read: the 0.5B
 teacher's tool call defaults to "positive" on SST-2's subtle negatives (4/8 —
 the same as always-positive), so this 3-row student mirrors the teacher's bias
 and ties the linear baseline. The point is the *pipeline*: teacher → cache →
@@ -784,6 +860,7 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | `samples/data/qwen2.5-0.5b-instruct/qwen_tool_final_prompt.txt`, `qwen_tool_final_prompt_ids.bin` | Final-prompt fixture (258 ids) |
 | `samples/data/qwen2.5-0.5b-instruct/qwen_tool_ids_py.bin` | PyTorch generated tool-call turn ids (42 = 19 tool + 23 final) |
 | `samples/data/qwen2.5-0.5b-instruct/qwen_tool_logits_py.bin` | PyTorch final-position logits reference |
+| `samples/data/qwen2.5-0.5b-instruct/qwen_plain_{prompt,prompt_ids,ids_py,logits_py}.txt|.bin` | Plain-prompt (no-tools) fixtures — prompt text/ids + PyTorch greedy ids + final logits (via `Python/qwen_plain_reference.py`; #408) |
 | `samples/data/qwen2.5-0.5b-instruct/qwen_distill_labels.json` | Resumable teacher-label cache (runtime-generated; gitignored model dir) |
 | `samples/data/qwen-distill/*.bin` | Torch-parity fixtures for the student MLP (committed, 9 files, ~2.16 MB; generated by `Python/qwen_distill_reference.py`) |
 
@@ -858,6 +935,11 @@ AutoDiff graph nodes are only created inside `GradientUtils.Grad()` scopes (used
 | Function-calling loop (`QwenToolParser` + `<tool_call>`/`<tool_response>`) | `getWeather` → tool result fed back → final answer |
 | `Gpt2BpeTokenizer` `Split`-regex pretokenizer + added tokens | Qwen tokenizer path (byte-verified against the HF fixture, 206/258 ids) |
 | `SafeTensorsLoader.Read<float>` fused BF16→F32 (`WidenBf16ToF32`) | Default load (BF16-on-disk → F32, memory-mapped, ~1.3 s median warm Release, ~1.88 GB peak managed) |
+| `TensorsHelper.MultiplyCore` single-row GEMV fast path (`bTransposed && aRows == 1`) | #398; every decode matmul (Q/K/V/O proj, FFN, LM head) — 5 → 36 ops/s on the LM head row |
+| `AttentionKernels<T>.DecodeAttention` | #400; fused single-query GQA decode attention (zero-copy cache reads, virtual GQA mapping, ~26 KB B/op flat vs kvLen) |
+| `LlamaForCausalLM<T>.ForwardPrefill` + `AttentionKernels<T>.BatchedAttention` | #401/#403; batched `[L, hidden]` prefill with K/V capture; fused GQA-aware prefill attention (alloc −6.4% at [256 tok]) |
+| `LlamaDecoderBlock<T>.ForwardCachedFused`/`ForwardPrefillFused` + `LlamaFusedKernels.DecoderBlockFused` | #404; fused per-token block, zero-alloc decode (decode block 131,985 → 1 B/op) |
+| bf16 benchmark/synthetic (`--precision bf16`; BFloat16 weights widen in-register per dot) | #407; benchmark/synthetic modes only — tools/distill run F32 |
 | Teacher distillation inside `GradientUtils.Grad()` | `SentimentMLP` 200-epoch training + linear baseline vs DistilBERT SST-2 eval table |
 | FNV-1a word+bigram feature hashing (4096-dim BOW) | Student/linear input features from raw sentences |
 | Resumable label cache + `--force` | `qwen_distill_labels.json` merge/recompute |
