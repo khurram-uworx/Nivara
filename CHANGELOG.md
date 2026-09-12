@@ -64,6 +64,30 @@ All notable changes to Nivara are documented here. Released versions are publish
   tolerance, `[1, vocab]` logits match the full forward, no graph node outside
   `Grad()`, GQA ratios 4/2 · 8/2 · 14/2).
 
+- **Per-token fused decoder-block kernel (Qwen-fast #404) — zero-alloc decode** —
+  `LlamaDecoderBlock<T>` gains public span-in/span-out `ForwardCachedFused` /
+  `ForwardPrefillFused` that run the whole per-token block (InputNorm → QKV(+bias) →
+  RoPE → KV write → attention → OProj → residual → PostNorm → SiLU-FFN → residual)
+  over per-layer `T[]` scratch (decode: lazy, zero steady-state allocs; prefill: one
+  `ArrayPool<T>.Shared` L-scaled workspace) instead of ~7–8 boxed
+  `ReverseGradTensor` ops × 24 layers (~4–6 MB/token). They reuse only existing
+  kernels (`GradKernels.MatMulTransposedB` GEMV, `Silu`, `RotaryForward`,
+  `AttentionKernels.DecodeAttention`/`BatchedAttention`,
+  `RMSNormKernel.PerRowRMSNormForwardKernel`) so numerics are unchanged, and are
+  inference-only (guard `GradientUtils.IsGradEnabled`); per-op loops are
+  byte-identical under Grad / toggle-off. `LlamaForCausalLM` routes decode/prefill
+  through them outside `Grad()` behind the new public opt-out toggle
+  `LlamaFusedKernels.DecoderBlockFused` (default `true`). Fused output is
+  bit-identical to the per-op chain (verification caught and fixed a
+  residual-clobber bug where in-place PostNorm overwrote the attention-residual
+  before the final add). Measured at Qwen2.5-0.5B shapes with `--runs 3` medians:
+  decode block 131,985 → 1 B/op, decode fwd 3,620,919 → 619,631 B/op (≈ the
+  irreducible ~608 KB `[1, vocab]` logits box), prefill seed rows −96…−99%
+  (seed [256] 735 MB → 7.0 MB), gen0 → 0 on all touched rows. E2E (64-token prompt
+  + 24-token decode, median of 3): decode 116.5 ms/token (6.2 tok/s), **13.4×**
+  cache-vs-full. Parity locked by new fused-vs-per-op, toggle A/B, prefill, and bf16
+  guards in `LlamaDecoderBlockTests` and `LlamaForCausalLMPrefillTests`.
+
 ### Changed
 
 - **Nested (non-slot) cumulative windows fall back to exact boundary materialization (#360)** —

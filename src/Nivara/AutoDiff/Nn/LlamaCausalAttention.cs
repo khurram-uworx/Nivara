@@ -38,6 +38,8 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     public int NumKeyValueHeads => numKeyValueHeads;
     /// <summary>Gets the per-head dimension.</summary>
     public int HeadDim => headDim;
+    /// <summary>Gets the rotary position embedding tables (fused-kernel path).</summary>
+    internal RotaryEmbedding<T> Rotary => rotary;
 
     /// <summary>
     /// Creates a Llama causal self-attention module.
@@ -153,16 +155,34 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
         K = rotary.Forward(K, positionOffset);
 
         // Prefill: capture the pre-repeat per-KV-head K/V into the cache rows the fused
-        // DecodeAttention reads (row-major [kvLen, numKeyValueHeads * headDim]).
+        // ports read (row-major [kvLen, numKeyValueHeads * headDim]), then — on the
+        // inference-only path — attend this chunk's rows with the virtual GQA mapping:
+        // no GqaRepeatKV expansion, no head repack, no [numHeads, L, L] score block, no
+        // mask allocation, no graph nodes (exactly the contract DecodeAttention established
+        // on the decode side).
         if (kCache is not null && vCache is not null)
         {
             int kvWidth = numKeyValueHeads * headDim;
             int rowBytes = qLen * kvWidth;
             K.AsSpan().CopyTo(kCache.AsSpan(positionOffset * kvWidth, rowBytes));
             V.AsSpan().CopyTo(vCache.AsSpan(positionOffset * kvWidth, rowBytes));
+
+            if (!GradientUtils.IsGradEnabled)
+            {
+                var outData = new T[qLen * numHeads * headDim];
+                AttentionKernels<T>.BatchedAttention(
+                    Q.AsSpan(),
+                    kCache.AsSpan(positionOffset * kvWidth, rowBytes),
+                    vCache.AsSpan(positionOffset * kvWidth, rowBytes),
+                    outData, qLen, numHeads, numKeyValueHeads, headDim, attnScale);
+                return OProj.Forward(new ReverseGradTensor<T>(
+                    NivaraColumn<T>.CreateFromOwnedArray(outData), requiresGrad: false,
+                    new[] { qLen, numHeads * headDim }));
+            }
         }
 
-        // GQA: repeat key/value heads to the query head count.
+        // Grad-enabled (or cache-less full Forward) path — GQA repeat + causal mask + MHA
+        // exactly as before so backward flows through the same graph nodes.
         K = ReverseGradOperations.GqaRepeatKV(K, numHeads, numKeyValueHeads);
         V = ReverseGradOperations.GqaRepeatKV(V, numHeads, numKeyValueHeads);
 

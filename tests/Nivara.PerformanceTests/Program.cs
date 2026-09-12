@@ -34,7 +34,7 @@ static class Program
 
     static int Main(string[] args)
     {
-        var (jsonPath, comparePath, runs, minOpsFraction, datasetTest, safetensorsMmap) = ParseArgs(args);
+        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap) = ParseArgs(args);
 
         if (datasetTest)
         {
@@ -50,7 +50,7 @@ static class Program
 
         if (runs > 1)
         {
-            var results = MeasureAcrossProcesses(runs);
+            var results = MeasureAcrossProcesses(runs, only);
             if (results is null)
                 return 2;
 
@@ -67,6 +67,9 @@ static class Program
 
         PrintHeader();
         RegisterScenarios();
+
+        if (only is not null)
+            s_scenarios.RemoveAll(s => !s.Name.Contains(only, StringComparison.OrdinalIgnoreCase));
 
         var singleResults = new List<ScenarioResult>();
         foreach (var scenario in s_scenarios)
@@ -102,7 +105,7 @@ static class Program
             PrintRow(r);
     }
 
-    static List<ScenarioResult>? MeasureAcrossProcesses(int runs)
+    static List<ScenarioResult>? MeasureAcrossProcesses(int runs, string? only)
     {
         var exe = Environment.ProcessPath;
         if (exe is null)
@@ -126,6 +129,11 @@ static class Program
                 };
                 psi.ArgumentList.Add("--runs");
                 psi.ArgumentList.Add("1");
+                if (only is not null)
+                {
+                    psi.ArgumentList.Add("--only");
+                    psi.ArgumentList.Add(only);
+                }
                 psi.ArgumentList.Add("--json");
                 psi.ArgumentList.Add(tmpFiles[i]);
                 using var child = Process.Start(psi);
@@ -295,6 +303,8 @@ static class Program
         RunAutoDiffSimdScenarios();
         RunQwenDecodeMatMulScenarios();
         RunQwenDecodeAttentionScenarios();
+        RunQwenDecodeBlockScenarios();
+        RunQwenDecodeForwardScenarios();
         RunQwenPrefillScenarios();
     }
 
@@ -605,6 +615,69 @@ static class Program
         };
     }
 
+    static void RunQwenDecodeBlockScenarios()
+    {
+        // Qwen2.5-0.5B single-token decoder-block decode (issue #404, docs/QWEN-PERF.md P1). Row
+        // name is identical on both branches — the baseline body measured the per-op block chain
+        // (block.ForwardCached); this branch measures the fused span kernel
+        // (block.ForwardCachedFused) — so --compare gates the true before/after. Target: B/op
+        // drops from 131,985 (per-op chain) toward ~0 steady-state.
+        Run("Qwen decode block [1x896 @ kvLen=64]", 3, 30,
+            () => CreateQwenDecodeBlockScenario(64));
+    }
+
+    // Qwen2.5-0.5B shapes: hidden 896, heads 14, kvHeads 2, headDim 64 (kvWidth 128), FFN 4864.
+    // Pre-populates a kvLen-row seeded cache and runs one single-token decode step through one
+    // full decoder block. Steady-state body: the fused kernel reuses the per-block scratch + the
+    // same input/output buffers and pre-seeded cache every call (zero heap allocations).
+    static Action CreateQwenDecodeBlockScenario(int kvLen)
+    {
+        const int hidden = 896, numHeads = 14, numKvHeads = 2, intermediate = 4864;
+        var block = new LlamaDecoderBlock<float>(hidden, numHeads, numKvHeads, intermediate);
+        int kvWidth = numKvHeads * (hidden / numHeads);
+        var seed = new Random(42 + kvLen);
+        // Capacity for kvLen cached positions plus the new decode row (required by ForwardCachedFused).
+        var kCache = new float[(kvLen + 1) * kvWidth];
+        var vCache = new float[(kvLen + 1) * kvWidth];
+        for (int i = 0; i < kvLen * kvWidth; i++)
+        {
+            kCache[i] = (float)(seed.NextDouble() * 2 - 1);
+            vCache[i] = (float)(seed.NextDouble() * 2 - 1);
+        }
+
+        // A single throwaway decode warms the lazy RoPE tables + the per-block fused scratch so
+        // the timed op is purely the fused block step, not first-use table/scratch allocation.
+        var inBuf = Fill(new float[hidden]);
+        var outBuf = new float[hidden];
+        block.ForwardCachedFused(inBuf, outBuf, kvLen, kCache, vCache, kvLen);
+
+        return () => block.ForwardCachedFused(inBuf, outBuf, kvLen, kCache, vCache, kvLen);
+    }
+
+    static void RunQwenDecodeForwardScenarios()
+    {
+        // Model-level single-token decode after a 64-token prefill (issue #404's per-token cost,
+        // docs/QWEN-PERF.md P1). Same row name on both branches — the model body routes to the
+        // fused block path outside Grad once wired, so --compare gates the before/after. The
+        // ~2 GB model is built once per row outside timing, like CreateQwenPrefillScenario.
+        Run("Qwen decode fwd [1 step]", 1, 6, () => CreateQwenDecodeForwardScenario());
+    }
+
+    static Action CreateQwenDecodeForwardScenario()
+    {
+        const int hidden = 896, kvLen = 64;
+        var model = new LlamaForCausalLM<float>(151_936, 896, 24, 14, 2, 4864);
+        var cache = new LlamaKVCache<float>(24, 2 * (hidden / 14));
+        var rng = new Random(42 + kvLen);
+        var prompt = new int[kvLen];
+        for (int i = 0; i < kvLen; i++)
+            prompt[i] = rng.Next(151_936);
+        // Seed outside timing so the measured op is exactly one decode step (KV append + attend).
+        model.ForwardPrefill(prompt, cache);
+        int nextTok = rng.Next(151_936);
+        return () => model.ForwardCached(nextTok, kvLen, cache);
+    }
+
     static void RunQwenPrefillScenarios()
     {
         // Qwen2.5-0.5B prompt prefill (docs/QWEN-PERF.md §2A, docs/TODO.md §B). "Qwen prefill
@@ -901,9 +974,9 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, bool DatasetTest, bool SafetensorsMmap) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap) ParseArgs(string[] args)
     {
-        string? jsonPath = null, comparePath = null;
+        string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
         double minOpsFraction = DefaultMinOpsFraction;
         bool datasetTest = false;
@@ -919,6 +992,9 @@ static class Program
                 case "--safetensors-mmap":
                     safetensorsMmap = true;
                     break;
+                case "--only" when i + 1 < args.Length:
+                    only = args[++i];
+                    break;
                 case "--json" when i + 1 < args.Length:
                     jsonPath = args[++i];
                     break;
@@ -933,13 +1009,13 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction, datasetTest, safetensorsMmap);
+        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)

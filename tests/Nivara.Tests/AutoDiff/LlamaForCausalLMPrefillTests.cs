@@ -1,7 +1,10 @@
 using Nivara.AutoDiff;
 using Nivara.AutoDiff.Nn;
+using Nivara.AutoDiff.Operations;
+using Nivara.AutoDiff.Utilities;
 using Nivara.Samples;
 using NUnit.Framework;
+using System.Buffers;
 using System.Runtime.CompilerServices;
 
 namespace Nivara.Tests.AutoDiff;
@@ -137,6 +140,31 @@ public class LlamaForCausalLMPrefillTests
     }
 
     [Test]
+    public void ForwardPrefill_PlainPromptLength_SeedThenCachedDecode_MatchesFullForward()
+    {
+        // The Qwen plain (no-tools) prompt (system + user + generation prompt) renders to 36
+        // tokens (measured from the real checkpoint via qwen benchmark --plain); pin
+        // seed-then-decode == full Forward at that length so the #408 plain surface and the
+        // #403 fused prefill attention share one always-run 1e-5 numeric seat (no checkpoint
+        // required).
+        using var model = TinyModel();
+        int[] prompt = Enumerable.Range(1, 36).ToArray();
+        int[] gen = [7, 21, 55];
+        using var cache = new LlamaKVCache<float>(2, KvWidth(4, 2, 32));
+
+        var logits = model.ForwardPrefill(prompt, cache);
+        AssertLastRowClose(model.Forward(prompt), logits, 128);
+
+        var prefix = new List<int>(prompt);
+        foreach (var g in gen)
+        {
+            prefix.Add(g);
+            logits = model.ForwardCached(g, prefix.Count - 1, cache);
+            AssertLastRowClose(model.Forward(prefix.ToArray()), logits, 128);
+        }
+    }
+
+    [Test]
     public void ForwardPrefill_CapturesAllKvRows_AtCorrectOffsets()
     {
         // Model-level (offset 0): rows [0, L) captured, rows [L, capacity) untouched fresh zeros.
@@ -210,6 +238,9 @@ public class LlamaForCausalLMPrefillTests
     [Test]
     public void ForwardPrefill_Parity_AcrossGqaRatios()
     {
+        // Every GQA ratio exercises the fused BatchedAttention prefill path (outside Grad,
+        // cache present) against the full Forward reference within 1e-5 — the acceptance gate
+        // for #403 (GQA parity across 4/2, 8/2, 14/2).
         foreach (var (hidden, heads, kvHeads) in new[] { (32, 4, 2), (64, 8, 2), (112, 14, 2) })
         {
             using var model = TinyModel(hidden, heads, kvHeads);
@@ -220,5 +251,159 @@ public class LlamaForCausalLMPrefillTests
 
             AssertLastRowClose(model.Forward(tokens), logits, 128);
         }
+    }
+
+    [Test]
+    public void ForwardPrefill_InsideGrad_MatchesFullForwardAndBuildsGraph()
+    {
+        // Verify the fused BatchedAttention branch is never taken inside Grad(): the Grad-enabled
+        // path must use MHA (GqaRepeatKV + CreateCausalMask + MultiHeadAttention) and match full
+        // Forward (also Grad-enabled) within 1e-5. Graph nodes must be built (leaf == false) —
+        // the fused branch only ever returns leaf tensors, so IsLeaf going false is the proof
+        // that the inference-only branch was skipped.
+        using var model = TinyModel();
+        int[] tokens = [1, 12, 45, 78, 99];
+        using var gradScope = GradientUtils.Grad();
+
+        using var cache = new LlamaKVCache<float>(2, KvWidth(4, 2, 32));
+        var logitsPrefill = model.ForwardPrefill(tokens, cache);
+        var logitsFull = model.Forward(tokens);
+
+        Assert.That(logitsPrefill.IsLeaf, Is.False,
+            "Grad-enabled ForwardPrefill must take the MHA path (fused branch is inference-only).");
+        Assert.That(logitsFull.IsLeaf, Is.False,
+            "Grad-enabled Forward must build graph nodes.");
+
+        // Numerically the same MHA path on the same data.
+        AssertLastRowClose(logitsFull, logitsPrefill, 128);
+    }
+
+    [Test]
+    public void BatchedAttention_Kernel_ParityAcrossGqaRatios()
+    {
+        // Isolated kernel-level test: fused BatchedAttention produces identical output (1e-5)
+        // to the MHA reference (GqaRepeatKV + CreateCausalMask + MultiHeadAttention) over the
+        // same random Q/K/V data, for every (qLen, GQA-ratio) pair. Exercises the virtual head
+        // mapping, reduced-range causal softmax, and weighted-sum accumulation in isolation.
+        foreach (var (heads, kvHeads, qLen) in new[]
+        {
+            (4, 2, 1), (4, 2, 5), (8, 2, 3), (8, 2, 8), (14, 2, 6)
+        })
+        {
+            int headDim = 8;
+            int kvWidth = kvHeads * headDim;
+            int D = heads * headDim;
+            var rng = new Random(42);
+
+            var qArr = new float[qLen * D];
+            var kArr = new float[qLen * kvWidth];
+            var vArr = new float[qLen * kvWidth];
+            for (int i = 0; i < qArr.Length; i++) qArr[i] = rng.NextSingle() - 0.5f;
+            for (int i = 0; i < kArr.Length; i++) kArr[i] = rng.NextSingle() - 0.5f;
+            for (int i = 0; i < vArr.Length; i++) vArr[i] = rng.NextSingle() - 0.5f;
+
+            float scale = 1.0f / MathF.Sqrt(headDim);
+
+            // Fused path.
+            var fusedOut = new float[qLen * D];
+            AttentionKernels<float>.BatchedAttention(qArr, kArr, vArr, fusedOut, qLen, heads, kvHeads, headDim, scale);
+
+            // Reference path: GqaRepeatKV K/V, create causal mask, call MultiHeadAttention.
+            var qTensor = ReverseGradTensor<float>.FromMatrix(qArr, qLen, D, requiresGrad: false);
+            var kTensor = ReverseGradTensor<float>.FromMatrix(kArr, qLen, kvWidth, requiresGrad: false);
+            var vTensor = ReverseGradTensor<float>.FromMatrix(vArr, qLen, kvWidth, requiresGrad: false);
+            var kRep = ReverseGradOperations.GqaRepeatKV(kTensor, heads, kvHeads);
+            var vRep = ReverseGradOperations.GqaRepeatKV(vTensor, heads, kvHeads);
+            var mask = ModuleHelpers<float>.CreateCausalMask(qLen, qLen);
+            var refOut = ReverseGradOperations.MultiHeadAttention(qTensor, kRep, vRep, heads, scale, mask);
+            refOut.Data.TryGetSpan(out var refSpan);
+
+            for (int i = 0; i < fusedOut.Length; i++)
+                AssertClose(refSpan[i], fusedOut[i]);
+        }
+    }
+
+    [Test]
+    public void ForwardCached_FusedMatchesPerOp_Within1e5()
+    {
+        // A/B parity for the model-level fused decode: with LlamaFusedKernels.DecoderBlockFused
+        // off, ForwardCached runs the per-op block chain; with it on, the fused single-token
+        // kernel (both gate on !GradientUtils.IsGradEnabled). The logits agree within 1e-5 and
+        // the layer-0 K/V rows are bit-equal (both paths run the same projection/rope/attention
+        // kernels outside Grad).
+        using var model = TinyModel();
+        int kvWidth = KvWidth(4, 2, 32);
+        int[] tokens = [1, 12, 45];
+
+        using var perOpCache = new LlamaKVCache<float>(2, kvWidth);
+        ReverseGradTensor<float>? perOp = null;
+        try
+        {
+            LlamaFusedKernels.DecoderBlockFused = false;
+            for (int p = 0; p < tokens.Length; p++)
+                perOp = model.ForwardCached(tokens[p], p, perOpCache);
+        }
+        finally
+        {
+            LlamaFusedKernels.DecoderBlockFused = true;
+        }
+
+        using var fusedCache = new LlamaKVCache<float>(2, kvWidth);
+        ReverseGradTensor<float>? fused = null;
+        for (int p = 0; p < tokens.Length; p++)
+            fused = model.ForwardCached(tokens[p], p, fusedCache);
+
+        perOp!.Data.TryGetSpan(out var perSpan);
+        fused!.Data.TryGetSpan(out var fusedSpan);
+        Assert.That(fusedSpan.Length, Is.EqualTo(perSpan.Length));
+        for (int i = 0; i < perSpan.Length; i++)
+            AssertClose(perSpan[i], fusedSpan[i]);
+
+        Assert.That(CacheBitEqual(fusedCache.keys[0], perOpCache.keys[0]), Is.True,
+            "Fused decode layer-0 K rows must match the per-op walk bit-for-bit.");
+        Assert.That(CacheBitEqual(fusedCache.values[0], perOpCache.values[0]), Is.True,
+            "Fused decode layer-0 V rows must match the per-op walk bit-for-bit.");
+        Assert.That(CacheClose(fusedCache.keys[1], perOpCache.keys[1], 1e-5f), Is.True,
+            "A/B decode layer-1 K rows must agree within 1e-5.");
+        Assert.That(CacheClose(fusedCache.values[1], perOpCache.values[1], 1e-5f), Is.True,
+            "A/B decode layer-1 V rows must agree within 1e-5.");
+    }
+
+    [Test]
+    public void ForwardPrefill_FusedMatchesPerOp_Within1e5()
+    {
+        using var model = TinyModel();
+        int[] tokens = [1, 12, 45, 78, 99];
+        int kvWidth = KvWidth(4, 2, 32);
+
+        using var perOpCache = new LlamaKVCache<float>(2, kvWidth);
+        ReverseGradTensor<float>? perOp = null;
+        try
+        {
+            LlamaFusedKernels.DecoderBlockFused = false;
+            perOp = model.ForwardPrefill(tokens, perOpCache);
+        }
+        finally
+        {
+            LlamaFusedKernels.DecoderBlockFused = true;
+        }
+
+        using var fusedCache = new LlamaKVCache<float>(2, kvWidth);
+        var fused = model.ForwardPrefill(tokens, fusedCache);
+
+        perOp!.Data.TryGetSpan(out var perSpan);
+        fused.Data.TryGetSpan(out var fusedSpan);
+        Assert.That(fusedSpan.Length, Is.EqualTo(perSpan.Length));
+        for (int i = 0; i < perSpan.Length; i++)
+            AssertClose(perSpan[i], fusedSpan[i]);
+
+        Assert.That(CacheBitEqual(fusedCache.keys[0], perOpCache.keys[0]), Is.True,
+            "Fused prefill layer-0 K rows must match the per-op prefill bit-for-bit.");
+        Assert.That(CacheBitEqual(fusedCache.values[0], perOpCache.values[0]), Is.True,
+            "Fused prefill layer-0 V rows must match the per-op prefill bit-for-bit.");
+        Assert.That(CacheClose(fusedCache.keys[1], perOpCache.keys[1], 1e-5f), Is.True,
+            "A/B prefill layer-1 K rows must agree within 1e-5.");
+        Assert.That(CacheClose(fusedCache.values[1], perOpCache.values[1], 1e-5f), Is.True,
+            "A/B prefill layer-1 V rows must agree within 1e-5.");
     }
 }
