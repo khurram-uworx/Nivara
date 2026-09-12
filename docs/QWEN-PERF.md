@@ -533,7 +533,7 @@ deferred by human decision (change confined to the samples/test surface;
 
 ---
 
-## P0-4 — Fused GQA-aware batched attention for prefill (#403)
+## P1 — Fused GQA-aware batched attention for prefill (#403)
 
 **What:** Batched prefill still materialized the GQA repeat: every layer ran
 `GqaRepeatKV` (+ head repack + `[numHeads, L, L]` score block + `[qLen, qLen]` mask),
@@ -603,7 +603,7 @@ Artifacts: `tests/Nivara.PerformanceTests/qwen-prefill-baseline.json` (cold) ·
 
 | Plan item | Status | Measured before → after | Notes |
 |---|---|---|---|
-| P0-follow-up — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | DONE — entry above (2026-09-12) | same-state A/B seed [256 tok]: 6,369 ms / 793.6 MB → 6,363 ms / **743.2 MB** (time +0.1%, alloc −6.4%) · gate alloc −5.6%…−6.4% on all seed rows; formal `--compare` time FAIL rows were cold-vs-warm drift (untouched FFN row −14%; old path also 6,369 ms warm) | tracked in #403 · gate: `--json qwen-prefill-baseline.json --only Qwen --runs 3` → `--compare qwen-prefill-baseline.json --only Qwen --runs 3`; baseline 2026-09-08 file predates `--only` (cross-machine) |
+| P1 — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | DONE — entry above (2026-09-12) | same-state A/B seed [256 tok]: 6,369 ms / 793.6 MB → 6,363 ms / **743.2 MB** (time +0.1%, alloc −6.4%) · gate alloc −5.6%…−6.4% on all seed rows; formal `--compare` time FAIL rows were cold-vs-warm drift (untouched FFN row −14%; old path also 6,369 ms warm) | tracked in #403 · gate: `--json qwen-prefill-baseline.json --only Qwen --runs 3` → `--compare qwen-prefill-baseline.json --only Qwen --runs 3`; baseline 2026-09-08 file predates `--only` (cross-machine) |
 | #408 — Plain-prompt coverage (benchmark + fixtures + parity) | benchmark + fixtures + parity landed and **verified** 2026-09-12 (fixtures generated; 18/18 targeted incl. plain greedy 7/7) | plain before → after (#403 retake): real checkpoint 36-tok prompt — prefill 1,471 → 1,758 ms (warm single-shot), cached decode 287 → 243 ms/tok, **5.8× → 6.1×** (7-tok answer) | `qwen benchmark --plain` / `qwen --plain`; `qwen_plain_reference.py` fixtures (`qwen_plain_{prompt,prompt_ids,ids_py,logits_py}`); parity pins in `QwenInstructParityTests` + 36-tok always-run seat in `LlamaForCausalLMPrefillTests` |
 | P1 — On-the-fly BF16 weights with F32 compute | DONE — see entry above (2026-09-11) | on this i5: KV total 1.78–1.93× slower, all phases ~1.6–2.2× slower | documented tradeoff (`--precision f32\|bf16`); win expected on AVX-512/HBM-class hardware · tracked in #387/#391 |
 | P1 — Per-token fused decoder-block kernel | | | tracked in #404 |
