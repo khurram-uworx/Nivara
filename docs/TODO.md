@@ -70,6 +70,13 @@ Probable promotion targets if the rule fires: `GradKernels.RotaryForward` and
 `AttentionKernels.DecodeAttention`, each behind `Avx512F.IsSupported` with the
 existing scalar path as fallback.
 
+Update (probe results): the rule fired for the decode-attention V-phase only
+(6.5–6.7×, 2.6–3.5% of token time → ~0.4–0.5%). RoPE stays scalar (4.4× but
+0.13%). Fallback design per human steer: **three-tier chain**, not scalar-only —
+`Vector512` (AVX-512) → `Vector<float>` (portable variable-width SIMD, works on
+non-AVX-512 machines) → existing scalar loop for non-float `T` / unaccelerated
+runtimes.
+
 ## Verification steps
 
 - `dotnet build tests/Nivara.SimdProbe` to compile-check.
@@ -80,17 +87,20 @@ existing scalar path as fallback.
 
 ## Planned commits
 
-1. `docs: plan AVX-512 scalar hot-path probe in TODO.md`
-2. `probe: add --scalar mode (ScalarKernelProbe.cs) to SimdProbe`
-3. `docs: record --scalar probe results and decision in SimdProbe README`
+1. `docs: plan AVX-512 scalar hot-path probe in TODO.md` ✅ `a21e3c4`
+2. `probe: add --scalar mode (ScalarKernelProbe.cs) to SimdProbe` ✅ `a28d093`
+3. `docs: record --scalar probe results and decision in SimdProbe README` ✅ `9fed597`
+4. `perf: vectorize decode-attention V-phase (Vector512 + Vector<float> fallback)` — pending promotion, approved by probe data
 
 ## Blast radius
 
 - Additive only: `tests/Nivara.SimdProbe/{Program.cs,ScalarKernelProbe.cs,README.md}`,
   `docs/TODO.md`, plus this branch. No `src/Nivara` edits in this step.
-- If promotion fires (unlikely per the audit), it touches `GradKernels.RotaryForward`
-  and `AttentionKernels.DecodeAttention` only, behind `Avx512F.IsSupported` with
-  scalar fallback; covered by existing RoPE/attention tests.
+- Promotion (fired for the V-phase): touches `AttentionKernels.DecodeAttention`
+  only, float path gated on `Vector512.IsHardwareAccelerated` / `Vector<float>`
+  with the existing scalar loop as fallback; existing decode-attention /
+  `LlamaCausalAttention` tests exercise the new path automatically on any
+  SIMD-capable host.
 
 ## GitHub issues log
 
