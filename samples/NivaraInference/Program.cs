@@ -33,6 +33,7 @@ class Program
         bool noKvCache = false;
         bool force = false;
         bool syntheticWeights = false;
+        bool plain = false;
         int teacherExamples = 0;
         int seed = 42;
         string text = "";
@@ -76,6 +77,8 @@ class Program
             }
             else if (args[i] == "--synthetic-weights")
                 syntheticWeights = true;
+            else if (args[i] == "--plain")
+                plain = true;
             else if (args[i] == "--text" && i + 1 < args.Length)
             {
                 text = args[i + 1];
@@ -101,7 +104,9 @@ class Program
             Console.WriteLine("  <image-path>      Run inference on a single image");
             Console.WriteLine();
             Console.WriteLine("Qwen options:");
-            Console.WriteLine("  --text \"...\"      Override the tools-mode user prompt (default: Paris weather)");
+            Console.WriteLine("  --text \"...\"      Override the default user prompt (tools or plain mode; default: Paris weather)");
+            Console.WriteLine("  --plain           Plain (no-tools) prompt surface. With 'benchmark': run the plain-prompt");
+            Console.WriteLine("                    decode benchmark; bare (no mode): single-shot plain chat demo.");
             Console.WriteLine("  --synthetic-weights  qwen benchmark: fabricate Qwen2.5-0.5B-shaped weights (no model");
             Console.WriteLine("                    file needed). Timing is shape-driven; correctness requires real weights.");
             Console.WriteLine("  --no-kv-cache      Disable the KV cache (re-run full forward each token)");
@@ -233,19 +238,28 @@ class Program
                         Console.Error.WriteLine("--synthetic-weights supports only the 'benchmark' mode (decode timing; correctness needs real weights).");
                         return 1;
                     }
-                    return bf16 ? Qwen.RunSyntheticBenchmark<BFloat16>() : Qwen.RunSyntheticBenchmark<float>();
+                    bool syntheticPlain = plain;
+                    if (bf16) return syntheticPlain ? Qwen.RunSyntheticBenchmark<BFloat16>(plain: true) : Qwen.RunSyntheticBenchmark<BFloat16>();
+                    return syntheticPlain ? Qwen.RunSyntheticBenchmark<float>(plain: true) : Qwen.RunSyntheticBenchmark<float>();
+                }
+                if (plain && mode.Length > 0 && mode != "benchmark")
+                {
+                    Console.Error.WriteLine("--plain is only valid with the default single-shot run or 'benchmark'.");
+                    return 1;
                 }
                 if (bf16)
                 {
                     if (mode == "benchmark")
-                        return Qwen.RunBenchmark(tensorsBf16, modelDir);
+                        return plain ? Qwen.RunPlainBenchmark(tensorsBf16, modelDir) : Qwen.RunBenchmark(tensorsBf16, modelDir);
                     Console.Error.WriteLine("Qwen2.5 precision error: bf16 supports only the 'benchmark' and '--synthetic-weights' modes; tools/distill run F32.");
                     return 1;
                 }
                 if (mode == "distill")
                     return Qwen.RunDistill(tensors, modelDir, teacherExamples, force, seed);
                 if (mode == "benchmark")
-                    return Qwen.RunBenchmark(tensors, modelDir);
+                    return plain ? Qwen.RunPlainBenchmark(tensors, modelDir) : Qwen.RunBenchmark(tensors, modelDir);
+                if (plain)
+                    return Qwen.RunPlain(tensors, modelDir, text);
                 return Qwen.RunTools(tensors, modelDir, useKvCache: !noKvCache, text);
             default:
                 Console.Error.WriteLine($"Unknown model type: {modelType}");

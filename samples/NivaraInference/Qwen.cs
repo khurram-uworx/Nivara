@@ -117,6 +117,15 @@ static class QwenChatTemplate
     /// <summary>First-turn prompt (system + user + generation prompt), used for the tool-call turn.</summary>
     public static string RenderFirstTurn(string systemMessage, string userText)
         => RenderToolLoop(systemMessage, userText, null, null);
+
+    /// <summary>Plain (no-tools) single-turn prompt: default Qwen system turn + user + generation
+    /// prompt. Byte-identical to the checkpoint's <c>{%- if tools %}{%- else %}</c> branch (which
+    /// always emits the default system turn) and to NivaraChat's
+    /// <c>QwenChatTemplate.Render([user], addGenerationPrompt: true)</c>.</summary>
+    public static string RenderPlain(string userText)
+        => "<|im_start|>system\n" + DefaultSystem + "<|im_end|>\n" +
+           "<|im_start|>user\n" + userText + "<|im_end|>\n" +
+           "<|im_start|>assistant\n";
 }
 
 /// <summary>Parses a single <c>&lt;tool_call&gt;{json}&lt;/tool_call&gt;</c> block from generated text.</summary>
@@ -173,6 +182,9 @@ static class Qwen
     /// the prefix each step (~30 min). 24 tokens keeps the timing regime comparable to the real
     /// tool turn (~19 tokens) at a practical runtime.</summary>
     const int MaxNewTokensSynthetic = 24;
+    /// <summary>Default plain (no-tools) prompt — fixed so the PyTorch fixture and NivaraInference
+    /// stay byte-identical (like the pinned Paris weather tools prompt).</summary>
+    const string PlainPrompt = "What is the capital of France?";
     const string WeatherToolName = "getWeather";
     const string WeatherToolDesc = "Gets the current weather for a city. Returns a short description like 'Sunny, 22\u00b0C'.";
     const string CityParamDesc = "The city name, e.g. 'Paris' or 'New York'";
@@ -541,14 +553,55 @@ static class Qwen
         return NarrowWidenScope<T>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens));
     }
 
+    /// <summary>KV-cache decode benchmark over the plain no-tools prompt (default: capital of
+    /// France). Same cached-vs-full split as the tools benchmark; shares the batched prefill path
+    /// so the #403 fused attention gates this surface too.</summary>
+    public static int RunPlainBenchmark<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain-prompt KV-cache decode benchmark ===");
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<T>()}");
+        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+
+        var promptIds = tokenizer.Encode(QwenChatTemplate.RenderPlain(PlainPrompt));
+        return NarrowWidenScope<T>(() => RunDecodeBenchmark(model, config, promptIds, MaxNewTokens, "the plain prompt"));
+    }
+
+    /// <summary>Plain (no-tools) single-shot demo: renders the no-tools prompt, generates with the
+    /// KV cache, prints the reply and timing. Returns 0 on success.</summary>
+    public static int RunPlain<T>(
+        Dictionary<string, (T[] Data, int[] Shape)> tensors, string modelDir, string? userText)
+        where T : struct, IFloatingPointIeee754<T>
+    {
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct: plain chat (no tools) ===");
+        Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {PrecisionLabel<T>()}");
+        var (model, config, tokenizer) = LoadModel(tensors, modelDir);
+
+        var prompt = QwenChatTemplate.RenderPlain(userText ?? PlainPrompt);
+        var promptIds = tokenizer.Encode(prompt).ToList();
+        Console.WriteLine($"Prompt ({promptIds.Count} tokens): {prompt.Replace("\n", "\\n")}");
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var ids = Generate(model, config, promptIds, MaxNewTokens, useKvCache: true);
+        sw.Stop();
+        Console.WriteLine();
+        Console.WriteLine($"Assistant: {tokenizer.Decode(ids)}");
+        Console.WriteLine($"{ids.Count} tokens in {sw.Elapsed.TotalSeconds:F1}s");
+        return 0;
+    }
+
     /// <summary>Decode benchmark over synthetic Qwen-shaped weights (Program.cs
     /// --synthetic-weights) — runs without the model file. Timing is shape-driven only;
     /// correctness is intentionally NOT exercised (random weights). For BF16 the identical float
-    /// pool is narrowed once so the two precisions measure the same weight values.</summary>
-    public static int RunSyntheticBenchmark<T>()
+    /// pool is narrowed once so the two precisions measure the same weight values. When
+    /// <paramref name="plain"/> is set the same shapes are labeled as the plain-prompt surface
+    /// (ids stay random — the synthetic benchmark measures the decode loop, not the prompt).</summary>
+    public static int RunSyntheticBenchmark<T>(bool plain = false)
         where T : struct, IFloatingPointIeee754<T>
     {
-        Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): KV-cache decode benchmark ===");
+        Console.WriteLine("=== Qwen2.5-0.5B-Instruct (synthetic weights): " +
+            (plain ? "plain-prompt " : "") + "KV-cache decode benchmark ===");
         string syntheticPrecision = typeof(T) == typeof(BFloat16) ? "BF16 (native, widen-SIMD)" : "F32 (synthetic)";
         Console.WriteLine($"Device: CPU ({CpuIdentity()} · {Environment.ProcessorCount} logical processors)  Runtime: .NET {Environment.Version}  Precision: {syntheticPrecision}");
         var tensorsF32 = SynthesizeTensors(QwenSyntheticConfig);
@@ -563,14 +616,15 @@ static class Qwen
         var promptIds = new int[64];
         for (int i = 0; i < promptIds.Length; i++)
             promptIds[i] = (int)(SyntheticRng() % (uint)QwenSyntheticConfig.VocabSize);
-        return NarrowWidenScope<T>(() => RunDecodeBenchmark(model, QwenSyntheticConfig, promptIds, MaxNewTokensSynthetic));
+        return NarrowWidenScope<T>(() => RunDecodeBenchmark(model, QwenSyntheticConfig, promptIds, MaxNewTokensSynthetic, "the synthetic prompt"));
     }
 
-    /// <summary>Shared decode-timing body: cached vs full forward, 3 runs each, median-of-3.</summary>
-    static int RunDecodeBenchmark<T>(LlamaForCausalLM<T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens)
+    /// <summary>Shared decode-timing body: cached vs full forward, 3 runs each, median-of-3.
+    /// <paramref name="scenario"/> names the prompt surface in the status line.</summary>
+    static int RunDecodeBenchmark<T>(LlamaForCausalLM<T> model, LlamaConfig config, IReadOnlyList<int> promptIds, int maxNewTokens, string scenario = "the tool call turn")
         where T : struct, IFloatingPointIeee754<T>
     {
-        Console.WriteLine($"Prompt tokens: {promptIds.Count}. Decoding the tool call turn {3} times each path...");
+        Console.WriteLine($"Prompt tokens: {promptIds.Count}. Decoding {scenario} 3 times each path...");
         Console.WriteLine();
 
         TimeResult Cached() => TimeGeneration(model, config, promptIds, maxNewTokens, useKvCache: true);
