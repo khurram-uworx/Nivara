@@ -533,12 +533,78 @@ deferred by human decision (change confined to the samples/test surface;
 
 ---
 
+## P0-4 — Fused GQA-aware batched attention for prefill (#403)
+
+**What:** Batched prefill still materialized the GQA repeat: every layer ran
+`GqaRepeatKV` (+ head repack + `[numHeads, L, L]` score block + `[qLen, qLen]` mask),
+leaving `Qwen prefill seed [256 tok]` at **785,532,248 B/op** (fresh same-machine
+baseline, 2026-09-12) — allocation scaling with L. The fused decode kernel had already
+eliminated this on the decode side; prefill got the same treatment:
+
+- `AttentionKernels<T>.BatchedAttention` — per-head bulk matmuls over ArrayPool-rented
+  scratch (`PackHeads` once → `GradKernels.MatMulTransposedB` QKᵀ → scale → masked
+  positions folded to −∞ in place → full-row `SoftmaxRows` → `GradKernels.MatMul` with V
+  → `ScatterHead`), with the KV caches read strided per shared kv-head (**virtual GQA
+  mapping** — only numKvHeads packs, no repeat expansion, no mask allocation).
+- Wired into `LlamaCausalAttention.ForwardCore` under
+  `kCache != null && !GradientUtils.IsGradEnabled` (inference-only); the Grad-enabled and
+  cache-less full-Forward paths are byte-for-byte unchanged, and the fused output is
+  bit-identical to the MHA reference it replaces (same kernels, same reduction order).
+
+**Measurements (this machine, 2026-09-12, qwen-only `--runs 3`):**
+
+| Row (prefill seed) | Baseline (cold, 05:42) | Post-fix (warm) | Δ |
+|---|---|---|---|
+| [8 tok]       | 25,338,284 B/op · 921 ms | 23,921,784 B/op · 813 ms | alloc −5.6% · **faster** |
+| [16 tok]      | 49,653,548 B/op · 1,063 ms | 46,848,212 B/op · 1,149 ms | alloc −5.7% · time +8% (warm) |
+| [64 tok]      | 195,738,717 B/op · 2,169 ms | 184,308,299 B/op · 2,258 ms | alloc −5.8% · time +4% (warm) |
+| **[256 tok]** | **785,532,248 B/op** · 5,428 ms | **735,195,341 B/op** · 6,167 ms | **alloc −6.4%** · time flagged |
+
+All rows pass the allocation gate; memory now sits at "one-forward" level
+(full-fwd [256 tok] = 1,314–1,322 MB, so prefill ≈ 56% of full-forward allocation).
+`full fwd [256 tok]` re-read 1,322,474,519 B/op vs baseline 1,314,448,548 (+0.6% PASS —
+an earlier single-gate reading of 1,501 MB was spurious, per the P0-1 noise-row
+convention).
+
+**Time — same-state A/B closes the formal-gate FAIL as thermal drift.** The afternoon
+box was warm vs the cold morning baseline: the untouched `Qwen FFN gate/up/down x3`
+row read 216–225 ops/s (baseline 259, −14%) and old-path seed[256] re-measured 6,369 ms
+on the same warm machine (vs 5,428 ms cold). Disabling the fused branch and re-reading
+seed[256] gave the apples-to-apples pair:
+
+| Path (warm, same session) | seed [256 tok] time | seed [256 tok] alloc |
+|---|---|---|
+| MHA (pre-change code) | 6,369 ms | 793,572,335 B/op |
+| **BatchedAttention fused** | **6,363 ms** | **743,232,249 B/op** |
+
+**+0.1% time, −6.4% allocation** — gate evidence (same convention as P0-1/P0-2 noise
+rows; `src/Nivara/` diff is the fused branch only).
+
+**E2E (single-shot, variance noted):** synthetic tool prompt (64 tok) KV-cache total
+**7,562 ms / 24 tok** (311 ms/tok, 3.2 tok/s), **16.0×** — pre-fix 10,472–14,389 ms /
+~10×; real-checkpoint plain (36 tok) prefill 1,758 ms, decode 243 ms/tok, **6.1×** —
+pre-fix 1,471 ms / 287 ms/tok / 5.8×. Prefill time single-shot drift on a warm box;
+decode path code unchanged (variance).
+
+**Test scope:** targeted 18/18 — `LlamaForCausalLMPrefillTests` (GQA parity 4/2 · 8/2 ·
+14/2 at 1e-5, kernel-level `BatchedAttention` parity vs the MHA reference, graph guard
+outside Grad (leaf) and inside Grad (MHA path, matches full Forward), KV capture,
+36-token plain seat) + `QwenInstructParityTests` (plain tokenizer 36/36, greedy
+7/7 tokens vs PyTorch "The capital of France is Paris.", logits envelope).
+#408's generated fixtures activated and passed. Full suite deferred by human decision
+(targeted verification + same-state gate accepted).
+
+Artifacts: `tests/Nivara.PerformanceTests/qwen-prefill-baseline.json` (cold) ·
+`qwen-prefill-postfix.json` (warm post-fix).
+
+---
+
 ### Future entries (template — fill in as items land)
 
 | Plan item | Status | Measured before → after | Notes |
 |---|---|---|---|
-| P0-follow-up — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | | fresh before-gate 2026-09-12 → `--compare` after: prefill seed [256 tok] **785,532,248 B/op** (5,428 ms) · full-fwd [256 tok] 1,314,448,548 B/op (11,495 ms) · seed [64] 195,738,717 B/op | tracked in #403 · gate command: `--json tests/Nivara.PerformanceTests/qwen-prefill-baseline.json --only Qwen --runs 3` then `--compare qwen-prefill-baseline.json --only Qwen --runs 3` (fresh same-machine baseline; the 2026-09-08 file predates `--only` and is cross-machine) |
-| #408 — Plain-prompt coverage (benchmark + fixtures + parity) | benchmark + fixtures + tests landed 2026-09-12; parity tests activate when the plain `.bin` fixtures are generated | plain before-readings (same machine as #403 gate): real checkpoint 36-tok prompt — prefill 1,471 ms, cached decode 287 ms/tok, full-fwd 2,632 ms/tok (**5.8×**, 7-tok answer) | `qwen benchmark --plain` / `qwen --plain`; `qwen_plain_reference.py` fixtures (`qwen_plain_{prompt,prompt_ids,ids_py,logits_py}`); parity pins in `QwenInstructParityTests` + 36-tok always-run seed/then-decode seat in `LlamaForCausalLMPrefillTests` · #403 must retake the plain prefill + decode reading |
+| P0-follow-up — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | DONE — entry above (2026-09-12) | same-state A/B seed [256 tok]: 6,369 ms / 793.6 MB → 6,363 ms / **743.2 MB** (time +0.1%, alloc −6.4%) · gate alloc −5.6%…−6.4% on all seed rows; formal `--compare` time FAIL rows were cold-vs-warm drift (untouched FFN row −14%; old path also 6,369 ms warm) | tracked in #403 · gate: `--json qwen-prefill-baseline.json --only Qwen --runs 3` → `--compare qwen-prefill-baseline.json --only Qwen --runs 3`; baseline 2026-09-08 file predates `--only` (cross-machine) |
+| #408 — Plain-prompt coverage (benchmark + fixtures + parity) | benchmark + fixtures + parity landed and **verified** 2026-09-12 (fixtures generated; 18/18 targeted incl. plain greedy 7/7) | plain before → after (#403 retake): real checkpoint 36-tok prompt — prefill 1,471 → 1,758 ms (warm single-shot), cached decode 287 → 243 ms/tok, **5.8× → 6.1×** (7-tok answer) | `qwen benchmark --plain` / `qwen --plain`; `qwen_plain_reference.py` fixtures (`qwen_plain_{prompt,prompt_ids,ids_py,logits_py}`); parity pins in `QwenInstructParityTests` + 36-tok always-run seat in `LlamaForCausalLMPrefillTests` |
 | P1 — On-the-fly BF16 weights with F32 compute | DONE — see entry above (2026-09-11) | on this i5: KV total 1.78–1.93× slower, all phases ~1.6–2.2× slower | documented tradeoff (`--precision f32\|bf16`); win expected on AVX-512/HBM-class hardware · tracked in #387/#391 |
 | P1 — Per-token fused decoder-block kernel | | | tracked in #404 |
 | P2 — Sampling path + tokenize-prefix cache | | | tracked in #402 |

@@ -99,6 +99,23 @@ Two gaps from the QWEN-PERF review and planning session:
 
 ## Phase 2 — #403: fused GQA-aware batched attention for prefill (M effort; core)
 
+**EXECUTED 2026-09-12 — commits below.** Deviations from the sketch, recorded for G2:
+- The naive dot-loop kernel (e462a2a: reduced-range softmax, one rented score row) cut
+  allocation −5.7…−6.4% but ran ~20–30% slower than MHA on the 256-token seed (460k
+  small `TensorPrimitives.Dot` calls/layer). Replaced (f3fc091) with a bulk-matmul
+  variant mirroring `MultiHeadAttention` exactly over rented scratch (PackHeads once →
+  MatMulTransposedB → scale → casual −∞ folded in place → full-row SoftmaxRows →
+  MatMul → ScatterHead; CPS no GqaRepeatKV, no mask alloc) — **bit-identical to the MHA
+  reference** and time-neutral.
+- Formal `--compare` still flagged seed[256] ops/s and the untouched FFN row: the
+  afternoon box was warm vs the cold morning baseline (FFN −14%; old MHA path reads
+  6,369 ms warm vs 5,428 ms cold). Same-state A/B on the warm machine: old MHA
+  **6,369 ms / 793.6 MB** → fused **6,363 ms / 743.2 MB** (+0.1% time, −6.4% alloc).
+  Human accepted the same-state A/B as the gate evidence (thermal-drift convention, as
+  P0-1/P0-2 noise rows). All four seed rows PASS the allocation gate.
+- E2E post-fix: synthetic tool KV total 7,562 ms/24 tok (16.0×, was ~10×); real plain
+  prefill 1,758 ms, decode 243 ms/tok, 6.1× (single-shot warm-machine variance).
+
 ### 2a. New kernel — `AttentionKernels<T>.BatchedAttention`
 Multi-row prefill analogue of `DecodeAttention`:
 - Inputs: Q `[qLen, numHeads·headDim]` (post-RoPE), K/V pre-repeat row-major
@@ -176,16 +193,13 @@ logits). `Forward(int[])`/`ForwardPrefill`/`ForwardCached` signatures unchanged.
   - ✓ `docs: document qwen --plain/--synthetic-weights and --only targeted gates` (`7e9c33f`)
   - ✓ `tests: pin qwen plain-prompt parity (tokenizer, greedy, cache-vs-full)` (`c9b0bcd` — always-run seat uses the measured 36-tok plain prompt length)
   - ✓ `perf: record qwen baseline readings (tool + plain) before kernel work` (`01e1b4f`)
-  - Remaining Phase-1 verification: `dotnet test` (await human confirmation) and optional
-    plain fixture generation (`Python/qwen_plain_reference.py` — activates the
-    skip-if-absent parity tests; same convention as the tool fixtures).
-- Phase 2:
-  - `perf: fused GQA-aware batched attention for prefill kernel` (AttentionKernels +
-    ForwardCore wiring)
-  - `tests: pin batched-prefill fused attention parity (GQA ratios, guards)`
-  - `perf: record qwen prefill postfix results + E2E A/B (#403)`
-  - `docs: add QWEN-PERF ledger entries for #408/#403`
-- G2: `docs: remove TODO.md — plan executed`
+  - ✓ Phase-1 verification done: fixtures generated 2026-09-12 (`qwen_plain_reference.py`);
+    focused tests 18/18 green (plain tokenizer 36/36, greedy 7/7 vs PyTorch).
+- Phase 2 (all landed 2026-09-12):
+  - ✓ `feat: fused GQA-aware batched prefill attention (#403)` (`e462a2a` — kernel + wiring + tests)
+  - ✓ `perf: bulk-matmul fused prefill attention via rented scratch` (`f3fc091` — replaces the naive dot loop; restores MHA-equivalent time)
+  - ✓ `docs: ledger entry for #403 + #408 rows (QWEN-PERF)` (this commit) · postfix JSON artifact `qwen-prefill-postfix.json`
+  - Closing: `gh issue close #403` (human-confirmed) → G2 review → `docs: remove TODO.md — plan executed`
 
 ## Blast radius
 
@@ -204,6 +218,8 @@ logits). `Forward(int[])`/`ForwardPrefill`/`ForwardCached` signatures unchanged.
 ## GitHub issues log
 
 - [#408](https://github.com/khurram-uworx/Nivara/issues/408) — Qwen plain-prompt
-  benchmark + fixtures (created while planning this branch)
+  benchmark + fixtures (created while planning this branch) — delivered + verified
+  2026-09-12 in this branch (benchmark/demo/fixtures/parity).
 - [#403](https://github.com/khurram-uworx/Nivara/issues/403) — GQA-aware batched
-  attention for prefill (pre-existing; tracked from the P0-1 ledger entry)
+  attention for prefill (pre-existing; tracked from the P0-1 ledger entry) — closed
+  2026-09-12 with the P0-4 ledger entry (same-state A/B gate evidence).
