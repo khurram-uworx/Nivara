@@ -24,8 +24,9 @@ internal class Program
             "run" => L0Run.Run(),
             "spv" => SpvDump.Run(),
             "ocl" => OclProbe.Run(),
-            "all" => L0Probe.Run() + L0Run.Run(),
-            _ => L0Probe.Run() + L0Run.Run()
+            "dx12" => D3d12Check.Run(),
+            "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run(),
+            _ => L0Probe.Run() + L0Run.Run() + D3d12Check.Run()
         };
     }
 }
