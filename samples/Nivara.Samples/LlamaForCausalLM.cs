@@ -194,20 +194,21 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
         Embed.Weight!.Tensor.Data.TryGetSpan(out var embedSpan);
         embedSpan.Slice(tokenId * hidden, hidden).CopyTo(fusedH0);
 
-        var cur = fusedH0;
-        var alt = fusedH1;
+        var cur = fusedH0!;
+        var alt = fusedH1!;
         for (int i = 0; i < layers.Length; i++)
         {
             layers[i].ForwardCachedFused(cur, alt, positionOffset, cache.keys[i], cache.values[i], positionOffset);
             (cur, alt) = (alt, cur);
         }
 
-        // Final norm + tied LM head on a private copy of the last layer's output.
-        var hTensor = ReverseGradTensor<T>.FromMatrix(cur.AsSpan().ToArray(), 1, hidden, requiresGrad: false);
-        var h = finalNorm.Forward(hTensor);
-        var logits = ReverseGradOperations.MatMulTransposedB(h, Embed.Weight!.Tensor);
-        logits.Reshape(1, vocabSize);
-        return logits;
+        // Final norm in place (plus gamma multiply), then the tied LM head GEMV into a fresh
+        // [1, vocab] logits buffer — the required return value (allocated per decode step).
+        finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
+        LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, 1, hidden, double.CreateChecked(finalNorm.Eps));
+        var logits = new T[vocabSize];
+        LlamaFusedKernels.MatMulTransposedB(cur, embedSpan, logits, 1, hidden, vocabSize);
+        return ReverseGradTensor<T>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
     }
 
     ReverseGradTensor<T> ForwardPrefillFusedCore(int[] inputIds, LlamaKVCache<T> cache)
@@ -229,20 +230,13 @@ public sealed class LlamaForCausalLM<T> : Module<T> where T : struct, IFloatingP
             (cur, alt) = (alt, cur);
         }
 
-        // Final norm over the whole chunk, then the tied LM head on the last hidden row only.
-        var hTensor = ReverseGradTensor<T>.FromMatrix(cur.AsSpan().ToArray(), L, hidden, requiresGrad: false);
-        var h = finalNorm.Forward(hTensor);
-        int lastRowStart = (L - 1) * hidden;
-        var lastRow = new T[hidden];
-        if (h.Data.TryGetSpan(out var hSpan))
-            hSpan.Slice(lastRowStart, hidden).CopyTo(lastRow);
-        else
-            for (int i = 0; i < hidden; i++) lastRow[i] = h[lastRowStart + i];
-        var last = ReverseGradTensor<T>.FromMatrix(lastRow, 1, hidden, requiresGrad: false);
-
-        var logits = ReverseGradOperations.MatMulTransposedB(last, Embed.Weight!.Tensor);
-        logits.Reshape(1, vocabSize);
-        return logits;
+        // Final norm over the whole chunk in place (plus gamma multiply), then the tied LM head GEMV on
+        // the last hidden row only, into a fresh [1, vocab] logits buffer (the required return value).
+        finalNorm.Weight!.Tensor.Data.TryGetSpan(out var finalGamma);
+        LlamaFusedKernels.RMSNormForwardInPlace(cur, finalGamma, L, hidden, double.CreateChecked(finalNorm.Eps));
+        var logits = new T[vocabSize];
+        LlamaFusedKernels.MatMulTransposedB(cur.AsSpan((L - 1) * hidden, hidden), embedSpan, logits, 1, hidden, vocabSize);
+        return ReverseGradTensor<T>.FromMatrix(logits, 1, vocabSize, requiresGrad: false);
     }
 }
 

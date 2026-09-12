@@ -370,6 +370,73 @@ public class LlamaForCausalLMPrefillTests
     }
 
     [Test]
+    public void FinalStage_NormAndHead_FusedMatchesPerOpLogits_BitExact()
+    {
+        // Pins the issue #413 acceptance: the fused final norm + tied-head GEMV must be
+        // bit-identical to the per-op RMSNorm.Forward + MatMulTransposedB path (same kernels,
+        // same reduction order).
+        const int hidden = 32, vocab = 128;
+        var rng = new Random(42);
+        var row = new float[hidden];
+        for (int i = 0; i < hidden; i++) row[i] = (float)(rng.NextDouble() * 2 - 1);
+        var weights = new float[vocab * hidden];
+        for (int i = 0; i < weights.Length; i++) weights[i] = (float)(rng.NextDouble() * 2 - 1);
+
+        using var norm = new RMSNorm<float>(hidden, 1e-5f);
+        using var head = ReverseGradTensor<float>.FromMatrix(weights, vocab, hidden, requiresGrad: false);
+        var perOpH = norm.Forward(ReverseGradTensor<float>.FromMatrix(row, 1, hidden, requiresGrad: false));
+        var perOpLogits = ReverseGradOperations.MatMulTransposedB(perOpH, head);
+        perOpLogits.Reshape(1, vocab);
+        perOpLogits.Data.TryGetSpan(out var perOpSpan);
+        var perOpArr = perOpSpan.ToArray();
+
+        var fusedRow = (float[])row.Clone();
+        norm.Weight!.Tensor.Data.TryGetSpan(out var gamma);
+        LlamaFusedKernels.RMSNormForwardInPlace(fusedRow, gamma, 1, hidden, double.CreateChecked(norm.Eps));
+        var fusedLogits = new float[vocab];
+        head.Data.TryGetSpan(out var weightSpan);
+        LlamaFusedKernels.MatMulTransposedB(fusedRow, weightSpan, fusedLogits, 1, hidden, vocab);
+
+        Assert.That(RangeBitEqual(fusedLogits, perOpArr, 0, vocab), Is.True,
+            "Fused final norm + head logits differ bit-for-bit from the per-op norm + head path.");
+    }
+
+    [Test]
+    public void FinalStage_MultiRow_FusedMatchesPerOpLastRowLogits_BitExact()
+    {
+        // Pins the issue #413 prefill final stage: a fused in-place norm over the whole
+        // [L, hidden] chunk plus last-row GEMV must equal the per-op chunk norm + last-row head.
+        const int rows = 4, hidden = 32, vocab = 128;
+        var rng = new Random(7);
+        var chunk = new float[rows * hidden];
+        for (int i = 0; i < chunk.Length; i++) chunk[i] = (float)(rng.NextDouble() * 2 - 1);
+        var weights = new float[vocab * hidden];
+        for (int i = 0; i < weights.Length; i++) weights[i] = (float)(rng.NextDouble() * 2 - 1);
+
+        using var norm = new RMSNorm<float>(hidden, 1e-5f);
+        using var head = ReverseGradTensor<float>.FromMatrix(weights, vocab, hidden, requiresGrad: false);
+        var perOpH = norm.Forward(ReverseGradTensor<float>.FromMatrix(chunk, rows, hidden, requiresGrad: false));
+        perOpH.Data.TryGetSpan(out var perOpHSpan);
+        var lastRow = new float[hidden];
+        perOpHSpan.Slice((rows - 1) * hidden, hidden).CopyTo(lastRow);
+        var perOpLogits = ReverseGradOperations.MatMulTransposedB(
+            ReverseGradTensor<float>.FromMatrix(lastRow, 1, hidden, requiresGrad: false), head);
+        perOpLogits.Reshape(1, vocab);
+        perOpLogits.Data.TryGetSpan(out var perOpSpan);
+        var perOpArr = perOpSpan.ToArray();
+
+        var fusedChunk = (float[])chunk.Clone();
+        norm.Weight!.Tensor.Data.TryGetSpan(out var gamma);
+        LlamaFusedKernels.RMSNormForwardInPlace(fusedChunk, gamma, rows, hidden, double.CreateChecked(norm.Eps));
+        var fusedLogits = new float[vocab];
+        head.Data.TryGetSpan(out var weightSpan);
+        LlamaFusedKernels.MatMulTransposedB(fusedChunk.AsSpan((rows - 1) * hidden, hidden), weightSpan, fusedLogits, 1, hidden, vocab);
+
+        Assert.That(RangeBitEqual(fusedLogits, perOpArr, 0, vocab), Is.True,
+            "Fused multi-row norm + last-row head logits differ bit-for-bit from the per-op path.");
+    }
+
+    [Test]
     public void ForwardPrefill_FusedMatchesPerOp_Within1e5()
     {
         using var model = TinyModel();
