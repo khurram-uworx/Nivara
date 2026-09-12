@@ -204,6 +204,11 @@ public class QwenInstructParityTests
     [Test]
     public void Model_GreedyToolLoop_MatchesTorchGeneratedIds()
     {
+        var idsPath = Path.Combine(ModelDir, "qwen_tool_ids_py.bin");
+        var promptIdsPath = Path.Combine(ModelDir, "qwen_tool_prompt_ids.bin");
+        if (!File.Exists(idsPath) || !File.Exists(promptIdsPath))
+            Assert.Ignore("Qwen tool greedy fixtures absent; skipping tool-loop parity verification.");
+
         var (model, config) = Model;
         var expected = ReadInt32("qwen_tool_ids_py.bin");
         Assert.That(expected.Length, Is.EqualTo(42), "fixture must contain tool turn (19) + final answer (23) ids");
@@ -219,6 +224,12 @@ public class QwenInstructParityTests
     [Test]
     public void Model_GreedyFinalAnswer_SemanticParityAndFinalLogitsWithinTolerance()
     {
+        var idsPath = Path.Combine(ModelDir, "qwen_tool_ids_py.bin");
+        var finalPromptIdsPath = Path.Combine(ModelDir, "qwen_tool_final_prompt_ids.bin");
+        var logitsPath = Path.Combine(ModelDir, "qwen_tool_logits_py.bin");
+        if (!File.Exists(idsPath) || !File.Exists(finalPromptIdsPath) || !File.Exists(logitsPath))
+            Assert.Ignore("Qwen tool fixtures absent; skipping final-answer parity verification.");
+
         var (model, config) = Model;
         var expected = ReadInt32("qwen_tool_ids_py.bin");
         Assert.That(expected.Length, Is.EqualTo(42), "fixture must contain tool turn (19) + final answer (23) ids");
@@ -303,7 +314,8 @@ public class QwenInstructParityTests
     {
         var idsPath = Path.Combine(ModelDir, "qwen_plain_ids_py.bin");
         var logitsPath = Path.Combine(ModelDir, "qwen_plain_logits_py.bin");
-        if (!File.Exists(idsPath) || !File.Exists(logitsPath))
+        var promptIdsPath = Path.Combine(ModelDir, "qwen_plain_prompt_ids.bin");
+        if (!File.Exists(idsPath) || !File.Exists(logitsPath) || !File.Exists(promptIdsPath))
             Assert.Ignore("Qwen plain fixtures absent; skipping plain greedy parity verification.");
 
         var (model, config) = Model;
