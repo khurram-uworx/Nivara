@@ -537,7 +537,8 @@ deferred by human decision (change confined to the samples/test surface;
 
 | Plan item | Status | Measured before → after | Notes |
 |---|---|---|---|
-| P0-follow-up — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | | | tracked in #403 |
+| P0-follow-up — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | | fresh before-gate 2026-09-12 → `--compare` after: prefill seed [256 tok] **785,532,248 B/op** (5,428 ms) · full-fwd [256 tok] 1,314,448,548 B/op (11,495 ms) · seed [64] 195,738,717 B/op | tracked in #403 · gate command: `--json tests/Nivara.PerformanceTests/qwen-prefill-baseline.json --only Qwen --runs 3` then `--compare qwen-prefill-baseline.json --only Qwen --runs 3` (fresh same-machine baseline; the 2026-09-08 file predates `--only` and is cross-machine) |
+| #408 — Plain-prompt coverage (benchmark + fixtures + parity) | benchmark + fixtures + tests landed 2026-09-12; parity tests activate when the plain `.bin` fixtures are generated | plain before-readings (same machine as #403 gate): real checkpoint 36-tok prompt — prefill 1,471 ms, cached decode 287 ms/tok, full-fwd 2,632 ms/tok (**5.8×**, 7-tok answer) | `qwen benchmark --plain` / `qwen --plain`; `qwen_plain_reference.py` fixtures (`qwen_plain_{prompt,prompt_ids,ids_py,logits_py}`); parity pins in `QwenInstructParityTests` + 36-tok always-run seed/then-decode seat in `LlamaForCausalLMPrefillTests` · #403 must retake the plain prefill + decode reading |
 | P1 — On-the-fly BF16 weights with F32 compute | DONE — see entry above (2026-09-11) | on this i5: KV total 1.78–1.93× slower, all phases ~1.6–2.2× slower | documented tradeoff (`--precision f32\|bf16`); win expected on AVX-512/HBM-class hardware · tracked in #387/#391 |
 | P1 — Per-token fused decoder-block kernel | | | tracked in #404 |
 | P2 — Sampling path + tokenize-prefix cache | | | tracked in #402 |
