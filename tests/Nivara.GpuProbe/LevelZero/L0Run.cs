@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Nivara.GpuProbe.LevelZero;
@@ -359,6 +361,112 @@ internal static class L0Run
                 },
                 zeCommandQueueExecuteCommandLists, zeCommandQueueSynchronize, zeMemFree,
                 timing: true, opsPerLaunch: 1_000_000);
+
+            // BF16 widening on device. The host holds raw 16-bit patterns — exactly
+            // System.Numerics.BFloat16's layout (SafeTensorsLoader keeps BF16 weights
+            // that way) — written into the SAME shared buffer the kernel reads. On an
+            // iGPU (unified DRAM) there is no copy in/out: zeMemAllocShared is used
+            // everywhere and one allocation is visible to both the CPU and the GPU.
+            static ushort Bf16Bits(float value)
+            {
+                var b = BFloat16.CreateChecked(value);
+                return Unsafe.As<BFloat16, ushort>(ref b);
+            }
+
+            float[] bf16Patterns = [1.0f, -2.0f, 1.5f, 123.5f];
+
+            Console.WriteLine();
+            Console.WriteLine("  [test 3] bf16_native: BF16->F32 via OpConvertBF16ToFINTEL (SPV_INTEL_bfloat16_conversion, capability 6115)");
+            bool bf16NativeBuilt = false;
+            foreach (uint version in versions)
+            {
+                if (TryCreateModule(loader, zeModuleCreateTest0, context, device, SpvKernels.Bf16Native(version), out IntPtr bf16Module))
+                {
+                    Console.WriteLine($"    module built OK (SPIR-V {L0Loader.SpirvVersion(version)}) — IGC honors the ZE_extension_bfloat16_conversions contract");
+                    loader.GetProc<ZeModuleDestroy>("zeModuleDestroy")(bf16Module);
+                    bf16NativeBuilt = true;
+                    break;
+                }
+            }
+
+            if (!bf16NativeBuilt)
+            {
+                Console.WriteLine("    [diagnostic] native BF16 module rejected: the driver advertises ZE_extension_bfloat16_conversions but IGC");
+                Console.WriteLine("    refuses SPV_INTEL_bfloat16_conversion modules — BF16 must use the safe-subset widen path (test 4).");
+                diagnostics++;
+            }
+
+            if (bf16NativeBuilt)
+            {
+                foreach (float value in bf16Patterns)
+                {
+                    ushort bits = Bf16Bits(value);
+                    TestKernel(
+                        loader, context, device, queue, computeOrdinal, versions, allocShared,
+                        v => SpvKernels.Bf16Native(v), "bf16_native", argCount: 2, n: 1,
+                        fill: (a, b, c) => Marshal.WriteInt16(a, 0, (short)bits),
+                        verify: (a, b, c) =>
+                        {
+                            int stored = Marshal.ReadInt32(b);
+                            bool pass = stored == (int)((uint)bits << 16);
+                            Console.WriteLine(pass
+                                ? $"      result: PASS (BF16 {value} (0x{bits:X4}) widened natively -> f32 0x{stored:X8})"
+                                : $"      result: FAIL (stored 0x{stored:X8}, expected 0x{(uint)bits << 16:X8})");
+                            if (!pass)
+                                failures++;
+                            return pass;
+                        },
+                        zeCommandQueueExecuteCommandLists, zeCommandQueueSynchronize, zeMemFree,
+                        timing: false, opsPerLaunch: 1);
+                }
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("  [test 4] bf16_emul: BF16->F32 widen via OpUConvert + shift16 (safe subset, no extension)");
+            foreach (float value in bf16Patterns)
+            {
+                ushort bits = Bf16Bits(value);
+                TestKernel(
+                    loader, context, device, queue, computeOrdinal, versions, allocShared,
+                    v => SpvKernels.Bf16EmulWiden(v), "bf16_emul", argCount: 2, n: 1,
+                    fill: (a, b, c) => Marshal.WriteInt16(a, 0, (short)bits),
+                    verify: (a, b, c) =>
+                    {
+                        int stored = Marshal.ReadInt32(b);
+                        bool pass = stored == (int)((uint)bits << 16);
+                        Console.WriteLine(pass
+                            ? $"      result: PASS (BF16 {value} (0x{bits:X4}) widened by shift -> f32 bits 0x{stored:X8})"
+                            : $"      result: FAIL (stored 0x{stored:X8}, expected 0x{(uint)bits << 16:X8})");
+                        if (!pass)
+                            failures++;
+                        return pass;
+                    },
+                    zeCommandQueueExecuteCommandLists, zeCommandQueueSynchronize, zeMemFree,
+                    timing: false, opsPerLaunch: 1);
+            }
+
+            if (bf16NativeBuilt)
+            {
+                Console.WriteLine();
+                Console.WriteLine("  [test 5] bf16_native_acc: 1M iterations of acc += widen(BF16 *a) (convert in an OpPhi loop)");
+                TestKernel(
+                    loader, context, device, queue, computeOrdinal, versions, allocShared,
+                    v => SpvKernels.Bf16NativeAccumulate(v), "bf16_native_acc", argCount: 2, n: 1,
+                    fill: (a, b, c) => Marshal.WriteInt16(a, 0, (short)Bf16Bits(1.0f)),
+                    verify: (a, b, c) =>
+                    {
+                        float stored = BitConverter.Int32BitsToSingle(Marshal.ReadInt32(b));
+                        bool pass = stored == 1_000_000.0f;
+                        Console.WriteLine(pass
+                            ? "      result: PASS (c[0] = 1,000,000.0 after 1M native BF16 widens + fp32 adds of BF16 1.0)"
+                            : $"      result: FAIL (c[0] = {stored}, expected 1,000,000.0)");
+                        if (!pass)
+                            failures++;
+                        return pass;
+                    },
+                    zeCommandQueueExecuteCommandLists, zeCommandQueueSynchronize, zeMemFree,
+                    timing: true, opsPerLaunch: 1_000_000);
+            }
         }
         finally
         {

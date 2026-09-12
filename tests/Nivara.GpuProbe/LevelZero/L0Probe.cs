@@ -103,6 +103,7 @@ internal static class L0Probe
         var zeDriverGetExt = loader.GetProc<ZeDriverGetExtensionProperties>("zeDriverGetExtensionProperties");
         uint extCount = 0;
         Check(zeDriverGetExt(driver, ref extCount, IntPtr.Zero), "zeDriverGetExtensionProperties (count)");
+        bool bf16Extension = false;
         if (extCount > 0)
         {
             IntPtr extPtr = Marshal.AllocHGlobal((int)extCount * Marshal.SizeOf<ZeDriverExtensionProperties>());
@@ -112,7 +113,10 @@ internal static class L0Probe
                 for (int i = 0; i < extCount; i++)
                 {
                     var e = L0Loader.StructureFromPtr<ZeDriverExtensionProperties>(extPtr + i * Marshal.SizeOf<ZeDriverExtensionProperties>());
-                    Console.WriteLine($"    extension: {L0Loader.AnsiString(e.name)} v{e.version}");
+                    string name = L0Loader.AnsiString(e.name);
+                    Console.WriteLine($"    extension: {name} v{e.version}");
+                    if (name == "ZE_extension_bfloat16_conversions")
+                        bf16Extension = true;
                 }
             }
             finally
@@ -120,6 +124,10 @@ internal static class L0Probe
                 Marshal.FreeHGlobal(extPtr);
             }
         }
+
+        Console.WriteLine(bf16Extension
+            ? "    => ZE_extension_bfloat16_conversions present: IGC is contracted to accept SPV_INTEL_bfloat16_conversion modules"
+            : "    => ZE_extension_bfloat16_conversions absent: no native BF16 conversion contract; BF16 must be widened on device");
 
         var zeDeviceGet = loader.GetProc<ZeDeviceGet>("zeDeviceGet");
         uint deviceCount = 0;
