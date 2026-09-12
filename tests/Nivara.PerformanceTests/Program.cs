@@ -481,7 +481,7 @@ static class Program
 
     static void RunQwenDecodeMatMulScenarios()
     {
-        // Qwen2.5-0.5B decode hot shapes (docs/QWEN-PERF.md §2B). Every decode matmul is a
+        // Qwen2.5-0.5B decode hot shapes (docs/QWEN.md → "Making Qwen fast"). Every decode matmul is a
         // single-row multiply against row-major [out, in] weights (bTransposed: true), so
         // these rows gate P0-2: the kernel must read each weight once — no rent + identity
         // copy — and allocate ~0 B/op with a preallocated result. Benchmarked at the real
@@ -566,7 +566,7 @@ static class Program
 
     static void RunQwenDecodeAttentionScenarios()
     {
-        // Qwen2.5-0.5B decode attention (docs/QWEN-PERF.md §2B, §3 item 3). Each per-token
+        // Qwen2.5-0.5B decode attention (docs/QWEN.md → "Making Qwen fast"). Each per-token
         // decode step in LlamaCausalAttention.ForwardCached currently BlockCopies the whole
         // cached KV prefix, runs GqaRepeatKV x2 (14->2 heads), and re-packs K/V head-major via
         // MultiHeadAttention.PackHeads — O(newLen * numHeads * headDim) copies per layer per
@@ -617,7 +617,7 @@ static class Program
 
     static void RunQwenDecodeBlockScenarios()
     {
-        // Qwen2.5-0.5B single-token decoder-block decode (issue #404, docs/QWEN-PERF.md P1). Row
+        // Qwen2.5-0.5B single-token decoder-block decode (issue #404, docs/QWEN.md → "Making Qwen fast"). Row
         // name is identical on both branches — the baseline body measured the per-op block chain
         // (block.ForwardCached); this branch measures the fused span kernel
         // (block.ForwardCachedFused) — so --compare gates the true before/after. Target: B/op
@@ -657,7 +657,7 @@ static class Program
     static void RunQwenDecodeForwardScenarios()
     {
         // Model-level single-token decode after a 64-token prefill (issue #404's per-token cost,
-        // docs/QWEN-PERF.md P1). Same row name on both branches — the model body routes to the
+        // docs/QWEN.md → "Making Qwen fast"). Same row name on both branches — the model body routes to the
         // fused block path outside Grad once wired, so --compare gates the before/after. The
         // ~2 GB model is built once per row outside timing, like CreateQwenPrefillScenario.
         Run("Qwen decode fwd [1 step]", 1, 6, () => CreateQwenDecodeForwardScenario());
@@ -680,7 +680,7 @@ static class Program
 
     static void RunQwenPrefillScenarios()
     {
-        // Qwen2.5-0.5B prompt prefill (docs/QWEN-PERF.md §2A, docs/TODO.md §B). "Qwen prefill
+        // Qwen2.5-0.5B prompt prefill (docs/QWEN.md → "Making Qwen fast"). "Qwen prefill
         // seed [L]" measures seeding the KV cache for an L-token prompt: on main the row runs the
         // current token-by-token SeedCache loop (L full-model walks — each re-reads every weight,
         // ~2 GB F32); on this branch the same row runs one batched model.ForwardPrefill (single
