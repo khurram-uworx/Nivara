@@ -1,6 +1,8 @@
 using System.Buffers;
 using System.Numerics;
 using System.Numerics.Tensors;
+using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics;
 
 namespace Nivara.AutoDiff.Operations;
 
@@ -114,6 +116,10 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
         try
         {
             var scoresSpan = scores.AsSpan(0, kvLen);
+            // Float accelerates on any SIMD-capable runtime; otherwise the scalar
+            // loop below (the generic fallback) handles every T.
+            bool floatVectors = typeof(T) == typeof(float)
+                && (Vector512.IsHardwareAccelerated || Vector.IsHardwareAccelerated);
             output.Clear();
             for (int qh = 0; qh < numHeads; qh++)
             {
@@ -123,18 +129,91 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
                     scoresSpan[j] = scale * TensorPrimitives.Dot(qHead, kCache.Slice(j * kvWidth + kvHead * headDim, headDim));
                 SoftmaxRows(scoresSpan, 1, kvLen);
                 var outHead = output.Slice(qh * headDim, headDim);
-                for (int j = 0; j < kvLen; j++)
+                if (floatVectors)
                 {
-                    var vRow = vCache.Slice(j * kvWidth + kvHead * headDim, headDim);
-                    T w = scoresSpan[j];
-                    for (int d = 0; d < headDim; d++)
-                        outHead[d] += w * vRow[d];
+                    var scoresF = MemoryMarshal.Cast<T, float>(scoresSpan);
+                    var vCacheF = MemoryMarshal.Cast<T, float>(vCache);
+                    var outHeadF = MemoryMarshal.Cast<T, float>(outHead);
+                    if (Vector512.IsHardwareAccelerated)
+                        VPhaseFloat512(scoresF, vCacheF, outHeadF, kvLen, kvWidth, kvHead, headDim);
+                    else
+                        VPhaseFloat(scoresF, vCacheF, outHeadF, kvLen, kvWidth, kvHead, headDim);
+                }
+                else
+                {
+                    for (int j = 0; j < kvLen; j++)
+                    {
+                        var vRow = vCache.Slice(j * kvWidth + kvHead * headDim, headDim);
+                        T w = scoresSpan[j];
+                        for (int d = 0; d < headDim; d++)
+                            outHead[d] += w * vRow[d];
+                    }
                 }
             }
         }
         finally
         {
             ArrayPool<T>.Shared.Return(scores);
+        }
+    }
+
+    /// <summary>Vector512 (AVX-512) V-phase: each 16-lane block of the head
+    /// accumulates across all KV rows in one zmm register via broadcast-FMA.
+    /// Tail (headDim not a multiple of 16) is handled scalar.</summary>
+    static void VPhaseFloat512(ReadOnlySpan<float> scores, ReadOnlySpan<float> vCache, Span<float> outHead, int kvLen, int kvWidth, int kvHead, int headDim)
+    {
+        int kvBase = kvHead * headDim;
+        int width = Vector512<float>.Count;
+        ref float vRef = ref MemoryMarshal.GetReference(vCache);
+        ref float oRef = ref MemoryMarshal.GetReference(outHead);
+        int d = 0;
+        for (; d + width <= headDim; d += width)
+        {
+            var acc = Vector512<float>.Zero;
+            for (int j = 0; j < kvLen; j++)
+            {
+                var wVec = Vector512.Create(scores[j]);
+                var vRow = Vector512.LoadUnsafe(ref vRef, (nuint)(j * kvWidth + kvBase + d));
+                acc = Vector512.FusedMultiplyAdd(wVec, vRow, acc);
+            }
+            Vector512.StoreUnsafe(acc, ref oRef, (nuint)d);
+        }
+        for (; d < headDim; d++)
+        {
+            float s = 0;
+            for (int j = 0; j < kvLen; j++)
+                s += scores[j] * vCache[j * kvWidth + kvBase + d];
+            outHead[d] = s;
+        }
+    }
+
+    /// <summary>Portable variable-width SIMD V-phase (<see cref="Vector{T}"/>, sized
+    /// to the host — SSE2/AVX2/NEON on non-AVX-512 machines). Same d-blocked
+    /// broadcast-FMA structure as the Vector512 kernel.</summary>
+    static void VPhaseFloat(ReadOnlySpan<float> scores, ReadOnlySpan<float> vCache, Span<float> outHead, int kvLen, int kvWidth, int kvHead, int headDim)
+    {
+        int kvBase = kvHead * headDim;
+        int width = Vector<float>.Count;
+        ref float vRef = ref MemoryMarshal.GetReference(vCache);
+        ref float oRef = ref MemoryMarshal.GetReference(outHead);
+        int d = 0;
+        for (; d + width <= headDim; d += width)
+        {
+            var acc = Vector<float>.Zero;
+            for (int j = 0; j < kvLen; j++)
+            {
+                var wVec = new Vector<float>(scores[j]);
+                var vRow = Vector.LoadUnsafe(ref vRef, (nuint)(j * kvWidth + kvBase + d));
+                acc = Vector.FusedMultiplyAdd(wVec, vRow, acc);
+            }
+            Vector.StoreUnsafe(acc, ref oRef, (nuint)d);
+        }
+        for (; d < headDim; d++)
+        {
+            float s = 0;
+            for (int j = 0; j < kvLen; j++)
+                s += scores[j] * vCache[j * kvWidth + kvBase + d];
+            outHead[d] = s;
         }
     }
 
