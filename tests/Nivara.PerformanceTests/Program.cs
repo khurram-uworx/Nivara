@@ -1124,7 +1124,10 @@ static class Program
             }
 
             bool bandwidthBound = IsBandwidthBound(r.Name);
-            var verdict = GateEvaluator.EvaluateRow(r, b, minOpsFraction, bandwidthBound);
+            var verdict = GateEvaluator.EvaluateRow(
+                new GateRow(r.Name, r.OpsPerSec, r.BytesPerOp, r.Gen0PerOp),
+                new GateRow(b.Name, b.OpsPerSec, b.BytesPerOp, b.Gen0PerOp),
+                minOpsFraction, bandwidthBound);
             if (!verdict.Pass)
                 failures++;
 

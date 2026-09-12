@@ -1,13 +1,20 @@
 namespace Nivara.PerformanceTests;
 
 /// <summary>
+/// The per-row metrics the <c>--compare</c> gate consumes. The harness measures
+/// <c>NsPerOp</c> too, but the gate policy has no use for it — keeping this record
+/// minimal lets <see cref="GateEvaluator"/> be compiled into both the harness and
+/// the test project as a shared source file (no project reference).
+/// </summary>
+internal sealed record GateRow(string Name, double OpsPerSec, double BytesPerOp, double Gen0PerOp);
+
+/// <summary>
 /// Pure per-row decision logic for the <c>--compare</c> no-regression gate (issue #420).
 /// Bandwidth-bound rows (single-row GEMV / memory-streaming kernels — the Qwen decode
 /// and prefill scenarios, ~30 GB/s effective DRAM ceiling) see ops/s swing ~2.5-3x with
 /// machine state while B/op stays byte-stable, so their ops/s leg is gated at a wide
-/// absolute floor; B/op and gen0 remain strict for every row. Extracted from
-/// <see cref="Program.Compare"/> so the gate policy is unit-testable without running the
-/// harness.
+/// absolute floor; B/op and gen0 remain strict for every row. Shared with the test
+/// project via a linked compile (see Nivara.Tests.csproj).
 /// </summary>
 internal static class GateEvaluator
 {
@@ -33,8 +40,8 @@ internal static class GateEvaluator
 
     /// <summary>Evaluates one measured row against its baseline row under the gate policy.</summary>
     internal static Verdict EvaluateRow(
-        ScenarioResult current,
-        ScenarioResult baseline,
+        GateRow current,
+        GateRow baseline,
         double minOpsFraction,
         bool bandwidthBound)
     {

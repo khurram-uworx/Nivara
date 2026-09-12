@@ -41,12 +41,16 @@ and decode fwd 3,620,919 B/op, while current code runs ~1 B/op and ~619,631 B/op
    - `InternalsVisibleTo("Nivara.Tests")` via csproj ItemGroup.
 
 2. **Unit tests — `tests/Nivara.Tests/`**
-   - Add `<ProjectReference Include="..\Nivara.PerformanceTests\Nivara.PerformanceTests.csproj" />`
-     to `Nivara.Tests.csproj` (referencing an Exe project is supported by the
-     SDK; compile-time only, no harness execution).
-   - New `PerfGateEvaluatorTests`: bandwidth-bound row passes at 26% ops/s but
-     fails at 20%; fails on B/op > ×1.01 or gen0 > +0.05 regardless of ops/s;
-     stable row still fails at 89% and passes at 91%; boundary at exactly 25%.
+   - `GateEvaluator` lives in a self-contained file compiled into **both** the
+     harness and the test project (linked `<Compile Include>` in `Nivara.Tests.csproj`),
+     so there is **no `Nivara.Tests` → `Nivara.PerformanceTests` project reference**
+     — the console harness stays out of CI, and the NUnit suite pins the gate policy.
+     The file's input record `GateRow` (Name, ops/s, B/op, gen0) keeps it free of
+     harness types (`ScenarioResult`/`ScenarioDefinition` stay in `Program.cs`).
+   - New `PerfGate/GateEvaluatorTests.cs`: bandwidth-bound row passes at 26% ops/s but
+     fails at 20%; fails on B/op > ×1.01 or gen0 > +0.05 regardless of ops/s; stable row
+     still fails at 89% and passes at 91%; boundary at exactly 25%; custom `--tolerance`
+     applies to stable rows only.
 
 3. **Docs**
    - `tests/Nivara.PerformanceTests/README.md` — gate-criteria table gains the
@@ -86,11 +90,12 @@ and decode fwd 3,620,919 B/op, while current code runs ~1 B/op and ~619,631 B/op
 - `tests/Nivara.PerformanceTests/Program.cs` — `Compare()` internals only; no
   harness CLI/API change, no public library change. Downstream: none
   (`src/Nivara/*` untouched). Existing tensors/columns/query surfaces untouched.
-- `tests/Nivara.PerformanceTests/GateEvaluator.cs` (new) — consumed only by
-  `Program.Compare` and the new tests.
-- `tests/Nivara.Tests` — one added ProjectReference + one new test file; pulls
-  the harness (and transitively `Nivara.Samples`, already referenced) into the
-  test build at compile time only. No existing tests touched.
+- `tests/Nivara.PerformanceTests/GateEvaluator.cs` (new) — self-contained gate
+  policy consumed by `Program.Compare` and, as a linked source file, by the new
+  tests in `Nivara.Tests`. No project reference between the two.
+- `tests/Nivara.Tests` — one linked compile + one new test file; the console
+  harness project is not referenced, so it is not pulled into the CI test build.
+  No existing tests touched.
 - Baseline JSON re-record — committed artifact; B/op/gen0 values for shared rows
   are unchanged except the code-driven decode-block/decode-fwd drops.
 - Coverage: existing perf-gate behavior has no unit tests today; the new
