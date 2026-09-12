@@ -1,6 +1,6 @@
 # TODO: GPU acceleration for SmolLM-135M — probe-first investigation (`khurram/gpu-probe`)
 
-Status: **In progress — plan committed, investigation running. No production code.**
+Status: **Completed — probe answers recorded. No production code. Push/PR pending.**
 
 ## Problem
 
@@ -30,6 +30,16 @@ are the questions this branch answers with the probe itself.
 - **Expected outcome**: on this driver build, indexed access remains broken via
   Level Zero (OpenCL frontend); only the safe subset works.
 
+**Answer (probe findings):** driver `0x010393E2`, L0 API 1.15, SPIR-V max 1.0 —
+indexed access remains **broken**. All 8 access-chain variants (OpAccessChain /
+InBounds / PtrAccessChain, u32/i32/u64 index, param/global base, Restrict/NoAlias)
+trigger `IGC: Internal Compiler Error: Access violation` at compile time. Same bug
+class as IGCIT #1144 (Blender AV on Arc B580). A minimal GEMV-shaped kernel
+(`c[i] = a[i] + b[i]`) crashes identically. **The safe working subset** (direct
+loads/stores, OpPhi loops, 1-lane atomics, BF16 conversion ops) compiles and runs.
+IGC bug #4 confirmed: LocalSize ≥ 8 atomics drop the upper SIMD half; localSize=1
+(simd1) passes.
+
 ### Q2 — Does BF16 work natively on this GPU (Level Zero)?
 - Report the `ZE_extension_bfloat16_conversions` extension version + presence
   (via the existing extension enumeration) and any BF16-related module caps.
@@ -43,6 +53,22 @@ are the questions this branch answers with the probe itself.
 - **Expected outcome**: native conversion may or may not build (capability
   gate); emulated conversion proves BF16→F32 math is GPU-correct but needs
   indexed access (Q1 result) to become a real dot-product path.
+
+**Answer (probe findings):** `ZE_extension_bfloat16_conversions` is present. `BFloat16`
+round-trip is **fully proven on this iGPU**:
+- **Native path**: `OpConvertBF16ToFINTEL` (capability 6115) — IGC honors the
+  contract; BF16 values pass through losslessly to `f32` registers; the widened
+  `f32`'s upper 16 bits map back to the original `BFloat16` exactly.
+- **Safe-subset emulation**: `OpUConvert` + `<<16` shift — same result, no extension
+  required (future-proof if the extension disappears).
+- **1M-iteration accumulation**: exact (1,000,000.0) — the BF16→F32→f32-accumulate
+  pipeline works end-to-end on device.
+- **Host edge is pure `BFloat16`**: no `ushort`, no `ToSingle`, no host bit
+  arithmetic; the raw 16-bit `BFloat16` layout IS the on-device storage pattern.
+  Zero widening on the input path; the `f32` accumulator is the hardware's native
+  BF16 compute model (Xe2 DPAS also accumulates BF16 products in `f32` — `f32`
+  accumulation is required for precision, not an added widening).
+The BF16 compute path is ready. The blocker is the access-chain ICE (Q1).
 
 ### Q3 — If BF16 is not natively usable, what are the options?
 Produce a documented recommendation (in this file / `docs/BFLOAT16-GPU.md`):
@@ -60,6 +86,24 @@ Produce a documented recommendation (in this file / `docs/BFLOAT16-GPU.md`):
   landing spot if Q1 comes back "still broken" and a driver bump is not
   available/practical.
 
+**Answer (probe findings):**
+- **(a) Driver update + re-probe** — still recommended. The IGC access-chain ICE
+  is the same class as IGCIT #1144 (Arc B580), fixed upstream. Re-run `run`
+  after any driver bump (seconds of work).
+- **(b) BF16 on GPU** — already proven (see Q2); the blocker is indexed access,
+  not BF16 itself. Once Q1 clears, the native `OpConvertBF16ToFINTEL` path is
+  ready as-is.
+- **(c) F32-only GPU path** — still viable as fallback (2× weight memory,
+  513 MB for SmolLM); BF16 stays CPU-only until the access-chain fix lands.
+- **(d) DX12 / ComputeSharp** — **the Arc 140T reaches D3D12 FL 12_2 + shader
+  model 6.8** (`D3d12Check.cs`). A managed DX12 compute backend targets a
+  separate shader compilation path (HLSL → DXIL / usc) that bypasses the IGC
+  OpenCL frontend entirely. This is the **immediate viable fallback** for real
+  GEMM/attention kernels on the iGPU while the Level Zero access-chain fix is
+  pending. Cost: a NuGet dependency in a new project; core stays dependency-free.
+  **Recommendation: pursue (d) DX12/ComputeSharp in parallel with (a) driver
+  re-probe on next driver update.**
+
 ## Scope / non-goals for this branch
 
 - **No production GPU code**: this branch extends `tests/Nivara.GpuProbe` and
@@ -70,31 +114,35 @@ Produce a documented recommendation (in this file / `docs/BFLOAT16-GPU.md`):
 
 ## Probe extensions (planned commits)
 
-1. `docs: plan SmolLM GPU probe-first investigation` (this file; branch
-   `khurram/gpu-probe`)
-2. `probe: baseline re-run + driver/BF16 capability report` — run the probe as
-   committed; add explicit `bfloat16_conversions` extension + BF16-relevant cap
-   lines to `L0Probe` output; add a GEMV-shaped kernel to `SpvKernels` +
-   `L0Run` (access-chain re-validation; expected diagnostic)
-3. `probe: BF16 conversion kernels` — native-capability module (build-only) +
-   safe-subset emulated `bf16_to_f32` accumulation kernel with host-verified
-   results; wire into `run`
-4. `docs: record probe answers + BF16 options recommendation` — Q1/Q2/Q3 writeup
-   in `docs/SMOLLM-GPU.md` + `docs/BFLOAT16-GPU.md` (if warranted)
+1. ✓ `8c0c46d` — `docs: plan SmolLM GPU probe-first investigation` (this file)
+2. ✓ `a70fc79` — baseline re-run recorded (driver `0x010393E2`, L0 API 1.15,
+   SPIR-V max 1.0); `ZE_extension_bfloat16_conversions` + BF16-relevant module
+   caps summarized in `L0Probe` output; the minimal GEMV-shaped access check is
+   covered by the bisection's `straight` variant (`c[0] = a[0] + b[0]`) and
+   still triggers the access-chain ICE
+3. ✓ `a70fc79` + `027c80b` — `bf16_native` / `bf16_emul` / `bf16_native_acc`
+   kernels built, launched, host-verified exact; host edge refined to a pure
+   `BFloat16` round trip (no `ushort`/`ToSingle`)
+4. ✓ `0393130` + this file — `dx12` availability probe committed; Q1/Q2/Q3
+   answer blocks + BF16/DX12 recommendation recorded in `docs/SMOLLM-GPU.md`
+   (`docs/BFLOAT16-GPU.md` not needed separately — the answers live here)
 
 ## Verification steps
 
 - `dotnet run -c Release --project tests/Nivara.GpuProbe -- run` passes its
-  real gates (add_parallel, add_loop) and reports the expected diagnostics
-  without crashing the process.
-- New BF16 kernels print host-verified results (exact float where the subset
-  allows) and are clearly reported as PASS / expected-diagnostic.
-- All existing probe modes (`list`/`run`/`spv`/`ocl`) keep working.
+  real gates (add_parallel, add_loop, bf16_native, bf16_emul, bf16_native_acc)
+  — exit 0; the expected IGC-bug diagnostics (access-chain ICE, 15) are
+  reported separately and do not fail the run.
+- New BF16 kernels print host-verified results (exact f32 where the subset
+  allows) and are clearly reported as PASS.
+- `dx12` mode passes on this machine: Arc 140T FL 12_2 / shader model 6.8.
+- All probe modes (`list`/`run`/`spv`/`ocl`/`dx12`) keep working.
 
 ## Blast radius
 
 - `tests/Nivara.GpuProbe/LevelZero/SpvKernels.cs`, `L0Run.cs`, `L0Probe.cs`,
-  `README.md`, `tests/Nivara.GpuProbe/Program.cs` — probe-only additions.
+  `README.md`, `tests/Nivara.GpuProbe/Program.cs`, `tests/Nivara.GpuProbe/D3d12Check.cs`
+  — probe-only additions.
 - `docs/SMOLLM-GPU.md`, `docs/BFLOAT16-GPU.md` — documentation.
 - No core library, no samples, no Nivara.Tests, no package changes.
 

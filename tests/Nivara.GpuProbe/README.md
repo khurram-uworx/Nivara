@@ -16,7 +16,8 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- spv    # dump hand-auth
 dotnet run -c Release --project tests/Nivara.GpuProbe -- run    # build + launch kernels, verify results (exit 0 = gates pass)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- l0     # list + run
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ocl    # OpenCL diagnostic (loader only — dead end, see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0
+dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12   # D3D12 availability check (FL level + shader model)
+dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12
 ```
 
 `run` is the real probe: it builds modules with `zeModuleCreate` (logs any
@@ -33,8 +34,12 @@ run-manually console app, **not** part of the NUnit suite.
 |------|--------|--------|
 | test 1 `add_parallel` | 256 work items (1-lane workgroups), each `OpAtomicIAdd`s its global id into a shared counter | **PASS** — counter = 32640 = Σ(0..255), verified exactly |
 | test 2 `add_loop` | 1 work item, 1,000,000 serial fp32 adds in an OpPhi loop, `*c = acc` | **PASS** — c[0] = 1,000,000.0, min ≈ 5.03 ms → ≈ **0.20 GFADD/s** |
+| test 3 `bf16_native` | BF16 → F32 via `OpConvertBF16ToFINTEL` (native, SPV_INTEL_bfloat16_conversion), 4 patterns × test values | **PASS** — widened f32 correct, **reloaded as BF16** equals the original `BFloat16` (exact, zero host widening) |
+| test 4 `bf16_emul` | BF16 → F32 widen via `OpUConvert` + `<<16` (safe subset, no extension), same 4 patterns | **PASS** — same exact results + BF16 reload |
+| test 5 `bf16_native_acc` | 1M-iteration `acc += widen(BF16)` loop in `OpPhi`, `OpConvertBF16ToFINTEL` inside the loop, L0→F32 accumulate | **PASS** — c[0] = 1,000,000.0, **exact** (f32 accumulation gate) |
+| `dx12` | D3D12CreateDevice at FL 11_0→12_2, shader model via CheckFeatureSupport | **PASS** — Arc 140T reaches **FL 12_2 / SM 6.8** |
 
-Both kernels round-trip host↔device memory through `zeMemAllocShared`, launch via
+All kernels round-trip host↔device memory through `zeMemAllocShared`, launch via
 `zeCommandListAppendLaunchKernel + zeCommandQueueExecuteCommandLists +
 zeCommandQueueSynchronize`, and results are marshaled back and compared with
 exact expectations. This is real iGPU compute verified on the host.
@@ -51,6 +56,10 @@ exact expectations. This is real iGPU compute verified on the host.
   + `OpBranchConditional`, continue block with `OpIAdd`) — the basis of `add_loop`.
 - `OpAtomicIAdd` on a kernel-argument pointer when each work item is its **own
   1-lane workgroup** (compile the atomic as simd1 and every lane lands).
+- **`BFloat16` ↔ `f32` round-trip** via `OpConvertBF16ToFINTEL` (capability 6115):
+  IGC honors the extension; BF16 passes through to `f32` losslessly, the widened
+  `f32`'s upper half maps back to the original `BFloat16` exactly — proven native
+  via `.NET 11 BFloat16` in/out, zero host widening.
 
 ### Broken constructs on this driver build (IGC OpenCL frontend) — `[FAIL]` diagnostics
 
@@ -88,6 +97,15 @@ The driver reports **SPIR-V max 1.0**; loading a 1.2 header hangs `zeModuleCreat
 (observed). All kernels are emitted as 1.0. The NPU (`Intel(R) AI Boost`,
 DDI driver[1], API 1.14) exposes **no SPIR-V support at all** (`spirvVersionSupported
 = 0`) and cannot run these kernels.
+
+### DX12 availability — the IGC-bypass side-path
+
+The Arc 140T iGPU creates a D3D12 device at **feature level 12_2** with **shader
+model 6.8** (`D3d12Check.cs`, pure P/Invoke against inbox `dxgi.dll`/`d3d12.dll`).
+A managed DX12 compute backend (ComputeSharp / HLSL → DXIL) targets a separate
+shader compilation path that bypasses the buggy IGC OpenCL/SPIR-V frontend entirely.
+This is the viable immediate fallback for real GEMM/attention kernels while the
+Level Zero access-chain ICE (bug #1 above) remains unfixed on this driver.
 
 ### Kernel binary export (follow-up)
 
@@ -128,21 +146,27 @@ entry points by name from `ze_loader.dll`.
 - `LevelZero/SpvKernels.cs` — the hand-authored SPIR-V writer plus all kernels
   (`add_parallel`, `add_loop`) and the 17-variant IGC bisection set.
 - `LevelZero/SpvDump.cs` — dumps modules to `%TEMP%\opencode\spv`.
+- `D3d12Check.cs` — D3D12 availability probe: DXGI adapter enumeration,
+  `D3D12CreateDevice` at FL 11_0..12_2, shader model via `CheckFeatureSupport`.
 - `LevelZero/OclProbe.cs` — OpenCL loader diagnostic (dead end: an OpenCL ICD
   dispatch path is not pursued; kept only for the Intel-export function discovery).
 
 ## Recommendations
 
-- On this driver build, **Nivara GPU kernels must stay inside the working subset**:
-  no access chains (no general scatter/gather), no private variables, serial or
-  per-lane-atom free vector reductions via 1-lane workgroups, OpPhi loops for
-  iteration, direct loads/stores through args only.
-- The practical shape for real Nivara work is **large serial/phi reductions per
-  work item over one scalar value per arg** (the `add_loop` pattern) combined
-  with **one-lane-group atomic accumulation** for cross-work-item aggregation.
-- Re-test these kernel shapes after any Intel driver update: the GEP/private-var
-  access violations are version-fixed upstream (IGCIT). `run` bisects the whole
-  surface in seconds, so a driver bump can be revalidated cheaply.
+- **BF16 compute model is proven end-to-end**: `.NET 11 BFloat16` in/out, GPU
+  in the middle, `f32` accumulation (the hardware's native model — Xe2 DPAS also
+  accumulates BF16 products in `f32`), zero host widening. The only blocker for a
+  real GEMV kernel is the access-chain ICE (bug #1), not BF16 itself.
+- **DX12/ComputeSharp is the immediate viable fallback** for real GEMM/attention:
+  the Arc 140T reaches FL 12_2 + SM 6.8, targeting a DXIL shader compilation path
+  that bypasses the IGC OpenCL frontend bug entirely. Cost: a NuGet dependency in
+  a new project (`src/Nivara.Gpu`); core stays dependency-free.
+- **Level Zero working subset** (still the IGC-bypass shape for L0): no access
+  chains (no scatter/gather), no private variables, direct loads/stores through
+  args only, OpPhi loops for iteration, 1-lane workgroup atomics for aggregation.
+- Re-test these kernel shapes after any Intel driver update: the GEP access-chain
+  ICE is version-fixed upstream (IGCIT). `run` bisects the whole surface in
+  seconds, so a driver bump can be revalidated cheaply.
 - The NPU (second L0 driver) is out of scope for SPIR-V compute — it exposes no
   SPIR-V; the graph-based NPU extensions (`ZE_extension_graph*`) would be the
   only path there, if pursued at all.
