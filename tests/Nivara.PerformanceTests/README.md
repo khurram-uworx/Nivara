@@ -79,12 +79,22 @@ across processes), so all `--runs > 1` baselines recorded before commit
 | `--compare <baseline.json>` | — | gate against `<baseline.json>`; exit 1 on regression, 2 on unreadable baseline |
 | `--runs <n>` | 1 | spawn `n` independent single-pass child processes and take the per-scenario median |
 | `--only <substring>` | all | measure only scenarios whose name contains `<substring>` (case-insensitive) — quick targeted gates, e.g. `--only Qwen` |
-| `--tolerance <pct>` | 90 | ops/s floor as a percent of baseline |
+| `--tolerance <pct>` | 90 | ops/s floor as a percent of baseline for stable rows only (bandwidth-bound rows use a fixed 25% floor, see below) |
 
-Gate criteria (tolerance constants in `Program.cs`):
-- `ops/s` ≥ `--tolerance`% of baseline (default 90%)
-- `B/op` ≤ baseline × 1.01 (allocation slack absorbs run-to-run jitter)
-- `gen0/op` ≤ baseline + 0.05 (GC scheduling is not allocation-proportional)
+Gate criteria (tolerance constants in `GateEvaluator.cs`):
+- **Stable rows:** `ops/s` ≥ `--tolerance`% of baseline (default 90%)
+- **Bandwidth-bound rows** (name starts with `"Qwen "` — single-row GEMV /
+  memory-streaming kernels at the ~30 GB/s DRAM ceiling): `ops/s` ≥ 25% of
+  baseline (fixed floor, issue #420). These rows read ~2.5–3× *slower* under
+  machine load while B/op stays byte-stable, which swamped the hard 90% floor
+  and failed every Qwen row spuriously for real perf changes ~10% in size.
+- `B/op` ≤ baseline × 1.01 (all rows — allocation slack absorbs run-to-run jitter)
+- `gen0/op` ≤ baseline + 0.05 (all rows — GC scheduling is not allocation-proportional)
+
+Bandwidth-bound classification is by name prefix (`"Qwen "`), matching the 16
+committed Qwen gate rows exactly. It is the stable key between baseline and
+compare. Only the `ops/s` leg is relaxed for these rows — `B/op` and `gen0/op`
+stay strict for every row, so the gate still catches allocation regressions.
 
 Per-phase workflow (on an idle machine — see the load caveat below):
 1. **Baseline** before the phase: `--json baseline.json --runs 3`

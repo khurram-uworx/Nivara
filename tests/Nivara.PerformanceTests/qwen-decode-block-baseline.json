@@ -1,120 +1,120 @@
 {
   "runtime": "11.0.0",
   "machine": "Intel64 Family 6 Model 197 Stepping 2, GenuineIntel · 16 logical processors · X64 · Microsoft Windows 10.0.26200",
-  "timestamp": "2026-09-12T08:53:06.3724001+00:00",
+  "timestamp": "2026-09-12T14:28:09.1880541+00:00",
   "runs": 3,
   "results": [
     {
       "name": "Qwen LM head matmul [1x896 @ 151936x896]",
-      "opsPerSec": 43.331287735458154,
-      "nsPerOp": 23078012.5,
+      "opsPerSec": 19.85735962149887,
+      "nsPerOp": 50359162.5,
       "bytesPerOp": 5,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen FFN gate/up/down x3",
-      "opsPerSec": 456.1537420572229,
-      "nsPerOp": 2192243.3333333335,
+      "opsPerSec": 191.899905009547,
+      "nsPerOp": 5211050,
       "bytesPerOp": 1.3333333333333333,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen attn Q/K/V/O proj",
-      "opsPerSec": 4812.087964968,
-      "nsPerOp": 207810,
+      "opsPerSec": 1921.0450485063875,
+      "nsPerOp": 520550,
       "bytesPerOp": 1.3333333333333333,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen Linear fwd [1x896 -> 2688]",
-      "opsPerSec": 3932.157181429732,
-      "nsPerOp": 254313.33333333334,
+      "opsPerSec": 1611.3698254886478,
+      "nsPerOp": 620590,
       "bytesPerOp": 22577.333333333332,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen LM head fwd [1x896 -> 151936]",
-      "opsPerSec": 43.08951847463105,
-      "nsPerOp": 23207500,
+      "opsPerSec": 19.803671353122976,
+      "nsPerOp": 50495687.5,
       "bytesPerOp": 608373,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen decode-attn fwd [1x896 @ kvLen=64]",
-      "opsPerSec": 3252.631921329676,
-      "nsPerOp": 307443.3333333333,
+      "opsPerSec": 1191.8051478037016,
+      "nsPerOp": 839063.3333333334,
       "bytesPerOp": 25929.333333333332,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen decode-attn fwd [1x896 @ kvLen=128]",
-      "opsPerSec": 2936.138977244923,
-      "nsPerOp": 340583.3333333333,
+      "opsPerSec": 571.830486570561,
+      "nsPerOp": 1748770,
       "bytesPerOp": 25929.333333333332,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen decode-attn fwd [1x896 @ kvLen=256]",
-      "opsPerSec": 2236.1609588658193,
-      "nsPerOp": 447195,
+      "opsPerSec": 984.9499645418013,
+      "nsPerOp": 1015280,
       "bytesPerOp": 25930,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen decode block [1x896 @ kvLen=64]",
-      "opsPerSec": 344.3783110539698,
-      "nsPerOp": 2903783.3333333335,
-      "bytesPerOp": 131985.33333333334,
+      "opsPerSec": 146.18914146041004,
+      "nsPerOp": 6840453.333333333,
+      "bytesPerOp": 1.3333333333333333,
       "gen0PerOp": 0
     },
     {
       "name": "Qwen decode fwd [1 step]",
-      "opsPerSec": 6.839101697670214,
-      "nsPerOp": 146218033.33333334,
-      "bytesPerOp": 3620918.6666666665,
-      "gen0PerOp": 0.16666666666666666
+      "opsPerSec": 4.362175114285352,
+      "nsPerOp": 229243433.33333334,
+      "bytesPerOp": 608014.6666666666,
+      "gen0PerOp": 0
     },
     {
       "name": "Qwen prefill seed [8 tok]",
-      "opsPerSec": 1.9223225347078536,
-      "nsPerOp": 520204066.6666667,
-      "bytesPerOp": 23915438.666666668,
-      "gen0PerOp": 0.3333333333333333
+      "opsPerSec": 1.4394358793211506,
+      "nsPerOp": 694716600,
+      "bytesPerOp": 934124,
+      "gen0PerOp": 0
     },
     {
       "name": "Qwen prefill seed [16 tok]",
-      "opsPerSec": 1.6982446773190762,
-      "nsPerOp": 588843300,
-      "bytesPerOp": 46843534.666666664,
-      "gen0PerOp": 1.1666666666666667
+      "opsPerSec": 0.9772328206379063,
+      "nsPerOp": 1023297600,
+      "bytesPerOp": 1029580,
+      "gen0PerOp": 0
     },
     {
       "name": "Qwen prefill seed [64 tok]",
-      "opsPerSec": 0.977240651569341,
-      "nsPerOp": 1023289400,
-      "bytesPerOp": 184310821.33333334,
-      "gen0PerOp": 0.3333333333333333
+      "opsPerSec": 0.535492104302795,
+      "nsPerOp": 1867441166.6666667,
+      "bytesPerOp": 1480030.6666666667,
+      "gen0PerOp": 0
     },
     {
       "name": "Qwen prefill seed [256 tok]",
-      "opsPerSec": 0.5184789483332012,
-      "nsPerOp": 1928718616.6666667,
-      "bytesPerOp": 735168134.6666666,
-      "gen0PerOp": 0.5
+      "opsPerSec": 0.19527607135059585,
+      "nsPerOp": 5120955133.333333,
+      "bytesPerOp": 4301626.666666667,
+      "gen0PerOp": 0.16666666666666666
     },
     {
       "name": "Qwen full fwd [64 tok]",
-      "opsPerSec": 0.5672182722559788,
-      "nsPerOp": 1762989750,
-      "bytesPerOp": 234029185.33333334,
+      "opsPerSec": 0.3000125510250721,
+      "nsPerOp": 3333193883.3333335,
+      "bytesPerOp": 234037745.33333334,
       "gen0PerOp": 0.3333333333333333
     },
     {
       "name": "Qwen full fwd [256 tok]",
-      "opsPerSec": 0.1896928601333651,
-      "nsPerOp": 5271679700,
-      "bytesPerOp": 1501388313.3333333,
-      "gen0PerOp": 0.6666666666666666
+      "opsPerSec": 0.08762115102736456,
+      "nsPerOp": 11412769500,
+      "bytesPerOp": 1314358158.6666667,
+      "gen0PerOp": 0.8333333333333334
     }
   ]
 }

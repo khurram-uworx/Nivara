@@ -243,16 +243,24 @@ public class LlamaCausalAttentionTests
         for (int i = 0; i < kCache.Length; i++) { kCache[i] = (float)(rnd.NextDouble() * 2 - 1); vCache[i] = (float)(rnd.NextDouble() * 2 - 1); }
         var output = new float[numHeads * headDim];
 
-        // Warm the ArrayPool so steady-state rent/return allocates nothing.
-        for (int i = 0; i < 2; i++)
+        // Warm the ArrayPool and let tiered JIT promotion settle so steady-state rent/return allocates nothing.
+        for (int i = 0; i < 64; i++)
             AttentionKernels<float>.DecodeAttention(q, kCache, vCache, output, kvLen, numHeads, numKvHeads, headDim, scale);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 50; i++)
-            AttentionKernels<float>.DecodeAttention(q, kCache, vCache, output, kvLen, numHeads, numKvHeads, headDim, scale);
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        // Take the minimum over several windows: one window can be inflated by transient runner
+        // events (a GC trimming a pooled bucket, a late tier-1/OSR promotion), but a genuine
+        // per-call allocation regression appears in every window and still fails the guard.
+        long best = long.MaxValue;
+        for (int w = 0; w < 5; w++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 50; i++)
+                AttentionKernels<float>.DecodeAttention(q, kCache, vCache, output, kvLen, numHeads, numKvHeads, headDim, scale);
+            long delta = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (delta < best) best = delta;
+        }
 
-        Assert.That(after - before, Is.LessThan(2048), "Fused decode kernel must not allocate per call (no cache copy).");
+        Assert.That(best, Is.LessThan(2048), "Fused decode kernel must not allocate per call (no cache copy).");
     }
 
     [Test]

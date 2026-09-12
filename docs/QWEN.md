@@ -373,8 +373,9 @@ performance program (issues/PRs #398–#415, branch `khurram/qwen-perf`). Every
 entry below is executed work with evidence — nothing is speculative. The
 authoritative row history lives in **`tests/Nivara.PerformanceTests`** (its
 README documents the measurement protocol: child-process medians via
-`--runs n`, `--only <substring>` gates, gate defaults minOps 90% / alloc ≤
-baseline × 1.01 / gen0 ≤ baseline + 0.05) with committed same-machine artifacts
+`--runs n`, `--only <substring>` gates, gate defaults minOps 90% (fixed 25%
+for bandwidth-bound Qwen rows — issue #420) / alloc ≤ baseline × 1.01 / gen0
+≤ baseline + 0.05) with committed same-machine artifacts
 `qwen-{fast,gqa,prefill,decode-block}-{baseline,postfix}.json`. Caveat that
 still stands: the 2026-09-08 `qwen-prefill-baseline.json` predates the `--only`
 filter and is cross-machine — re-baseline fresh per item on the machine you

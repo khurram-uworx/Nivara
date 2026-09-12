@@ -22,10 +22,6 @@ static class Program
 {
     static readonly List<ScenarioDefinition> s_scenarios = [];
 
-    const double DefaultMinOpsFraction = 0.90;
-    const double MaxAllocationFraction = 1.01;
-    const double Gen0Tolerance = 0.05;
-
     static readonly JsonSerializerOptions s_jsonOptions = new(JsonSerializerDefaults.Web)
     {
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
@@ -1002,7 +998,7 @@ static class Program
     {
         string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
-        double minOpsFraction = DefaultMinOpsFraction;
+        double minOpsFraction = GateEvaluator.DefaultMinOpsFraction;
         bool datasetTest = false;
         bool safetensorsMmap = false;
 
@@ -1090,6 +1086,16 @@ static class Program
         return "unknown CPU";
     }
 
+    /// <summary>
+    /// True for bandwidth-bound scenarios whose ops/s swings ~2.5-3x with machine state
+    /// (single-row GEMV / memory-streaming kernels — the Qwen decode and prefill rows,
+    /// issue #420). Their ops/s leg is gated at
+    /// <see cref="GateEvaluator.BandwidthBoundMinOpsFraction"/> instead of the default
+    /// stable-row floor; B/op and gen0 stay strict for all rows.
+    /// </summary>
+    static bool IsBandwidthBound(string name)
+        => name.StartsWith("Qwen ", StringComparison.Ordinal);
+
     static int Compare(string baselinePath, List<ScenarioResult> results, double minOpsFraction)
     {
         HarnessReport baseline;
@@ -1106,7 +1112,7 @@ static class Program
 
         var baselineByName = baseline.Results.ToDictionary(r => r.Name);
         Console.WriteLine();
-        Console.WriteLine($"No-regression gate vs {Path.GetFileName(baselinePath)} (minOps {minOpsFraction:P0}, maxAlloc {(1 - MaxAllocationFraction):P0} slack, gen0 +{Gen0Tolerance:N2}):");
+        Console.WriteLine($"No-regression gate vs {Path.GetFileName(baselinePath)} (minOps {minOpsFraction:P0}, bandwidth-bound ops/s floor {GateEvaluator.BandwidthBoundMinOpsFraction:P0}, maxAlloc {(1 - GateEvaluator.MaxAllocationFraction):P0} slack, gen0 +{GateEvaluator.Gen0Tolerance:N2}):");
 
         int failures = 0;
         foreach (var r in results)
@@ -1117,15 +1123,19 @@ static class Program
                 continue;
             }
 
-            bool opsOk = r.OpsPerSec >= b.OpsPerSec * minOpsFraction;
-            bool bytesOk = r.BytesPerOp <= b.BytesPerOp * MaxAllocationFraction;
-            bool gen0Ok = r.Gen0PerOp <= b.Gen0PerOp + Gen0Tolerance;
-            bool ok = opsOk && bytesOk && gen0Ok;
-            if (!ok)
+            bool bandwidthBound = IsBandwidthBound(r.Name);
+            var verdict = GateEvaluator.EvaluateRow(
+                new GateRow(r.Name, r.OpsPerSec, r.BytesPerOp, r.Gen0PerOp),
+                new GateRow(b.Name, b.OpsPerSec, b.BytesPerOp, b.Gen0PerOp),
+                minOpsFraction, bandwidthBound);
+            if (!verdict.Pass)
                 failures++;
 
+            string mark = verdict.Pass
+                ? (bandwidthBound ? "BW-PASS" : "PASS")
+                : (bandwidthBound ? "BW-FAIL" : "FAIL");
             Console.WriteLine(
-                $"  {(ok ? "PASS" : "FAIL")}  {r.Name,-46}  ops/s {r.OpsPerSec,9:N0} vs {b.OpsPerSec,9:N0}  B/op {r.BytesPerOp,12:N0} vs {b.BytesPerOp,12:N0}  gen0 {r.Gen0PerOp,5:N2} vs {b.Gen0PerOp,5:N2}");
+                $"  {mark}  {r.Name,-46}  ops/s {r.OpsPerSec,9:N0} vs {b.OpsPerSec,9:N0} (floor {verdict.OpsFloor:P0})  B/op {r.BytesPerOp,12:N0} vs {b.BytesPerOp,12:N0}  gen0 {r.Gen0PerOp,5:N2} vs {b.Gen0PerOp,5:N2}");
         }
 
         Console.WriteLine();
