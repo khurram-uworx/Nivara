@@ -322,4 +322,88 @@ public class LlamaForCausalLMPrefillTests
                 AssertClose(refSpan[i], fusedOut[i]);
         }
     }
+
+    [Test]
+    public void ForwardCached_FusedMatchesPerOp_Within1e5()
+    {
+        // A/B parity for the model-level fused decode: with LlamaFusedKernels.DecoderBlockFused
+        // off, ForwardCached runs the per-op block chain; with it on, the fused single-token
+        // kernel (both gate on !GradientUtils.IsGradEnabled). The logits agree within 1e-5 and
+        // the layer-0 K/V rows are bit-equal (both paths run the same projection/rope/attention
+        // kernels outside Grad).
+        using var model = TinyModel();
+        int kvWidth = KvWidth(4, 2, 32);
+        int[] tokens = [1, 12, 45];
+
+        using var perOpCache = new LlamaKVCache<float>(2, kvWidth);
+        ReverseGradTensor<float>? perOp = null;
+        try
+        {
+            LlamaFusedKernels.DecoderBlockFused = false;
+            for (int p = 0; p < tokens.Length; p++)
+                perOp = model.ForwardCached(tokens[p], p, perOpCache);
+        }
+        finally
+        {
+            LlamaFusedKernels.DecoderBlockFused = true;
+        }
+
+        using var fusedCache = new LlamaKVCache<float>(2, kvWidth);
+        ReverseGradTensor<float>? fused = null;
+        for (int p = 0; p < tokens.Length; p++)
+            fused = model.ForwardCached(tokens[p], p, fusedCache);
+
+        perOp!.Data.TryGetSpan(out var perSpan);
+        fused!.Data.TryGetSpan(out var fusedSpan);
+        Assert.That(fusedSpan.Length, Is.EqualTo(perSpan.Length));
+        for (int i = 0; i < perSpan.Length; i++)
+            AssertClose(perSpan[i], fusedSpan[i]);
+
+        Assert.That(CacheBitEqual(fusedCache.keys[0], perOpCache.keys[0]), Is.True,
+            "Fused decode layer-0 K rows must match the per-op walk bit-for-bit.");
+        Assert.That(CacheBitEqual(fusedCache.values[0], perOpCache.values[0]), Is.True,
+            "Fused decode layer-0 V rows must match the per-op walk bit-for-bit.");
+        Assert.That(CacheClose(fusedCache.keys[1], perOpCache.keys[1], 1e-5f), Is.True,
+            "A/B decode layer-1 K rows must agree within 1e-5.");
+        Assert.That(CacheClose(fusedCache.values[1], perOpCache.values[1], 1e-5f), Is.True,
+            "A/B decode layer-1 V rows must agree within 1e-5.");
+    }
+
+    [Test]
+    public void ForwardPrefill_FusedMatchesPerOp_Within1e5()
+    {
+        using var model = TinyModel();
+        int[] tokens = [1, 12, 45, 78, 99];
+        int kvWidth = KvWidth(4, 2, 32);
+
+        using var perOpCache = new LlamaKVCache<float>(2, kvWidth);
+        ReverseGradTensor<float>? perOp = null;
+        try
+        {
+            LlamaFusedKernels.DecoderBlockFused = false;
+            perOp = model.ForwardPrefill(tokens, perOpCache);
+        }
+        finally
+        {
+            LlamaFusedKernels.DecoderBlockFused = true;
+        }
+
+        using var fusedCache = new LlamaKVCache<float>(2, kvWidth);
+        var fused = model.ForwardPrefill(tokens, fusedCache);
+
+        perOp!.Data.TryGetSpan(out var perSpan);
+        fused.Data.TryGetSpan(out var fusedSpan);
+        Assert.That(fusedSpan.Length, Is.EqualTo(perSpan.Length));
+        for (int i = 0; i < perSpan.Length; i++)
+            AssertClose(perSpan[i], fusedSpan[i]);
+
+        Assert.That(CacheBitEqual(fusedCache.keys[0], perOpCache.keys[0]), Is.True,
+            "Fused prefill layer-0 K rows must match the per-op prefill bit-for-bit.");
+        Assert.That(CacheBitEqual(fusedCache.values[0], perOpCache.values[0]), Is.True,
+            "Fused prefill layer-0 V rows must match the per-op prefill bit-for-bit.");
+        Assert.That(CacheClose(fusedCache.keys[1], perOpCache.keys[1], 1e-5f), Is.True,
+            "A/B prefill layer-1 K rows must agree within 1e-5.");
+        Assert.That(CacheClose(fusedCache.values[1], perOpCache.values[1], 1e-5f), Is.True,
+            "A/B prefill layer-1 V rows must agree within 1e-5.");
+    }
 }
