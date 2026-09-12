@@ -90,6 +90,15 @@ public class QwenInstructParityTests
         return result;
     }
 
+    /// <summary>Skips the test when Python-generated parity fixtures are absent,
+    /// matching the tokenizer-fixture pattern — tests must not fail in that state.</summary>
+    static void SkipIfFixturesMissing(params string[] names)
+    {
+        var missing = names.Where(n => !File.Exists(Path.Combine(ModelDir, n))).ToArray();
+        if (missing.Length > 0)
+            Assert.Ignore($"Qwen tool fixtures absent ({string.Join(", ", missing)}); skipping parity verification.");
+    }
+
     [Test]
     public void Tokenizer_EncodeToolPrompt_MatchesTorchIds()
     {
@@ -186,6 +195,7 @@ public class QwenInstructParityTests
     [Test]
     public void Model_GreedyToolLoop_MatchesTorchGeneratedIds()
     {
+        SkipIfFixturesMissing("qwen_tool_ids_py.bin", "qwen_tool_prompt_ids.bin");
         var (model, config) = Model;
         var expected = ReadInt32("qwen_tool_ids_py.bin");
         Assert.That(expected.Length, Is.EqualTo(42), "fixture must contain tool turn (19) + final answer (23) ids");
@@ -201,6 +211,7 @@ public class QwenInstructParityTests
     [Test]
     public void Model_GreedyFinalAnswer_SemanticParityAndFinalLogitsWithinTolerance()
     {
+        SkipIfFixturesMissing("qwen_tool_ids_py.bin", "qwen_tool_final_prompt_ids.bin", "qwen_tool_logits_py.bin");
         var (model, config) = Model;
         var expected = ReadInt32("qwen_tool_ids_py.bin");
         Assert.That(expected.Length, Is.EqualTo(42), "fixture must contain tool turn (19) + final answer (23) ids");
