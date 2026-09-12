@@ -138,9 +138,9 @@ captured in GitHub issues so nothing is shelved when the doc is deleted.
 
 ## GitHub issues log
 
-- [ ] *new* — INT8 block-quantized Qwen stretch (blocked on integer AutoDiff, `docs/INTEGERS.md`; cross-links #390)
-- [ ] #386 — refreshed with post-Qwen-fast estimates + bf16 small-VM lever + float-only distill note
-- [ ] #402 — body reference reworded from QWEN-PERF to QWEN.md
+- [x] #416 — INT8 block-quantized Qwen stretch (created 2026-09-12; blocked on integer AutoDiff, `docs/INTEGERS.md`; cross-links #390)
+- [x] #386 — comment added (2026-09-12) refreshing the post-Qwen-fast estimates + bf16 small-VM lever + float-only distill note; user takes the cycle from there
+- [x] #402 — body reference reworded from QWEN-PERF to QWEN.md (2026-09-12)
 - [ ] existing/verified open: #399, #411 (backlog), #413, #414 (P2), #402 (P2), #387, #390, #391 (stretch/future)
 
 ## Blast radius
