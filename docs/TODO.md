@@ -1,7 +1,7 @@
 # #404 — P1: Per-token fused decoder-block kernel (kill ~200 allocs/token during decode)
 
 Branch: `khurram/qwen-perf` · Issue: https://github.com/khurram-uworx/Nivara/issues/404
-Ledger row: `docs/QWEN-PERF.md` l.609 (future-entries table) · Gate tooling: `docs/QWEN-PERF.md` "per-item gate workflow".
+Ledger row: `docs/QWEN-PERF.md` (P1 #404 entry + future-entries table) · Gate tooling: `docs/QWEN-PERF.md` "per-item gate workflow".
 
 ## Problem
 
@@ -127,31 +127,69 @@ public void ForwardCachedFused(ReadOnlySpan<T> input, Span<T> output, int positi
 
 ## Planned commits (one logical change each, verify + human-confirm long-running steps)
 
-1. `docs: plan #404 fused decoder kernel in TODO.md` — this file (commit now).
-2. `perf: add Qwen decode block/fwd harness rows (harness-first)` — harness rows only (per-op
-   bodies). Ask human → capture `qwen-decode-block-baseline.json` (fresh pair for #404).
-3. `feat: fused decoder-block kernel surface (RoPE accessor, toggle, span block methods)` —
-   src/Nivara + harness row bodies swap to fused (same row names ⇒ A/B gate).
-4. `feat: wire fused decode path into LlamaForCausalLM` — samples model-level routing.
-5. `test: fused-block parity, toggle A/B, alloc guard` — Nivara.Tests (ask human → targeted test
-   run).
-6. `perf: gate after fused decode block` — ask human → `--compare` run; record results.
-7. `e2e: qwen synthetic benchmark median-of-3` — ask human → run; record honestly.
-8. `docs: ledger entry #404 fused decoder block` — QWEN-PERF.md P1 row + `docs/CHANGELOG.md` note
-   if the public surface warrants one (new public block methods + toggle are additive).
-9. G2 reviews → `docs: remove TODO.md — #404 plan executed`, then offer push + PR.
+1. ✅ `docs: plan #404 fused decoder kernel in TODO.md` — `112d8ed` (committed at planning).
+2. ✅ `perf: add Qwen decode block/fwd harness rows (harness-first)` — `3f42c4d`
+   (rows only); harness-first baseline captured at commit `5076989`
+   (`qwen-decode-block-baseline.json`).
+3. ✅ `feat: fused decoder-block kernel surface (RoPE accessor, toggle, span block methods)` —
+   `614f2cd` (src/Nivara + harness row bodies swap to fused; same row names ⇒ A/B gate).
+4. ✅ `feat: wire fused decode path into LlamaForCausalLM` — included in `614f2cd`
+   (samples model-level routing, `fusedH0`/`fusedH1` ping-pong + toggle).
+5. ✅ `test: fused-block parity, toggle A/B, alloc guard` — `775a621` (new tests) +
+   `6b64eec` (original 7-test fixture restored byte-for-byte). Targeted run **42/42**.
+6. ✅ `perf: gate after fused decode block` — `--compare` run **16/16 PASS**; results in
+   Execution log + ledger.
+7. ✅ `e2e: qwen synthetic benchmark median-of-3` — Gate 3 green (Execution log).
+8. ✅ `docs: ledger entry #404 fused decoder block` — QWEN-PERF.md P1 entry +
+   future-entries row, `docs/CHANGELOG.md` "Added" note (public surface warrants it),
+   this file's Execution log.
+9. ⏳ G2 reviews (branch as a whole + against this file) → `docs: remove TODO.md —
+   #404 plan executed`, then offer push + PR (human-confirmed).
 
 ## GitHub issues log
 
-- No new issues created during planning. Candidate follow-ups to capture during execution (rule:
-  create at discovery, record here):
-  - [ ] Fuse the final RMSNorm + tied LM head into the fused decode step (~608 KB/token logits
-        box) — residual floor of #404, out of scope for this item.
-  - [ ] Fuse final Norm + head for prefill too (the `[L, vocab]`-last-row head currently boxes the
-        last single row).
+- No new issues were created during planning. Follow-ups created at discovery
+  (during execution, per the "create at discovery, record here" rule):
+  - [x] [#413](https://github.com/khurram-uworx/Nivara/issues/413) — fuse the
+        final RMSNorm + tied LM head into the fused decode step (~608 KB/token
+        logits box + residual ~11 KB boxing) — residual floor of #404.
+  - [x] [#414](https://github.com/khurram-uworx/Nivara/issues/414) — fuse the
+        final Norm + head for prefill too (the `[L, vocab]`-last-row head
+        currently boxes the last single row).
   - [#399](https://github.com/khurram-uworx/Nivara/issues/399) (open, orthogonal): DecodeAttention
         per-dot score loop at large kvLen — the fused block calls the kernel and composes with any
         later fix.
+
+## Execution log
+
+- **Harness-first (before):** `--json qwen-decode-block-baseline.json --only Qwen
+  --runs 3` captured at commit `5076989` (human-confirmed). Decode block
+  131,985 B/op; decode fwd 3,620,919 B/op; seed rows 23.9M / 46.8M / 184.3M /
+  735.2M B/op.
+- **Fused surface + routing:** commits `614f2cd` (src/Nivara surface + harness row
+  swap), `775a621`/`6b64eec` (tests: new fused parity/A/B/alloc guards + original
+  7-test fixture restored byte-for-byte), `77b3df8` (residual fix, see below).
+- **Targeted tests (human-confirmed run):** `--filter` over
+  `LlamaDecoderBlockTests|LlamaForCausalLMPrefillTests|LlamaCausalLMBf16ParityTests|
+  LlamaCausalAttentionTests|InferenceGraphTests` — **42/42 pass**. First run failed
+  10/12 parity tests: both fused paths applied PostNorm in place over the
+  attention-residual buffer (`ffnIn + mlp`, not `residual + mlp`). Fixed in
+  `77b3df8` by preserving the residual in its own per-layer scratch / pool-rented
+  prefill buffer. After the fix, fused decode/prefill outputs are bit-identical to
+  the per-op chain.
+- **Gate 2 (perf `--compare`, human-confirmed):** `--compare
+  qwen-decode-block-baseline.json --only Qwen --runs 3` — **16/16 Qwen rows PASS**
+  (one-sided no-regression): decode block → 1 B/op, decode fwd → 619,631 B/op,
+  seed rows −96…−99%, gen0 → 0 on touched rows.
+- **Gate 3 (E2E, human-confirmed):** `qwen benchmark --synthetic-weights`
+  (benchmark's built-in median-of-3, 64-token prompt + 24-token decode): decode
+  **116.5 ms/token (6.2 tok/s)**, prefill 941 ms, cache total 3,737 ms; full
+  re-forward 2,074 ms/token → **13.4×**. Same-machine pre-#404 decode (P0-3 A/B)
+  was ~524–571 ms/token → ≈4.5–4.9× decode wall-clock, outside the ±22% noise
+  band (the plan's "may be modest" expectation proved conservative).
+- **Docs:** `docs/QWEN-PERF.md` P1 #404 ledger entry + future-entries row DONE;
+  `docs/CHANGELOG.md` "Added" note; this file updated for the records.
+- **Remaining:** step 9 G2 review (below), human-confirmed push + PR.
 
 ## Blast radius
 

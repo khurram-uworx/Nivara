@@ -599,6 +599,83 @@ Artifacts: `tests/Nivara.PerformanceTests/qwen-prefill-baseline.json` (cold) ·
 
 ---
 
+## P1 — Per-token fused decoder-block kernel (#404)
+
+**Status: DONE** (2026-09-12 · branch `khurram/qwen-perf` · commits `5076989`
+baseline capture, `614f2cd` fused surface, `775a621` tests, `6b64eec` fixture
+restore, `77b3df8` residual fix, results + ledger entry)
+
+**Item:** each cached-decode token rebuilt the whole decoder block as a chain of
+boxed tensor ops — per layer per token: InputNorm → QKV (+bias) → RoPE → KV write →
+`DecodeAttention` → OProj → residual add → PostNorm → SiLU-FFN → residual add
+(~26 KB/op measured floor on the decode-attn row, ~7–8 boxes × 24 layers
+≈ ~4–6 MB/token). New public block methods `ForwardCachedFused` /
+`ForwardPrefillFused` run the same stage order over span/scratch buffers with zero
+per-token heap allocations (decode = per-layer lazy `T[]` scratch, zero steady-state
+allocs; prefill = one `ArrayPool<T>.Shared` L-scaled workspace per layer). Model-level
+routing in `LlamaForCausalLM<T>` under `LlamaFusedKernels.DecoderBlockFused` (public
+opt-out toggle, default `true`, `NivaraPrimitives` precedent); block methods guard
+`GradientUtils.IsGradEnabled` (inference-only). Reuses only existing kernels —
+`GradKernels.MatMulTransposedB` (⇒ P0-2 GEMV fast path), `Silu`, `RotaryForward`,
+`AttentionKernels<T>.DecodeAttention`/`BatchedAttention`,
+`RMSNormKernel<T>.PerRowRMSNormForwardKernel` — so numerics are unchanged, and
+scratch is count-reduced (`attn` is reused as the DownProj output, `gateOut×up`
+in-place into `up`), with `residual` kept in its own buffer.
+
+**Bug found & fixed during verification.** The fused-vs-per-op parity suite caught a
+real correctness defect on first run: both fused paths applied PostNorm **in place**
+over the attention-residual buffer, then computed `ffnIn + mlp` instead of
+`residual + mlp` (the residual had been clobbered by the in-place norm; 10 failing
+parity tests). The fix preserves the residual in its own per-layer scratch (decode) /
+pool-rented buffer (prefill) before the in-place PostNorm (commit `77b3df8`,
++15/−5). After the fix, fused decode and prefill outputs are **bit-identical** to
+the per-op chain.
+
+**Numerics:** block-level fused-vs-per-op parity bit-identical (qkvBias on/off);
+layer-0 K/V cache rows bit-equal across fused/per-op walks, deeper layers within
+the existing 1e-5 convention; model-level toggle A/B, prefill parity, and bf16
+parity (both f32 and bf16 models route fused by default — free regression guard)
+green. Target suite **42/42** (`LlamaDecoderBlockTests` = restored 7 + 5 new,
+`LlamaForCausalLMPrefillTests` A/B toggle, `LlamaCausalLMBf16ParityTests`,
+`LlamaCausalAttentionTests`, `InferenceGraphTests`).
+
+**Measured before/after** (harness, authoritative — `qwen-decode-block-baseline.json`
+captured pre-fusion at commit `5076989`; identical row names for the A/B gate):
+
+| Row | Before (per-op) | After (fused) | Δ B/op | gen0 |
+|---|---|---|---|---|
+| decode block [1x896 @ kvLen=64] | 131,985 B/op · 344 ops/s | **1 B/op** · 362 ops/s | −100% | → 0 |
+| decode fwd [1 step] | 3,620,919 B/op · 7 ops/s | **619,631 B/op** · 9 ops/s | ≈608 KB floor (−83%) | → 0 |
+| prefill seed [8 tok] | 23,915,439 B/op | **1,028,611 B/op** | −96% | → 0 |
+| prefill seed [16 tok] | 46,843,535 B/op | **1,208,052 B/op** | −97% | → 0 |
+| prefill seed [64 tok] | 184,310,821 B/op | **2,179,776 B/op** | −99% | → 0 |
+| prefill seed [256 tok] | 735,168,135 B/op | **7,043,532 B/op** | −99% | → 0 |
+
+Decode now allocates **one 608 KB `[1, vocab]` logits box per token** (the
+irreducible tied-head output) plus nothing else; prefill collapses from per-block
+op-boxing at `[L, ·]` scale to a single rented workspace per layer.
+
+**Gate note:** `--compare qwen-decode-block-baseline.json --only Qwen --runs 3`
+(one-sided no-regression, human-confirmed): **16/16 Qwen rows PASS** — decode block
+131,985 → 1 B/op, decode fwd 3,620,919 → 619,631 B/op, every seed row −96…−99%,
+gen0 → 0 on each touched row; no pre-existing row regressed.
+
+**E2E** (`dotnet run -c Release --project samples/NivaraInference -- qwen
+benchmark --synthetic-weights`, benchmark's built-in median-of-3, 64-token prompt +
+24-token decode, this 16-logical-processor machine): KV-cache decode
+**116.5 ms/token (6.2 tok/s)**, prefill **941 ms**, cache total **3,737 ms / 24 tok**;
+full re-forward 2,074 ms/token → **13.4×** cache-vs-full. Relative wall clock: the
+pre-#404 decode on this machine measured ~524–571 ms/token in the P0-3 A/B (same
+64+24 synthetic protocol) → **≈4.5–4.9× decode speedup**, far outside the ±22%
+noise band. (The P0-1 E2E's 86.2 ms/token decode was a different, faster machine —
+cross-machine numbers are not comparable.)
+
+**Test scope:** targeted 42/42 (above); full suite deferred by human decision per P0
+precedent. Rerun JSON removed after the gate; the baseline artifact
+`qwen-decode-block-baseline.json` is retained at commit `5076989`.
+
+---
+
 ### Future entries (template — fill in as items land)
 
 | Plan item | Status | Measured before → after | Notes |
@@ -606,6 +683,6 @@ Artifacts: `tests/Nivara.PerformanceTests/qwen-prefill-baseline.json` (cold) ·
 | P1 — GQA-aware batched attention for prefill (skip `GqaRepeatKV`; fused multi-row kernel) | DONE — entry above (2026-09-12) | same-state A/B seed [256 tok]: 6,369 ms / 793.6 MB → 6,363 ms / **743.2 MB** (time +0.1%, alloc −6.4%) · gate alloc −5.6%…−6.4% on all seed rows; formal `--compare` time FAIL rows were cold-vs-warm drift (untouched FFN row −14%; old path also 6,369 ms warm) | tracked in #403 · gate: `--json qwen-prefill-baseline.json --only Qwen --runs 3` → `--compare qwen-prefill-baseline.json --only Qwen --runs 3`; baseline 2026-09-08 file predates `--only` (cross-machine) |
 | #408 — Plain-prompt coverage (benchmark + fixtures + parity) | benchmark + fixtures + parity landed and **verified** 2026-09-12 (fixtures generated; 18/18 targeted incl. plain greedy 7/7) | plain before → after (#403 retake): real checkpoint 36-tok prompt — prefill 1,471 → 1,758 ms (warm single-shot), cached decode 287 → 243 ms/tok, **5.8× → 6.1×** (7-tok answer) | `qwen benchmark --plain` / `qwen --plain`; `qwen_plain_reference.py` fixtures (`qwen_plain_{prompt,prompt_ids,ids_py,logits_py}`); parity pins in `QwenInstructParityTests` + 36-tok always-run seat in `LlamaForCausalLMPrefillTests` |
 | P1 — On-the-fly BF16 weights with F32 compute | DONE — see entry above (2026-09-11) | on this i5: KV total 1.78–1.93× slower, all phases ~1.6–2.2× slower | documented tradeoff (`--precision f32\|bf16`); win expected on AVX-512/HBM-class hardware · tracked in #387/#391 |
-| P1 — Per-token fused decoder-block kernel | | | tracked in #404 |
+| P1 — Per-token fused decoder-block kernel | DONE — entry above (2026-09-12) | decode block 131,985 → **1 B/op**; decode fwd 3,620,919 → **619,631 B/op** (≈608 KB logits floor); seed rows −96…−99% (256 tok: 735.2 MB → 7.04 MB); gen0 → 0; E2E decode 116.5 ms/token (6.2 tok/s), **13.4×** cache-vs-full | tracked in #404 · gate: `--json qwen-decode-block-baseline.json --only Qwen --runs 3` (baseline commit `5076989`) → `--compare` — **16/16 PASS**; follow-ups #413/#414 (final norm + head fusion) |
 | P2 — Sampling path + tokenize-prefix cache | | | tracked in #402 |
 | Stretch — INT8 block-quantized weights / GGUF backend (#390) | | | |
