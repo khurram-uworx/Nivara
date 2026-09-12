@@ -210,7 +210,7 @@ Machine: Intel Core Ultra 7 255H, 16 logical processors, x64, .NET 11.0.0 (Relea
   plus attention (424 ms/8 tok, 469 ms/16 tok) — +79.5%/+270.6% ops/s with B/op and
   gen0/op down. The 64/256-token seed rows are NEW (the baseline carried loop rows only to
   L=16 because loop L=64+ ≈ 25+ s/op); their before/after is carried by the E2E split
-  timing (prefill 5,566 → 747 ms, docs/QWEN-PERF.md). The `full fwd` siblings are
+  timing (prefill 5,566 → 747 ms, docs/QWEN.md → *Making Qwen fast*). The `full fwd` siblings are
   unchanged-code `model.Forward` rows and are flat (B/op byte-identical; the [64] row's
   gen0 0.33 → 0.50 is GC-scheduling noise — ops/s and B/op are flat).
 - **This table is the current-machine rolling history.** The Prev column

@@ -170,6 +170,16 @@ All notable changes to Nivara are documented here. Released versions are publish
   rows (empty prefixes are suppressed). `StreamMaterializationCount` reports zero for
   such plans.
 
+- **Qwen docs consolidated** — the standalone Qwen performance ledger
+  (research review + improvement ledger) was folded into `docs/QWEN.md`
+  (the Qwen2.5 model doc now carries the Qwen-fast performance journey: review
+  findings, executed improvements with measured deltas, remaining P2/backlog/stretch
+  items, and the not-worth-investing record) and `samples/NivaraInference/README.md`
+  (the library building blocks it added, in that README's set format), then deleted;
+  outstanding items are tracked in issues (#399, #402, #411, #413, #414, #416). The
+  `NivaraInference`/`NivaraChat` sample READMEs are the only docs that cross-link
+  QWEN; `docs/QWEN.md` stands alone.
+
 ## [1.4.0] - 2026-08-21
 
 ### Added

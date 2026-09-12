@@ -8,31 +8,35 @@ iterations, and closes with a clean natural-language answer.
 
 This document records the ground-truth findings (the format, the vocab-size
 subtlety, the tokenizer divergence, the loader benchmark), what was reusable from
-Phase B, what was fixed and why, and the verification evidence. The code lives in
+Phase B, what was fixed and why, the verification evidence, and the measured
+performance journey (Qwen-fast). The code lives in
 `samples/NivaraChat/Qwen/`; the tests in `tests/Nivara.Tests/Qwen/`.
 
 Related Qwen work, tracked separately: #384 (qkvBias loader gap), #386 (Qwen
-distillation), #387 (BF16-in-memory SIMD-dot), #388 (fused BF16→F32 read),
-#390 (GGUF backend), #391 (revisit BF16 workarounds when `Vector<BFloat16>` SIMD
-lands).
+distillation — the full teacher-labeling + training E2E cycle on a dedicated
+machine), #387 (BF16-in-memory SIMD-dot), #388 (fused BF16→F32 read), #390 (GGUF
+backend), #391 (revisit BF16 workarounds when `Vector<BFloat16>` SIMD lands),
+#399 (backlog: `DecodeAttention` per-dot loop at large `kvLen`), #402 (P2:
+float single-pass sampling + REPL tokenize-prefix cache), #411 (backlog: RMSNorm
+gamma via `TensorPrimitives.Multiply`), #413/#414 (P2: fuse the final RMSNorm +
+tied LM head into the fused decode / prefill paths), #416 (stretch: INT8
+block-quantized weights — blocked on integer support in AutoDiff, see
+`docs/INTEGERS.md`). The executed Qwen-fast performance work (P0-1, P0-2, P0-3,
+#403, #404, #407, #408) is recorded in *Making Qwen fast* below.
 
 ---
 
 ## How Qwen works on Nivara — the library map
 
-An engineer wanting to run or extend Qwen should start here. Two sample READMEs
-anchor the fuller technical detail and are cross-linked throughout:
-
-- **`samples/NivaraChat/README.md`** — the user-facing `--qwen` demo (function
-  calling via `IChatClient`): `--qwen tools-weather|chat|plain`, the
-  `FunctionInvokingChatClient` tool loop, and the code layout under
-  `samples/NivaraChat/Qwen/`.
-- **`samples/NivaraInference/README.md`** — the low-level library scratchpad:
-  `qwen tools` (function calling), `qwen distill` (teacher distillation,
-  #386), `qwen benchmark` (KV-cached vs full re-forward) and
-  `qwen benchmark --plain` / `qwen --plain` (no-tools single-turn benchmark and
-  demo), `--synthetic-weights` (Qwen-shaped timing without the model file),
-  plus the weight loading, narrow-precision, and SafeTensors loader sections.
+An engineer wanting to run or extend Qwen should start here. The two sample
+projects exercise this surface from opposite directions: the **`NivaraInference`
+sample** is the library scratchpad (its `qwen` CLI: `tools` function calling,
+`distill` teacher distillation, `benchmark` KV-cached vs full re-forward,
+`--plain`/`--synthetic-weights`/`--precision bf16` variants, plus the weight
+loading and loader sections), and the **`NivaraChat` sample** is the user-facing
+chat demo (the `--qwen tools-weather|chat|plain` modes over `IChatClient`). This
+document is the ground-truth reference for the Qwen model itself; this section
+maps the code.
 
 ### The load path (checkpoint → tensors)
 
@@ -55,6 +59,17 @@ config.json + model.safetensors + vocab.json + merges.txt + tokenizer.json
 > into each tensor's `float[]` with **no interim `ushort[]`** (one pass, ~1 GB less
 > peak memory). When `Vector<BFloat16>` SIMD support lands in the runtime this
 > tradeoff is worth revisiting (#387, #388, **#391**).
+>
+> Qwen-fast item **#407** added an opt-in alternative for benchmark/synthetic
+> modes only: `--precision bf16` keeps the weights native `BFloat16` (~942 MB)
+> and widens each lane in-register inside the dot kernel
+> (`NarrowFloatKernels.DotBf16Core` — F32 FMA math on bf16 storage at rest,
+> results rounded back to bf16 for the next layer). This halves weight memory and
+> traffic but measured **uniformly slower** on the i5-1135G7 AVX2/LPDDR4x box
+> used for the P1 verdict (per-lane widen-narrow overhead exceeds the traffic
+> saving); the win is expected on AVX-512 / HBM-class hardware. Full tradeoff and
+> numbers in *Making Qwen fast* below. Tools/distill stay float; fp16 stays
+> rejected.
 
 Qwen's config is Llama-loader-compatible: `hidden 896`, 24 layers, **GQA 14↔2**
 KV heads, SiLU gated FFN, `RMSNorm` (ε=1e-6), **RoPE θ=1_000_000** (10× SmolLM),
@@ -62,8 +77,7 @@ KV heads, SiLU gated FFN, `RMSNorm` (ε=1e-6), **RoPE θ=1_000_000** (10× SmolL
 Q/K/V projections**. Of these only the biased projections were a real core gap —
 everything else reused the SmolLM machinery unchanged (`LlamaLoader`,
 `LlamaForCausalLM<T>`, GQA `GqaRepeatKV`, `RMSNorm<T>`, SiLU, RoPE
-`rotate_half`, tied LM head). See `samples/NivaraInference/README.md` →
-"Qwen2.5-0.5B-Instruct" for the reusable-vs-new breakdown.
+`rotate_half`, tied LM head).
 
 ### What was added where (core vs sample-scoped)
 
@@ -75,6 +89,12 @@ everything else reused the SmolLM machinery unchanged (`LlamaLoader`,
 | `Gpt2BpeTokenizer` Qwen preamble | **sample** `samples/Nivara.Samples/` | `Split`-regex pretokenize + added-token merge |
 | `LlamaKVCache<T>` + `ForwardCached` | **sample** | per-token KV-cached decode |
 | `QwenChatClient<T>`, `QwenChatTemplate`, `QwenToolCallParser`, `QwenSampleTools` | **sample** `samples/NivaraChat/Qwen/` | the `IChatClient` + tool loop |
+| `TensorsHelper.MultiplyCore` single-row GEMV fast path (`bTransposed && aRows == 1`) | **core** `src/Nivara/Tensors/TensorsHelper.cs` | P0-2 (#398); every decode matmul dots the weight row directly — no rent, no identity `CopyTo`, no clear-on-return |
+| `AttentionKernels<T>.DecodeAttention` | **core** `src/Nivara/AutoDiff/Operations/AttentionKernels.cs` | P0-3 (#400); fused single-query GQA decode attention — zero-copy cache reads, virtual GQA mapping, no `BlockCopy` / `GqaRepeatKV` |
+| `LlamaCausalAttention<T>.ForwardCore` + `AttentionKernels<T>.BatchedAttention` | **core** `src/Nivara/AutoDiff/Nn/LlamaCausalAttention.cs` + `Operations/AttentionKernels.cs` | #403; shared core with per-KV-head K/V capture; fused GQA-aware batched prefill attention (no repeat expansion, no mask alloc) |
+| `LlamaForCausalLM<T>.ForwardPrefill(int[] ids, LlamaKVCache<T> cache)` | **sample** `samples/Nivara.Samples/` | P0-1; batched `[L, hidden]` prompt prefill with K/V capture — one weight read for the whole prompt instead of L full-model walks |
+| `ForwardCachedFused` / `ForwardPrefillFused` + `LlamaFusedKernels.DecoderBlockFused` | **sample** `samples/Nivara.Samples/` | #404; whole per-token block over span/scratch buffers, zero steady-state allocs; public opt-out toggle, default `true` |
+| bf16 benchmark/synthetic (`--precision bf16`, `SafeTensorsLoader.Read<BFloat16>`, `NivaraPrimitives.UseWidenSimd`) | **sample** `samples/Nivara.Samples/` + `samples/NivaraChat/` | #407; weights stay `BFloat16` and widen in-register per dot (F32 FMA math); benchmark/synthetic modes only — tools/distill stay float |
 
 ### The `qkvBias` option (public API)
 
@@ -112,18 +132,21 @@ The `QwenChatClient` is a plain `Microsoft.Extensions.AI.IChatClient` over
 `LlamaForCausalLM<T>` + `Gpt2BpeTokenizer` + `LlamaKVCache<T>`, wrapped by MEAI
 10.9.0's `FunctionInvokingChatClient` for the loop. It runs **inference-default**
 (ADR-001/002): `model.Eval()`, never inside `GradientUtils.Grad()`, so no graph
-nodes are built (`samples/NivaraInference/README.md` documents the same
-inference-default guarantee for its `qwen` modes). The Gpt2BpeTokenizer/loader
-gaps, the byte-exact renderer, and the parser are all described in detail below;
-the `qwen tools`/`qwen distill` feature surface is in
-`samples/NivaraInference/README.md`, and `qwen tools-weather` wiring in
-`samples/NivaraChat/README.md` → "Qwen (`--qwen`)".
+nodes are built (the `qwen` CLI modes in the `NivaraInference` sample document
+the same inference-default guarantee). The Gpt2BpeTokenizer/loader gaps, the
+byte-exact renderer, and the parser are all described in detail below; the
+`qwen tools`/`qwen distill`/`qwen benchmark` surface runs from the
+`NivaraInference` sample, and the `--qwen tools-weather` chat wiring runs from
+the `NivaraChat` sample.
 
-> **KV-cache & generation pipeline** — render → `Encode` → `SeedCache` (KV prefill
-> per prompt token) → per-token `ForwardCached` → decode → parse. Greedy `ArgMax`
+> **KV-cache & generation pipeline** — render → `Encode` → `SeedCache` (one
+> batched `ForwardPrefill` over the whole prompt captures K/V) → per-token
+> `ForwardCached` (decoder-block path fused by default via
+> `LlamaFusedKernels.DecoderBlockFused`, opt-out) → decode → parse. Greedy
+> `ArgMax`
 > by default; `temperature > 0` adds temperature softmax + optional top-p, from a
 > seeded shared RNG. Stops on `QwenIds.StopIds` `[151645, 151643]`. Details in
-> *The client* section below.
+> *The client* section below, measured costs in *Making Qwen fast*.
 
 ---
 
@@ -332,8 +355,92 @@ Qwen: The weather in Paris is partly cloudy with a temperature of 18°C. The lig
 
 Two model generations (tool-call turn + final turn), loop closes within the cap
 (the 343 s figure includes the ~1-min in-process F32 load of the 988 MB BF16
-checkpoint). `--smollm chat|plain` is untouched; `--qwen chat|plain` are plain
-streaming modes with the same generation core.
+checkpoint). **This transcript is the pre-Qwen-fast baseline (PR #385 era,
+2026-09-05):** on the current code the same run is dramatically faster — every
+prompt token no longer walks the whole model (P0-1 batched prefill), and each
+decoded token runs the fused block path (`#404`; see *Making Qwen fast* below —
+current benchmark protocol measures ~116.5 ms/token decode, 13.4× cache-vs-full,
+on the 16-logical-processor machine). `--smollm chat|plain` is untouched;
+`--qwen chat|plain` are plain streaming modes with the same generation core.
+
+---
+
+## Making Qwen fast (Qwen-fast)
+
+The Qwen inference path started from the pre-Qwen-fast baseline above (two
+generations ≈ 343 s for the weather turn) and went through a measured
+performance program (issues/PRs #398–#415, branch `khurram/qwen-perf`). Every
+entry below is executed work with evidence — nothing is speculative. The
+authoritative row history lives in **`tests/Nivara.PerformanceTests`** (its
+README documents the measurement protocol: child-process medians via
+`--runs n`, `--only <substring>` gates, gate defaults minOps 90% / alloc ≤
+baseline × 1.01 / gen0 ≤ baseline + 0.05) with committed same-machine artifacts
+`qwen-{fast,gqa,prefill,decode-block}-{baseline,postfix}.json`. Caveat that
+still stands: the 2026-09-08 `qwen-prefill-baseline.json` predates the `--only`
+filter and is cross-machine — re-baseline fresh per item on the machine you
+measure on.
+
+### What the review found (pre-execution, 2026-09-05)
+
+- **Prefill was O(L) full-model walks.** `SeedCache` ran `ForwardCached` once per
+  prompt token; each walk re-read every weight (~2 GB F32), i.e. ≥120 GB of DRAM
+  traffic for a 60-token tool prompt before the first generated token.
+- **Every decode matmul copied the weights first.** `MultiplyCore` rented a
+  transposed copy of B (`b.CopyTo(bT)`, clear-on-return) for every
+  `aRows == 1` matmul; the LM head alone identity-copied ~545 MB per token on
+  top of the ~545 MB dot read. Premise correction (measured, sourced from the
+  runtime): `ArrayPool<T>.Shared` *does* pool the 136M-element bucket — the cost
+  was memory traffic + clears, not fresh alloc/GC churn (~2.7 GB/token on the
+  LM head op alone).
+- **Decode re-materialized attention every step.** Full KV-prefix
+  `Buffer.BlockCopy`, `GqaRepeatKV` ×7 blowup over the whole prefix, head
+  repack, and a fresh all-zeros mask — `O(newLen·numHeads·headDim)` copies per
+  layer per token.
+- **Per-op tensor boxing.** ~150–200 `T[]` + `NivaraColumn<T>` +
+  `ReverseGradTensor` allocations per decoded token.
+- F32 decode ceiling at ~30 GB/s effective bandwidth: ~15–20 tok/s (theory).
+
+### Executed improvements and measured deltas
+
+| Item | What changed | Key measured delta |
+|---|---|---|
+| **P0-2** single-row GEMV fast path (#398) | `TensorsHelper.MultiplyCore` dots the weight row directly for `bTransposed && aRows == 1` — no rent, no identity copy, no clear | LM head matmul 5 → 36 ops/s (**+620%**); FFN 61 → 529 ops/s (+767%); Q/K/V/O proj +940%; bit-identical numerics |
+| **P0-3** fused decode attention (#400) | `AttentionKernels<T>.DecodeAttention`: zero-copy cache reads, virtual GQA mapping, no `BlockCopy`/`GqaRepeatKV`/repack/mask | decode-attn +62–177% across kvLen 64/128/256; B/op **21×/41×/81×↓** to a flat ~26 KB (kvLen-independent) |
+| **P0-1** batched prefill (#401) | `LlamaForCausalLM<T>.ForwardPrefill`: one `[L, hidden]` forward captures K/V at absolute positions | prefill 5,566 → **747 ms** (~7.4×); KV-cache total 7,635 → 2,808 ms · 3.1 → 8.5 tok/s (~2.7×) |
+| **#403** fused batched attention | `AttentionKernels<T>.BatchedAttention` + `LlamaCausalAttention.ForwardCore` refactor; per-KV-head packs only, no repeat, no mask | same-state A/B seed[256]: +0.1% time, **alloc −6.4%**; all seed rows −5.6…−6.4% |
+| **#404** fused decoder block | `ForwardCachedFused`/`ForwardPrefillFused` + public `LlamaFusedKernels.DecoderBlockFused` (default on, opt-out); zero-alloc decode, one rented workspace per layer for prefill | decode block 131,985 → **1 B/op**; decode fwd 3,620,919 → **619,631 B/op** (logits floor); seed rows −96…−99%; gen0 → 0; E2E **116.5 ms/token (6.2 tok/s), 13.4× cache-vs-full** |
+| **P1 BF16** on-the-fly (#407) | `--precision bf16`: weights stay `BFloat16` (~942 MB), widened in-register per dot (`NarrowFloatKernels.DotBf16Core`, F32 FMA); benchmark/synthetic only | measured **uniformly slower** on the i5-1135G7 (prefill 1.9–2.2×, decode 1.6–1.8×); halves memory/traffic — win expected on AVX-512/HBM |
+| **#408** plain-prompt coverage | `qwen benchmark --plain` / `qwen --plain` + Torch fixtures (`qwen_plain_*`) + parity | 36/36 tokenizer ids, greedy 7/7 ids "The capital of France is Paris."; real-checkpoint plain 36-tok: prefill 1,758 ms, decode 243 ms/tok, **6.1×** |
+
+**Post-perf E2E anchors** (synthetic 64-token prompt + 24-token decode, median
+of 3, this 16-logical-processor machine): KV-cache decode **116.5 ms/token
+(6.2 tok/s)**, prefill **941 ms**, cache total **3,737 ms / 24 tok**, full
+re-forward 2,074 ms/token → **13.4×** cache-vs-full — an ≈4.5–4.9× decode
+speedup over the pre-#404 ~524–571 ms/token on the same protocol. Real-checkpoint
+plain seat: prefill 1,758 ms, decode ~243 ms/token, 6.1×. (The P0-1-era
+86.2 ms/token decode was a different, faster machine — cross-machine numbers are
+not comparable.) The dedicated-machine full E2E refresh (distill cycle +
+benchmark + tools rows in Release) is tracked in **#386**.
+
+### Remaining / not done
+
+| Item | Issue | Notes |
+|---|---|---|
+| P2 — float single-pass sampling + REPL tokenize-prefix cache | **#402** | `temperature > 0` only; default greedy path unaffected |
+| P2 — fuse final RMSNorm + tied LM head into fused decode | **#413** | decode fwd already at the ≈608 KB logits floor; fuses the last chain |
+| P2 — fuse final Norm + LM head into prefill | **#414** | |
+| Backlog — `DecodeAttention` per-dot loop at large `kvLen` | **#399** | small at Qwen chat context; grows toward 32k positions |
+| Backlog — RMSNorm gamma as `TensorPrimitives.Multiply` | **#411** | kernel cleanup; no E2E win expected |
+| Backlog — keep BF16 in memory as `ushort` + SIMD-dot (skip load-time widen) | **#387** / **#391** | revisit when `Vector<BFloat16>` SIMD lands |
+| Stretch — GGUF backend | **#390** | load-format only; reuses renderer/parser/loop wiring |
+| Stretch — INT8 block-quantized weights (llama.cpp-style Q8, ~4× traffic cut, ~65+ tok/s ceiling) | **#416** | **blocked**: AutoDiff requires `IFloatingPointIeee754<T>` — integer-tensor support first (`docs/INTEGERS.md`) |
+
+**Not worth investing now** (recorded so the reasoning survives): precomputing a
+transposed weight-view cache — weights already live in the transposed-B layout
+the P0-2 fast path dots directly; parallelizing decode — `aRows == 1` keeps the
+`ShouldParallelize` gate off by design, parallelism belongs in batched prefill;
+speculative decoding / top-k tricks — greedy argmax is already a single scan and
+the win is in memory traffic, not the scan.
 
 ---
 
@@ -406,6 +513,37 @@ streaming modes with the same generation core.
   → transcript above, clean answer, loop terminates. `--smollm chat|plain`
   untouched and still working.
 - Regression: 17 earlier parity/loader tests re-run green.
+
+### Qwen-fast verification (perf-era suites)
+
+- **P0-2 (GEMV fast path):** full suite **3449 passed / 0 failed**; parity tests
+  lock single-row == row 0 of a two-row run, Dot-vs-Dot bit-exact for
+  float/double, Half/BFloat16 widen-path parity, cold-pool alloc guard.
+- **P0-3 (fused decode attention):** `LlamaCausalAttentionTests` 12/12 — fused
+  output equals the `GqaRepeatKV` + `MultiHeadAttention` slow path within 1e-5
+  across GQA 14/2 · 8/4 · 12/4 · 8/8, virtual-mapping pin, cache-vs-full parity,
+  steady-state zero-alloc guard, no graph node outside `Grad()`.
+- **P0-1 (batched prefill):** `LlamaForCausalLMPrefillTests` + KV-cache/
+  attention fixtures 21/21 + full suite **3458 passed / 1 failed** (the failure
+  is the unrelated `Transpose_PerformanceProbe_TiledKernelBeatsBclViewMaterialization`
+  #136 timing probe); real-checkpoint `QwenInstructParityTests` green.
+- **#403 (fused batched attention):** targeted 18/18 (GQA parity 4/2 · 8/2 ·
+  14/2 at 1e-5, kernel-level `BatchedAttention` vs the MHA reference, graph
+  guards, KV capture, 36-token plain seat) + `QwenInstructParityTests` plain
+  36/36 + greedy 7/7; **#408** generated fixtures activated.
+- **P1 BF16 (#407):** `LlamaCausalLMBf16ParityTests` 2/2 (greedy argmax matches
+  through full forward, prefill, and 8-step KV-cached decode; logits within
+  prefill/decode ~1e-4); guardrail neighborhood 16 pass / 2 skip (the skips are
+  the pre-existing #406 model-test fixture issue, unrelated).
+- **#404 (fused decoder block):** targeted 42/42 — block-level fused-vs-per-op
+  parity **bit-identical** (qkvBias on/off), model-level toggle A/B, prefill
+  parity, bf16 parity (both f32 and bf16 models route fused by default);
+  harness gate `--compare qwen-decode-block-baseline.json --only Qwen --runs 3`
+  → **16/16 PASS**. The parity suite also caught and fixed a real defect during
+  development (in-place PostNorm clobbered the residual — `77b3df8`).
+- Full-suite runs after #403/#404/P1-BF16 were deferred by human decision
+  (targeted fixtures + same-state gates accepted; the P0-1 full suite was the
+  last whole-suite run on the perf branch).
 
 ---
 
