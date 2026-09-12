@@ -38,6 +38,8 @@ public sealed class LlamaCausalAttention<T> : Module<T> where T : struct, IFloat
     public int NumKeyValueHeads => numKeyValueHeads;
     /// <summary>Gets the per-head dimension.</summary>
     public int HeadDim => headDim;
+    /// <summary>Gets the rotary position embedding tables (fused-kernel path).</summary>
+    internal RotaryEmbedding<T> Rotary => rotary;
 
     /// <summary>
     /// Creates a Llama causal self-attention module.

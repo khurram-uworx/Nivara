@@ -147,6 +147,28 @@ public sealed class RotaryEmbedding<T> : Module<T> where T : struct, IFloatingPo
         return resultTensor;
     }
 
+    /// <summary>
+    /// Returns the precomputed cosine/sine frequency tables for the position range
+    /// <c>[startPosition, startPosition + count)</c>, one table row (length
+    /// <c>headDim / 2</c>) per position. Span kernels consume these directly for the
+    /// per-token fused decoder-block path, matching
+    /// <see cref="Forward(ReverseGradTensor{T}, int)"/>'s slice of the same caches so the
+    /// rotation math is bit-identical.
+    /// </summary>
+    internal void GetPositionTables(int startPosition, int count, out ReadOnlySpan<T> cos, out ReadOnlySpan<T> sin)
+    {
+        if (startPosition < 0) throw new ArgumentOutOfRangeException(nameof(startPosition));
+        if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
+        if (startPosition + count > maxPositionEmbeddings)
+            throw new ArgumentException($"Position {startPosition + count - 1} exceeds max_position_embeddings {maxPositionEmbeddings}.");
+
+        EnsureCache(startPosition + count);
+        int cacheStart = startPosition * (headDim / 2);
+        int len = count * (headDim / 2);
+        cos = cosCache.AsSpan(cacheStart, len);
+        sin = sinCache.AsSpan(cacheStart, len);
+    }
+
     void EnsureCache(int seqLen)
     {
         int halfDim = headDim / 2;

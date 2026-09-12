@@ -618,26 +618,25 @@ static class Program
     static void RunQwenDecodeBlockScenarios()
     {
         // Qwen2.5-0.5B single-token decoder-block decode (issue #404, docs/QWEN-PERF.md P1). Row
-        // name is identical on both branches — the body measures the per-op block chain
-        // (block.ForwardCached) at baseline and swaps to the fused span kernel
-        // (block.ForwardCachedFused) once the fused surface lands — so --compare gates the true
-        // before/after. Target: B/op drops from the per-op chain (~tens of KB) toward ~0
-        // steady-state.
+        // name is identical on both branches — the baseline body measured the per-op block chain
+        // (block.ForwardCached); this branch measures the fused span kernel
+        // (block.ForwardCachedFused) — so --compare gates the true before/after. Target: B/op
+        // drops from 131,985 (per-op chain) toward ~0 steady-state.
         Run("Qwen decode block [1x896 @ kvLen=64]", 3, 30,
             () => CreateQwenDecodeBlockScenario(64));
     }
 
     // Qwen2.5-0.5B shapes: hidden 896, heads 14, kvHeads 2, headDim 64 (kvWidth 128), FFN 4864.
     // Pre-populates a kvLen-row seeded cache and runs one single-token decode step through one
-    // full decoder block. Each run reuses the same pre-seeded cache so the measured op is
-    // exactly the per-token block decode step (the per-op path at baseline).
+    // full decoder block. Steady-state body: the fused kernel reuses the per-block scratch + the
+    // same input/output buffers and pre-seeded cache every call (zero heap allocations).
     static Action CreateQwenDecodeBlockScenario(int kvLen)
     {
         const int hidden = 896, numHeads = 14, numKvHeads = 2, intermediate = 4864;
         var block = new LlamaDecoderBlock<float>(hidden, numHeads, numKvHeads, intermediate);
         int kvWidth = numKvHeads * (hidden / numHeads);
         var seed = new Random(42 + kvLen);
-        // Capacity for kvLen cached positions plus the new decode row (required by ForwardCached).
+        // Capacity for kvLen cached positions plus the new decode row (required by ForwardCachedFused).
         var kCache = new float[(kvLen + 1) * kvWidth];
         var vCache = new float[(kvLen + 1) * kvWidth];
         for (int i = 0; i < kvLen * kvWidth; i++)
@@ -646,18 +645,13 @@ static class Program
             vCache[i] = (float)(seed.NextDouble() * 2 - 1);
         }
 
-        // A single throwaway decode warms the lazy RoPE tables so the timed op is purely the
-        // block decode step, not first-use table construction.
-        var warmToken = new ReverseGradTensor<float>(NivaraColumn<float>.Create(Fill(new float[hidden])), requiresGrad: false);
-        warmToken.Reshape(1, hidden);
-        block.ForwardCached(warmToken, kvLen, kCache, vCache, kvLen);
+        // A single throwaway decode warms the lazy RoPE tables + the per-block fused scratch so
+        // the timed op is purely the fused block step, not first-use table/scratch allocation.
+        var inBuf = Fill(new float[hidden]);
+        var outBuf = new float[hidden];
+        block.ForwardCachedFused(inBuf, outBuf, kvLen, kCache, vCache, kvLen);
 
-        return () =>
-        {
-            var input = new ReverseGradTensor<float>(NivaraColumn<float>.Create(Fill(new float[hidden])), requiresGrad: false);
-            input.Reshape(1, hidden);
-            block.ForwardCached(input, kvLen, kCache, vCache, kvLen);
-        };
+        return () => block.ForwardCachedFused(inBuf, outBuf, kvLen, kCache, vCache, kvLen);
     }
 
     static void RunQwenDecodeForwardScenarios()
