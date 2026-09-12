@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Numerics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
 namespace Nivara.GpuProbe.LevelZero;
@@ -362,17 +361,19 @@ internal static class L0Run
                 zeCommandQueueExecuteCommandLists, zeCommandQueueSynchronize, zeMemFree,
                 timing: true, opsPerLaunch: 1_000_000);
 
-            // BF16 widening on device. The host holds raw 16-bit patterns — exactly
-            // System.Numerics.BFloat16's layout (SafeTensorsLoader keeps BF16 weights
-            // that way) — written into the SAME shared buffer the kernel reads. On an
-            // iGPU (unified DRAM) there is no copy in/out: zeMemAllocShared is used
+            // BF16 widening on device, BFloat16-to-BFloat16. The host holds weights as
+            // System.Numerics.BFloat16 — the raw 16-bit pattern IS the BFloat16 memory
+            // layout (SafeTensorsLoader keeps BF16 weights that way) — and writes the
+            // BFloat16 itself into the SAME shared buffer the kernel reads. On an iGPU
+            // (unified DRAM) there is no copy in/out: zeMemAllocShared is used
             // everywhere and one allocation is visible to both the CPU and the GPU.
-            static ushort Bf16Bits(float value)
-            {
-                var b = BFloat16.CreateChecked(value);
-                return Unsafe.As<BFloat16, ushort>(ref b);
-            }
-
+            // BFloat16 is the high half of the f32 the GPU emits (BF16 -> F32 is
+            // lossless), so the result is loaded straight back into BFloat16 — no
+            // ushort, no ToSingle, no host bit arithmetic anywhere in the round trip.
+            // "No widening" holds for the input path (BF16 end to end); the kernel's
+            // f32 accumulator is the hardware's native BF16 compute model (Xe2 DPAS
+            // also accumulates BF16 products in f32 — f32 accumulation is required
+            // for precision, never a host/API widening we introduced).
             float[] bf16Patterns = [1.0f, -2.0f, 1.5f, 123.5f];
 
             Console.WriteLine();
@@ -400,18 +401,18 @@ internal static class L0Run
             {
                 foreach (float value in bf16Patterns)
                 {
-                    ushort bits = Bf16Bits(value);
+                    var bf16 = BFloat16.CreateChecked(value);
                     TestKernel(
                         loader, context, device, queue, computeOrdinal, versions, allocShared,
                         v => SpvKernels.Bf16Native(v), "bf16_native", argCount: 2, n: 1,
-                        fill: (a, b, c) => Marshal.WriteInt16(a, 0, (short)bits),
+                        fill: (a, b, c) => Marshal.StructureToPtr(bf16, a, false),
                         verify: (a, b, c) =>
                         {
-                            int stored = Marshal.ReadInt32(b);
-                            bool pass = stored == (int)((uint)bits << 16);
+                            var stored = Marshal.PtrToStructure<BFloat16>(IntPtr.Add(b, 2));
+                            bool pass = stored == bf16;
                             Console.WriteLine(pass
-                                ? $"      result: PASS (BF16 {value} (0x{bits:X4}) widened natively -> f32 0x{stored:X8})"
-                                : $"      result: FAIL (stored 0x{stored:X8}, expected 0x{(uint)bits << 16:X8})");
+                                ? $"      result: PASS (BF16 {value} widened natively, reloaded as BF16 {stored})"
+                                : $"      result: FAIL (reloaded {stored}, expected {bf16})");
                             if (!pass)
                                 failures++;
                             return pass;
@@ -425,18 +426,18 @@ internal static class L0Run
             Console.WriteLine("  [test 4] bf16_emul: BF16->F32 widen via OpUConvert + shift16 (safe subset, no extension)");
             foreach (float value in bf16Patterns)
             {
-                ushort bits = Bf16Bits(value);
+                var bf16 = BFloat16.CreateChecked(value);
                 TestKernel(
                     loader, context, device, queue, computeOrdinal, versions, allocShared,
                     v => SpvKernels.Bf16EmulWiden(v), "bf16_emul", argCount: 2, n: 1,
-                    fill: (a, b, c) => Marshal.WriteInt16(a, 0, (short)bits),
+                    fill: (a, b, c) => Marshal.StructureToPtr(bf16, a, false),
                     verify: (a, b, c) =>
                     {
-                        int stored = Marshal.ReadInt32(b);
-                        bool pass = stored == (int)((uint)bits << 16);
+                        var stored = Marshal.PtrToStructure<BFloat16>(IntPtr.Add(b, 2));
+                        bool pass = stored == bf16;
                         Console.WriteLine(pass
-                            ? $"      result: PASS (BF16 {value} (0x{bits:X4}) widened by shift -> f32 bits 0x{stored:X8})"
-                            : $"      result: FAIL (stored 0x{stored:X8}, expected 0x{(uint)bits << 16:X8})");
+                            ? $"      result: PASS (BF16 {value} widened by shift, reloaded as BF16 {stored})"
+                            : $"      result: FAIL (reloaded {stored}, expected {bf16})");
                         if (!pass)
                             failures++;
                         return pass;
@@ -452,7 +453,7 @@ internal static class L0Run
                 TestKernel(
                     loader, context, device, queue, computeOrdinal, versions, allocShared,
                     v => SpvKernels.Bf16NativeAccumulate(v), "bf16_native_acc", argCount: 2, n: 1,
-                    fill: (a, b, c) => Marshal.WriteInt16(a, 0, (short)Bf16Bits(1.0f)),
+                    fill: (a, b, c) => Marshal.StructureToPtr(BFloat16.CreateChecked(1.0f), a, false),
                     verify: (a, b, c) =>
                     {
                         float stored = BitConverter.Int32BitsToSingle(Marshal.ReadInt32(b));
