@@ -25,6 +25,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
     T[]? v;
     T[]? attn;
     T[]? h;
+    T[]? residual;
     T[]? gate;
     T[]? gateOut;
     T[]? up;
@@ -263,9 +264,11 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
             qBuf.AsSpan(0, qWidth), kCache.AsSpan(0, needed), vCache.AsSpan(0, needed),
             attnBuf.AsSpan(0, qWidth), newLen, numHeads, numKvHeads, headDim, scale);
 
-        // Output projection into h, then the attention residual in place.
+        // Output projection into h, then the attention residual in place; the residual is also
+        // preserved for the final output add because PostNorm below writes h in place.
         GradKernels.MatMulTransposedB(attnBuf.AsSpan(0, qWidth), WeightSpan(Attention.OProj.Weight), hBuf, 1, qWidth, hiddenSize);
         TensorPrimitives.Add(input, hBuf.AsSpan(0, hiddenSize), hBuf.AsSpan(0, hiddenSize));
+        if (residual is not null) hBuf.AsSpan(0, hiddenSize).CopyTo(residual);
 
         // PostNorm (in place), then the gated SiLU feed-forward.
         RMSNormKernel<T>.PerRowRMSNormForwardKernel(hBuf, hBuf, 1, hiddenSize, double.CreateChecked(PostNorm.Eps));
@@ -277,9 +280,10 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         GradKernels.MatMulTransposedB(hBuf.AsSpan(0, hiddenSize), WeightSpan(UpProj.Weight), upBuf, 1, hiddenSize, intermediateSize);
         TensorPrimitives.Multiply(gateOutBuf.AsSpan(0, intermediateSize), upBuf.AsSpan(0, intermediateSize), upBuf.AsSpan(0, intermediateSize));
 
-        // Down projection (into the spent attn buffer) + residual into the caller's output.
+        // Down projection (into the spent attn buffer) + residual from the preserved buffer into
+        // the caller's output.
         GradKernels.MatMulTransposedB(upBuf.AsSpan(0, intermediateSize), WeightSpan(DownProj.Weight), attnBuf, 1, intermediateSize, hiddenSize);
-        TensorPrimitives.Add(hBuf.AsSpan(0, hiddenSize), attnBuf.AsSpan(0, hiddenSize), output);
+        TensorPrimitives.Add(residual!.AsSpan(0, hiddenSize), attnBuf.AsSpan(0, hiddenSize), output);
     }
 
     /// <summary>
@@ -330,6 +334,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         var vArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * kvWidth, 1));
         var attnArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * qWidth, 1));
         var hArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
+        var residualArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * hiddenSize, 1));
         var gateArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
         var gateOutArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
         var upArr = ArrayPool<T>.Shared.Rent(Math.Max(qLen * intermediateSize, 1));
@@ -385,6 +390,8 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
                 attnArr.AsSpan(0, qLen * qWidth), qLen, numHeads, numKvHeads, headDim, scale);
             GradKernels.MatMulTransposedB(attnArr.AsSpan(0, qLen * qWidth), WeightSpan(Attention.OProj.Weight), hArr, qLen, qWidth, hiddenSize);
             TensorPrimitives.Add(input, hArr.AsSpan(0, qLen * hiddenSize), hArr.AsSpan(0, qLen * hiddenSize));
+            // Preserve the residual for the final output add (PostNorm below writes hArr in place).
+            hArr.AsSpan(0, qLen * hiddenSize).CopyTo(residualArr);
 
             // PostNorm, then the gated SiLU feed-forward.
             RMSNormKernel<T>.PerRowRMSNormForwardKernel(hArr, hArr, qLen, hiddenSize, double.CreateChecked(PostNorm.Eps));
@@ -398,9 +405,10 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
             GradKernels.MatMulTransposedB(hSpan, WeightSpan(UpProj.Weight), upArr, qLen, hiddenSize, intermediateSize);
             TensorPrimitives.Multiply(gateOutArr.AsSpan(0, qLen * intermediateSize), upArr.AsSpan(0, qLen * intermediateSize), upArr.AsSpan(0, qLen * intermediateSize));
 
-            // Down projection into the spent attn buffer + residual into the caller's output.
+            // Down projection into the spent attn buffer + residual from the preserved buffer into
+            // the caller's output.
             GradKernels.MatMulTransposedB(upArr.AsSpan(0, qLen * intermediateSize), WeightSpan(DownProj.Weight), mlpArr, qLen, intermediateSize, hiddenSize);
-            TensorPrimitives.Add(hArr.AsSpan(0, qLen * hiddenSize), mlpArr.AsSpan(0, qLen * hiddenSize), output);
+            TensorPrimitives.Add(residualArr.AsSpan(0, qLen * hiddenSize), mlpArr.AsSpan(0, qLen * hiddenSize), output);
         }
         finally
         {
@@ -410,6 +418,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
             ArrayPool<T>.Shared.Return(vArr);
             ArrayPool<T>.Shared.Return(attnArr);
             ArrayPool<T>.Shared.Return(hArr);
+            ArrayPool<T>.Shared.Return(residualArr);
             ArrayPool<T>.Shared.Return(gateArr);
             ArrayPool<T>.Shared.Return(gateOutArr);
             ArrayPool<T>.Shared.Return(upArr);
@@ -425,6 +434,7 @@ public sealed class LlamaDecoderBlock<T> : Module<T> where T : struct, IFloating
         v = new T[kvWidth];
         attn = new T[qWidth];
         h = new T[hiddenSize];
+        residual = new T[hiddenSize];
         gate = new T[intermediateSize];
         gateOut = new T[intermediateSize];
         up = new T[intermediateSize];
