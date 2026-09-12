@@ -92,6 +92,13 @@ Per-phase workflow (on an idle machine — see the load caveat below):
 3. `--compare` exits 0 on pass; on FAIL, bisect to the offending change before
    proceeding (ADR-002 no-regression gate).
 
+**Targeted gates:** when a phase touches only one surface (Qwen inference rows,
+the AutoDiff kernels, etc.), scope both runs with `--only <substring>` — e.g.
+`--only Qwen` measures just the Qwen rows (~1–2 min vs the full cold harness),
+and `--compare` ignores every other scenario. Baseline and compare must use the
+same filter on the same machine (the committed `qwen-*.json` pairs in this
+folder are qwen-only gates).
+
 ## Methodology
 
 - **No forced GC** in measurements; steady-state warmup (5 iterations) before

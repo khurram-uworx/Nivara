@@ -29,8 +29,10 @@ anchor the fuller technical detail and are cross-linked throughout:
   `samples/NivaraChat/Qwen/`.
 - **`samples/NivaraInference/README.md`** — the low-level library scratchpad:
   `qwen tools` (function calling), `qwen distill` (teacher distillation,
-  #386), `qwen benchmark` (KV-cached vs full re-forward), plus the weight
-  loading, narrow-precision, and SafeTensors loader sections.
+  #386), `qwen benchmark` (KV-cached vs full re-forward) and
+  `qwen benchmark --plain` / `qwen --plain` (no-tools single-turn benchmark and
+  demo), `--synthetic-weights` (Qwen-shaped timing without the model file),
+  plus the weight loading, narrow-precision, and SafeTensors loader sections.
 
 ### The load path (checkpoint → tensors)
 
