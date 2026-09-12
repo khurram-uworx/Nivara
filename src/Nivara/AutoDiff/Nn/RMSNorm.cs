@@ -99,32 +99,32 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
                 var gradOutData = new T[typedGradOutput.Length];
                 typedGradOutput.CopyTo(gradOutData, default(T)!);
 
-                // dL/dy = dL/dOut * gamma  (since out = y * gamma)
-                var gradNorm = new T[gradOutData.Length];
-                for (int i = 0; i < rows; i++)
-                {
-                    int baseIdx = i * normalizedShape;
-                    for (int j = 0; j < normalizedShape; j++)
-                        gradNorm[baseIdx + j] = gradOutData[baseIdx + j] * savedGamma[j];
-                }
-
-                var gradInputData = new T[gradNorm.Length];
-                RMSNormKernel<T>.PerRowRMSNormBackwardKernel(
-                    savedInput, gradNorm, gradInputData, savedRows, savedNormShape, savedEps);
-                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.CreateFromOwnedArray(gradInputData));
-
                 // dL/dgamma[j] = sum_i y[i,j] * dL/dOut[i,j]
+                // Runs first: consumes raw gradOutData before the in-place gamma multiply below.
                 var gradWeightData = new T[normalizedShape];
-                var yData = new T[gradNorm.Length];
+                var yData = new T[gradOutData.Length];
                 RMSNormKernel<T>.PerRowRMSNormForwardKernel(
                     savedInput, yData, savedRows, savedNormShape, savedEps);
+                var rowProduct = new T[normalizedShape];
                 for (int i = 0; i < rows; i++)
                 {
                     int baseIdx = i * normalizedShape;
-                    for (int j = 0; j < normalizedShape; j++)
-                        gradWeightData[j] += yData[baseIdx + j] * gradOutData[baseIdx + j];
+                    TensorPrimitives.Multiply(yData.AsSpan(baseIdx, normalizedShape), gradOutData.AsSpan(baseIdx, normalizedShape), rowProduct);
+                    TensorPrimitives.Add(rowProduct, gradWeightData, gradWeightData);
                 }
                 ReverseGradOperations.AccumulateGradient(weight.Tensor, NivaraColumn<T>.CreateFromOwnedArray(gradWeightData));
+
+                // dL/dy = dL/dOut * gamma  (since out = y * gamma) — in-place, aliasing identical to #411
+                for (int i = 0; i < rows; i++)
+                {
+                    int baseIdx = i * normalizedShape;
+                    TensorPrimitives.Multiply(gradOutData.AsSpan(baseIdx, normalizedShape), savedGamma, gradOutData.AsSpan(baseIdx, normalizedShape));
+                }
+
+                var gradInputData = new T[gradOutData.Length];
+                RMSNormKernel<T>.PerRowRMSNormBackwardKernel(
+                    savedInput, gradOutData, gradInputData, savedRows, savedNormShape, savedEps);
+                ReverseGradOperations.AccumulateGradient(input, NivaraColumn<T>.CreateFromOwnedArray(gradInputData));
             });
 
             ComputationGraph.AddNode(resultTensor, gradFn);
