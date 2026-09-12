@@ -25,6 +25,18 @@ public class GateEvaluatorTests
     }
 
     [Test]
+    public void EvaluateRow_BandwidthBoundJustAboveFloor_Passes()
+    {
+        var measured = Row(BandwidthBoundRow, opsPerSec: 260);
+        var baseline = Row(BandwidthBoundRow, opsPerSec: 1000);
+
+        var verdict = GateEvaluator.EvaluateRow(measured, baseline, 0.90, bandwidthBound: true);
+
+        Assert.That(verdict.OpsOk, Is.True);
+        Assert.That(verdict.Pass, Is.True);
+    }
+
+    [Test]
     public void EvaluateRow_BandwidthBoundAtExactBandwidthFloor_Passes()
     {
         var measured = Row(BandwidthBoundRow, opsPerSec: 100);
