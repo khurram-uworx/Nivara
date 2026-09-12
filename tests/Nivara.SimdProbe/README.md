@@ -205,9 +205,11 @@ promotion bar. RoPE stays scalar.**
 The scalar V-phase costs 2.6–3.5% of per-token wall time and grows with cache
 length; the AVX-512 d-blocked broadcast-FMA kernel is 6.5–6.7× faster,
 recovering ~2–3% of decode time. This is the one branch worth promoting into
-`src/Nivara` (gated on `Avx512F.IsSupported` + `Vector512.IsHardwareAccelerated`,
-scalar fallback, float path only — the current implementation is generic
-`IFloatingPointIeee754<T>`).
+`src/Nivara` — done. The float path now uses a three-tier chain: `Vector512`
+(AVX-512, gated on `Vector512.IsHardwareAccelerated`) → `Vector<float>`
+(portable variable-width SIMD — SSE2/AVX2/NEON on non-AVX-512 machines) →
+existing scalar loop (non-float `T` / unaccelerated runtimes). Verified by
+existing attention/KV-cache/prefill/PyTorch-parity tests.
 
 ## Findings
 

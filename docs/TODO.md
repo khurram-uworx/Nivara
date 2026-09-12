@@ -104,6 +104,6 @@ runtimes.
 
 ## GitHub issues log
 
-- [ ] (none yet — any deferred work surfaced by the probe, e.g. the RMSNorm
-      gamma `TensorPrimitives.Multiply` micro-fix, will be filed here when/if it
-      comes up; do not hold items in memory)
+- [#411](https://github.com/khurram-uworx/Nivara/issues/411) — RMSNorm forward
+  gamma multiply uses `TensorPrimitives.Multiply` (consistency micro-fix,
+  surfaced by the decode hot-path audit; negligible perf impact)
