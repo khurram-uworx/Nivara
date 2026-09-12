@@ -28,19 +28,15 @@ block-quantized weights — blocked on integer support in AutoDiff, see
 
 ## How Qwen works on Nivara — the library map
 
-An engineer wanting to run or extend Qwen should start here. Two sample READMEs
-anchor the fuller technical detail and are cross-linked throughout:
-
-- **`samples/NivaraChat/README.md`** — the user-facing `--qwen` demo (function
-  calling via `IChatClient`): `--qwen tools-weather|chat|plain`, the
-  `FunctionInvokingChatClient` tool loop, and the code layout under
-  `samples/NivaraChat/Qwen/`.
-- **`samples/NivaraInference/README.md`** — the low-level library scratchpad:
-  `qwen tools` (function calling), `qwen distill` (teacher distillation,
-  #386), `qwen benchmark` (KV-cached vs full re-forward) and
-  `qwen benchmark --plain` / `qwen --plain` (no-tools single-turn benchmark and
-  demo), `--synthetic-weights` (Qwen-shaped timing without the model file),
-  plus the weight loading, narrow-precision, and SafeTensors loader sections.
+An engineer wanting to run or extend Qwen should start here. The two sample
+projects exercise this surface from opposite directions: the **`NivaraInference`
+sample** is the library scratchpad (its `qwen` CLI: `tools` function calling,
+`distill` teacher distillation, `benchmark` KV-cached vs full re-forward,
+`--plain`/`--synthetic-weights`/`--precision bf16` variants, plus the weight
+loading and loader sections), and the **`NivaraChat` sample** is the user-facing
+chat demo (the `--qwen tools-weather|chat|plain` modes over `IChatClient`). This
+document is the ground-truth reference for the Qwen model itself; this section
+maps the code.
 
 ### The load path (checkpoint → tensors)
 
@@ -81,8 +77,7 @@ KV heads, SiLU gated FFN, `RMSNorm` (ε=1e-6), **RoPE θ=1_000_000** (10× SmolL
 Q/K/V projections**. Of these only the biased projections were a real core gap —
 everything else reused the SmolLM machinery unchanged (`LlamaLoader`,
 `LlamaForCausalLM<T>`, GQA `GqaRepeatKV`, `RMSNorm<T>`, SiLU, RoPE
-`rotate_half`, tied LM head). See `samples/NivaraInference/README.md` →
-"Qwen2.5-0.5B-Instruct" for the reusable-vs-new breakdown.
+`rotate_half`, tied LM head).
 
 ### What was added where (core vs sample-scoped)
 
@@ -137,12 +132,12 @@ The `QwenChatClient` is a plain `Microsoft.Extensions.AI.IChatClient` over
 `LlamaForCausalLM<T>` + `Gpt2BpeTokenizer` + `LlamaKVCache<T>`, wrapped by MEAI
 10.9.0's `FunctionInvokingChatClient` for the loop. It runs **inference-default**
 (ADR-001/002): `model.Eval()`, never inside `GradientUtils.Grad()`, so no graph
-nodes are built (`samples/NivaraInference/README.md` documents the same
-inference-default guarantee for its `qwen` modes). The Gpt2BpeTokenizer/loader
-gaps, the byte-exact renderer, and the parser are all described in detail below;
-the `qwen tools`/`qwen distill` feature surface is in
-`samples/NivaraInference/README.md`, and `qwen tools-weather` wiring in
-`samples/NivaraChat/README.md` → "Qwen (`--qwen`)".
+nodes are built (the `qwen` CLI modes in the `NivaraInference` sample document
+the same inference-default guarantee). The Gpt2BpeTokenizer/loader gaps, the
+byte-exact renderer, and the parser are all described in detail below; the
+`qwen tools`/`qwen distill`/`qwen benchmark` surface runs from the
+`NivaraInference` sample, and the `--qwen tools-weather` chat wiring runs from
+the `NivaraChat` sample.
 
 > **KV-cache & generation pipeline** — render → `Encode` → `SeedCache` (one
 > batched `ForwardPrefill` over the whole prompt captures K/V) → per-token
@@ -425,7 +420,7 @@ speedup over the pre-#404 ~524–571 ms/token on the same protocol. Real-checkpo
 plain seat: prefill 1,758 ms, decode ~243 ms/token, 6.1×. (The P0-1-era
 86.2 ms/token decode was a different, faster machine — cross-machine numbers are
 not comparable.) The dedicated-machine full E2E refresh (distill cycle +
-benchmark + tools rows, per the Inference README format) is tracked in **#386**.
+benchmark + tools rows in Release) is tracked in **#386**.
 
 ### Remaining / not done
 
