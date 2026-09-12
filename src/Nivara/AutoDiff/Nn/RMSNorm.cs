@@ -1,5 +1,6 @@
 using Nivara.AutoDiff.Operations;
 using System.Numerics;
+using System.Numerics.Tensors;
 
 namespace Nivara.AutoDiff.Nn;
 
@@ -78,8 +79,7 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
         for (int i = 0; i < rows; i++)
         {
             int baseIdx = i * normalizedShape;
-            for (int j = 0; j < normalizedShape; j++)
-                outputData[baseIdx + j] = outputData[baseIdx + j] * gamma[j];
+            TensorPrimitives.Multiply(outputData.AsSpan(baseIdx, normalizedShape), gamma, outputData.AsSpan(baseIdx, normalizedShape));
         }
 
         var resultTensor = new ReverseGradTensor<T>(
@@ -148,8 +148,7 @@ public sealed class RMSNorm<T> : Module<T> where T : struct, IFloatingPointIeee7
         for (int i = 0; i < rows; i++)
         {
             int baseIdx = i * cols;
-            for (int j = 0; j < cols; j++)
-                y[baseIdx + j] = y[baseIdx + j] * gamma[j];
+            TensorPrimitives.Multiply(y.AsSpan(baseIdx, cols), gamma, y.AsSpan(baseIdx, cols));
         }
         return y;
     }

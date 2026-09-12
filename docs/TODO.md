@@ -66,5 +66,4 @@ wall-clock win (~43k FLOP/token for Qwen sizes). See issue #411.
 
 ## GitHub issues log
 
-- None discovered yet. If implementation surfaces deferred work, create an issue
-  immediately (`gh issue create --repo khurram-uworx/Nivara`) and record it here.
+- [x] #418 — Vectorize RMSNorm backward grad loops with TensorPrimitives (deferred from #411 scope; created while working on #411).
