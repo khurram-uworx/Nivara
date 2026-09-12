@@ -303,6 +303,8 @@ static class Program
         RunAutoDiffSimdScenarios();
         RunQwenDecodeMatMulScenarios();
         RunQwenDecodeAttentionScenarios();
+        RunQwenDecodeBlockScenarios();
+        RunQwenDecodeForwardScenarios();
         RunQwenPrefillScenarios();
     }
 
@@ -611,6 +613,75 @@ static class Program
             input.Reshape(1, hidden);
             attn.ForwardCached(input, kvLen, kCache, vCache, kvLen);
         };
+    }
+
+    static void RunQwenDecodeBlockScenarios()
+    {
+        // Qwen2.5-0.5B single-token decoder-block decode (issue #404, docs/QWEN-PERF.md P1). Row
+        // name is identical on both branches — the body measures the per-op block chain
+        // (block.ForwardCached) at baseline and swaps to the fused span kernel
+        // (block.ForwardCachedFused) once the fused surface lands — so --compare gates the true
+        // before/after. Target: B/op drops from the per-op chain (~tens of KB) toward ~0
+        // steady-state.
+        Run("Qwen decode block [1x896 @ kvLen=64]", 3, 30,
+            () => CreateQwenDecodeBlockScenario(64));
+    }
+
+    // Qwen2.5-0.5B shapes: hidden 896, heads 14, kvHeads 2, headDim 64 (kvWidth 128), FFN 4864.
+    // Pre-populates a kvLen-row seeded cache and runs one single-token decode step through one
+    // full decoder block. Each run reuses the same pre-seeded cache so the measured op is
+    // exactly the per-token block decode step (the per-op path at baseline).
+    static Action CreateQwenDecodeBlockScenario(int kvLen)
+    {
+        const int hidden = 896, numHeads = 14, numKvHeads = 2, intermediate = 4864;
+        var block = new LlamaDecoderBlock<float>(hidden, numHeads, numKvHeads, intermediate);
+        int kvWidth = numKvHeads * (hidden / numHeads);
+        var seed = new Random(42 + kvLen);
+        // Capacity for kvLen cached positions plus the new decode row (required by ForwardCached).
+        var kCache = new float[(kvLen + 1) * kvWidth];
+        var vCache = new float[(kvLen + 1) * kvWidth];
+        for (int i = 0; i < kvLen * kvWidth; i++)
+        {
+            kCache[i] = (float)(seed.NextDouble() * 2 - 1);
+            vCache[i] = (float)(seed.NextDouble() * 2 - 1);
+        }
+
+        // A single throwaway decode warms the lazy RoPE tables so the timed op is purely the
+        // block decode step, not first-use table construction.
+        var warmToken = new ReverseGradTensor<float>(NivaraColumn<float>.Create(Fill(new float[hidden])), requiresGrad: false);
+        warmToken.Reshape(1, hidden);
+        block.ForwardCached(warmToken, kvLen, kCache, vCache, kvLen);
+
+        return () =>
+        {
+            var input = new ReverseGradTensor<float>(NivaraColumn<float>.Create(Fill(new float[hidden])), requiresGrad: false);
+            input.Reshape(1, hidden);
+            block.ForwardCached(input, kvLen, kCache, vCache, kvLen);
+        };
+    }
+
+    static void RunQwenDecodeForwardScenarios()
+    {
+        // Model-level single-token decode after a 64-token prefill (issue #404's per-token cost,
+        // docs/QWEN-PERF.md P1). Same row name on both branches — the model body routes to the
+        // fused block path outside Grad once wired, so --compare gates the before/after. The
+        // ~2 GB model is built once per row outside timing, like CreateQwenPrefillScenario.
+        Run("Qwen decode fwd [1 step]", 1, 6, () => CreateQwenDecodeForwardScenario());
+    }
+
+    static Action CreateQwenDecodeForwardScenario()
+    {
+        const int hidden = 896, kvLen = 64;
+        var model = new LlamaForCausalLM<float>(151_936, 896, 24, 14, 2, 4864);
+        var cache = new LlamaKVCache<float>(24, 2 * (hidden / 14));
+        var rng = new Random(42 + kvLen);
+        var prompt = new int[kvLen];
+        for (int i = 0; i < kvLen; i++)
+            prompt[i] = rng.Next(151_936);
+        // Seed outside timing so the measured op is exactly one decode step (KV append + attend).
+        model.ForwardPrefill(prompt, cache);
+        int nextTok = rng.Next(151_936);
+        return () => model.ForwardCached(nextTok, kvLen, cache);
     }
 
     static void RunQwenPrefillScenarios()
