@@ -127,6 +127,24 @@ public class QwenInstructParityTests
     }
 
     [Test]
+    public void Tokenizer_EncodePlainPrompt_MatchesTorchIds()
+    {
+        var promptPath = Path.Combine(ModelDir, "qwen_plain_prompt.txt");
+        var idsPath = Path.Combine(ModelDir, "qwen_plain_prompt_ids.bin");
+        if (!File.Exists(promptPath) || !File.Exists(idsPath))
+            Assert.Ignore("Qwen plain fixtures absent; skipping plain-prompt tokenizer parity verification.");
+
+        var prompt = File.ReadAllText(promptPath);
+        var expected = ReadInt32("qwen_plain_prompt_ids.bin");
+
+        var ids = Tokenizer.Encode(prompt);
+
+        Assert.That(ids.Count, Is.EqualTo(expected.Length));
+        for (int i = 0; i < expected.Length; i++)
+            Assert.That(ids[i], Is.EqualTo(expected[i]), $"token[{i}] differs (expected {expected[i]}, got {ids[i]})");
+    }
+
+    [Test]
     public void Tokenizer_VocabSize_IncludesAddedTokens()
     {
         // 151,643 base vocab + 22 added tokens (incl. <tool_call>/</tool_call>).
@@ -278,6 +296,62 @@ public class QwenInstructParityTests
         // numeric errors (rope/transpose/attention bugs) land far outside it.
         Assert.That(maxAbsDiff, Is.LessThan(0.03f * maxAbsLogit + 0.5f),
             "final-position logits must be within BF16-reference relative tolerance");
+    }
+
+    [Test]
+    public void Model_GreedyPlainPrompt_MatchesTorchGeneratedIds()
+    {
+        var idsPath = Path.Combine(ModelDir, "qwen_plain_ids_py.bin");
+        var logitsPath = Path.Combine(ModelDir, "qwen_plain_logits_py.bin");
+        if (!File.Exists(idsPath) || !File.Exists(logitsPath))
+            Assert.Ignore("Qwen plain fixtures absent; skipping plain greedy parity verification.");
+
+        var (model, config) = Model;
+        var promptIds = ReadInt32("qwen_plain_prompt_ids.bin");
+        var expected = ReadInt32("qwen_plain_ids_py.bin");
+
+        var answer = Greedy(model, config, promptIds, maxNewTokens: 160);
+        TestContext.Out.WriteLine("C# plain ids: " + string.Join(",", answer));
+        TestContext.Out.WriteLine("Py plain ids:  " + string.Join(",", expected));
+
+        // Byte-identical structural check: the short plain answer must be token-identical to the
+        // Torch greedy run — same strictness as the 19-token tool turn (free-form final answers
+        // are the only surface with a documented near-tie flip).
+        Assert.That(answer.Count, Is.EqualTo(expected.Length));
+        for (int i = 0; i < expected.Length; i++)
+            Assert.That(answer[i], Is.EqualTo(expected[i]), $"answer token[{i}] differs (expected {expected[i]}, got {answer[i]})");
+
+        // Numeric parity over the SAME input Torch saw: last-row logits predicting eos from the
+        // full Py prompt + answer must match the fixture within the BF16 relative tolerance.
+        var fullIds = promptIds.Concat(expected).ToArray();
+        var logits = model.Forward(fullIds); // [L, vocab]
+        var torchLogits = ReadFloat32("qwen_plain_logits_py.bin");
+        Assert.That(logits.Shape[1], Is.EqualTo(torchLogits.Length));
+
+        int vocab = torchLogits.Length;
+        int offset = logits.Length - vocab;
+        float maxAbsDiff = 0f;
+        float maxAbsLogit = 0f;
+        int argmax = -1;
+        float best = float.NegativeInfinity;
+        for (int i = 0; i < torchLogits.Length; i++)
+        {
+            float cSharp = logits[offset + i];
+            maxAbsDiff = Math.Max(maxAbsDiff, Math.Abs(cSharp - torchLogits[i]));
+            maxAbsLogit = Math.Max(maxAbsLogit, Math.Abs(torchLogits[i]));
+            if (cSharp > best)
+            {
+                best = cSharp;
+                argmax = i;
+            }
+        }
+        TestContext.Out.WriteLine(
+            $"plain final-position logits: maxAbsDiff={maxAbsDiff:F6}, " +
+            $"refMaxAbs={maxAbsLogit:F3}, argmax={argmax}");
+
+        Assert.That(argmax, Is.EqualTo(151645), "plain final-row argmax must predict <|im_end|>");
+        Assert.That(maxAbsDiff, Is.LessThan(0.03f * maxAbsLogit + 0.5f),
+            "plain final-position logits must be within BF16-reference relative tolerance");
     }
 
     /// <summary>Greedily decodes with a KV cache (numeric-identical to full forward), stopping on

@@ -137,6 +137,31 @@ public class LlamaForCausalLMPrefillTests
     }
 
     [Test]
+    public void ForwardPrefill_PlainPromptLength_SeedThenCachedDecode_MatchesFullForward()
+    {
+        // The Qwen plain (no-tools) prompt (system + user + generation prompt) renders to 36
+        // tokens (measured from the real checkpoint via qwen benchmark --plain); pin
+        // seed-then-decode == full Forward at that length so the #408 plain surface and the
+        // #403 fused prefill attention share one always-run 1e-5 numeric seat (no checkpoint
+        // required).
+        using var model = TinyModel();
+        int[] prompt = Enumerable.Range(1, 36).ToArray();
+        int[] gen = [7, 21, 55];
+        using var cache = new LlamaKVCache<float>(2, KvWidth(4, 2, 32));
+
+        var logits = model.ForwardPrefill(prompt, cache);
+        AssertLastRowClose(model.Forward(prompt), logits, 128);
+
+        var prefix = new List<int>(prompt);
+        foreach (var g in gen)
+        {
+            prefix.Add(g);
+            logits = model.ForwardCached(g, prefix.Count - 1, cache);
+            AssertLastRowClose(model.Forward(prefix.ToArray()), logits, 128);
+        }
+    }
+
+    [Test]
     public void ForwardPrefill_CapturesAllKvRows_AtCorrectOffsets()
     {
         // Model-level (offset 0): rows [0, L) captured, rows [L, capacity) untouched fresh zeros.
