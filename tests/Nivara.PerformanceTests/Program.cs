@@ -34,7 +34,7 @@ static class Program
 
     static int Main(string[] args)
     {
-        var (jsonPath, comparePath, runs, minOpsFraction, datasetTest, safetensorsMmap) = ParseArgs(args);
+        var (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap) = ParseArgs(args);
 
         if (datasetTest)
         {
@@ -50,7 +50,7 @@ static class Program
 
         if (runs > 1)
         {
-            var results = MeasureAcrossProcesses(runs);
+            var results = MeasureAcrossProcesses(runs, only);
             if (results is null)
                 return 2;
 
@@ -67,6 +67,9 @@ static class Program
 
         PrintHeader();
         RegisterScenarios();
+
+        if (only is not null)
+            s_scenarios.RemoveAll(s => !s.Name.Contains(only, StringComparison.OrdinalIgnoreCase));
 
         var singleResults = new List<ScenarioResult>();
         foreach (var scenario in s_scenarios)
@@ -102,7 +105,7 @@ static class Program
             PrintRow(r);
     }
 
-    static List<ScenarioResult>? MeasureAcrossProcesses(int runs)
+    static List<ScenarioResult>? MeasureAcrossProcesses(int runs, string? only)
     {
         var exe = Environment.ProcessPath;
         if (exe is null)
@@ -126,6 +129,11 @@ static class Program
                 };
                 psi.ArgumentList.Add("--runs");
                 psi.ArgumentList.Add("1");
+                if (only is not null)
+                {
+                    psi.ArgumentList.Add("--only");
+                    psi.ArgumentList.Add(only);
+                }
                 psi.ArgumentList.Add("--json");
                 psi.ArgumentList.Add(tmpFiles[i]);
                 using var child = Process.Start(psi);
@@ -901,9 +909,9 @@ static class Program
     static void PrintRow(ScenarioResult r)
         => Console.WriteLine($"{r.Name,-46} {r.OpsPerSec,12:N0} {r.NsPerOp,8:N0} {r.BytesPerOp,12:N0} {r.Gen0PerOp,7:N2}");
 
-    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, bool DatasetTest, bool SafetensorsMmap) ParseArgs(string[] args)
+    static (string? JsonPath, string? ComparePath, int Runs, double MinOpsFraction, string? Only, bool DatasetTest, bool SafetensorsMmap) ParseArgs(string[] args)
     {
-        string? jsonPath = null, comparePath = null;
+        string? jsonPath = null, comparePath = null, only = null;
         int runs = 1;
         double minOpsFraction = DefaultMinOpsFraction;
         bool datasetTest = false;
@@ -919,6 +927,9 @@ static class Program
                 case "--safetensors-mmap":
                     safetensorsMmap = true;
                     break;
+                case "--only" when i + 1 < args.Length:
+                    only = args[++i];
+                    break;
                 case "--json" when i + 1 < args.Length:
                     jsonPath = args[++i];
                     break;
@@ -933,13 +944,13 @@ static class Program
                     break;
                 default:
                     Console.Error.WriteLine($"Unknown argument: {args[i]}");
-                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
+                    Console.Error.WriteLine("Usage: Nivara.PerformanceTests [--dataset-test] [--safetensors-mmap [<path>]] [--only <substring>] [--json <path>] [--compare <baseline.json>] [--runs <n>] [--tolerance <pct>]");
                     Environment.Exit(2);
                     break;
             }
         }
 
-        return (jsonPath, comparePath, runs, minOpsFraction, datasetTest, safetensorsMmap);
+        return (jsonPath, comparePath, runs, minOpsFraction, only, datasetTest, safetensorsMmap);
     }
 
     static void WriteJson(string path, List<ScenarioResult> results, int runs)

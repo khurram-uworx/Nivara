@@ -397,6 +397,16 @@ dotnet run --project samples/NivaraInference -c Release -- qwen distill --force
 
 # Decode benchmark: median-of-3 tool-call turns, KV-cached vs full re-forward
 dotnet run --project samples/NivaraInference -c Release -- qwen benchmark
+
+# Plain (no-tools) single-turn surfaces
+dotnet run --project samples/NivaraInference -c Release -- qwen --plain                # single-shot demo
+dotnet run --project samples/NivaraInference -c Release -- qwen benchmark --plain     # decode benchmark (no tools)
+# (--text overrides the default fixed plain prompt "What is the capital of France?")
+
+# Synthetic Qwen-shaped weights (no model file; timing shapes only, ~3x faster)
+dotnet run --project samples/NivaraInference -c Release -- qwen --synthetic-weights benchmark
+dotnet run --project samples/NivaraInference -c Release -- qwen --synthetic-weights benchmark --plain
+
 # (qwen default load is the fused BF16->F32 read; --precision f32 is equivalent)
 ```
 
