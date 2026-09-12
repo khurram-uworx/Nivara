@@ -160,7 +160,16 @@ Update this file's Results section with before/after numbers.
 
 ### Before (scalar backward, current code)
 
-_Captured during commit 1._
+Captured 2026-09-12 via commit 1 harness, `--only RMSNorm --runs 3` (`.NET 11.0.0`, Intel Core Ultra 7 255H).
+Medians of 3 child-process runs — `tests/Nivara.PerformanceTests/rmsnorm-before.json`.
+
+| Scenario | ops/s | ns/op | B/op | gen0/op |
+|---|---|---|---|---|
+| AutoDiff RMSNorm fwd+bwd 1M x float (functional — control) | 181 | 5,521,270 | 8,002,250 | 0.30 |
+| AutoDiff RMSNorm scalar baseline 1M x float (control) | 309 | 3,232,970 | 2 | 0.00 |
+| **AutoDiff RMSNormModule fwd+bwd 1M x float (#418 closure)** | **36** | **28,059,495** | **33,606,170** | **0.80** |
+
+Expected after change: B/op −4,000,000 (gradNorm allocation removed), flat-to-slightly-better ops/s.
 
 ### After (TensorPrimitives backward)
 

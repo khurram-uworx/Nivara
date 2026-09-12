@@ -477,6 +477,30 @@ static class Program
                     }
                 };
             });
+
+        // #418 gate: the RMSNorm<T> module grad closure (gamma multiply + gamma-grad accumulation),
+        // exercised end-to-end. The "AutoDiff RMSNorm fwd+bwd" row above covers the functional op
+        // (ReverseGradOperations.RMSNorm) only, not the affine module.
+        Run("AutoDiff RMSNormModule fwd+bwd 1M x float", 5, 20,
+            () =>
+            {
+                const int rows = 256, cols = 4096;
+                var rms = new RMSNorm<float>(cols, eps: 1e-5f);
+                var inputColumn = NivaraColumn<float>.Create(Fill(new float[rows * cols]));
+                var ones = Fill(new float[rows * cols]);
+                return () =>
+                {
+                    using (GradientUtils.Grad())
+                    {
+                        var input = new ReverseGradTensor<float>(inputColumn, requiresGrad: true);
+                        input.Reshape(rows, cols);
+                        var output = rms.Forward(input);
+                        var gradient = new ReverseGradTensor<float>(NivaraColumn<float>.Create(ones), requiresGrad: false);
+                        gradient.Reshape(rows, cols);
+                        output.Backward(gradient);
+                    }
+                };
+            });
     }
 
     static void RunQwenDecodeMatMulScenarios()
