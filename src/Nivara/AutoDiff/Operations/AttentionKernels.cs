@@ -137,4 +137,88 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
             ArrayPool<T>.Shared.Return(scores);
         }
     }
+
+    /// <summary>
+    /// Batched (multi-row) GQA prefill attention over a chunk of <c>qLen</c> rows with a
+    /// causal mask, mirroring <see cref="DecodeAttention"/>'s no-materialization contract.
+    ///
+    /// Query is <c>[qLen, numHeads * headDim]</c> (post-RoPE, contiguous rows). The key/value
+    /// caches are row-major <c>[kvLen, numKvHeads * headDim]</c> holding this chunk's rows
+    /// (post-RoPE, pre-repeat, per-KV-head layout exactly as captured by
+    /// <c>LlamaCausalAttention.ForwardPrefill</c>). Each query head <c>qh</c> attends against its
+    /// shared KV head <c>kv = qh / repeat</c> (<c>repeat = numHeads / numKvHeads</c>) with a
+    /// <em>virtual</em> GQA mapping — the cache is read strided, so no GqaRepeatKV expansion, no
+    /// head repack, no <c>[numHeads, L, L]</c> score block, and no mask allocation occur. Row
+    /// <c>i</c> attends to cache rows <c>[0, i]</c> only (reduced-range causal softmax: the masked
+    /// <c>j &gt; i</c> tail contributes exp(−∞) = 0, so softmaxing the j-range directly is
+    /// mathematically identical to the full-row + additive-scale-then-softmax path; the absolute
+    /// position offset is irrelevant because only this chunk's rows are visible to each other,
+    /// exactly as the current <c>[qLen, qLen]</c> mask semantics).
+    ///
+    /// This is the inference-only prefill attention path for
+    /// <c>LlamaCausalAttention.ForwardCore</c>; it builds no graph nodes and allocates only one
+    /// rented score buffer (ArrayPool-reused across rows and heads).
+    /// </summary>
+    /// <param name="q">Query rows, <c>[qLen * numHeads * headDim]</c></param>
+    /// <param name="kCache">RoPE'd key cache (this chunk's rows), <c>[qLen * numKvHeads * headDim]</c></param>
+    /// <param name="vCache">Value cache (this chunk's rows), <c>[qLen * numKvHeads * headDim]</c></param>
+    /// <param name="output">Attention output, <c>[qLen * numHeads * headDim]</c></param>
+    /// <param name="qLen">Number of query rows in this chunk (must be ≥ 1)</param>
+    /// <param name="numHeads">Query head count (must be divisible by <paramref name="numKvHeads"/>)</param>
+    /// <param name="numKvHeads">Key/value head count</param>
+    /// <param name="headDim">Per-head dimension</param>
+    /// <param name="scale">Attention scale (usually <c>1/sqrt(headDim)</c>)</param>
+    public static void BatchedAttention(
+        ReadOnlySpan<T> q,
+        ReadOnlySpan<T> kCache,
+        ReadOnlySpan<T> vCache,
+        Span<T> output,
+        int qLen,
+        int numHeads,
+        int numKvHeads,
+        int headDim,
+        T scale)
+    {
+        if (qLen <= 0) throw new ArgumentOutOfRangeException(nameof(qLen));
+        if (numHeads <= 0 || numKvHeads <= 0 || numHeads % numKvHeads != 0)
+            throw new ArgumentException($"numHeads ({numHeads}) must be a positive multiple of numKvHeads ({numKvHeads}).");
+        if (headDim <= 0) throw new ArgumentOutOfRangeException(nameof(headDim));
+
+        int repeat = numHeads / numKvHeads;
+        int kvWidth = numKvHeads * headDim;
+        if (q.Length < qLen * numHeads * headDim) throw new ArgumentOutOfRangeException(nameof(q));
+        if (kCache.Length < qLen * kvWidth || vCache.Length < qLen * kvWidth)
+            throw new ArgumentOutOfRangeException(nameof(kCache));
+        if (output.Length < qLen * numHeads * headDim) throw new ArgumentOutOfRangeException(nameof(output));
+
+        var scores = ArrayPool<T>.Shared.Rent(Math.Max(qLen, 1));
+        try
+        {
+            var scoresSpan = scores.AsSpan(0, qLen);
+            output.Clear();
+            for (int qh = 0; qh < numHeads; qh++)
+            {
+                int kvHead = qh / repeat;
+                for (int i = 0; i < qLen; i++)
+                {
+                    var qRow = q.Slice(i * numHeads * headDim + qh * headDim, headDim);
+                    for (int j = 0; j <= i; j++)
+                        scoresSpan[j] = scale * TensorPrimitives.Dot(qRow, kCache.Slice(j * kvWidth + kvHead * headDim, headDim));
+                    SoftmaxRows(scoresSpan[..(i + 1)], 1, i + 1);
+                    var outRow = output.Slice(i * numHeads * headDim + qh * headDim, headDim);
+                    for (int j = 0; j <= i; j++)
+                    {
+                        var vRow = vCache.Slice(j * kvWidth + kvHead * headDim, headDim);
+                        T w = scoresSpan[j];
+                        for (int d = 0; d < headDim; d++)
+                            outRow[d] += w * vRow[d];
+                    }
+                }
+            }
+        }
+        finally
+        {
+            ArrayPool<T>.Shared.Return(scores);
+        }
+    }
 }
