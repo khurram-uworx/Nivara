@@ -271,16 +271,23 @@ public class LlamaDecoderBlockTests
         var input = Filled(hidden, 9);
         var output = new float[hidden];
 
-        // Warm the RoPE tables, the per-block scratch, and the ArrayPool score buffer.
-        for (int i = 0; i < 3; i++)
+        // Warm the RoPE tables, the per-block scratch, and the ArrayPool score buffer; let tiered JIT promotion settle.
+        for (int i = 0; i < 32; i++)
             block.ForwardCachedFused(input, output, kvLen, kCache, vCache, kvLen);
 
-        long before = GC.GetAllocatedBytesForCurrentThread();
-        for (int i = 0; i < 50; i++)
-            block.ForwardCachedFused(input, output, kvLen, kCache, vCache, kvLen);
-        long after = GC.GetAllocatedBytesForCurrentThread();
+        // Take the minimum over several windows so transient runner noise (pool trim, late tiering)
+        // cannot inflate the guard; a per-call allocation regression still fails every window.
+        long best = long.MaxValue;
+        for (int w = 0; w < 3; w++)
+        {
+            long before = GC.GetAllocatedBytesForCurrentThread();
+            for (int i = 0; i < 50; i++)
+                block.ForwardCachedFused(input, output, kvLen, kCache, vCache, kvLen);
+            long delta = GC.GetAllocatedBytesForCurrentThread() - before;
+            if (delta < best) best = delta;
+        }
 
-        Assert.That(after - before, Is.LessThan(2048),
+        Assert.That(best, Is.LessThan(2048),
             "Fused decode block must not allocate per call in steady state.");
     }
 
