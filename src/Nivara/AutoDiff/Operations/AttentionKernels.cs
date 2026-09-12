@@ -145,19 +145,22 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
     /// Query is <c>[qLen, numHeads * headDim]</c> (post-RoPE, contiguous rows). The key/value
     /// caches are row-major <c>[kvLen, numKvHeads * headDim]</c> holding this chunk's rows
     /// (post-RoPE, pre-repeat, per-KV-head layout exactly as captured by
-    /// <c>LlamaCausalAttention.ForwardPrefill</c>). Each query head <c>qh</c> attends against its
-    /// shared KV head <c>kv = qh / repeat</c> (<c>repeat = numHeads / numKvHeads</c>) with a
-    /// <em>virtual</em> GQA mapping — the cache is read strided, so no GqaRepeatKV expansion, no
-    /// head repack, no <c>[numHeads, L, L]</c> score block, and no mask allocation occur. Row
-    /// <c>i</c> attends to cache rows <c>[0, i]</c> only (reduced-range causal softmax: the masked
-    /// <c>j &gt; i</c> tail contributes exp(−∞) = 0, so softmaxing the j-range directly is
-    /// mathematically identical to the full-row + additive-scale-then-softmax path; the absolute
-    /// position offset is irrelevant because only this chunk's rows are visible to each other,
-    /// exactly as the current <c>[qLen, qLen]</c> mask semantics).
+    /// <c>LlamaCausalAttention.ForwardPrefill</c>). Per query head <c>qh</c> the shared KV head
+    /// <c>kv = qh / repeat</c> (<c>repeat = numHeads / numKvHeads</c>) is attended with a
+    /// <em>virtual</em> GQA mapping — the cache is read strided, so no GqaRepeatKV expansion
+    /// occurs and only <c>numKvHeads</c> packs of K/V are gathered (not <c>numHeads</c>).
+    ///
+    /// Per head the work mirrors <see cref="ReverseGradOperations.MultiHeadAttention{T}"/>
+    /// exactly: packed heads → <c>GradKernels.MatMulTransposedB</c> QK^T → scale → masked
+    /// positions set to −∞ (the causal additive-mask values, folded in place) → full-row
+    /// softmax → <c>GradKernels.MatMul</c> with V → scatter. The rows, scores, mask, and
+    /// per-head output buffers are ArrayPool-rented and reused across heads and layers, so the
+    /// only heap allocation is the output tensor itself. The absolute position offset is
+    /// irrelevant because only this chunk's rows are visible to each other, exactly as the
+    /// current <c>[qLen, qLen]</c> mask semantics.
     ///
     /// This is the inference-only prefill attention path for
-    /// <c>LlamaCausalAttention.ForwardCore</c>; it builds no graph nodes and allocates only one
-    /// rented score buffer (ArrayPool-reused across rows and heads).
+    /// <c>LlamaCausalAttention.ForwardCore</c>; it builds no graph nodes.
     /// </summary>
     /// <param name="q">Query rows, <c>[qLen * numHeads * headDim]</c></param>
     /// <param name="kCache">RoPE'd key cache (this chunk's rows), <c>[qLen * numKvHeads * headDim]</c></param>
@@ -186,39 +189,67 @@ internal static class AttentionKernels<T> where T : struct, IFloatingPointIeee75
 
         int repeat = numHeads / numKvHeads;
         int kvWidth = numKvHeads * headDim;
-        if (q.Length < qLen * numHeads * headDim) throw new ArgumentOutOfRangeException(nameof(q));
+        int D = numHeads * headDim;
+        if (q.Length < qLen * D) throw new ArgumentOutOfRangeException(nameof(q));
         if (kCache.Length < qLen * kvWidth || vCache.Length < qLen * kvWidth)
             throw new ArgumentOutOfRangeException(nameof(kCache));
-        if (output.Length < qLen * numHeads * headDim) throw new ArgumentOutOfRangeException(nameof(output));
+        if (output.Length < qLen * D) throw new ArgumentOutOfRangeException(nameof(output));
 
-        var scores = ArrayPool<T>.Shared.Rent(Math.Max(qLen, 1));
+        int qHeadsLen = numHeads * qLen * headDim;
+        int kvHeadsLen = numKvHeads * qLen * headDim;
+        int scoreLen = qLen * qLen;
+
+        var qHeads = ArrayPool<T>.Shared.Rent(Math.Max(qHeadsLen, 1));
+        var kHeads = ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1));
+        var vHeads = ArrayPool<T>.Shared.Rent(Math.Max(kvHeadsLen, 1));
+        var scores = ArrayPool<T>.Shared.Rent(Math.Max(scoreLen, 1));
+        var outHead = ArrayPool<T>.Shared.Rent(Math.Max(qLen * headDim, 1));
         try
         {
-            var scoresSpan = scores.AsSpan(0, qLen);
+            var qHeadsSpan = qHeads.AsSpan(0, qHeadsLen);
+            var kHeadsSpan = kHeads.AsSpan(0, kvHeadsLen);
+            var vHeadsSpan = vHeads.AsSpan(0, kvHeadsLen);
+            var scoresSpan = scores.AsSpan(0, scoreLen);
+
+            PackHeads(q, qHeadsSpan, qLen, numHeads, headDim);
+            for (int h = 0; h < numKvHeads; h++)
+            {
+                GatherHead(kCache, kHeads.AsSpan(h * qLen * headDim, qLen * headDim), qLen, kvWidth, h, headDim);
+                GatherHead(vCache, vHeads.AsSpan(h * qLen * headDim, qLen * headDim), qLen, kvWidth, h, headDim);
+            }
+
             output.Clear();
             for (int qh = 0; qh < numHeads; qh++)
             {
                 int kvHead = qh / repeat;
+                var qhBuf = qHeadsSpan.Slice(qh * qLen * headDim, qLen * headDim);
+                var khBuf = kHeadsSpan.Slice(kvHead * qLen * headDim, qLen * headDim);
+                var vhBuf = vHeadsSpan.Slice(kvHead * qLen * headDim, qLen * headDim);
+
+                // QK^T via the same bulk kernel MultiHeadAttention uses, then scale and fold the
+                // causal mask (−∞ beyond the diagonal) directly into the score buffer so the
+                // full-row softmax sees identical values to the additive-mask path.
+                GradKernels.MatMulTransposedB(qhBuf, khBuf, scores, qLen, headDim, qLen);
+                TensorPrimitives.Multiply(scoresSpan, scale, scoresSpan);
                 for (int i = 0; i < qLen; i++)
                 {
-                    var qRow = q.Slice(i * numHeads * headDim + qh * headDim, headDim);
-                    for (int j = 0; j <= i; j++)
-                        scoresSpan[j] = scale * TensorPrimitives.Dot(qRow, kCache.Slice(j * kvWidth + kvHead * headDim, headDim));
-                    SoftmaxRows(scoresSpan[..(i + 1)], 1, i + 1);
-                    var outRow = output.Slice(i * numHeads * headDim + qh * headDim, headDim);
-                    for (int j = 0; j <= i; j++)
-                    {
-                        var vRow = vCache.Slice(j * kvWidth + kvHead * headDim, headDim);
-                        T w = scoresSpan[j];
-                        for (int d = 0; d < headDim; d++)
-                            outRow[d] += w * vRow[d];
-                    }
+                    int rowStart = i * qLen;
+                    for (int j = i + 1; j < qLen; j++)
+                        scores[rowStart + j] = T.NegativeInfinity;
                 }
+                SoftmaxRows(scoresSpan, qLen, qLen);
+
+                GradKernels.MatMul(scores, vhBuf, outHead, qLen, qLen, headDim);
+                ScatterHead(outHead.AsSpan(0, qLen * headDim), output, qLen, D, qh, headDim);
             }
         }
         finally
         {
+            ArrayPool<T>.Shared.Return(qHeads);
+            ArrayPool<T>.Shared.Return(kHeads);
+            ArrayPool<T>.Shared.Return(vHeads);
             ArrayPool<T>.Shared.Return(scores);
+            ArrayPool<T>.Shared.Return(outHead);
         }
     }
 }
