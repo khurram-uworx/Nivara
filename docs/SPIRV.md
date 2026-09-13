@@ -6,8 +6,8 @@ when it tried to write kernels **by hand** — `spirv.core.grammar.json` opcode 
 opcode — against the Intel **Level Zero** API, and why that path is a **dead
 end for real math on this driver**, plus what still works (the safe subset) and
 what the findings imply for every compiler-backed path that followed. The
-series continues with `docs/SYCL.md` (oneAPI DPC++ → SPIR-V) and
-`docs/DX12.md` (HLSL `cs_5_1` DXBC), and will get a fourth, `docs/OPENVINO.md`
+series continues with `docs/SYCL.md` (oneAPI DPC++ → SPIR-V), `docs/DX12.md`
+(HLSL `cs_5_1` DXBC), and the fourth, `docs/OPENVINO.md`
 (Intel OpenVINO GPU plugin — issue #428).
 
 All findings below were verified on an **Intel Arc 140T** (8086:7DD1, 128 EU,
@@ -60,7 +60,8 @@ The safe constructs, in one line each:
 
 That last bullet is why the whole phase kept **BF16 on the wire** everywhere:
 the transport (raw `BFloat16` bits → GPU-side widen) is validated on every path
-that followed (SYCL, DX12 — and OpenVINO will reuse it).
+that followed (SYCL, DX12 — and OpenVINO proved it again, with raw-BF16 `.bin`
+weights consumed by the plugin).
 
 ## 3. What this driver cannot do (IGC OpenCL-frontend bugs)
 
@@ -116,10 +117,11 @@ access that any real GEMM needs. The design decision this data forced:
 - **DX12 remains the IGC-bypass side-path**: HLSL → DXBC `cs_5_1` goes through
   the driver's D3D12 compute frontend, entirely bypassing the buggy OpenCL
   frontend — and was later **compute-proven** end-to-end (`docs/DX12.md`).
-- **OpenVINO (issue #428)** is the third, first-party option whose GPU plugin
+- **OpenVINO (issue #428)** was the third, first-party option whose GPU plugin
   historically also sits on the OpenCL/IGC stack — its tuned, precompiled
-  kernel set may behave differently from hand-authored SPIR-V; the phase will
-  measure exactly that.
+  kernel set may behave differently from hand-authored SPIR-V. Measured: it
+  does (**PASS all three kernels on the F32 config; the BF16 row's silu is an
+  honest F16-precision finding, `docs/OPENVINO.md`**).
 
 ## 6. Lessons for Nivara's GPU strategy
 
@@ -136,10 +138,11 @@ access that any real GEMM needs. The design decision this data forced:
   (native + emulated), SYCL and DX12. Design debt zero.
 - **Decision input for a future `src/Nivara.Gpu`:** on this
   Arc iGPU/Windows/driver, the proven compute paths are compiler-backed
-  (SYCL/oneMKL-shaped) and driver-shader-backed (DX12); L0 hand-authored is
-  excluded; OpenVINO's verdict is pending (#428). The three-way numbers the
-  case-study series ends up with (PR #427, `docs/SYCL.md`, `docs/DX12.md`) are
-  the rough end-to-end estimate inputs.
+(SYCL/oneMKL-shaped) and driver-shader-backed (DX12); L0 hand-authored is
+   excluded; OpenVINO's verdict is in (#428, `docs/OPENVINO.md`). The four way
+   numbers the case-study series ends up with (PR #427, `docs/SYCL.md`,
+   `docs/DX12.md`, `docs/OPENVINO.md`) are the rough end-to-end estimate
+   inputs.
 
 ## Reference links
 
@@ -148,4 +151,4 @@ access that any real GEMM needs. The design decision this data forced:
 - [SPIR-V 1.0 core grammar](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html)
 - [SPV_INTEL_bfloat16_conversion extension (Khronos)](https://github.com/KhronosGroup/SPIRV-Registry/blob/main/extensions/INTEL/SPV_INTEL_bfloat16_conversion.asciidoc)
 - [IGCIT #1144 — Blender access violation on Arc B580 (driver bug class)](https://github.com/intel/intel-graphics-compiler/issues/1144)
-- Series: `docs/SYCL.md` · `docs/DX12.md` · (pending) `docs/OPENVINO.md` — issue #428
+- Series: `docs/SYCL.md` · `docs/DX12.md` · `docs/OPENVINO.md` — issue #428

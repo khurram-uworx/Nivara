@@ -344,11 +344,14 @@ kernel launches (batch decode tokens).
 
 ### CPU vs GPU kernel-only timing (measured, GpuProbe `kernels` mode, Arc 140T)
 
-| Kernel | CPU (production Nivara) | SYCL kernel-only | Speedup | Notes |
-|---|---|---|---|---|
-| dot16 (K=16) | 3.4 µs | 52.7 µs | **0.06× (GPU slower)** | Pure launch overhead; a 16-element dot is not parallel work |
-| silu (576) | 77.0 µs | 33.5 µs | **2.3× faster** | 576 parallel lanes beat the scalar CPU loop |
-| gemv (1536×576) | 4560 µs | 197.8 µs | **23.1× faster** | 1536 output rows fully parallel on the EU array |
+**Measured figures live in the probe README's consolidated side-by-side table**
+(`tests/Nivara.GpuProbe/README.md` → "Backend comparison — the numbers, side by
+side"), which gathers the SYCL, DX12 and OpenVINO numbers into one view; this
+doc's range for this leg was dot16 3.4/13–53 µs, silu 33.5/12–34 µs, gemv
+197.8/170–198 µs — SYCL is launch-bound at K=16, ~2× CPU on silu, ~23× CPU on
+gemv. The **23.1× gemv result is this leg's decisive number**: every decode
+token in SmolLM is dominated by [1536×576]·[576] GEMVs, and the GPU runs each
+one ~23× faster than the production CPU kernel at these exact shapes.
 
 Measured with a best-of-3 per kernel (post-JIT steady state, submit+wait only,
 excluding process/queue setup — the SYCL runner prints `TIME` lines). CPU
