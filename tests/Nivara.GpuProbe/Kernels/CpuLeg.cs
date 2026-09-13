@@ -78,10 +78,25 @@ internal static class CpuLeg
     }
 
     /// <summary>
-    /// The CPU leg over the full fixture set — the gold target for all other legs.
+    /// The CPU leg over the full fixture set — the gold target for all other legs,
+    /// with per-kernel wall time in microseconds.
     /// </summary>
-    public static LegResults ComputeLeg(KernelFixtures fixtures) => new(
-        Dot(fixtures.Dot16A, fixtures.Dot16B),
-        Silu(fixtures.SiluX),
-        Gemv(fixtures.GemvX, fixtures.GemvW, KernelFixtures.IntermediateSize, KernelFixtures.HiddenSize));
+    public static LegResults ComputeLeg(KernelFixtures fixtures)
+    {
+        var sw = new System.Diagnostics.Stopwatch();
+
+        sw.Restart();
+        float dot = Dot(fixtures.Dot16A, fixtures.Dot16B);
+        double dot16Us = sw.Elapsed.TotalMicroseconds;
+
+        sw.Restart();
+        float[] silu = Silu(fixtures.SiluX);
+        double siluUs = sw.Elapsed.TotalMicroseconds;
+
+        sw.Restart();
+        float[] gemv = Gemv(fixtures.GemvX, fixtures.GemvW, KernelFixtures.IntermediateSize, KernelFixtures.HiddenSize);
+        double gemvUs = sw.Elapsed.TotalMicroseconds;
+
+        return new LegResults(dot, silu, gemv, dot16Us, siluUs, gemvUs);
+    }
 }

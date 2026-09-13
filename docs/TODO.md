@@ -228,7 +228,11 @@ After all gates pass and perf is measured on the same fixtures:
   the production CPU leg **and** its throughput ≥ production-CPU
   `MatMulTransposedB` throughput → record in `docs/SMOLLM-GPU.md` that a
   **SYCL/oneAPI-backed `src/Nivara.Gpu`** is the recommended route (promotion
-  decided explicitly later, per the human).
+  decided explicitly later, per the human). **Measured (commit 7):** silu is
+  2.3× and gemv 23.1× faster than the production CPU kernels at the exact
+  SmolLM shapes; dot16 (K=16) is launch-bound and 15× slower — dot16 is a
+  correctness probe, not a perf row. The full three-way table lands with the
+  DX12 leg (commit 9).
 - **If** the SYCL kernels are correct but slower → record the honest verdict
   (correct, not-yet-fast) and the perf gap; DX12 remains the measured comparison leg
   (FL 12_2 / SM 6.8 verified), L0 stays a documented degenerate path (dot-K16/SiLU
@@ -291,17 +295,39 @@ After all gates pass and perf is measured on the same fixtures:
    `kernels` CLI mode (and `sycl` routed through the same harness). Verified: kernels mode
    exits 0, all gates pass (dot16 0.0 ULP, silu 576/576 worst 4 ULP, gemv 1536/1536 worst
    row |diff| = 1.63e-9). README: `kernels` build/run line + harness explanation + Files.
-7. `probe: hand-rolled DX12 compute path` — D3d12Compute.cs (device→PSO→dispatch→fence→readback)
-   + HLSL dot16/gemv/silu; build-verified. README: files/results updates.
-8. `probe: DX12 kernel gates + perf pass across all legs` — wire DX12 leg into KernelGate;
-   `kernels` exit 0; timings for dot16/dot576/gemv/silu across CPU/SYCL/DX12, README results.
-9. Cleanup: G2 review → `git rm docs/TODO.md` → `docs: remove TODO.md — plan executed` → offer
-   push + PR (human-confirmed).
+7. `probe: kernel-only perf pass (CPU vs SYCL) + docs/SYCL.md` — per-kernel
+   timing: runner prints `TIME` lines (best-of-3 `submit→wait`, post-JIT steady
+   state via `std::chrono`); `CpuLeg.ComputeLeg` times each kernel with
+   `Stopwatch` (warmup pass discarded, then timed); `LegResults`/`KernelGate`
+   carry + print the timing table. DONE/MESSURED on the Arc 140T: dot16 CPU
+   3.4 µs vs SYCL 52.7 µs (launch-bound, GPU slower), silu CPU 77.0 µs vs SYCL
+   33.5 µs (2.3× faster), gemv CPU 4560 µs vs SYCL 197.8 µs (23.1× faster).
+   New `docs/SYCL.md` (toolchain setup, IGC bugs, BF16 patterns, USM/DLL
+   gotchas, perf notes, SmolLM/Qwen kernel lessons). README: timing table +
+   files updates. **DX12 engagements are NOT deferred — this perf pass lands
+   first (human decision), then the DX12 compute leg and its gates follow.**
+8. `probe: hand-rolled DX12 compute path` — D3d12Compute.cs (device→PSO→dispatch→
+   fence→readback) + HLSL dot16/gemv/silu; build-verified. README: files/results
+   updates.
+9. `probe: DX12 kernel gates + three-way perf (+ docs/DX12.md)` — wire DX12 leg
+   into KernelGate; `kernels` exit 0; timings for dot16/gemv/silu across
+   CPU/SYCL/DX12 (three-way table), README results. **If the DX12 gates pass
+   (i.e. the hand-rolled D3D12 compute path works), write `docs/DX12.md`
+   mirroring `docs/SYCL.md`: the DX12 kernel-authoring workflow (device→PSO→
+   dispatch→fence→readback, HLSL `cs_5_1` shape, `asfloat(uint<<16)` BF16
+   widen, root signature/descriptor heap rules, DXBC vs DXIL/SM6.8 notes,
+   three-way perf rows) so humans and agents learn "this is how you write a
+   DX12 kernel" just like §3 of `docs/SYCL.md`. Condition records the honest
+   verdict either way (proven / fallback-only).
+10. Cleanup: G2 review → `git rm docs/TODO.md` → `docs: remove TODO.md — plan
+    executed` → offer push + PR (human-confirmed).
 
 ## Blast radius
 
 - Code: `tests/Nivara.GpuProbe/**` only (probe project, standalone, not in the NUnit suite) plus
-  `docs/TODO.md`, `tests/Nivara.GpuProbe/README.md`, `docs/SMOLLM-GPU.md`.
+  `docs/TODO.md`, `tests/Nivara.GpuProbe/README.md`, `docs/SMOLLM-GPU.md`, `docs/SYCL.md`
+  (kernel-authoring workflow, already landed with the perf pass), `docs/DX12.md` (same workflow
+  doc for the DX12 leg, lands with the DX12 gates in commit 9).
 - csproj-only: the solution-wide NuGet refresh in commit 1 touches 17 `.csproj` files across
   `src/`, `samples/`, `tests/` — **package-version bumps only, no source changes**, and required
   to keep the probe's references on one consistent rc.1 line.

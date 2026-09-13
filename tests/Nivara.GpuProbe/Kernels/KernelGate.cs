@@ -16,14 +16,44 @@ internal static class KernelGate
         Console.WriteLine();
         Console.WriteLine("--- kernel gates vs CPU (production Nivara kernels) ---");
 
+        // Warm up the production kernels once: the first call pays JIT compilation
+        // cost and would dominate the timing rows. Discard it; time the second pass.
+        _ = CpuLeg.ComputeLeg(fixtures);
         LegResults cpu = CpuLeg.ComputeLeg(fixtures);
+        LegResults? gpu = gpuLeg(fixtures);
 
         int failures = 0;
         failures += Gate(cpu, cpu, "CPU (production Nivara)");
-        failures += GateLeg(gpuLegName, gpuLeg(fixtures), cpu);
+        failures += GateLeg(gpuLegName, gpu, cpu);
+
+        Console.WriteLine();
+        PrintTimingTable(cpu, gpu, gpuLegName);
 
         Console.WriteLine($"  kernels mode exit: {failures} failed kernel(s), 0 unexpected");
         return failures;
+    }
+
+    /// <summary>Prints CPU vs GPU per-kernel wall time (µs). GPU times need the leg's own timer
+    /// (e.g. the runner's TIME lines); the CPU times are captured by <see cref="CpuLeg.ComputeLeg"/>.</summary>
+    private static void PrintTimingTable(LegResults cpu, LegResults? gpu, string gpuLegName)
+    {
+        Console.WriteLine("  kernel timings (µs per invocation, excluding process/device setup):");
+        PrintTimingRow("dot16", cpu.Dot16Us, gpu?.Dot16Us);
+        PrintTimingRow("silu", cpu.SiluUs, gpu?.SiluUs);
+        PrintTimingRow("gemv", cpu.GemvUs, gpu?.GemvUs);
+    }
+
+    private static void PrintTimingRow(string kernel, double cpuUs, double? gpuUs)
+    {
+        if (gpuUs is null || gpuUs.Value <= 0)
+        {
+            string note = gpuUs is null ? "gpu unavailable" : "no gpu timing";
+            Console.WriteLine($"    {kernel.PadRight(7)} CPU {cpuUs,8:F1} µs   [{note}]");
+            return;
+        }
+
+        double ratio = cpuUs > 0 ? cpuUs / gpuUs.Value : 0;
+        Console.WriteLine($"    {kernel.PadRight(7)} CPU {cpuUs,8:F1} µs   GPU {gpuUs.Value,8:F1} µs   ({ratio:F2}x {(ratio >= 1 ? "faster" : "slower")})");
     }
 
     private static int GateLeg(string name, LegResults? results, LegResults cpu)

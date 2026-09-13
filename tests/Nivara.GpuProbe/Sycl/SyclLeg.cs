@@ -40,20 +40,20 @@ internal static class SyclLeg
 
         Console.WriteLine($"  launcher: {RunCmd} (sources Intel oneAPI setvars so the SYCL runtime DLLs resolve)");
 
-        var dot16 = RunKernel("dot16", WriteBf16Concat(fixtures.Dot16A, fixtures.Dot16B), out var dot16Out, KernelFixtures.Dot16Length);
-        var silu = RunKernel("silu", WriteBf16Concat(fixtures.SiluX), out var siluOut, KernelFixtures.HiddenSize);
-        var gemv = RunKernel("gemv", WriteBf16Concat(fixtures.GemvW, fixtures.GemvX), out var gemvOut,
-            KernelFixtures.IntermediateSize, KernelFixtures.HiddenSize);
+        var dot16 = RunKernel("dot16", WriteBf16Concat(fixtures.Dot16A, fixtures.Dot16B), KernelFixtures.Dot16Length);
+        var silu = RunKernel("silu", WriteBf16Concat(fixtures.SiluX), KernelFixtures.HiddenSize);
+        var gemv = RunKernel("gemv", WriteBf16Concat(fixtures.GemvW, fixtures.GemvX), KernelFixtures.IntermediateSize, KernelFixtures.HiddenSize);
         if (dot16 is null || silu is null || gemv is null)
             return null;
 
-        Console.WriteLine(dot16Out.Trim());  // device line + dot16 value from the runner
+        Console.WriteLine(dot16.Value.stdout.Trim());  // device line + dot16 value from the runner
 
-        return new LegResults(dot16[0], silu, gemv);
+        return new LegResults(dot16.Value.results[0], silu.Value.results, gemv.Value.results,
+            dot16.Value.timeUs, silu.Value.timeUs, gemv.Value.timeUs);
     }
 
-    /// <summary>Runs one kernel through the runner; returns the f32 results or null on failure.</summary>
-    private static float[]? RunKernel(string mode, byte[] input, out string stdout, int dim0, int dim1 = 0)
+    /// <summary>Runs one kernel through the runner; returns results + kernel-only time (µs), or null on failure.</summary>
+    private static (float[] results, double timeUs, string stdout)? RunKernel(string mode, byte[] input, int dim0, int dim1 = 0)
     {
         string dir = Path.Combine(Path.GetTempPath(), "opencode", "sycl");
         Directory.CreateDirectory(dir);
@@ -62,13 +62,28 @@ internal static class SyclLeg
         File.WriteAllBytes(inFile, input);
 
         var (rc, so, se, results) = Spawn(mode, inFile, outFile, dim0, dim1);
-        stdout = so;
         if (rc != 0)
         {
             Console.WriteLine($"  [{mode}] runner failed (exit {rc}): {se.Trim()}");
             return null;
         }
-        return results;
+        return (results, ParseTimeUs(so, mode), so);
+    }
+
+    /// <summary>Extracts the kernel-only time from the runner's "TIME &lt;mode&gt; = X us" stdout line.</summary>
+    private static double ParseTimeUs(string stdout, string mode)
+    {
+        foreach (string line in stdout.Split('\n'))
+        {
+            string t = line.Trim();
+            if (!t.StartsWith($"TIME {mode} =", StringComparison.Ordinal))
+                continue;
+            int eq = t.IndexOf('=', StringComparison.Ordinal);
+            if (eq > 0 && double.TryParse(t[(eq + 1)..].Trim().Split(' ')[0],
+                    System.Globalization.CultureInfo.InvariantCulture, out double us))
+                return us;
+        }
+        return 0;
     }
 
     private static (int exitCode, string stdout, string stderr, float[] results) Spawn(string mode, string inFile, string outFile, int dim0, int dim1)

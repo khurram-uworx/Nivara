@@ -253,6 +253,27 @@ harness) is a follow-up for the `kernels` gate mode; the SPIR-V 1.0 ceiling
 noted below may force native-image loading — the runtime shim is the safe
 default because it also exercises the production UR adapter path end-to-end.
 
+### Performance (commit 7 — kernel-only, steady-state)
+
+The `kernels` mode now prints a per-kernel timing table: CPU times come from
+`CpuLeg.ComputeLeg` (warmed once to pay JIT, then timed via `Stopwatch`);
+SYCL times come from the runner's own `std::chrono` best-of-3 `submit→wait`
+(`TIME` lines in `sycl_runner`), excluding process/queue setup. Measured on
+the Arc 140T (driver 1.15.37858):
+
+| kernel | CPU (production Nivara) | SYCL kernel-only | verdict |
+|---|---|---|---|
+| `dot16` (K=16) | 3.4 µs | 52.7 µs | 0.06× — **launch-bound**, GPU slower |
+| `silu` (576) | 77.0 µs | 33.5 µs | **2.3× faster** |
+| `gemv` (1536×576) | 4560 µs | 197.8 µs | **23.1× faster** |
+
+Reading: `dot16` exists only as the smallest correctness probe — at K=16 the
+launch overhead swamps the work. `silu` and `gemv` are the real SmolLM decode
+shapes and both are decisive GPU wins; the 23.1× gemv is the headline number
+(every decode token is dominated by `[1536×576]·[576]` GEMVs). The ~50 ms
+subprocess launch per kernel is not included — a production native `.dll`
+with a long-lived queue eliminates it entirely. Full notes in `docs/SYCL.md`.
+
 ## Level Zero P/Invoke surface
 
 Structs, constants, and proc addresses are taken only from the official
@@ -268,16 +289,18 @@ entry points by name from `ze_loader.dll`.
 - `Kernels/KernelFixtures.cs` — SmolLM-shaped BF16 fixtures + shared native
   write-BF16 / read-f32 helpers.
 - `Kernels/LegResults.cs` — one leg's results over the fixture set
-  (`dot16` / `silu` / `gemv`), produced by every leg for the gate.
+  (`dot16` / `silu` / `gemv`), produced by every leg for the gate, plus
+  per-kernel wall time in µs for the timing table.
 - `Kernels/KernelGate.cs` — the multi-leg correctness gate harness: CPU gold +
-  every wired GPU leg, per-kernel gate rows with worst-ULP diagnostics, exit
-  code = failed kernels. `kernels` CLI mode runs it (DX12 slots in later).
+  every wired GPU leg, per-kernel gate rows with worst-ULP diagnostics, and a
+  CPU-vs-GPU timing table (µs); exit code = failed kernels. `kernels` CLI mode
+  runs it (DX12 slots in later).
 - `Kernels/CpuLeg.cs` — **the production-kernel CPU leg (gold target)** for the
   gate: dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>`
   (aRows=1 → the allocation-free BLAS2 GEMV path the fused Llama head runs),
   SiLU via `Activation.Silu` (`GradKernels.Silu`, sigmoid-then-multiply), all
   consumed read-only through public API, plus `ComputeLeg` over the full
-  fixtures. Carries the gate helpers
+  fixtures (per-kernel `Stopwatch` timings). Carries the gate helpers
   (`WithinTolerance`, `UlpDistance`, `GateAbs`/`GateRel`). Replaces the deleted
   double-precision `GoldenReferences.cs` — no hand-rolled or double oracle exists.
 - `LevelZero/L0Probe.cs` — enumeration: drivers, API versions, extensions, devices
@@ -299,14 +322,15 @@ entry points by name from `ze_loader.dll`.
   dispatch path is not pursued; kept only for the Intel-export function discovery).
 - `Sycl/sycl_runner.cpp` — DPC++ runner: `dot16`/`gemv`/`silu` kernels
   (`sycl::queue` + USM, device-side `uint16 << 16` BF16→f32 emul-widen), raw
-  BF16 in → raw f32 out. Built by `Sycl/build.cmd` (`icpx -fsycl -O2`, sources
+  BF16 in → raw f32 out; prints `TIME <mode> = X us` (best-of-3 `submit→wait`,
+  post-JIT steady state). Built by `Sycl/build.cmd` (`icpx -fsycl -O2`, sources
   VsDevCmd + oneAPI setvars).
 - `Sycl/build.cmd` / `Sycl/run.cmd` — build entry point; launcher that sources
   oneAPI `setvars` so the child process resolves `sycl8.dll`/`ur_loader.dll`
   (a direct spawn dies with `STATUS_DLL_NOT_FOUND`).
 - `Sycl/SyclLeg.cs` — the .NET SYCL leg (transport only): writes the fixtures,
-  spawns `run.cmd`, reads the f32 outputs, returns a `LegResults`. Gating lives
-  in `KernelGate`, not here.
+  spawns `run.cmd`, reads the f32 outputs + `TIME` lines, returns a `LegResults`
+  with per-kernel timings. Gating lives in `KernelGate`, not here.
 - `Sycl/.gitignore` — keeps `sycl_runner.exe` / LLVM objects out of git.
 
 ## Recommendations

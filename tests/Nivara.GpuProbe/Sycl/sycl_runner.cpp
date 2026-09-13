@@ -17,6 +17,7 @@
 // Exit codes: 0 = success, 1 = device/queue/kernel failure, 2 = bad args / I/O.
 #include <sycl/sycl.hpp>
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -32,6 +33,23 @@ inline float WidenBf16(uint16_t bits) {
     float f;
     std::memcpy(&f, &u, sizeof(u));
     return f;
+}
+
+// Steady-state kernel wall time: [submit .. wait] best-of-N in microseconds.
+// The first submit compiles the kernel (JIT); later submits reuse it, so the
+// best-of-N reading is the true steady-state kernel time, not the compile cost.
+template <typename Fn>
+double TimedBest(Fn&& fn, int iterations = 3) {
+    double best = 1e300;
+    for (int i = 0; i < iterations; ++i) {
+        auto t0 = std::chrono::high_resolution_clock::now();
+        fn();
+        auto t1 = std::chrono::high_resolution_clock::now();
+        double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+        if (us < best)
+            best = us;
+    }
+    return best;
 }
 
 int Fail(const char* msg, int code) {
@@ -68,17 +86,20 @@ int RunDot16(sycl::queue& q, const std::vector<uint16_t>& input, std::vector<flo
 
     int rc = 0;
     try {
-        q.submit([&](sycl::handler& h) {
-            h.single_task([=] {
-                float acc = 0.0f;
-                for (int i = 0; i < 16; ++i)
-                    acc += WidenBf16(a[i]) * WidenBf16(b[i]);
-                c[0] = acc;
+        double us = TimedBest([&] {
+            q.submit([&](sycl::handler& h) {
+                h.single_task([=] {
+                    float acc = 0.0f;
+                    for (int i = 0; i < 16; ++i)
+                        acc += WidenBf16(a[i]) * WidenBf16(b[i]);
+                    c[0] = acc;
+                });
             });
+            q.wait();
         });
-        q.wait();
         out.assign(1, c[0]);
         std::fprintf(stdout, "  dot16 = %.9g\n", c[0]);
+        std::fprintf(stdout, "TIME dot16 = %.1f us\n", us);
     } catch (const sycl::exception& e) {
         rc = Fail(("dot16 kernel failed: " + std::string(e.what())).c_str(), 1);
     }
@@ -105,16 +126,19 @@ int RunGemv(sycl::queue& q, const std::vector<uint16_t>& input, int rows, int co
 
     int rc = 0;
     try {
-        q.submit([&](sycl::handler& h) {
-            h.parallel_for(sycl::range<1>(static_cast<size_t>(rows)), [=](sycl::id<1> r) {
-                float acc = 0.0f;
-                for (int k = 0; k < cols; ++k)
-                    acc += WidenBf16(w[r * cols + k]) * WidenBf16(x[k]);
-                y[r] = acc;
+        double us = TimedBest([&] {
+            q.submit([&](sycl::handler& h) {
+                h.parallel_for(sycl::range<1>(static_cast<size_t>(rows)), [=](sycl::id<1> r) {
+                    float acc = 0.0f;
+                    for (int k = 0; k < cols; ++k)
+                        acc += WidenBf16(w[r * cols + k]) * WidenBf16(x[k]);
+                    y[r] = acc;
+                });
             });
+            q.wait();
         });
-        q.wait();
         out.assign(y, y + rows);
+        std::fprintf(stdout, "TIME gemv = %.1f us\n", us);
     } catch (const sycl::exception& e) {
         rc = Fail(("gemv kernel failed: " + std::string(e.what())).c_str(), 1);
     }
@@ -139,14 +163,17 @@ int RunSilu(sycl::queue& q, const std::vector<uint16_t>& input, int n, std::vect
 
     int rc = 0;
     try {
-        q.submit([&](sycl::handler& h) {
-            h.parallel_for(sycl::range<1>(need), [=](sycl::id<1> i) {
-                float xv = WidenBf16(in[i]);
-                result[i] = xv / (1.0f + sycl::exp(-xv));
+        double us = TimedBest([&] {
+            q.submit([&](sycl::handler& h) {
+                h.parallel_for(sycl::range<1>(need), [=](sycl::id<1> i) {
+                    float xv = WidenBf16(in[i]);
+                    result[i] = xv / (1.0f + sycl::exp(-xv));
+                });
             });
+            q.wait();
         });
-        q.wait();
         out.assign(result, result + need);
+        std::fprintf(stdout, "TIME silu = %.1f us\n", us);
     } catch (const sycl::exception& e) {
         rc = Fail(("silu kernel failed: " + std::string(e.what())).c_str(), 1);
     }
