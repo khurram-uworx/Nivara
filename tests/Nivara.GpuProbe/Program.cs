@@ -25,6 +25,7 @@ internal class Program
             "spv" => SpvDump.Run(),
             "ocl" => OclProbe.Run(),
             "dx12" => D3d12Check.Run(),
+            "sycl" => Sycl.SyclLeg.Run(Kernels.KernelFixtures.Generate()),
             "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run(),
             _ => L0Probe.Run() + L0Run.Run() + D3d12Check.Run()
         };

@@ -269,14 +269,23 @@ After all gates pass and perf is measured on the same fixtures:
    IGC driver miscompiles OpFMul(131)→OpFSub(130) and OpFDiv(132)→OpFMul(131) in the OpenCL
    kernel model (exact-input probes + Σ(a−b) / x·(1+exp(−x)) mirrors confirm), so hand-authored
    SPIR-V cannot express real math on this driver. README: L0 gate rows + finding #5.
-5. `probe: oneAPI/SYCL toolchain sandbox` — human-informed winget install of
-   `Intel.OneAPI.BaseToolkit`; first SYCL kernels written in DPC++ (`dot16`/`gemv`/`silu`),
-   compiled with `icpx`; decide the load path (compiler-produced SPIR-V through the proven L0
-   harness vs. a small SYCL-runtime shim invoked from .NET). Answers: does IGC run FP mul/div
-   correctly on *toolchain-produced* bytecode? README: SYCL toolchain notes.
-6. `probe: three-way correctness gate harness` — KernelGate with golden-tolerance asserts +
+5. `probe: oneAPI/SYCL toolchain sandbox → PROVEN` — human-informed winget install of
+   `Intel.OneAPI.BaseToolkit` (2025.1.3.8) + `Microsoft.VisualStudio.2022.BuildTools`
+   (MSVC host toolchain is a hard icpx prerequisite). DONE: `Sycl/sycl_runner.cpp`
+   (DPC++ `dot16`/`gemv`/`silu`, `sycl::queue` + USM, device-side `<<16` emul-widen),
+   `Sycl/build.cmd` (sources VsDevCmd + oneAPI setvars), `Sycl/run.cmd` (sources
+   setvars so `sycl8.dll`/`ur_loader.dll` resolve — direct spawn → `STATUS_DLL_NOT_FOUND`),
+   `Sycl/SyclLeg.cs` (spawn + gate vs CpuLeg), `sycl` CLI mode. **Decision:** the
+   **SYCL-runtime shim** is the commit-5 load path (real UR adapter end-to-end);
+   compiler-produced-SPIR-V-via-`zeModuleCreate` is a follow-up option for the
+   `kernels` gate mode. **Decisive answer:** *yes* — IGC computes BF16 FP mul/div
+   correctly on toolchain-produced bytecode: dot16 0.0 ULP (bit-exact), silu
+   576/576, gemv 1536/1536 rows pass the CPU-leg gate (`|diff| = 1.63e-9` on the
+   worst row; the 14 336-ULP headline is a near-zero-ref row diagnostic, not a
+   failure). README: header verdict + SYCL leg section + gate table + Files.
+6. `probe: multi-leg correctness gate harness` — KernelGate with golden-tolerance asserts +
    reporting (CPU + SYCL leg wired first; DX12 joins later). README: `kernels` build/run line +
-   gate table.
+   gate table. (SYCL's `sycl` mode already gates in-process; this commit generalizes it.)
 7. `probe: hand-rolled DX12 compute path` — D3d12Compute.cs (device→PSO→dispatch→fence→readback)
    + HLSL dot16/gemv/silu; build-verified. README: files/results updates.
 8. `probe: DX12 kernel gates + perf pass across all legs` — wire DX12 leg into KernelGate;

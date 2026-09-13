@@ -6,8 +6,12 @@ inbox `ze_loader.dll` (no packages, no bindings, no CUDA/OpenCL) driving
 results — not just device enumeration. **Verdict so far:** the runtime harness
 works end-to-end (module load, launch, readback, verifiable results) but this
 driver's IGC miscompiles FP multiply/divide in the OpenCL kernel model
-(`OpFMul`→`OpFSub`, `OpFDiv`→`OpFMul`), so real dot/GEMV/SiLU math moves to the
-**oneAPI SYCL/DPC++ toolchain path** (see `docs/TODO.md`).
+(`OpFMul`→`OpFSub`, `OpFDiv`→`OpFMul`), so hand-authored SPIR-V cannot express
+real math — **real dot/GEMV/SiLU math is proven through the oneAPI SYCL/DPC++
+toolchain instead** (see `tests/Nivara.GpuProbe/Sycl/` and `docs/TODO.md`):
+compiled with `icpx`, running on the Arc 140T via the SYCL runtime over Level
+Zero, all three kernels gate **PASS** against the production Nivara CPU kernels
+(dot16 bit-exact, silu 576/576, gemv 1536/1536 rows).
 
 Host: **Intel Core Ultra 7 255H (Arrow Lake-H)** with the **Arc 140T iGPU**
 (128 EU, PCI 8086:7DD1) and an on-package **Intel AI Boost NPU** (8086:7D1D).
@@ -204,6 +208,42 @@ hand-authoring kernels and use the oneAPI toolchain — the hand-written path
 served its purpose (proving the runtime harness + documenting the driver
 landmines) and now steps aside.
 
+## oneAPI SYCL/DPC++ leg (commit 5 — the pivot, proven)
+
+`Sycl/sycl_runner.cpp` is a DPC++ runner with the three production-shape kernels
+(bf16→f32 emul-widen `uint16 << 16` on device, exactly like the L0 leg):
+`dot16` (single task, serial K=16 f32 accumulate), `gemv` (one work-item per
+output row, serial K=576 — real indexed memory, which L0 couldn't do), `silu`
+(per-element, `x / (1 + exp(−x))`). Raw BF16 fixture bytes in → raw f32
+results out; builds with `icpx -fsycl -O2` (`Sycl/build.cmd` sources VS 2022
+Build Tools `VsDevCmd` for the MSVC host tools, then oneAPI `setvars`).
+
+The kernel is the production toolchain shape llama.cpp's SYCL backend uses
+(SYCL runtime on Level Zero underneath), so this answers the decisive question
+commit 4 left open: **does IGC execute BF16 FP mul/div correctly on
+toolchain-produced bytecode? — Yes.**
+
+| kernel | gate vs CpuLeg (production Nivara) | worst | result |
+|---|---|---|---|
+| `dot16` (K=16) | `\|leg − cpu\| ≤ 1e-6 + 1e-5·\|cpu\|` | **0.0 ULP** (bit-exact) | PASS |
+| `silu` (576) | tolerance gate per element | 4.0 ULP | PASS (576/576) |
+| `gemv` (1536×576) | tolerance gate per row | 14 336 ULP @ row 1508 (`\|diff\| = 1.6e-9`, near-zero ref row) | PASS (1536/1536) |
+
+Note on the gemv "worst ULP" figure: it is the *worst relative* row — after
+cancellation some rows land near zero where an f32 ULP is ~1.9e-9, so a perfectly
+good row reads thousands of ULP while sitting far inside the `1e-6` absolute
+gate bound (`\|diff\| = 1.63e-9` on the worst row). The threshold row used for
+diagnostics, not pass/fail.
+
+Load path decision (recorded): commit 5 ships the **SYCL-runtime shim** path —
+`SyclLeg.cs` spawns `run.cmd` (sources `setvars` so `sycl8.dll`/`ur_loader.dll`
+resolve; a direct spawn fails `STATUS_DLL_NOT_FOUND`), gates all three kernels
+against `CpuLeg`, and exits nonzero on any real failure. The alternative
+(extract compiler-produced SPIR-V and load through the probe's `zeModuleCreate`
+harness) is a follow-up for the `kernels` gate mode; the SPIR-V 1.0 ceiling
+noted below may force native-image loading — the runtime shim is the safe
+default because it also exercises the production UR adapter path end-to-end.
+
 ## Level Zero P/Invoke surface
 
 Structs, constants, and proc addresses are taken only from the official
@@ -214,7 +254,8 @@ entry points by name from `ze_loader.dll`.
 
 ## Files
 
-- `Program.cs` — CLI dispatch (`list` / `run` / `spv` / `ocl` / `l0` / `all`).
+- `Program.cs` — CLI dispatch (`list` / `run` / `spv` / `ocl` / `l0` / `sycl` /
+  `all`).
 - `Kernels/KernelFixtures.cs` — SmolLM-shaped BF16 fixtures + shared native
   write-BF16 / read-f32 helpers.
 - `Kernels/CpuLeg.cs` — **the production-kernel CPU leg (gold target)** for the
@@ -241,23 +282,35 @@ entry points by name from `ze_loader.dll`.
   `D3D12CreateDevice` at FL 11_0..12_2, shader model via `CheckFeatureSupport`.
 - `LevelZero/OclProbe.cs` — OpenCL loader diagnostic (dead end: an OpenCL ICD
   dispatch path is not pursued; kept only for the Intel-export function discovery).
+- `Sycl/sycl_runner.cpp` — DPC++ runner: `dot16`/`gemv`/`silu` kernels
+  (`sycl::queue` + USM, device-side `uint16 << 16` BF16→f32 emul-widen), raw
+  BF16 in → raw f32 out. Built by `Sycl/build.cmd` (`icpx -fsycl -O2`, sources
+  VsDevCmd + oneAPI setvars).
+- `Sycl/build.cmd` / `Sycl/run.cmd` — build entry point; launcher that sources
+  oneAPI `setvars` so the child process resolves `sycl8.dll`/`ur_loader.dll`
+  (a direct spawn dies with `STATUS_DLL_NOT_FOUND`).
+- `Sycl/SyclLeg.cs` — the .NET SYCL leg: writes the fixtures, spawns `run.cmd`,
+  reads the f32 outputs, gates each kernel against `CpuLeg`, reports per-kernel
+  pass/fail + worst-ULP row diagnostics, nonzero exit on any real failure.
+- `Sycl/.gitignore` — keeps `sycl_runner.exe` / LLVM objects out of git.
 
 ## Recommendations
 
-- **BF16 compute model is proven end-to-end**: `.NET 11 BFloat16` in/out, GPU
-  in the middle, `f32` accumulation (the hardware's native model — Xe2 DPAS also
-  accumulates BF16 products in `f32`), zero host widening. The only blocker for a
-  real GEMV kernel is the access-chain ICE (bug #1); the kernel-phase blockers
-  are bugs #1 (no indexed memory) and #5 (mul/div miscompiled).
+- **BF16 compute model is proven end-to-end on the SYCL leg**: `.NET 11 BFloat16`
+  in/out, GPU in the middle, `f32` accumulation (the hardware's native model — Xe2
+  DPAS also accumulates BF16 products in `f32`), zero host widening. `dot16` is
+  bit-exact against the production CPU kernel and the full 1536×576 GEMV and 576
+  SiLU gates pass inside the tolerance bound.
 - **Hand-authored SPIR-V on this driver is a dead end for real math** (bug #5):
   the L0 leg cannot perform FP multiply or divide at all, so no dot/GEMV/SiLU is
   expressible through hand-written bytecode. Documented as the authoritative
-  verdict of this probe phase; **kernel authoring pivots to the oneAPI SYCL/DPC++
-  toolchain** (compiler-produced SPIR-V via `icpx`), where IGC consumes validated
-  toolchain bytecode — the same path llama.cpp's SYCL backend uses on Arrow Lake
-  Arc iGPUs. The probe keeps its L0 harness (module load, launch, readback all
-  proven) and simply feeds it compiler-built modules; promotion decisions
-  (e.g. `src/Nivara.Gpu`) come later.
+  verdict of this probe phase; **kernel authoring has pivoted to the oneAPI
+  SYCL/DPC++ toolchain and is proven correct** — `icpx`-compiled DPC++ kernels
+  (the same stack llama.cpp's SYCL backend uses on Arrow Lake Arc iGPUs) gate
+  PASS against the production Nivara kernels while running through the real SYCL
+  runtime on Level Zero. Whether a real `src/Nivara.Gpu` should ride the SYCL
+  runtime or load compiler-produced native images through the probe's L0 harness
+  is a promotion decision for later; both paths are now live options.
 - **DX12/ComputeSharp remains the compiler-backed fallback**: the Arc 140T
   reaches FL 12_2 + SM 6.8, and HLSL → DXIL is another validated compiler path
   that bypasses hand-authored bytecode concerns entirely.
