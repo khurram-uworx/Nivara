@@ -63,9 +63,9 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- spv     # dump hand-aut
 dotnet run -c Release --project tests/Nivara.GpuProbe -- run     # build + launch kernels, verify results (exit 0 = no unexpected failures; diagnosed driver bugs reported separately)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- l0      # list + run
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ocl     # OpenCL diagnostic (loader only — dead end, see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12    # D3D12 availability check + the full DX12 compute leg gates (in-process HLSL→DXIL→PSO→dispatch, no toolchain)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12    # D3D12 availability check + the full DX12 compute leg gates (in-process HLSL→DXBC cs_5_1→PSO→dispatch, no toolchain)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gates (needs Sycl/build.cmd first, see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # multi-leg gate harness: CPU gold + every wired GPU leg (SYCL now, DX12 next)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # three-way gate harness: CPU gold + SYCL + DX12 (exit 0 = all gates pass)
 dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12
 ```
 
@@ -195,9 +195,11 @@ signature with two descriptor tables (SRV t0 / UAV u0), SHADER_VISIBLE
 CBV_SRV_UAV heap, UPLOAD→DEFAULT(→COPY_SOURCE)→READBACK buffers, fence+event
 wait per iteration, 1 warmup + 3 timed best-of-3 — the same methodology as the
 SYCL leg. This bypasses the buggy IGC OpenCL/SPIR-V frontend entirely (HLSL →
-DXIL → the driver's compute pipeline), so real GEMM/attention kernels are
+DXBC/DXIL → the driver's compute pipeline), so real GEMM/attention kernels are
 expressible while the Level Zero access-chain ICE (bug #1 above) remains
-unfixed on this driver.
+unfixed on this driver. The `kernels` mode runs the **three-way** CPU·SYCL·DX12
+gate table with a per-GPU-leg timing column; full workflow notes in
+`docs/DX12.md`.
 
 ### Kernel binary export (follow-up)
 
@@ -280,7 +282,8 @@ launch overhead swamps the work. `silu` and `gemv` are the real SmolLM decode
 shapes and both are decisive GPU wins; the 23.1× gemv is the headline number
 (every decode token is dominated by `[1536×576]·[576]` GEMVs). The ~50 ms
 subprocess launch per kernel is not included — a production native `.dll`
-with a long-lived queue eliminates it entirely. Full notes in `docs/SYCL.md`.
+with a long-lived queue eliminates it entirely. Full notes in `docs/SYCL.md`;
+the DX12 workflow lives in `docs/DX12.md`.
 
 ## DX12 compute leg (commit 8 — hand-rolled, proven)
 
@@ -341,7 +344,7 @@ entry points by name from `ze_loader.dll`.
 - `Kernels/KernelGate.cs` — the multi-leg correctness gate harness: CPU gold +
   every wired GPU leg, per-kernel gate rows with worst-ULP diagnostics, and a
   CPU-vs-GPU timing table (µs); exit code = failed kernels. `kernels` CLI mode
-  runs it (DX12 slots in later).
+  runs it three-way (SYCL + DX12).
 - `Kernels/CpuLeg.cs` — **the production-kernel CPU leg (gold target)** for the
   gate: dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>`
   (aRows=1 → the allocation-free BLAS2 GEMV path the fused Llama head runs),

@@ -16,4 +16,13 @@ internal sealed record LegResults(
 {
     public static LegResults Untimed(float dot16, float[] silu, float[] gemv)
         => new(dot16, silu, gemv, 0, 0, 0);
+
+    /// <summary>Per-kernel wall time (µs) by kernel name, used by the multi-leg timing table.</summary>
+    public double? UsFor(string kernel) => kernel switch
+    {
+        "dot16" => Dot16Us,
+        "silu" => SiluUs,
+        "gemv" => GemvUs,
+        _ => null
+    };
 }

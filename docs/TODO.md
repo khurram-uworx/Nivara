@@ -319,6 +319,17 @@ After all gates pass and perf is measured on the same fixtures:
    three-way perf rows) so humans and agents learn "this is how you write a
    DX12 kernel" just like §3 of `docs/SYCL.md`. Condition records the honest
    verdict either way (proven / fallback-only).
+   DONE: KernelGate now runs multiple GPU legs (`params (Name, Leg)[]`), the
+   `kernels` mode runs the three-way CPU·SYCL·DX12 gate table and timing
+   rows per GPU leg; `LegResults` gained `UsFor(kernel)` for the per-leg
+   timing columns. All gates green (dot16 0.0 ULP, silu 576/576 worst 4 ULP,
+   gemv 1536/1536 worst row |diff| = 1.63e-9 on both GPU legs). Measured
+   three-way (best-of-3 per run, ranges across runs): gemv CPU 2291–2521 µs
+   vs SYCL 170–177 µs vs DX12 152–247 µs (~10–16× on both GPU legs); silu
+   CPU 29–31 µs vs SYCL 12–21 µs vs DX12 86–98 µs; dot16 CPU 1.2–1.7 µs
+   vs SYCL 13–21 µs vs DX12 117–131 µs (launch-bound). New `docs/DX12.md`
+   (pipeline, HLSL authoring, vtable/ABI gotchas, three-way perf, DXBC vs
+   DXIL/SM6.8 + WAVE_MMA notes). README: three-way rows.
 10. Cleanup: G2 review → `git rm docs/TODO.md` → `docs: remove TODO.md — plan
     executed` → offer push + PR (human-confirmed).
 

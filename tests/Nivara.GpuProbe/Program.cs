@@ -26,7 +26,9 @@ internal class Program
             "ocl" => OclProbe.Run(),
             "dx12" => D3d12Check.Run() + D3d12.D3d12Compute.Run(),
             "sycl" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
-            "kernels" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(), "SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
+            "kernels" => Kernels.KernelGate.Run(Kernels.KernelFixtures.Generate(),
+                ("SYCL (oneAPI)", Sycl.SyclLeg.RunLeg),
+                ("DX12 (hand-rolled)", D3d12.D3d12Compute.RunLeg)),
             "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run(),
             _ => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run()
         };

@@ -6,12 +6,16 @@ namespace Nivara.GpuProbe.Kernels;
 /// <see cref="CpuLeg"/>) is the gold target, and every GPU leg is gated against it with
 /// <c>|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|</c>. Per-kernel rows report the worst ULP
 /// at the reference's magnitude (a *diagnostic*, not the gate) and the pass count. Exit code
-/// = number of failed kernels (0 = all gates pass).
+/// = number of failed kernels across every leg (0 = all gates pass).
 /// </summary>
 internal static class KernelGate
 {
-    /// <summary>Runs the CPU reference + one GPU leg and prints the gate table.</summary>
+    /// <summary>Single-leg convenience overload.</summary>
     public static int Run(KernelFixtures fixtures, string gpuLegName, Func<KernelFixtures, LegResults?> gpuLeg)
+        => Run(fixtures, (gpuLegName, gpuLeg));
+
+    /// <summary>Runs the CPU reference + every GPU leg and prints the gate table.</summary>
+    public static int Run(KernelFixtures fixtures, params (string Name, Func<KernelFixtures, LegResults?> Leg)[] legs)
     {
         Console.WriteLine();
         Console.WriteLine("--- kernel gates vs CPU (production Nivara kernels) ---");
@@ -20,47 +24,54 @@ internal static class KernelGate
         // cost and would dominate the timing rows. Discard it; time the second pass.
         _ = CpuLeg.ComputeLeg(fixtures);
         LegResults cpu = CpuLeg.ComputeLeg(fixtures);
-        LegResults? gpu = gpuLeg(fixtures);
 
-        int failures = 0;
-        failures += Gate(cpu, cpu, "CPU (production Nivara)");
-        failures += GateLeg(gpuLegName, gpu, cpu);
+        int failures = Gate(cpu, cpu, "CPU (production Nivara)");
+
+        var gpuResults = new List<(string Name, LegResults? Results)>();
+        foreach ((string name, Func<KernelFixtures, LegResults?> leg) in legs)
+        {
+            LegResults? results = leg(fixtures);
+            gpuResults.Add((name, results));
+            failures += GateLeg(name, results, cpu);
+        }
 
         Console.WriteLine();
-        PrintTimingTable(cpu, gpu, gpuLegName);
+        PrintTimingTable(cpu, gpuResults);
 
         Console.WriteLine($"  kernels mode exit: {failures} failed kernel(s), 0 unexpected");
         return failures;
     }
 
-    /// <summary>Prints CPU vs GPU per-kernel wall time (µs). GPU times need the leg's own timer
-    /// (e.g. the runner's TIME lines); the CPU times are captured by <see cref="CpuLeg.ComputeLeg"/>.</summary>
-    private static void PrintTimingTable(LegResults cpu, LegResults? gpu, string gpuLegName)
+    /// <summary>Prints CPU vs each GPU leg's per-kernel wall time (µs). GPU times come from
+    /// the legs themselves; the CPU times are captured by <see cref="CpuLeg.ComputeLeg"/>.</summary>
+    private static void PrintTimingTable(LegResults cpu, List<(string Name, LegResults? Results)> gpus)
     {
         Console.WriteLine("  kernel timings (µs per invocation, excluding process/device setup):");
-        PrintTimingRow("dot16", cpu.Dot16Us, gpu?.Dot16Us);
-        PrintTimingRow("silu", cpu.SiluUs, gpu?.SiluUs);
-        PrintTimingRow("gemv", cpu.GemvUs, gpu?.GemvUs);
+        PrintTimingRow("dot16", cpu.Dot16Us, gpus);
+        PrintTimingRow("silu", cpu.SiluUs, gpus);
+        PrintTimingRow("gemv", cpu.GemvUs, gpus);
     }
 
-    private static void PrintTimingRow(string kernel, double cpuUs, double? gpuUs)
+    private static void PrintTimingRow(string kernel, double cpuUs, List<(string Name, LegResults? Results)> gpus)
     {
-        if (gpuUs is null || gpuUs.Value <= 0)
+        string cpuCell = $"CPU {cpuUs,8:F1} µs";
+        var gpuCells = new List<string>();
+        foreach ((string name, LegResults? results) in gpus)
         {
-            string note = gpuUs is null ? "gpu unavailable" : "no gpu timing";
-            Console.WriteLine($"    {kernel.PadRight(7)} CPU {cpuUs,8:F1} µs   [{note}]");
-            return;
+            string shortName = name.Split(' ', '(')[0];
+            double? gpuUs = results?.UsFor(kernel);
+            gpuCells.Add(gpuUs is null or <= 0
+                ? $"{shortName,7} unavailable"
+                : $"{shortName,7} {gpuUs.Value,8:F1} µs");
         }
-
-        double ratio = cpuUs > 0 ? cpuUs / gpuUs.Value : 0;
-        Console.WriteLine($"    {kernel.PadRight(7)} CPU {cpuUs,8:F1} µs   GPU {gpuUs.Value,8:F1} µs   ({ratio:F2}x {(ratio >= 1 ? "faster" : "slower")})");
+        Console.WriteLine($"    {kernel.PadRight(7)} {cpuCell}   {string.Join("   ", gpuCells)}");
     }
 
     private static int GateLeg(string name, LegResults? results, LegResults cpu)
     {
         if (results is null)
         {
-            Console.WriteLine($"  {name.PadRight(28)} UNBUILT / UNAVAILABLE (3 kernels failed)");
+            Console.WriteLine($"\n  {name.PadRight(28)} UNBUILT / UNAVAILABLE (3 kernels failed)");
             return 3;
         }
 
