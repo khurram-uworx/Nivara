@@ -10,7 +10,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
     <ProjectReference Include="..\..\src\Nivara.Extensions\Nivara.Extensions.csproj" />
-    <PackageReference Include="Microsoft.ML.Tokenizers" Version="3.0.0-preview.26160.2" />
+    <PackageReference Include="Microsoft.ML.Tokenizers" Version="3.0.0-preview.26457.2" />
     <PackageReference Include="Streamix" Version="1.2.3" />
   </ItemGroup>
 
@@ -21,7 +21,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-preview.7.26381.103" />
+    <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.1.26425.128" />
   </ItemGroup>
 
 </Project>

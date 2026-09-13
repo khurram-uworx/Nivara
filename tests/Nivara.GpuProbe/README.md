@@ -8,6 +8,19 @@ results — not just device enumeration.
 Host: **Intel Core Ultra 7 255H (Arrow Lake-H)** with the **Arc 140T iGPU**
 (128 EU, PCI 8086:7DD1) and an on-package **Intel AI Boost NPU** (8086:7D1D).
 
+## References
+
+The probe consumes existing Nivara kernels **read-only** for its CPU verification
+leg (no code changes to the referenced projects; the GPU legs stay pure P/Invoke —
+hand-authored SPIR-V on Level Zero, hand-rolled D3D12 compute on DX12, no GPU
+bindings/packages):
+
+- `src/Nivara` — `LlamaFusedKernels.MatMulTransposedB<T>` (the production SmolLM
+  GEMV kernel) and `System.Numerics.Tensors`/`TensorPrimitives` (package version
+  rc.1, matching the solution-wide refresh) for the CPU dot/exp reference.
+- `samples/Nivara.Samples` — `SafeTensorsLoader.WidenBf16ToF32` (SIMD BF16→f32
+  widen at load, once-only).
+
 ## Build & Run
 
 ```bash
