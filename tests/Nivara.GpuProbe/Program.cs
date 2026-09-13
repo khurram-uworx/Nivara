@@ -39,8 +39,8 @@ internal class Program
                 ("DX12 (hand-rolled)", D3d12.D3d12Compute.RunLeg),
                 ("OV (bf16 IR)", OpenVino.OpenVinoLeg.RunBf16),
                 ("OV (f32 + hint)", OpenVino.OpenVinoLeg.RunF32)),
-            "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run(),
-            _ => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run()
+            "all" => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run() + OpenVino.Availability.Run() + OVRun(),
+            _ => L0Probe.Run() + L0Run.Run() + D3d12Check.Run() + D3d12.D3d12Compute.Run() + OpenVino.Availability.Run() + OVRun()
         };
     }
 }
