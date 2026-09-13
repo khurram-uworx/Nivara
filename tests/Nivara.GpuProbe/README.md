@@ -21,6 +21,23 @@ bindings/packages):
 - `samples/Nivara.Samples` — `SafeTensorsLoader.WidenBf16ToF32` (SIMD BF16→f32
   widen at load, once-only).
 
+## Kernel phase fixtures & golden oracle
+
+The three-way (CPU · L0 · DX12) BF16 dot/GEMV + SiLU probe compares every leg
+against one implementation-independent target on the same byte-identical inputs:
+
+- `Kernels/KernelFixtures.cs` — deterministic SmolLM-135M-shaped BF16 fixtures
+  (hidden 576, heads 9, kv 3, intermediate 1536, silu, vocab 49152 — embedded,
+  `config.json` is an optional override only). One xorshift RNG stream (seed
+  `0x9E3779B9`, Qwen mirror), values `(rng/uint.Max − 0.5f)·0.1f` narrowed via
+  `BFloat16.CreateChecked`; buffers are `System.Numerics.BFloat16` end-to-end (raw
+  16-bit patterns on the wire, GPU widens in-register). Also hosts the native
+  write-BF16 / read-f32 helpers.
+- `Kernels/GoldenReferences.cs` — double-precision golden dot/GEMV/SiLU (BF16→double
+  widen and double products are exact for 8-bit mantissas; serial double
+  accumulate). Gate for every kernel/leg: `|leg − golden| ≤ 1e-6 + 1e-5·|golden|`;
+  per-leg worst ULP reported as a diagnostic.
+
 ## Build & Run
 
 ```bash
@@ -150,6 +167,10 @@ entry points by name from `ze_loader.dll`.
 ## Files
 
 - `Program.cs` — CLI dispatch (`list` / `run` / `spv` / `ocl` / `l0` / `all`).
+- `Kernels/KernelFixtures.cs` — SmolLM-shaped BF16 fixtures + shared native
+  write-BF16 / read-f32 helpers.
+- `Kernels/GoldenReferences.cs` — double-precision golden dot/GEMV/SiLU oracle +
+  tolerance gate / ULP diagnostic.
 - `LevelZero/L0Probe.cs` — enumeration: drivers, API versions, extensions, devices
   (type, PCI id, EU topology, clocks), module caps (SPIR-V version, fp16/fp32/fp64
   flags, DP4A), queue groups.
