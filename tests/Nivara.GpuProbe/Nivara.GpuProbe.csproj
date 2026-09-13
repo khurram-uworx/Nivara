@@ -9,6 +9,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Numerics.Tensors" Version="11.0.0-rc.1.26425.128" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\samples\Nivara.Samples\Nivara.Samples.csproj" />
+    <ProjectReference Include="..\..\src\Nivara\Nivara.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="11.0.100-rc.1.26425.128" />
   </ItemGroup>
 

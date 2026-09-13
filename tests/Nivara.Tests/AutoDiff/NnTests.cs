@@ -1501,7 +1501,7 @@ public class NnTests
 
         float otherRowSum = 0f;
         for (int d = 0; d < 4; d++)
-            otherRowSum += weightGrad[0 * 4 + d];
+            otherRowSum += weightGrad![0 * 4 + d];
 
         Assert.That(otherRowSum, Is.EqualTo(0f).Within(1e-5f),
             "Token 0 was not used — gradient should be 0");
