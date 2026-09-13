@@ -76,4 +76,12 @@ internal static class CpuLeg
             Math.Abs((double)r32 - (double)MathF.BitDecrement(r32)));
         return ulp > 0 ? Math.Abs(leg - reference) / ulp : 0.0;
     }
+
+    /// <summary>
+    /// The CPU leg over the full fixture set — the gold target for all other legs.
+    /// </summary>
+    public static LegResults ComputeLeg(KernelFixtures fixtures) => new(
+        Dot(fixtures.Dot16A, fixtures.Dot16B),
+        Silu(fixtures.SiluX),
+        Gemv(fixtures.GemvX, fixtures.GemvW, KernelFixtures.IntermediateSize, KernelFixtures.HiddenSize));
 }

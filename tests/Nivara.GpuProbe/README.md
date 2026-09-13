@@ -56,14 +56,23 @@ maintained — the production kernels are the gold target:
 ## Build & Run
 
 ```bash
-dotnet run -c Release --project tests/Nivara.GpuProbe -- list   # enumerate L0 drivers/devices/extensions
-dotnet run -c Release --project tests/Nivara.GpuProbe -- spv    # dump hand-authored SPIR-V to %TEMP%\opencode\spv
-dotnet run -c Release --project tests/Nivara.GpuProbe -- run    # build + launch kernels, verify results (exit 0 = no unexpected failures; diagnosed driver bugs reported separately)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- l0     # list + run
-dotnet run -c Release --project tests/Nivara.GpuProbe -- ocl    # OpenCL diagnostic (loader only — dead end, see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12   # D3D12 availability check (FL level + shader model)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- list    # enumerate L0 drivers/devices/extensions
+dotnet run -c Release --project tests/Nivara.GpuProbe -- spv     # dump hand-authored SPIR-V to %TEMP%\opencode\spv
+dotnet run -c Release --project tests/Nivara.GpuProbe -- run     # build + launch kernels, verify results (exit 0 = no unexpected failures; diagnosed driver bugs reported separately)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- l0      # list + run
+dotnet run -c Release --project tests/Nivara.GpuProbe -- ocl     # OpenCL diagnostic (loader only — dead end, see below)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12    # D3D12 availability check (FL level + shader model)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gates (needs Sycl/build.cmd first, see below)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # multi-leg gate harness: CPU gold + every wired GPU leg (SYCL now, DX12 later)
 dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12
 ```
+
+`kernels` (and `sycl`, which routes through the same harness) is the
+**correctness gate**: the CPU leg (production Nivara kernels, see
+`Kernels/CpuLeg.cs`) is the gold target, and each wired GPU leg's `dot16` /
+`silu` / `gemv` output is gated against it with
+`|leg − cpuNivara| ≤ 1e-6 + 1e-5·|cpuNivara|`. Exit code = number of failed
+kernels (0 = all gates pass).
 
 `run` is the real probe: it builds modules with `zeModuleCreate` (logs any
 `zeModuleBuildLogGetString` output), launches kernels on a compute queue, and
@@ -254,15 +263,21 @@ entry points by name from `ze_loader.dll`.
 
 ## Files
 
-- `Program.cs` — CLI dispatch (`list` / `run` / `spv` / `ocl` / `l0` / `sycl` /
-  `all`).
+- `Program.cs` — CLI dispatch (`list` / `run` / `spv` / `ocl` / `l0` / `dx12` /
+  `sycl` / `kernels` / `all`).
 - `Kernels/KernelFixtures.cs` — SmolLM-shaped BF16 fixtures + shared native
   write-BF16 / read-f32 helpers.
+- `Kernels/LegResults.cs` — one leg's results over the fixture set
+  (`dot16` / `silu` / `gemv`), produced by every leg for the gate.
+- `Kernels/KernelGate.cs` — the multi-leg correctness gate harness: CPU gold +
+  every wired GPU leg, per-kernel gate rows with worst-ULP diagnostics, exit
+  code = failed kernels. `kernels` CLI mode runs it (DX12 slots in later).
 - `Kernels/CpuLeg.cs` — **the production-kernel CPU leg (gold target)** for the
-  three-way gate: dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>`
+  gate: dot/GEMV via `LlamaFusedKernels.MatMulTransposedB<float>`
   (aRows=1 → the allocation-free BLAS2 GEMV path the fused Llama head runs),
   SiLU via `Activation.Silu` (`GradKernels.Silu`, sigmoid-then-multiply), all
-  consumed read-only through public API. Carries the gate helpers
+  consumed read-only through public API, plus `ComputeLeg` over the full
+  fixtures. Carries the gate helpers
   (`WithinTolerance`, `UlpDistance`, `GateAbs`/`GateRel`). Replaces the deleted
   double-precision `GoldenReferences.cs` — no hand-rolled or double oracle exists.
 - `LevelZero/L0Probe.cs` — enumeration: drivers, API versions, extensions, devices
@@ -289,9 +304,9 @@ entry points by name from `ze_loader.dll`.
 - `Sycl/build.cmd` / `Sycl/run.cmd` — build entry point; launcher that sources
   oneAPI `setvars` so the child process resolves `sycl8.dll`/`ur_loader.dll`
   (a direct spawn dies with `STATUS_DLL_NOT_FOUND`).
-- `Sycl/SyclLeg.cs` — the .NET SYCL leg: writes the fixtures, spawns `run.cmd`,
-  reads the f32 outputs, gates each kernel against `CpuLeg`, reports per-kernel
-  pass/fail + worst-ULP row diagnostics, nonzero exit on any real failure.
+- `Sycl/SyclLeg.cs` — the .NET SYCL leg (transport only): writes the fixtures,
+  spawns `run.cmd`, reads the f32 outputs, returns a `LegResults`. Gating lives
+  in `KernelGate`, not here.
 - `Sycl/.gitignore` — keeps `sycl_runner.exe` / LLVM objects out of git.
 
 ## Recommendations

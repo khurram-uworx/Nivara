@@ -284,8 +284,13 @@ After all gates pass and perf is measured on the same fixtures:
    worst row; the 14 336-ULP headline is a near-zero-ref row diagnostic, not a
    failure). README: header verdict + SYCL leg section + gate table + Files.
 6. `probe: multi-leg correctness gate harness` — KernelGate with golden-tolerance asserts +
-   reporting (CPU + SYCL leg wired first; DX12 joins later). README: `kernels` build/run line +
-   gate table. (SYCL's `sycl` mode already gates in-process; this commit generalizes it.)
+   reporting (CPU + SYCL leg wired first; DX12 joins later). DONE: `Kernels/LegResults.cs`
+   (one leg's dot16/silu/gemv results), `Kernels/KernelGate.cs` (CPU gold reference via
+   `CpuLeg.ComputeLeg` + per-kernel gate rows with worst-ULP diagnostics; exit code =
+   failed kernels), `Sycl/SyclLeg.cs` reduced to transport-only (spawn runner → `LegResults`),
+   `kernels` CLI mode (and `sycl` routed through the same harness). Verified: kernels mode
+   exits 0, all gates pass (dot16 0.0 ULP, silu 576/576 worst 4 ULP, gemv 1536/1536 worst
+   row |diff| = 1.63e-9). README: `kernels` build/run line + harness explanation + Files.
 7. `probe: hand-rolled DX12 compute path` — D3d12Compute.cs (device→PSO→dispatch→fence→readback)
    + HLSL dot16/gemv/silu; build-verified. README: files/results updates.
 8. `probe: DX12 kernel gates + perf pass across all legs` — wire DX12 leg into KernelGate;
