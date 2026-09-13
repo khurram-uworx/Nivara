@@ -7,11 +7,13 @@ results — not just device enumeration. **Verdict so far:** the runtime harness
 works end-to-end (module load, launch, readback, verifiable results) but this
 driver's IGC miscompiles FP multiply/divide in the OpenCL kernel model
 (`OpFMul`→`OpFSub`, `OpFDiv`→`OpFMul`), so hand-authored SPIR-V cannot express
-real math — **real dot/GEMV/SiLU math is proven through the oneAPI SYCL/DPC++
-toolchain instead** (see `tests/Nivara.GpuProbe/Sycl/` and `docs/TODO.md`):
-compiled with `icpx`, running on the Arc 140T via the SYCL runtime over Level
-Zero, all three kernels gate **PASS** against the production Nivara CPU kernels
-(dot16 bit-exact, silu 576/576, gemv 1536/1536 rows).
+real math — **real dot/GEMV/SiLU math is proven through two compiler-backed
+paths**: the oneAPI SYCL/DPC++ toolchain (`tests/Nivara.GpuProbe/Sycl/`) and the
+hand-rolled DX12 path (`tests/Nivara.GpuProbe/D3d12/`, pure P/Invoke against
+inbox `d3d12.dll`/`dxgi.dll`/`d3dcompiler_47.dll`). Both gate **PASS** against
+the production Nivara CPU kernels (dot16 bit-exact, silu 576/576, gemv 1536/1536
+rows) on the Arc 140T — SYCL through the SYCL runtime over Level Zero, DX12
+through HLSL `cs_5_1` compiled in-process with `d3dcompiler_47`.
 
 Host: **Intel Core Ultra 7 255H (Arrow Lake-H)** with the **Arc 140T iGPU**
 (128 EU, PCI 8086:7DD1) and an on-package **Intel AI Boost NPU** (8086:7D1D).
@@ -61,9 +63,9 @@ dotnet run -c Release --project tests/Nivara.GpuProbe -- spv     # dump hand-aut
 dotnet run -c Release --project tests/Nivara.GpuProbe -- run     # build + launch kernels, verify results (exit 0 = no unexpected failures; diagnosed driver bugs reported separately)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- l0      # list + run
 dotnet run -c Release --project tests/Nivara.GpuProbe -- ocl     # OpenCL diagnostic (loader only — dead end, see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12    # D3D12 availability check (FL level + shader model)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- dx12    # D3D12 availability check + the full DX12 compute leg gates (in-process HLSL→DXIL→PSO→dispatch, no toolchain)
 dotnet run -c Release --project tests/Nivara.GpuProbe -- sycl    # SYCL leg gates (needs Sycl/build.cmd first, see below)
-dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # multi-leg gate harness: CPU gold + every wired GPU leg (SYCL now, DX12 later)
+dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels # multi-leg gate harness: CPU gold + every wired GPU leg (SYCL now, DX12 next)
 dotnet run -c Release --project tests/Nivara.GpuProbe # default: l0 + run + dx12
 ```
 
@@ -182,14 +184,20 @@ The driver reports **SPIR-V max 1.0**; loading a 1.2 header hangs `zeModuleCreat
 DDI driver[1], API 1.14) exposes **no SPIR-V support at all** (`spirvVersionSupported
 = 0`) and cannot run these kernels.
 
-### DX12 availability — the IGC-bypass side-path
+### DX12 — the IGC-bypass side-path (now compute-proven, not just enumerated)
 
 The Arc 140T iGPU creates a D3D12 device at **feature level 12_2** with **shader
 model 6.8** (`D3d12Check.cs`, pure P/Invoke against inbox `dxgi.dll`/`d3d12.dll`).
-A managed DX12 compute backend (ComputeSharp / HLSL → DXIL) targets a separate
-shader compilation path that bypasses the buggy IGC OpenCL/SPIR-V frontend entirely.
-This is the viable immediate fallback for real GEMM/attention kernels while the
-Level Zero access-chain ICE (bug #1 above) remains unfixed on this driver.
+The DX12 **compute** leg (`D3d12/D3d12Compute.cs` + `D3d12/GemvKernels.cs`) is a
+hand-rolled HLSL→DXBC `cs_5_1` path: P/Invoke + vtable dispatch (no D3D12.NET /
+ComputeSharp / TerraFX), compiling in-process with `d3dcompiler_47.dll`, root
+signature with two descriptor tables (SRV t0 / UAV u0), SHADER_VISIBLE
+CBV_SRV_UAV heap, UPLOAD→DEFAULT(→COPY_SOURCE)→READBACK buffers, fence+event
+wait per iteration, 1 warmup + 3 timed best-of-3 — the same methodology as the
+SYCL leg. This bypasses the buggy IGC OpenCL/SPIR-V frontend entirely (HLSL →
+DXIL → the driver's compute pipeline), so real GEMM/attention kernels are
+expressible while the Level Zero access-chain ICE (bug #1 above) remains
+unfixed on this driver.
 
 ### Kernel binary export (follow-up)
 
@@ -274,6 +282,45 @@ shapes and both are decisive GPU wins; the 23.1× gemv is the headline number
 subprocess launch per kernel is not included — a production native `.dll`
 with a long-lived queue eliminates it entirely. Full notes in `docs/SYCL.md`.
 
+## DX12 compute leg (commit 8 — hand-rolled, proven)
+
+`D3d12/D3d12Compute.cs` is a standalone hand-rolled DX12 compute path — no
+bindings, no ComputeSharp/TerraFX, no `#if WINDOWS` — just `DllImport` +
+vtable dispatch against inbox `d3d12.dll`/`dxgi.dll`/`d3dcompiler_47.dll`
+(all struct layouts, GUIDs, enum values and vtable slots taken from the SDK
+header `10.0.26100.0\um\d3d12.h`; `ValidateLayouts()` asserts `Marshal.SizeOf`
+== C sizes before running). BF16 fixtures are packed 2-per-`uint` (even
+element in the HIGH half, odd in the LOW) and widened in-shader by
+`Widen(packed, element)`; each kernel gets its inputs concatenated into one
+`StructuredBuffer<uint>` SRV and writes a `RWStructuredBuffer<uint>` UAV. The
+leg runs `dx12` CLI mode through the same `KernelGate` harness (CPU gold
+first, then the DX12 leg, timing table).
+
+| kernel | gate vs CpuLeg (production Nivara) | worst | result |
+|---|---|---|---|
+| `dot16` (K=16) | `\|leg − cpu\| ≤ 1e-6 + 1e-5·\|cpu\|` | **0.0 ULP** (bit-exact) | PASS |
+| `silu` (576) | tolerance gate per element | 4.0 ULP | PASS (576/576) |
+| `gemv` (1536×576) | tolerance gate per row | 14 336 ULP @ row 1508 (`\|diff\| = 1.6e-9`, near-zero ref row) | PASS (1536/1536) |
+
+Same gemv worst-ULP caveat as SYCL: the diagnostic row lands near zero where an
+f32 ULP is tiny, far inside the `1e-6` absolute gate.
+
+### Performance (Arc 140T, driver 1.15.37858; best-of-3 per run, best observed across runs)
+
+| kernel | CPU (production Nivara) | DX12 kernel-only | verdict |
+|---|---|---|---|
+| `dot16` (K=16) | 1.2 µs | 126 µs (ran 126–402 µs) | 0.01× — **launch-bound**, GPU slower |
+| `silu` (576) | 29 µs | 86 µs (ran 86–262 µs) | 0.34× — still launch-bound at 576 elems |
+| `gemv` (1536×576) | 2238 µs | 157 µs (ran 157–286 µs) | **14.4× faster** |
+
+Reading: same profile as SYCL — tiny kernels drown in per-dispatch overhead
+(PSO+wall clock), while the real SmolLM decode shape (`gemv`) is a decisive
+GPU win approaching the SYCL 23.1× figure (the gap is the per-iteration
+copy/transition overhead of the probe's one-shot-transient-buffer design;
+a production `src/Nivara.Gpu` would keep persistent buffers). Descriptor-handle
+structs return through a **hidden pointer**, not RAX — `GetCpu/GpuDescriptorHandleForHeapStart`
+take an `out` slot (the first ABI bug this leg hit, fixed after a heap-vtable crash).
+
 ## Level Zero P/Invoke surface
 
 Structs, constants, and proc addresses are taken only from the official
@@ -317,7 +364,19 @@ entry points by name from `ze_loader.dll`.
   evidence) and the 17-variant IGC bisection set.
 - `LevelZero/SpvDump.cs` — dumps modules to `%TEMP%\opencode\spv`.
 - `D3d12Check.cs` — D3D12 availability probe: DXGI adapter enumeration,
-  `D3D12CreateDevice` at FL 11_0..12_2, shader model via `CheckFeatureSupport`.
+  `D3D12CreateDevice` at FL 11_0..12_2, shader model via `CheckFeatureSupport`
+  (feature-validated: a bogus feature value is rejected with E_INVALIDARG to
+  prove the call is live). Shared P/Invoke helpers: `Vtable<T>` (vtable-slot
+  dispatch), `Release`, `CreateFactory`, `TryCreateDevice`.
+- `D3d12/D3d12Compute.cs` — the hand-rolled DX12 compute leg: full pipeline
+  (layout validation → device → queue/allocator/list/fence/root-signature/heap
+  → per-kernel D3DCompile + PSO + UPLOAD/DEFAULT/READBACK buffers + SRV/UAV
+  views → 1 warmup + 3 timed dispatch passes → readback f32 → `LegResults`).
+  All vtable slots/GUIDs/structs taken from the SDK header, with runtime
+  identity self-checks on the descriptor heap.
+- `D3d12/GemvKernels.cs` — HLSL `cs_5_1` source builders for the three kernels
+  (`dot16`, `silu` = `x/(1+exp(−x))`, `gemv`), the in-shader `Widen(packed,
+  element)` BF16→f32 unpack, and the host-side `PackBf16` 2-per-uint packing.
 - `LevelZero/OclProbe.cs` — OpenCL loader diagnostic (dead end: an OpenCL ICD
   dispatch path is not pursued; kept only for the Intel-export function discovery).
 - `Sycl/sycl_runner.cpp` — DPC++ runner: `dot16`/`gemv`/`silu` kernels
@@ -350,9 +409,11 @@ entry points by name from `ze_loader.dll`.
   runtime on Level Zero. Whether a real `src/Nivara.Gpu` should ride the SYCL
   runtime or load compiler-produced native images through the probe's L0 harness
   is a promotion decision for later; both paths are now live options.
-- **DX12/ComputeSharp remains the compiler-backed fallback**: the Arc 140T
-  reaches FL 12_2 + SM 6.8, and HLSL → DXIL is another validated compiler path
-  that bypasses hand-authored bytecode concerns entirely.
+- **DX12 is a proven second compiler-backed path (commit 8)**: the Arc 140T
+  reaches FL 12_2 + SM 6.8, and the hand-rolled HLSL→DXIL→PSO pipeline gates all
+  three kernels PASS against the production Nivara kernels with zero external
+  tooling (in-process `d3dcompiler_47`). Readies the option of a managed-native
+  GPU backend (HLSL kernels + P/Invoke bindings) without the oneAPI subprocess.
 - **Level Zero working subset** (for reference probes only): no access chains (no
   scatter/gather), no private variables, direct loads/stores through args only,
   OpPhi loops for iteration, 1-lane workgroup atomics for aggregation.

@@ -16,7 +16,7 @@ internal static class D3d12Check
     private static readonly Guid IID_ID3D12Device = new("189819f1-1db6-4b57-be54-1821339b85f7");
 
     private const uint Level_11_0 = 0xb000, Level_11_1 = 0xb100, Level_12_0 = 0xc000, Level_12_1 = 0xc100, Level_12_2 = 0xc200;
-    private const int D3D12FeatureShaderModel = 6;
+    private const int D3D12FeatureShaderModel = 7; // D3D12_FEATURE_SHADER_MODEL (verified: 7, not 6)
     private const int DxgiErrorNotFound = unchecked((int)0x887A0002U);
 
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
@@ -59,8 +59,7 @@ internal static class D3d12Check
         IntPtr factory = IntPtr.Zero;
         try
         {
-            Guid factoryIid = IID_IDXGIFactory1;
-            int hr = CreateDXGIFactory1(ref factoryIid, out factory);
+            int hr = CreateFactory(out factory);
             if (hr < 0)
             {
                 Console.WriteLine($"  [FAIL] CreateDXGIFactory1: hr=0x{hr:X8}");
@@ -139,13 +138,28 @@ internal static class D3d12Check
             IntPtr smPtr = Marshal.AllocHGlobal(4);
             try
             {
-                // D3D12_FEATURE_DATA_SHADER_MODEL: input HighestShaderModel is the
-                // highest SM we ask for; the runtime clamps to what the driver supports.
+                // Prove the call is live before trusting any reply: a bogus feature
+                // value is rejected with E_INVALIDARG by the real CheckFeatureSupport
+                // and by no other device vtable slot. (Slot 13 = CheckFeatureSupport:
+                // ID3D12Device inherits ID3D12Object directly, whose four methods at
+                // slots 3-6 sit beneath it, so GetNodeCount starts at 7. The original
+                // slot-15 call silently hit GetDescriptorHandleIncrementSize — a UINT
+                // getter that writes nothing to our buffer — and "reported" the
+                // pre-written value unchanged.)
+                int bogusFeature = unchecked((int)0x7FFFFFFF);
+                Marshal.WriteInt32(smPtr, 0);
+                int hrBogus = Vtable<CheckFeatureSupport>(device, 13)(device, bogusFeature, smPtr, (nuint)4);
+                bool live = hrBogus == unchecked((int)0x80070057);
+
+                // Real probe: request shader model 6.8 (the highest clipboard the
+                // runtime accepts); it clamps down to the driver's max.
                 Marshal.WriteInt32(smPtr, 0x68); // D3D_SHADER_MODEL_6_8
-                hr = Vtable<CheckFeatureSupport>(device, 15)(device, D3D12FeatureShaderModel, smPtr, (nuint)4);
-                Console.WriteLine(hr >= 0
-                    ? $"    highest shader model: {ShaderModel((uint)Marshal.ReadInt32(smPtr))}"
-                    : $"    [FAIL] CheckFeatureSupport(shader model): hr=0x{hr:X8}");
+                int smHr = Vtable<CheckFeatureSupport>(device, 13)(device, D3D12FeatureShaderModel, smPtr, (nuint)4);
+                int supported = Marshal.ReadInt32(smPtr);
+                bool verified = live && smHr >= 0 && supported >= 0x50 && supported <= 0x68;
+                Console.WriteLine(verified
+                    ? $"    highest shader model: {ShaderModel((uint)supported)} (feature-validated; bogus request rejected with E_INVALIDARG)"
+                    : $"    [FAIL] CheckFeatureSupport(shader model): hr=0x{smHr:X8}, bogus-hr=0x{hrBogus:X8}, replied 0x{(uint)supported:X2} — slot/feature probe failed");
             }
             finally
             {
@@ -159,17 +173,92 @@ internal static class D3d12Check
         return false;
     }
 
-    private static T Vtable<T>(IntPtr obj, int slot) where T : Delegate
+    internal static T Vtable<T>(IntPtr obj, int slot) where T : Delegate
     {
         IntPtr vtbl = Marshal.ReadIntPtr(obj);
         IntPtr fn = Marshal.ReadIntPtr(vtbl, slot * IntPtr.Size);
         return Marshal.GetDelegateForFunctionPointer<T>(fn);
     }
 
-    private static void Release(IntPtr obj)
+    internal static void Release(IntPtr obj)
     {
         if (obj != IntPtr.Zero)
             Vtable<ReleaseCom>(obj, 2)(obj);
+    }
+
+    /// <summary>Creates the DXGI factory used by both the availability check and
+    /// the compute leg.</summary>
+    internal static int CreateFactory(out IntPtr factory)
+    {
+        Guid factoryIid = IID_IDXGIFactory1;
+        return CreateDXGIFactory1(ref factoryIid, out factory);
+    }
+
+    /// <summary>
+    /// Creates a D3D12 device on the first DXGI adapter that accepts one (DXGI
+    /// enumerates the primary/Intel adapter first, mirroring the SYCL leg's device-0
+    /// selection), trying feature levels 12_0/11_1/11_0. Returns 0 on success; the
+    /// device is owned by the caller (release via <see cref="Release"/>). Used by the
+    /// DX12 compute leg so it shares the availability check's enumeration plumbing.
+    /// </summary>
+    internal static int TryCreateDevice(out IntPtr device, out string description)
+    {
+        device = IntPtr.Zero;
+        description = "";
+        int hr = CreateFactory(out IntPtr factory);
+        if (hr < 0)
+            return hr;
+        try
+        {
+            var enumAdapters = Vtable<EnumAdapters>(factory, 7);
+            uint index = 0;
+            while (true)
+            {
+                hr = enumAdapters(factory, index, out IntPtr adapter);
+                if (hr == DxgiErrorNotFound)
+                    return DxgiErrorNotFound;
+                if (hr < 0)
+                    return hr;
+                try
+                {
+                    Guid deviceIid = IID_ID3D12Device;
+                    foreach (uint level in new[] { Level_12_2, Level_12_1, Level_12_0, Level_11_1, Level_11_0 })
+                    {
+                        int dhr = D3D12CreateDevice(adapter, level, ref deviceIid, out IntPtr dev);
+                        if (dhr >= 0)
+                        {
+                            device = dev;
+                            description = ReadAdapterDescription(adapter);
+                            return 0;
+                        }
+                    }
+                }
+                finally
+                {
+                    Release(adapter);
+                }
+                index++;
+            }
+        }
+        finally
+        {
+            Release(factory);
+        }
+    }
+
+    private static string ReadAdapterDescription(IntPtr adapter)
+    {
+        IntPtr descPtr = Marshal.AllocHGlobal(Marshal.SizeOf<AdapterDesc>());
+        try
+        {
+            return Vtable<GetAdapterDesc>(adapter, 8)(adapter, descPtr) >= 0
+                ? Marshal.PtrToStructure<AdapterDesc>(descPtr).Description
+                : "";
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(descPtr);
+        }
     }
 
     private static string FeatureLevel(uint level) => level switch
