@@ -101,12 +101,17 @@ Modified files:
     silently FX-compiles to F16 and the gate FAILS. This row is the direct-IGC-class proof and passes all kernels.
 - **Deviation — `ENABLE_MMAD=YES` never passed.** Purely a perf knob; dot16 is already bit-exact without it,
   so nothing correctness-relevant is lost by omitting it. Revisit only if docs/perf ever need it.
-- **`kernels` exit is 402 (expected), not 0.** The honest bf16-silu row fails its tight f32 gate (F16-elementwise
-  rounding, ~1e-5 @ 0.014 magnitude) per the G1 decision; its failures are documented in `docs/OPENVINO.md` §3.
+- **`kernels` exit is 405 (expected), not 0.** 402 = the honest bf16-silu row failing its tight f32 gate
+  (F16-elementwise rounding, ~1e-5 @ 0.014 magnitude) per the G1 decision + 3 = the SYCL-unavailable baseline.
   All other cells PASS: OV bf16 dot16 (0 ULP) + gemv PASS, OV f32 all PASS. The exit-code contract holds:
   it equals the number of failed cells, and every failure is an explicitly-flagged honest one.
-- **Remaining: docs** (commits 6–7: `docs/OPENVINO.md`, probe `README.md` — incl. a full review pass per the
-  human, not just the OV delta — `docs/SPIRV.md` pending refs, `CHANGELOG.md`), then G2.
+- **Docs done (commits 6–7):** `docs/OPENVINO.md` written; probe `README.md` fully reviewed per the human
+  request — intro/ambit, References, Build & Run, exit contract, Files, Recommendations all updated, plus a
+  **consolidated side-by-side performance table** ("Backend comparison — the numbers, side by side") that is
+  now the single home for all measured figures from every series doc (SPIRV/SYCL/DX12/OPENVINO per-table
+  figures moved, not repeated); `docs/SPIRV.md` pending refs flipped. **CHANGELOG is intentionally left alone**
+  — the probe legs stay out of it until the promotion decision (what/how gets into `src/Nivara.Gpu`) is made;
+  the existing L0-probe bullet was removed for the same reason. Then G2.
 
 ## Correctness gates (unchanged from the probe series)
 
@@ -140,7 +145,8 @@ Modified files:
    `04f4fbe` + `c467dbd`]**
 6. `docs: add GPU case-study doc docs/OPENVINO.md (OpenVINO leg verdict)` — required deliverable.
 7. `docs: record OpenVINO leg results + flip SPIRV.md pending refs` — probe README (full review pass per
-   the human, not just the OV delta) + SPIRV.md + CHANGELOG.
+   the human, not just the OV delta) + SPIRV.md. CHANGELOG deliberately untouched: probes stay out until the
+   promotion decision. **[done — consolidated README table is the single home for all measured figures]**
 8. Cleanup: G2 review (branch as a whole + vs TODO.md) → `git rm docs/TODO.md` → `docs: remove
    TODO.md — plan executed` → offer push + PR (human-confirmed).
 
