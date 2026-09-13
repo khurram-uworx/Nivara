@@ -24,7 +24,8 @@ The probe consumes existing Nivara kernels **read-only** for its CPU verificatio
 leg (no code changes to the referenced projects; the GPU legs keep the host side
 pure P/Invoke — no GPU bindings/packages. The kernel *source* is hand-authored
 SPIR-V for the now-blocked L0 leg, compiler-produced SYCL/DPC++ SPIR-V for the
-oneAPI leg, and HLSL for the DX12 leg, per the pivot in `docs/TODO.md`):
+oneAPI leg, and HLSL for the DX12 leg, per the case-study docs `docs/SPIRV.md`
+(L0), `docs/SYCL.md` (oneAPI/SYCL), and `docs/DX12.md` (DX12):
 
 - `src/Nivara` — `LlamaFusedKernels.MatMulTransposedB<T>` (the production SmolLM
   GEMV kernel — dot and GEMV both run through it, in the exact fused-head call
@@ -283,7 +284,9 @@ shapes and both are decisive GPU wins; the 23.1× gemv is the headline number
 (every decode token is dominated by `[1536×576]·[576]` GEMVs). The ~50 ms
 subprocess launch per kernel is not included — a production native `.dll`
 with a long-lived queue eliminates it entirely. Full notes in `docs/SYCL.md`;
-the DX12 workflow lives in `docs/DX12.md`.
+the DX12 workflow lives in `docs/DX12.md`; the L0/hand-authored-SPIR-V verdict
+and safe subset live in `docs/SPIRV.md`. Together these three case-study docs
+(and the future `docs/OPENVINO.md`) are Nivara's GPU-backend decision records.
 
 ## DX12 compute leg (commit 8 — hand-rolled, proven)
 
