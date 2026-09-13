@@ -85,6 +85,29 @@ Modified files:
 - `docs/SPIRV.md` — flip the three `(pending)` OpenVINO refs (lines 10–11, 140, 151) to published.
 - `docs/TODO.md` — this plan.
 
+## Execution status (updated as the plan proceeds)
+
+- **G1 cleared** by the human (Decisions above; bf16/f32 dual-config + honest BF16 rounding reporting).
+- **Commits 2–5 done** — one P/Invoke leg commit (`04f4fbe`, OpenVinoNative/Runner/OvIrModels/OpenVinoLeg/
+  Availability + kernels wiring) + `c467dbd` (header/default/`all` cover all three backends). Both build- and
+  run-verified on Arc 140T.
+- **Deviation — no precision hint on the bf16 config.** Implemented configs, verified in Python before C#:
+  - `OV (bf16 IR)`: BF16-declared IR nodes, compiled on `"GPU"` with **no `INFERENCE_PRECISION_HINT`**
+    (the GPU plugin picks f16 internally; read-back and printed hint shows `f16`). `INFERENCE_PRECISION_HINT=BF16`
+    is a *CPU-only* token on this release — rejected by the GPU plugin, so it is never passed. This is what the
+    issue's "BF16" row means: a BF16-declared model on the GPU plugin. dot16/gemv still gate PASS (f32-tier
+    reductions), silu honestly reports F16-elementwise rounding.
+  - `OV (f32 + hint)`: F32-declared IR + **mandatory** `INFERENCE_PRECISION_HINT=f32` — without it the plugin
+    silently FX-compiles to F16 and the gate FAILS. This row is the direct-IGC-class proof and passes all kernels.
+- **Deviation — `ENABLE_MMAD=YES` never passed.** Purely a perf knob; dot16 is already bit-exact without it,
+  so nothing correctness-relevant is lost by omitting it. Revisit only if docs/perf ever need it.
+- **`kernels` exit is 402 (expected), not 0.** The honest bf16-silu row fails its tight f32 gate (F16-elementwise
+  rounding, ~1e-5 @ 0.014 magnitude) per the G1 decision; its failures are documented in `docs/OPENVINO.md` §3.
+  All other cells PASS: OV bf16 dot16 (0 ULP) + gemv PASS, OV f32 all PASS. The exit-code contract holds:
+  it equals the number of failed cells, and every failure is an explicitly-flagged honest one.
+- **Remaining: docs** (commits 6–7: `docs/OPENVINO.md`, probe `README.md` — incl. a full review pass per the
+  human, not just the OV delta — `docs/SPIRV.md` pending refs, `CHANGELOG.md`), then G2.
+
 ## Correctness gates (unchanged from the probe series)
 
 - Single gate for every leg: `|leg − cpu| ≤ 1e-6 + 1e-5·|cpuNivara|` (`CpuLeg.GateAbs/GateRel`), against
@@ -96,23 +119,28 @@ Modified files:
 
 - `python -m pip install openvino==2026.2.1` (official Intel wheel; runtime only).
 - `dotnet build tests/Nivara.GpuProbe` (net11.0 probe only) before each probe commit.
-- `dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels` — five-way gates (exit 0).
+- `dotnet run -c Release --project tests/Nivara.GpuProbe -- kernels` — five-way gates. Exit = failed-cell
+  count; expected **402** on this machine until the f32 row is read (all cells PASS except the honestly-flagged
+  OV bf16 silu row — the intended G1 outcome, documented in OPENVINO.md §3).
 - `dotnet run -c Release --project tests/Nivara.GpuProbe -- openvino` — OV-specific availability/readback.
 - Existing modes must stay green: `run`, `dx12`, `sycl` (SYCL returns UNBUILT).
 - Ask before any `dotnet test` / long verification run.
 
 ## Planned commits (one logical change each, local only)
 
-1. `docs: plan GPU probe phase 3 (OpenVINO leg) in TODO.md` — this file.
+1. `docs: plan GPU probe phase 3 (OpenVINO leg) in TODO.md` — this file. **[done: `0ea64e0`]**
 2. `probe: OpenVINO runtime discovery + openvino_c.dll P/Invoke surface` — OpenVinoNative +
-   OpenVinoRunner; build-verified.
+   OpenVinoRunner; build-verified. **[folded into `04f4fbe`]**
 3. `probe: OpenVINO IR v11 model writer (dot16/silu/gemv, bf16 weights)` — OvIrModels; build-verified.
+   **[folded into `04f4fbe`]**
 4. `probe: OpenVINO leg — dual-config gate (bf16 + f32), GPU device assert` — OpenVinoLeg + Program.cs
-   `openvino` mode; build + run `openvino` (GPU plugin availability + readback).
+   `openvino` mode; build + run `openvino` (GPU plugin availability + readback). **[folded into `04f4fbe`]**
 5. `probe: five-way kernels gate (CPU · SYCL · DX12 · OV-bf16 · OV-f32) — OpenVINO PASS` — wire the
-   OV leg into `kernels`; `kernels` exit 0.
+   OV leg into `kernels`; `kernels` exit matches the documented honest-bf16-silu contract. **[folded into
+   `04f4fbe` + `c467dbd`]**
 6. `docs: add GPU case-study doc docs/OPENVINO.md (OpenVINO leg verdict)` — required deliverable.
-7. `docs: record OpenVINO leg results + flip SPIRV.md pending refs` — probe README, SPIRV.md, CHANGELOG.
+7. `docs: record OpenVINO leg results + flip SPIRV.md pending refs` — probe README (full review pass per
+   the human, not just the OV delta) + SPIRV.md + CHANGELOG.
 8. Cleanup: G2 review (branch as a whole + vs TODO.md) → `git rm docs/TODO.md` → `docs: remove
    TODO.md — plan executed` → offer push + PR (human-confirmed).
 
